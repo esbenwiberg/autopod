@@ -1,3 +1,13 @@
+import {
+  type FailureStageRow,
+  type ModelsAnalyticsResponse,
+  type PerModelAggregate,
+  type PerRuntimeAggregate,
+  type UnknownModelSample,
+  type ValidationStage,
+  canonicalModelKey,
+  effectiveCostUsd,
+} from '@autopod/shared';
 /**
  * Models analytics aggregator.
  * Pure function: takes a SQLite handle and a trailing window in days,
@@ -11,16 +21,6 @@
  * (e.g. -0.42 means $0.42 cheaper this window vs prior). Desktop formats as %+$.2f/PR.
  */
 import type Database from 'better-sqlite3';
-import {
-  canonicalModelKey,
-  effectiveCostUsd,
-  type FailureStageRow,
-  type ModelsAnalyticsResponse,
-  type PerModelAggregate,
-  type PerRuntimeAggregate,
-  type UnknownModelSample,
-  type ValidationStage,
-} from '@autopod/shared';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -519,13 +519,10 @@ export function computeModelsAnalytics(
         successRate: accum.completeCount / accum.podCount,
         totalCostUsd: isUnknown ? null : accum.totalCostUsd,
         dollarPerPr:
-          isUnknown || accum.completeCount === 0
-            ? null
-            : accum.totalCostUsd / accum.completeCount,
+          isUnknown || accum.completeCount === 0 ? null : accum.totalCostUsd / accum.completeCount,
         scoredCount: accum.scoredCount,
         avgQuality: accum.scoredCount > 0 ? accum.scoreSum / accum.scoredCount : null,
-        meanTtmSeconds:
-          accum.completeCount > 0 ? accum.sumTtmSeconds / accum.completeCount : null,
+        meanTtmSeconds: accum.completeCount > 0 ? accum.sumTtmSeconds / accum.completeCount : null,
         escalatedCount: accum.escalatedPodIds.size,
         escalationRate: accum.escalatedPodIds.size / accum.podCount,
         completeCostUsd: isUnknown ? null : accum.completeCostUsd,
@@ -550,18 +547,16 @@ export function computeModelsAnalytics(
           : null,
       scoredCount: accum.scoredCount,
       avgQuality: accum.scoredCount > 0 ? accum.scoreSum / accum.scoredCount : null,
-      meanTtmSeconds:
-        accum.completeCount > 0 ? accum.sumTtmSeconds / accum.completeCount : null,
+      meanTtmSeconds: accum.completeCount > 0 ? accum.sumTtmSeconds / accum.completeCount : null,
       escalatedCount: accum.escalatedPodIds.size,
-      escalationRate:
-        accum.podCount > 0 ? accum.escalatedPodIds.size / accum.podCount : 0,
+      escalationRate: accum.podCount > 0 ? accum.escalatedPodIds.size / accum.podCount : 0,
     };
   });
 
   // ── Build failureStageMatrix[] ─────────────────────────────────────────────
 
   const failureStageMatrix: FailureStageRow[] = byModel.map(({ model }) => {
-    const sa = byModelAccum.get(model)!.stageAccum;
+    const sa = byModelAccum.get(model)?.stageAccum;
     return {
       model,
       stages: STAGES.map((stage) => {
@@ -621,4 +616,3 @@ export function computeModelsAnalytics(
     unknownModels,
   };
 }
-

@@ -30,21 +30,7 @@ export interface PreviewStatus {
 export function buildSupervisorCommand(startCommand: string): string {
   // Escape single quotes inside startCommand for safe shell embedding.
   const escaped = startCommand.replace(/'/g, "'\\''");
-  return (
-    `export START_COMMAND='${escaped}'\n` +
-    `i=0\n` +
-    `rm -f /tmp/autopod-supervisor.pid /tmp/autopod-restart-count /tmp/autopod-start.log\n` +
-    `echo 0 > /tmp/autopod-restart-count\n` +
-    `(\n` +
-    `  while true; do\n` +
-    `    eval "$START_COMMAND" >> /tmp/autopod-start.log 2>&1 || true\n` +
-    `    i=$((i+1))\n` +
-    `    echo $i > /tmp/autopod-restart-count\n` +
-    `    if [ $i -ge 5 ]; then sleep 5; else sleep 1; fi\n` +
-    `  done\n` +
-    `) &\n` +
-    `echo $! > /tmp/autopod-supervisor.pid`
-  );
+  return `export START_COMMAND='${escaped}'\ni=0\nrm -f /tmp/autopod-supervisor.pid /tmp/autopod-restart-count /tmp/autopod-start.log\necho 0 > /tmp/autopod-restart-count\n(\n  while true; do\n    eval "$START_COMMAND" >> /tmp/autopod-start.log 2>&1 || true\n    i=$((i+1))\n    echo $i > /tmp/autopod-restart-count\n    if [ $i -ge 5 ]; then sleep 5; else sleep 1; fi\n  done\n) &\necho $! > /tmp/autopod-supervisor.pid`;
 }
 
 /**
@@ -64,14 +50,22 @@ export function parseStatus(input: {
   reachableHttp: number | null;
 }): PreviewStatus {
   const running = input.pid !== null && input.pid.trim().length > 0;
-  const reachable = running && input.reachableHttp !== null && input.reachableHttp >= 200 && input.reachableHttp < 300;
-  const restartCount = input.restartCount !== null ? (parseInt(input.restartCount.trim(), 10) || 0) : 0;
+  const reachable =
+    running &&
+    input.reachableHttp !== null &&
+    input.reachableHttp >= 200 &&
+    input.reachableHttp < 300;
+  const restartCount =
+    input.restartCount !== null ? Number.parseInt(input.restartCount.trim(), 10) || 0 : 0;
   const lastError = extractLastError(input.startLogTail);
   return { running, reachable, restartCount, lastError };
 }
 
 function extractLastError(logTail: string | null): string | null {
   if (!logTail) return null;
-  const lines = logTail.split('\n').map((l) => l.trim()).filter(Boolean);
+  const lines = logTail
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
   return lines.length > 0 ? (lines[lines.length - 1] ?? null) : null;
 }

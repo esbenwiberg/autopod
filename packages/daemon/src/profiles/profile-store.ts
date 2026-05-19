@@ -490,7 +490,7 @@ export function createProfileStore(
         }
       }
 
-      // Build dynamic UPDATE — only touch changed fields
+      // Build field-specific UPDATE — only touch changed fields
       const fieldMap: Record<string, unknown> = {};
       const setClauses: string[] = [];
 

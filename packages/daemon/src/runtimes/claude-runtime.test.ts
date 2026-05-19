@@ -605,13 +605,14 @@ describe('ClaudeRuntime', () => {
           (c[0] as Record<string, unknown>).msg === 'Spawning claude in container',
       );
       expect(spawnCall).toBeDefined();
-      const logObj = spawnCall![0] as Record<string, unknown>;
+      const logObj = spawnCall?.[0] as Record<string, unknown>;
       const loggedArgs = logObj.args as string[];
       expect(loggedArgs.at(-1)).toMatch(/^<task: 50000 bytes>$/);
       expect(JSON.stringify(logObj).includes(bigStr)).toBe(false);
 
       // Real args passed to execStreaming must still contain the full task
-      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock
+        .calls[0]?.[1] as string[];
       expect(execArgs.at(-1)).toBe(bigStr);
     });
 
@@ -699,7 +700,12 @@ describe('ClaudeRuntime', () => {
         handle.finish(0);
       }, 10);
 
-      for await (const _ of runtime.resume('resume-snapshot', 'Do something', 'container-123', {})) {
+      for await (const _ of runtime.resume(
+        'resume-snapshot',
+        'Do something',
+        'container-123',
+        {},
+      )) {
         /* consume */
       }
 
@@ -710,7 +716,7 @@ describe('ClaudeRuntime', () => {
           (c[0] as Record<string, unknown>).msg === 'Resuming claude pod in container',
       );
       expect(resumeLog).toBeDefined();
-      expect(resumeLog![0] as Record<string, unknown>).not.toHaveProperty('args');
+      expect(resumeLog?.[0] as Record<string, unknown>).not.toHaveProperty('args');
     });
 
     it('calls execStreaming with --resume when a claude pod ID is known', async () => {

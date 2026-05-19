@@ -26,9 +26,7 @@ describe('FixFeedbackRepository', () => {
   it('enqueue returns a row with a generated UUID; peek finds it; count returns 1', () => {
     const row = repo.enqueue(podId, 'Fix the lint errors');
 
-    expect(row.id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-    );
+    expect(row.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
     expect(row.podId).toBe(podId);
     expect(row.message).toBe('Fix the lint errors');
     expect(typeof row.createdAt).toBe('number');
@@ -47,8 +45,8 @@ describe('FixFeedbackRepository', () => {
     const peeked = repo.peek(podId);
     expect(peeked).toHaveLength(2);
     // created_at ASC — first enqueued is first returned
-    expect(peeked[0]!.id).toBe(r1.id);
-    expect(peeked[1]!.id).toBe(r2.id);
+    expect(peeked[0]?.id).toBe(r1.id);
+    expect(peeked[1]?.id).toBe(r2.id);
 
     expect(repo.count(podId)).toBe(2);
   });
@@ -80,8 +78,8 @@ describe('FixFeedbackRepository', () => {
     const peeked = repo.peek(podId);
 
     expect(peeked).toHaveLength(1);
-    expect(peeked[0]!.id).toBe(row.id);
-    expect(peeked[0]!.message).toBe('after-drain');
+    expect(peeked[0]?.id).toBe(row.id);
+    expect(peeked[0]?.message).toBe('after-drain');
   });
 
   it('peekLatest returns the most recently enqueued row; null when empty', () => {

@@ -30,9 +30,9 @@ import type {
   RequestCredentialPayload,
   SastResult,
   SpawnFixResponse,
-  UpdateFromBaseResponse,
   StdioInjectedMcpServer,
   TaskReviewResult,
+  UpdateFromBaseResponse,
   ValidationFinding,
   ValidationOverride,
   ValidationOverridePayload,
@@ -202,7 +202,7 @@ function normalizeCommitEmail(email: string | null | undefined): string | null {
 }
 
 /** Allocate a random host port in range 10000–48999 for container port mapping.
- * Capped at 48999 to avoid the Windows/Hyper-V dynamic port reservation range (49152+). */
+ * Capped at 48999 to avoid the Windows/Hyper-V ephemeral port reservation range (49152+). */
 function allocateHostPort(): number {
   return 10_000 + Math.floor(Math.random() * 39_000);
 }
@@ -4838,9 +4838,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ? (deps.actionEngine?.getAvailableActions(effectivePolicy) ?? [])
           : [];
 
-        // Resolve dynamic sections (fetches URLs, respects token budgets)
+        // Resolve runtime-fetched sections (fetches URLs, respects token budgets)
         if (mergedSections.some((s) => s.fetch)) {
-          emitStatus('Fetching dynamic CLAUDE.md sections…');
+          emitStatus('Fetching runtime CLAUDE.md sections…');
         }
         const resolvedSections = await resolveSections(mergedSections, logger, {
           podId,

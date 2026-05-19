@@ -2,7 +2,6 @@ import type {
   AcDefinition,
   AgentMode,
   ExecutionTarget,
-  SpecContract,
   NetworkPolicyMode,
   OutputMode,
   OutputTarget,
@@ -14,6 +13,7 @@ import type {
   PreSubmitReviewSnapshot,
   Profile,
   ReferenceRepo,
+  SpecContract,
   TaskSummary,
   ValidationOverride,
   ValidationResult,
@@ -242,7 +242,7 @@ function parseAcceptanceCriteria(raw: unknown): AcDefinition[] | null {
   return parsed.map((item) => {
     if (typeof item !== 'object' || item === null) {
       throw new Error(
-        `Legacy acceptance_criteria shape detected: item is not an object. Run the wrap-up SQL to clear legacy rows.`,
+        'Legacy acceptance_criteria shape detected: item is not an object. Run the wrap-up SQL to clear legacy rows.',
       );
     }
     const obj = item as Record<string, unknown>;
@@ -253,7 +253,7 @@ function parseAcceptanceCriteria(raw: unknown): AcDefinition[] | null {
         );
       }
     }
-    if (typeof obj['outcome'] !== 'string' || obj['outcome'].length === 0) {
+    if (typeof obj.outcome !== 'string' || obj.outcome.length === 0) {
       throw new Error(
         `Invalid acceptance_criteria item: "outcome" is missing or empty. Run the wrap-up SQL to clear legacy rows.`,
       );

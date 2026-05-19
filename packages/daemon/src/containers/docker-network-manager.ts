@@ -496,9 +496,7 @@ export class DockerNetworkManager {
     // destination it falls through to the final REJECT and the agent sees
     // ECONNREFUSED. Match on the rewritten destination instead of the interface.
     lines.push('# Allow the REDIRECT-ed traffic to reach HAProxy on loopback');
-    lines.push(
-      `iptables -A OUTPUT -p tcp -d 127.0.0.1 --dport ${HAPROXY_LISTEN_PORT} -j ACCEPT`,
-    );
+    lines.push(`iptables -A OUTPUT -p tcp -d 127.0.0.1 --dport ${HAPROXY_LISTEN_PORT} -j ACCEPT`);
     lines.push('');
     lines.push('# Reject everything else outbound.');
     lines.push('iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable');

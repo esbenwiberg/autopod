@@ -81,8 +81,9 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         if (data.mcpServers && data.mcpServers.length > 0) {
           console.log(`${chalk.bold('MCP servers:')}`);
           for (const s of data.mcpServers) {
+            const target = s.type === 'stdio' ? [s.command, ...(s.args ?? [])].join(' ') : s.url;
             console.log(
-              `  ${chalk.cyan(s.name)} ${chalk.dim(s.url)}${s.description ? ` — ${s.description}` : ''}`,
+              `  ${chalk.cyan(s.name)} ${chalk.dim(target)}${s.description ? ` — ${s.description}` : ''}`,
             );
           }
         }

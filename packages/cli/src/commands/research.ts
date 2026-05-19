@@ -17,8 +17,7 @@ export function registerResearchCommands(program: Command, getClient: () => Auto
       },
       [] as string[],
     )
-    .option('--repo-pat <token>', 'PAT shared across all reference repos (for private repos)')
-    .action(async (profile: string, task: string, opts: { repo: string[]; repoPat?: string }) => {
+    .action(async (profile: string, task: string, opts: { repo: string[] }) => {
       const client = getClient();
       const referenceRepos = opts.repo.length ? opts.repo.map((url) => ({ url })) : undefined;
 
@@ -28,7 +27,6 @@ export function registerResearchCommands(program: Command, getClient: () => Auto
           task,
           outputMode: 'artifact',
           referenceRepos,
-          referenceRepoPat: opts.repoPat,
         }),
       );
 

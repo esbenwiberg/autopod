@@ -92,9 +92,9 @@ describe('update-from-base command', () => {
       409,
     );
     (mockClient.updateFromBase as ReturnType<typeof vi.fn>).mockRejectedValueOnce(daemonError);
-    await expect(
-      program.parseAsync(['node', 'ap', 'update-from-base', 'abcd1234']),
-    ).rejects.toBe(daemonError);
+    await expect(program.parseAsync(['node', 'ap', 'update-from-base', 'abcd1234'])).rejects.toBe(
+      daemonError,
+    );
   });
 
   it('conflict: prints all conflicted files and exits 1', async () => {

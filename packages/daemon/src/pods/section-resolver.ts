@@ -24,7 +24,7 @@ const DEFAULT_CONTENT_PROCESSING: ProcessContentConfig = {
 };
 
 /**
- * Resolve CLAUDE.md sections — fetches dynamic content where configured.
+ * Resolve CLAUDE.md sections — fetches remote content where configured.
  * Never throws. Failed fetches are logged and silently skipped (or fall back to static content).
  * Fetched content is always processed through quarantine + PII sanitization.
  */

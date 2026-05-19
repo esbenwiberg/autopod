@@ -7,32 +7,41 @@ const logger = pino({ level: 'silent' });
 describe('createModelManager', () => {
   it('returns the same load promise across concurrent calls', async () => {
     // We don't load a real model in tests; we just verify the caching shape.
-    const mm = createModelManager({ logger });
+    const mm = createModelManager({
+      logger,
+      pipelineLoader: async () => async () => [],
+    });
     const a = mm.getInjectionClassifier();
     const b = mm.getInjectionClassifier();
     expect(a).toBe(b);
   });
 
   it('returns null when a model fails to load (no network in tests)', async () => {
-    // Force a failing import path by passing a clearly invalid model name.
-    // The real loader catches dynamic-import errors and returns null.
     const mm = createModelManager({
       logger,
-      injectionModel: `not-a-real/model-${Math.random()}`,
+      injectionModel: 'not-a-real/model',
+      pipelineLoader: async () => {
+        throw new Error('load failed');
+      },
     });
     const cls = await mm.getInjectionClassifier();
     expect(cls).toBeNull();
   });
 
   it('memoizes the failed result — does not retry', async () => {
+    const pipelineLoader = vi.fn(async () => {
+      throw new Error('load failed');
+    });
     const mm = createModelManager({
       logger,
-      injectionModel: `not-a-real/model-${Math.random()}`,
+      injectionModel: 'not-a-real/model',
+      pipelineLoader,
     });
     const first = await mm.getInjectionClassifier();
     const second = await mm.getInjectionClassifier();
     expect(first).toBeNull();
     expect(second).toBeNull();
+    expect(pipelineLoader).toHaveBeenCalledTimes(1);
     // Same promise = the dynamic import only happened once.
     expect(mm.getInjectionClassifier()).toBe(mm.getInjectionClassifier());
   });
@@ -52,7 +61,10 @@ describe('createModelManager logger', () => {
     } as any;
     const mm = createModelManager({
       logger: fakeLogger,
-      injectionModel: `not-a-real/model-${Math.random()}`,
+      injectionModel: 'not-a-real/model',
+      pipelineLoader: async () => {
+        throw new Error('load failed');
+      },
     });
     await mm.getInjectionClassifier();
     expect(warn).toHaveBeenCalled();

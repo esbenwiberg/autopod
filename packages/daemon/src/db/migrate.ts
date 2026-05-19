@@ -59,7 +59,10 @@ function snapshotBeforeCutover(dbPath: string, logger: Logger, suffix: string): 
     fs.copyFileSync(dbPath, backupPath);
     logger.info({ backupPath, suffix }, 'Pre-cutover DB snapshot written');
   } catch (err) {
-    logger.error({ err, dbPath, backupPath, suffix }, 'Failed to snapshot DB before cutover migration');
+    logger.error(
+      { err, dbPath, backupPath, suffix },
+      'Failed to snapshot DB before cutover migration',
+    );
     throw err; // fail closed — do not apply migration
   }
 }

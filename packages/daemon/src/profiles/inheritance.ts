@@ -31,6 +31,7 @@ const SPECIAL_MERGE_FIELDS: ReadonlySet<keyof Profile> = new Set([
  */
 export function resolveInheritance(child: Profile, parent: Profile): Profile {
   const resolved = { ...child };
+  const resolvedFields = resolved as Record<keyof Profile, Profile[keyof Profile]>;
   const strategy: MergeStrategy = child.mergeStrategy ?? {};
 
   // Simple fields: inherit from parent if child has the default/null value
@@ -40,8 +41,7 @@ export function resolveInheritance(child: Profile, parent: Profile): Profile {
     const childValue = child[key];
     // If child has null/undefined, inherit from parent
     if (childValue === null || childValue === undefined) {
-      // biome-ignore lint/suspicious/noExplicitAny: dynamic property assignment across union types
-      (resolved as any)[key] = parent[key];
+      resolvedFields[key] = parent[key];
     }
   }
 

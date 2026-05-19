@@ -5144,7 +5144,12 @@ describe('updateFromBase', () => {
 
     const result = await manager.updateFromBase(pod.id);
 
-    expect(result).toEqual({ ok: true, action: 'rebased', baseBranch: 'main', validation: 'started' });
+    expect(result).toEqual({
+      ok: true,
+      action: 'rebased',
+      baseBranch: 'main',
+      validation: 'started',
+    });
     // Validation starts via setImmediate — flush it
     await new Promise((r) => setImmediate(r));
     expect(triggerSpy).toHaveBeenCalledWith(pod.id);
@@ -5162,7 +5167,12 @@ describe('updateFromBase', () => {
 
     const result = await manager.updateFromBase(pod.id);
 
-    expect(result).toEqual({ ok: true, action: 'rebased', baseBranch: 'main', validation: 'started' });
+    expect(result).toEqual({
+      ok: true,
+      action: 'rebased',
+      baseBranch: 'main',
+      validation: 'started',
+    });
     await new Promise((r) => setImmediate(r));
     expect(triggerSpy).toHaveBeenCalledWith(pod.id);
   });

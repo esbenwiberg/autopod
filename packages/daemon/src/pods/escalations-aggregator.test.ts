@@ -252,14 +252,14 @@ describe('computeEscalationsAnalytics', () => {
 
     const result = computeEscalationsAnalytics(db, 30);
     const buckets = result.askHumanTtr.buckets;
-    expect(buckets[0]!.label).toBe('<1m');
-    expect(buckets[0]!.count).toBe(2); // 1s and 59s
-    expect(buckets[1]!.label).toBe('1–5m');
-    expect(buckets[1]!.count).toBe(1); // 60s
-    expect(buckets[2]!.label).toBe('5–15m');
-    expect(buckets[2]!.count).toBe(1); // 300s
-    expect(buckets[7]!.label).toBe('>24h');
-    expect(buckets[7]!.count).toBe(1); // 100000s
+    expect(buckets[0]?.label).toBe('<1m');
+    expect(buckets[0]?.count).toBe(2); // 1s and 59s
+    expect(buckets[1]?.label).toBe('1–5m');
+    expect(buckets[1]?.count).toBe(1); // 60s
+    expect(buckets[2]?.label).toBe('5–15m');
+    expect(buckets[2]?.count).toBe(1); // 300s
+    expect(buckets[7]?.label).toBe('>24h');
+    expect(buckets[7]?.count).toBe(1); // 100000s
   });
 
   // ── TTR open exclusion ──────────────────────────────────────────────────────
@@ -343,15 +343,15 @@ describe('computeEscalationsAnalytics', () => {
     // Expect 3 rows: <small profiles>, A, B (test-profile has 0 pods so absent)
     const smallRow = rows.find((r) => r.profile === '<small profiles>');
     expect(smallRow).toBeDefined();
-    expect(smallRow!.podCount).toBe(5); // C(3) + D(2)
-    expect(smallRow!.escalatedCount).toBe(3); // C(3) + D(0)
-    expect(smallRow!.rate).toBeCloseTo(0.6);
+    expect(smallRow?.podCount).toBe(5); // C(3) + D(2)
+    expect(smallRow?.escalatedCount).toBe(3); // C(3) + D(0)
+    expect(smallRow?.rate).toBeCloseTo(0.6);
 
     // Sorted by rate DESC: small(0.6), A(0.5), B(0.25)
     const profilesWithData = rows.filter((r) => ['<small profiles>', 'A', 'B'].includes(r.profile));
-    expect(profilesWithData[0]!.profile).toBe('<small profiles>');
-    expect(profilesWithData[1]!.profile).toBe('A');
-    expect(profilesWithData[2]!.profile).toBe('B');
+    expect(profilesWithData[0]?.profile).toBe('<small profiles>');
+    expect(profilesWithData[1]?.profile).toBe('A');
+    expect(profilesWithData[2]?.profile).toBe('B');
   });
 
   it('tie-break: same rate, higher podCount first', () => {
@@ -371,8 +371,8 @@ describe('computeEscalationsAnalytics', () => {
 
     const result = computeEscalationsAnalytics(db, 30);
     const profiles = result.perProfile.filter((r) => ['X', 'Y'].includes(r.profile));
-    expect(profiles[0]!.profile).toBe('X'); // higher podCount wins
-    expect(profiles[1]!.profile).toBe('Y');
+    expect(profiles[0]?.profile).toBe('X'); // higher podCount wins
+    expect(profiles[1]?.profile).toBe('Y');
   });
 
   it('per-profile fold-in suppressed when all profiles have podCount >= 5', () => {
@@ -427,10 +427,10 @@ describe('computeEscalationsAnalytics', () => {
 
     const result = computeEscalationsAnalytics(db, 30);
     expect(result.blockerPatterns).toHaveLength(2);
-    expect(result.blockerPatterns[0]!.description).toBe('Cannot find file');
-    expect(result.blockerPatterns[0]!.count).toBe(4); // 3 + 1 trimmed
-    expect(result.blockerPatterns[1]!.description).toBe('Cannot find file.');
-    expect(result.blockerPatterns[1]!.count).toBe(2);
+    expect(result.blockerPatterns[0]?.description).toBe('Cannot find file');
+    expect(result.blockerPatterns[0]?.count).toBe(4); // 3 + 1 trimmed
+    expect(result.blockerPatterns[1]?.description).toBe('Cannot find file.');
+    expect(result.blockerPatterns[1]?.count).toBe(2);
   });
 
   // ── Blocker pattern pod-id cap ──────────────────────────────────────────────
@@ -450,8 +450,8 @@ describe('computeEscalationsAnalytics', () => {
 
     const result = computeEscalationsAnalytics(db, 30);
     expect(result.blockerPatterns).toHaveLength(1);
-    expect(result.blockerPatterns[0]!.count).toBe(15);
-    expect(result.blockerPatterns[0]!.podIds).toHaveLength(10);
+    expect(result.blockerPatterns[0]?.count).toBe(15);
+    expect(result.blockerPatterns[0]?.podIds).toHaveLength(10);
   });
 
   // ── Blocker pattern not cohort-restricted ───────────────────────────────────
@@ -466,7 +466,7 @@ describe('computeEscalationsAnalytics', () => {
 
     const result = computeEscalationsAnalytics(db, 30);
     expect(result.blockerPatterns).toHaveLength(1);
-    expect(result.blockerPatterns[0]!.description).toBe('Workspace blocker');
+    expect(result.blockerPatterns[0]?.description).toBe('Workspace blocker');
   });
 
   it('blocker patterns exclude scheduled-job pods by default', () => {
@@ -487,7 +487,7 @@ describe('computeEscalationsAnalytics', () => {
     const result = computeEscalationsAnalytics(db, 30);
 
     expect(result.blockerPatterns).toHaveLength(1);
-    expect(result.blockerPatterns[0]!.description).toBe('Real blocker');
+    expect(result.blockerPatterns[0]?.description).toBe('Real blocker');
   });
 
   it('scope can include only scheduled-job blocker patterns', () => {
@@ -508,7 +508,7 @@ describe('computeEscalationsAnalytics', () => {
     const result = computeEscalationsAnalytics(db, 30, { scope: 'scheduled' });
 
     expect(result.blockerPatterns).toHaveLength(1);
-    expect(result.blockerPatterns[0]!.description).toBe('Scheduled findings digest');
+    expect(result.blockerPatterns[0]?.description).toBe('Scheduled findings digest');
   });
 
   // ── Sparkline not cohort-restricted ────────────────────────────────────────

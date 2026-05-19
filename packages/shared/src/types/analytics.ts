@@ -150,11 +150,7 @@ export interface SafetyAnalyticsResponse {
 
 /** The four states pods spend meaningful time in. The other 12 PodStatus
  *  values are transitional and excluded by design. */
-export type LoadBearingStatus =
-  | 'queued'
-  | 'running'
-  | 'validating'
-  | 'awaiting_input';
+export type LoadBearingStatus = 'queued' | 'running' | 'validating' | 'awaiting_input';
 
 export interface ThroughputCohortPod {
   podId: string;

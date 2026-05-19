@@ -146,7 +146,7 @@ function formatResponse(response: {
 
 /**
  * Get the Zod-compatible schema params for an action definition.
- * Used for dynamic MCP tool registration.
+ * Used for runtime MCP tool registration.
  */
 export function actionParamsToZodShape(
   action: ActionDefinition,

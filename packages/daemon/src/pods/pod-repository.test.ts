@@ -460,7 +460,10 @@ describe('PodRepository', () => {
     }
 
     it('throws when a row carries a legacy "test" field', () => {
-      writeRawAc('legacy-test', JSON.stringify([{ type: 'cmd', test: 'foo', pass: 'p', fail: 'f' }]));
+      writeRawAc(
+        'legacy-test',
+        JSON.stringify([{ type: 'cmd', test: 'foo', pass: 'p', fail: 'f' }]),
+      );
       expect(() => repo.getOrThrow('legacy-test')).toThrow(/field "test"/);
     });
 

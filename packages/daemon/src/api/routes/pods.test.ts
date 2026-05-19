@@ -11,6 +11,7 @@ import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from '../../api/server.js';
 import type { AuthModule } from '../../interfaces/index.js';
+import { createFixFeedbackRepository } from '../../pods/fix-feedback-repository.js';
 import {
   createEscalationRepository,
   createEventBus,
@@ -19,7 +20,6 @@ import {
   createPodQueue,
   createPodRepository,
 } from '../../pods/index.js';
-import { createFixFeedbackRepository } from '../../pods/fix-feedback-repository.js';
 import { createNudgeRepository } from '../../pods/nudge-repository.js';
 import { createQualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { createProfileStore } from '../../profiles/index.js';
@@ -1546,7 +1546,11 @@ describe('GET /pods/:podId/preview/status', () => {
         type: 'claude' as const,
         spawn: vi.fn().mockReturnValue(
           (async function* () {
-            yield { type: 'complete' as const, timestamp: new Date().toISOString(), result: 'done' };
+            yield {
+              type: 'complete' as const,
+              timestamp: new Date().toISOString(),
+              result: 'done',
+            };
           })(),
         ),
         resume: vi.fn(),
@@ -2089,8 +2093,9 @@ describe('POST /pods/:podId/update-from-base', () => {
     vi.spyOn(podManager, 'updateFromBase');
     // Store the manager reference for setting mock return values per test
     (app as FastifyInstance & { _testPodManager: typeof podManager })._testPodManager = podManager;
-    (app as FastifyInstance & { _testWorktreeManager: typeof worktreeManager })._testWorktreeManager =
-      worktreeManager;
+    (
+      app as FastifyInstance & { _testWorktreeManager: typeof worktreeManager }
+    )._testWorktreeManager = worktreeManager;
   });
 
   afterEach(async () => {
@@ -2111,7 +2116,9 @@ describe('POST /pods/:podId/update-from-base', () => {
 
   it('returns 200 with rebased response on clean rebase from failed pod', async () => {
     const podId = insertFailedPod();
-    const manager = (app as FastifyInstance & { _testPodManager: ReturnType<typeof createPodManager> })._testPodManager;
+    const manager = (
+      app as FastifyInstance & { _testPodManager: ReturnType<typeof createPodManager> }
+    )._testPodManager;
     vi.spyOn(manager, 'triggerValidation').mockResolvedValue(undefined);
 
     const res = await app.inject({
@@ -2126,7 +2133,11 @@ describe('POST /pods/:podId/update-from-base', () => {
 
   it('returns 200 with already_up_to_date when branch is current', async () => {
     const podId = insertFailedPod();
-    const worktreeManager = (app as FastifyInstance & { _testWorktreeManager: { rebaseOntoBase: ReturnType<typeof vi.fn> } })._testWorktreeManager;
+    const worktreeManager = (
+      app as FastifyInstance & {
+        _testWorktreeManager: { rebaseOntoBase: ReturnType<typeof vi.fn> };
+      }
+    )._testWorktreeManager;
     worktreeManager.rebaseOntoBase.mockResolvedValueOnce({
       alreadyUpToDate: true,
       rebased: true,
@@ -2140,12 +2151,20 @@ describe('POST /pods/:podId/update-from-base', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ ok: true, action: 'already_up_to_date', baseBranch: 'main' });
+    expect(res.json()).toMatchObject({
+      ok: true,
+      action: 'already_up_to_date',
+      baseBranch: 'main',
+    });
   });
 
   it('returns 409 with conflict response when rebase has conflicts', async () => {
     const podId = insertFailedPod();
-    const worktreeManager = (app as FastifyInstance & { _testWorktreeManager: { rebaseOntoBase: ReturnType<typeof vi.fn> } })._testWorktreeManager;
+    const worktreeManager = (
+      app as FastifyInstance & {
+        _testWorktreeManager: { rebaseOntoBase: ReturnType<typeof vi.fn> };
+      }
+    )._testWorktreeManager;
     worktreeManager.rebaseOntoBase.mockResolvedValueOnce({
       alreadyUpToDate: false,
       rebased: false,

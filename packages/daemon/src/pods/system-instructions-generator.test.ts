@@ -395,9 +395,7 @@ describe('generateSystemInstructions', () => {
     const md = generateSystemInstructions(
       makeProfile(),
       makeSession({
-        acceptanceCriteria: [
-          { type: 'none', outcome: 'Page loads without errors' },
-        ],
+        acceptanceCriteria: [{ type: 'none', outcome: 'Page loads without errors' }],
       }),
       'http://localhost:8080/mcp/x',
     );

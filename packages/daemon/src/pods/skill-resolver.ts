@@ -45,7 +45,10 @@ export async function listBuiltinSkills(): Promise<BuiltinSkillMeta[]> {
 
   for (const d of dirents) {
     if (d.isFile() && d.name.endsWith('.md')) {
-      candidates.push({ name: d.name.replace(/\.md$/, ''), file: path.join(BUILTIN_SKILLS_DIR, d.name) });
+      candidates.push({
+        name: d.name.replace(/\.md$/, ''),
+        file: path.join(BUILTIN_SKILLS_DIR, d.name),
+      });
     } else if (d.isDirectory()) {
       const skillFile = path.join(BUILTIN_SKILLS_DIR, d.name, 'SKILL.md');
       try {

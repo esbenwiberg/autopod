@@ -12,6 +12,7 @@ const contract: SpecContract = {
       id: 'finding-created',
       given: ['a validation finding exists'],
       when: ['the validator stores evidence'],
+      // biome-ignore lint/suspicious/noThenProperty: contract scenarios intentionally use Given/When/Then.
       then: ['the finding can be audited later'],
     },
   ],

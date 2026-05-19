@@ -32,7 +32,7 @@ const DEFAULT_CONFIG: QuarantineConfig = {
  * - threshold <= score < blockThreshold: wrap in quarantine markers
  * - score >= blockThreshold: block entirely (fail-closed)
  *
- * Fails closed: any unexpected error during scanning blocks the content rather
+ * Fails closed: unexpected errors during scanning block the content rather
  * than letting it through unexamined.
  */
 export function quarantine(text: string, config?: Partial<QuarantineConfig>): QuarantineResult {

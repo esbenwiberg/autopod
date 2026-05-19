@@ -62,14 +62,14 @@ export function createFixFeedbackRepository(db: Database.Database): FixFeedbackR
              ORDER BY created_at ASC`,
           )
           .all(podId) as FixFeedback[];
-        db.prepare(`DELETE FROM pending_fix_feedback WHERE pod_id = ?`).run(podId);
+        db.prepare('DELETE FROM pending_fix_feedback WHERE pod_id = ?').run(podId);
         return rows;
       })();
     },
 
     count(podId: string): number {
       const row = db
-        .prepare(`SELECT COUNT(*) AS n FROM pending_fix_feedback WHERE pod_id = ?`)
+        .prepare('SELECT COUNT(*) AS n FROM pending_fix_feedback WHERE pod_id = ?')
         .get(podId) as { n: number };
       return row.n;
     },

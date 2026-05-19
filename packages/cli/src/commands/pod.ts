@@ -670,7 +670,10 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
               contractContent: readFileSync(contractPath, 'utf8'),
             },
           ]);
-          if (!brief?.contract) podGroup.error(`contract could not be parsed: ${contractPath}`);
+          if (!brief?.contract) {
+            podGroup.error(`contract could not be parsed: ${contractPath}`);
+            return;
+          }
           resolvedTask = brief.task;
           contract = brief.contract;
         } else if (opts.file) {

@@ -27,5 +27,9 @@ export async function resolvePodId(client: AutopodClient, partial: string): Prom
     throw new Error(`Ambiguous pod ID "${partial}" matches: ${ids}`);
   }
 
-  return matches[0]?.id;
+  const [match] = matches;
+  if (!match) {
+    throw new PodNotFoundError(partial);
+  }
+  return match.id;
 }

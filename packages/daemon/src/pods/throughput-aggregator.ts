@@ -1,3 +1,9 @@
+import type {
+  LoadBearingStatus,
+  QueueDepthBucket,
+  ThroughputAnalyticsResponse,
+  TimeInStatusBox,
+} from '@autopod/shared';
 /**
  * Throughput analytics aggregator.
  * Pure function: takes a SQLite handle and a trailing window in days,
@@ -20,12 +26,6 @@
  *   interval intersects [window_start, window_end].
  */
 import type Database from 'better-sqlite3';
-import type {
-  LoadBearingStatus,
-  QueueDepthBucket,
-  TimeInStatusBox,
-  ThroughputAnalyticsResponse,
-} from '@autopod/shared';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -116,7 +116,7 @@ function computeQueueDepth(pods: QueuePodRow[], days: number): QueueDepthBucket[
 
   for (let i = 0; i < days * 24; i++) {
     const hourStartMs = windowStartHourMs + i * 3_600_000;
-    const hour = new Date(hourStartMs).toISOString().slice(0, 19) + 'Z';
+    const hour = `${new Date(hourStartMs).toISOString().slice(0, 19)}Z`;
 
     let maxDepth = 0;
     let totalDepth = 0;
@@ -173,14 +173,15 @@ function computeTimeInStatus(cohortRows: CohortRow[], events: StatusEventRow[]):
 
       const status = event.newStatus as LoadBearingStatus;
       const thisMs = new Date(event.createdAt).getTime();
-      const nextMs = i < evts.length - 1 ? new Date(evts[i + 1]!.createdAt).getTime() : completedAtMs;
+      const nextMs =
+        i < evts.length - 1 ? new Date(evts[i + 1]?.createdAt).getTime() : completedAtMs;
       const durationSeconds = (nextMs - thisMs) / 1000;
-      stateDurations.get(status)!.push(durationSeconds);
+      stateDurations.get(status)?.push(durationSeconds);
     }
   }
 
   return LOAD_BEARING_STATES.map((status) => {
-    const samples = stateDurations.get(status)!.sort((a, b) => a - b);
+    const samples = stateDurations.get(status)?.sort((a, b) => a - b);
     if (samples.length === 0) {
       return { status, p25: 0, p50: 0, p75: 0, p90: 0, max: 0, sampleCount: 0 };
     }

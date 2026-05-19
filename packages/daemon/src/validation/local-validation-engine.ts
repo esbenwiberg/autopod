@@ -938,9 +938,16 @@ async function collectFactAttachments(
   }
 }
 
-function attachmentKindForPath(path: string): NonNullable<FactCheckResult['attachments']>[number]['kind'] {
+function attachmentKindForPath(
+  path: string,
+): NonNullable<FactCheckResult['attachments']>[number]['kind'] {
   const lower = path.toLowerCase();
-  if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp')) {
+  if (
+    lower.endsWith('.png') ||
+    lower.endsWith('.jpg') ||
+    lower.endsWith('.jpeg') ||
+    lower.endsWith('.webp')
+  ) {
     return 'screenshot';
   }
   if (lower.endsWith('.zip')) return 'trace';
@@ -1906,7 +1913,7 @@ ${acList}
 Fields:
 - "criterion": COPY the criterion text VERBATIM from the numbered list above. Do NOT paraphrase, shorten, or alter it.
 - "method": HTTP method (GET, POST, PUT, DELETE, PATCH)
-- "path": URL path — use {varName} placeholders for dynamic IDs (explained below)
+- "path": URL path — use {varName} placeholders for runtime IDs (explained below)
 - "expectedStatus": HTTP status code as a NUMBER (e.g. 200, 201, 400, 404)
 - "bodyContains": optional string that must appear in the JSON response body
 - "requestBody": optional JSON object for POST/PUT/PATCH
@@ -2219,11 +2226,9 @@ export async function executeCmdChecks(
       }
 
       try {
-        const exec = await containerManager.execInContainer(
-          containerId,
-          ['sh', '-c', ac.command],
-          { timeout: 30_000 },
-        );
+        const exec = await containerManager.execInContainer(containerId, ['sh', '-c', ac.command], {
+          timeout: 30_000,
+        });
         const stdoutTrimmed = exec.stdout.trim();
         const stdoutPreview = exec.stdout.slice(0, 800);
         const stderrPreview = exec.stderr.slice(0, 400);
@@ -2326,12 +2331,13 @@ export async function restartSupervisorIfDown(
   const reachable = await pollUntilReachable(config.previewUrl, { attempts: 2, intervalMs: 1_000 });
   if (reachable) return;
 
-  log?.warn({ podId: config.podId }, 'Server unreachable after script generation — restarting supervisor');
+  log?.warn(
+    { podId: config.podId },
+    'Server unreachable after script generation — restarting supervisor',
+  );
 
   const startCwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
-  const kickCmd =
-    `kill -9 $(cat /tmp/autopod-supervisor.pid 2>/dev/null) 2>/dev/null; ` +
-    buildSupervisorCommand(config.startCommand);
+  const kickCmd = `kill -9 $(cat /tmp/autopod-supervisor.pid 2>/dev/null) 2>/dev/null; ${buildSupervisorCommand(config.startCommand)}`;
 
   await cm
     .execInContainer(config.containerId, ['sh', '-c', kickCmd], { cwd: startCwd })
@@ -2679,14 +2685,18 @@ export function buildReviewPrompt(
           (scenario) =>
             `- ${scenario.id}\n  Given: ${scenario.given.join(' / ')}\n  When: ${scenario.when.join(' / ')}\n  Then: ${scenario.then.join(' / ')}`,
         )
-        .join('\n')}\n\nRequired facts already executed by the validator:\n${contract.requiredFacts
-        .map(
-          (fact) =>
-            `- ${fact.id} proves ${fact.proves.join(', ')} via ${fact.artifact.change} ${fact.artifact.path}: \`${fact.command}\``,
-        )
-        .join('\n') || '- none'}\n\nHuman review items:\n${contract.humanReview
-        .map((item) => `- ${item.id} covers ${item.covers.join(', ')}: ${item.criterion}`)
-        .join('\n') || '- none'}\n`
+        .join('\n')}\n\nRequired facts already executed by the validator:\n${
+        contract.requiredFacts
+          .map(
+            (fact) =>
+              `- ${fact.id} proves ${fact.proves.join(', ')} via ${fact.artifact.change} ${fact.artifact.path}: \`${fact.command}\``,
+          )
+          .join('\n') || '- none'
+      }\n\nHuman review items:\n${
+        contract.humanReview
+          .map((item) => `- ${item.id} covers ${item.covers.join(', ')}: ${item.criterion}`)
+          .join('\n') || '- none'
+      }\n`
     : '';
 
   const planSection = config.plan

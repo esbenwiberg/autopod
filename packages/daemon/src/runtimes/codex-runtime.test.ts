@@ -170,7 +170,7 @@ describe('CodexRuntime', () => {
           (c[0] as Record<string, unknown>).msg === 'Spawning codex in container',
       );
       expect(spawnCall).toBeDefined();
-      const logObj = spawnCall![0] as Record<string, unknown>;
+      const logObj = spawnCall?.[0] as Record<string, unknown>;
       const loggedArgs = logObj.args as string[];
       expect(loggedArgs[1]).toMatch(/^<task: 50000 bytes>$/);
       expect(JSON.stringify(logObj).includes(bigStr)).toBe(false);
@@ -355,7 +355,7 @@ describe('CodexRuntime', () => {
             'Resuming codex with follow-up message in container',
       );
       expect(resumeCall).toBeDefined();
-      const logObj = resumeCall![0] as Record<string, unknown>;
+      const logObj = resumeCall?.[0] as Record<string, unknown>;
       const loggedArgs = logObj.args as string[];
       expect(loggedArgs[1]).toMatch(/^<task: 50000 bytes>$/);
       expect(JSON.stringify(logObj).includes(bigStr)).toBe(false);

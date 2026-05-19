@@ -735,7 +735,7 @@ describe('DockerContainerManager', () => {
 
       const logCall = debugSpy.mock.calls.find((c) => c[1] === 'Exec completed');
       expect(logCall).toBeDefined();
-      const logObj = logCall![0] as Record<string, unknown>;
+      const logObj = logCall?.[0] as Record<string, unknown>;
       const loggedCommand = logObj.command as string[];
       expect(loggedCommand[3]).toBe('<arg: 50000 bytes>');
       expect(loggedCommand[0]).toBe('/run/autopod/agent-shim.sh');
@@ -806,7 +806,7 @@ describe('DockerContainerManager', () => {
 
       const logCall = infoSpy.mock.calls.find((c) => c[1] === 'Streaming exec started');
       expect(logCall).toBeDefined();
-      const logObj = logCall![0] as Record<string, unknown>;
+      const logObj = logCall?.[0] as Record<string, unknown>;
       const loggedCommand = logObj.command as string[];
       expect(loggedCommand[3]).toBe('<arg: 50000 bytes>');
       expect(loggedCommand[0]).toBe('/run/autopod/agent-shim.sh');
@@ -831,7 +831,7 @@ describe('DockerContainerManager', () => {
 
       const logCall = infoSpy.mock.calls.find((c) => c[1] === 'Streaming exec started');
       expect(logCall).toBeDefined();
-      const logObj = logCall![0] as Record<string, unknown>;
+      const logObj = logCall?.[0] as Record<string, unknown>;
       expect(logObj.command).toEqual(cmd);
 
       muxStream.end();
@@ -1024,7 +1024,7 @@ describe('DockerContainerManager', () => {
         (c) => typeof c[1] === 'string' && c[1].includes('exec.inspect timed out'),
       );
       expect(logCall).toBeDefined();
-      const logObj = logCall![0] as Record<string, unknown>;
+      const logObj = logCall?.[0] as Record<string, unknown>;
       const loggedCommand = logObj.command as string[];
       expect(loggedCommand[3]).toBe('<arg: 50000 bytes>');
       expect(loggedCommand[0]).toBe('/run/autopod/agent-shim.sh');

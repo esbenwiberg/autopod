@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
-import { describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@autopod/shared';
+import { describe, expect, it } from 'vitest';
 import { ClaudeStreamParser } from './claude-stream-parser.js';
 
 // Actual event shapes captured from `claude --output-format stream-json --verbose`

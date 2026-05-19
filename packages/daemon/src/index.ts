@@ -205,7 +205,7 @@ const memoryRepo = createMemoryRepository(db);
 const pendingOverrideRepo = createPendingOverrideRepository(db);
 const qualityScoreRepo = createQualityScoreRepository(db);
 const scanRepo = createScanRepository(db);
-// ML detectors are opt-in via env. Set AUTOPOD_SECURITY_ML=true to enable
+// ML detectors are opt-in via env. Enable AUTOPOD_SECURITY_ML to load
 // the prompt-injection and PII classifiers (ONNX, lazy-loaded). Disabled
 // by default to keep daemon RAM low and avoid first-run model downloads.
 const securityMlEnabled = process.env.AUTOPOD_SECURITY_ML === 'true';
@@ -297,7 +297,7 @@ const worktreeManager = new LocalWorktreeManager({ logger });
 const MOCK_DOCKER = process.env.AUTOPOD_MOCK_DOCKER === 'true';
 
 // Docker is required for real pods — all agent work runs inside containers.
-// Set AUTOPOD_MOCK_DOCKER=true to skip Docker entirely (API/health-check dev mode).
+// Enable AUTOPOD_MOCK_DOCKER to skip Docker entirely (API/health-check dev mode).
 const Dockerode = (await import('dockerode')).default;
 type DockerodeInstance = InstanceType<typeof Dockerode>;
 

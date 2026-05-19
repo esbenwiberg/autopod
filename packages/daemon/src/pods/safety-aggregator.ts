@@ -40,7 +40,12 @@ function scoreToHistogramIndex(score: number): number {
 
 // ── Network policy buckets ─────────────────────────────────────────────────────
 
-const NETWORK_POLICY_BUCKETS: NetworkPolicyBucket[] = ['allow-all', 'restricted', 'deny-all', 'unknown'];
+const NETWORK_POLICY_BUCKETS: NetworkPolicyBucket[] = [
+  'allow-all',
+  'restricted',
+  'deny-all',
+  'unknown',
+];
 
 // ── Audit chain fleet verifier ─────────────────────────────────────────────────
 
@@ -225,7 +230,11 @@ export function computeSafetyAnalytics(
     // Injection patterns from safety_events only
     ...safetyPatternRows
       .filter((r) => r.kind === 'injection')
-      .map((r) => ({ kind: 'injection' as SafetyEventKind, patternName: r.patternName, count: r.count })),
+      .map((r) => ({
+        kind: 'injection' as SafetyEventKind,
+        patternName: r.patternName,
+        count: r.count,
+      })),
   ];
 
   // ── bySource ────────────────────────────────────────────────────────────────
@@ -372,9 +381,7 @@ export interface AuditChainVerifyResult {
   ranAt: string;
 }
 
-export function runAndPersistAuditChainVerification(
-  db: Database.Database,
-): AuditChainVerifyResult {
+export function runAndPersistAuditChainVerification(db: Database.Database): AuditChainVerifyResult {
   const result = verifyFleetAuditChain(db);
   const ranAt = new Date().toISOString();
 

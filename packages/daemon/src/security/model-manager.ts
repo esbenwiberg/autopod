@@ -15,6 +15,9 @@ const ENV_PII_MODEL_PATH = 'AUTOPOD_PII_MODEL_PATH';
 
 export type TextClassificationOutput = Array<{ label: string; score: number }>;
 export type TextClassifier = (text: string) => Promise<TextClassificationOutput>;
+type PipelineTask = 'text-classification' | 'token-classification';
+type LoadedPipeline = (text: string) => Promise<unknown> | unknown;
+type PipelineLoader = (task: PipelineTask, model: string) => Promise<LoadedPipeline>;
 
 export type TokenClassificationItem = {
   entity: string;
@@ -57,10 +60,22 @@ export interface ModelManagerConfig {
    */
   cacheDir?: string;
   logger: Logger;
+  pipelineLoader?: PipelineLoader;
 }
 
 const DEFAULT_INJECTION_MODEL = 'protectai/deberta-v3-base-prompt-injection-v2';
 const DEFAULT_PII_MODEL = 'iiiorg/piiranha-v1-detect-personal-information';
+
+async function loadPipeline(
+  config: ModelManagerConfig,
+  task: PipelineTask,
+  model: string,
+): Promise<LoadedPipeline> {
+  if (config.pipelineLoader) return config.pipelineLoader(task, model);
+
+  const { pipeline } = await import('@huggingface/transformers');
+  return pipeline(task, model) as unknown as LoadedPipeline;
+}
 
 /**
  * Production model manager. Loads ONNX models via `@huggingface/transformers`
@@ -77,14 +92,13 @@ export function createModelManager(config: ModelManagerConfig): ModelManager {
   async function loadInjection(): Promise<TextClassifier | null> {
     injectionStatus = 'loading';
     try {
-      const { pipeline } = await import('@huggingface/transformers');
       const localPath = process.env[ENV_INJECTION_MODEL_PATH];
       const model = localPath ?? config.injectionModel ?? DEFAULT_INJECTION_MODEL;
       config.logger.info(
         { model, source: localPath ? 'local' : 'hf' },
         'Loading prompt-injection classifier (ONNX)',
       );
-      const pipe = await pipeline('text-classification', model);
+      const pipe = await loadPipeline(config, 'text-classification', model);
       injectionStatus = 'loaded';
       return async (text: string) => {
         const out = await pipe(text);
@@ -103,14 +117,13 @@ export function createModelManager(config: ModelManagerConfig): ModelManager {
   async function loadPii(): Promise<TokenClassifier | null> {
     piiStatus = 'loading';
     try {
-      const { pipeline } = await import('@huggingface/transformers');
       const localPath = process.env[ENV_PII_MODEL_PATH];
       const model = localPath ?? config.piiModel ?? DEFAULT_PII_MODEL;
       config.logger.info(
         { model, source: localPath ? 'local' : 'hf' },
         'Loading PII NER classifier (ONNX)',
       );
-      const pipe = await pipeline('token-classification', model);
+      const pipe = await loadPipeline(config, 'token-classification', model);
       piiStatus = 'loaded';
       return async (text: string) => {
         const out = await pipe(text);

@@ -183,9 +183,7 @@ function startPmsetAdjunct(
             const wakeAt = parsePmsetTimestamp(line);
             if (!Number.isFinite(wakeAt) || wakeAt < filterBefore) continue;
             const sleptMs =
-              lastSleepAt !== null
-                ? wakeAt - lastSleepAt
-                : Date.now() - getLastTickAt();
+              lastSleepAt !== null ? wakeAt - lastSleepAt : Date.now() - getLastTickAt();
             lastSleepAt = null;
             onWake(sleptMs, 'pmset');
           }

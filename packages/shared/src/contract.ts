@@ -54,6 +54,7 @@ function parseScenario(value: unknown, index: number): ContractScenario {
     id: asString(obj.id, `scenarios[${index}].id`),
     given: asStringArray(obj.given, `scenarios[${index}].given`),
     when: asStringArray(obj.when, `scenarios[${index}].when`),
+    // biome-ignore lint/suspicious/noThenProperty: contract scenarios intentionally use Given/When/Then.
     then: asStringArray(obj.then, `scenarios[${index}].then`),
   };
 }

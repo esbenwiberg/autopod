@@ -97,7 +97,7 @@ export interface BuiltinSkillSource {
 
 /**
  * A content section to inject into the generated CLAUDE.md.
- * Content is either inline (static) or fetched from a URL at provisioning time (dynamic).
+ * Content is either inline (static) or fetched from a URL at provisioning time.
  */
 export interface InjectedClaudeMdSection {
   /** Section heading in CLAUDE.md — also used as key for merge/override */

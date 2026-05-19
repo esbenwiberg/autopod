@@ -342,6 +342,5 @@ describe('ProfileValidator', () => {
       const result = validateProfile({ ...validInput, mergePollIntervalSec: 7200 });
       expect(result.valid).toBe(false);
     });
-
   });
 });

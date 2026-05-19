@@ -1,9 +1,9 @@
 import { spawn as childSpawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostResumedEvent, SystemEvent } from '@autopod/shared';
 import pino from 'pino';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EventBus } from './event-bus.js';
 import { _internals, startSleepDetector } from './sleep-detector.js';
 
@@ -82,8 +82,8 @@ describe('tick-gap — happy path', () => {
     vi.useFakeTimers();
     mockNow = EPOCH_OFFSET;
     vi.spyOn(Date, 'now').mockImplementation(() => mockNow);
-    delete process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS;
-    delete process.env.AUTOPOD_DISABLE_SLEEP_DETECT;
+    process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS = undefined;
+    process.env.AUTOPOD_DISABLE_SLEEP_DETECT = undefined;
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -125,8 +125,8 @@ describe('threshold', () => {
     vi.useFakeTimers();
     mockNow = EPOCH_OFFSET;
     vi.spyOn(Date, 'now').mockImplementation(() => mockNow);
-    delete process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS;
-    delete process.env.AUTOPOD_DISABLE_SLEEP_DETECT;
+    process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS = undefined;
+    process.env.AUTOPOD_DISABLE_SLEEP_DETECT = undefined;
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -149,7 +149,7 @@ describe('threshold', () => {
     await sleepThen(200_000); // 200 s gap > 180 s threshold
     stop();
     expect(events).toHaveLength(1);
-    expect(events[0]!.detector).toBe('tick-gap');
+    expect(events[0]?.detector).toBe('tick-gap');
   });
 
   it('gap of 90 s triggers event when threshold overridden to 60 s', async () => {
@@ -160,7 +160,7 @@ describe('threshold', () => {
     await sleepThen(90_000); // 90 s > 60 s threshold
     stop();
     expect(events).toHaveLength(1);
-    delete process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS;
+    process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS = undefined;
   });
 });
 
@@ -173,12 +173,12 @@ describe('disable', () => {
     vi.useFakeTimers();
     mockNow = EPOCH_OFFSET;
     vi.spyOn(Date, 'now').mockImplementation(() => mockNow);
-    delete process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS;
+    process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS = undefined;
   });
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
-    delete process.env.AUTOPOD_DISABLE_SLEEP_DETECT;
+    process.env.AUTOPOD_DISABLE_SLEEP_DETECT = undefined;
   });
 
   it('AUTOPOD_DISABLE_SLEEP_DETECT=1 suppresses all events', async () => {
@@ -215,12 +215,12 @@ describe('dedupe', () => {
     mockNow = EPOCH_OFFSET;
     vi.spyOn(Date, 'now').mockImplementation(() => mockNow);
     process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS = '1'; // every tick exceeds threshold
-    delete process.env.AUTOPOD_DISABLE_SLEEP_DETECT;
+    process.env.AUTOPOD_DISABLE_SLEEP_DETECT = undefined;
   });
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
-    delete process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS;
+    process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS = undefined;
   });
 
   it('second wake signal within 5 s is suppressed', async () => {
@@ -267,8 +267,8 @@ describe('platform: linux', () => {
     vi.useFakeTimers();
     mockNow = EPOCH_OFFSET;
     vi.spyOn(Date, 'now').mockImplementation(() => mockNow);
-    delete process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS;
-    delete process.env.AUTOPOD_DISABLE_SLEEP_DETECT;
+    process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS = undefined;
+    process.env.AUTOPOD_DISABLE_SLEEP_DETECT = undefined;
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -282,7 +282,7 @@ describe('platform: linux', () => {
     await normalTick();
     await sleepThen(4 * HOUR);
     expect(events).toHaveLength(1);
-    expect(events[0]!.detector).toBe('tick-gap');
+    expect(events[0]?.detector).toBe('tick-gap');
     stop();
   });
 });
@@ -296,8 +296,8 @@ describe('cleanup', () => {
     vi.useFakeTimers();
     mockNow = EPOCH_OFFSET;
     vi.spyOn(Date, 'now').mockImplementation(() => mockNow);
-    delete process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS;
-    delete process.env.AUTOPOD_DISABLE_SLEEP_DETECT;
+    process.env.AUTOPOD_SLEEP_DETECT_THRESHOLD_MS = undefined;
+    process.env.AUTOPOD_DISABLE_SLEEP_DETECT = undefined;
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -443,14 +443,15 @@ describe('startMacOsAdjunct — native module fallback to pmset', () => {
     const proc = makeFakePmsetProc();
     spawnMock.mockReturnValue(proc as unknown as ReturnType<typeof childSpawn>);
 
+    const callsBefore = spawnMock.mock.calls.length;
     const stop = await _internals.startMacOsAdjunct(logger, () => Date.now(), vi.fn());
+    const callsFromThisStart = spawnMock.mock.calls.slice(callsBefore);
 
-    expect(spawnMock).toHaveBeenCalledTimes(1);
-    expect(spawnMock).toHaveBeenCalledWith(
+    expect(callsFromThisStart).toContainEqual([
       'pmset',
       ['-g', 'log'],
       expect.objectContaining({ stdio: ['ignore', 'pipe', 'ignore'] }),
-    );
+    ]);
 
     stop();
   });

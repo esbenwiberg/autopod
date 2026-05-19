@@ -64,13 +64,9 @@ export async function pushCommitsToBareViaStagingRef(
 ): Promise<PushResult> {
   const stagingRef = autopodStagingRef(podId);
   const cleanupStaging = async () => {
-    await execFileAsync('git', [
-      '--git-dir',
-      bareRepoPath,
-      'update-ref',
-      '-d',
-      stagingRef,
-    ]).catch(() => {});
+    await execFileAsync('git', ['--git-dir', bareRepoPath, 'update-ref', '-d', stagingRef]).catch(
+      () => {},
+    );
   };
 
   const branchResolve = await runGit(['rev-parse', '--abbrev-ref', 'HEAD']);

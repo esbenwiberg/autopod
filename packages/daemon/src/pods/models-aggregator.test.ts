@@ -71,12 +71,7 @@ function insertQuality(db: Database.Database, podId: string, score: number): voi
   `).run({ podId, score, completedAt: new Date().toISOString() });
 }
 
-function insertEscalation(
-  db: Database.Database,
-  podId: string,
-  type: string,
-  id?: string,
-): string {
+function insertEscalation(db: Database.Database, podId: string, type: string, id?: string): string {
   const eid = id ?? `esc-${++seq}`;
   db.prepare(`
     INSERT INTO escalations (id, pod_id, type, payload, created_at)
@@ -134,8 +129,10 @@ describe('computeModelsAnalytics', () => {
 
   it('single-model cohort — correct per-model rollup and summary', () => {
     // 7 complete, 2 killed, 1 failed = 10 total
-    for (let i = 0; i < 7; i++) insertPod(db, { model: 'claude-opus-4-7', status: 'complete', costUsd: 30 / 7 });
-    for (let i = 0; i < 2; i++) insertPod(db, { model: 'claude-opus-4-7', status: 'killed', costUsd: 0 });
+    for (let i = 0; i < 7; i++)
+      insertPod(db, { model: 'claude-opus-4-7', status: 'complete', costUsd: 30 / 7 });
+    for (let i = 0; i < 2; i++)
+      insertPod(db, { model: 'claude-opus-4-7', status: 'killed', costUsd: 0 });
     insertPod(db, { model: 'claude-opus-4-7', status: 'failed', costUsd: 0 });
 
     // 5 quality scores averaging 80: 70+80+80+80+90 = 400/5=80
@@ -175,8 +172,8 @@ describe('computeModelsAnalytics', () => {
     const result = computeModelsAnalytics(db, 30);
 
     expect(result.byModel).toHaveLength(1);
-    expect(result.byModel[0]!.model).toBe('claude-opus-4-7');
-    expect(result.byModel[0]!.podCount).toBe(10);
+    expect(result.byModel[0]?.model).toBe('claude-opus-4-7');
+    expect(result.byModel[0]?.podCount).toBe(10);
   });
 
   // ── Unknown model bucket ─────────────────────────────────────────────────
@@ -190,10 +187,10 @@ describe('computeModelsAnalytics', () => {
     expect(result.byModel).toHaveLength(2);
     const unknown = result.byModel.find((r) => r.model === '<unknown>');
     expect(unknown).toBeDefined();
-    expect(unknown!.podCount).toBe(5);
-    expect(unknown!.totalCostUsd).toBeNull();
-    expect(unknown!.dollarPerPr).toBeNull();
-    expect(unknown!.completeCostUsd).toBeNull();
+    expect(unknown?.podCount).toBe(5);
+    expect(unknown?.totalCostUsd).toBeNull();
+    expect(unknown?.dollarPerPr).toBeNull();
+    expect(unknown?.completeCostUsd).toBeNull();
 
     const opus = result.byModel.find((r) => r.model === 'claude-opus-4-7');
     expect(opus).toBeDefined();
@@ -211,7 +208,7 @@ describe('computeModelsAnalytics', () => {
     const result = computeModelsAnalytics(db, 30);
 
     const unknown = result.byModel.find((r) => r.model === '<unknown>');
-    expect(unknown!.podCount).toBe(12);
+    expect(unknown?.podCount).toBe(12);
     expect(result.unknownModels).toHaveLength(10);
   });
 
@@ -219,9 +216,11 @@ describe('computeModelsAnalytics', () => {
 
   it('MIN_COHORT_FOR_HEADLINE — haiku has 3 complete pods (< 5), excluded from cheapest headline', () => {
     // Haiku: 3 complete pods at $0.10/PR
-    for (let i = 0; i < 3; i++) insertPod(db, { model: 'claude-haiku-4-5', status: 'complete', costUsd: 0.1 });
+    for (let i = 0; i < 3; i++)
+      insertPod(db, { model: 'claude-haiku-4-5', status: 'complete', costUsd: 0.1 });
     // Opus: 100 complete pods at $5/PR
-    for (let i = 0; i < 100; i++) insertPod(db, { model: 'claude-opus-4-7', status: 'complete', costUsd: 5 });
+    for (let i = 0; i < 100; i++)
+      insertPod(db, { model: 'claude-opus-4-7', status: 'complete', costUsd: 5 });
 
     const result = computeModelsAnalytics(db, 30);
 
@@ -229,7 +228,7 @@ describe('computeModelsAnalytics', () => {
     // Haiku still appears in byModel
     const haiku = result.byModel.find((r) => r.model === 'claude-haiku-4-5');
     expect(haiku).toBeDefined();
-    expect(haiku!.podCount).toBe(3);
+    expect(haiku?.podCount).toBe(3);
   });
 
   // ── MIN_COHORT_FOR_HEADLINE — best quality ───────────────────────────────
@@ -283,12 +282,12 @@ describe('computeModelsAnalytics', () => {
     const result = computeModelsAnalytics(db, 30);
 
     expect(result.byRuntime).toHaveLength(3);
-    expect(result.byRuntime[0]!.runtime).toBe('claude');
-    expect(result.byRuntime[1]!.runtime).toBe('codex');
-    expect(result.byRuntime[2]!.runtime).toBe('copilot');
-    expect(result.byRuntime[1]!.podCount).toBe(0);
-    expect(result.byRuntime[2]!.podCount).toBe(0);
-    expect(result.byRuntime[1]!.avgQuality).toBeNull();
+    expect(result.byRuntime[0]?.runtime).toBe('claude');
+    expect(result.byRuntime[1]?.runtime).toBe('codex');
+    expect(result.byRuntime[2]?.runtime).toBe('copilot');
+    expect(result.byRuntime[1]?.podCount).toBe(0);
+    expect(result.byRuntime[2]?.podCount).toBe(0);
+    expect(result.byRuntime[1]?.avgQuality).toBeNull();
   });
 
   // ── TTM mean math ────────────────────────────────────────────────────────
@@ -307,7 +306,7 @@ describe('computeModelsAnalytics', () => {
 
     const result = computeModelsAnalytics(db, 30);
 
-    expect(result.byModel[0]!.meanTtmSeconds).toBeCloseTo(320, 0);
+    expect(result.byModel[0]?.meanTtmSeconds).toBeCloseTo(320, 0);
   });
 
   // ── TTM excludes non-complete pods ───────────────────────────────────────
@@ -329,7 +328,7 @@ describe('computeModelsAnalytics', () => {
 
     const result = computeModelsAnalytics(db, 30);
 
-    expect(result.byModel[0]!.meanTtmSeconds).toBeCloseTo(60, 0);
+    expect(result.byModel[0]?.meanTtmSeconds).toBeCloseTo(60, 0);
   });
 
   // ── Quality excludes pods without a quality row ──────────────────────────
@@ -340,14 +339,14 @@ describe('computeModelsAnalytics', () => {
     const pods = db
       .prepare(`SELECT id FROM pods WHERE model='claude-opus-4-7' LIMIT 3`)
       .all() as Array<{ id: string }>;
-    insertQuality(db, pods[0]!.id, 60);
-    insertQuality(db, pods[1]!.id, 70);
-    insertQuality(db, pods[2]!.id, 80);
+    insertQuality(db, pods[0]?.id, 60);
+    insertQuality(db, pods[1]?.id, 70);
+    insertQuality(db, pods[2]?.id, 80);
 
     const result = computeModelsAnalytics(db, 30);
 
-    expect(result.byModel[0]!.scoredCount).toBe(3);
-    expect(result.byModel[0]!.avgQuality).toBeCloseTo(70);
+    expect(result.byModel[0]?.scoredCount).toBe(3);
+    expect(result.byModel[0]?.avgQuality).toBeCloseTo(70);
   });
 
   // ── Cost waste in totalCostUsd ───────────────────────────────────────────
@@ -369,7 +368,7 @@ describe('computeModelsAnalytics', () => {
 
     const result = computeModelsAnalytics(db, 30);
 
-    expect(result.byModel[0]!.completeCostUsd).toBeCloseTo(5);
+    expect(result.byModel[0]?.completeCostUsd).toBeCloseTo(5);
   });
 
   // ── Escalation rate predicate ────────────────────────────────────────────
@@ -401,7 +400,7 @@ describe('computeModelsAnalytics', () => {
 
     const result = computeModelsAnalytics(db, 30);
 
-    expect(result.byModel[0]!.escalatedCount).toBe(1);
+    expect(result.byModel[0]?.escalatedCount).toBe(1);
   });
 
   // ── Failure-stage matrix shape ───────────────────────────────────────────
@@ -446,10 +445,10 @@ describe('computeModelsAnalytics', () => {
     const result = computeModelsAnalytics(db, 30);
 
     expect(result.failureStageMatrix).toHaveLength(1);
-    expect(result.failureStageMatrix[0]!.model).toBe('claude-opus-4-7');
-    const buildCell = result.failureStageMatrix[0]!.stages.find((s) => s.stage === 'build');
-    expect(buildCell!.podsRan).toBe(5); // all 5 pods ran build
-    expect(buildCell!.podsFailed).toBe(2); // the 2 'opus' pods failed
+    expect(result.failureStageMatrix[0]?.model).toBe('claude-opus-4-7');
+    const buildCell = result.failureStageMatrix[0]?.stages.find((s) => s.stage === 'build');
+    expect(buildCell?.podsRan).toBe(5); // all 5 pods ran build
+    expect(buildCell?.podsFailed).toBe(2); // the 2 'opus' pods failed
   });
 
   it('failure-stage podsRan===0 cells — sast with no runs emits zeros not omitted', () => {
@@ -459,7 +458,7 @@ describe('computeModelsAnalytics', () => {
 
     const result = computeModelsAnalytics(db, 30);
 
-    const sastCell = result.failureStageMatrix[0]!.stages.find((s) => s.stage === 'sast');
+    const sastCell = result.failureStageMatrix[0]?.stages.find((s) => s.stage === 'sast');
     expect(sastCell).toEqual({ stage: 'sast', podsRan: 0, podsFailed: 0, failureRate: 0 });
   });
 
@@ -486,8 +485,8 @@ describe('computeModelsAnalytics', () => {
     // Today's slot should have 5 (Opus), yesterday's slot should have 0 (Sonnet doesn't count)
     const todaySlot = result.summary.mostUsedDailySparkline.at(-1);
     const yesterdaySlot = result.summary.mostUsedDailySparkline.at(-2);
-    expect(todaySlot!.count).toBe(5);
-    expect(yesterdaySlot!.count).toBe(0);
+    expect(todaySlot?.count).toBe(5);
+    expect(yesterdaySlot?.count).toBe(0);
   });
 
   it('sparkline length matches days param', () => {
@@ -509,7 +508,7 @@ describe('computeModelsAnalytics', () => {
     const result = computeModelsAnalytics(db, 30);
 
     expect(result.summary.cohortSize).toBe(1);
-    expect(result.byModel[0]!.podCount).toBe(1);
+    expect(result.byModel[0]?.podCount).toBe(1);
   });
 
   // ── Workspace exclusion ──────────────────────────────────────────────────
@@ -521,7 +520,7 @@ describe('computeModelsAnalytics', () => {
     const result = computeModelsAnalytics(db, 30);
 
     expect(result.summary.cohortSize).toBe(1);
-    expect(result.byModel[0]!.podCount).toBe(1);
+    expect(result.byModel[0]?.podCount).toBe(1);
   });
 
   // ── Prior-window delta ───────────────────────────────────────────────────

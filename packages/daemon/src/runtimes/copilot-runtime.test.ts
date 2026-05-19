@@ -141,13 +141,14 @@ describe('CopilotRuntime', () => {
           (c[0] as Record<string, unknown>).msg === 'Spawning copilot in container',
       );
       expect(spawnCall).toBeDefined();
-      const logObj = spawnCall![0] as Record<string, unknown>;
+      const logObj = spawnCall?.[0] as Record<string, unknown>;
       const loggedArgs = logObj.args as string[];
       expect(loggedArgs[1]).toMatch(/^<task: 50000 bytes>$/);
       expect(JSON.stringify(logObj).includes(bigStr)).toBe(false);
 
       // Real args to execStreaming still contain the full task
-      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock
+        .calls[0]?.[1] as string[];
       expect(execArgs).toContain(bigStr);
     });
 

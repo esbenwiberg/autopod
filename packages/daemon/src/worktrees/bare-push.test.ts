@@ -4,11 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  autopodStagingRef,
-  pushCommitsToBareViaStagingRef,
-  type RunGit,
-} from './bare-push.js';
+import { type RunGit, autopodStagingRef, pushCommitsToBareViaStagingRef } from './bare-push.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -73,16 +69,7 @@ async function buildFixture(tmpRoot: string) {
   await git(seed, ['commit', '-m', 'init']);
   await git(seed, ['push', 'origin', 'HEAD:refs/heads/main']);
 
-  await git(tmpRoot, [
-    '--git-dir',
-    bare,
-    'worktree',
-    'add',
-    '-b',
-    'feature-x',
-    hostWt,
-    'main',
-  ]);
+  await git(tmpRoot, ['--git-dir', bare, 'worktree', 'add', '-b', 'feature-x', hostWt, 'main']);
 
   await mkdir(container);
   await git(container, ['init', '--initial-branch=feature-x']);
@@ -91,10 +78,7 @@ async function buildFixture(tmpRoot: string) {
     `${path.join(bare, 'objects')}\n`,
   );
   const { stdout: mainTip } = await git(tmpRoot, ['--git-dir', bare, 'rev-parse', 'main']);
-  await writeFile(
-    path.join(container, '.git', 'refs', 'heads', 'feature-x'),
-    mainTip,
-  );
+  await writeFile(path.join(container, '.git', 'refs', 'heads', 'feature-x'), mainTip);
   await writeFile(path.join(container, '.git', 'HEAD'), 'ref: refs/heads/feature-x\n');
   // Sync working tree to the branch we just wired up.
   await git(container, ['reset', '--hard', 'feature-x']);
@@ -130,39 +114,20 @@ describe('bare push via staging ref', () => {
     expect(result.stderr).toMatch(/refusing to update checked out branch/i);
 
     // Branch on the bare did NOT advance.
-    const { stdout: bareTip } = await git(tmpRoot, [
-      '--git-dir',
-      bare,
-      'rev-parse',
-      'feature-x',
-    ]);
-    const { stdout: mainTip } = await git(tmpRoot, [
-      '--git-dir',
-      bare,
-      'rev-parse',
-      'main',
-    ]);
+    const { stdout: bareTip } = await git(tmpRoot, ['--git-dir', bare, 'rev-parse', 'feature-x']);
+    const { stdout: mainTip } = await git(tmpRoot, ['--git-dir', bare, 'rev-parse', 'main']);
     expect(bareTip.trim()).toBe(mainTip.trim());
   });
 
   it('pushCommitsToBareViaStagingRef advances the bare branch and cleans up the staging ref', async () => {
     const { bare, container } = await buildFixture(tmpRoot);
 
-    const result = await pushCommitsToBareViaStagingRef(
-      runGitIn(container),
-      bare,
-      'pod-abc',
-    );
+    const result = await pushCommitsToBareViaStagingRef(runGitIn(container), bare, 'pod-abc');
 
     expect(result).toEqual({ pushed: true });
 
     const { stdout: containerTip } = await git(container, ['rev-parse', 'HEAD']);
-    const { stdout: bareTip } = await git(tmpRoot, [
-      '--git-dir',
-      bare,
-      'rev-parse',
-      'feature-x',
-    ]);
+    const { stdout: bareTip } = await git(tmpRoot, ['--git-dir', bare, 'rev-parse', 'feature-x']);
     expect(bareTip.trim()).toBe(containerTip.trim());
 
     // Staging ref must not linger.
@@ -183,43 +148,21 @@ describe('bare push via staging ref', () => {
     // container's HEAD is no longer an FF descendant. Do it via a SECOND
     // linked worktree so we don't disturb the first one's HEAD checkout state.
     const otherWt = path.join(tmpRoot, 'other-wt');
-    await git(tmpRoot, [
-      '--git-dir',
-      bare,
-      'worktree',
-      'add',
-      '--force',
-      otherWt,
-      'feature-x',
-    ]);
+    await git(tmpRoot, ['--git-dir', bare, 'worktree', 'add', '--force', otherWt, 'feature-x']);
     await writeFile(path.join(otherWt, 'divergent.txt'), 'divergent\n');
     await git(otherWt, ['add', '.']);
     await git(otherWt, ['commit', '-m', 'divergent commit on bare side']);
 
-    const divergedTipResult = await git(tmpRoot, [
-      '--git-dir',
-      bare,
-      'rev-parse',
-      'feature-x',
-    ]);
+    const divergedTipResult = await git(tmpRoot, ['--git-dir', bare, 'rev-parse', 'feature-x']);
     const divergedTip = divergedTipResult.stdout.trim();
 
-    const result = await pushCommitsToBareViaStagingRef(
-      runGitIn(container),
-      bare,
-      'pod-nonff',
-    );
+    const result = await pushCommitsToBareViaStagingRef(runGitIn(container), bare, 'pod-nonff');
 
     expect(result.pushed).toBe(false);
     expect(result.reason).toMatch(/non-fast-forward|update-ref/);
 
     // Branch must not have moved.
-    const { stdout: bareTip } = await git(tmpRoot, [
-      '--git-dir',
-      bare,
-      'rev-parse',
-      'feature-x',
-    ]);
+    const { stdout: bareTip } = await git(tmpRoot, ['--git-dir', bare, 'rev-parse', 'feature-x']);
     expect(bareTip.trim()).toBe(divergedTip);
 
     // Staging ref cleaned up.
@@ -237,11 +180,7 @@ describe('bare push via staging ref', () => {
     const { bare, container } = await buildFixture(tmpRoot);
     await git(container, ['checkout', '--detach', 'HEAD']);
 
-    const result = await pushCommitsToBareViaStagingRef(
-      runGitIn(container),
-      bare,
-      'pod-detached',
-    );
+    const result = await pushCommitsToBareViaStagingRef(runGitIn(container), bare, 'pod-detached');
 
     expect(result.pushed).toBe(false);
     expect(result.reason).toMatch(/detached/i);
@@ -265,11 +204,7 @@ describe('bare push via staging ref', () => {
     await git(container, ['add', '.']);
     await git(container, ['commit', '-m', 'fresh-branch commit']);
 
-    const result = await pushCommitsToBareViaStagingRef(
-      runGitIn(container),
-      bare,
-      'pod-fresh',
-    );
+    const result = await pushCommitsToBareViaStagingRef(runGitIn(container), bare, 'pod-fresh');
 
     expect(result).toEqual({ pushed: true });
 

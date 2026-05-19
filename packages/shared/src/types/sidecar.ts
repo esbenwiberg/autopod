@@ -1,7 +1,7 @@
 /**
  * Sidecar — a companion container spawned alongside a pod.
  *
- * The generic abstraction: any workload that needs a neighbouring container
+ * The shared abstraction for workloads that need a neighbouring container
  * on the pod's isolated Docker network (e.g. a Dagger engine, an ephemeral
  * Postgres for integration tests, Azurite for Azure-storage emulation).
  *

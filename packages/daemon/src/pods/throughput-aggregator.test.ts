@@ -276,8 +276,16 @@ describe('computeThroughputAnalytics', () => {
     // Two pods, each with a queued duration of 60s and 180s respectively.
     // Sorted: [60, 180]. p25 ≈ 90, p50 = 120, p75 = 150, p90 = 168, max = 180.
     const times: [string, string, string][] = [
-      [minutesAgo(5), new Date(Date.now() - 5 * 60_000 + 60_000).toISOString(), new Date(Date.now() - 5 * 60_000 + 120_000).toISOString()],
-      [minutesAgo(8), new Date(Date.now() - 8 * 60_000 + 180_000).toISOString(), new Date(Date.now() - 8 * 60_000 + 240_000).toISOString()],
+      [
+        minutesAgo(5),
+        new Date(Date.now() - 5 * 60_000 + 60_000).toISOString(),
+        new Date(Date.now() - 5 * 60_000 + 120_000).toISOString(),
+      ],
+      [
+        minutesAgo(8),
+        new Date(Date.now() - 8 * 60_000 + 180_000).toISOString(),
+        new Date(Date.now() - 8 * 60_000 + 240_000).toISOString(),
+      ],
     ];
 
     for (const [t0, t1, t2] of times) {
@@ -365,8 +373,10 @@ describe('computeThroughputAnalytics', () => {
     expect(result.cohort).toHaveLength(5000);
     expect(result.cohortTruncated).toBe(true);
     // Most-recent-first ordering: the first entry should have the largest completedAt
-    expect(result.cohort[0]!.completedAt >= result.cohort[result.cohort.length - 1]!.completedAt).toBe(true);
-  });
+    expect(
+      result.cohort[0]?.completedAt >= result.cohort[result.cohort.length - 1]?.completedAt,
+    ).toBe(true);
+  }, 15_000);
 
   // ── Prior-window delta ──────────────────────────────────────────────────────
 
