@@ -92,7 +92,6 @@ public struct DetailPanelView: View {
     }
 
     @State private var selectedTab: DetailTab = .overview
-    @State private var isTaskExpanded: Bool = false
     @State private var didCopyName: Bool = false
 
     private var isTerminalAvailable: Bool { pod.pod.agentMode == .interactive }
@@ -249,18 +248,6 @@ public struct DetailPanelView: View {
                 }
             }
 
-            if !pod.task.isEmpty {
-                Text(pod.task)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(isTaskExpanded ? 8 : 2)
-                    .truncationMode(.tail)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 8)
-                    .onTapGesture { isTaskExpanded.toggle() }
-                    .help("Click to \(isTaskExpanded ? "collapse" : "expand") task")
-            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -299,10 +286,56 @@ public struct DetailPanelView: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+                if let tagline = taskTagline {
+                    Text(tagline)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(tagline)
+                }
             }
             .fixedSize(horizontal: false, vertical: true)
             .layoutPriority(1)
         }
+    }
+
+    private var taskTagline: String? {
+        let candidates = pod.task
+            .split(whereSeparator: \.isNewline)
+            .map { cleanTaskLine(String($0)) }
+            .filter { !$0.isEmpty && !isBoilerplateTaskLine($0) }
+
+        let fallback = cleanTaskLine(pod.task)
+        let chosen = candidates.first ?? (fallback.isEmpty ? nil : fallback)
+        guard let chosen else { return nil }
+        return truncateTagline(chosen)
+    }
+
+    private func cleanTaskLine(_ line: String) -> String {
+        line
+            .replacingOccurrences(of: #"^\s*[#>*\-\u{2022}\u{25CF}\u{25CB}]+\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func isBoilerplateTaskLine(_ line: String) -> Bool {
+        let lower = line.lowercased()
+        return lower.hasPrefix("previous session died")
+            || lower.hasPrefix("read ")
+            || lower.hasPrefix("loaded ")
+            || lower.hasPrefix("searched ")
+            || lower.hasPrefix("explore(")
+            || lower.hasPrefix("update(")
+            || lower.hasPrefix("auto mode ")
+            || lower.contains("ctrl+o to expand")
+    }
+
+    private func truncateTagline(_ line: String) -> String {
+        let maxLength = 180
+        guard line.count > maxLength else { return line }
+        return String(line.prefix(maxLength - 3)).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
     }
 
 
