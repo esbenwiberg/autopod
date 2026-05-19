@@ -1607,7 +1607,7 @@ describe('parseWarningCount', () => {
   });
 });
 
-describe('runBuild — exit-0-with-warnings downgrade', () => {
+describe('runBuild — warning policy', () => {
   function baseConfigForBuild(buildCommand: string): ValidationEngineConfig {
     return {
       podId: 'pod-test',
@@ -1650,7 +1650,7 @@ describe('runBuild — exit-0-with-warnings downgrade', () => {
     } as unknown as ContainerManager;
   }
 
-  it("downgrades build status to 'fail' when exit 0 but warnings present", async () => {
+  it("keeps status 'pass' when exit 0 but warnings are present", async () => {
     const cm = containerManagerWithBuildOutput(
       'Restore complete (1.0s)\nBuild succeeded with 3 warning(s) in 17.8s',
       0,
@@ -1659,10 +1659,10 @@ describe('runBuild — exit-0-with-warnings downgrade', () => {
 
     const result = await engine.validate(baseConfigForBuild('dotnet build'));
 
-    expect(result.smoke.build.status).toBe('fail');
+    expect(result.smoke.build.status).toBe('pass');
     expect(result.smoke.build.warningCount).toBe(3);
-    expect(result.smoke.build.output).toContain('Build exited 0 but emitted 3 warning(s)');
-    expect(result.smoke.build.output).toContain('--- build output ---');
+    expect(result.smoke.build.output).not.toContain('Build exited 0 but emitted');
+    expect(result.smoke.build.output).not.toContain('--- build output ---');
   });
 
   it("keeps status 'pass' when exit 0 and no warnings", async () => {
@@ -1674,6 +1674,20 @@ describe('runBuild — exit-0-with-warnings downgrade', () => {
     expect(result.smoke.build.status).toBe('pass');
     expect(result.smoke.build.warningCount).toBe(0);
     expect(result.smoke.build.output).not.toContain('exited 0 but emitted');
+  });
+
+  it('fails when project warning policy makes the build exit nonzero', async () => {
+    const cm = containerManagerWithBuildOutput(
+      'Foo.cs(10,5): error CS8618: Non-nullable property must contain a non-null value',
+      1,
+    );
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(baseConfigForBuild('dotnet build'));
+
+    expect(result.smoke.build.status).toBe('fail');
+    expect(result.smoke.build.output).toContain('error CS8618');
+    expect(result.smoke.build.output).not.toContain('Build exited 0 but emitted');
   });
 
   it('reports warningCount on a real failure (exit nonzero) without overriding status reasoning', async () => {
@@ -1688,8 +1702,8 @@ describe('runBuild — exit-0-with-warnings downgrade', () => {
     const result = await engine.validate(baseConfigForBuild('dotnet build'));
 
     expect(result.smoke.build.status).toBe('fail');
-    // The output is the raw build output (not the warning-downgrade hint), since
-    // the build legitimately failed via exit code.
+    // The output is the raw build output, since the build legitimately failed
+    // via exit code.
     expect(result.smoke.build.output).not.toContain('Build exited 0 but emitted');
   });
 });

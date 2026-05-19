@@ -576,11 +576,11 @@ export function startAppStabilityMonitor(url: string, onCrash: () => void): () =
 /**
  * Parse warning count from build output.
  *
- * Many toolchains (notably `dotnet build` with Roslyn analyzers) exit 0 even
- * when they emit warnings. Without parsing them, those warnings sail through
- * the exit-code-only gate and reach main. This helper recognises common
- * "succeeded with N warning(s)" summary patterns so the gate can downgrade
- * an exit-0 build to fail.
+ * Many toolchains (notably `dotnet build` with Roslyn analyzers) report warnings
+ * in their output while still exiting 0 when project policy allows them. This
+ * helper recognises common "succeeded with N warning(s)" summary patterns so
+ * validation can surface the count as diagnostics without second-guessing the
+ * build tool's pass/fail policy.
  *
  * Strategy:
  *   1. MSBuild's authoritative "Build succeeded with N warning(s)" trailing line
@@ -705,7 +705,6 @@ async function runBuild(
   // limit is fake headroom.
   const looksOomKilled = result.exitCode === 137 || /(^|\n)Killed\s*$/.test(rawOutput.slice(-200));
   let output = rawOutput;
-  let effectiveStatus: 'pass' | 'fail' = status;
   if (status === 'fail' && looksOomKilled) {
     const hint =
       'Build appears to have been OOM-killed (exit 137 / "Killed"). Raise the Docker Desktop VM memory (Settings → Resources), reduce concurrent pods, or increase profile.containerMemoryGb.';
@@ -717,20 +716,17 @@ async function runBuild(
   } else if (status === 'fail') {
     log?.warn({ exitCode: result.exitCode, duration }, 'build failed');
   } else if (warningCount > 0) {
-    // Build exited 0 but emitted warnings. dotnet/Roslyn (and others) won't
-    // trip the exit-code gate on warnings by default, so without this downgrade
-    // they slip past validation and reach main. Treat warnings as failures and
-    // surface a clear correction prompt to the agent / human reviewer.
-    effectiveStatus = 'fail';
-    const hint = `Build exited 0 but emitted ${warningCount} warning(s). Autopod treats build warnings as failures. Fix the warnings, or — if a specific occurrence is intentional — suppress it at the call site with a justification (e.g. \`#pragma warning disable Sxxxx\` for .NET, or an inline rule disable for the equivalent linter).`;
-    output = `${hint}\n\n--- build output ---\n${rawOutput}`;
-    log?.warn({ warningCount, duration }, 'build downgraded to fail — warnings present');
+    // The project owns warning policy (`TreatWarningsAsErrors`, `NoWarn`,
+    // `WarningsNotAsErrors`, etc.). If those policies want a warning to fail
+    // the build, the build command must exit non-zero; Autopod only records the
+    // warning count here so diagnostics remain visible.
+    log?.info({ warningCount, duration }, 'build passed with warnings');
   } else {
     log?.info({ duration }, 'build passed');
   }
 
   return {
-    status: effectiveStatus,
+    status,
     output: output.slice(0, 50_000), // Cap output size
     duration,
     warningCount,

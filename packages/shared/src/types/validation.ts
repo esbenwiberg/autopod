@@ -55,8 +55,8 @@ export interface BuildResult {
   /**
    * Warnings parsed from build output. Populated when the build emits a
    * recognizable warning summary (e.g. MSBuild's "succeeded with N warning(s)").
-   * When present and > 0 on an otherwise-passing build, status is downgraded to 'fail' —
-   * autopod treats build warnings as failures so they can't slip past validation.
+   * Diagnostic only: build pass/fail follows the build command's exit code so
+   * project-level warning policy remains authoritative.
    */
   warningCount?: number;
 }
