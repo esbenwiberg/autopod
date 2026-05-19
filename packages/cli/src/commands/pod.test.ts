@@ -1,3 +1,4 @@
+import { AutopodError } from '@autopod/shared';
 import { Command } from 'commander';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
@@ -82,6 +83,18 @@ describe('update-from-base command', () => {
       'Pod abcd1234 already contains latest main. No validation started.',
     );
     logSpy.mockRestore();
+  });
+
+  it('INVALID_STATE: AutopodError propagates instead of being swallowed', async () => {
+    const daemonError = new AutopodError(
+      "Cannot run update-from-base on pod abcd1234 in status 'running'",
+      'INVALID_STATE',
+      409,
+    );
+    (mockClient.updateFromBase as ReturnType<typeof vi.fn>).mockRejectedValueOnce(daemonError);
+    await expect(
+      program.parseAsync(['node', 'ap', 'update-from-base', 'abcd1234']),
+    ).rejects.toBe(daemonError);
   });
 
   it('conflict: prints all conflicted files and exits 1', async () => {

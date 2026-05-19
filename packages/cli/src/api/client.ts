@@ -181,9 +181,13 @@ export class AutopodClient {
     if (response.status === 401) {
       try {
         token = await this.getToken();
-        response = await doFetch(token);
       } catch {
         throw new AuthError('Token refresh failed. Try: ap login');
+      }
+      try {
+        response = await doFetch(token);
+      } catch {
+        throw new DaemonUnreachableError(this.baseUrl);
       }
     }
 
