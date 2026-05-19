@@ -5899,8 +5899,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           emitActivityStatus(podId, 'No changes to merge — pushing branch and completing pod');
           if (pod.branch) {
             try {
-              const noChangeUseForce = forceWithLeaseAllowances.has(podId);
-              if (noChangeUseForce) {
+              const useForce = forceWithLeaseAllowances.has(podId);
+              if (useForce) {
                 await worktreeManager.pushBranch(pod.worktreePath, pod.branch, { force: true });
               } else {
                 await worktreeManager.pushBranch(pod.worktreePath, pod.branch);
@@ -5973,11 +5973,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Pass the PAT so we don't depend on the in-memory cache, which is
           // evicted whenever any sibling worktree on the same bare repo is
           // cleaned up (local-worktree-manager.ts cleanup()).
-          const prePushUseForce = forceWithLeaseAllowances.has(podId);
+          const useForce = forceWithLeaseAllowances.has(podId);
           try {
             await worktreeManager.pushBranch(worktreePath, branch, {
               pat: selectGitPat(approveProfile),
-              ...(prePushUseForce ? { force: true } : {}),
+              ...(useForce ? { force: true } : {}),
             });
             forceWithLeaseAllowances.delete(podId);
             emitActivityStatus(podId, 'Branch pushed');
@@ -6924,7 +6924,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const pod = podRepo.getOrThrow(podId);
       const force = options?.force ?? false;
 
-      // Fire-and-forget trigger used by update-from-base unwind to start follow-up validation.
       const triggerValidationFromUpdateIntent = () => {
         setImmediate(() =>
           this.triggerValidation(podId).catch((e: unknown) =>
@@ -6932,8 +6931,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ),
         );
       };
-      // Returns true (and consumes the intent) if a pending update-from-base should run
-      // before correction feedback is sent to the agent. Handles all cleanup and error logging.
+      // Must be checked before sending correction feedback to the agent.
       const tryConsumeUpdateIntent = (): boolean => {
         if (!pendingUpdateFromBaseIntents.has(podId)) return false;
         pendingUpdateFromBaseIntents.delete(podId);
