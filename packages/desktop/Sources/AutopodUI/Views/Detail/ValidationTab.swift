@@ -1,4 +1,5 @@
 import AutopodClient
+import Foundation
 import SwiftUI
 
 /// Validation tab — shows live per-phase progress chips + a detail panel for the selected phase.
@@ -378,126 +379,153 @@ public struct ValidationTab: View {
   @ViewBuilder
   private var headerView: some View {
     HStack(spacing: 12) {
-      if let attempts = pod.attempts {
-        Text(attempts.reworkCount > 0 ? "Rework \(attempts.reworkCount) — Attempt \(attempts.current) of \(attempts.max)" : "Attempt \(attempts.current) of \(attempts.max)")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      } else if let p = progress {
-        Text("Attempt \(p.attempt)")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+      HStack(spacing: 12) {
+        if let attempts = pod.attempts {
+          let attemptLabel = attempts.reworkCount > 0
+            ? "Rework \(attempts.reworkCount) — Attempt \(attempts.current) of \(attempts.max)"
+            : "Attempt \(attempts.current) of \(attempts.max)"
+          Text(attemptLabel)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        } else if let p = progress {
+          Text("Attempt \(p.attempt)")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        if pod.fixIteration > 0 {
+          Text("Fix iteration \(pod.fixIteration)")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.indigo)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.indigo.opacity(0.12), in: Capsule())
+        }
+        validationHistoryMenu
       }
-      if pod.fixIteration > 0 {
-        Text("Fix iteration \(pod.fixIteration)")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.indigo)
-          .padding(.horizontal, 6)
-          .padding(.vertical, 2)
-          .background(.indigo.opacity(0.12), in: Capsule())
-      }
-      validationHistoryMenu
-      Spacer()
-      if pod.containerUrl != nil,
-         pod.status == .validated || pod.status == .validating {
-        Button {
-          isOpeningApp = true
-          Task {
-            await actions.openLiveApp(pod.id)
-            isOpeningApp = false
-          }
-        } label: {
-          if isOpeningApp {
-            HStack(spacing: 4) {
-              ProgressView().controlSize(.mini)
-              Text("Starting…")
+      .layoutPriority(2)
+
+      Spacer(minLength: 8)
+
+      HStack(spacing: 8) {
+        if pod.containerUrl != nil,
+           pod.status == .validated || pod.status == .validating {
+          Button {
+            isOpeningApp = true
+            Task {
+              await actions.openLiveApp(pod.id)
+              isOpeningApp = false
             }
-          } else {
-            Label("Open App", systemImage: "safari")
+          } label: {
+            if isOpeningApp {
+              HStack(spacing: 4) {
+                ProgressView().controlSize(.mini)
+                Text("Starting…").lineLimit(1)
+              }
+            } else {
+              Label("Open App", systemImage: "safari").lineLimit(1)
+            }
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .disabled(isOpeningApp)
+        }
+        if pod.status == .validating || pod.status == .running {
+          Button {
+            isSkippingValidation = true
+            let newSkip = !pod.skipValidation
+            Task {
+              await actions.setSkipValidation(pod.id, newSkip)
+              isSkippingValidation = false
+            }
+          } label: {
+            if isSkippingValidation {
+              HStack(spacing: 4) {
+                ProgressView().controlSize(.mini)
+                Text("Updating…").lineLimit(1)
+              }
+            } else if pod.skipValidation {
+              Label("Skipping", systemImage: "forward.fill").lineLimit(1)
+            } else {
+              Label("Skip Validation", systemImage: "forward").lineLimit(1)
+            }
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .tint(pod.skipValidation ? .orange : nil)
+          .disabled(isSkippingValidation)
+        }
+        if pod.status == .validating || pod.status == .failed || pod.status == .reviewRequired {
+          Button {
+            isUpdatingFromBase = true
+            updateFromBaseMessage = nil
+            Task {
+              let result = await actions.updateFromBase(pod.id)
+              isUpdatingFromBase = false
+              updateFromBaseMessage = updateFromBaseLabel(result)
+            }
+          } label: {
+            if isUpdatingFromBase {
+              HStack(spacing: 4) {
+                ProgressView().controlSize(.mini)
+                Text("Updating…").lineLimit(1)
+              }
+            } else {
+              Label("Update From Base", systemImage: "arrow.triangle.2.circlepath")
+                .lineLimit(1)
+            }
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .disabled(isUpdatingFromBase || !pod.hasWorktree || pod.worktreeCompromised)
+        }
+        if pod.status == .validating {
+          Button {
+            isInterrupting = true
+            Task {
+              await actions.interruptValidation(pod.id)
+              isInterrupting = false
+            }
+          } label: {
+            if isInterrupting {
+              HStack(spacing: 4) {
+                ProgressView().controlSize(.mini)
+                Text("Stopping…").lineLimit(1)
+              }
+            } else {
+              Label("Interrupt", systemImage: "stop.fill").lineLimit(1)
+            }
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .tint(.orange)
+          .disabled(isInterrupting)
+        }
+        if pod.status == .failed || pod.status == .reviewRequired {
+          Button {
+            showForceApprovePopover = true
+          } label: {
+            if isForceApproving {
+              HStack(spacing: 4) {
+                ProgressView().controlSize(.mini)
+                Text("Approving…").lineLimit(1)
+              }
+            } else {
+              Label("Force Approve", systemImage: "checkmark.seal.fill").lineLimit(1)
+            }
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .tint(.green)
+          .disabled(isForceApproving)
+          .popover(isPresented: $showForceApprovePopover) {
+            forceApprovePopover
           }
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .disabled(isOpeningApp)
       }
-      if pod.status == .validating || pod.status == .running {
-        Button {
-          isSkippingValidation = true
-          let newSkip = !pod.skipValidation
-          Task {
-            await actions.setSkipValidation(pod.id, newSkip)
-            isSkippingValidation = false
-          }
-        } label: {
-          if isSkippingValidation {
-            HStack(spacing: 4) { ProgressView().controlSize(.mini); Text("Updating…") }
-          } else if pod.skipValidation {
-            Label("Skipping", systemImage: "forward.fill")
-          } else {
-            Label("Skip Validation", systemImage: "forward")
-          }
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .tint(pod.skipValidation ? .orange : nil)
-        .disabled(isSkippingValidation)
-      }
-      if pod.status == .validating || pod.status == .failed || pod.status == .reviewRequired {
-        Button {
-          isUpdatingFromBase = true
-          updateFromBaseMessage = nil
-          Task {
-            let result = await actions.updateFromBase(pod.id)
-            isUpdatingFromBase = false
-            updateFromBaseMessage = updateFromBaseLabel(result)
-          }
-        } label: {
-          if isUpdatingFromBase {
-            HStack(spacing: 4) { ProgressView().controlSize(.mini); Text("Updating…") }
-          } else {
-            Label("Update From Base", systemImage: "arrow.triangle.2.circlepath")
-          }
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .disabled(isUpdatingFromBase || !pod.hasWorktree || pod.worktreeCompromised)
-      }
-      if pod.status == .validating {
-        Button {
-          isInterrupting = true
-          Task {
-            await actions.interruptValidation(pod.id)
-            isInterrupting = false
-          }
-        } label: {
-          if isInterrupting {
-            HStack(spacing: 4) { ProgressView().controlSize(.mini); Text("Stopping…") }
-          } else {
-            Label("Interrupt", systemImage: "stop.fill")
-          }
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .tint(.orange)
-        .disabled(isInterrupting)
-      }
-      if pod.status == .failed || pod.status == .reviewRequired {
-        Button {
-          showForceApprovePopover = true
-        } label: {
-          if isForceApproving {
-            HStack(spacing: 4) { ProgressView().controlSize(.mini); Text("Approving…") }
-          } else {
-            Label("Force Approve", systemImage: "checkmark.seal.fill")
-          }
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .tint(.green)
-        .disabled(isForceApproving)
-        .popover(isPresented: $showForceApprovePopover) {
-          forceApprovePopover
-        }
-      }
+      .layoutPriority(0)
     }
     if let message = updateFromBaseMessage {
       Text(message)
@@ -514,22 +542,61 @@ public struct ValidationTab: View {
         .controlSize(.mini)
         .help("Loading validation history")
     } else if !sortedValidationHistory.isEmpty {
-      Picker("Validation attempt", selection: $selectedHistoryKey) {
-        Text("Current").tag("current")
-        ForEach(sortedValidationHistory) { item in
-          Text("Attempt \(item.attempt) · \(item.result.overall)")
-            .tag(String(item.attempt))
+      Menu {
+        Button {
+          selectedHistoryKey = "current"
+        } label: {
+          validationHistoryMenuItem("Current", selected: selectedHistoryKey == "current")
         }
+        Divider()
+        ForEach(sortedValidationHistory) { item in
+          let key = String(item.attempt)
+          Button {
+            selectedHistoryKey = key
+          } label: {
+            validationHistoryMenuItem(
+              "Attempt \(item.attempt) · \(item.result.overall)",
+              selected: selectedHistoryKey == key
+            )
+          }
+        }
+      } label: {
+        HStack(spacing: 6) {
+          Text(selectedValidationHistoryLabel)
+            .font(.caption)
+            .lineLimit(1)
+            .truncationMode(.tail)
+          Spacer(minLength: 4)
+          Image(systemName: "chevron.up.chevron.down")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .pickerStyle(.menu)
       .controlSize(.small)
-      .frame(maxWidth: 150)
+      .frame(minWidth: 148, idealWidth: 158, maxWidth: 170)
+      .layoutPriority(3)
       .help("Show current or previous validation results")
     } else if let historyError {
       Image(systemName: "clock.badge.exclamationmark")
         .font(.system(size: 12))
         .foregroundStyle(.secondary)
         .help(historyError)
+    }
+  }
+
+  private var selectedValidationHistoryLabel: String {
+    guard let selectedHistory else { return "Attempt: Current" }
+    return "Attempt \(selectedHistory.attempt) · \(selectedHistory.result.overall)"
+  }
+
+  private func validationHistoryMenuItem(_ title: String, selected: Bool) -> some View {
+    HStack {
+      Text(title)
+      if selected {
+        Spacer()
+        Image(systemName: "checkmark")
+      }
     }
   }
 
@@ -2181,4 +2248,74 @@ private struct CollapsibleSection<Content: View>: View {
     )
   )
   .frame(width: 500, height: 500)
+}
+
+#Preview("Validation — narrow header") {
+  ValidationTab(
+    pod: narrowValidationHeaderPreviewPod(),
+    actions: .preview,
+    loadValidationHistory: { _ in
+      try validationHistoryPreviewResponses()
+    }
+  )
+  .frame(width: 500, height: 500)
+}
+
+private func narrowValidationHeaderPreviewPod() -> Pod {
+  var progress = ValidationProgress.initial(attempt: 2)
+  progress.build = ValidationPhaseState(status: .failed, duration: 75_400)
+  progress.test = ValidationPhaseState(status: .skipped, duration: 0)
+  progress.lint = ValidationPhaseState(status: .passed, duration: 77)
+  progress.sast = ValidationPhaseState(status: .skipped, duration: 0)
+
+  return Pod(
+    id: "preview-validation-menu",
+    status: .validating,
+    hasWorktree: true,
+    branch: "fix/validation-menu",
+    profileName: "webapp",
+    model: "claude-sonnet",
+    startedAt: Date().addingTimeInterval(-900),
+    diffStats: DiffStats(added: 45, removed: 31, files: 6),
+    validationProgress: progress,
+    containerUrl: URL(string: "http://localhost:3002"),
+    attempts: AttemptInfo(current: 2, max: 3)
+  )
+}
+
+private func validationHistoryPreviewResponses() throws -> [StoredValidationResponse] {
+  let json = """
+  [
+    {
+      "id": "validation-attempt-1",
+      "podId": "preview-validation-menu",
+      "attempt": 1,
+      "createdAt": "2026-05-19T10:00:00Z",
+      "result": {
+        "podId": "preview-validation-menu",
+        "attempt": 1,
+        "timestamp": "2026-05-19T10:00:00Z",
+        "smoke": {
+          "status": "fail",
+          "build": {
+            "status": "fail",
+            "output": "Build failed",
+            "duration": 75400
+          },
+          "health": {
+            "status": "skip",
+            "url": "http://localhost:3000/health",
+            "responseCode": null,
+            "duration": 0,
+            "responseBody": null
+          },
+          "pages": []
+        },
+        "overall": "fail",
+        "duration": 75477
+      }
+    }
+  ]
+  """
+  return try JSONDecoder().decode([StoredValidationResponse].self, from: Data(json.utf8))
 }
