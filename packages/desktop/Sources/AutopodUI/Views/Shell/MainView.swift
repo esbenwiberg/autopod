@@ -420,28 +420,28 @@ public struct MainView: View {
                         selectedAnalyticsCard = result.card
                         sidebarSelection = result.sidebar
                         selectedSessionId = result.session
-                        requestedDetailTab = .summary
+                        requestedDetailTab = .work
                     },
                     onSafetySelectPod: { sessionId in
                         let result = Self.analyticsSelectPodResult(sessionId: sessionId)
                         selectedAnalyticsCard = result.card
                         sidebarSelection = result.sidebar
                         selectedSessionId = result.session
-                        requestedDetailTab = .summary
+                        requestedDetailTab = .work
                     },
                     onThroughputSelectPod: { sessionId in
                         let result = Self.analyticsSelectPodResult(sessionId: sessionId)
                         selectedAnalyticsCard = result.card
                         sidebarSelection = result.sidebar
                         selectedSessionId = result.session
-                        requestedDetailTab = .summary
+                        requestedDetailTab = .work
                     },
                     onEscalationsSelectPod: { sessionId in
                         let result = Self.analyticsSelectPodResult(sessionId: sessionId)
                         selectedAnalyticsCard = result.card
                         sidebarSelection = result.sidebar
                         selectedSessionId = result.session
-                        requestedDetailTab = .summary
+                        requestedDetailTab = .work
                     }
                 )
             } else if sidebarSelection == .salesPitch {

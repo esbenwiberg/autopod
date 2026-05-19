@@ -2,34 +2,14 @@ import AutopodClient
 import MarkdownUI
 import SwiftUI
 
-/// Summary tab — plan, task summary, deviations from plan, and original pod prompt.
-struct SummaryTab: View {
+/// Work tab — task, plan, task summary, deviations from plan, and quality signals.
+struct WorkTab: View {
     let pod: Pod
     /// Optional closure for fetching session-quality signals. When nil
     /// (previews, tests without daemon), the quality card is simply hidden.
     var loadQuality: ((String) async throws -> PodQualitySignals)? = nil
 
     @State private var quality: PodQualitySignals? = nil
-    // Lightbox state for the proof-of-work card
-    @State private var lightboxRefs: [ScreenshotRef] = []
-    @State private var lightboxIndex: Int = 0
-    @State private var isLightboxPresented: Bool = false
-
-    /// Full combined set (smoke → ac → review) for lightbox arrow-key navigation.
-    /// The proof-of-work card shows only smoke thumbnails, but clicking one opens
-    /// the lightbox with the full set so reviewers can navigate all evidence.
-    private var fullScreenshotSet: [ScreenshotRef] {
-        let pageShots = pod.validationChecks?.proofOfWorkScreenshots ?? []
-        let acShots = pod.validationChecks?.acChecks?.compactMap { $0.screenshot } ?? []
-        let reviewShots = pod.validationChecks?.taskReviewScreenshots ?? []
-        return pageShots + acShots + reviewShots
-    }
-
-    private func openLightbox(_ index: Int) {
-        lightboxRefs = fullScreenshotSet
-        lightboxIndex = index
-        isLightboxPresented = true
-    }
 
     var body: some View {
         ScrollView {
@@ -52,34 +32,12 @@ struct SummaryTab: View {
                     taskSummaryCard(summary)
                 }
 
-                // Proof of work — smoke-page screenshots for web features
-                if let shots = pod.validationChecks?.proofOfWorkScreenshots, !shots.isEmpty {
-                    proofOfWorkCard(shots)
-                }
-
-                // Pre-submit reviewer verdict (set when the agent called pre_submit_review).
-                // Tucked at the bottom — the headline is the plan + summary;
-                // the latest review verdict belongs at the end.
-                if let verdict = pod.preSubmitReview {
-                    preSubmitReviewCard(verdict)
-                }
             }
             .padding(20)
         }
         .task(id: pod.id) {
             await fetchQuality()
         }
-        .overlay {
-            if isLightboxPresented, !lightboxRefs.isEmpty {
-                ScreenshotLightbox(
-                    refs: lightboxRefs,
-                    currentIndex: $lightboxIndex,
-                    isPresented: $isLightboxPresented
-                )
-                .transition(.opacity)
-            }
-        }
-        .animation(.easeInOut(duration: 0.18), value: isLightboxPresented)
     }
 
     // MARK: - Quality
@@ -184,81 +142,6 @@ struct SummaryTab: View {
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-
-    // MARK: - Pre-submit reviewer verdict
-
-    private func preSubmitReviewCard(_ verdict: PreSubmitReviewSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Image(systemName: preSubmitIcon(for: verdict.status))
-                    .foregroundStyle(preSubmitTint(for: verdict.status))
-                Text("Pre-submit Review")
-                    .font(.system(.subheadline).weight(.semibold))
-                Spacer()
-                Text(verdict.status.rawValue.uppercased())
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(preSubmitTint(for: verdict.status).opacity(0.15), in: Capsule())
-                    .foregroundStyle(preSubmitTint(for: verdict.status))
-                Text(verdict.model)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-
-            if !verdict.reasoning.isEmpty {
-                Text(verdict.reasoning)
-                    .font(.callout)
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-            }
-
-            if !verdict.issues.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Issues")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                        .tracking(0.3)
-                    ForEach(Array(verdict.issues.enumerated()), id: \.offset) { _, issue in
-                        HStack(alignment: .top, spacing: 6) {
-                            Image(systemName: "circle.fill")
-                                .font(.system(size: 4))
-                                .foregroundStyle(.tertiary)
-                                .padding(.top, 6)
-                            Text(issue)
-                                .font(.caption)
-                                .foregroundStyle(.primary)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-            }
-        }
-        .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-
-    private func preSubmitIcon(for status: PreSubmitReviewSnapshot.Status) -> String {
-        switch status {
-        case .pass: "checkmark.seal.fill"
-        case .fail: "xmark.seal.fill"
-        case .uncertain: "questionmark.circle.fill"
-        case .skipped: "minus.circle"
-        }
-    }
-
-    private func preSubmitTint(for status: PreSubmitReviewSnapshot.Status) -> Color {
-        switch status {
-        case .pass: .green
-        case .fail: .red
-        case .uncertain: .orange
-        case .skipped: .secondary
-        }
     }
 
     // MARK: - Task summary
@@ -370,80 +253,16 @@ struct SummaryTab: View {
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.orange.opacity(0.15), lineWidth: 1))
     }
 
-    // MARK: - Proof of work
-
-    private func proofOfWorkCard(_ shots: [ScreenshotRef]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "photo.on.rectangle.angled")
-                    .foregroundStyle(.green)
-                Text("Proof of Work")
-                    .font(.system(.subheadline).weight(.semibold))
-                Spacer()
-                Text("\(shots.count) page\(shots.count == 1 ? "" : "s")")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.quaternary, in: Capsule())
-            }
-
-            let cols: [GridItem] = shots.count == 1
-                ? [GridItem(.flexible())]
-                : [GridItem(.flexible()), GridItem(.flexible())]
-
-            LazyVGrid(columns: cols, spacing: 8) {
-                ForEach(Array(shots.enumerated()), id: \.element.id) { idx, shot in
-                    screenshotGridCell(shot, index: idx, allShots: shots)
-                }
-            }
-        }
-        .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-
-    @ViewBuilder
-    private func screenshotGridCell(
-        _ shot: ScreenshotRef,
-        index: Int,
-        allShots: [ScreenshotRef]
-    ) -> some View {
-        ZStack(alignment: .bottom) {
-            ScreenshotThumbnail(
-                ref: shot,
-                allRefs: fullScreenshotSet,
-                onOpen: { openLightbox($0) },
-                maxHeight: 200,
-                fillMode: true
-            )
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: 80, maxHeight: 200)
-            .clipped()
-
-            Text(shot.label)
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.black.opacity(0.55))
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
-    }
 }
 
 // MARK: - Previews
 
-#Preview("Summary — validated") {
-    SummaryTab(pod: MockData.validated)
+#Preview("Work — validated") {
+    WorkTab(pod: MockData.validated)
         .frame(width: 550, height: 600)
 }
 
-#Preview("Summary — running") {
-    SummaryTab(pod: MockData.running)
+#Preview("Work — running") {
+    WorkTab(pod: MockData.running)
         .frame(width: 550, height: 400)
 }

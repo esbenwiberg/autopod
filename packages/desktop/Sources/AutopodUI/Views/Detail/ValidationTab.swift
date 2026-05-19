@@ -46,7 +46,7 @@ public struct ValidationTab: View {
   private var progress: ValidationProgress? { pod.validationProgress }
 
   private var displayedPhases: [ValidationPhase] {
-    ValidationPhase.allCases.filter { $0 != .ac }
+    [.build, .test, .lint, .sast, .health, .pages, .facts, .review]
   }
 
   /// The phase to show in the detail panel — user pick, then auto-running, else nil.
@@ -187,6 +187,7 @@ public struct ValidationTab: View {
 
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
+          validationSummaryPanel
           phaseDetailPanel
         }
         .padding(20)
@@ -398,6 +399,115 @@ public struct ValidationTab: View {
   }
 
   // MARK: - Detail panel
+
+  @ViewBuilder
+  private var validationSummaryPanel: some View {
+    let contract = pod.contract
+    let factChecks = progress?.factChecks ?? checks?.factChecks ?? []
+    let passedFacts = factChecks.filter(\.passed).count
+    let failedFacts = factChecks.filter { !$0.passed }.count
+    let totalFacts = contract?.requiredFacts.count ?? factChecks.count
+    let reviewIssueCount = progress?.reviewDetail?.issues.count ?? checks?.reviewIssues?.count ?? 0
+
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(alignment: .top, spacing: 12) {
+        Image(systemName: validationSummaryIcon)
+          .font(.system(size: 18, weight: .semibold))
+          .foregroundStyle(validationSummaryColor)
+          .frame(width: 24)
+        VStack(alignment: .leading, spacing: 3) {
+          Text(validationSummaryTitle)
+            .font(.callout.weight(.semibold))
+          Text(validationSummarySubtitle)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        Spacer(minLength: 8)
+      }
+
+      HStack(spacing: 8) {
+        summaryChip(
+          label: "Phases",
+          value: "\(displayedPhases.filter { phaseStatus($0) == .passed }.count)/\(displayedPhases.count)",
+          color: validationSummaryColor
+        )
+        if let contract {
+          summaryChip(label: "Scenarios", value: "\(contract.scenarios.count)", color: .blue)
+          summaryChip(label: "Facts", value: "\(passedFacts)/\(totalFacts)", color: failedFacts > 0 ? .red : .green)
+          summaryChip(label: "Human Review", value: "\(contract.humanReview.count)", color: .purple)
+        }
+        if reviewIssueCount > 0 {
+          summaryChip(label: "Findings", value: "\(reviewIssueCount)", color: .red)
+        }
+        if let verdict = pod.preSubmitReview {
+          summaryChip(label: "Pre-submit", value: verdict.status.rawValue, color: preSubmitTint(for: verdict.status))
+        }
+      }
+    }
+    .padding(14)
+    .background(validationSummaryColor.opacity(0.06))
+    .clipShape(RoundedRectangle(cornerRadius: 10))
+    .overlay(RoundedRectangle(cornerRadius: 10).stroke(validationSummaryColor.opacity(0.16), lineWidth: 1))
+  }
+
+  private var validationSummaryTitle: String {
+    if let failed = displayedPhases.first(where: { phaseStatus($0) == .failed }) {
+      return "\(failed.displayName) needs attention"
+    }
+    if displayedPhases.contains(where: { phaseStatus($0) == .running }) {
+      return "Validation is running"
+    }
+    if checks?.allPassed == true {
+      return "Validation passed"
+    }
+    if checks == nil && progress == nil {
+      return "Validation has not started"
+    }
+    return "Validation status"
+  }
+
+  private var validationSummarySubtitle: String {
+    let contractSummary = pod.contract.map {
+      "\($0.scenarios.count) scenarios, \($0.requiredFacts.count) required facts, \($0.humanReview.count) human review checks."
+    }
+    if let failed = displayedPhases.first(where: { phaseStatus($0) == .failed }) {
+      return [failed.displayName + " failed.", contractSummary].compactMap { $0 }.joined(separator: " ")
+    }
+    if let active = progress?.activePhase {
+      return [active.displayName + " is currently running.", contractSummary].compactMap { $0 }.joined(separator: " ")
+    }
+    return contractSummary ?? "Build, checks, facts, and review results are shown below."
+  }
+
+  private var validationSummaryIcon: String {
+    if displayedPhases.contains(where: { phaseStatus($0) == .failed }) { return "xmark.seal.fill" }
+    if displayedPhases.contains(where: { phaseStatus($0) == .running }) { return "arrow.triangle.2.circlepath" }
+    if checks?.allPassed == true { return "checkmark.seal.fill" }
+    return "checkmark.seal"
+  }
+
+  private var validationSummaryColor: Color {
+    if displayedPhases.contains(where: { phaseStatus($0) == .failed }) { return .red }
+    if displayedPhases.contains(where: { phaseStatus($0) == .running }) { return .blue }
+    if checks?.allPassed == true { return .green }
+    return .secondary
+  }
+
+  private func summaryChip(label: String, value: String, color: Color) -> some View {
+    HStack(spacing: 5) {
+      Text(label)
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+      Text(value)
+        .font(.system(.caption2, design: .monospaced).weight(.semibold))
+        .foregroundStyle(color)
+        .lineLimit(1)
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 4)
+    .background(color.opacity(0.10), in: Capsule())
+  }
 
   @ViewBuilder
   private var phaseDetailPanel: some View {
@@ -743,79 +853,165 @@ public struct ValidationTab: View {
   @ViewBuilder
   private func scenarioCard(_ scenario: ContractScenarioResponse) -> some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text(scenario.id)
-        .font(.caption.weight(.semibold))
-      scenarioLines("Given", scenario.given)
-      scenarioLines("When", scenario.when)
-      scenarioLines("Then", scenario.then)
+      HStack(spacing: 8) {
+        Image(systemName: "list.bullet.rectangle")
+          .font(.system(size: 12))
+          .foregroundStyle(.blue)
+        Text(scenario.id)
+          .font(.callout.weight(.semibold))
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .textSelection(.enabled)
+        Spacer(minLength: 0)
+        Text("scenario")
+          .font(.system(.caption2, design: .monospaced))
+          .foregroundStyle(.blue)
+          .padding(.horizontal, 6)
+          .padding(.vertical, 2)
+          .background(Color.blue.opacity(0.12), in: Capsule())
+      }
+
+      ViewThatFits(in: .horizontal) {
+        HStack(alignment: .top, spacing: 10) {
+          scenarioColumn("Given", scenario.given)
+          scenarioColumn("When", scenario.when)
+          scenarioColumn("Then", scenario.then)
+        }
+
+        VStack(alignment: .leading, spacing: 10) {
+          scenarioColumn("Given", scenario.given)
+          scenarioColumn("When", scenario.when)
+          scenarioColumn("Then", scenario.then)
+        }
+      }
     }
-    .padding(10)
+    .padding(12)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(Color(nsColor: .controlBackgroundColor))
     .clipShape(RoundedRectangle(cornerRadius: 8))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.blue.opacity(0.12), lineWidth: 1))
   }
 
   @ViewBuilder
-  private func scenarioLines(_ label: String, _ lines: [String]) -> some View {
-    VStack(alignment: .leading, spacing: 3) {
+  private func scenarioColumn(_ label: String, _ lines: [String]) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
       Text(label.uppercased())
-        .font(.caption2)
+        .font(.system(size: 9, weight: .semibold))
         .foregroundStyle(.secondary)
+        .tracking(0.4)
       ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-        Text("• \(line)")
-          .font(.caption)
-          .fixedSize(horizontal: false, vertical: true)
+        HStack(alignment: .top, spacing: 6) {
+          Circle()
+            .fill(Color.secondary.opacity(0.45))
+            .frame(width: 4, height: 4)
+            .padding(.top, 6)
+          Text(line)
+            .font(.caption)
+            .foregroundStyle(.primary)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+        }
       }
     }
+    .padding(10)
+    .frame(maxWidth: .infinity, alignment: .topLeading)
+    .background(Color(nsColor: .windowBackgroundColor).opacity(0.55))
+    .clipShape(RoundedRectangle(cornerRadius: 6))
   }
 
   @ViewBuilder
   private func requiredFactCard(_ fact: RequiredFactResponse, evidence: FactCheckDetail?) -> some View {
     let evidenceColor: Color = evidence == nil ? .secondary : (evidence?.passed == true ? .green : .red)
-    VStack(alignment: .leading, spacing: 8) {
-      HStack(alignment: .top, spacing: 8) {
-        Image(systemName: evidence == nil ? "clock" : (evidence?.passed == true ? "checkmark.circle.fill" : "xmark.circle.fill"))
-          .font(.system(size: 13))
-          .foregroundStyle(evidenceColor)
-          .padding(.top, 1)
-        VStack(alignment: .leading, spacing: 2) {
-          Text(fact.id)
-            .font(.callout.weight(.medium))
-          Text(fact.kind)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
+    HStack(alignment: .top, spacing: 0) {
+      Rectangle()
+        .fill(evidenceColor.opacity(evidence == nil ? 0.35 : 0.75))
+        .frame(width: 3)
+
+      VStack(alignment: .leading, spacing: 10) {
+        HStack(alignment: .top, spacing: 8) {
+          Image(systemName: evidence == nil ? "clock" : (evidence?.passed == true ? "checkmark.circle.fill" : "xmark.circle.fill"))
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(evidenceColor)
+            .padding(.top, 1)
+          VStack(alignment: .leading, spacing: 3) {
+            Text(fact.id)
+              .font(.callout.weight(.semibold))
+              .lineLimit(1)
+              .truncationMode(.middle)
+              .textSelection(.enabled)
+            HStack(spacing: 6) {
+              Text(fact.kind)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+              Text(fact.artifact.change)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(Color.secondary.opacity(0.10), in: Capsule())
+            }
+          }
+          Spacer(minLength: 4)
+          factStatusBadge(evidence: evidence)
         }
-        Spacer(minLength: 4)
-        factBadge(evidence == nil ? "awaiting evidence" : "evidence")
-      }
-      Text("proves \(fact.proves.joined(separator: ", "))")
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-      Text(fact.artifact.path)
-        .font(.system(.caption2, design: .monospaced))
-        .foregroundStyle(.secondary)
-        .textSelection(.enabled)
-      Text(fact.command)
-        .font(.system(.caption2, design: .monospaced))
-        .foregroundStyle(.secondary)
-        .textSelection(.enabled)
-      if let evidence {
-        factEvidenceBody(evidence)
-      } else {
-        Text("Awaiting evidence from Autopod validator.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .padding(.horizontal, 8)
-          .padding(.vertical, 6)
+
+        contractMetaRow(label: "proves", value: fact.proves.joined(separator: ", "))
+        contractMetaRow(label: "artifact", value: fact.artifact.path, monospaced: true)
+        contractMetaRow(label: "command", value: fact.command, monospaced: true)
+
+        if let evidence {
+          factEvidenceBody(evidence)
+        } else {
+          HStack(spacing: 8) {
+            Image(systemName: "hourglass")
+              .font(.system(size: 11))
+              .foregroundStyle(.secondary)
+            Text("Awaiting evidence from Autopod validator.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          .padding(.horizontal, 10)
+          .padding(.vertical, 8)
           .frame(maxWidth: .infinity, alignment: .leading)
           .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
-          .clipShape(RoundedRectangle(cornerRadius: 4))
+          .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
       }
+      .padding(12)
     }
-    .padding(10)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(Color(nsColor: .controlBackgroundColor))
     .clipShape(RoundedRectangle(cornerRadius: 8))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(evidenceColor.opacity(0.15), lineWidth: 1))
+  }
+
+  private func contractMetaRow(label: String, value: String, monospaced: Bool = false) -> some View {
+    HStack(alignment: .top, spacing: 8) {
+      Text(label)
+        .font(.system(size: 9, weight: .semibold))
+        .foregroundStyle(.tertiary)
+        .textCase(.uppercase)
+        .tracking(0.35)
+        .frame(width: 58, alignment: .leading)
+      Text(value)
+        .font(monospaced ? .system(.caption, design: .monospaced) : .caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(monospaced ? 2 : nil)
+        .truncationMode(.middle)
+        .fixedSize(horizontal: false, vertical: true)
+        .textSelection(.enabled)
+    }
+  }
+
+  private func factStatusBadge(evidence: FactCheckDetail?) -> some View {
+    let label = evidence == nil ? "awaiting evidence" : (evidence?.passed == true ? "passed" : "failed")
+    let color: Color = evidence == nil ? .secondary : (evidence?.passed == true ? .green : .red)
+    return Text(label)
+      .font(.system(.caption2, design: .monospaced).weight(.semibold))
+      .padding(.horizontal, 7)
+      .padding(.vertical, 3)
+      .background(color.opacity(0.12), in: Capsule())
+      .foregroundStyle(color)
   }
 
   @ViewBuilder
@@ -1031,6 +1227,9 @@ public struct ValidationTab: View {
         failLabel: "Review flagged issues",
         skipLabel: reviewSkipLabel(kind: skipKind, reason: skipReason)
       )
+      if let verdict = pod.preSubmitReview {
+        preSubmitReviewCard(verdict)
+      }
       if let reasoning, !reasoning.isEmpty {
         Text(reasoning)
           .font(.caption)
@@ -1185,6 +1384,74 @@ public struct ValidationTab: View {
     case "review-failed": return reason ?? "Review failed"
     case "no-changes": return reason ?? "No code changes to review"
     default: return reason ?? "Review skipped"
+    }
+  }
+
+  private func preSubmitReviewCard(_ verdict: PreSubmitReviewSnapshot) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 8) {
+        Image(systemName: preSubmitIcon(for: verdict.status))
+          .foregroundStyle(preSubmitTint(for: verdict.status))
+        Text("Pre-submit Review")
+          .font(.callout.weight(.semibold))
+        Spacer()
+        Text(verdict.status.rawValue.uppercased())
+          .font(.system(.caption2, design: .monospaced).weight(.semibold))
+          .padding(.horizontal, 7)
+          .padding(.vertical, 3)
+          .background(preSubmitTint(for: verdict.status).opacity(0.14), in: Capsule())
+          .foregroundStyle(preSubmitTint(for: verdict.status))
+        Text(verdict.model)
+          .font(.caption2)
+          .foregroundStyle(.tertiary)
+      }
+
+      if !verdict.reasoning.isEmpty {
+        Text(verdict.reasoning)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+          .textSelection(.enabled)
+      }
+
+      if !verdict.issues.isEmpty {
+        VStack(alignment: .leading, spacing: 6) {
+          ForEach(Array(verdict.issues.enumerated()), id: \.offset) { _, issue in
+            HStack(alignment: .top, spacing: 7) {
+              Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(preSubmitTint(for: verdict.status))
+                .padding(.top, 2)
+              Text(issue)
+                .font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            }
+          }
+        }
+      }
+    }
+    .padding(12)
+    .background(preSubmitTint(for: verdict.status).opacity(0.06))
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(preSubmitTint(for: verdict.status).opacity(0.16), lineWidth: 1))
+  }
+
+  private func preSubmitIcon(for status: PreSubmitReviewSnapshot.Status) -> String {
+    switch status {
+    case .pass: "checkmark.seal.fill"
+    case .fail: "xmark.seal.fill"
+    case .uncertain: "questionmark.circle.fill"
+    case .skipped: "minus.circle"
+    }
+  }
+
+  private func preSubmitTint(for status: PreSubmitReviewSnapshot.Status) -> Color {
+    switch status {
+    case .pass: .green
+    case .fail: .red
+    case .uncertain: .orange
+    case .skipped: .secondary
     }
   }
 
