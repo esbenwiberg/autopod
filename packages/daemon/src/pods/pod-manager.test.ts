@@ -5211,6 +5211,82 @@ describe('updateFromBase', () => {
     expect(refreshed.mergeBlockReason).toBeNull();
   });
 
+  it('validation success clears pending intent so a later revalidation does not unexpectedly rebase', async () => {
+    // Abort signal can arrive after the validation engine has already produced a pass.
+    // The intent must not linger on a 'validated' pod that later re-enters validation
+    // (e.g., after rejection), or the next failure would consume a stale rebase request.
+    const ctx = createTestContext({ overall: 'pass' });
+    vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+      alreadyUpToDate: false,
+      rebased: true,
+      conflicts: [],
+    });
+
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget' },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'ctr-1',
+      worktreePath: '/tmp/wt',
+      validationAttempts: 0,
+    });
+
+    // First validation: plant the intent mid-run (the abort race), then succeed.
+    vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(async () => {
+      await manager.updateFromBase(pod.id);
+      return {
+        podId: pod.id,
+        attempt: 1,
+        timestamp: new Date().toISOString(),
+        smoke: {
+          status: 'pass' as const,
+          build: { status: 'pass' as const, output: 'ok', duration: 0 },
+          health: { status: 'pass' as const, url: '', responseCode: 200, duration: 0 },
+          pages: [],
+        },
+        taskReview: null,
+        overall: 'pass' as const,
+        duration: 0,
+      };
+    });
+
+    await manager.triggerValidation(pod.id);
+
+    expect(manager.getSession(pod.id).status).toBe('validated');
+    // The success path doesn't consume intents, so no rebase yet.
+    expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+
+    // Simulate the pod re-entering validation (e.g., after rejection).
+    ctx.podRepo.update(pod.id, { status: 'rejected' });
+    ctx.podRepo.update(pod.id, { status: 'running' });
+    ctx.podRepo.update(pod.id, { validationAttempts: 0 });
+
+    // Second validation fails — would consume any lingering intent on the retry path.
+    vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(async () => ({
+      podId: pod.id,
+      attempt: 1,
+      timestamp: new Date().toISOString(),
+      smoke: {
+        status: 'fail' as const,
+        build: { status: 'fail' as const, output: 'fail', duration: 0 },
+        health: { status: 'fail' as const, url: '', responseCode: null, duration: 0 },
+        pages: [],
+      },
+      taskReview: null,
+      overall: 'fail' as const,
+      duration: 0,
+    }));
+
+    await manager.triggerValidation(pod.id);
+    await new Promise((r) => setImmediate(r));
+
+    // The first run's intent should have been cleared on success — no rebase fired.
+    expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+  });
+
   it('invalid status returns INVALID_STATE 409', async () => {
     const ctx = createTestContext();
     const manager = createPodManager(ctx.deps);

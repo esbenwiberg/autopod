@@ -7418,6 +7418,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (s2.skipValidation) {
           emitActivityStatus(podId, 'Validation skipped by human toggle — marking as validated');
           logger.info({ podId, attempt }, 'skip_validation set mid-run — bypassing result');
+          pendingUpdateFromBaseIntents.delete(podId);
           const validatedPod = transition(s2, 'validated');
           maybeTriggerDependents(validatedPod);
           return;
@@ -7591,6 +7592,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
 
           podRepo.update(podId, { lastCorrectionMessage: null });
+          // Validation completed before the abort signal landed — stale update-from-base
+          // intent must not fire on a later revalidation for this pod.
+          pendingUpdateFromBaseIntents.delete(podId);
           const validatedPod = transition(s2, 'validated', { prUrl });
           maybeTriggerDependents(validatedPod);
 
