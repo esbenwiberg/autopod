@@ -106,4 +106,16 @@ public struct AgentEvent: Identifiable, Sendable {
         f.dateFormat = "HH:mm:ss"
         return f.string(from: timestamp)
     }
+
+    public var isMCPToolCall: Bool {
+        type == .toolUse && (toolName?.hasPrefix("mcp__") ?? false)
+    }
+
+    public var displayIcon: String {
+        isMCPToolCall ? "point.3.connected.trianglepath.dotted" : type.icon
+    }
+
+    public var displayColor: Color {
+        isMCPToolCall ? .teal : type.color
+    }
 }

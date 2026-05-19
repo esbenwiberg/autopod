@@ -325,9 +325,9 @@ struct LogEventRow: View {
                     .frame(width: 55, alignment: .trailing)
 
                 // Type indicator
-                Image(systemName: event.type.icon)
+                Image(systemName: event.displayIcon)
                     .font(.system(size: 10))
-                    .foregroundStyle(event.type.color)
+                    .foregroundStyle(event.displayColor)
                     .frame(width: 16)
 
                 // Content
@@ -356,7 +356,7 @@ struct LogEventRow: View {
             .contentShape(Rectangle())
             .background(
                 isExpanded
-                    ? event.type.color.opacity(0.04)
+                    ? event.displayColor.opacity(0.04)
                     : (event.type == .error ? Color.red.opacity(0.04) : Color.clear)
             )
         }
