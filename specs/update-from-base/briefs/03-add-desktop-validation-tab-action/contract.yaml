@@ -1,0 +1,37 @@
+contract_version: 1
+title: "Add desktop Validation-tab Update From Base action"
+depends_on:
+  - 01-add-daemon-action
+scenarios:
+  - id: validation-tab-button-visibility
+    given:
+      - "a pod detail view is open on the Validation tab"
+    when:
+      - "the pod status is validating, failed, or review_required"
+    then:
+      - "the Update From Base button is visible in the header"
+      - "the button is not shown for unrelated statuses"
+  - id: validation-tab-action-result
+    given:
+      - "the operator clicks Update From Base"
+    when:
+      - "the daemon returns queued_after_abort, already_up_to_date, rebased, or conflict"
+    then:
+      - "the UI shows readable feedback for the returned action"
+      - "conflicted files are visible for conflict responses"
+  - id: validation-tab-disabled-state
+    given:
+      - "a visible Update From Base button"
+    when:
+      - "the request is in flight or the pod has no usable worktree"
+    then:
+      - "the button is disabled"
+required_facts: []
+human_review:
+  - id: review-desktop-validation-tab-update-from-base
+    covers:
+      - validation-tab-button-visibility
+      - validation-tab-action-result
+      - validation-tab-disabled-state
+    criterion: "The SwiftUI Validation tab button appears only for eligible statuses, uses the existing header style, shows loading/disabled states, and surfaces every daemon response variant without a new modal."
+    reason: "Native SwiftUI behaviour needs human review because this brief has no executable desktop acceptance command."

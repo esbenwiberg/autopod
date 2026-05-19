@@ -1,0 +1,69 @@
+contract_version: 1
+title: "Add daemon update-from-base action"
+depends_on: []
+scenarios:
+  - id: eligible-route-response
+    given:
+      - "a pod in validating, failed, or review_required with a worktree"
+    when:
+      - "the operator posts to /pods/:podId/update-from-base"
+    then:
+      - "the daemon returns one of the UpdateFromBaseResponse variants"
+      - "pods in unrelated statuses are rejected with INVALID_STATE"
+  - id: clean-rebase-revalidates
+    given:
+      - "an eligible parked pod whose branch can be rebased onto its base branch"
+    when:
+      - "update-from-base runs"
+    then:
+      - "the pod branch is rebased"
+      - "validation attempt state is reset"
+      - "follow-up validation starts as attempt 1"
+  - id: validating-abort-handoff
+    given:
+      - "a pod currently in validating"
+    when:
+      - "the operator triggers update-from-base"
+    then:
+      - "the current validation is aborted"
+      - "the update intent runs before correction feedback is sent to the agent"
+      - "the route responds queued_after_abort immediately"
+  - id: conflict-stays-reviewable
+    given:
+      - "an eligible pod whose branch conflicts while rebasing onto base"
+    when:
+      - "update-from-base runs"
+    then:
+      - "the response lists conflicted files"
+      - "the pod remains reviewable"
+      - "mergeBlockReason is not written"
+  - id: post-rebase-push-is-force-with-lease
+    given:
+      - "a pod branch was cleanly rebased by update-from-base"
+    when:
+      - "the next successful validation publishes that branch"
+    then:
+      - "the push uses the existing force-with-lease option"
+      - "the force allowance is cleared after that publish"
+required_facts:
+  - id: fact-update-from-base-pod-manager
+    proves:
+      - clean-rebase-revalidates
+      - validating-abort-handoff
+      - conflict-stays-reviewable
+      - post-rebase-push-is-force-with-lease
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager update-from-base
+  - id: fact-update-from-base-route-contract
+    proves:
+      - eligible-route-response
+      - conflict-stays-reviewable
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/api/routes/pods.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- routes update-from-base
+human_review: []

@@ -1,7 +1,5 @@
 ---
 title: "Add desktop Validation-tab Update From Base action"
-depends_on: [01-add-daemon-update-from-base-action]
-acceptance_criteria: []
 touches:
   - packages/desktop/Sources/AutopodClient/DaemonAPI.swift
   - packages/desktop/Sources/AutopodDesktop/Stores/ActionHandler.swift
@@ -24,7 +22,7 @@ the typed result without introducing a new screen.
 
 Approved v1 wireframe:
 
-```
+```text
 Validation tab header
 
 Attempt 2 of 3                                      [Open App]
@@ -38,65 +36,26 @@ Attempt 3 of 3                                      [Update From Base]
                                                     [Force Approve]
 ```
 
-## API DTO
+Add a Swift response type matching the daemon union. The implementation may be
+an enum or a struct with `action`, `ok`, `baseBranch`, `validation`, and
+`conflicts` fields, depending on existing `DaemonAPI.swift` style.
 
-Add a Swift response type matching the daemon union:
-
-```swift
-public enum UpdateFromBaseResponse: Decodable, Sendable {
-  case queuedAfterAbort
-  case alreadyUpToDate(baseBranch: String)
-  case rebased(baseBranch: String)
-  case conflict(baseBranch: String, conflicts: [String])
-}
-```
-
-The actual implementation may use a struct with `action`, `ok`,
-`baseBranch`, `validation`, and `conflicts` fields if that better matches
-existing `DaemonAPI.swift` style. The important contract is exact decoding of
-the daemon response variants.
-
-Add:
-
-```swift
-public func updateFromBase(podId: String) async throws -> UpdateFromBaseResponse
-```
-
-to `DaemonAPI`.
-
-## Action plumbing
-
-Thread a new `updateFromBase` closure through:
-
-- `ActionHandler`
-- `PodActions`
-- any mock/default action initializer used by previews
-
-After a successful request, trigger the same pod refresh/list refresh behaviour
-that nearby actions use. For conflict responses, do not treat the HTTP request
-as failed; show the conflict as an action result.
-
-## ValidationTab UI
-
-Add local state:
-
-- `isUpdatingFromBase`
-- optional last-result / conflict message if existing toast plumbing cannot
-  show the result directly
+Thread a new `updateFromBase` action through `ActionHandler`, `PodActions`, and
+preview/mock action initializers. After a successful request, trigger the same
+pod refresh/list refresh behaviour that nearby actions use. Conflict responses
+are typed action results, not transport failures.
 
 Button visibility:
 
-- show for `.validating`, `.failed`, `.reviewRequired`
+- show for `.validating`, `.failed`, and `.reviewRequired`
 - hide for all other statuses
-- disable when already updating
+- disable while already updating
 - disable when there is no worktree or the pod is known to have a compromised
   worktree
 
-Button placement:
-
-- In the existing header action stack, between `Skip Validation` and
-  `Interrupt` for validating pods.
-- In failed/review_required, before `Force Approve`.
+Place the button in the existing header action stack between `Skip Validation`
+and `Interrupt` for validating pods, and before `Force Approve` for
+failed/review_required pods.
 
 Suggested label:
 
@@ -131,12 +90,15 @@ new modal in v1.
 
 ## Does not touch
 
-- No daemon or shared changes in this brief.
-- No Pod card / Summary tab / global detail action rail button.
-- No new conflict-resolution UI.
+- `packages/daemon/` - daemon route and response are owned by brief 01.
+- `packages/shared/` - response contract is owned by brief 01.
+- `packages/cli/` - CLI is owned by brief 02.
+- `packages/escalation-mcp/` - no agent/MCP path for this action.
 
 ## Constraints
 
+- Follow `design.md` -> UX flows -> Desktop Validation Tab exactly for placement
+  and visibility.
 - Keep the button on the Validation tab only.
 - Use the existing action visual style from nearby header buttons.
 - Do not rearrange the rest of the Validation tab.
@@ -144,10 +106,10 @@ new modal in v1.
   only reports the update-from-base decision; normal pod status updates carry
   validation results later.
 
-## Test Expectations
+## Test expectations
 
-Native SwiftUI does not have a firing `api` or `web` AC in the Autopod
-validation engine, so this brief intentionally has no acceptance criteria.
+Native SwiftUI does not yet have an automated UI fact harness in Autopod, so the
+contract uses human review for the visual behaviour.
 
 The implementer should still run the available desktop build/test/previews used
 in this repo and include results in the handover. Manual smoke should verify:
@@ -161,6 +123,7 @@ in this repo and include results in the handover. Manual smoke should verify:
 
 ## Wrap-up
 
-- Include screenshots or a concise manual-smoke note in the handover.
-- Mention whether `Pod.swift` needed a new worktree/compromised-worktree field
-  or could reuse an existing one.
+Before finishing:
+1. Run `/simplify` and address its findings.
+2. Re-run build and tests; both must still pass.
+3. Commit and push.

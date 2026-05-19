@@ -30,18 +30,17 @@ restart validation without spawning another agent task.
 
 1. `POST /pods/:podId/update-from-base` returns a typed outcome for
    `validating`, `failed`, and `review_required` pods and refuses unrelated
-   statuses. *(Brief 01 AC.)*
+   statuses.
 2. A clean rebase onto the current base branch resets validation attempts and
-   starts validation again as attempt 1. *(Brief 01 AC.)*
+   starts validation again as attempt 1.
 3. A rebase conflict returns a conflict response with file paths, leaves the
-   pod reviewable, and does not persist a merge-block reason. *(Brief 01 AC.)*
+   pod reviewable, and does not persist a merge-block reason.
 4. `ap update-from-base <id>` resolves short IDs, prints already-up-to-date /
    queued / rebased outcomes, and exits non-zero with conflicts on conflict.
-   *(Brief 02 AC.)*
 
 The desktop Validation-tab button is reviewer-judged via Swift build/previews
-and manual smoke notes because native SwiftUI surfaces do not have a firing
-`api` or `web` AC in the validation engine.
+and manual smoke notes because native SwiftUI surfaces do not yet have an
+automated UI fact harness in Autopod.
 
 ## Non-goals
 

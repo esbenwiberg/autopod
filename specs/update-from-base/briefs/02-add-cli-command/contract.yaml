@@ -1,0 +1,52 @@
+contract_version: 1
+title: "Add CLI update-from-base command"
+depends_on:
+  - 01-add-daemon-action
+scenarios:
+  - id: cli-rebased-output
+    given:
+      - "the daemon returns a rebased update-from-base response"
+    when:
+      - "the operator runs ap update-from-base <id>"
+    then:
+      - "the CLI prints the base branch"
+      - "the CLI says validation restarted"
+      - "the command exits successfully"
+  - id: cli-queued-output
+    given:
+      - "the daemon returns queued_after_abort"
+    when:
+      - "the operator runs ap update-from-base <id>"
+    then:
+      - "the CLI tells the operator validation is stopping and update-from-base will run next"
+      - "the command exits successfully"
+  - id: cli-already-up-to-date-output
+    given:
+      - "the daemon returns already_up_to_date"
+    when:
+      - "the operator runs ap update-from-base <id>"
+    then:
+      - "the CLI says the pod already contains the latest base branch"
+      - "the CLI says no validation started"
+      - "the command exits successfully"
+  - id: cli-conflict-output
+    given:
+      - "the daemon returns a conflict response"
+    when:
+      - "the operator runs ap update-from-base <id>"
+    then:
+      - "the CLI prints every conflicted file"
+      - "the command exits with status 1"
+required_facts:
+  - id: fact-cli-update-from-base-command
+    proves:
+      - cli-rebased-output
+      - cli-queued-output
+      - cli-already-up-to-date-output
+      - cli-conflict-output
+    kind: unit-test
+    artifact:
+      path: packages/cli/src/commands/pod.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/cli test -- update-from-base
+human_review: []
