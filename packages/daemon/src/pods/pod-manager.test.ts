@@ -35,6 +35,7 @@ import type { EscalationRepository } from './escalation-repository.js';
 import { createEventBus } from './event-bus.js';
 import type { EventBus } from './event-bus.js';
 import { createEventRepository } from './event-repository.js';
+import type { EventRepository } from './event-repository.js';
 import { createFixFeedbackRepository } from './fix-feedback-repository.js';
 import { type PodManagerDependencies, createPodManager } from './pod-manager.js';
 import { createPodRepository } from './pod-repository.js';
@@ -223,6 +224,7 @@ function createMockValidationEngine(result?: Partial<ValidationResult>): Validat
 interface TestContext {
   db: Database.Database;
   podRepo: PodRepository;
+  eventRepo: EventRepository;
   escalationRepo: EscalationRepository;
   eventBus: EventBus;
   profileStore: ProfileStore;
@@ -329,6 +331,7 @@ function createTestContext(
     podRepo,
     escalationRepo,
     fixFeedbackRepo,
+    eventRepo,
     profileStore,
     eventBus,
     containerManagerFactory: { get: vi.fn(() => containerManager) },
@@ -345,6 +348,7 @@ function createTestContext(
   return {
     db,
     podRepo,
+    eventRepo,
     escalationRepo,
     eventBus,
     profileStore,
@@ -1896,6 +1900,40 @@ describe('PodManager', () => {
         expect(task).toContain('def5678 Half-done work');
       });
 
+      it('skips agent spawn during recovery when the prior run already emitted complete', async () => {
+        const ctx = createTestContext();
+        setupExecFileMock({ bareRepoPath: '/tmp/bare/recovered.git' });
+
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Continue feature', skipValidation: true },
+          'user-1',
+        );
+
+        ctx.eventBus.emit({
+          type: 'pod.agent_activity',
+          timestamp: '2026-01-01T00:00:00.000Z',
+          podId: pod.id,
+          event: {
+            type: 'complete',
+            timestamp: '2026-01-01T00:00:00.000Z',
+            result: 'Agent finished before daemon restart',
+          },
+        });
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+        });
+
+        await manager.processPod(pod.id);
+
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+        const updated = manager.getSession(pod.id);
+        expect(updated.status).toBe('validated');
+        expect(updated.worktreePath).toBe('/tmp/worktree/existing');
+      });
+
       it('uses fresh spawn with rework prompt when reworkReason is set', async () => {
         const runtime = createMockRuntime();
         (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
@@ -2180,6 +2218,35 @@ describe('PodManager', () => {
 
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('validated');
+    });
+
+    it('recovers from live container when workspace sync fails before validation', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      (ctx.containerManager.execInContainer as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('docker exec failed'),
+      );
+      (
+        ctx.containerManager.extractDirectoryFromContainer as ReturnType<typeof vi.fn>
+      ).mockRejectedValueOnce(new Error('archive fallback failed'));
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const result = manager.getSession(pod.id);
+      expect(result.worktreeCompromised).toBe(false);
+      expect(result.status).toBe('validated');
+      expect(ctx.validationEngine.validate).toHaveBeenCalled();
+      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
     });
 
     it('pushes branch and creates PR on validation pass', async () => {
@@ -3505,6 +3572,43 @@ describe('PodManager', () => {
       expect(result.worktreeCompromised).toBe(true);
       expect(result.status).toBe('failed');
       expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+    });
+
+    it('recovers from live container when workspace sync fails before auto-commit', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      (ctx.containerManager.execInContainer as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('docker exec failed'),
+      );
+      (
+        ctx.containerManager.extractDirectoryFromContainer as ReturnType<typeof vi.fn>
+      ).mockRejectedValueOnce(new Error('archive fallback failed'));
+
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        worktreeCompromised: true,
+      });
+
+      await manager.handleCompletion(pod.id);
+
+      const result = manager.getSession(pod.id);
+      expect(result.worktreeCompromised).toBe(false);
+      expect(result.status).toBe('validated');
+      expect(ctx.worktreeManager.commitPendingChangesWithGeneratedMessage).toHaveBeenCalledWith(
+        '/tmp/wt',
+        'Add feature',
+        expect.any(Object),
+        'opus',
+        { maxDeletions: 100 },
+      );
+      expect(ctx.validationEngine.validate).toHaveBeenCalled();
+      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
     });
 
     it('stops worker completion before auto-commit when workspace sync fails', async () => {

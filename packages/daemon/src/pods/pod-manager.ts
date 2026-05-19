@@ -903,6 +903,19 @@ function deriveAgentAttempt(phaseTokenUsage: PhaseTokenUsage | null): number {
   return 1 + highestRework;
 }
 
+function hasPersistedAgentCompleteEvent(
+  eventRepo: EventRepository | undefined,
+  podId: string,
+): boolean {
+  if (!eventRepo) return false;
+  return eventRepo
+    .getForSession(podId)
+    .some(
+      (event) =>
+        event.payload.type === 'pod.agent_activity' && event.payload.event.type === 'complete',
+    );
+}
+
 export function createPodManager(deps: PodManagerDependencies): PodManager {
   const {
     podRepo,
@@ -2607,6 +2620,48 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     // would otherwise be invisible to the watchdog and trigger a false auto-fail
     // before the agent process has even spawned.
     bumpActivityTimestamp(podId);
+  }
+
+  function describeSyncFailure(err: unknown): string {
+    if (err instanceof Error && err.message.trim()) {
+      return `${err.name}: ${err.message}`;
+    }
+    return String(err);
+  }
+
+  async function tryRecoverAfterWorkspaceSyncFailure(
+    pod: Pod,
+    err: unknown,
+    phase: 'auto-commit' | 'validation',
+  ): Promise<boolean> {
+    if (!pod.containerId || !pod.worktreePath) return false;
+
+    const detail = describeSyncFailure(err);
+    logger.warn(
+      { err, podId: pod.id, phase },
+      'Workspace sync failed - attempting live container recovery',
+    );
+    emitActivityStatus(
+      pod.id,
+      `Workspace sync failed before ${phase} (${detail}). Attempting live container recovery...`,
+    );
+
+    const cm = containerManagerFactory.get(pod.executionTarget);
+    const recovered = await recoverWorktreeFromContainer(
+      pod.containerId,
+      pod.worktreePath,
+      cm,
+      pod.id,
+    );
+    if (!recovered) return false;
+
+    podRepo.update(pod.id, { worktreeCompromised: false });
+    emitActivityStatus(
+      pod.id,
+      `Workspace recovered from live container after sync failure; continuing ${phase}.`,
+    );
+    logger.info({ podId: pod.id, phase }, 'Recovered worktree after workspace sync failure');
+    return true;
   }
 
   /** Per-phase WebSocket events that drive the desktop Validation tab chips.
@@ -4850,6 +4905,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           return;
         }
 
+        if (isRecovery && !isRework && hasPersistedAgentCompleteEvent(deps.eventRepo, podId)) {
+          emitStatus('Agent already finished before recovery — resuming completion…');
+          logger.info(
+            { podId, worktreePath },
+            'Recovery found persisted agent complete event — skipping agent spawn',
+          );
+          await this.handleCompletion(podId);
+          return;
+        }
+
         // Start the agent — recovery mode uses resume for Claude, fresh spawn for others
         emitStatus('Spawning agent…');
         const runtime = runtimeRegistry.get(pod.runtime);
@@ -5341,9 +5406,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             );
           }
         } catch (err) {
-          syncSucceeded = false;
-          agentCommitsPushed = false;
           logger.warn({ err, podId }, 'Failed to sync workspace back to host');
+          const recovered = await tryRecoverAfterWorkspaceSyncFailure(pod, err, 'auto-commit');
+          syncSucceeded = recovered;
+          agentCommitsPushed = recovered;
         }
       }
 
@@ -6990,8 +7056,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const cm = containerManagerFactory.get(pod.executionTarget);
             await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, podId);
           } catch (err) {
-            validationSyncOk = false;
             logger.warn({ err, podId }, 'Failed to sync workspace before validation');
+            validationSyncOk = await tryRecoverAfterWorkspaceSyncFailure(pod, err, 'validation');
           }
         }
         if (!validationSyncOk) {
