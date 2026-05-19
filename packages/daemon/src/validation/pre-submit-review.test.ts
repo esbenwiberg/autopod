@@ -208,4 +208,40 @@ describe('pickCachedPreSubmit (Tier 1 cache hit logic)', () => {
     expect(result.status).toBe('pass');
     expect(result.reasoning).toContain('matches scope');
   });
+
+  it('returns null when cached scope metadata does not match the current diff', () => {
+    const diff = 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n';
+    const cache = {
+      status: 'pass',
+      diffHash: hashDiff(diff),
+      filesReviewed: 2,
+      linesAdded: 1,
+      linesRemoved: 1,
+      reasoning: 'stale scope',
+      issues: [],
+      model: 'sonnet',
+      checkedAt: new Date().toISOString(),
+    };
+    expect(pickCachedPreSubmit(makeConfig(diff, cache))).toBeNull();
+  });
+
+  it('returns null when cached startCommitSha does not match validation scope', () => {
+    const diff = 'diff body unchanged';
+    const cache = {
+      status: 'pass',
+      diffHash: hashDiff(diff),
+      startCommitSha: 'old-start',
+      reasoning: 'stale base',
+      issues: [],
+      model: 'sonnet',
+      checkedAt: new Date().toISOString(),
+    };
+    expect(
+      pickCachedPreSubmit({
+        diff,
+        startCommitSha: 'new-start',
+        preSubmitReview: cache,
+      }),
+    ).toBeNull();
+  });
 });

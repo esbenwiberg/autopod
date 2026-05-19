@@ -216,6 +216,14 @@ export interface PreSubmitReviewToolResult {
   linesRemoved: number;
   /** True when the call returned a previously-cached verdict for an unchanged diff. */
   reusedCache?: boolean;
+  /** Metadata from the cached verdict, included on cache hits for agent sanity checks. */
+  cachedMetadata?: {
+    diffSource?: 'container' | 'worktree' | 'none';
+    filesReviewed?: number;
+    linesAdded?: number;
+    linesRemoved?: number;
+    startCommitSha?: string | null;
+  };
 }
 
 export interface ValidationPhaseResult {

@@ -274,6 +274,13 @@ describe('PodBridge.runPreSubmitReview', () => {
     cachedVerdict?: {
       status: 'pass' | 'fail' | 'uncertain' | 'skipped';
       diffHash: string;
+      diffSource?: 'container' | 'worktree' | 'none';
+      filesReviewed?: number;
+      linesAdded?: number;
+      linesRemoved?: number;
+      containerId?: string | null;
+      worktreePath?: string | null;
+      startCommitSha?: string | null;
       reasoning: string;
       issues: string[];
       model: string;
@@ -463,6 +470,13 @@ describe('PodBridge.runPreSubmitReview', () => {
       cachedVerdict: {
         status: 'fail',
         diffHash: expectedHash,
+        diffSource: 'container',
+        filesReviewed: 1,
+        linesAdded: 1,
+        linesRemoved: 0,
+        containerId: 'container-abc',
+        worktreePath: '/tmp/worktree',
+        startCommitSha: 'start-sha',
         reasoning: 'cached: missing tests',
         issues: ['src/foo.ts:1: needs a test'],
         model: 'sonnet',
@@ -485,10 +499,58 @@ describe('PodBridge.runPreSubmitReview', () => {
     expect(result.status).toBe('fail');
     expect(result.reasoning).toBe('cached: missing tests');
     expect(result.issues).toEqual(['src/foo.ts:1: needs a test']);
+    expect(result.cachedMetadata).toEqual(
+      expect.objectContaining({
+        diffSource: 'container',
+        filesReviewed: 1,
+        linesAdded: 1,
+        linesRemoved: 0,
+        startCommitSha: 'start-sha',
+      }),
+    );
     expect(mockRunPreSubmitReview).not.toHaveBeenCalled();
     // Cache is not re-written when we just returned from it.
     const update = (podRepo as unknown as { update: ReturnType<typeof vi.fn> }).update;
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it('ignores a cached verdict when the diff metadata does not match', async () => {
+    const { hashDiff } = await import('../validation/pre-submit-review.js');
+    const expectedHash = hashDiff(SAMPLE_DIFF);
+
+    const { bridge, podId } = buildBridgeWithWorktree({
+      containerDiff: SAMPLE_DIFF,
+      cachedVerdict: {
+        status: 'pass',
+        diffHash: expectedHash,
+        diffSource: 'worktree',
+        filesReviewed: 99,
+        linesAdded: 99,
+        linesRemoved: 0,
+        containerId: 'old-container',
+        worktreePath: '/tmp/worktree',
+        startCommitSha: 'start-sha',
+        reasoning: 'stale pass',
+        issues: [],
+        model: 'sonnet',
+        checkedAt: '2025-01-01T00:00:00.000Z',
+      },
+      runResult: {
+        status: 'fail',
+        reasoning: 'fresh failure',
+        issues: ['src/foo.ts:1: still broken'],
+        model: 'sonnet',
+        diffHash: 'fresh',
+        durationMs: 1,
+      },
+    });
+
+    const result = await bridge.runPreSubmitReview(podId, {});
+
+    expect(result.reusedCache).toBeUndefined();
+    expect(result.status).toBe('fail');
+    expect(result.reasoning).toBe('fresh failure');
+    expect(mockRunPreSubmitReview).toHaveBeenCalledTimes(1);
   });
 
   it('caches the verdict on the pod via podRepo.update on a fresh review', async () => {
@@ -513,6 +575,13 @@ describe('PodBridge.runPreSubmitReview', () => {
         preSubmitReview: expect.objectContaining({
           status: 'pass',
           diffHash: 'cached-hash',
+          diffSource: 'container',
+          filesReviewed: 1,
+          linesAdded: 1,
+          linesRemoved: 0,
+          containerId: 'container-abc',
+          worktreePath: '/tmp/worktree',
+          startCommitSha: 'start-sha',
           reasoning: 'all good',
           model: 'sonnet',
         }),
