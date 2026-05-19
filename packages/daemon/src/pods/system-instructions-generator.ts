@@ -566,6 +566,9 @@ export function generateSystemInstructions(
       'Owning your commits is part of the task.',
   );
   lines.push(
+    '   - Do not edit `.husky/**`, `.githooks/**`, `.git/hooks/**`, `.claude/**`, `.codex/**`, or `.mcp.json` to bypass sandbox, permission, or hook execution failures unless the task explicitly asks you to change those operational files. If a hook or environment policy blocks you, report the blocker and commit only the task-scoped code changes.',
+  );
+  lines.push(
     '4. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.',
   );
   lines.push(

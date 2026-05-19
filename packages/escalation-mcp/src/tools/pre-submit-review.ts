@@ -29,6 +29,7 @@ function formatForAgent(result: PreSubmitReviewToolResult): {
   linesAdded: number;
   linesRemoved: number;
   reusedCache?: boolean;
+  cachedMetadata?: PreSubmitReviewToolResult['cachedMetadata'];
 } {
   return {
     status: result.status,
@@ -41,5 +42,6 @@ function formatForAgent(result: PreSubmitReviewToolResult): {
     linesAdded: result.linesAdded,
     linesRemoved: result.linesRemoved,
     ...(result.reusedCache ? { reusedCache: true } : {}),
+    ...(result.cachedMetadata ? { cachedMetadata: result.cachedMetadata } : {}),
   };
 }

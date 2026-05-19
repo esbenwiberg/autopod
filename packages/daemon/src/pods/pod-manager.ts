@@ -94,6 +94,7 @@ import { cleanupClaudeState, ensureClaudeStateDir } from '../runtimes/claude-sta
 import { cleanupCodexState, ensureCodexStateDir } from '../runtimes/codex-state-store.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
+import { parseDiffFilePaths } from '../validation/review-context-builder.js';
 import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import { DeletionGuardError, GitCredentialError } from '../worktrees/local-worktree-manager.js';
@@ -2349,6 +2350,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           `Workspace sync-back command failed (exit ${syncResult.exitCode}): ${syncResult.stderr.trim() || syncResult.stdout.trim()}`,
         );
       }
+      if (pushed) {
+        await refreshHostWorktreeIndex(worktreePath, podId);
+      }
     } catch (err) {
       // Fall back to the Docker archive API on any exec failure — getArchive() works on both
       // running and stopped (but not yet removed) containers. Previously only 409
@@ -2411,6 +2415,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         } finally {
           await rm(tmpGitDir, { recursive: true, force: true }).catch(() => {});
         }
+      }
+      if (pushed) {
+        await refreshHostWorktreeIndex(worktreePath, podId);
       }
     }
     return { pushed };
@@ -2480,6 +2487,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       await cm.extractDirectoryFromContainer(containerId, '/workspace', worktreePath, ['.git']);
+      await refreshHostWorktreeIndex(worktreePath, podId);
       logger.info({ containerId, worktreePath }, 'Worktree repopulated from live container');
       return true;
     } catch (err) {
@@ -2722,13 +2730,77 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     );
     if (!recovered) return false;
 
-    podRepo.update(pod.id, { worktreeCompromised: false });
+    podRepo.update(pod.id, { worktreeCompromised: false, preSubmitReview: null });
     emitActivityStatus(
       pod.id,
       `Workspace recovered from live container after sync failure; continuing ${phase}.`,
     );
     logger.info({ podId: pod.id, phase }, 'Recovered worktree after workspace sync failure');
     return true;
+  }
+
+  async function refreshHostWorktreeIndex(worktreePath: string, podId: string): Promise<void> {
+    try {
+      await execFileAsync('git', ['reset', '--mixed', 'HEAD'], { cwd: worktreePath });
+      logger.info({ podId, worktreePath }, 'Refreshed host worktree index after sync-back');
+    } catch (err) {
+      logger.warn(
+        { err, podId, worktreePath },
+        'Failed to refresh host worktree index after sync-back',
+      );
+      throw err;
+    }
+  }
+
+  function protectedOperationalPathReason(pathname: string): string | null {
+    if (
+      pathname === '.mcp.json' ||
+      pathname.startsWith('.husky/') ||
+      pathname.startsWith('.githooks/') ||
+      pathname.startsWith('.git/hooks/') ||
+      pathname.startsWith('.claude/') ||
+      pathname.startsWith('.codex/')
+    ) {
+      return 'agent/runtime operational path';
+    }
+    return null;
+  }
+
+  function podExplicitlyScopesOperationalPaths(pod: Pod): boolean {
+    const haystack = [
+      pod.task,
+      pod.taskSummary?.actualSummary,
+      pod.taskSummary?.how,
+      ...(pod.touches ?? []),
+      ...(pod.acceptanceCriteria ?? []).flatMap((ac) => [ac.outcome, ac.hint]),
+    ]
+      .filter(Boolean)
+      .join('\n')
+      .toLowerCase();
+    return [
+      '.husky',
+      '.githooks',
+      '.git/hooks',
+      '.claude',
+      '.codex',
+      '.mcp.json',
+      'pre-commit',
+      'commit-msg',
+      'git hook',
+      'agent config',
+      'agent tooling',
+      'mcp',
+    ].some((needle) => haystack.includes(needle));
+  }
+
+  function assertProtectedOperationalPathsInScope(pod: Pod, diff: string): void {
+    const changed = parseDiffFilePaths(diff).filter((p) => protectedOperationalPathReason(p));
+    if (changed.length === 0 || podExplicitlyScopesOperationalPaths(pod)) return;
+    throw new AutopodError(
+      `Protected operational files changed without explicit task scope: ${changed.join(', ')}. Revert these hook/agent-config changes or disclose explicit scope for them before validation.`,
+      'PROTECTED_OPERATIONAL_PATHS_CHANGED',
+      422,
+    );
   }
 
   /** Per-phase WebSocket events that drive the desktop Validation tab chips.
@@ -7070,6 +7142,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           reworkReason,
           reworkCount: (pod.reworkCount ?? 0) + 1,
           recoveryCount: 0,
+          preSubmitReview: null,
         });
         transition(pod, 'queued');
         enqueueSession(podId);
@@ -7185,6 +7258,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               ),
             ])
           : ['', ''];
+        assertProtectedOperationalPathsInScope(pod, diff);
 
         // Try to load a repo-specific code-review skill from the worktree
         const codeReviewSkill = pod.worktreePath
@@ -7900,6 +7974,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               ),
             ])
           : ['', ''];
+        assertProtectedOperationalPathsInScope(pod, diff);
 
         const codeReviewSkill = pod.worktreePath
           ? await loadCodeReviewSkill(pod.worktreePath, logger)

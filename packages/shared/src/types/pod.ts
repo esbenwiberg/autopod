@@ -12,6 +12,16 @@ export interface PreSubmitReviewSnapshot {
   status: 'pass' | 'fail' | 'uncertain' | 'skipped';
   /** Hash of the diff this verdict applies to. Cache keyed by this. */
   diffHash: string;
+  /** Where the diff was read from when the verdict was produced. */
+  diffSource?: 'container' | 'worktree' | 'none';
+  /** Scope counters for the reviewed diff. Used to reject stale cache hits. */
+  filesReviewed?: number;
+  linesAdded?: number;
+  linesRemoved?: number;
+  /** Pod/worktree identity at review time. Used to avoid cross-container stale hits. */
+  containerId?: string | null;
+  worktreePath?: string | null;
+  startCommitSha?: string | null;
   reasoning: string;
   issues: string[];
   /** The reviewer model used (e.g. 'sonnet'). */

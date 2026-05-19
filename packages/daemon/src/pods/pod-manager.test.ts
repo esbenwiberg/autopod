@@ -43,6 +43,17 @@ import type { PodRepository } from './pod-repository.js';
 
 const logger = pino({ level: 'silent' });
 
+function mockExecFileSuccess(): void {
+  mockedExecFile.mockImplementation((...args: unknown[]) => {
+    const callback = args[args.length - 1] as (
+      err: Error | null,
+      result: { stdout: string; stderr: string },
+    ) => void;
+    callback(null, { stdout: '', stderr: '' });
+    return undefined as never;
+  });
+}
+
 function createTestDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
@@ -365,6 +376,10 @@ function createTestContext(
 }
 
 describe('PodManager', () => {
+  beforeEach(() => {
+    mockExecFileSuccess();
+  });
+
   describe('createSession', () => {
     it('creates a pod in queued status', () => {
       const ctx = createTestContext();
@@ -2247,6 +2262,12 @@ describe('PodManager', () => {
       expect(result.status).toBe('validated');
       expect(ctx.validationEngine.validate).toHaveBeenCalled();
       expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
+      expect(mockedExecFile).toHaveBeenCalledWith(
+        'git',
+        ['reset', '--mixed', 'HEAD'],
+        { cwd: '/tmp/wt' },
+        expect.any(Function),
+      );
     });
 
     it('pushes branch and creates PR on validation pass', async () => {
@@ -3548,6 +3569,35 @@ describe('PodManager', () => {
       expect(ctx.prManager.createPr).not.toHaveBeenCalled();
     });
 
+    it('fails validation before review when protected operational files changed out of scope', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      (ctx.worktreeManager.getDiff as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+        'diff --git a/.husky/pre-commit b/.husky/pre-commit\n' +
+          '--- a/.husky/pre-commit\n' +
+          '+++ b/.husky/pre-commit\n' +
+          '@@ -1 +1 @@\n' +
+          '-old\n' +
+          '+new\n',
+      );
+
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const result = manager.getSession(pod.id);
+      expect(result.status).toBe('failed');
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+    });
+
     it('stops worker completion before validation when auto-commit hits the deletion guard', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       (
@@ -3609,6 +3659,66 @@ describe('PodManager', () => {
       );
       expect(ctx.validationEngine.validate).toHaveBeenCalled();
       expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
+    });
+
+    it('refreshes the host linked-worktree index after promoting container commits', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const oldSha = '1111111111111111111111111111111111111111';
+      const bareRepoPath = '/tmp/bare/repo.git';
+      const resetCalls: unknown[][] = [];
+
+      mockedExecFile.mockImplementation((...args: unknown[]) => {
+        const gitArgs = args[1] as string[];
+        const callback = args[args.length - 1] as (
+          err: Error | null,
+          result: { stdout: string; stderr: string },
+        ) => void;
+        if (gitArgs[0] === 'rev-parse' && gitArgs[1] === '--git-common-dir') {
+          callback(null, { stdout: bareRepoPath, stderr: '' });
+        } else if (gitArgs[0] === '--git-dir' && gitArgs[2] === 'rev-parse') {
+          callback(null, { stdout: `${oldSha}\n`, stderr: '' });
+        } else if (gitArgs[0] === 'reset') {
+          resetCalls.push(args);
+          callback(null, { stdout: '', stderr: '' });
+        } else {
+          callback(null, { stdout: '', stderr: '' });
+        }
+        return undefined as never;
+      });
+
+      (ctx.containerManager.execInContainer as ReturnType<typeof vi.fn>).mockImplementation(
+        async (_containerId: string, cmd: string[]) => {
+          const command = cmd.join(' ');
+          if (command.includes('/workspace/.git/objects/info/alternates')) {
+            return { stdout: `${bareRepoPath}\n`, stderr: '', exitCode: 0 };
+          }
+          if (command.includes('rev-parse --abbrev-ref HEAD')) {
+            return { stdout: 'feature/test\n', stderr: '', exitCode: 0 };
+          }
+          return { stdout: '', stderr: '', exitCode: 0 };
+        },
+      );
+
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.handleCompletion(pod.id);
+
+      expect(resetCalls).toContainEqual([
+        'git',
+        ['reset', '--mixed', 'HEAD'],
+        { cwd: '/tmp/wt' },
+        expect.any(Function),
+      ]);
+      expect(manager.getSession(pod.id).worktreeCompromised).toBe(false);
     });
 
     it('stops worker completion before auto-commit when workspace sync fails', async () => {

@@ -3303,10 +3303,50 @@ export function pickCachedPreSubmit(
   if (!cache) return null;
   if (cache.status !== 'pass') return null;
   if (cache.diffHash !== hashDiff(config.diff)) return null;
+  if (
+    cache.startCommitSha !== undefined &&
+    cache.startCommitSha !== (config.startCommitSha ?? null)
+  ) {
+    return null;
+  }
+  if (
+    cache.filesReviewed !== undefined ||
+    cache.linesAdded !== undefined ||
+    cache.linesRemoved !== undefined
+  ) {
+    const scope = summarizeUnifiedDiff(config.diff);
+    if (
+      cache.filesReviewed !== scope.filesReviewed ||
+      cache.linesAdded !== scope.linesAdded ||
+      cache.linesRemoved !== scope.linesRemoved
+    ) {
+      return null;
+    }
+  }
   return {
     status: 'pass',
     reasoning: cache.reasoning,
     issues: cache.issues,
+  };
+}
+
+function summarizeUnifiedDiff(diff: string): {
+  filesReviewed: number;
+  linesAdded: number;
+  linesRemoved: number;
+} {
+  if (!diff.trim()) return { filesReviewed: 0, linesAdded: 0, linesRemoved: 0 };
+  let linesAdded = 0;
+  let linesRemoved = 0;
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+++ ') || line.startsWith('--- ')) continue;
+    if (line.startsWith('+')) linesAdded++;
+    else if (line.startsWith('-')) linesRemoved++;
+  }
+  return {
+    filesReviewed: (diff.match(/^diff --git /gm) ?? []).length,
+    linesAdded,
+    linesRemoved,
   };
 }
 
