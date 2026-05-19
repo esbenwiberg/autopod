@@ -139,6 +139,10 @@ public struct AppRootView: View {
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.previewStatus(podId: id)
       },
+      loadValidationHistory: { [connectionManager] (id: String) in
+        guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
+        return try await api.getValidationHistory(id)
+      },
       loadQualityScores: { [connectionManager] in
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.listQualityScores()

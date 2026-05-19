@@ -11,8 +11,13 @@ public struct ValidationTab: View {
   public let pod: Pod
   public let checks: ValidationChecks?
   public var actions: PodActions
+  public var loadValidationHistory: ((String) async throws -> [StoredValidationResponse])?
 
   @State private var selectedPhase: ValidationPhase? = nil
+  @State private var selectedHistoryKey: String = "current"
+  @State private var validationHistory: [StoredValidationResponse] = []
+  @State private var isLoadingHistory = false
+  @State private var historyError: String?
   @State private var expandedBuildOutput = false
   @State private var expandedTestOutput = false
   @State private var expandedLintOutput = false
@@ -35,15 +40,164 @@ public struct ValidationTab: View {
   @State private var lightboxIndex: Int = 0
   @State private var isLightboxPresented: Bool = false
 
-  public init(pod: Pod, checks: ValidationChecks? = nil, actions: PodActions = .preview) {
+  public init(
+    pod: Pod,
+    checks: ValidationChecks? = nil,
+    actions: PodActions = .preview,
+    loadValidationHistory: ((String) async throws -> [StoredValidationResponse])? = nil
+  ) {
     self.pod = pod
     self.checks = checks ?? pod.validationChecks
     self.actions = actions
+    self.loadValidationHistory = loadValidationHistory
   }
 
   // MARK: - Derived state
 
-  private var progress: ValidationProgress? { pod.validationProgress }
+  private var progress: ValidationProgress? {
+    selectedHistory == nil ? pod.validationProgress : nil
+  }
+
+  private var displayedChecks: ValidationChecks? {
+    selectedHistory.map { validationChecks(from: $0.result) } ?? checks
+  }
+
+  private var selectedHistory: StoredValidationResponse? {
+    guard let attempt = Int(selectedHistoryKey) else { return nil }
+    return validationHistory.first { $0.attempt == attempt }
+  }
+
+  private var sortedValidationHistory: [StoredValidationResponse] {
+    validationHistory.sorted { lhs, rhs in
+      if lhs.attempt != rhs.attempt { return lhs.attempt > rhs.attempt }
+      return lhs.createdAt > rhs.createdAt
+    }
+  }
+
+  private func fetchValidationHistory() async {
+    guard let loadValidationHistory else { return }
+    isLoadingHistory = true
+    historyError = nil
+    do {
+      validationHistory = try await loadValidationHistory(pod.id)
+      if selectedHistoryKey != "current", selectedHistory == nil {
+        selectedHistoryKey = "current"
+      }
+    } catch {
+      validationHistory = []
+      historyError = "Could not load validation history: \(error.localizedDescription)"
+      selectedHistoryKey = "current"
+    }
+    isLoadingHistory = false
+  }
+
+  private func validationChecks(from response: ValidationResponse) -> ValidationChecks {
+    let buildOutput = response.smoke.build.status == "fail" && !response.smoke.build.output.isEmpty
+      ? response.smoke.build.output
+      : nil
+    let testOutput: String? = {
+      guard let test = response.test, test.status != "pass" else { return nil }
+      let combined = [test.stdout, test.stderr].compactMap { $0 }.joined(separator: "\n")
+      return combined.isEmpty ? nil : combined
+    }()
+    let lintOutput = response.lint?.status == "fail" && response.lint?.output.isEmpty == false
+      ? response.lint?.output
+      : nil
+    let sastOutput = response.sast?.status == "fail" && response.sast?.output.isEmpty == false
+      ? response.sast?.output
+      : nil
+    let healthCheck = HealthCheckDetail(
+      status: response.smoke.health.status,
+      url: response.smoke.health.url,
+      responseCode: response.smoke.health.responseCode,
+      duration: response.smoke.health.duration,
+      responseBody: response.smoke.health.responseBody
+    )
+    let pages: [PageDetail]? = response.smoke.pages.isEmpty ? nil : response.smoke.pages.map { page in
+      PageDetail(
+        path: page.path,
+        status: page.status,
+        consoleErrors: page.consoleErrors,
+        assertions: page.assertions.map { assertion in
+          AssertionDetail(
+            selector: assertion.selector,
+            type: assertion.type,
+            expected: assertion.expected,
+            actual: assertion.actual,
+            passed: assertion.passed
+          )
+        },
+        loadTime: page.loadTime
+      )
+    }
+    let acValidation: Bool? = response.acValidation.flatMap {
+      $0.status == "skip" ? nil : ($0.status == "pass")
+    }
+    let acChecks = response.acValidation?.results.map { check in
+      AcCheckDetail(
+        criterion: check.criterion,
+        passed: check.passed,
+        reasoning: check.reasoning,
+        validationType: check.validationType
+      )
+    }
+    let factValidation: Bool? = response.factValidation.flatMap {
+      $0.status == "skip" ? nil : ($0.status == "pass")
+    }
+    let factChecks = response.factValidation?.results.map { fact in
+      FactCheckDetail(
+        factId: fact.factId,
+        proves: fact.proves,
+        kind: fact.kind,
+        artifactPath: fact.artifactPath,
+        command: fact.command,
+        passed: fact.passed,
+        status: fact.status,
+        exitCode: fact.exitCode,
+        durationMs: fact.durationMs,
+        artifact: fact.artifact,
+        attachments: fact.attachments,
+        reasoning: fact.reasoning,
+        stdout: fact.stdout,
+        stderr: fact.stderr
+      )
+    }
+    let requirementsCheck = response.taskReview?.requirementsCheck?.map {
+      RequirementCheckDetail(criterion: $0.criterion, met: $0.met, note: $0.note)
+    }
+
+    return ValidationChecks(
+      smoke: response.smoke.status == "pass",
+      tests: mapTriState(response.test?.status),
+      lint: mapTriState(response.lint?.status),
+      sast: mapTriState(response.sast?.status),
+      review: mapTriState(response.taskReview?.status),
+      buildOutput: buildOutput,
+      testOutput: testOutput,
+      lintOutput: lintOutput,
+      sastOutput: sastOutput,
+      reviewIssues: response.taskReview?.issues,
+      reviewReasoning: response.taskReview?.reasoning,
+      reviewSkipReason: response.reviewSkipReason,
+      reviewSkipKind: response.reviewSkipKind,
+      acSkipReason: response.acSkipReason,
+      healthCheck: healthCheck,
+      pages: pages,
+      acValidation: acValidation,
+      acChecks: acChecks,
+      factValidation: factValidation,
+      factChecks: factChecks,
+      requirementsCheck: requirementsCheck
+    )
+  }
+
+  private func mapTriState(_ status: String?) -> Bool? {
+    switch status {
+    case "pass": true
+    case "fail": false
+    default: nil
+    }
+  }
 
   private var displayedPhases: [ValidationPhase] {
     [.build, .test, .lint, .sast, .health, .pages, .facts, .review]
@@ -59,9 +213,9 @@ public struct ValidationTab: View {
   /// Combined ordered screenshot set for lightbox navigation: smoke → legacy → review.
   /// Derived from whichever source is live (progress from events, or final checks).
   private var screenshotSet: [ScreenshotRef] {
-    let pageShots = (progress?.pageDetails ?? checks?.pages ?? []).compactMap { $0.screenshot }
-    let acShots = (progress?.acChecks ?? checks?.acChecks ?? []).compactMap { $0.screenshot }
-    let reviewShots = progress?.reviewDetail?.screenshots ?? checks?.taskReviewScreenshots ?? []
+    let pageShots = (progress?.pageDetails ?? displayedChecks?.pages ?? []).compactMap { $0.screenshot }
+    let acShots = (progress?.acChecks ?? displayedChecks?.acChecks ?? []).compactMap { $0.screenshot }
+    let reviewShots = progress?.reviewDetail?.screenshots ?? displayedChecks?.taskReviewScreenshots ?? []
     return pageShots + acShots + reviewShots
   }
 
@@ -92,7 +246,7 @@ public struct ValidationTab: View {
   /// Per-phase status, derived from either live progress or the final checks result.
   private func phaseStatus(_ phase: ValidationPhase) -> PhaseStatus {
     if let p = progress { return p.state(for: phase).status }
-    guard let c = checks else { return .notStarted }
+    guard let c = displayedChecks else { return .notStarted }
     switch phase {
     case .build:
       return c.smoke || c.buildOutput == nil ? .passed : .failed
@@ -154,7 +308,7 @@ public struct ValidationTab: View {
       }
     }
     // Fallback from checks
-    if let c = checks {
+    if let c = displayedChecks {
       switch phase {
       case .pages:
         return c.pages.map { "\($0.count) pages" }
@@ -193,7 +347,13 @@ public struct ValidationTab: View {
         .padding(20)
       }
     }
+    .task(id: pod.id) {
+      await fetchValidationHistory()
+    }
     .onChange(of: progress?.attempt) { _, _ in
+      selectedPhase = nil
+    }
+    .onChange(of: selectedHistoryKey) { _, _ in
       selectedPhase = nil
     }
     .onChange(of: pod.status) { _, _ in
@@ -234,6 +394,7 @@ public struct ValidationTab: View {
           .padding(.vertical, 2)
           .background(.indigo.opacity(0.12), in: Capsule())
       }
+      validationHistoryMenu
       Spacer()
       if pod.containerUrl != nil,
          pod.status == .validated || pod.status == .validating {
@@ -346,6 +507,32 @@ public struct ValidationTab: View {
   }
 
   @ViewBuilder
+  private var validationHistoryMenu: some View {
+    if isLoadingHistory {
+      ProgressView()
+        .controlSize(.mini)
+        .help("Loading validation history")
+    } else if !sortedValidationHistory.isEmpty {
+      Picker("Validation attempt", selection: $selectedHistoryKey) {
+        Text("Current").tag("current")
+        ForEach(sortedValidationHistory) { item in
+          Text("Attempt \(item.attempt) · \(item.result.overall)")
+            .tag(String(item.attempt))
+        }
+      }
+      .pickerStyle(.menu)
+      .controlSize(.small)
+      .frame(maxWidth: 150)
+      .help("Show current or previous validation results")
+    } else if let historyError {
+      Image(systemName: "clock.badge.exclamationmark")
+        .font(.system(size: 12))
+        .foregroundStyle(.secondary)
+        .help(historyError)
+    }
+  }
+
+  @ViewBuilder
   private var forceApprovePopover: some View {
     VStack(alignment: .leading, spacing: 12) {
       Text("Force Approve").font(.headline)
@@ -381,7 +568,7 @@ public struct ValidationTab: View {
 
   @ViewBuilder
   private var phaseChipRow: some View {
-    let hasAnyData = progress != nil || checks != nil
+    let hasAnyData = progress != nil || displayedChecks != nil
     ScrollView(.horizontal, showsIndicators: false) {
       HStack(spacing: 8) {
         ForEach(displayedPhases, id: \.self) { phase in
@@ -403,11 +590,11 @@ public struct ValidationTab: View {
   @ViewBuilder
   private var validationSummaryPanel: some View {
     let contract = pod.contract
-    let factChecks = progress?.factChecks ?? checks?.factChecks ?? []
+    let factChecks = progress?.factChecks ?? displayedChecks?.factChecks ?? []
     let passedFacts = factChecks.filter(\.passed).count
     let failedFacts = factChecks.filter { !$0.passed }.count
     let totalFacts = contract?.requiredFacts.count ?? factChecks.count
-    let reviewIssueCount = progress?.reviewDetail?.issues.count ?? checks?.reviewIssues?.count ?? 0
+    let reviewIssueCount = progress?.reviewDetail?.issues.count ?? displayedChecks?.reviewIssues?.count ?? 0
 
     VStack(alignment: .leading, spacing: 12) {
       HStack(alignment: .top, spacing: 12) {
@@ -458,10 +645,10 @@ public struct ValidationTab: View {
     if displayedPhases.contains(where: { phaseStatus($0) == .running }) {
       return "Validation is running"
     }
-    if checks?.allPassed == true {
+    if displayedChecks?.allPassed == true {
       return "Validation passed"
     }
-    if checks == nil && progress == nil {
+    if displayedChecks == nil && progress == nil {
       return "Validation has not started"
     }
     return "Validation status"
@@ -483,14 +670,14 @@ public struct ValidationTab: View {
   private var validationSummaryIcon: String {
     if displayedPhases.contains(where: { phaseStatus($0) == .failed }) { return "xmark.seal.fill" }
     if displayedPhases.contains(where: { phaseStatus($0) == .running }) { return "arrow.triangle.2.circlepath" }
-    if checks?.allPassed == true { return "checkmark.seal.fill" }
+    if displayedChecks?.allPassed == true { return "checkmark.seal.fill" }
     return "checkmark.seal"
   }
 
   private var validationSummaryColor: Color {
     if displayedPhases.contains(where: { phaseStatus($0) == .failed }) { return .red }
     if displayedPhases.contains(where: { phaseStatus($0) == .running }) { return .blue }
-    if checks?.allPassed == true { return .green }
+    if displayedChecks?.allPassed == true { return .green }
     return .secondary
   }
 
@@ -528,9 +715,9 @@ public struct ValidationTab: View {
       // Legacy criteria list stays visible when older pods have criteria,
       // regardless of validation state.
       if !criteria.isEmpty {
-        acListSection(criteria: criteria, acChecks: progress?.acChecks ?? checks?.acChecks)
+        acListSection(criteria: criteria, acChecks: progress?.acChecks ?? displayedChecks?.acChecks)
       }
-      if progress == nil && checks == nil {
+      if progress == nil && displayedChecks == nil {
         // Empty state — no validation run yet
         VStack(spacing: 10) {
           Image(systemName: "checkmark.seal")
@@ -561,7 +748,7 @@ public struct ValidationTab: View {
   @ViewBuilder
   private var buildDetail: some View {
     let status = phaseStatus(.build)
-    let output: String? = progress?.buildOutput ?? checks?.buildOutput
+    let output: String? = progress?.buildOutput ?? displayedChecks?.buildOutput
     let dur: Int? = progress?.build.duration
 
     VStack(alignment: .leading, spacing: 12) {
@@ -576,9 +763,9 @@ public struct ValidationTab: View {
   @ViewBuilder
   private var testDetail: some View {
     let status = phaseStatus(.test)
-    let output: String? = progress?.testOutput ?? checks?.testOutput
+    let output: String? = progress?.testOutput ?? displayedChecks?.testOutput
     let dur: Int? = progress?.test.duration
-    let smokeOk = checks?.smoke ?? (progress?.build.status == .passed)
+    let smokeOk = displayedChecks?.smoke ?? (progress?.build.status == .passed)
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(status: status, passLabel: "All tests passed", failLabel: "Tests failed",
@@ -593,9 +780,9 @@ public struct ValidationTab: View {
   @ViewBuilder
   private var lintDetail: some View {
     let status = phaseStatus(.lint)
-    let output: String? = progress?.lintOutput ?? checks?.lintOutput
+    let output: String? = progress?.lintOutput ?? displayedChecks?.lintOutput
     let dur: Int? = progress?.lint.duration
-    let buildOk = checks?.smoke != false || (progress?.build.status == .passed)
+    let buildOk = displayedChecks?.smoke != false || (progress?.build.status == .passed)
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(status: status, passLabel: "Lint passed", failLabel: "Lint failed",
@@ -610,9 +797,9 @@ public struct ValidationTab: View {
   @ViewBuilder
   private var sastDetail: some View {
     let status = phaseStatus(.sast)
-    let output: String? = progress?.sastOutput ?? checks?.sastOutput
+    let output: String? = progress?.sastOutput ?? displayedChecks?.sastOutput
     let dur: Int? = progress?.sast.duration
-    let buildOk = checks?.smoke != false || (progress?.build.status == .passed)
+    let buildOk = displayedChecks?.smoke != false || (progress?.build.status == .passed)
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(status: status, passLabel: "Security scan passed", failLabel: "Security scan failed",
@@ -627,7 +814,7 @@ public struct ValidationTab: View {
   @ViewBuilder
   private var healthDetail: some View {
     let status = phaseStatus(.health)
-    let health: HealthCheckDetail? = progress?.healthDetail ?? checks?.healthCheck
+    let health: HealthCheckDetail? = progress?.healthDetail ?? displayedChecks?.healthCheck
     let dur: Int? = progress?.health.duration
 
     VStack(alignment: .leading, spacing: 12) {
@@ -679,7 +866,7 @@ public struct ValidationTab: View {
   @ViewBuilder
   private var pagesDetail: some View {
     let status = phaseStatus(.pages)
-    let pages: [PageDetail]? = progress?.pageDetails ?? checks?.pages
+    let pages: [PageDetail]? = progress?.pageDetails ?? displayedChecks?.pages
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(status: status, passLabel: "All pages passed",
@@ -753,13 +940,13 @@ public struct ValidationTab: View {
   @ViewBuilder
   private var acDetail: some View {
     let status = phaseStatus(.ac)
-    let acChecks: [AcCheckDetail]? = progress?.acChecks ?? checks?.acChecks
+    let acChecks: [AcCheckDetail]? = progress?.acChecks ?? displayedChecks?.acChecks
     let criteria = pod.acceptanceCriteria
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(status: status, passLabel: "Legacy checks verified",
                      failLabel: "Legacy checks failed",
-                     skipLabel: acSkipLabel(reason: checks?.acSkipReason))
+                     skipLabel: acSkipLabel(reason: displayedChecks?.acSkipReason))
       if let criteria, !criteria.isEmpty {
         acListSection(criteria: criteria, acChecks: acChecks)
       } else if let acChecks, !acChecks.isEmpty {
@@ -777,7 +964,7 @@ public struct ValidationTab: View {
   @ViewBuilder
   private var factsDetail: some View {
     let status = phaseStatus(.facts)
-    let factChecks: [FactCheckDetail]? = progress?.factChecks ?? checks?.factChecks
+    let factChecks: [FactCheckDetail]? = progress?.factChecks ?? displayedChecks?.factChecks
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(status: status, passLabel: "Required facts passed",
@@ -1213,12 +1400,12 @@ public struct ValidationTab: View {
   private var reviewDetail: some View {
     let status = phaseStatus(.review)
     let detail: ReviewPhaseDetail? = progress?.reviewDetail
-    let issues: [String] = detail?.issues ?? checks?.reviewIssues ?? []
-    let reasoning: String? = detail?.reasoning ?? checks?.reviewReasoning
-    let skipReason: String? = checks?.reviewSkipReason
-    let skipKind: String? = checks?.reviewSkipKind
-    let reqs: [RequirementCheckDetail]? = detail?.requirementsCheck ?? checks?.requirementsCheck
-    let screenshots: [ScreenshotRef] = detail?.screenshots ?? checks?.taskReviewScreenshots ?? []
+    let issues: [String] = detail?.issues ?? displayedChecks?.reviewIssues ?? []
+    let reasoning: String? = detail?.reasoning ?? displayedChecks?.reviewReasoning
+    let skipReason: String? = displayedChecks?.reviewSkipReason
+    let skipKind: String? = displayedChecks?.reviewSkipKind
+    let reqs: [RequirementCheckDetail]? = detail?.requirementsCheck ?? displayedChecks?.requirementsCheck
+    let screenshots: [ScreenshotRef] = detail?.screenshots ?? displayedChecks?.taskReviewScreenshots ?? []
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(
@@ -1242,10 +1429,10 @@ public struct ValidationTab: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
           ForEach(Array(issues.enumerated()), id: \.offset) { idx, issue in
-            let findingId = checks?.reviewFindings?.first(where: { $0.description == issue })?.id
+            let findingId = displayedChecks?.reviewFindings?.first(where: { $0.description == issue })?.id
               ?? "review-issue-\(idx)"
             let isDismissed = dismissedFindingIds.contains(findingId)
-              || (checks?.dismissedFindingIds.contains(findingId) ?? false)
+              || (displayedChecks?.dismissedFindingIds.contains(findingId) ?? false)
             HStack(alignment: .top, spacing: 6) {
               Image(systemName: isDismissed ? "checkmark.circle.fill" : "exclamationmark.triangle")
                 .font(.system(size: 9))
@@ -1340,7 +1527,7 @@ public struct ValidationTab: View {
 
   @ViewBuilder
   private var correctionMessageBlock: some View {
-    if let msg = checks?.correctionMessage {
+    if let msg = displayedChecks?.correctionMessage {
       VStack(alignment: .leading, spacing: 6) {
         Text("Feedback Sent to Agent")
           .font(.caption.weight(.semibold))

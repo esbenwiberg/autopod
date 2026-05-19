@@ -42,6 +42,7 @@ public struct MainView: View {
     public var loadContent: ((String, String) async throws -> SessionFileContent)?
     public var loadQuality: ((String) async throws -> PodQualitySignals)?
     public var loadPreviewStatus: ((String) async throws -> PreviewStatus)?
+    public var loadValidationHistory: ((String) async throws -> [StoredValidationResponse])?
     public var loadQualityScores: (() async throws -> [PodQualityScore])?
     public var loadCostAnalytics: (() async throws -> CostAnalyticsResponse)?
     public var loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)?
@@ -109,6 +110,7 @@ public struct MainView: View {
         loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
         loadQuality: ((String) async throws -> PodQualitySignals)? = nil,
         loadPreviewStatus: ((String) async throws -> PreviewStatus)? = nil,
+        loadValidationHistory: ((String) async throws -> [StoredValidationResponse])? = nil,
         loadQualityScores: (() async throws -> [PodQualityScore])? = nil,
         loadCostAnalytics: (() async throws -> CostAnalyticsResponse)? = nil,
         loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
@@ -167,6 +169,7 @@ public struct MainView: View {
         self.loadContent = loadContent
         self.loadQuality = loadQuality
         self.loadPreviewStatus = loadPreviewStatus
+        self.loadValidationHistory = loadValidationHistory
         self.loadQualityScores = loadQualityScores
         self.loadCostAnalytics = loadCostAnalytics
         self.loadReliabilityAnalytics = loadReliabilityAnalytics
@@ -498,6 +501,7 @@ public struct MainView: View {
                     loadContent: loadContent,
                     loadQuality: loadQuality,
                     loadPreviewStatus: loadPreviewStatus,
+                    loadValidationHistory: loadValidationHistory,
                     isLoadingLogs: isLoadingLogs,
                     logsLoadError: logsLoadError,
                     onReloadLogs: onReloadLogs,

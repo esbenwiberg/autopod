@@ -235,7 +235,7 @@ public actor DaemonAPI {
     return results.map(\.id)
   }
 
-  public func getValidationHistory(_ id: String) async throws -> [ValidationResponse] {
+  public func getValidationHistory(_ id: String) async throws -> [StoredValidationResponse] {
     try await request("GET", "/pods/\(id)/validations")
   }
 

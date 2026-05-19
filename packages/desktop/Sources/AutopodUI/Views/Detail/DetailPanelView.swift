@@ -32,6 +32,7 @@ public struct DetailPanelView: View {
     public var loadContent: ((String, String) async throws -> SessionFileContent)?
     public var loadQuality: ((String) async throws -> PodQualitySignals)?
     public var loadPreviewStatus: ((String) async throws -> PreviewStatus)?
+    public var loadValidationHistory: ((String) async throws -> [StoredValidationResponse])?
     public var isLoadingLogs: Bool
     public var logsLoadError: String?
     public var onReloadLogs: (() -> Void)?
@@ -60,6 +61,7 @@ public struct DetailPanelView: View {
         loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
         loadQuality: ((String) async throws -> PodQualitySignals)? = nil,
         loadPreviewStatus: ((String) async throws -> PreviewStatus)? = nil,
+        loadValidationHistory: ((String) async throws -> [StoredValidationResponse])? = nil,
         isLoadingLogs: Bool = false,
         logsLoadError: String? = nil,
         onReloadLogs: (() -> Void)? = nil,
@@ -84,6 +86,7 @@ public struct DetailPanelView: View {
         self.loadContent = loadContent
         self.loadQuality = loadQuality
         self.loadPreviewStatus = loadPreviewStatus
+        self.loadValidationHistory = loadValidationHistory
         self.isLoadingLogs = isLoadingLogs
         self.logsLoadError = logsLoadError
         self.onReloadLogs = onReloadLogs
@@ -136,7 +139,11 @@ public struct DetailPanelView: View {
                 )
                 case .diff:       DiffTab(pod: pod, diffString: diffString, onRefresh: onRefreshDiff)
                 case .work:       WorkTab(pod: pod, loadQuality: loadQuality)
-                case .validation: ValidationTab(pod: pod, actions: actions)
+                case .validation: ValidationTab(
+                    pod: pod,
+                    actions: actions,
+                    loadValidationHistory: loadValidationHistory
+                )
                 case .evidence:   EvidenceTab(
                     pod: pod,
                     loadFiles: loadFiles,
@@ -302,13 +309,22 @@ public struct DetailPanelView: View {
     }
 
     private var taskTagline: String? {
-        let candidates = pod.task
+        let generatedCandidates = [
+            pod.briefTitle,
+            pod.plan?.summary,
+            pod.taskSummary?.actualSummary,
+            pod.latestActivity,
+        ]
+        .compactMap { $0 }
+        .map { cleanTaskLine($0) }
+        .filter { !$0.isEmpty && !isBoilerplateTaskLine($0) }
+
+        let taskCandidates = pod.task
             .split(whereSeparator: \.isNewline)
             .map { cleanTaskLine(String($0)) }
             .filter { !$0.isEmpty && !isBoilerplateTaskLine($0) }
 
-        let fallback = cleanTaskLine(pod.task)
-        let chosen = candidates.first ?? (fallback.isEmpty ? nil : fallback)
+        let chosen = generatedCandidates.first ?? taskCandidates.first
         guard let chosen else { return nil }
         return truncateTagline(chosen)
     }
@@ -322,7 +338,11 @@ public struct DetailPanelView: View {
 
     private func isBoilerplateTaskLine(_ line: String) -> Bool {
         let lower = line.lowercased()
-        return lower.hasPrefix("previous session died")
+        return lower == "task"
+            || lower == "summary"
+            || lower == "plan"
+            || lower.hasPrefix("## ")
+            || lower.hasPrefix("previous session died")
             || lower.hasPrefix("read ")
             || lower.hasPrefix("loaded ")
             || lower.hasPrefix("searched ")

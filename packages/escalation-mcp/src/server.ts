@@ -90,7 +90,9 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     'report_plan',
     'Report your implementation plan before writing any code. Fire-and-forget — does not block.',
     {
-      summary: z.string().describe('A one-line summary of your approach'),
+      summary: z
+        .string()
+        .describe('A concrete one-line UI tagline for this pod: what it will change or investigate'),
       steps: z.array(z.string()).describe('Numbered steps you plan to take'),
     },
     async (input) => {

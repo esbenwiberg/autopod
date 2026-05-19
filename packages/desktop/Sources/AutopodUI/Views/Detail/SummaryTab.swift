@@ -10,34 +10,148 @@ struct WorkTab: View {
     var loadQuality: ((String) async throws -> PodQualitySignals)? = nil
 
     @State private var quality: PodQualitySignals? = nil
+    @State private var selectedSection: WorkSection = .task
+
+    private enum WorkSection: String, CaseIterable {
+        case task, plan, summary, deviations, quality
+
+        var label: String {
+            switch self {
+            case .task: "Task"
+            case .plan: "Plan"
+            case .summary: "Summary"
+            case .deviations: "Deviations"
+            case .quality: "Quality"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .task: "text.quote"
+            case .plan: "list.bullet.clipboard"
+            case .summary: "doc.text.below.ecg"
+            case .deviations: "exclamationmark.triangle"
+            case .quality: "gauge.with.dots.needle.67percent"
+            }
+        }
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // Session quality — behavioural telemetry, headline signal
-                if let signals = quality {
-                    SessionQualityCard(signals: signals)
+        HSplitView {
+            sectionRail
+                .frame(minWidth: 150, idealWidth: 170, maxWidth: 220)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    selectedSectionContent
                 }
-
-                // Task brief — anchors everything else
-                promptCard
-
-                // Plan
-                if let plan = pod.plan {
-                    planCard(plan)
-                }
-
-                // Task summary (persistent once reported)
-                if let summary = pod.taskSummary {
-                    taskSummaryCard(summary)
-                }
-
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(20)
         }
         .task(id: pod.id) {
             await fetchQuality()
         }
+        .onAppear {
+            selectedSection = defaultSection
+        }
+        .onChange(of: pod.id) { _, _ in
+            selectedSection = defaultSection
+        }
+    }
+
+    private var defaultSection: WorkSection {
+        pod.taskSummary == nil ? .task : .summary
+    }
+
+    private var sectionRail: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Work")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .tracking(0.4)
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+
+            ForEach(WorkSection.allCases, id: \.self) { section in
+                Button {
+                    selectedSection = section
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: section.icon)
+                            .font(.system(size: 12))
+                            .frame(width: 16)
+                        Text(section.label)
+                            .font(.subheadline.weight(selectedSection == section ? .semibold : .regular))
+                        Spacer(minLength: 0)
+                        if section == .deviations, let count = pod.taskSummary?.deviations.count, count > 0 {
+                            Text("\(count)")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .foregroundStyle(selectedSection == section ? .primary : .secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(selectedSection == section ? Color.white.opacity(0.08) : .clear)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 7))
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+    }
+
+    @ViewBuilder
+    private var selectedSectionContent: some View {
+        switch selectedSection {
+        case .task:
+            promptCard
+        case .plan:
+            if let plan = pod.plan {
+                planCard(plan)
+            } else {
+                emptyWorkSection("No plan reported yet", icon: "list.bullet.clipboard")
+            }
+        case .summary:
+            if let summary = pod.taskSummary {
+                taskSummaryCard(summary, includeDeviations: false)
+            } else {
+                emptyWorkSection("No task summary reported yet", icon: "doc.text.below.ecg")
+            }
+        case .deviations:
+            if let summary = pod.taskSummary, !summary.deviations.isEmpty {
+                deviationsCard(summary.deviations)
+            } else {
+                emptyWorkSection("No deviations reported", icon: "checkmark.circle")
+            }
+        case .quality:
+            if let signals = quality {
+                SessionQualityCard(signals: signals)
+            } else {
+                emptyWorkSection("No quality signals yet", icon: "gauge.with.dots.needle.67percent")
+            }
+        }
+    }
+
+    private func emptyWorkSection(_ text: String, icon: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 30))
+                .foregroundStyle(.tertiary)
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 80)
     }
 
     // MARK: - Quality
@@ -146,7 +260,7 @@ struct WorkTab: View {
 
     // MARK: - Task summary
 
-    private func taskSummaryCard(_ summary: TaskSummary) -> some View {
+    private func taskSummaryCard(_ summary: TaskSummary, includeDeviations: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Image(systemName: "doc.text.below.ecg")
@@ -175,18 +289,33 @@ struct WorkTab: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
 
-            if !summary.deviations.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Deviations from Plan")
-                        .font(.system(.caption, design: .default).weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                        .tracking(0.3)
+            if includeDeviations && !summary.deviations.isEmpty {
+                deviationsCard(summary.deviations)
+            }
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
 
-                    ForEach(Array(summary.deviations.enumerated()), id: \.offset) { _, deviation in
-                        deviationCard(deviation)
-                    }
-                }
+    private func deviationsCard(_ deviations: [DeviationItem]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                Text("Deviations from Plan")
+                    .font(.system(.subheadline).weight(.semibold))
+                Spacer()
+                Text("\(deviations.count)")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.orange.opacity(0.1), in: Capsule())
+            }
+
+            ForEach(Array(deviations.enumerated()), id: \.offset) { _, deviation in
+                deviationCard(deviation)
             }
         }
         .padding(14)

@@ -55,6 +55,14 @@ public struct ValidationResponse: Codable, Sendable {
   public let duration: Int
 }
 
+public struct StoredValidationResponse: Codable, Sendable, Identifiable {
+  public let id: String
+  public let podId: String
+  public let attempt: Int
+  public let result: ValidationResponse
+  public let createdAt: String
+}
+
 // MARK: - Smoke
 
 public struct SmokeResultResponse: Codable, Sendable {

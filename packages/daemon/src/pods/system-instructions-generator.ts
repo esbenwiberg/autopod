@@ -536,7 +536,7 @@ export function generateSystemInstructions(
       hasCodeIntel
         ? `**Code-intel MCPs are active — use ${codeIntelExamples}, etc. for ALL symbol discovery. Do NOT use grep, find, or file reads to locate symbols.** `
         : ''
-    }Then call \`report_plan\` with your approach and numbered steps.${
+    }Then call \`report_plan\` with a concrete one-line summary of what this pod will change or investigate, plus numbered steps. The summary is shown as the pod tagline in the UI, so do not use generic text like "Task", "Implement the request", or markdown headings.${
       profile.evaluatePlan
         ? ' After calling `report_plan`, immediately call `check_messages` — the harness may have queued feedback on your plan against the acceptance criteria.'
         : ''

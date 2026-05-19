@@ -25,14 +25,13 @@ struct OverviewTab: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // Worktree-compromised banner — lives inside the ScrollView so its
-                // multi-line text can't propagate a min-height up to the window.
+            VStack(alignment: .leading, spacing: 16) {
+                overviewStatusStrip
+
                 if pod.worktreeCompromised {
                     WorktreeCompromisedBanner()
                 }
 
-                // Escalation card (if pending)
                 if pod.status == .awaitingInput, let question = pod.escalationQuestion {
                     if pod.escalationType == "action_approval" {
                         actionApprovalCard(question)
@@ -41,31 +40,28 @@ struct OverviewTab: View {
                     }
                 }
 
-                // Progress
+                if pod.status == .failed || pod.status == .reviewRequired {
+                    errorSection
+                }
+
                 if let phase = pod.phase {
                     progressSection(phase)
                 }
 
-                // Pending memory suggestions
                 if !pendingMemories.isEmpty {
                     memorySuggestionsSection
                 }
 
-                // Profile metadata row
-                profileMetadataRow
+                overviewSnapshotGrid
 
-                // Preview card (web UI pods only)
                 if pod.hasWebUi {
-                    previewCard
+                    compactPreviewCard
                 }
 
-                // Artifacts (interactive-artifact pods only land here after complete)
                 if let artifactsPath = pod.artifactsPath, !artifactsPath.isEmpty {
                     artifactsSection(artifactsPath)
                 }
 
-                // Infrastructure — sidecars + test-pipeline branches. Hidden entirely
-                // when the pod has neither.
                 if !pod.requireSidecars.isEmpty
                     || !pod.sidecarContainerIds.isEmpty
                     || !pod.testRunBranches.isEmpty
@@ -73,30 +69,18 @@ struct OverviewTab: View {
                     infrastructureSection
                 }
 
-                // Metrics
-                metricsCard
-
-                // Commit activity (running/paused or any pod with commits)
                 if pod.commitCount > 0 || pod.status == .running || pod.status == .paused {
                     commitSection
                 }
 
-                // Validation summary (if available)
                 if let checks = pod.validationChecks {
                     validationSummary(checks)
                 }
 
-                // Error / review required
-                if pod.status == .failed || pod.status == .reviewRequired {
-                    errorSection
-                }
-
-                // Pod chain
                 if pod.linkedSessionId != nil {
                     chainSection
                 }
 
-                // Recent activity
                 activityFeed
             }
             .padding(20)
@@ -118,6 +102,115 @@ struct OverviewTab: View {
             poller.stop()
             startPollingIfNeeded()
         }
+    }
+
+    // MARK: - Overview summary
+
+    private var overviewStatusStrip: some View {
+        let accent = pod.status.color
+        return HStack(alignment: .top, spacing: 12) {
+            Image(systemName: overviewStatusIcon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(accent)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(overviewStatusTitle)
+                    .font(.callout.weight(.semibold))
+                Text(overviewStatusSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Text(pod.status.label)
+                .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                .foregroundStyle(accent)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(accent.opacity(0.12), in: Capsule())
+        }
+        .padding(14)
+        .background(accent.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(accent.opacity(0.16), lineWidth: 1))
+    }
+
+    private var overviewStatusIcon: String {
+        switch pod.status {
+        case .failed: "xmark.seal.fill"
+        case .reviewRequired, .awaitingInput: "exclamationmark.triangle.fill"
+        case .complete: "checkmark.seal.fill"
+        case .running, .validating, .provisioning, .merging, .mergePending, .handoff:
+            "arrow.triangle.2.circlepath"
+        default: "circle"
+        }
+    }
+
+    private var overviewStatusTitle: String {
+        if pod.worktreeCompromised { return "Worktree needs recovery" }
+        switch pod.status {
+        case .failed: return "Pod failed"
+        case .reviewRequired: return "Human review required"
+        case .awaitingInput: return "Agent needs input"
+        case .complete: return "Pod complete"
+        case .validating: return "Validation running"
+        case .running: return "Agent running"
+        default: return pod.status.label.capitalized
+        }
+    }
+
+    private var overviewStatusSubtitle: String {
+        if pod.worktreeCompromised {
+            return "Recover the worktree before retrying or continuing this pod."
+        }
+        if let err = pod.errorSummary, (pod.status == .failed || pod.status == .reviewRequired) {
+            return err
+        }
+        if let phase = pod.phase {
+            return phase.description
+        }
+        return "\(pod.profileName) on \(pod.branch)"
+    }
+
+    private var overviewSnapshotGrid: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
+            snapshotTile(icon: "person.text.rectangle", label: "Profile", value: pod.profileName)
+            snapshotTile(icon: "arrow.triangle.branch", label: "Branch", value: pod.branch)
+            snapshotTile(icon: "clock", label: "Duration", value: pod.duration)
+            snapshotTile(icon: "dollarsign.circle", label: "Cost", value: String(format: "$%.3f", pod.costUsd))
+            if let diff = pod.diffStats {
+                snapshotTile(icon: "doc.text", label: "Diff", value: "\(diff.files) files, +\(diff.added)/-\(diff.removed)")
+            }
+            if let quality {
+                snapshotTile(icon: "checkmark.seal", label: "Quality", value: quality.score.map { "\($0)/100" } ?? quality.grade.capitalized)
+            } else {
+                snapshotTile(icon: "checkmark.seal", label: "Quality", value: "—")
+            }
+        }
+    }
+
+    private func snapshotTile(icon: String, label: String, value: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Text(value)
+                    .font(.system(.caption, design: label == "Branch" ? .monospaced : .default).weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Quality
@@ -147,6 +240,75 @@ struct OverviewTab: View {
     }
 
     // MARK: - Preview card
+
+    private var compactPreviewCard: some View {
+        let running = poller.status?.running ?? false
+        let reachable = poller.status?.reachable ?? false
+        let restartCount = poller.status?.restartCount ?? 0
+        let urlString = poller.status?.previewUrl
+        let accentColor: Color = running && reachable ? .green
+            : running && !reachable ? .orange
+            : .secondary
+
+        return HStack(spacing: 10) {
+            Image(systemName: running && reachable ? "play.circle.fill" : "play.rectangle")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(accentColor)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text("Preview")
+                        .font(.caption.weight(.semibold))
+                    if restartCount > 0 {
+                        Text("\(restartCount) restart\(restartCount == 1 ? "" : "s")")
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.orange)
+                    }
+                }
+                Text(compactPreviewSubtitle(running: running, reachable: reachable, urlString: urlString))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: 8)
+
+            if let urlString {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(urlString, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Copy preview URL")
+            }
+
+            Button {
+                Task { await actions.openLiveApp(pod.id) }
+            } label: {
+                Label("Open", systemImage: "play.fill")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(running && reachable ? .green : nil)
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(accentColor.opacity(0.16), lineWidth: 1))
+    }
+
+    private func compactPreviewSubtitle(running: Bool, reachable: Bool, urlString: String?) -> String {
+        if let error = poller.lastFetchError { return "Status check failed: \(error)" }
+        if let urlString { return urlString }
+        if running && !reachable { return "Server is starting or respawning" }
+        if running { return "Preview server running" }
+        return "No preview active"
+    }
 
     private var previewCard: some View {
         let running = poller.status?.running ?? false
