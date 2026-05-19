@@ -711,6 +711,25 @@ describe('LocalWorktreeManager', () => {
       expect(result.reason).toMatch(/Refusing to restore/);
     });
 
+    it('explicit recovery refreshes a stale index and restores tracked modifications', async () => {
+      mockStatusSequence(
+        ['D  .changes/fix.md', ' M Client/sheet-js-fix/bin/xlsx.njs', ' D src/deleted.ts'],
+        [' M Client/sheet-js-fix/bin/xlsx.njs', ' D src/deleted.ts'],
+      );
+
+      const result = await manager.restoreFromHead('/tmp/worktree/sess', {
+        allowTrackedModifications: true,
+      });
+
+      expect(result.restored).toBe(true);
+      expect(result.restoredCount).toBe(2);
+      expect(result.reason).toContain('2 tracked files');
+
+      const calls = execFileMock.mock.calls.map((c) => (c[1] as string[]).join(' '));
+      expect(calls).toContain('reset --mixed HEAD');
+      expect(calls).toContain('checkout -- .');
+    });
+
     it('refuses when untracked files are present', async () => {
       mockStatusPorcelain(['?? new-file.txt', ' D src/deleted.ts']);
 

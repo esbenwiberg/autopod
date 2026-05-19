@@ -3659,6 +3659,12 @@ describe('PodManager', () => {
       );
       expect(ctx.validationEngine.validate).toHaveBeenCalled();
       expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
+      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledWith(
+        'ctr-1',
+        '/workspace',
+        '/tmp/wt',
+        expect.arrayContaining(['.git', 'node_modules']),
+      );
     });
 
     it('refreshes the host linked-worktree index after promoting container commits', async () => {

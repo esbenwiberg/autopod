@@ -2238,6 +2238,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     );
   }
 
+  // Archive fallback runs on the host, so keep dependency/code-intel caches out of
+  // the mirror. They are ignored runtime state and can contain filesystem entries
+  // that macOS refuses to recreate from Docker tar streams.
+  const WORKSPACE_ARCHIVE_EXCLUDES = ['.git', 'node_modules', '.serena', '.roslyn-codelens'];
+
   async function syncWorkspaceBackOnce(
     containerId: string,
     worktreePath: string,
@@ -2365,7 +2370,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       );
 
       // Extract workspace files excluding .git so the host gitlink is preserved.
-      await cm.extractDirectoryFromContainer(containerId, '/workspace', worktreePath, ['.git']);
+      await cm.extractDirectoryFromContainer(
+        containerId,
+        '/workspace',
+        worktreePath,
+        WORKSPACE_ARCHIVE_EXCLUDES,
+      );
 
       // Try to recover commits: extract the container's .git to a temp dir and push to bare.
       let bareRepoPath: string | null = null;
@@ -2486,7 +2496,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       }
 
-      await cm.extractDirectoryFromContainer(containerId, '/workspace', worktreePath, ['.git']);
+      await cm.extractDirectoryFromContainer(
+        containerId,
+        '/workspace',
+        worktreePath,
+        WORKSPACE_ARCHIVE_EXCLUDES,
+      );
       await refreshHostWorktreeIndex(worktreePath, podId);
       logger.info({ containerId, worktreePath }, 'Worktree repopulated from live container');
       return true;
@@ -9607,9 +9622,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // are typically already on the bare via the in-container `git push` step
       // of syncWorkspaceBack, even when the file-copy half timed out. The host
       // worktree's HEAD/index point at those commits — only working-tree files
-      // are missing on disk. `restoreFromHead` is a safe `git checkout -- .`
-      // gated on the dirty state being purely deletions.
-      const restored = await worktreeManager.restoreFromHead(pod.worktreePath);
+      // are stale on disk. `restoreFromHead` is gated on recoverable tracked-file
+      // damage so it can fix stale index/deletion/corruption states without
+      // sweeping unrelated untracked work.
+      const restored = await worktreeManager.restoreFromHead(pod.worktreePath, {
+        allowTrackedModifications: true,
+      });
       if (!restored.restored) {
         return {
           recovered: false,

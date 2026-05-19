@@ -68,7 +68,8 @@ export interface ContainerManager {
    * Extract a directory from a container (works on stopped containers) to a host path.
    * Clears the host directory contents first (skipping any entries in `excludes`),
    * then extracts the container directory (skipping entries matching `excludes`).
-   * `excludes` entries are matched against the top-level names within containerPath.
+   * Bare `excludes` entries such as `node_modules` match any path segment; entries
+   * with slashes match that relative path and its descendants.
    */
   extractDirectoryFromContainer(
     containerId: string,

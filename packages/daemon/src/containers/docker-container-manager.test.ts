@@ -1,9 +1,11 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -609,6 +611,40 @@ describe('DockerContainerManager', () => {
       expect(readdirAutopodStaging(hostPath)).toEqual([]);
     });
 
+    it('skips nested excluded directories and preserves archive link entries', async () => {
+      mkdirSync(join(hostPath, 'Client', 'node_modules'), { recursive: true });
+      writeFileSync(join(hostPath, 'Client', 'node_modules', 'keep.txt'), 'cached');
+
+      container.getArchive.mockResolvedValue(
+        await createTarStreamWithHeaders([
+          { name: 'workspace/Client/src/app.ts', content: 'new' },
+          { name: 'workspace/Client/node_modules/pkg/index.js', content: 'ignored' },
+          {
+            name: 'workspace/bin/runner-hard',
+            type: 'link',
+            linkname: 'workspace/tools/runner.js',
+          },
+          { name: 'workspace/tools/runner.js', content: 'runner' },
+          { name: 'workspace/bin/runner', type: 'symlink', linkname: '../tools/runner.js' },
+        ]),
+      );
+
+      await manager.extractDirectoryFromContainer('abc123', '/workspace', hostPath, [
+        '.git',
+        'node_modules',
+      ]);
+
+      expect(readFileSync(join(hostPath, 'Client', 'src', 'app.ts'), 'utf-8')).toBe('new');
+      expect(readFileSync(join(hostPath, 'Client', 'node_modules', 'keep.txt'), 'utf-8')).toBe(
+        'cached',
+      );
+      expect(existsSync(join(hostPath, 'Client', 'node_modules', 'pkg'))).toBe(false);
+      expect(readFileSync(join(hostPath, 'bin', 'runner-hard'), 'utf-8')).toBe('runner');
+      expect(lstatSync(join(hostPath, 'bin', 'runner')).isSymbolicLink()).toBe(true);
+      expect(readlinkSync(join(hostPath, 'bin', 'runner'))).toBe('../tools/runner.js');
+      expect(readdirAutopodStaging(hostPath)).toEqual([]);
+    });
+
     it('leaves the host directory untouched when archive extraction cannot start', async () => {
       writeFileSync(join(hostPath, 'existing.txt'), 'keep me');
       container.getArchive.mockRejectedValue(new Error('docker socket unavailable'));
@@ -1069,6 +1105,26 @@ async function createTarStreamFromEntries(
   const p = pack();
   for (const [filename, content] of entries) {
     p.entry({ name: filename }, content);
+  }
+  p.finalize();
+  return p;
+}
+
+async function createTarStreamWithHeaders(
+  entries: Array<
+    | { name: string; content: string; type?: 'file' }
+    | { name: string; type: 'symlink'; linkname: string }
+    | { name: string; type: 'link'; linkname: string }
+  >,
+): Promise<NodeJS.ReadableStream> {
+  const { pack } = await import('tar-stream');
+  const p = pack();
+  for (const entry of entries) {
+    if (entry.type === 'symlink' || entry.type === 'link') {
+      p.entry({ name: entry.name, type: entry.type, linkname: entry.linkname });
+    } else {
+      p.entry({ name: entry.name }, entry.content);
+    }
   }
   p.finalize();
   return p;

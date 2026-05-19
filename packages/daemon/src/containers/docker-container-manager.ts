@@ -1,10 +1,12 @@
 import {
   cpSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -84,9 +86,22 @@ function pathExists(path: string): boolean {
   }
 }
 
-function isExcludedTopLevel(relPath: string, excludes?: string[]): boolean {
-  const topLevel = relPath.split('/')[0];
-  return Boolean(topLevel && excludes?.includes(topLevel));
+function normalizeExtractPath(pathname: string): string {
+  return pathname.split('/').filter(Boolean).join('/');
+}
+
+function isExcludedPath(relPath: string, excludes?: string[]): boolean {
+  if (!excludes?.length) return false;
+  const normalizedRel = normalizeExtractPath(relPath);
+  const segments = normalizedRel.split('/');
+  return excludes.some((exclude) => {
+    const normalizedExclude = normalizeExtractPath(exclude);
+    if (!normalizedExclude) return false;
+    if (!normalizedExclude.includes('/')) {
+      return segments.includes(normalizedExclude);
+    }
+    return normalizedRel === normalizedExclude || normalizedRel.startsWith(`${normalizedExclude}/`);
+  });
 }
 
 function removeStaleSyncStagingDirs(hostPath: string): void {
@@ -95,6 +110,10 @@ function removeStaleSyncStagingDirs(hostPath: string): void {
       rmSync(join(hostPath, entry), { recursive: true, force: true });
     }
   }
+}
+
+function archiveEntryRelativePath(name: string, prefix: string): string {
+  return name.startsWith(prefix) ? name.slice(prefix.length) : name;
 }
 
 function collectRelativeEntries(
@@ -109,7 +128,7 @@ function collectRelativeEntries(
     for (const dirent of readdirSync(absoluteDir, { withFileTypes: true })) {
       const relPath = relativeDir ? `${relativeDir}/${dirent.name}` : dirent.name;
       const topLevel = relPath.split('/')[0];
-      if (topLevel === skipTopLevel || isExcludedTopLevel(relPath, excludes)) {
+      if (topLevel === skipTopLevel || isExcludedPath(relPath, excludes)) {
         continue;
       }
       entries.push(relPath);
@@ -135,6 +154,7 @@ function mirrorStagedDirectory(
       force: true,
       errorOnExist: false,
       dereference: false,
+      verbatimSymlinks: true,
       preserveTimestamps: true,
     });
   }
@@ -546,13 +566,12 @@ export class DockerContainerManager implements ContainerManager {
     // Tar entries are prefixed with the basename of containerPath (e.g. "workspace/")
     const prefix = `${basename(containerPath)}/`;
     const extract = tar.extract();
+    const pendingHardlinks: Array<{ fullPath: string; targetPath: string }> = [];
 
     try {
       await new Promise<void>((resolve, reject) => {
         extract.on('entry', (header, stream, next) => {
-          const rel = header.name.startsWith(prefix)
-            ? header.name.slice(prefix.length)
-            : header.name;
+          const rel = archiveEntryRelativePath(header.name, prefix);
 
           if (!rel) {
             // Root directory entry itself — skip
@@ -561,9 +580,7 @@ export class DockerContainerManager implements ContainerManager {
             return;
           }
 
-          // Skip entries that match an excluded top-level name
-          const topLevel = rel.split('/')[0];
-          if (topLevel && excludes?.includes(topLevel)) {
+          if (isExcludedPath(rel, excludes)) {
             stream.resume();
             stream.on('end', next);
             return;
@@ -573,6 +590,22 @@ export class DockerContainerManager implements ContainerManager {
 
           if (header.type === 'directory') {
             mkdirSync(fullPath, { recursive: true });
+            stream.resume();
+            stream.on('end', next);
+          } else if (header.type === 'symlink') {
+            mkdirSync(dirname(fullPath), { recursive: true });
+            symlinkSync(header.linkname ?? '', fullPath);
+            stream.resume();
+            stream.on('end', next);
+          } else if (header.type === 'link') {
+            mkdirSync(dirname(fullPath), { recursive: true });
+            const targetRel = archiveEntryRelativePath(header.linkname ?? '', prefix);
+            const targetPath = join(stagingPath, targetRel);
+            if (pathExists(targetPath)) {
+              linkSync(targetPath, fullPath);
+            } else {
+              pendingHardlinks.push({ fullPath, targetPath });
+            }
             stream.resume();
             stream.on('end', next);
           } else {
@@ -590,7 +623,23 @@ export class DockerContainerManager implements ContainerManager {
             stream.on('error', reject);
           }
         });
-        extract.on('finish', resolve);
+        extract.on('finish', () => {
+          try {
+            for (const { fullPath, targetPath } of pendingHardlinks) {
+              if (!pathExists(targetPath)) {
+                this.logger.warn(
+                  { fullPath, targetPath },
+                  'Skipping archive hardlink with missing target',
+                );
+                continue;
+              }
+              linkSync(targetPath, fullPath);
+            }
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        });
         extract.on('error', reject);
         (archiveStream as NodeJS.ReadableStream).pipe(extract);
       });

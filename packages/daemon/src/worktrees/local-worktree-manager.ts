@@ -11,6 +11,7 @@ import type {
   MergeBranchConfig,
   RebaseOntoBaseConfig,
   RebaseOntoBaseResult,
+  RestoreFromHeadOptions,
   RestoreFromHeadResult,
   WorktreeCreateConfig,
   WorktreeManager,
@@ -215,20 +216,49 @@ async function collectPorcelainRecords(worktreePath: string): Promise<string[]> 
 
 function categorizePorcelainRecords(records: string[]): {
   deletions: string[];
+  modifications: string[];
   blockers: string[];
 } {
   const deletions: string[] = [];
+  const modifications: string[] = [];
   const blockers: string[] = [];
   for (const rec of records) {
     const xy = rec.slice(0, 2);
     const pathPart = rec.slice(3);
     if (xy === ' D') {
       deletions.push(pathPart);
+    } else if (xy === ' M') {
+      modifications.push(pathPart);
     } else {
       blockers.push(`${xy} ${pathPart}`);
     }
   }
-  return { deletions, blockers };
+  return { deletions, modifications, blockers };
+}
+
+function recoverablePorcelainState(
+  records: string[],
+  allowTrackedModifications: boolean,
+): {
+  deletions: string[];
+  modifications: string[];
+  blockers: string[];
+} {
+  const { deletions, modifications, blockers } = categorizePorcelainRecords(records);
+  return {
+    deletions,
+    modifications,
+    blockers: allowTrackedModifications
+      ? blockers
+      : [...blockers, ...modifications.map((p) => ` M ${p}`)],
+  };
+}
+
+function hasStagedPorcelainChanges(records: string[]): boolean {
+  return records.some((record) => {
+    const xy = record.slice(0, 2);
+    return xy !== '??' && xy[0] !== ' ';
+  });
 }
 
 function getAutopodSyncStagingPath(record: string): string | null {
@@ -864,14 +894,23 @@ export class LocalWorktreeManager implements WorktreeManager {
     return stdout.trim().split('\n').filter(Boolean).length;
   }
 
-  async restoreFromHead(worktreePath: string): Promise<RestoreFromHeadResult> {
+  async restoreFromHead(
+    worktreePath: string,
+    options: RestoreFromHeadOptions = {},
+  ): Promise<RestoreFromHeadResult> {
     // `--porcelain=v1` gives a stable two-character status code per path:
     //   columns are XY where X=staged, Y=unstaged. Space = clean.
-    //   ' D' → unstaged deletion of a HEAD-tracked file (the one case we recover).
+    //   ' D' → unstaged deletion of a HEAD-tracked file.
+    //   ' M' → unstaged modification; only restored on explicit recovery.
     //   '??' → untracked.
-    //   Anything else (' M', 'M ', 'A ', 'R ', 'U?', etc.) means real work might be present.
+    //   Anything else ('M ', 'A ', 'R ', 'U?', etc.) means real work might be present.
     let records = await collectPorcelainRecords(worktreePath);
     if (await removeAutopodSyncStagingRecords(worktreePath, records)) {
+      records = await collectPorcelainRecords(worktreePath);
+    }
+
+    if (options.allowTrackedModifications && hasStagedPorcelainChanges(records)) {
+      await git(['reset', '--mixed', 'HEAD'], { cwd: worktreePath });
       records = await collectPorcelainRecords(worktreePath);
     }
 
@@ -888,7 +927,11 @@ export class LocalWorktreeManager implements WorktreeManager {
       };
     }
 
-    let { deletions, blockers } = categorizePorcelainRecords(records);
+    const allowTrackedModifications = options.allowTrackedModifications === true;
+    let { deletions, modifications, blockers } = recoverablePorcelainState(
+      records,
+      allowTrackedModifications,
+    );
 
     // If `.gitignore` itself was wiped along with the rest of the working tree
     // (typical: laptop sleep killed sync-back mid-rm), the porcelain check is
@@ -905,7 +948,10 @@ export class LocalWorktreeManager implements WorktreeManager {
       try {
         await git(['checkout', '--', ...deletedIgnoreFiles], { cwd: worktreePath });
         records = await collectPorcelainRecords(worktreePath);
-        ({ deletions, blockers } = categorizePorcelainRecords(records));
+        ({ deletions, modifications, blockers } = recoverablePorcelainState(
+          records,
+          allowTrackedModifications,
+        ));
         if (records.length === 0) {
           // Restoring just the ignore files left the tree clean — every other
           // entry was an ignored-but-temporarily-untracked artifact.
@@ -942,10 +988,12 @@ export class LocalWorktreeManager implements WorktreeManager {
       };
     }
 
-    // All entries are unstaged deletions of HEAD-tracked files. `git checkout
-    // -- .` restores them from the index without touching HEAD or the index
-    // itself — safer than `git reset --hard HEAD`, which would also blow away
-    // any state we missed in the porcelain check.
+    const restoredCount = deletions.length + modifications.length;
+
+    // All entries are recoverable tracked-file damage. `git checkout -- .`
+    // restores them from the index without touching HEAD or the index itself —
+    // safer than `git reset --hard HEAD`, which would also blow away any state
+    // we missed in the porcelain check.
     try {
       await git(['checkout', '--', '.'], { cwd: worktreePath });
     } catch (err) {
@@ -957,13 +1005,17 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
 
     this.logger.info(
-      { worktreePath, restoredCount: deletions.length },
-      'Restored deleted files from HEAD',
+      { worktreePath, restoredCount, deletionCount: deletions.length },
+      'Restored tracked files from HEAD',
     );
+    const reason =
+      modifications.length === 0
+        ? `Restored ${deletions.length} deleted file${deletions.length === 1 ? '' : 's'} from HEAD`
+        : `Restored ${restoredCount} tracked file${restoredCount === 1 ? '' : 's'} from HEAD`;
     return {
       restored: true,
-      reason: `Restored ${deletions.length} deleted file${deletions.length === 1 ? '' : 's'} from HEAD`,
-      restoredCount: deletions.length,
+      reason,
+      restoredCount,
     };
   }
 

@@ -89,6 +89,15 @@ export interface RestoreFromHeadResult {
   restoredCount: number;
 }
 
+export interface RestoreFromHeadOptions {
+  /**
+   * Default false: only unstaged deletions are restored. Explicit recovery flows
+   * may set this after a failed archive sync, where the bare branch can already
+   * point at the agent's commit while the linked-worktree index/files are stale.
+   */
+  allowTrackedModifications?: boolean;
+}
+
 export interface WorktreeResult {
   worktreePath: string;
   bareRepoPath: string;
@@ -177,22 +186,27 @@ export interface WorktreeManager {
   }): Promise<BranchFolderContents>;
   /**
    * Restore the working tree to match HEAD when (and only when) the dirty
-   * state is exclusively unstaged deletions of HEAD-tracked files. This is
+   * state is exclusively recoverable tracked-file damage. By default that means
+   * unstaged deletions of HEAD-tracked files only. Explicit recovery callers may
+   * set `allowTrackedModifications` to also restore tracked modifications after
+   * refreshing the stale linked-worktree index. This is
    * the post-mortem recovery path for a partial container→host sync — the
    * `find … rm` half ran but `cp -a` was killed (often a Docker-engine stall
    * after laptop sleep), leaving phantom deletions on disk while the agent's
    * real commits are already safe on the bare via the in-container push.
    *
    * Refuses (returns `restored: false` with a reason) the moment it sees:
-   *   - any modified, added, renamed, copied, or unmerged path
-   *   - any staged change at all
+   *   - any added, renamed, copied, or unmerged path
+   *   - any staged change at all, unless `allowTrackedModifications` is true
    *   - any untracked file
-   *   - working tree clean (nothing to restore — caller used wrong recovery path)
    *
    * On the safe path, runs `git checkout -- .` so HEAD and the index are
    * untouched — only deleted working-tree files come back.
    */
-  restoreFromHead(worktreePath: string): Promise<RestoreFromHeadResult>;
+  restoreFromHead(
+    worktreePath: string,
+    options?: RestoreFromHeadOptions,
+  ): Promise<RestoreFromHeadResult>;
 }
 
 export interface BranchFolderContents {
