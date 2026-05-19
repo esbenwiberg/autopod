@@ -69,6 +69,12 @@ const SYSTEM_TOP_LEVEL_DIRS = new Set([
   'opt',
 ]);
 
+const REMOVE_TIMEOUT_RECHECK_DELAY_MS = 250;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function pathExists(path: string): boolean {
   try {
     lstatSync(path);
@@ -155,6 +161,32 @@ export class DockerContainerManager implements ContainerManager {
   constructor({ docker, logger }: DockerContainerManagerOptions) {
     this.docker = docker ?? new Dockerode();
     this.logger = logger;
+  }
+
+  private async containerRemovedAfterTimeout(
+    container: Dockerode.Container,
+    containerId: string,
+  ): Promise<boolean> {
+    await sleep(REMOVE_TIMEOUT_RECHECK_DELAY_MS);
+
+    try {
+      await boundedDockerCall(container.inspect(), {
+        label: 'container.inspect (remove-timeout recheck)',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+        logger: this.logger,
+        containerId,
+      });
+      return false;
+    } catch (err: unknown) {
+      if (isExpectedDockerError(err, [404])) {
+        return true;
+      }
+      this.logger.warn(
+        { containerId, err },
+        'Could not confirm container removal after remove timeout',
+      );
+      return false;
+    }
   }
 
   async spawn(config: ContainerSpawnConfig): Promise<string> {
@@ -381,6 +413,13 @@ export class DockerContainerManager implements ContainerManager {
         });
       } catch (err: unknown) {
         if (err instanceof DockerCallTimeoutError) {
+          if (await this.containerRemovedAfterTimeout(container, containerId)) {
+            this.logger.warn(
+              { containerId },
+              'Remove timed out during kill but follow-up inspect confirmed container is gone',
+            );
+            return;
+          }
           this.logger.error(
             { containerId },
             'Remove timed out during kill — container may leak (daemon wedged)',

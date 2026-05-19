@@ -967,6 +967,26 @@ describe('DockerContainerManager', () => {
       expect(Date.now() - start).toBeLessThan(500);
     });
 
+    it('kill() resolves when remove times out but follow-up inspect reports the container gone', async () => {
+      container.remove.mockReturnValue(new Promise(() => {}));
+      container.inspect.mockRejectedValue({ statusCode: 404 });
+
+      const start = Date.now();
+      await expect(manager.kill('abc123')).resolves.toBeUndefined();
+      expect(container.inspect).toHaveBeenCalledTimes(1);
+      expect(Date.now() - start).toBeLessThan(500);
+    });
+
+    it('kill() still rejects when remove times out and follow-up inspect finds the container', async () => {
+      container.remove.mockReturnValue(new Promise(() => {}));
+      container.inspect.mockResolvedValue({ State: { Running: false } });
+
+      const start = Date.now();
+      await expect(manager.kill('abc123')).rejects.toThrow(/timed out/);
+      expect(container.inspect).toHaveBeenCalledTimes(1);
+      expect(Date.now() - start).toBeLessThan(500);
+    });
+
     it('getStatus() returns "unknown" when inspect hangs (graceful degradation)', async () => {
       container.inspect.mockReturnValue(new Promise(() => {}));
       const start = Date.now();
