@@ -14,6 +14,7 @@
   "scripts": {
     "build": "tsup",
     "clean": "rm -rf dist",
+    "typecheck": "tsup --dts-only",
     "test": "vitest run",
     "dev": "tsup --watch --no-dts"
   },

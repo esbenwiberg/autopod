@@ -14,6 +14,7 @@ coverage/
 .DS_Store
 *.key
 .autopod-data/
+**/.autopod-data/
 .autopod/
 !.autopod/review/SAMPLE-*.html
 tmp/
@@ -25,3 +26,4 @@ packages/desktop/.swiftpm/xcode/package.xcworkspace/xcuserdata/
 packages/desktop/Autopod.xcodeproj/xcuserdata/
 packages/desktop/Autopod.xcodeproj/project.xcworkspace/
 investigations/
+report.html

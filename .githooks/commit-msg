@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+subject=$(head -n 1 "$1")
+
+case "$subject" in
+  feat\(*\):*|feat:*|fix\(*\):*|fix:*|docs\(*\):*|docs:*|style\(*\):*|style:*|refactor\(*\):*|refactor:*|perf\(*\):*|perf:*|test\(*\):*|test:*|build\(*\):*|build:*|ci\(*\):*|ci:*|chore\(*\):*|chore:*|revert\(*\):*|revert:*|security\(*\):*|security:*)
+    exit 0
+    ;;
+esac
+
+echo "Commit subject must use Conventional Commits, e.g. fix(daemon): handle retry." >&2
+exit 1

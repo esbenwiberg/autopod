@@ -1,0 +1,10 @@
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+
+assets/banner.png linguist-generated=true
+assets/icon.png linguist-generated=true
+website/icon.png linguist-generated=true
+packages/desktop/Autopod/Assets.xcassets/AppIcon.appiconset/*.png linguist-generated=true

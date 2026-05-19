@@ -63,7 +63,7 @@ security-scan, session, sidecar, task-summary). Browse the dir; this list rots f
 
 ### @autopod/daemon
 
-The backend server. All heavy lifting lives here. See `packages/daemon/AGENTS.md`
+The backend server. All heavy lifting lives here. See `packages/daemon/CLAUDE.md`
 for the per-subsystem deep dive — what follows is just the entry-point map.
 
 **Pod Management** (`src/pods/`) — large dir, ~30 modules; key entry points:
@@ -71,7 +71,7 @@ for the per-subsystem deep dive — what follows is just the entry-point map.
 - `state-machine.ts` — `validateTransition()` + `canX()` helpers
 - `pod-repository.ts` — pod CRUD; **never** set `pod.status` directly, go through `updateStatus()`
 - `event-bus.ts` — publish/subscribe consumed by the WebSocket layer
-- `system-instructions-generator.ts` — builds the container's AGENTS.md
+- `system-instructions-generator.ts` — builds the container's CLAUDE.md
 - `skill-resolver.ts` — resolves skill content (local file or GitHub)
 - `registry-injector.ts` — generates `.npmrc` / `NuGet.config` for private feeds
 
@@ -81,7 +81,7 @@ for the per-subsystem deep dive — what follows is just the entry-point map.
 - `aci-container-manager.ts` — Azure Container Instances backend (alternative to Docker)
 
 **Runtimes** (`src/runtimes/`):
-- `Codex-runtime.ts` — Anthropic Codex via API, streams `AgentEvent` from SSE
+- `claude-runtime.ts` — Anthropic Claude via API, streams `AgentEvent` from SSE
 - `codex-runtime.ts` — OpenAI Codex/GPT streaming
 - `copilot-runtime.ts` — GitHub Copilot streaming
 - Each runtime has a co-located stream parser with `.test.ts` coverage
@@ -106,7 +106,7 @@ for the per-subsystem deep dive — what follows is just the entry-point map.
 - `migrate.ts` — migration runner (applies pending `.sql` files in filename order)
 - `migrations/` — sequenced `NNN_*.sql` files; latest prefix is in the high 090s
 
-**CRITICAL — migration numbering**: The runner uses the numeric prefix as the schema version. **Two files sharing the same prefix is a silent bug** — the runner applies the first one alphabetically and skips the second forever (same version number). A local `PreToolUse` hook (`.Codex/hooks/migration-prefix-check.sh`) blocks Write/Edit on a colliding prefix; the cross-branch case still needs CI/manual rebase resolution. Check the highest existing prefix before creating one: `ls packages/daemon/src/db/migrations/ | tail -5`. Never reuse a number.
+**CRITICAL — migration numbering**: The runner uses the numeric prefix as the schema version. **Two files sharing the same prefix is a silent bug** — the runner applies the first one alphabetically and skips the second forever (same version number). A local `PreToolUse` hook (`.claude/hooks/migration-prefix-check.sh`) blocks Write/Edit on a colliding prefix; the cross-branch case still needs CI/manual rebase resolution. Check the highest existing prefix before creating one: `ls packages/daemon/src/db/migrations/ | tail -5`. Never reuse a number.
 
 **Profiles** (`src/profiles/`):
 - `profile-store.ts` — Profile CRUD with credential encryption
@@ -252,7 +252,7 @@ Key code paths:
 - `packages/daemon/src/pods/state-machine.ts` — transition validation
 - `packages/daemon/src/pods/registry-injector.ts` — `.npmrc` / `NuGet.config` generation
 - `packages/daemon/src/pods/skill-resolver.ts` — skill content resolution
-- `packages/daemon/src/pods/system-instructions-generator.ts` — container AGENTS.md builder
+- `packages/daemon/src/pods/system-instructions-generator.ts` — container CLAUDE.md builder
 
 ## Testing Patterns
 
@@ -270,7 +270,7 @@ When Docker is available, `scripts/docker-validate.sh` runs real container smoke
 - `packages/daemon/src/pods/pod-lifecycle.e2e.test.ts` — full state machine traversal with mocked infra
 
 ### Runtime stream parser tests
-Each runtime (`Codex-runtime.ts`, `codex-runtime.ts`, `copilot-runtime.ts`) has a
+Each runtime (`claude-runtime.ts`, `codex-runtime.ts`, `copilot-runtime.ts`) has a
 `.test.ts` covering stream event parsing edge cases.
 
 ## Environment Variables

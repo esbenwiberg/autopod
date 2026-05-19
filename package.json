@@ -3,15 +3,23 @@
   "private": true,
   "packageManager": "pnpm@9.15.4",
   "scripts": {
-    "build": "turbo run build",
-    "test": "turbo run test",
+    "build": "node scripts/run-turbo.mjs build",
+    "test": "node scripts/run-turbo.mjs test",
+    "typecheck": "node scripts/run-turbo.mjs typecheck",
     "lint": "biome check .",
+    "format:check": "biome format .",
     "lint:fix": "biome check --write .",
-    "dev": "turbo run dev",
-    "clean": "turbo run clean && rm -rf node_modules"
+    "arch": "depcruise --config .dependency-cruiser.cjs packages",
+    "deadcode": "knip",
+    "audit": "pnpm audit --audit-level high",
+    "secret-scan": "node scripts/secret-scan.mjs",
+    "dev": "node scripts/run-turbo.mjs dev",
+    "clean": "node scripts/run-turbo.mjs clean"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "dependency-cruiser": "^17.0.0",
+    "knip": "^5.0.0",
     "turbo": "^2.3.3",
     "typescript": "^5.7.3",
     "vitest": "^3.0.4"

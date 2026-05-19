@@ -195,6 +195,46 @@ ap override <id> <finding-id> --guidance "Use our custom date helper instead"
 
 ## Getting Started
 
+## Install
+
+Install dependencies with pnpm through `npx`:
+
+```bash
+npx pnpm install
+```
+
+## Usage
+
+Create or select a profile, then start a pod with `ap run`:
+
+```bash
+ap run my-app "Add a dark mode toggle to the settings page"
+```
+
+## Build
+
+Build every workspace package through Turbo:
+
+```bash
+npm run build
+```
+
+## Test
+
+Run the full Vitest suite:
+
+```bash
+npm test
+```
+
+## Architecture
+
+Autopod is a pnpm/Turbo monorepo. `packages/shared` owns the type contracts,
+`packages/daemon` runs the Fastify API and pod orchestration loop,
+`packages/cli` exposes the `ap` command, `packages/validator` builds
+browser-validation scripts, and `packages/escalation-mcp` is injected into
+agent containers for escalation and self-validation tools.
+
 ### Prerequisites
 
 - **Node.js 22+**

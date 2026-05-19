@@ -228,7 +228,7 @@ logged." Match this exactly.
   log message so users have a hint.
 
 - **Body Markdown for ADO vs GitHub.** ADO renders
-  `![alt](url)` and `<img>` differently from GitHub. The existing
+  Markdown image placeholders and `<img>` tags differently from GitHub. The existing
   `pr-body-builder.ts` uses `inlineImages: false` for ADO
   (`ado-pr-manager.ts:206`). Read the rendering branch before
   deciding whether the new attachment URLs slot into the existing

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "typecheck": "echo 'No e2e TypeScript sources yet'",
     "test": "echo 'No e2e tests yet'"
   }
 }

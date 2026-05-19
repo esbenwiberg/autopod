@@ -238,7 +238,7 @@ four small PRs.
 - **Change:** Added `escapeMd()` helper. Escapes `@mention`, HTML angle
   brackets, link syntax, pipes, and backticks for all agent-supplied fields
   (Why, What, How, deviations, checklist).
-- **Test:** snapshot tests that `@security-team URGENT` and `[link](url)`
+- **Test:** snapshot tests that `@security-team URGENT` and placeholder Markdown links
   render escaped.
 
 ### 6.3 Auto-merge requires explicit APPROVED  🟢
