@@ -567,6 +567,38 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       await killAction(id);
     });
 
+  // ap update-from-base
+  program
+    .command('update-from-base <id>')
+    .description('Rebase pod branch onto latest base and restart validation')
+    .action(async (id: string) => {
+      const client = getClient();
+      const resolvedId = await resolvePodId(client, id);
+      const result = await client.updateFromBase(resolvedId);
+
+      switch (result.action) {
+        case 'queued_after_abort':
+          console.log(
+            'Validation is stopping. Update from base will run before the next validation step.',
+          );
+          break;
+        case 'already_up_to_date':
+          console.log(
+            `Pod ${resolvedId} already contains latest ${result.baseBranch}. No validation started.`,
+          );
+          break;
+        case 'rebased':
+          console.log(`Rebased onto ${result.baseBranch}. Validation restarted.`);
+          break;
+        case 'conflict':
+          console.log(`Rebase conflict while updating from ${result.baseBranch}:`);
+          for (const file of result.conflicts) {
+            console.log(`  ${file}`);
+          }
+          process.exit(1);
+      }
+    });
+
   // ap pod <sub> — aliases for ap logs / status / kill
   const podGroup = program.command('pod').description('Pod management shortcuts');
   podGroup

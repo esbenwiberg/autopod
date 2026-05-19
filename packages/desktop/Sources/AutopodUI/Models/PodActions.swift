@@ -92,6 +92,9 @@ public struct PodActions: Sendable {
   /// preview can read briefs the user just authored. Returns the daemon
   /// response — caller should fall through (open sheet anyway) on failure.
   public var syncWorkspaceBranch: @MainActor @Sendable (String) async -> SyncBranchResponse?
+  /// Rebase the pod branch onto the latest base and restart validation.
+  /// Returns the typed daemon response (including conflict results); nil on transport/INVALID_STATE error.
+  public var updateFromBase: @MainActor @Sendable (String) async -> UpdateFromBaseResponse?
 
   public init(
     approve: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
@@ -133,7 +136,8 @@ public struct PodActions: Sendable {
     lastPreviewError: @escaping @MainActor @Sendable () -> String? = { nil },
     createSeries: @escaping @MainActor @Sendable (CreateSeriesRequest) async -> String? = { _ in nil },
     spawnDependent: @escaping @MainActor @Sendable (String, String, [String], String?, String?, [AcDefinition]?, String?) async -> String? = { _, _, _, _, _, _, _ in nil },
-    syncWorkspaceBranch: @escaping @MainActor @Sendable (String) async -> SyncBranchResponse? = { _ in nil }
+    syncWorkspaceBranch: @escaping @MainActor @Sendable (String) async -> SyncBranchResponse? = { _ in nil },
+    updateFromBase: @escaping @MainActor @Sendable (String) async -> UpdateFromBaseResponse? = { _ in nil }
   ) {
     self.approve = approve
     self.reject = reject
@@ -175,6 +179,7 @@ public struct PodActions: Sendable {
     self.createSeries = createSeries
     self.spawnDependent = spawnDependent
     self.syncWorkspaceBranch = syncWorkspaceBranch
+    self.updateFromBase = updateFromBase
   }
 
   /// No-op instance for previews

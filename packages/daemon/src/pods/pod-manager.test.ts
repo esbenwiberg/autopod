@@ -4886,3 +4886,439 @@ describe('wake recovery — wake-correction postscript', () => {
     expect(task).not.toContain('interrupted by a host sleep');
   });
 });
+
+describe('updateFromBase', () => {
+  /** Advance a pod to a parked terminal state reachable from the normal flow. */
+  function setupParkedPod(
+    ctx: TestContext,
+    status: 'failed' | 'review_required',
+    opts: { worktreePath?: string | null; worktreeCompromised?: boolean } = {},
+  ) {
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget' },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'provisioning',
+      worktreePath: opts.worktreePath === undefined ? '/tmp/worktree/abc' : opts.worktreePath,
+      containerId: 'container-xyz',
+      startedAt: new Date().toISOString(),
+    });
+    ctx.podRepo.update(pod.id, { status: 'running' });
+    ctx.podRepo.update(pod.id, { status: 'validating' });
+    if (status === 'review_required') {
+      ctx.podRepo.update(pod.id, { status: 'review_required' });
+    } else {
+      ctx.podRepo.update(pod.id, { status: 'failed' });
+    }
+    if (opts.worktreeCompromised) {
+      ctx.podRepo.update(pod.id, { worktreeCompromised: true });
+    }
+    return { manager, pod };
+  }
+
+  it('failed + clean rebase returns rebased and starts validation asynchronously', async () => {
+    const ctx = createTestContext();
+    vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+      alreadyUpToDate: false,
+      rebased: true,
+      conflicts: [],
+    });
+    const { manager, pod } = setupParkedPod(ctx, 'failed');
+    const triggerSpy = vi.spyOn(manager, 'triggerValidation').mockResolvedValue(undefined);
+
+    const result = await manager.updateFromBase(pod.id);
+
+    expect(result).toEqual({ ok: true, action: 'rebased', baseBranch: 'main', validation: 'started' });
+    // Validation starts via setImmediate — flush it
+    await new Promise((r) => setImmediate(r));
+    expect(triggerSpy).toHaveBeenCalledWith(pod.id);
+  });
+
+  it('review_required + clean rebase returns rebased and starts validation asynchronously', async () => {
+    const ctx = createTestContext();
+    vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+      alreadyUpToDate: false,
+      rebased: true,
+      conflicts: [],
+    });
+    const { manager, pod } = setupParkedPod(ctx, 'review_required');
+    const triggerSpy = vi.spyOn(manager, 'triggerValidation').mockResolvedValue(undefined);
+
+    const result = await manager.updateFromBase(pod.id);
+
+    expect(result).toEqual({ ok: true, action: 'rebased', baseBranch: 'main', validation: 'started' });
+    await new Promise((r) => setImmediate(r));
+    expect(triggerSpy).toHaveBeenCalledWith(pod.id);
+  });
+
+  it('alreadyUpToDate returns already_up_to_date and does not start validation', async () => {
+    const ctx = createTestContext();
+    vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+      alreadyUpToDate: true,
+      rebased: true,
+      conflicts: [],
+    });
+    const { manager, pod } = setupParkedPod(ctx, 'failed');
+    const triggerSpy = vi.spyOn(manager, 'triggerValidation').mockResolvedValue(undefined);
+
+    const result = await manager.updateFromBase(pod.id);
+
+    expect(result).toEqual({ ok: true, action: 'already_up_to_date', baseBranch: 'main' });
+    await new Promise((r) => setImmediate(r));
+    expect(triggerSpy).not.toHaveBeenCalled();
+  });
+
+  it('conflict returns { ok: false, action: conflict } with file paths and does not write mergeBlockReason', async () => {
+    const ctx = createTestContext();
+    vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+      alreadyUpToDate: false,
+      rebased: false,
+      conflicts: ['packages/foo/package.json', 'pnpm-lock.yaml'],
+    });
+    const { manager, pod } = setupParkedPod(ctx, 'failed');
+
+    const result = await manager.updateFromBase(pod.id);
+
+    expect(result).toEqual({
+      ok: false,
+      action: 'conflict',
+      baseBranch: 'main',
+      conflicts: ['packages/foo/package.json', 'pnpm-lock.yaml'],
+    });
+    const refreshed = manager.getSession(pod.id);
+    expect(refreshed.mergeBlockReason).toBeNull();
+    // Pod stays in failed — still reviewable
+    expect(refreshed.status).toBe('failed');
+  });
+
+  it('clean rebase resets validationAttempts to 0 so follow-up starts as attempt 1', async () => {
+    const ctx = createTestContext();
+    vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+      alreadyUpToDate: false,
+      rebased: true,
+      conflicts: [],
+    });
+    const { manager, pod } = setupParkedPod(ctx, 'failed');
+    ctx.podRepo.update(pod.id, { validationAttempts: 2 });
+    vi.spyOn(manager, 'triggerValidation').mockResolvedValue(undefined);
+
+    await manager.updateFromBase(pod.id);
+
+    expect(manager.getSession(pod.id).validationAttempts).toBe(0);
+  });
+
+  it('next pushBranch after clean rebase uses { force: true }, then clears the allowance', async () => {
+    const ctx = createTestContext({ overall: 'pass' });
+    vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+      alreadyUpToDate: false,
+      rebased: true,
+      conflicts: [],
+    });
+    const { manager, pod } = setupParkedPod(ctx, 'failed');
+
+    // Set the force allowance via updateFromBase (spy on triggerValidation to avoid running it)
+    vi.spyOn(manager, 'triggerValidation').mockResolvedValue(undefined);
+    await manager.updateFromBase(pod.id);
+
+    // Advance pod to validated with a PR so approveSession runs the pushBranch path
+    ctx.podRepo.update(pod.id, { status: 'running' });
+    ctx.podRepo.update(pod.id, { status: 'validating' });
+    ctx.podRepo.update(pod.id, { status: 'validated' });
+    ctx.podRepo.update(pod.id, { prUrl: 'https://github.com/org/repo/pull/42' });
+
+    await manager.approveSession(pod.id);
+
+    const pushCalls = vi.mocked(ctx.worktreeManager.pushBranch).mock.calls;
+    // The pre-merge pushBranch call must use force: true
+    expect(pushCalls[0]?.[2]).toMatchObject({ force: true });
+
+    // A second approveSession (no update-from-base in between) must NOT use force
+    vi.mocked(ctx.worktreeManager.pushBranch).mockClear();
+    ctx.podRepo.update(pod.id, { status: 'complete' });
+    ctx.podRepo.update(pod.id, { status: 'queued' });
+    ctx.podRepo.update(pod.id, { status: 'provisioning' });
+    ctx.podRepo.update(pod.id, { status: 'running' });
+    ctx.podRepo.update(pod.id, { status: 'validating' });
+    ctx.podRepo.update(pod.id, { status: 'validated' });
+
+    await manager.approveSession(pod.id);
+
+    expect(vi.mocked(ctx.worktreeManager.pushBranch).mock.calls[0]?.[2]?.force).toBeFalsy();
+  });
+
+  it('validating pod returns queued_after_abort immediately', async () => {
+    const ctx = createTestContext();
+    const { manager, pod } = setupParkedPod(ctx, 'failed');
+    ctx.podRepo.update(pod.id, { status: 'running' });
+    ctx.podRepo.update(pod.id, { status: 'validating' });
+
+    const result = await manager.updateFromBase(pod.id);
+
+    expect(result).toEqual({ ok: true, action: 'queued_after_abort' });
+  });
+
+  it('validating pod abort handoff: unwind runs rebase and starts follow-up validation on clean rebase', async () => {
+    // The validation engine is mocked to call updateFromBase mid-run (simulating the abort race)
+    // then return a fail result. The retry path should detect the pending intent and run rebase.
+    const ctx = createTestContext({ overall: 'fail' });
+    vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+      alreadyUpToDate: false,
+      rebased: true,
+      conflicts: [],
+    });
+
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget' },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'ctr-1',
+      worktreePath: '/tmp/wt',
+      validationAttempts: 0,
+    });
+
+    // When the validation engine runs, call updateFromBase to plant the intent.
+    // This simulates the abort request arriving mid-validation.
+    vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(async () => {
+      await manager.updateFromBase(pod.id); // pod is 'validating' here → stores intent
+      return {
+        podId: pod.id,
+        attempt: 1,
+        timestamp: new Date().toISOString(),
+        smoke: {
+          status: 'fail' as const,
+          build: { status: 'fail' as const, output: 'fail', duration: 0 },
+          health: { status: 'fail' as const, url: '', responseCode: null, duration: 0 },
+          pages: [],
+        },
+        taskReview: null,
+        overall: 'fail' as const,
+        duration: 0,
+      };
+    });
+
+    const triggerSpy = vi.spyOn(manager, 'triggerValidation');
+
+    await manager.triggerValidation(pod.id);
+
+    // The retry path consumed the intent, ran the rebase, and scheduled follow-up
+    expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalled();
+    // Flush setImmediate so follow-up triggerValidation fires
+    await new Promise((r) => setImmediate(r));
+    // triggerValidation was called again (the follow-up)
+    expect(triggerSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('alreadyUpToDate after abort transitions pod to failed without starting follow-up validation', async () => {
+    const ctx = createTestContext({ overall: 'fail' });
+    vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+      alreadyUpToDate: true,
+      rebased: true,
+      conflicts: [],
+    });
+
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget' },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'ctr-1',
+      worktreePath: '/tmp/wt',
+      validationAttempts: 0,
+    });
+
+    vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(async () => {
+      await manager.updateFromBase(pod.id);
+      return {
+        podId: pod.id,
+        attempt: 1,
+        timestamp: new Date().toISOString(),
+        smoke: {
+          status: 'fail' as const,
+          build: { status: 'fail' as const, output: 'fail', duration: 0 },
+          health: { status: 'fail' as const, url: '', responseCode: null, duration: 0 },
+          pages: [],
+        },
+        taskReview: null,
+        overall: 'fail' as const,
+        duration: 0,
+      };
+    });
+
+    const triggerSpy = vi.spyOn(manager, 'triggerValidation');
+
+    await manager.triggerValidation(pod.id);
+    await new Promise((r) => setImmediate(r));
+
+    // The unwind ran the rebase but found nothing to update — pod parked in failed.
+    expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalled();
+    expect(manager.getSession(pod.id).status).toBe('failed');
+    // Only the original triggerValidation call — no follow-up scheduled.
+    expect(triggerSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('conflict after abort transitions validating pod to review_required', async () => {
+    const ctx = createTestContext({ overall: 'fail' });
+    vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+      alreadyUpToDate: false,
+      rebased: false,
+      conflicts: ['src/index.ts'],
+    });
+
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget' },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'ctr-1',
+      worktreePath: '/tmp/wt',
+      validationAttempts: 2, // last attempt → max-attempts path
+    });
+
+    // Plant the intent during validation (as the abort would)
+    vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(async () => {
+      await manager.updateFromBase(pod.id);
+      return {
+        podId: pod.id,
+        attempt: 3,
+        timestamp: new Date().toISOString(),
+        smoke: {
+          status: 'fail' as const,
+          build: { status: 'fail' as const, output: 'fail', duration: 0 },
+          health: { status: 'fail' as const, url: '', responseCode: null, duration: 0 },
+          pages: [],
+        },
+        taskReview: null,
+        overall: 'fail' as const,
+        duration: 0,
+      };
+    });
+
+    await manager.triggerValidation(pod.id);
+    // Allow the async runUpdateFromBaseAfterAbort to complete
+    await new Promise((r) => setImmediate(r));
+
+    const refreshed = manager.getSession(pod.id);
+    expect(refreshed.status).toBe('review_required');
+    expect(refreshed.mergeBlockReason).toBeNull();
+  });
+
+  it('validation success clears pending intent so a later revalidation does not unexpectedly rebase', async () => {
+    // Abort signal can arrive after the validation engine has already produced a pass.
+    // The intent must not linger on a 'validated' pod that later re-enters validation
+    // (e.g., after rejection), or the next failure would consume a stale rebase request.
+    const ctx = createTestContext({ overall: 'pass' });
+    vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
+      alreadyUpToDate: false,
+      rebased: true,
+      conflicts: [],
+    });
+
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget' },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'ctr-1',
+      worktreePath: '/tmp/wt',
+      validationAttempts: 0,
+    });
+
+    // First validation: plant the intent mid-run (the abort race), then succeed.
+    vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(async () => {
+      await manager.updateFromBase(pod.id);
+      return {
+        podId: pod.id,
+        attempt: 1,
+        timestamp: new Date().toISOString(),
+        smoke: {
+          status: 'pass' as const,
+          build: { status: 'pass' as const, output: 'ok', duration: 0 },
+          health: { status: 'pass' as const, url: '', responseCode: 200, duration: 0 },
+          pages: [],
+        },
+        taskReview: null,
+        overall: 'pass' as const,
+        duration: 0,
+      };
+    });
+
+    await manager.triggerValidation(pod.id);
+
+    expect(manager.getSession(pod.id).status).toBe('validated');
+    // The success path doesn't consume intents, so no rebase yet.
+    expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+
+    // Simulate the pod re-entering validation (e.g., after rejection).
+    ctx.podRepo.update(pod.id, { status: 'rejected' });
+    ctx.podRepo.update(pod.id, { status: 'running' });
+    ctx.podRepo.update(pod.id, { validationAttempts: 0 });
+
+    // Second validation fails — would consume any lingering intent on the retry path.
+    vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(async () => ({
+      podId: pod.id,
+      attempt: 1,
+      timestamp: new Date().toISOString(),
+      smoke: {
+        status: 'fail' as const,
+        build: { status: 'fail' as const, output: 'fail', duration: 0 },
+        health: { status: 'fail' as const, url: '', responseCode: null, duration: 0 },
+        pages: [],
+      },
+      taskReview: null,
+      overall: 'fail' as const,
+      duration: 0,
+    }));
+
+    await manager.triggerValidation(pod.id);
+    await new Promise((r) => setImmediate(r));
+
+    // The first run's intent should have been cleared on success — no rebase fired.
+    expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+  });
+
+  it('invalid status returns INVALID_STATE 409', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget' },
+      'user-1',
+    );
+    // Pod is in 'queued' — ineligible
+
+    await expect(manager.updateFromBase(pod.id)).rejects.toMatchObject({
+      code: 'INVALID_STATE',
+      statusCode: 409,
+    });
+  });
+
+  it('missing worktree returns INVALID_STATE 400', async () => {
+    const ctx = createTestContext();
+    const { manager, pod } = setupParkedPod(ctx, 'failed', { worktreePath: null });
+
+    await expect(manager.updateFromBase(pod.id)).rejects.toMatchObject({
+      code: 'INVALID_STATE',
+      statusCode: 400,
+    });
+  });
+
+  it('compromised worktree returns WORKTREE_COMPROMISED 409', async () => {
+    const ctx = createTestContext();
+    const { manager, pod } = setupParkedPod(ctx, 'failed', { worktreeCompromised: true });
+
+    await expect(manager.updateFromBase(pod.id)).rejects.toMatchObject({
+      code: 'WORKTREE_COMPROMISED',
+      statusCode: 409,
+    });
+  });
+});

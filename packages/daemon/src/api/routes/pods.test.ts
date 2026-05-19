@@ -1961,3 +1961,249 @@ describe('POST /pods/:podId/spawn-fix', () => {
     expect(enqueuedSessions).toContain(body.fixPodId);
   });
 });
+
+describe('POST /pods/:podId/update-from-base', () => {
+  let db: Database.Database;
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    podSeq = 0;
+    db = createTestDb();
+
+    const profileStore = createProfileStore(db);
+    const podRepo = createPodRepository(db);
+    const eventRepo = createEventRepository(db);
+    const escalationRepo = createEscalationRepository(db);
+    const nudgeRepo = createNudgeRepository(db);
+    const fixFeedbackRepo = createFixFeedbackRepository(db);
+    const eventBus = createEventBus(eventRepo, logger);
+    const authModule = createMockAuthModule();
+
+    const worktreeManager = {
+      create: vi.fn(),
+      cleanup: vi.fn(),
+      getDiffStats: vi.fn(),
+      getDiff: vi.fn(),
+      mergeBranch: vi.fn(),
+      commitFiles: vi.fn(),
+      pushBranch: vi.fn(),
+      pullBranch: vi.fn(),
+      rebaseOntoBase: vi.fn().mockResolvedValue({
+        alreadyUpToDate: false,
+        rebased: true,
+        conflicts: [],
+      }),
+      getCommitLog: vi.fn(),
+      readBranchFolder: vi.fn(),
+      restoreFromHead: vi.fn(),
+      commitPendingChanges: vi.fn(),
+      commitPendingChangesWithGeneratedMessage: vi.fn(),
+    };
+
+    const runtimeRegistry = {
+      get: vi.fn().mockReturnValue({
+        type: 'claude' as const,
+        spawn: vi.fn(),
+        resume: vi.fn(),
+        abort: vi.fn(),
+      }),
+    };
+
+    const validationEngine = { validate: vi.fn() };
+
+    const podManager = createPodManager({
+      podRepo,
+      escalationRepo,
+      nudgeRepo,
+      fixFeedbackRepo,
+      profileStore,
+      eventBus,
+      containerManagerFactory: {
+        get: vi.fn(() => ({
+          spawn: vi.fn(),
+          kill: vi.fn(),
+          stop: vi.fn(),
+          start: vi.fn(),
+          refreshFirewall: vi.fn(),
+          writeFile: vi.fn(),
+          readFile: vi.fn(),
+          getStatus: vi.fn().mockResolvedValue('running' as const),
+          execInContainer: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+          execStreaming: vi.fn(),
+        })),
+      },
+      worktreeManager,
+      runtimeRegistry,
+      validationEngine,
+      enqueueSession: () => {},
+      mcpBaseUrl: 'http://localhost:3100',
+      daemonConfig: { mcpServers: [], claudeMdSections: [] },
+      logger,
+    });
+
+    const podBridge = {
+      createEscalation: vi.fn(),
+      resolveEscalation: vi.fn(),
+      getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getMaxAiCalls: vi.fn().mockReturnValue(5),
+      getAutoPauseThreshold: vi.fn().mockReturnValue(3),
+      getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
+      getReviewerModel: vi.fn().mockReturnValue('sonnet'),
+      callReviewerModel: vi.fn().mockResolvedValue('ok'),
+      incrementEscalationCount: vi.fn(),
+      reportPlan: vi.fn(),
+      reportProgress: vi.fn(),
+      consumeMessages: vi.fn().mockReturnValue({ hasMessage: false }),
+      executeAction: vi.fn(),
+      getAvailableActions: vi.fn().mockReturnValue([]),
+      writeFileInContainer: vi.fn(),
+      execInContainer: vi.fn(),
+    };
+
+    app = await createServer({
+      authModule,
+      podManager,
+      profileStore,
+      eventBus,
+      eventRepo,
+      podBridge,
+      pendingRequestsByPod: new Map(),
+      db,
+      logLevel: 'silent',
+      prettyLog: false,
+    });
+
+    await app.inject({
+      method: 'POST',
+      url: '/profiles',
+      headers: authHeaders,
+      payload: {
+        name: 'test-profile',
+        repoUrl: 'https://github.com/org/repo',
+        buildCommand: 'npm run build',
+        startCommand: 'node server.js --port $PORT',
+      },
+    });
+
+    // Spy on updateFromBase so route tests can assert on it without running the full flow
+    vi.spyOn(podManager, 'updateFromBase');
+    // Store the manager reference for setting mock return values per test
+    (app as FastifyInstance & { _testPodManager: typeof podManager })._testPodManager = podManager;
+    (app as FastifyInstance & { _testWorktreeManager: typeof worktreeManager })._testWorktreeManager =
+      worktreeManager;
+  });
+
+  afterEach(async () => {
+    await app.close();
+    db.close();
+  });
+
+  /** Insert a pod in failed status with a worktree. */
+  function insertFailedPod(id?: string): string {
+    const podId = insertPod(db, { id, status: 'failed' });
+    db.prepare('UPDATE pods SET worktree_path = ?, container_id = ? WHERE id = ?').run(
+      '/tmp/wt/x',
+      'container-xyz',
+      podId,
+    );
+    return podId;
+  }
+
+  it('returns 200 with rebased response on clean rebase from failed pod', async () => {
+    const podId = insertFailedPod();
+    const manager = (app as FastifyInstance & { _testPodManager: ReturnType<typeof createPodManager> })._testPodManager;
+    vi.spyOn(manager, 'triggerValidation').mockResolvedValue(undefined);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pods/${podId}/update-from-base`,
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true, action: 'rebased', baseBranch: 'main' });
+  });
+
+  it('returns 200 with already_up_to_date when branch is current', async () => {
+    const podId = insertFailedPod();
+    const worktreeManager = (app as FastifyInstance & { _testWorktreeManager: { rebaseOntoBase: ReturnType<typeof vi.fn> } })._testWorktreeManager;
+    worktreeManager.rebaseOntoBase.mockResolvedValueOnce({
+      alreadyUpToDate: true,
+      rebased: true,
+      conflicts: [],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pods/${podId}/update-from-base`,
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true, action: 'already_up_to_date', baseBranch: 'main' });
+  });
+
+  it('returns 409 with conflict response when rebase has conflicts', async () => {
+    const podId = insertFailedPod();
+    const worktreeManager = (app as FastifyInstance & { _testWorktreeManager: { rebaseOntoBase: ReturnType<typeof vi.fn> } })._testWorktreeManager;
+    worktreeManager.rebaseOntoBase.mockResolvedValueOnce({
+      alreadyUpToDate: false,
+      rebased: false,
+      conflicts: ['packages/foo/package.json'],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pods/${podId}/update-from-base`,
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({
+      ok: false,
+      action: 'conflict',
+      conflicts: ['packages/foo/package.json'],
+    });
+  });
+
+  it('returns 409 with INVALID_STATE for a pod in an ineligible status', async () => {
+    const podId = insertPod(db, { status: 'complete' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pods/${podId}/update-from-base`,
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ code: 'INVALID_STATE' });
+  });
+
+  it('returns 400 with INVALID_STATE for a pod with no worktree', async () => {
+    const podId = insertPod(db, { status: 'failed' });
+    // no worktree_path set
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pods/${podId}/update-from-base`,
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: 'INVALID_STATE' });
+  });
+
+  it('returns 200 with queued_after_abort for a validating pod', async () => {
+    const podId = insertFailedPod();
+    db.prepare('UPDATE pods SET status = ? WHERE id = ?').run('validating', podId);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pods/${podId}/update-from-base`,
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true, action: 'queued_after_abort' });
+  });
+});

@@ -15,6 +15,7 @@ import type {
   Profile,
   ScheduledJob,
   SpecContract,
+  UpdateFromBaseResponse,
   UpdateScheduledJobRequest,
   ValidationResult,
   WatchedIssue,
@@ -154,6 +155,63 @@ export class AutopodClient {
       `/pods/${id}/kick`,
       reason ? { reason } : undefined,
     );
+  }
+
+  async updateFromBase(id: string): Promise<UpdateFromBaseResponse> {
+    const path = `/pods/${id}/update-from-base`;
+    const url = `${this.baseUrl}${path}`;
+    let token: string;
+
+    try {
+      token = await this.getToken();
+    } catch {
+      throw new AuthError('Not authenticated. Try: ap login');
+    }
+
+    const doFetch = (t: string) =>
+      fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${t}` } });
+
+    let response: Awaited<ReturnType<typeof fetch>>;
+    try {
+      response = await doFetch(token);
+    } catch {
+      throw new DaemonUnreachableError(this.baseUrl);
+    }
+
+    if (response.status === 401) {
+      try {
+        token = await this.getToken();
+      } catch {
+        throw new AuthError('Token refresh failed. Try: ap login');
+      }
+      try {
+        response = await doFetch(token);
+      } catch {
+        throw new DaemonUnreachableError(this.baseUrl);
+      }
+    }
+
+    // 409 has two meanings for this route: typed conflict response or INVALID_STATE error.
+    if (response.status === 409) {
+      let body: Record<string, unknown> = {};
+      try {
+        body = (await response.json()) as Record<string, unknown>;
+      } catch {
+        // not JSON
+      }
+      if (body.action === 'conflict') {
+        return body as UpdateFromBaseResponse;
+      }
+      const message = (body.message as string | undefined) ?? `HTTP 409 on ${path}`;
+      const code = (body.code as string | undefined) ?? 'CONFLICT';
+      throw new AutopodError(message, code, 409);
+    }
+
+    if (!response.ok) {
+      await this.handleError(response, path);
+    }
+
+    return (await response.json()) as UpdateFromBaseResponse;
   }
 
   async completeSession(

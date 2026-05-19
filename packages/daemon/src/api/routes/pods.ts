@@ -759,6 +759,22 @@ export function podRoutes(
     reply.status(204);
   });
 
+  // POST /pods/:podId/update-from-base — rebase pod branch onto latest base and restart validation
+  app.post('/pods/:podId/update-from-base', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    try {
+      const result = await podManager.updateFromBase(podId);
+      reply.status(result.ok ? 200 : 409);
+      return result;
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message, code: err.code };
+      }
+      throw err;
+    }
+  });
+
   // POST /pods/:podId/skip-validation — toggle skip-validation flag at runtime
   app.post('/pods/:podId/skip-validation', async (request, reply) => {
     const { podId } = request.params as { podId: string };

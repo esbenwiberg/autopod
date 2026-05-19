@@ -30,6 +30,7 @@ import type {
   RequestCredentialPayload,
   SastResult,
   SpawnFixResponse,
+  UpdateFromBaseResponse,
   StdioInjectedMcpServer,
   TaskReviewResult,
   ValidationFinding,
@@ -832,6 +833,14 @@ export interface PodManager {
    */
   requestFixSession(podId: string, message: string): Promise<SpawnFixResponse>;
   /**
+   * Rebase an eligible pod branch onto the latest origin/<baseBranch> and restart
+   * validation. Eligible statuses: `validating`, `failed`, `review_required`.
+   * For `validating` pods, aborts current validation and queues the update intent;
+   * the unwind runs the rebase before sending correction feedback.
+   * Returns a typed outcome — does not wait for follow-up validation to complete.
+   */
+  updateFromBase(podId: string): Promise<UpdateFromBaseResponse>;
+  /**
    * Retry PR creation for a complete pod whose PR was never successfully created.
    * Updates prUrl on success. Throws if the pod is not complete or already has a PR.
    */
@@ -1208,6 +1217,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   /** Active AbortControllers for in-progress validation runs, keyed by podId. */
   const validationAbortControllers = new Map<string, AbortController>();
+
+  /** Pods whose operator triggered update-from-base while they were validating.
+   *  Consumed by the validation unwind to run the rebase instead of retrying the agent. */
+  const pendingUpdateFromBaseIntents = new Set<string>();
+
+  /** Pods whose branch was cleanly rebased by update-from-base.
+   *  The next pushBranch call for these pods may use --force-with-lease; cleared after one use. */
+  const forceWithLeaseAllowances = new Set<string>();
 
   /**
    * Per-pod throttle for `last_agent_event_at` DB writes. Bumped on any liveness
@@ -1634,6 +1651,56 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       { podId, parentId: fixPod.linkedPodId },
       'Fix pod completed after push — parent merge poller will re-attempt merge',
     );
+  }
+
+  /**
+   * Performs the rebase-and-revalidate flow for a pod whose update-from-base
+   * intent was consumed during validation unwind. Pod must be in `validating`
+   * state; this function handles all status transitions.
+   * `startFollowUpValidation` is called (fire-and-forget) when the rebase is clean.
+   */
+  async function runUpdateFromBaseAfterAbort(
+    podId: string,
+    startFollowUpValidation: () => void,
+  ): Promise<void> {
+    const pod = podRepo.getOrThrow(podId);
+    if (!pod.worktreePath) {
+      transition(pod, 'failed');
+      return;
+    }
+    const profile = profileStore.get(pod.profileName);
+    const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
+
+    emitActivityStatus(podId, `Update from base: rebasing onto '${baseBranch}'…`);
+
+    const rebaseResult = await worktreeManager.rebaseOntoBase({
+      worktreePath: pod.worktreePath,
+      baseBranch,
+      pat: selectGitPat(profile),
+    });
+
+    const freshPod = podRepo.getOrThrow(podId);
+
+    if (rebaseResult.alreadyUpToDate) {
+      emitActivityStatus(podId, `Branch already up to date with '${baseBranch}'`);
+      transition(freshPod, 'failed');
+      return;
+    }
+
+    if (!rebaseResult.rebased) {
+      emitActivityStatus(
+        podId,
+        `Rebase conflict with '${baseBranch}': ${rebaseResult.conflicts.join(', ')}`,
+      );
+      transition(freshPod, 'review_required');
+      return;
+    }
+
+    emitActivityStatus(podId, `Rebased onto '${baseBranch}' — restarting validation…`);
+    forceWithLeaseAllowances.add(podId);
+    transition(freshPod, 'failed');
+    podRepo.update(podId, { validationAttempts: 0 });
+    startFollowUpValidation();
   }
 
   /** Start polling PR merge status for a pod in merge_pending state. */
@@ -5832,7 +5899,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           emitActivityStatus(podId, 'No changes to merge — pushing branch and completing pod');
           if (pod.branch) {
             try {
-              await worktreeManager.pushBranch(pod.worktreePath, pod.branch);
+              const useForce = forceWithLeaseAllowances.has(podId);
+              if (useForce) {
+                await worktreeManager.pushBranch(pod.worktreePath, pod.branch, { force: true });
+              } else {
+                await worktreeManager.pushBranch(pod.worktreePath, pod.branch);
+              }
+              forceWithLeaseAllowances.delete(podId);
             } catch (err) {
               logger.warn(
                 { err, podId },
@@ -5900,10 +5973,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Pass the PAT so we don't depend on the in-memory cache, which is
           // evicted whenever any sibling worktree on the same bare repo is
           // cleaned up (local-worktree-manager.ts cleanup()).
+          const useForce = forceWithLeaseAllowances.has(podId);
           try {
             await worktreeManager.pushBranch(worktreePath, branch, {
               pat: selectGitPat(approveProfile),
+              ...(useForce ? { force: true } : {}),
             });
+            forceWithLeaseAllowances.delete(podId);
             emitActivityStatus(podId, 'Branch pushed');
           } catch (pushErr) {
             const reason = pushErr instanceof Error ? pushErr.message : String(pushErr);
@@ -6848,6 +6924,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const pod = podRepo.getOrThrow(podId);
       const force = options?.force ?? false;
 
+      const triggerValidationFromUpdateIntent = () => {
+        setImmediate(() =>
+          this.triggerValidation(podId).catch((e: unknown) =>
+            logger.error({ err: e, podId }, 'update-from-base follow-up validation failed'),
+          ),
+        );
+      };
+      // Must be checked before sending correction feedback to the agent.
+      const tryConsumeUpdateIntent = (): boolean => {
+        if (!pendingUpdateFromBaseIntents.has(podId)) return false;
+        pendingUpdateFromBaseIntents.delete(podId);
+        runUpdateFromBaseAfterAbort(podId, triggerValidationFromUpdateIntent).catch((e: unknown) =>
+          logger.error({ err: e, podId }, 'update-from-base after abort failed'),
+        );
+        return true;
+      };
+
       if (pod.worktreeCompromised) {
         emitActivityStatus(
           podId,
@@ -7325,6 +7418,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (s2.skipValidation) {
           emitActivityStatus(podId, 'Validation skipped by human toggle — marking as validated');
           logger.info({ podId, attempt }, 'skip_validation set mid-run — bypassing result');
+          pendingUpdateFromBaseIntents.delete(podId);
           const validatedPod = transition(s2, 'validated');
           maybeTriggerDependents(validatedPod);
           return;
@@ -7498,6 +7592,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
 
           podRepo.update(podId, { lastCorrectionMessage: null });
+          // Validation completed before the abort signal landed — stale update-from-base
+          // intent must not fire on a later revalidation for this pod.
+          pendingUpdateFromBaseIntents.delete(podId);
           const validatedPod = transition(s2, 'validated', { prUrl });
           maybeTriggerDependents(validatedPod);
 
@@ -7531,6 +7628,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             });
           }
         } else if (force || attempt < s2.maxValidationAttempts) {
+          if (tryConsumeUpdateIntent()) return;
+
           emitActivityStatus(
             podId,
             `Validation failed (attempt ${attempt}/${s2.maxValidationAttempts}) — retrying`,
@@ -7580,6 +7679,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             'Retrying after validation failure',
           );
         } else {
+          if (tryConsumeUpdateIntent()) return;
+
           emitActivityStatus(
             podId,
             `Validation failed — max attempts (${s2.maxValidationAttempts}) exhausted, needs review`,
@@ -7600,6 +7701,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       } catch (err) {
         logger.error({ err, podId }, 'Validation error');
         const s2 = podRepo.getOrThrow(podId);
+
+        // Pod is still `validating`; runUpdateFromBaseAfterAbort handles status transitions.
+        if (tryConsumeUpdateIntent()) return;
+
         transition(s2, 'failed');
 
         // Stop the container (not remove) so it can be restarted for preview
@@ -8129,6 +8234,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         ),
       ]);
 
+      pendingUpdateFromBaseIntents.delete(podId);
+      forceWithLeaseAllowances.delete(podId);
       podRepo.delete(podId);
       logger.info({ podId }, 'Pod deleted');
     },
@@ -8644,6 +8751,80 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     interruptValidation(podId: string): void {
       validationAbortControllers.get(podId)?.abort();
+    },
+
+    async updateFromBase(podId: string): Promise<UpdateFromBaseResponse> {
+      const pod = podRepo.getOrThrow(podId);
+
+      const eligibleStatuses = ['validating', 'failed', 'review_required'] as const;
+      if (!(eligibleStatuses as readonly string[]).includes(pod.status)) {
+        throw new AutopodError(
+          `Cannot run update-from-base on pod ${podId} in status '${pod.status}'`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      if (!pod.worktreePath) {
+        throw new AutopodError(
+          `Pod ${podId} has no worktree — cannot update from base`,
+          'INVALID_STATE',
+          400,
+        );
+      }
+
+      if (pod.worktreeCompromised) {
+        throw new AutopodError(
+          `Pod ${podId} worktree is compromised — recover it before updating from base`,
+          'WORKTREE_COMPROMISED',
+          409,
+        );
+      }
+
+      // For validating pods: store the intent, abort current validation, return immediately.
+      // The validation unwind (retry or catch path) consumes the intent and runs the rebase.
+      if (pod.status === 'validating') {
+        pendingUpdateFromBaseIntents.add(podId);
+        validationAbortControllers.get(podId)?.abort();
+        return { ok: true, action: 'queued_after_abort' };
+      }
+
+      // For failed / review_required pods: run the rebase directly.
+      const profile = profileStore.get(pod.profileName);
+      const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
+
+      emitActivityStatus(podId, `Update from base: rebasing onto '${baseBranch}'…`);
+
+      const rebaseResult = await worktreeManager.rebaseOntoBase({
+        worktreePath: pod.worktreePath,
+        baseBranch,
+        pat: selectGitPat(profile),
+      });
+
+      if (rebaseResult.alreadyUpToDate) {
+        emitActivityStatus(podId, `Branch already up to date with '${baseBranch}'`);
+        return { ok: true, action: 'already_up_to_date', baseBranch };
+      }
+
+      if (!rebaseResult.rebased) {
+        emitActivityStatus(
+          podId,
+          `Rebase conflict with '${baseBranch}': ${rebaseResult.conflicts.join(', ')}`,
+        );
+        return { ok: false, action: 'conflict', baseBranch, conflicts: rebaseResult.conflicts };
+      }
+
+      // Clean rebase: mark for force-with-lease, reset attempts, start validation async.
+      emitActivityStatus(podId, `Rebased onto '${baseBranch}' — starting validation…`);
+      forceWithLeaseAllowances.add(podId);
+      podRepo.update(podId, { validationAttempts: 0 });
+      setImmediate(() => {
+        this.triggerValidation(podId).catch((e: unknown) =>
+          logger.error({ err: e, podId }, 'update-from-base follow-up validation failed'),
+        );
+      });
+
+      return { ok: true, action: 'rebased', baseBranch, validation: 'started' };
     },
 
     setSkipValidation(podId: string, skip: boolean): void {

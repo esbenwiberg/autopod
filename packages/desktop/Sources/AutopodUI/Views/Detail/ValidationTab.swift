@@ -21,6 +21,8 @@ public struct ValidationTab: View {
   @State private var isInterrupting = false
   @State private var isSkippingValidation = false
   @State private var isForceApproving = false
+  @State private var isUpdatingFromBase = false
+  @State private var updateFromBaseMessage: String?
   @State private var showForceApprovePopover = false
   @State private var forceApproveReason: String = ""
   @State private var overridePopoverFindingId: String? = nil
@@ -191,8 +193,10 @@ public struct ValidationTab: View {
       }
     }
     .onChange(of: progress?.attempt) { _, _ in
-      // Reset user selection when a new validation attempt starts
       selectedPhase = nil
+    }
+    .onChange(of: pod.status) { _, _ in
+      updateFromBaseMessage = nil
     }
     .overlay {
       if isLightboxPresented {
@@ -274,6 +278,26 @@ public struct ValidationTab: View {
         .tint(pod.skipValidation ? .orange : nil)
         .disabled(isSkippingValidation)
       }
+      if pod.status == .validating || pod.status == .failed || pod.status == .reviewRequired {
+        Button {
+          isUpdatingFromBase = true
+          updateFromBaseMessage = nil
+          Task {
+            let result = await actions.updateFromBase(pod.id)
+            isUpdatingFromBase = false
+            updateFromBaseMessage = updateFromBaseLabel(result)
+          }
+        } label: {
+          if isUpdatingFromBase {
+            HStack(spacing: 4) { ProgressView().controlSize(.mini); Text("Updating…") }
+          } else {
+            Label("Update From Base", systemImage: "arrow.triangle.2.circlepath")
+          }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .disabled(isUpdatingFromBase || !pod.hasWorktree || pod.worktreeCompromised)
+      }
       if pod.status == .validating {
         Button {
           isInterrupting = true
@@ -311,6 +335,12 @@ public struct ValidationTab: View {
           forceApprovePopover
         }
       }
+    }
+    if let message = updateFromBaseMessage {
+      Text(message)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
     }
   }
 
@@ -1084,6 +1114,26 @@ public struct ValidationTab: View {
         }
       }
       correctionMessageBlock
+    }
+  }
+
+  // MARK: - Update From Base helpers
+
+  private func updateFromBaseLabel(_ response: UpdateFromBaseResponse?) -> String? {
+    guard let response else { return nil }
+    let branch = response.baseBranch ?? "base"
+    switch response.action {
+    case "queued_after_abort":
+      return "Validation is stopping. Update from base will run next."
+    case "already_up_to_date":
+      return "Already contains latest \(branch)."
+    case "rebased":
+      return "Rebased onto \(branch). Validation restarted."
+    case "conflict":
+      let files = response.conflicts?.map { "  \($0)" }.joined(separator: "\n") ?? ""
+      return "Rebase conflict while updating from \(branch):\n\(files)"
+    default:
+      return nil
     }
   }
 

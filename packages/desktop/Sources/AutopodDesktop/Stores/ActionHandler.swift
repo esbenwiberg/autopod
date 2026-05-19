@@ -107,6 +107,9 @@ public final class ActionHandler {
       },
       syncWorkspaceBranch: { [weak self] id in
         await self?.syncWorkspaceBranch(id) ?? nil
+      },
+      updateFromBase: { [weak self] id in
+        await self?.updateFromBase(id) ?? nil
       }
     )
   }
@@ -585,6 +588,21 @@ public final class ActionHandler {
         podStore.upsertSession(pod)
       }
       return response.seriesId
+    } catch {
+      lastError = error.localizedDescription
+      return nil
+    }
+  }
+
+  public func updateFromBase(_ podId: String) async -> UpdateFromBaseResponse? {
+    pendingAction = "update-from-base-\(podId)"
+    defer { pendingAction = nil }
+    do {
+      let result = try await api.updateFromBase(podId)
+      if result.action == "rebased" || result.action == "queued_after_abort" {
+        await podStore.refreshSession(podId)
+      }
+      return result
     } catch {
       lastError = error.localizedDescription
       return nil
