@@ -88,6 +88,11 @@ function insertValidation(db: Database.Database, podId: string, result: object):
   `).run({ id, podId, result: JSON.stringify(result), createdAt: new Date().toISOString() });
 }
 
+function expectDefined<T>(value: T | undefined): T {
+  expect(value).toBeDefined();
+  return value as T;
+}
+
 // ── Test setup ────────────────────────────────────────────────────────────────
 
 describe('computeModelsAnalytics', () => {
@@ -140,12 +145,12 @@ describe('computeModelsAnalytics', () => {
       .prepare(`SELECT id FROM pods WHERE model='claude-opus-4-7' AND status='complete' LIMIT 5`)
       .all() as Array<{ id: string }>;
     const scores = [70, 80, 80, 80, 90];
-    podIds.forEach((r, i) => insertQuality(db, r.id, scores[i]!));
+    podIds.forEach((r, i) => insertQuality(db, r.id, expectDefined(scores[i])));
 
     const result = computeModelsAnalytics(db, 30);
 
     expect(result.byModel).toHaveLength(1);
-    const row = result.byModel[0]!;
+    const row = expectDefined(result.byModel[0]);
     expect(row.model).toBe('claude-opus-4-7');
     expect(row.podCount).toBe(10);
     expect(row.completeCount).toBe(7);
@@ -356,7 +361,7 @@ describe('computeModelsAnalytics', () => {
     insertPod(db, { model: 'claude-opus-4-7', status: 'killed', costUsd: 3 });
 
     const result = computeModelsAnalytics(db, 30);
-    const row = result.byModel[0]!;
+    const row = expectDefined(result.byModel[0]);
 
     expect(row.totalCostUsd).toBeCloseTo(8);
     expect(row.dollarPerPr).toBeCloseTo(8); // 8 / 1 complete pod
@@ -378,17 +383,17 @@ describe('computeModelsAnalytics', () => {
     for (let i = 0; i < 10; i++) pods.push(insertPod(db, { model: 'claude-opus-4-7' }));
 
     // 3 ask_human pods
-    insertEscalation(db, pods[0]!, 'ask_human');
-    insertEscalation(db, pods[1]!, 'ask_human');
-    insertEscalation(db, pods[2]!, 'ask_human');
+    insertEscalation(db, expectDefined(pods[0]), 'ask_human');
+    insertEscalation(db, expectDefined(pods[1]), 'ask_human');
+    insertEscalation(db, expectDefined(pods[2]), 'ask_human');
     // 1 validation_override pod
-    insertEscalation(db, pods[3]!, 'validation_override');
+    insertEscalation(db, expectDefined(pods[3]), 'validation_override');
     // excluded types
-    insertEscalation(db, pods[4]!, 'ask_ai');
-    insertEscalation(db, pods[5]!, 'request_credential');
+    insertEscalation(db, expectDefined(pods[4]), 'ask_ai');
+    insertEscalation(db, expectDefined(pods[5]), 'request_credential');
 
     const result = computeModelsAnalytics(db, 30);
-    const row = result.byModel[0]!;
+    const row = expectDefined(result.byModel[0]);
 
     expect(row.escalatedCount).toBe(4);
     expect(row.escalationRate).toBeCloseTo(0.4);

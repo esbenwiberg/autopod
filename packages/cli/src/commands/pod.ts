@@ -841,7 +841,11 @@ function formatLogEvent(
     }
     case 'pod.created': {
       const cr = event as import('@autopod/shared').PodCreatedEvent;
-      console.log(`${ts} ${chalk.blue('Pod created:')} ${cr.pod.id.slice(0, 8)}`);
+      const branchInfo =
+        cr.pod.branch && cr.pod.baseBranch
+          ? chalk.dim(` ${cr.pod.branch} -> ${cr.pod.baseBranch}`)
+          : '';
+      console.log(`${ts} ${chalk.blue('Pod created:')} ${cr.pod.id.slice(0, 8)}${branchInfo}`);
       break;
     }
     default:

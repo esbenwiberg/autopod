@@ -95,8 +95,10 @@ function computePercentile(sorted: number[], p: number): number {
   const idx = (p / 100) * (sorted.length - 1);
   const lo = Math.floor(idx);
   const hi = Math.ceil(idx);
-  if (lo === hi) return sorted[lo]!;
-  return sorted[lo]! + (idx - lo) * (sorted[hi]! - sorted[lo]!);
+  const loValue = sorted[lo] ?? 0;
+  if (lo === hi) return loValue;
+  const hiValue = sorted[hi] ?? loValue;
+  return loValue + (idx - lo) * (hiValue - loValue);
 }
 
 // ── Queue-depth computation ───────────────────────────────────────────────────
@@ -168,7 +170,8 @@ function computeTimeInStatus(cohortRows: CohortRow[], events: StatusEventRow[]):
     if (completedAtMs === undefined) continue;
 
     for (let i = 0; i < evts.length; i++) {
-      const event = evts[i]!;
+      const event = evts[i];
+      if (!event) continue;
       if (!event.newStatus || !LOAD_BEARING_SET.has(event.newStatus)) continue;
 
       const status = event.newStatus as LoadBearingStatus;
@@ -191,7 +194,7 @@ function computeTimeInStatus(cohortRows: CohortRow[], events: StatusEventRow[]):
       p50: computePercentile(samples, 50),
       p75: computePercentile(samples, 75),
       p90: computePercentile(samples, 90),
-      max: samples[samples.length - 1]!,
+      max: samples[samples.length - 1] ?? 0,
       sampleCount: samples.length,
     };
   });

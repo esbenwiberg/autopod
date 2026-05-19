@@ -92,7 +92,9 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     {
       summary: z
         .string()
-        .describe('A concrete one-line UI tagline for this pod: what it will change or investigate'),
+        .describe(
+          'A concrete one-line UI tagline for this pod: what it will change or investigate',
+        ),
       steps: z.array(z.string()).describe('Numbered steps you plan to take'),
     },
     async (input) => {

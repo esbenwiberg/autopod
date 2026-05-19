@@ -458,6 +458,8 @@ export interface PodSummary {
   status: PodStatus;
   model: string;
   runtime: RuntimeType;
+  branch?: string | null;
+  baseBranch?: string | null;
   duration: number | null;
   filesChanged: number;
   createdAt: string;

@@ -101,8 +101,8 @@ function sparklineDays(days: number): string[] {
 }
 
 function bucketTtrSeconds(secs: number): number {
-  for (let i = 0; i < TTR_BOUNDARIES.length; i++) {
-    if (secs < TTR_BOUNDARIES[i]!) return i;
+  for (const [i, boundary] of TTR_BOUNDARIES.entries()) {
+    if (secs < boundary) return i;
   }
   return TTR_BOUNDARIES.length; // '>24h' bucket
 }
@@ -213,7 +213,7 @@ export function computeEscalationsAnalytics(
     // Round to ms precision to absorb julianday floating-point noise.
     const secs = Math.round(row.seconds * 1000) / 1000;
     const idx = bucketTtrSeconds(secs);
-    ttrCounts[idx]!++;
+    ttrCounts[idx] = (ttrCounts[idx] ?? 0) + 1;
     if (secs > maxSeconds) maxSeconds = secs;
   }
 
@@ -229,7 +229,7 @@ export function computeEscalationsAnalytics(
 
   const askHumanTtrBuckets: AskHumanTtrBucket[] = TTR_BUCKET_LABELS.map((label, i) => ({
     label,
-    count: ttrCounts[i]!,
+    count: ttrCounts[i] ?? 0,
   }));
   const askHumanTtr: AskHumanTtr = {
     buckets: askHumanTtrBuckets,

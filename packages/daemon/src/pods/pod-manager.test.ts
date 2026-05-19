@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type {
   AgentEvent,
+  PodCreatedEvent,
   Runtime,
   RuntimeType,
   StackTemplate,
@@ -84,6 +85,7 @@ function createTestDb(): Database.Database {
 
 interface TestProfileOverrides {
   name?: string;
+  defaultBranch?: string;
   privateRegistries?: string;
   registryPat?: string;
   branchPrefix?: string;
@@ -114,7 +116,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
   `).run({
     name,
     repoUrl: 'https://github.com/org/repo',
-    defaultBranch: 'main',
+    defaultBranch: opts.defaultBranch ?? 'main',
     template: 'node22',
     buildCommand: 'npm run build',
     startCommand: 'npm start',
@@ -397,6 +399,19 @@ describe('PodManager', () => {
       expect(pod.model).toBe('opus');
       expect(pod.runtime).toBe('claude');
       expect(pod.branch).toContain('autopod/');
+      expect(pod.baseBranch).toBe('main');
+    });
+
+    it('pins omitted baseBranch to the profile default at creation time', () => {
+      const ctx = createTestContext(undefined, { defaultBranch: 'release/2.3.10' });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fix release issue' },
+        'user-1',
+      );
+
+      expect(pod.baseBranch).toBe('release/2.3.10');
     });
 
     it('uses custom model and branch when provided', () => {
@@ -475,9 +490,13 @@ describe('PodManager', () => {
 
       manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1');
 
-      // biome-ignore lint/suspicious/noExplicitAny: narrowing discriminated union for field access
-      const createdEvent = events.find((e: any) => e.type === 'pod.created');
+      const createdEvent = events.find(
+        (e): e is PodCreatedEvent =>
+          typeof e === 'object' && e !== null && (e as { type?: unknown }).type === 'pod.created',
+      );
       expect(createdEvent).toBeDefined();
+      expect(createdEvent?.pod.branch).toMatch(/^autopod\//);
+      expect(createdEvent?.pod.baseBranch).toBe('main');
     });
 
     describe('preflight overlap', () => {
@@ -2310,6 +2329,35 @@ describe('PodManager', () => {
       expect(result.prUrl).toBe('https://github.com/org/repo/pull/42');
     });
 
+    it('uses the pod-pinned baseBranch even if the profile default changes before PR creation', async () => {
+      const ctx = createTestContext({ overall: 'pass' }, { defaultBranch: 'release/2.3.10' });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Patch release branch' },
+        'user-1',
+      );
+      expect(pod.baseBranch).toBe('release/2.3.10');
+
+      ctx.db
+        .prepare("UPDATE profiles SET default_branch = 'main' WHERE name = 'test-profile'")
+        .run();
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.prManager.createPr).toHaveBeenCalledWith(
+        expect.objectContaining({
+          podId: pod.id,
+          baseBranch: 'release/2.3.10',
+        }),
+      );
+    });
+
     it('still validates even if PR creation fails', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       (ctx.prManager.createPr as ReturnType<typeof vi.fn>).mockRejectedValue(
@@ -2550,7 +2598,7 @@ describe('PodManager', () => {
         );
 
         expect(pod.outputMode).toBe('pr');
-        expect(pod.baseBranch).toBeNull();
+        expect(pod.baseBranch).toBe('main');
       });
 
       it('stores acFrom on the pod', () => {

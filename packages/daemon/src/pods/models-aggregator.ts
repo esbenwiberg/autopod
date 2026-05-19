@@ -138,6 +138,20 @@ interface RuntimeAccum {
   escalatedPodIds: Set<string>;
 }
 
+function emptyRuntimeAccum(): RuntimeAccum {
+  return {
+    podCount: 0,
+    completeCount: 0,
+    killedCount: 0,
+    failedCount: 0,
+    totalCostUsd: 0,
+    sumTtmSeconds: 0,
+    scoreSum: 0,
+    scoredCount: 0,
+    escalatedPodIds: new Set(),
+  };
+}
+
 // ── Empty-cohort fast path ────────────────────────────────────────────────────
 
 function emptyResponse(days: number): ModelsAnalyticsResponse {
@@ -249,20 +263,7 @@ export function computeModelsAnalytics(
   // ── Accumulate byModel and byRuntime ────────────────────────────────────────
   const byModelAccum = new Map<string, ModelAccum>();
   const byRuntimeAccum = new Map<string, RuntimeAccum>(
-    RUNTIMES.map((rt) => [
-      rt,
-      {
-        podCount: 0,
-        completeCount: 0,
-        killedCount: 0,
-        failedCount: 0,
-        totalCostUsd: 0,
-        sumTtmSeconds: 0,
-        scoreSum: 0,
-        scoredCount: 0,
-        escalatedPodIds: new Set(),
-      },
-    ]),
+    RUNTIMES.map((rt) => [rt, emptyRuntimeAccum()]),
   );
 
   const unknownRaw = new Map<string, number>(); // raw model string → pod count
@@ -532,7 +533,7 @@ export function computeModelsAnalytics(
   // ── Build byRuntime[] ──────────────────────────────────────────────────────
 
   const byRuntime: PerRuntimeAggregate[] = RUNTIMES.map((runtime) => {
-    const accum = byRuntimeAccum.get(runtime)!;
+    const accum = byRuntimeAccum.get(runtime) ?? emptyRuntimeAccum();
     return {
       runtime,
       podCount: accum.podCount,

@@ -227,11 +227,12 @@ describe('computeThroughputAnalytics', () => {
 
     const result = computeThroughputAnalytics(db, days);
 
-    const bucket = result.queueDepth[20]!;
-    expect(bucket.max).toBe(2);
+    const bucket = result.queueDepth[20];
+    expect(bucket).toBeDefined();
+    expect(bucket?.max).toBe(2);
     // Samples 0-29: depth=1 (pod A only); samples 30-59: depth=2 (both)
     // mean = (30*1 + 30*2) / 60 = 1.5
-    expect(bucket.mean).toBeCloseTo(1.5);
+    expect(bucket?.mean).toBeCloseTo(1.5);
   });
 
   // ── Time-in-status percentiles ──────────────────────────────────────────────

@@ -38,6 +38,14 @@ function scoreToHistogramIndex(score: number): number {
   return Math.min(9, Math.floor(score * 10));
 }
 
+function toFirstMismatch(
+  podId: string | null,
+  rowId: number | null,
+  reason: string | null,
+): { podId: string; rowId: number; reason: string } | null {
+  return podId !== null && rowId !== null && reason !== null ? { podId, rowId, reason } : null;
+}
+
 // ── Network policy buckets ─────────────────────────────────────────────────────
 
 const NETWORK_POLICY_BUCKETS: NetworkPolicyBucket[] = [
@@ -253,11 +261,12 @@ export function computeSafetyAnalytics(
 
   const histBuckets = new Array<number>(10).fill(0);
   for (const { quarantine_score } of quarantineScoreRows) {
-    histBuckets[scoreToHistogramIndex(quarantine_score)]!++;
+    const idx = scoreToHistogramIndex(quarantine_score);
+    histBuckets[idx] = (histBuckets[idx] ?? 0) + 1;
   }
   const quarantineHistogram = HISTOGRAM_BUCKET_LABELS.map((bucket, i) => ({
     bucket,
-    count: histBuckets[i]!,
+    count: histBuckets[i] ?? 0,
   }));
 
   // ── byPod ────────────────────────────────────────────────────────────────────
@@ -336,14 +345,11 @@ export function computeSafetyAnalytics(
         valid: latestVerif.valid === 1,
         totalPods: latestVerif.total_pods,
         totalEntries: latestVerif.total_entries,
-        firstMismatch:
-          latestVerif.first_mismatch_pod_id !== null
-            ? {
-                podId: latestVerif.first_mismatch_pod_id,
-                rowId: latestVerif.first_mismatch_row_id!,
-                reason: latestVerif.first_mismatch_reason!,
-              }
-            : null,
+        firstMismatch: toFirstMismatch(
+          latestVerif.first_mismatch_pod_id,
+          latestVerif.first_mismatch_row_id,
+          latestVerif.first_mismatch_reason,
+        ),
       }
     : {
         lastVerifiedAt: null,
@@ -405,14 +411,11 @@ export function runAndPersistAuditChainVerification(db: Database.Database): Audi
     valid: result.valid,
     totalPods: result.totalPods,
     totalEntries: result.totalEntries,
-    firstMismatch:
-      result.firstMismatchPodId !== null
-        ? {
-            podId: result.firstMismatchPodId,
-            rowId: result.firstMismatchRowId!,
-            reason: result.firstMismatchReason!,
-          }
-        : null,
+    firstMismatch: toFirstMismatch(
+      result.firstMismatchPodId,
+      result.firstMismatchRowId,
+      result.firstMismatchReason,
+    ),
     ranAt,
   };
 }

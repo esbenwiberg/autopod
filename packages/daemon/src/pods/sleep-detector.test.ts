@@ -108,10 +108,10 @@ describe('tick-gap — happy path', () => {
     await sleepThen(4 * HOUR); // gap = 4h > threshold → event
     expect(events).toHaveLength(1);
 
-    const ev = events[0]!;
-    expect(ev.detector).toBe('tick-gap');
-    expect(ev.sleptMs).toBeGreaterThanOrEqual(4 * HOUR);
-    expect(ev.reconciledPodIds).toEqual([]);
+    const ev = events[0];
+    expect(ev?.detector).toBe('tick-gap');
+    expect(ev?.sleptMs).toBeGreaterThanOrEqual(4 * HOUR);
+    expect(ev?.reconciledPodIds).toEqual([]);
     stop();
   });
 });

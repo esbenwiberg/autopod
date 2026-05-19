@@ -3206,6 +3206,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const runtime = request.runtime ?? profile.defaultRuntime ?? 'claude';
       const executionTarget = request.executionTarget ?? profile.executionTarget ?? 'local';
       const skipValidation = request.skipValidation ?? false;
+      const effectiveBaseBranch = request.baseBranch ?? profile.defaultBranch ?? 'main';
 
       // Resolve the effective PodOptions once, so both branch derivation and
       // DB insertion use the exact same values.
@@ -3270,7 +3271,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const candidateTouches = request.touches ?? [];
       if (candidateTouches.length > 0) {
         try {
-          const candidateBase = request.baseBranch ?? profile.defaultBranch ?? 'main';
           const candidateRepoUrl = profile.repoUrl ?? null;
           const profileRepoUrls = new Map<string, string | null>();
           const resolveRepoUrl = (profileName: string): string | null => {
@@ -3292,7 +3292,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             {
               touches: candidateTouches,
               repoUrl: candidateRepoUrl,
-              baseBranch: candidateBase,
+              baseBranch: effectiveBaseBranch,
             },
             candidates,
           );
@@ -3330,7 +3330,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // directly to origin/main. Auto-generate a safe branch unless this pod was spawned
         // by fixManually() (linkedPodId set), which intentionally inherits the worker's branch.
         if (resolvedPod.agentMode === 'interactive' && !request.linkedPodId) {
-          const effectiveBaseBranch = request.baseBranch ?? profile.defaultBranch ?? 'main';
           if (branch === effectiveBaseBranch) {
             const prefix = request.branchPrefix ?? profile.branchPrefix ?? 'autopod/';
             branch = `${prefix}${id}`;
@@ -3355,7 +3354,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             contract: request.contract ?? null,
             options: resolvedPod,
             outputMode: effectiveOutputMode,
-            baseBranch: request.baseBranch ?? null,
+            baseBranch: effectiveBaseBranch,
             acFrom: request.acFrom ?? null,
             linkedPodId: request.linkedPodId ?? null,
             pimGroups: (() => {
@@ -3426,6 +3425,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           status: pod.status,
           model: pod.model,
           runtime: pod.runtime,
+          branch: pod.branch,
+          baseBranch: pod.baseBranch,
           duration: null,
           filesChanged: pod.filesChanged,
           createdAt: pod.createdAt,
@@ -3464,7 +3465,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (!hasDeps) {
         enqueueSession(id);
       }
-      logger.info({ podId: id, profile: request.profileName }, 'Pod created');
+      logger.info(
+        { podId: id, profile: request.profileName, branch: pod.branch, baseBranch: pod.baseBranch },
+        'Pod created',
+      );
       return pod;
     },
 
