@@ -15,7 +15,7 @@ public enum StatHealth {
 }
 
 /// Compact metric tile: SF Symbol, label, monospaced value, and a thin
-/// health-colored accent bar. Used by the Session Quality grid in `SummaryTab`.
+/// health-colored accent bar. Used by the Session Quality grid in `WorkTab`.
 public struct StatTile: View {
     public let icon: String
     public let label: String

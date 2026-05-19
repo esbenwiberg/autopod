@@ -2,7 +2,8 @@ import AppKit
 import AutopodClient
 import SwiftUI
 
-/// Detail panel — shown when a pod is selected. Tabbed: Overview, Logs, Diff, Validation.
+/// Detail panel — shown when a pod is selected. Tabbed around operator questions:
+/// Overview, Work, Validation, Evidence, Diff, Logs, Terminal, and Series.
 public struct DetailPanelView: View {
     public let pod: Pod
     public let events: [AgentEvent]
@@ -95,14 +96,19 @@ public struct DetailPanelView: View {
     @State private var didCopyName: Bool = false
 
     private var isTerminalAvailable: Bool { pod.pod.agentMode == .interactive }
-    private var isMarkdownAvailable: Bool { pod.hasWorktree || pod.pod.output == .artifact }
-    private var isArtifactsAvailable: Bool { pod.hasWorktree || pod.pod.output == .artifact }
+    private var isEvidenceAvailable: Bool {
+        pod.hasWorktree
+        || pod.pod.output == .artifact
+        || !(pod.validationChecks?.proofOfWorkScreenshots?.isEmpty ?? true)
+        || !(pod.validationChecks?.taskReviewScreenshots?.isEmpty ?? true)
+        || pod.artifactsPath != nil
+    }
     @State private var showPromoteMenu: Bool = false
 
     /// Artifact payload beats everything; for series pods the graph is the landing view;
     /// otherwise Overview. Applied on first appear and when the selected pod changes.
     static func defaultTab(for pod: Pod) -> DetailTab {
-        if pod.pod.output == .artifact { return .markdown }
+        if pod.pod.output == .artifact { return .evidence }
         if pod.seriesId != nil { return .series }
         return .overview
     }
@@ -130,11 +136,15 @@ public struct DetailPanelView: View {
                     onReload: onReloadLogs
                 )
                 case .diff:       DiffTab(pod: pod, diffString: diffString, onRefresh: onRefreshDiff)
+                case .work:       WorkTab(pod: pod, loadQuality: loadQuality)
                 case .validation: ValidationTab(pod: pod, actions: actions)
-                case .summary:    SummaryTab(pod: pod, loadQuality: loadQuality)
+                case .evidence:   EvidenceTab(
+                    pod: pod,
+                    loadFiles: loadFiles,
+                    loadArtifacts: loadArtifacts,
+                    loadContent: loadContent
+                )
                 case .terminal:   EmptyView()
-                case .markdown:   MarkdownTab(pod: pod, loadFiles: loadFiles, loadContent: loadContent)
-                case .artifacts:  ArtifactsTab(pod: pod, loadArtifacts: loadArtifacts, loadContent: loadContent)
                 case .series:
                     SeriesPipelineView(
                         pods: seriesPods,
@@ -1039,7 +1049,7 @@ public struct DetailPanelView: View {
         DetailTab.allCases.filter { tab in
             switch tab {
             case .series: return pod.seriesId != nil
-            case .artifacts: return isArtifactsAvailable
+            case .evidence: return isEvidenceAvailable
             default: return true
             }
         }
@@ -1075,10 +1085,9 @@ public struct DetailPanelView: View {
 
     private func tabButton(_ tab: DetailTab, showLabel: Bool) -> some View {
         let isSelected = selectedTab == tab
-        let isDisabled = (tab == .terminal && !isTerminalAvailable) || (tab == .markdown && !isMarkdownAvailable)
+        let isDisabled = tab == .terminal && !isTerminalAvailable
         let disabledHelp: String = {
             if tab == .terminal && !isTerminalAvailable { return "Terminal is only available for workspace pods" }
-            if tab == .markdown && !isMarkdownAvailable { return "Markdown viewer becomes available once the pod has a workspace" }
             return ""
         }()
 
@@ -1189,18 +1198,17 @@ struct WorktreeCompromisedBanner: View {
 // MARK: - Tab enum
 
 public enum DetailTab: CaseIterable {
-    case overview, logs, diff, terminal, markdown, artifacts, validation, summary, series
+    case overview, work, validation, evidence, diff, logs, terminal, series
 
     var label: String {
         switch self {
         case .overview:    "Overview"
-        case .logs:        "Logs"
-        case .diff:        "Diff"
-        case .terminal:    "Terminal"
-        case .markdown:    "Markdown"
-        case .artifacts:   "Artifacts"
+        case .work:        "Work"
         case .validation:  "Validation"
-        case .summary:     "Summary"
+        case .evidence:    "Evidence"
+        case .diff:        "Diff"
+        case .logs:        "Logs"
+        case .terminal:    "Terminal"
         case .series:      "Series"
         }
     }
@@ -1208,13 +1216,12 @@ public enum DetailTab: CaseIterable {
     var icon: String {
         switch self {
         case .overview:    "square.text.square"
-        case .logs:        "text.line.last.and.arrowtriangle.forward"
-        case .diff:        "doc.text.magnifyingglass"
-        case .terminal:    "terminal"
-        case .markdown:    "doc.richtext"
-        case .artifacts:   "doc.on.doc"
+        case .work:        "doc.text.below.ecg"
         case .validation:  "checkmark.seal"
-        case .summary:     "doc.text.below.ecg"
+        case .evidence:    "photo.on.rectangle.angled"
+        case .diff:        "doc.text.magnifyingglass"
+        case .logs:        "text.line.last.and.arrowtriangle.forward"
+        case .terminal:    "terminal"
         case .series:      "rectangle.3.group.fill"
         }
     }
