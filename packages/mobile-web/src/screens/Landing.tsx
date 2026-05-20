@@ -6,7 +6,12 @@ import { usePodsStore } from '../store/pods.js';
 type Tab = 'needs-me' | 'active';
 
 export function Landing(): JSX.Element {
-  const { pods, loading, error, refresh } = usePodsStore();
+  // Per-slice subscriptions — zustand v5 requires this for fine-grained
+  // re-renders. Destructuring the whole store re-renders on every set().
+  const pods = usePodsStore((s) => s.pods);
+  const loading = usePodsStore((s) => s.loading);
+  const error = usePodsStore((s) => s.error);
+  const refresh = usePodsStore((s) => s.refresh);
   const [tab, setTab] = useState<Tab>('needs-me');
 
   useEffect(() => {
@@ -15,7 +20,8 @@ export function Landing(): JSX.Element {
 
   const filtered = useMemo(() => {
     const predicate = tab === 'needs-me' ? needsMe : isActive;
-    return [...pods].filter(predicate).sort(byRecency);
+    // .filter() returns a new array, so .sort() doesn't mutate `pods`.
+    return pods.filter(predicate).sort(byRecency);
   }, [pods, tab]);
 
   const needsMeCount = useMemo(() => pods.filter(needsMe).length, [pods]);

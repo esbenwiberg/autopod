@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, AuthRequiredError, apiFetch } from './api.js';
+import { STORAGE_KEY } from './token.js';
 
 describe('apiFetch', () => {
   beforeEach(() => {
@@ -12,7 +13,7 @@ describe('apiFetch', () => {
   });
 
   it('injects Bearer token from localStorage', async () => {
-    window.localStorage.setItem('autopod.token', 'secret');
+    window.localStorage.setItem(STORAGE_KEY, 'secret');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
@@ -27,7 +28,7 @@ describe('apiFetch', () => {
   });
 
   it('returns parsed JSON for 2xx responses', async () => {
-    window.localStorage.setItem('autopod.token', 't');
+    window.localStorage.setItem(STORAGE_KEY, 't');
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify([{ id: 'pod-1' }]), {
         status: 200,
@@ -40,16 +41,16 @@ describe('apiFetch', () => {
   });
 
   it('on 401, clears the token, navigates to /scan-again, and throws AuthRequiredError', async () => {
-    window.localStorage.setItem('autopod.token', 'stale');
+    window.localStorage.setItem(STORAGE_KEY, 'stale');
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 401 }));
 
     await expect(apiFetch('/pods')).rejects.toBeInstanceOf(AuthRequiredError);
-    expect(window.localStorage.getItem('autopod.token')).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
     expect(window.location.hash).toBe('#/scan-again');
   });
 
   it('throws ApiError with status for other non-2xx responses', async () => {
-    window.localStorage.setItem('autopod.token', 't');
+    window.localStorage.setItem(STORAGE_KEY, 't');
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('boom', { status: 500 }));
 
     await expect(apiFetch('/pods')).rejects.toMatchObject({
@@ -59,7 +60,7 @@ describe('apiFetch', () => {
   });
 
   it('sets Content-Type: application/json when a body is supplied', async () => {
-    window.localStorage.setItem('autopod.token', 't');
+    window.localStorage.setItem(STORAGE_KEY, 't');
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response(null, { status: 204 }));
@@ -71,7 +72,7 @@ describe('apiFetch', () => {
   });
 
   it('returns undefined for 204 No Content', async () => {
-    window.localStorage.setItem('autopod.token', 't');
+    window.localStorage.setItem(STORAGE_KEY, 't');
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }));
 
     const out = await apiFetch('/pods/x/kill', { method: 'POST' });

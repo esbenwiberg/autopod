@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'autopod.token';
+export const STORAGE_KEY = 'autopod.token';
 const HASH_PREFIX = '#token=';
 
 /**

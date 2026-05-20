@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { clearStoredToken, readStoredToken, readTokenFromHash } from './token.js';
+import { STORAGE_KEY, clearStoredToken, readStoredToken, readTokenFromHash } from './token.js';
 
 describe('token storage', () => {
   beforeEach(() => {
@@ -38,7 +38,7 @@ describe('token storage', () => {
   });
 
   it('clearStoredToken removes the persisted value', () => {
-    window.localStorage.setItem('autopod.token', 'x');
+    window.localStorage.setItem(STORAGE_KEY, 'x');
     clearStoredToken();
     expect(readStoredToken()).toBeNull();
   });
