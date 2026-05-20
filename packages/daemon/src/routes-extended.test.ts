@@ -696,12 +696,30 @@ describe('Extended Route Tests', () => {
         ' const app = express();',
       ].join('\n');
 
-      // With startCommitSha already set, the route makes a single call:
-      // git diff <startCommitSha> HEAD
-      containerManager.execInContainer.mockResolvedValueOnce({
-        stdout: unifiedDiff,
-        stderr: '',
-        exitCode: 0,
+      // The route now fetches the anchored net diff plus live preview data in parallel.
+      // Dispatch by git subcommand so this test does not depend on call ordering.
+      containerManager.execInContainer.mockImplementation((_containerId: string, cmd: string[]) => {
+        if (cmd[0] === 'git' && cmd[1] === 'diff' && cmd.includes('HEAD')) {
+          return Promise.resolve({ stdout: '', stderr: '', exitCode: 0 });
+        }
+
+        if (
+          cmd[0] === 'git' &&
+          cmd[1] === 'diff' &&
+          cmd.includes('abc123def456abc123def456abc123def456abc1')
+        ) {
+          return Promise.resolve({ stdout: unifiedDiff, stderr: '', exitCode: 0 });
+        }
+
+        if (cmd[0] === 'git' && cmd[1] === 'ls-files') {
+          return Promise.resolve({ stdout: '', stderr: '', exitCode: 0 });
+        }
+
+        if (cmd[0] === 'git' && cmd[1] === 'log') {
+          return Promise.resolve({ stdout: '', stderr: '', exitCode: 0 });
+        }
+
+        return Promise.resolve({ stdout: '', stderr: 'unexpected command', exitCode: 1 });
       });
 
       const res = await app.inject({

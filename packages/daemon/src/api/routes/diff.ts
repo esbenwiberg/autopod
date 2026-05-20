@@ -1,6 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import type { WorktreeManager } from '../../interfaces/worktree-manager.js';
-import { computePodDiff } from '../../pods/pod-diff-fetcher.js';
+import {
+  computePodCommitDiffs,
+  computePodDiff,
+  computePodUncommittedDiff,
+  computePodUntrackedPreview,
+} from '../../pods/pod-diff-fetcher.js';
 import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
 import type { ProfileStore } from '../../profiles/index.js';
 
@@ -8,11 +13,36 @@ interface DiffFile {
   path: string;
   status: 'added' | 'modified' | 'deleted';
   diff: string;
+  binary?: boolean;
+  truncated?: boolean;
+  note?: string;
+}
+
+interface DiffCommit {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  body: string;
+  authorDate: string;
+  files: DiffFile[];
+  stats: DiffStats;
+}
+
+interface DiffStats {
+  added: number;
+  removed: number;
+  changed: number;
 }
 
 interface DiffResponse {
   files: DiffFile[];
-  stats: { added: number; removed: number; changed: number };
+  stats: DiffStats;
+  previewFiles: DiffFile[];
+  previewStats: DiffStats;
+  uncommittedFiles: DiffFile[];
+  uncommittedStats: DiffStats;
+  commits: DiffCommit[];
+  commitGroupingUnavailableReason?: string;
 }
 
 export function diffRoutes(
@@ -32,34 +62,75 @@ export function diffRoutes(
       ? containerManagerFactory.get(pod.executionTarget)
       : undefined;
 
+    const podSlice = {
+      containerId: pod.containerId ?? null,
+      worktreePath: pod.worktreePath ?? null,
+      startCommitSha: pod.startCommitSha ?? null,
+    };
+
     // Single source of truth: same fetcher used by pre-submit review.
     // Single-ref `git diff <base>` folds committed + uncommitted into one net
     // delta — avoids the double-counting bug where a file committed AND modified
     // in the worktree showed up as two separate `diff --git` blocks.
-    const { diff: rawDiff } = await computePodDiff({
-      pod: {
-        containerId: pod.containerId ?? null,
-        worktreePath: pod.worktreePath ?? null,
-        startCommitSha: pod.startCommitSha ?? null,
-      },
-      defaultBranch: baseBranch,
-      containerManager,
-      worktreeManager,
-      logger: request.log,
+    const [canonical, preview, uncommitted, commitGroups] = await Promise.all([
+      computePodDiff({
+        pod: podSlice,
+        defaultBranch: baseBranch,
+        containerManager,
+        worktreeManager,
+        logger: request.log,
+      }),
+      computePodUntrackedPreview({
+        pod: podSlice,
+        defaultBranch: baseBranch,
+        containerManager,
+        worktreeManager,
+        logger: request.log,
+      }),
+      computePodUncommittedDiff({
+        pod: podSlice,
+        defaultBranch: baseBranch,
+        containerManager,
+        worktreeManager,
+        logger: request.log,
+      }),
+      computePodCommitDiffs({
+        pod: podSlice,
+        defaultBranch: baseBranch,
+        containerManager,
+        worktreeManager,
+        logger: request.log,
+      }),
+    ]);
+
+    const files = parseDiff(canonical.diff);
+    const previewFiles = preview.files;
+    const uncommittedFiles = parseDiff(uncommitted.diff);
+    const commits = commitGroups.commits.map((commit) => {
+      const commitFiles = parseDiff(commit.diff);
+      return {
+        sha: commit.sha,
+        shortSha: commit.shortSha,
+        subject: commit.subject,
+        body: commit.body,
+        authorDate: commit.authorDate,
+        files: commitFiles,
+        stats: statsForFiles(commitFiles),
+      };
     });
 
-    if (!rawDiff.trim()) {
-      return { files: [], stats: { added: 0, removed: 0, changed: 0 } } satisfies DiffResponse;
-    }
-
-    const files = parseDiff(rawDiff);
-    const stats = {
-      added: files.reduce((sum, f) => sum + countLines(f.diff, '+'), 0),
-      removed: files.reduce((sum, f) => sum + countLines(f.diff, '-'), 0),
-      changed: files.length,
-    };
-
-    return { files, stats } satisfies DiffResponse;
+    return {
+      files,
+      stats: statsForFiles(files),
+      previewFiles,
+      previewStats: statsForFiles(previewFiles),
+      uncommittedFiles,
+      uncommittedStats: statsForFiles(uncommittedFiles),
+      commits,
+      ...(commitGroups.unavailableReason
+        ? { commitGroupingUnavailableReason: commitGroups.unavailableReason }
+        : {}),
+    } satisfies DiffResponse;
   });
 }
 
@@ -137,4 +208,12 @@ function countLines(diff: string, prefix: string): number {
     }
   }
   return count;
+}
+
+function statsForFiles(files: DiffFile[]): DiffStats {
+  return {
+    added: files.reduce((sum, f) => sum + countLines(f.diff, '+'), 0),
+    removed: files.reduce((sum, f) => sum + countLines(f.diff, '-'), 0),
+    changed: files.length,
+  };
 }

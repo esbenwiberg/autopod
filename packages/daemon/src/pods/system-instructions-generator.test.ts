@@ -430,7 +430,7 @@ describe('generateSystemInstructions', () => {
     );
 
     expect(md).toContain('## Guidelines');
-    expect(md).toContain('Commit after every meaningful unit of work');
+    expect(md).toContain('Commit after every meaningful, reviewable unit of work');
     expect(md).toContain('Do NOT modify configuration files');
     expect(md).toContain('Self-review your diff');
   });

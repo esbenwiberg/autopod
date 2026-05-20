@@ -54,7 +54,21 @@ describe('diff route', () => {
       '+added\n' +
       '-removed\n';
     const cm = {
-      execInContainer: vi.fn().mockResolvedValue({ stdout: sample, stderr: '', exitCode: 0 }),
+      execInContainer: vi.fn().mockImplementation((_id, cmd: string[]) => {
+        if (cmd[0] === 'git' && cmd[1] === 'diff' && cmd.includes('start-sha')) {
+          return Promise.resolve({ stdout: sample, stderr: '', exitCode: 0 });
+        }
+        if (cmd[0] === 'git' && cmd[1] === 'diff' && cmd.includes('HEAD')) {
+          return Promise.resolve({ stdout: '', stderr: '', exitCode: 0 });
+        }
+        if (cmd[0] === 'git' && cmd[1] === 'ls-files') {
+          return Promise.resolve({ stdout: '', stderr: '', exitCode: 0 });
+        }
+        if (cmd[0] === 'git' && cmd[1] === 'log') {
+          return Promise.resolve({ stdout: '', stderr: '', exitCode: 0 });
+        }
+        return Promise.resolve({ stdout: '', stderr: 'unexpected', exitCode: 1 });
+      }),
     } as unknown as ContainerManager;
 
     diffRoutes(app, makePodManager(), makeContainerFactory(cm), makeProfileStore());
@@ -65,6 +79,80 @@ describe('diff route', () => {
     const body = res.json() as { files: unknown[]; stats: { changed: number } };
     expect(body.files).toHaveLength(1);
     expect(body.stats).toEqual({ added: 1, removed: 1, changed: 1 });
+    expect(body.previewFiles).toEqual([]);
+    expect(body.commits).toEqual([]);
+  });
+
+  it('returns untracked preview and commit groups separately from the canonical diff', async () => {
+    const canonical =
+      'diff --git a/src/foo.ts b/src/foo.ts\n' +
+      '--- a/src/foo.ts\n' +
+      '+++ b/src/foo.ts\n' +
+      '@@ -1 +1 @@\n' +
+      '-old\n' +
+      '+new\n';
+    const untracked =
+      'diff --git a/src/new.ts b/src/new.ts\n' +
+      'new file mode 100644\n' +
+      '--- /dev/null\n' +
+      '+++ b/src/new.ts\n' +
+      '@@ -0,0 +1 @@\n' +
+      '+export const value = 1;\n';
+    const calls: string[][] = [];
+    const cm = {
+      execInContainer: vi.fn().mockImplementation((_id, cmd: string[]) => {
+        calls.push(cmd);
+        if (cmd[0] === 'git' && cmd[1] === 'diff' && cmd.includes('start-sha')) {
+          return Promise.resolve({ stdout: canonical, stderr: '', exitCode: 0 });
+        }
+        if (cmd[0] === 'git' && cmd[1] === 'diff' && cmd.includes('HEAD')) {
+          return Promise.resolve({ stdout: '', stderr: '', exitCode: 0 });
+        }
+        if (cmd[0] === 'git' && cmd[1] === 'ls-files') {
+          return Promise.resolve({ stdout: 'src/new.ts\0', stderr: '', exitCode: 0 });
+        }
+        if (cmd[0] === 'stat') {
+          return Promise.resolve({ stdout: '24\n', stderr: '', exitCode: 0 });
+        }
+        if (cmd[0] === 'git' && cmd[1] === 'diff' && cmd.includes('--no-index')) {
+          return Promise.resolve({ stdout: untracked, stderr: '', exitCode: 1 });
+        }
+        if (cmd[0] === 'git' && cmd[1] === 'log') {
+          return Promise.resolve({
+            stdout: [
+              'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              'aaaaaaaa',
+              '2026-05-20T10:00:00Z',
+              'feat: add thing',
+              '\x1e',
+            ].join('\0'),
+            stderr: '',
+            exitCode: 0,
+          });
+        }
+        if (cmd[0] === 'git' && cmd[1] === 'show') {
+          return Promise.resolve({ stdout: canonical, stderr: '', exitCode: 0 });
+        }
+        return Promise.resolve({ stdout: '', stderr: 'unexpected', exitCode: 1 });
+      }),
+    } as unknown as ContainerManager;
+
+    diffRoutes(app, makePodManager(), makeContainerFactory(cm), makeProfileStore());
+    await app.ready();
+
+    const res = await app.inject({ method: 'GET', url: '/pods/pod-1/diff' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      files: { path: string }[];
+      previewFiles: { path: string }[];
+      commits: { shortSha: string; files: { path: string }[] }[];
+    };
+    expect(body.files.map((f) => f.path)).toEqual(['src/foo.ts']);
+    expect(body.previewFiles.map((f) => f.path)).toEqual(['src/new.ts']);
+    expect(body.commits).toHaveLength(1);
+    expect(body.commits[0]?.shortSha).toBe('aaaaaaaa');
+    expect(body.commits[0]?.files.map((f) => f.path)).toEqual(['src/foo.ts']);
+    expect(calls.some((cmd) => cmd[1] === 'merge-base')).toBe(false);
   });
 
   // Regression: previously tryWorktreeDiff (and tryContainerDiff) ran
@@ -111,6 +199,16 @@ describe('diff route', () => {
 
     const res = await app.inject({ method: 'GET', url: '/pods/pod-1/diff' });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ files: [], stats: { added: 0, removed: 0, changed: 0 } });
+    expect(res.json()).toEqual({
+      files: [],
+      stats: { added: 0, removed: 0, changed: 0 },
+      previewFiles: [],
+      previewStats: { added: 0, removed: 0, changed: 0 },
+      uncommittedFiles: [],
+      uncommittedStats: { added: 0, removed: 0, changed: 0 },
+      commits: [],
+      commitGroupingUnavailableReason:
+        'commit grouping unavailable from container and host worktree',
+    });
   });
 });

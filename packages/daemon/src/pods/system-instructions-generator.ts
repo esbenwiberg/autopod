@@ -547,9 +547,10 @@ export function generateSystemInstructions(
   );
   lines.push('3. **Commit your work — properly**:');
   lines.push(
-    '   - After each phase (or sooner for significant changes), run ' +
+    '   - Commit after each coherent, reviewable unit of work: a finished subsystem change, ' +
+      'a testable behavior slice, or a cleanup after a passing check. Run ' +
       '`git add -A && git commit -m "<conventional-commit subject>"`. ' +
-      'Do not save all commits for the end.',
+      'Do not save everything for the end, but also do not make one commit per tiny file edit.',
   );
   lines.push(
     '   - Use conventional-commit format: `type(scope): subject`. ' +
@@ -683,7 +684,7 @@ export function generateSystemInstructions(
     lines.push('- Cite sources where applicable');
   } else {
     lines.push(
-      '- Commit after every meaningful unit of work — do not batch everything at the end. ' +
+      '- Commit after every meaningful, reviewable unit of work — do not batch everything at the end, and do not make one commit per tiny file edit. ' +
         'Use conventional-commit subjects (e.g. `feat(scope): ...`, `fix(scope): ...`); ' +
         'leftover uncommitted changes get an ugly `chore: auto-commit ...` fallback.',
     );

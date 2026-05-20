@@ -14,8 +14,8 @@ public final class PodStore {
   public private(set) var isLoading = false
   public private(set) var error: String?
 
-  /// Cached diff strings keyed by pod ID
-  public private(set) var sessionDiffs: [String: String] = [:]
+  /// Cached diff responses keyed by pod ID.
+  public private(set) var sessionDiffs: [String: DiffApiResponse] = [:]
 
   /// Persisted quality scores keyed by pod ID. Populated by
   /// `loadQualityScores()` alongside `loadSessions()`. Only terminal pods
@@ -163,11 +163,14 @@ public final class PodStore {
     guard let api else { return }
     do {
       let response = try await api.getSessionDiff(podId)
-      // Reconstruct the raw diff string from structured files
-      let raw = response.files.map(\.diff).joined(separator: "\n")
-      // Only cache non-empty diffs — empty results should be retried on next event
-      if !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        sessionDiffs[podId] = raw
+      let hasDiff =
+        !response.files.isEmpty ||
+        !(response.previewFiles ?? []).isEmpty ||
+        !(response.uncommittedFiles ?? []).isEmpty ||
+        !(response.commits ?? []).isEmpty
+      // Only cache non-empty diff payloads — empty results should be retried on next event.
+      if hasDiff {
+        sessionDiffs[podId] = response
       } else {
         sessionDiffs.removeValue(forKey: podId)
       }

@@ -1,18 +1,42 @@
+import AutopodClient
 import SwiftUI
 
 // MARK: - Diff model
 
 public struct DiffFile: Identifiable, Sendable {
-  public var id: String { path }
+  public let id: String
   public let path: String
   public let status: DiffFileStatus
   public let hunks: [DiffHunk]
   public var linesAdded: Int
   public var linesRemoved: Int
+  public var note: String?
+  public var binary: Bool
+  public var truncated: Bool
+  public var groupLabel: String?
 
-  public init(path: String, status: DiffFileStatus, hunks: [DiffHunk], linesAdded: Int, linesRemoved: Int) {
-    self.path = path; self.status = status; self.hunks = hunks
-    self.linesAdded = linesAdded; self.linesRemoved = linesRemoved
+  public init(
+    id: String? = nil,
+    path: String,
+    status: DiffFileStatus,
+    hunks: [DiffHunk],
+    linesAdded: Int,
+    linesRemoved: Int,
+    note: String? = nil,
+    binary: Bool = false,
+    truncated: Bool = false,
+    groupLabel: String? = nil
+  ) {
+    self.id = id ?? "\(groupLabel ?? "diff"):\(path)"
+    self.path = path
+    self.status = status
+    self.hunks = hunks
+    self.linesAdded = linesAdded
+    self.linesRemoved = linesRemoved
+    self.note = note
+    self.binary = binary
+    self.truncated = truncated
+    self.groupLabel = groupLabel
   }
 }
 
@@ -51,10 +75,22 @@ public struct DiffLine: Identifiable, Sendable {
   public init(kind: Kind, content: String) { self.kind = kind; self.content = content }
 }
 
+private struct ParsedCommit: Identifiable, Sendable {
+  var id: String { commit.sha }
+  let commit: DiffApiCommit
+  let files: [DiffFile]
+}
+
+private enum DiffDisplayMode: String, CaseIterable, Identifiable {
+  case files = "Files"
+  case commits = "Commits"
+  var id: String { rawValue }
+}
+
 // MARK: - Diff parser
 
 public enum DiffParser {
-  public static func parse(_ raw: String) -> [DiffFile] {
+  public static func parse(_ raw: String, groupLabel: String? = nil) -> [DiffFile] {
     var files: [DiffFile] = []
     let lines = raw.components(separatedBy: "\n")
     var i = 0
@@ -62,24 +98,31 @@ public enum DiffParser {
     while i < lines.count {
       let line = lines[i]
 
-      // Start of a new file diff
       if line.hasPrefix("diff --git") {
+        let headerLine = line
         i += 1
         var path = ""
         var status: DiffFileStatus = .modified
         var hunks: [DiffHunk] = []
         var added = 0, removed = 0
 
-        // Parse header lines
         while i < lines.count && !lines[i].hasPrefix("@@") && !lines[i].hasPrefix("diff --git") {
           let l = lines[i]
           if l.hasPrefix("+++ b/") { path = String(l.dropFirst(6)) }
+          else if l.hasPrefix("+++ /dev/null") { status = .deleted }
+          else if l.hasPrefix("--- /dev/null") { status = .added }
           else if l.hasPrefix("new file") { status = .added }
           else if l.hasPrefix("deleted file") { status = .deleted }
           i += 1
         }
 
-        // Parse hunks
+        if path.isEmpty {
+          let header = headerLine.replacingOccurrences(of: "diff --git ", with: "")
+          if let range = header.range(of: " b/") {
+            path = String(header[range.upperBound...])
+          }
+        }
+
         while i < lines.count && !lines[i].hasPrefix("diff --git") {
           let l = lines[i]
           if l.hasPrefix("@@") {
@@ -107,7 +150,16 @@ public enum DiffParser {
         }
 
         if !path.isEmpty {
-          files.append(DiffFile(path: path, status: status, hunks: hunks, linesAdded: added, linesRemoved: removed))
+          files.append(
+            DiffFile(
+              path: path,
+              status: status,
+              hunks: hunks,
+              linesAdded: added,
+              linesRemoved: removed,
+              groupLabel: groupLabel
+            )
+          )
         }
       } else {
         i += 1
@@ -116,36 +168,101 @@ public enum DiffParser {
 
     return files
   }
+
+  public static func parse(_ apiFile: DiffApiFile, groupLabel: String? = nil) -> DiffFile {
+    let parsed = parse(apiFile.diff, groupLabel: groupLabel).first
+    let status = DiffFileStatus(rawValue: apiFile.status) ?? parsed?.status ?? .modified
+    return DiffFile(
+      id: "\(groupLabel ?? "diff"):\(apiFile.path)",
+      path: apiFile.path,
+      status: status,
+      hunks: parsed?.hunks ?? [],
+      linesAdded: parsed?.linesAdded ?? countLines(apiFile.diff, prefix: "+"),
+      linesRemoved: parsed?.linesRemoved ?? countLines(apiFile.diff, prefix: "-"),
+      note: apiFile.note,
+      binary: apiFile.binary ?? false,
+      truncated: apiFile.truncated ?? false,
+      groupLabel: groupLabel
+    )
+  }
+
+  private static func countLines(_ diff: String, prefix: Character) -> Int {
+    diff.split(separator: "\n").filter { line in
+      line.first == prefix && !line.hasPrefix("\(prefix)\(prefix)\(prefix)")
+    }.count
+  }
 }
 
 // MARK: - Diff tab view
 
 public struct DiffTab: View {
   public let pod: Pod
-  public let diffString: String?
+  public let diffResponse: DiffApiResponse?
   public var onRefresh: (() -> Void)?
 
-  public init(pod: Pod, diffString: String? = nil, onRefresh: (() -> Void)? = nil) {
+  public init(pod: Pod, diffResponse: DiffApiResponse? = nil, onRefresh: (() -> Void)? = nil) {
     self.pod = pod
-    self.diffString = diffString
+    self.diffResponse = diffResponse
     self.onRefresh = onRefresh
   }
 
   @State private var selectedFile: String?
-  @State private var parsedFiles: [DiffFile]? = nil
+  @State private var mode: DiffDisplayMode = .files
+  @State private var canonicalFiles: [DiffFile] = []
+  @State private var previewFiles: [DiffFile] = []
+  @State private var uncommittedFiles: [DiffFile] = []
+  @State private var parsedCommits: [ParsedCommit] = []
   @State private var isParsing = false
 
-  private var totalAdded: Int { (parsedFiles ?? []).reduce(0) { $0 + $1.linesAdded } }
-  private var totalRemoved: Int { (parsedFiles ?? []).reduce(0) { $0 + $1.linesRemoved } }
+  private var allFileModeFiles: [DiffFile] { canonicalFiles + previewFiles }
+  private var totalAdded: Int { canonicalFiles.reduce(0) { $0 + $1.linesAdded } }
+  private var totalRemoved: Int { canonicalFiles.reduce(0) { $0 + $1.linesRemoved } }
+
+  private var responseIdentity: String {
+    guard let diffResponse else { return "nil:\(pod.id)" }
+    let commitIds = (diffResponse.commits ?? []).map { commit in
+      "\(commit.sha):\(fingerprint(commit.files))"
+    }.joined(separator: ",")
+    return [
+      fingerprint(diffResponse.files),
+      fingerprint(diffResponse.previewFiles ?? []),
+      fingerprint(diffResponse.uncommittedFiles ?? []),
+      commitIds,
+    ].joined(separator: "|")
+  }
+
+  private func fingerprint(_ files: [DiffApiFile]) -> String {
+    var hash: UInt64 = 14_695_981_039_346_656_037
+
+    func mix(_ value: String) {
+      for byte in value.utf8 {
+        hash ^= UInt64(byte)
+        hash = hash &* 1_099_511_628_211
+      }
+      hash ^= 0xff
+      hash = hash &* 1_099_511_628_211
+    }
+
+    for file in files {
+      mix(file.path)
+      mix(file.status)
+      mix(file.diff)
+      mix(file.note ?? "")
+      mix(file.binary == true ? "binary" : "text")
+      mix(file.truncated == true ? "truncated" : "full")
+    }
+
+    return String(hash, radix: 16)
+  }
 
   private var emptyStateSubline: String? {
     switch pod.status {
     case .provisioning:
-      "Container is starting…"
+      "Container is starting..."
     case .running, .awaitingInput, .paused:
-      "Agent hasn't modified any files yet"
+      "No tracked or untracked changes visible yet"
     case .validating, .merging, .mergePending, .handoff, .killing:
-      "Refreshing diff…"
+      "Refreshing diff..."
     case .complete, .failed, .killed:
       "No changes recorded for this pod"
     default:
@@ -154,116 +271,51 @@ public struct DiffTab: View {
   }
 
   public var body: some View {
-    Group {
-      if isParsing || (diffString != nil && parsedFiles == nil) {
-        VStack(spacing: 10) {
-          ProgressView()
-          Text("Parsing diff…")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-      } else if parsedFiles?.isEmpty != false {
-        VStack(spacing: 10) {
-          Image(systemName: "doc.text.magnifyingglass")
-            .font(.system(size: 32))
-            .foregroundStyle(.tertiary)
-          Text("No diff available")
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-          if let subline = emptyStateSubline {
-            Text(subline)
-              .font(.caption)
-              .foregroundStyle(.tertiary)
-          }
-          if let onRefresh {
-            Button {
-              onRefresh()
-            } label: {
-              Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .padding(.top, 4)
+    VStack(spacing: 0) {
+      HStack(spacing: 8) {
+        Picker("", selection: $mode) {
+          ForEach(DiffDisplayMode.allCases) { item in
+            Text(item.rawValue).tag(item)
           }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-      } else {
-        let files = parsedFiles ?? []
-        HSplitView {
-          // File tree
-          VStack(alignment: .leading, spacing: 0) {
-            // Stats header
-            HStack(spacing: 8) {
-              Text("\(files.count) files")
-                .font(.caption.weight(.semibold))
-              Spacer()
-              Text("+\(totalAdded)")
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(.green)
-              Text("-\(totalRemoved)")
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(.red)
-              if let onRefresh {
-                Button {
-                  onRefresh()
-                } label: {
-                  Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-                .help("Refresh diff")
-              }
-            }
-            .padding(10)
+        .pickerStyle(.segmented)
+        .frame(width: 180)
 
-            Divider()
+        Spacer()
 
-            List(files, selection: $selectedFile) { file in
-              HStack(spacing: 6) {
-                Image(systemName: file.status.icon)
-                  .foregroundStyle(file.status.color)
-                  .font(.system(size: 10))
-                Text(file.path)
-                  .font(.system(.caption, design: .monospaced))
-                  .lineLimit(1)
-                  .help(file.path)
-                Spacer()
-                Text("+\(file.linesAdded) -\(file.linesRemoved)")
-                  .font(.system(.caption2, design: .monospaced))
-                  .foregroundStyle(.secondary)
-              }
-              .tag(file.path)
-            }
-            .listStyle(.sidebar)
+        if let onRefresh {
+          Button {
+            onRefresh()
+          } label: {
+            Image(systemName: "arrow.clockwise")
           }
-          .frame(minWidth: 200, idealWidth: 280)
+          .buttonStyle(.borderless)
+          .controlSize(.small)
+          .help("Refresh diff")
+        }
+      }
+      .padding(.horizontal, 10)
+      .padding(.vertical, 8)
 
-          // Diff content
-          ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-              let displayFiles = selectedFile.flatMap { sel in files.filter { $0.path == sel } } ?? files
-              ForEach(displayFiles) { file in
-                diffFileView(file)
-              }
-            }
-            .padding(8)
+      Divider()
+
+      Group {
+        if isParsing {
+          loadingState
+        } else {
+          switch mode {
+          case .files:
+            filesMode
+          case .commits:
+            commitsMode
           }
         }
       }
     }
-    .task(id: diffString) {
-      guard let raw = diffString else { parsedFiles = []; return }
-      isParsing = true
-      let result = await Task.detached(priority: .userInitiated) {
-        DiffParser.parse(raw)
-      }.value
-      parsedFiles = result
-      isParsing = false
+    .task(id: responseIdentity) {
+      await parseResponse()
     }
     .task(id: pod.status) {
-      // Auto-refresh while the tab is visible and the pod is still doing work.
-      // SwiftUI cancels this task when the tab unmounts or pod.status changes.
       guard pod.status.isActive, let onRefresh else { return }
       while !Task.isCancelled {
         try? await Task.sleep(for: .seconds(5))
@@ -273,20 +325,229 @@ public struct DiffTab: View {
     }
   }
 
+  private var loadingState: some View {
+    VStack(spacing: 10) {
+      ProgressView()
+      Text("Parsing diff...")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+
+  private var filesMode: some View {
+    Group {
+      if allFileModeFiles.isEmpty {
+        emptyState(title: "No diff available", subline: emptyStateSubline)
+      } else {
+        HSplitView {
+          fileSidebar
+          fileDiffContent(files: allFileModeFiles)
+        }
+      }
+    }
+  }
+
+  private var commitsMode: some View {
+    let hasCommitContent =
+      !parsedCommits.isEmpty || !uncommittedFiles.isEmpty || !previewFiles.isEmpty
+
+    return Group {
+      if !hasCommitContent {
+        emptyState(
+          title: diffResponse?.commitGroupingUnavailableReason == nil
+            ? "No commits yet"
+            : "Commit groups unavailable",
+          subline: diffResponse?.commitGroupingUnavailableReason ?? emptyStateSubline
+        )
+      } else {
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 0) {
+            if !uncommittedFiles.isEmpty {
+              diffGroupView(
+                title: "Uncommitted tracked changes",
+                subtitle: "Working tree vs HEAD",
+                files: uncommittedFiles
+              )
+            }
+
+            ForEach(parsedCommits) { item in
+              commitGroupView(item)
+            }
+
+            if !previewFiles.isEmpty {
+              diffGroupView(
+                title: "Untracked workspace preview",
+                subtitle: "\(previewFiles.count) file\(previewFiles.count == 1 ? "" : "s")",
+                files: previewFiles
+              )
+            }
+          }
+          .padding(8)
+        }
+      }
+    }
+  }
+
+  private var fileSidebar: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 8) {
+        Text("\(canonicalFiles.count) files")
+          .font(.caption.weight(.semibold))
+        if !previewFiles.isEmpty {
+          Text("+ \(previewFiles.count) preview")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        Spacer()
+        Text("+\(totalAdded)")
+          .font(.system(.caption2, design: .monospaced))
+          .foregroundStyle(.green)
+        Text("-\(totalRemoved)")
+          .font(.system(.caption2, design: .monospaced))
+          .foregroundStyle(.red)
+      }
+      .padding(10)
+
+      Divider()
+
+      List(selection: $selectedFile) {
+        if !canonicalFiles.isEmpty {
+          Section("Canonical diff") {
+            ForEach(canonicalFiles) { file in fileRow(file) }
+          }
+        }
+        if !previewFiles.isEmpty {
+          Section("Untracked preview") {
+            ForEach(previewFiles) { file in fileRow(file) }
+          }
+        }
+      }
+      .listStyle(.sidebar)
+    }
+    .frame(minWidth: 220, idealWidth: 320)
+  }
+
+  private func fileRow(_ file: DiffFile) -> some View {
+    HStack(spacing: 6) {
+      Image(systemName: file.status.icon)
+        .foregroundStyle(file.status.color)
+        .font(.system(size: 10))
+      Text(file.path)
+        .font(.system(.caption, design: .monospaced))
+        .lineLimit(1)
+        .help(file.path)
+      Spacer()
+      Text("+\(file.linesAdded) -\(file.linesRemoved)")
+        .font(.system(.caption2, design: .monospaced))
+        .foregroundStyle(.secondary)
+    }
+    .tag(file.id)
+  }
+
+  private func fileDiffContent(files: [DiffFile]) -> some View {
+    ScrollView {
+      LazyVStack(alignment: .leading, spacing: 0) {
+        if let selectedFile,
+           let file = files.first(where: { $0.id == selectedFile }) {
+          diffFileView(file)
+        } else {
+          if !canonicalFiles.isEmpty {
+            diffGroupView(title: "Canonical diff", subtitle: nil, files: canonicalFiles)
+          }
+          if !previewFiles.isEmpty {
+            diffGroupView(
+              title: "Untracked workspace preview",
+              subtitle: "\(previewFiles.count) file\(previewFiles.count == 1 ? "" : "s")",
+              files: previewFiles
+            )
+          }
+        }
+      }
+      .padding(8)
+    }
+  }
+
+  private func commitGroupView(_ item: ParsedCommit) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 8) {
+        Text(item.commit.shortSha)
+          .font(.system(.caption, design: .monospaced).weight(.semibold))
+          .foregroundStyle(.cyan)
+        Text(item.commit.subject)
+          .font(.caption.weight(.semibold))
+          .lineLimit(1)
+        Spacer()
+        Text("+\(item.commit.stats.added) -\(item.commit.stats.removed)")
+          .font(.system(.caption2, design: .monospaced))
+          .foregroundStyle(.secondary)
+      }
+
+      if !item.commit.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        Text(item.commit.body)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(3)
+      }
+
+      ForEach(item.files) { file in
+        diffFileView(file)
+      }
+    }
+    .padding(.bottom, 10)
+  }
+
+  private func diffGroupView(title: String, subtitle: String?, files: [DiffFile]) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 8) {
+        Text(title)
+          .font(.caption.weight(.semibold))
+        if let subtitle {
+          Text(subtitle)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+      }
+      .padding(.horizontal, 8)
+      .padding(.top, 6)
+
+      ForEach(files) { file in
+        diffFileView(file)
+      }
+    }
+  }
+
   private func diffFileView(_ file: DiffFile) -> some View {
     VStack(alignment: .leading, spacing: 0) {
-      // File header
       HStack(spacing: 6) {
         Image(systemName: file.status.icon)
           .foregroundStyle(file.status.color)
         Text(file.path)
           .font(.system(.caption, design: .monospaced).weight(.semibold))
+        if file.truncated {
+          Text("truncated")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
       }
       .padding(8)
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(Color(nsColor: .controlBackgroundColor))
 
-      // Hunks
+      if let note = file.note {
+        Text(note)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .padding(.horizontal, 8)
+          .padding(.vertical, 6)
+      } else if file.hunks.isEmpty {
+        Text(file.binary ? "Binary file" : "No textual hunks")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .padding(.horizontal, 8)
+          .padding(.vertical, 6)
+      }
+
       ForEach(file.hunks) { hunk in
         Text(hunk.header)
           .font(.system(.caption2, design: .monospaced))
@@ -306,6 +567,77 @@ public struct DiffTab: View {
 
       Divider().padding(.vertical, 4)
     }
+  }
+
+  private func emptyState(title: String, subline: String?) -> some View {
+    VStack(spacing: 10) {
+      Image(systemName: "doc.text.magnifyingglass")
+        .font(.system(size: 32))
+        .foregroundStyle(.tertiary)
+      Text(title)
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+      if let subline {
+        Text(subline)
+          .font(.caption)
+          .foregroundStyle(.tertiary)
+          .multilineTextAlignment(.center)
+      }
+      if let onRefresh {
+        Button {
+          onRefresh()
+        } label: {
+          Label("Refresh", systemImage: "arrow.clockwise")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .padding(.top, 4)
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+
+  private func parseResponse() async {
+    guard let diffResponse else {
+      canonicalFiles = []
+      previewFiles = []
+      uncommittedFiles = []
+      parsedCommits = []
+      selectedFile = nil
+      return
+    }
+
+    isParsing = true
+    let result = await Task.detached(priority: .userInitiated) {
+      let canonical = diffResponse.files.map {
+        DiffParser.parse($0, groupLabel: "canonical")
+      }
+      let preview = (diffResponse.previewFiles ?? []).map {
+        DiffParser.parse($0, groupLabel: "preview")
+      }
+      let uncommitted = (diffResponse.uncommittedFiles ?? []).map {
+        DiffParser.parse($0, groupLabel: "uncommitted")
+      }
+      let commits = (diffResponse.commits ?? []).map { commit in
+        ParsedCommit(
+          commit: commit,
+          files: commit.files.map {
+            DiffParser.parse($0, groupLabel: commit.shortSha)
+          }
+        )
+      }
+      return (canonical, preview, uncommitted, commits)
+    }.value
+
+    canonicalFiles = result.0
+    previewFiles = result.1
+    uncommittedFiles = result.2
+    parsedCommits = result.3
+    let validIds = Set((canonicalFiles + previewFiles).map(\.id))
+    if let selectedFile, !validIds.contains(selectedFile) {
+      self.selectedFile = nil
+    }
+    isParsing = false
   }
 
   private func linePrefix(_ kind: DiffLine.Kind) -> String {
@@ -334,35 +666,5 @@ public struct DiffTab: View {
 }
 
 #Preview("Diff tab") {
-  DiffTab(pod: MockData.validated, diffString: """
-  diff --git a/src/auth/google.ts b/src/auth/google.ts
-  new file mode 100644
-  --- /dev/null
-  +++ b/src/auth/google.ts
-  @@ -0,0 +1,15 @@
-  +import { OAuth2Client } from 'google-auth-library';
-  +
-  +export function createGoogleClient() {
-  +  return new OAuth2Client({
-  +    clientId: process.env.GOOGLE_CLIENT_ID,
-  +    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  +  });
-  +}
-  diff --git a/src/routes/auth.ts b/src/routes/auth.ts
-  --- a/src/routes/auth.ts
-  +++ b/src/routes/auth.ts
-  @@ -1,5 +1,8 @@
-   import express from 'express';
-  +import { createGoogleClient } from '../auth/google';
-
-   const router = express.Router();
-  +const google = createGoogleClient();
-
-  -router.get('/login', (req, res) => {
-  +router.get('/login', async (req, res) => {
-  +  const url = google.generateAuthUrl({ scope: ['profile', 'email'] });
-  +  res.redirect(url);
-   });
-  """)
-  .frame(width: 700, height: 500)
+  DiffTab(pod: MockData.validated)
 }

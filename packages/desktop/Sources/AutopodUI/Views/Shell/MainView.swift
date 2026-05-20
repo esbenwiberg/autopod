@@ -27,7 +27,7 @@ public struct MainView: View {
     public var limitedLogCount: Int?
     public var onReloadLogs: (() -> Void)?
     public var onLoadAllLogs: (() -> Void)?
-    public var sessionDiffs: [String: String]
+    public var sessionDiffs: [String: DiffApiResponse]
     public var terminalState: String
     public var terminalDataPipe: TerminalDataPipe?
     public var onTerminalSendData: (([UInt8]) -> Void)?
@@ -97,7 +97,7 @@ public struct MainView: View {
         limitedLogCount: Int? = nil,
         onReloadLogs: (() -> Void)? = nil,
         onLoadAllLogs: (() -> Void)? = nil,
-        sessionDiffs: [String: String] = [:],
+        sessionDiffs: [String: DiffApiResponse] = [:],
         terminalState: String = "disconnected",
         terminalDataPipe: TerminalDataPipe? = nil,
         onTerminalSendData: (([UInt8]) -> Void)? = nil,
@@ -494,7 +494,7 @@ public struct MainView: View {
                     onSelectPod: { selectedSessionId = $0 },
                     eventsForPod: eventsForPod,
                     loadEventsForPod: loadEventsForPod,
-                    diffString: sessionDiffs[pod.id],
+                    diffResponse: sessionDiffs[pod.id],
                     terminalState: terminalState,
                     terminalDataPipe: terminalDataPipe,
                     onTerminalSendData: onTerminalSendData,

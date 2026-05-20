@@ -19,7 +19,7 @@ public struct DetailPanelView: View {
     /// Triggers a historical event fetch for a pod whose events haven't been
     /// loaded yet (e.g. when the user opens the panel for a sibling).
     public var loadEventsForPod: ((String) -> Void)?
-    public var diffString: String?
+    public var diffResponse: DiffApiResponse?
     public var terminalState: String
     public var terminalDataPipe: TerminalDataPipe?
     public var onTerminalSendData: (([UInt8]) -> Void)?
@@ -50,7 +50,7 @@ public struct DetailPanelView: View {
         onSelectPod: ((String) -> Void)? = nil,
         eventsForPod: ((String) -> [AgentEvent])? = nil,
         loadEventsForPod: ((String) -> Void)? = nil,
-        diffString: String? = nil,
+        diffResponse: DiffApiResponse? = nil,
         terminalState: String = "disconnected",
         terminalDataPipe: TerminalDataPipe? = nil,
         onTerminalSendData: (([UInt8]) -> Void)? = nil,
@@ -77,7 +77,7 @@ public struct DetailPanelView: View {
         self.onSelectPod = onSelectPod
         self.eventsForPod = eventsForPod
         self.loadEventsForPod = loadEventsForPod
-        self.diffString = diffString
+        self.diffResponse = diffResponse
         self.terminalState = terminalState
         self.terminalDataPipe = terminalDataPipe
         self.onTerminalSendData = onTerminalSendData
@@ -145,7 +145,7 @@ public struct DetailPanelView: View {
                     onReload: onReloadLogs,
                     onLoadAll: onLoadAllLogs
                 )
-                case .diff:       DiffTab(pod: pod, diffString: diffString, onRefresh: onRefreshDiff)
+                case .diff:       DiffTab(pod: pod, diffResponse: diffResponse, onRefresh: onRefreshDiff)
                 case .work:       WorkTab(pod: pod, loadQuality: loadQuality)
                 case .validation: ValidationTab(
                     pod: pod,
