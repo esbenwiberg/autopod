@@ -280,7 +280,7 @@ Each runtime (`claude-runtime.ts`, `codex-runtime.ts`, `copilot-runtime.ts`) has
 | Variable | Default | Required | Notes |
 |----------|---------|----------|-------|
 | `PORT` | `3100` | no | HTTP bind port |
-| `HOST` | `0.0.0.0` | no | HTTP bind address |
+| `HOST` | `127.0.0.1` | no | HTTP bind address. Keep on loopback; expose to phone via `tailscale serve` (see `docs/mobile.md`) rather than binding to `0.0.0.0`. |
 | `DB_PATH` | `./autopod.db` | no | SQLite file location |
 | `LOG_LEVEL` | `info` | no | pino log level |
 | `NODE_ENV` | — | yes (prod) | If `production`, auth is enforced |
@@ -295,6 +295,7 @@ Each runtime (`claude-runtime.ts`, `codex-runtime.ts`, `copilot-runtime.ts`) has
 | `ACR_USERNAME` | — | no | ACR credentials for ACI |
 | `ACR_PASSWORD` | — | no | ACR credentials for ACI |
 | `AUTOPOD_CONTAINER_HOST` | — | no | Override host for MCP base URL inside containers |
+| `AUTOPOD_MOBILE_DIST` | — | no | Override mobile PWA dist dir (default: `packages/mobile-web/dist`). See `docs/mobile.md`. |
 
 ## Environment Gotchas
 

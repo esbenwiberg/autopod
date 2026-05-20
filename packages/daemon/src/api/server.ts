@@ -35,6 +35,7 @@ import { mcpHandler } from './mcp-handler.js';
 import { mcpProxyHandler } from './mcp-proxy-handler.js';
 import { authPlugin } from './plugins/auth.js';
 import { corsPlugin } from './plugins/cors.js';
+import { mobileStaticPlugin } from './plugins/mobile-static.js';
 import { rateLimitPlugin } from './plugins/rate-limit.js';
 import { requestLoggerPlugin } from './plugins/request-logger.js';
 import { actionRoutes } from './routes/actions.js';
@@ -239,6 +240,11 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     safetyEventsRepo: deps.safetyEventsRepo,
     logger: app.log as unknown as import('pino').Logger,
   });
+
+  // Mobile PWA — serves packages/mobile-web/dist at /mobile/*. Skipped at
+  // startup if the bundle isn't built. Static assets are public; the SPA
+  // enforces auth client-side.
+  await mobileStaticPlugin(app);
 
   return app;
 }

@@ -17,6 +17,7 @@ COPY packages/daemon/package.json packages/daemon/
 COPY packages/cli/package.json packages/cli/
 COPY packages/validator/package.json packages/validator/
 COPY packages/escalation-mcp/package.json packages/escalation-mcp/
+COPY packages/mobile-web/package.json packages/mobile-web/
 
 RUN pnpm install --frozen-lockfile || pnpm install
 
@@ -26,6 +27,7 @@ COPY packages/daemon/ packages/daemon/
 COPY packages/cli/ packages/cli/
 COPY packages/validator/ packages/validator/
 COPY packages/escalation-mcp/ packages/escalation-mcp/
+COPY packages/mobile-web/ packages/mobile-web/
 
 # Build
 RUN pnpm build

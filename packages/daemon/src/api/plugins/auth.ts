@@ -21,6 +21,13 @@ export function authPlugin(
   app.decorateRequest('user', null);
 
   app.addHook('preHandler', async (request: FastifyRequest) => {
+    // The mobile PWA shell (HTML, JS, manifest, icons) is public by design —
+    // it's the same bundle for every user and contains no secrets. The SPA
+    // enforces auth client-side using the dev token paired via the QR flow.
+    // Skipping the prefix here also keeps unknown sub-paths returning a clean
+    // 404 from @fastify/static rather than a confusing 401.
+    if (request.url.startsWith('/mobile/') || request.url === '/mobile') return;
+
     const routeConfig = request.routeOptions?.config as
       | { auth?: boolean | 'pod-token' }
       | undefined;
