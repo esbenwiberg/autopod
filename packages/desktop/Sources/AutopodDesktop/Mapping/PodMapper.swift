@@ -90,6 +90,18 @@ public enum PodMapper {
         let hint = "\n\nReply `dismiss` to override all, `dismiss 1,3` for specific items, or any other text as guidance for the agent."
         return header + body + hint
       }
+      if esc.type == "request_credential" {
+        if let reason = esc.payload.reason?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !reason.isEmpty {
+          return reason
+        }
+        let service = switch esc.payload.service {
+        case "github": "GitHub"
+        case "ado": "ADO"
+        default: "git provider"
+        }
+        return "Credential update required for \(service). Update the profile PAT, then reply to retry."
+      }
       return esc.payload.question ?? esc.payload.description
     }()
     let escalationOptions: [String]? = {

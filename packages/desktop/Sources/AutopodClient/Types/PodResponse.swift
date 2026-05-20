@@ -240,6 +240,9 @@ public struct EscalationPayload: Codable, Sendable {
   public let options: [String]?
   public let domain: String?
   public let description: String?
+  public let reason: String?
+  public let service: String?
+  public let source: String?
   public let attempted: [String]?
   public let needs: String?
   // Action approval fields

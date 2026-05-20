@@ -242,6 +242,72 @@ import AutopodUI
   #expect(pod.escalationQuestion == "Which auth provider?")
 }
 
+@Test func mapsRequestCredentialEscalationReason() throws {
+  let json = """
+  {
+    "id": "test-credential",
+    "profileName": "webapp",
+    "task": "Push branch",
+    "status": "awaiting_input",
+    "model": "sonnet",
+    "runtime": "claude",
+    "executionTarget": "local",
+    "branch": "feat/credential",
+    "containerId": null,
+    "worktreePath": "/tmp/worktree",
+    "validationAttempts": 1,
+    "maxValidationAttempts": 3,
+    "lastValidationResult": null,
+    "pendingEscalation": {
+      "id": "esc-credential",
+      "podId": "test-credential",
+      "type": "request_credential",
+      "timestamp": "2026-05-20T09:56:24Z",
+      "payload": {
+        "service": "ado",
+        "reason": "git push was rejected by ado. Update the profile's adoPat with a token that has write access to the target repo, then resume the pod.",
+        "source": "host_push"
+      },
+      "response": null
+    },
+    "escalationCount": 1,
+    "skipValidation": false,
+    "createdAt": "2026-05-20T09:00:00Z",
+    "startedAt": "2026-05-20T09:00:00Z",
+    "completedAt": null,
+    "updatedAt": "2026-05-20T09:56:24Z",
+    "userId": "user-1",
+    "filesChanged": 4,
+    "linesAdded": 20,
+    "linesRemoved": 8,
+    "previewUrl": null,
+    "prUrl": null,
+    "plan": null,
+    "progress": null,
+    "acceptanceCriteria": null,
+    "claudeSessionId": null,
+    "outputMode": "pr",
+    "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
+    "baseBranch": null,
+    "acFrom": null,
+    "recoveryWorktreePath": null,
+    "lastHeartbeatAt": null,
+    "inputTokens": 5000,
+    "outputTokens": 1000,
+    "costUsd": 0.1,
+    "commitCount": 1,
+    "lastCommitAt": null
+  }
+  """.data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+
+  #expect(pod.status == .awaitingInput)
+  #expect(pod.escalationType == "request_credential")
+  #expect(pod.escalationQuestion?.contains("Update the profile's adoPat") == true)
+}
+
 @Test func mapsWorkspaceSession() throws {
   let json = """
   {
