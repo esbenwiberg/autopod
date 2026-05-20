@@ -20,15 +20,15 @@ public struct SessionQualityCard: View {
                     .frame(width: 10, height: 10)
                 Text("Session Quality")
                     .font(.system(.subheadline).weight(.semibold))
+                    .lineLimit(1)
                 Spacer()
                 if let score = signals.score {
-                    Text("\(score)/100")
-                        .font(.system(.caption, design: .monospaced).weight(.semibold))
-                        .foregroundStyle(qualityColor(signals.grade))
+                    qualityScoreBadge(score)
                 }
                 Text(signals.grade.capitalized)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
 
             LazyVGrid(
@@ -92,5 +92,34 @@ public struct SessionQualityCard: View {
         case "red": return .red
         default: return .gray
         }
+    }
+
+    private func qualityScoreBadge(_ score: Int) -> some View {
+        let color = qualityColor(signals.grade)
+
+        return HStack(alignment: .firstTextBaseline, spacing: 1) {
+            Text("\(score)")
+                .font(.system(size: 15, weight: .bold, design: .monospaced))
+                .foregroundStyle(color)
+            Text("/100")
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(color.opacity(0.78))
+                .baselineOffset(1)
+        }
+        .monospacedDigit()
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .frame(minWidth: 62)
+        .background(
+            Capsule()
+                .fill(color.opacity(0.16))
+        )
+        .overlay(
+            Capsule()
+                .stroke(color.opacity(0.42), lineWidth: 1)
+        )
+        .help("Quality score \(score)/100")
     }
 }
