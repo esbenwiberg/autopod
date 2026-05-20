@@ -8,7 +8,18 @@ import { apiFetch } from './api.js';
  * Step 5 ships pause / resume / kill / nudge. Step 6 adds answer/approve/reject;
  * step 7 adds force-complete / extend-attempts / update-from-base / spawn-fix.
  */
-export type ActionKind = 'pause' | 'resume' | 'kill' | 'nudge' | 'approve' | 'reject';
+export type ActionKind =
+  | 'pause'
+  | 'resume'
+  | 'kill'
+  | 'nudge'
+  | 'approve'
+  | 'reject'
+  | 'force_complete'
+  | 'extend_attempts'
+  | 'extend_pr_attempts'
+  | 'update_from_base'
+  | 'spawn_fix';
 
 export interface ActionDef {
   kind: ActionKind;
@@ -63,6 +74,48 @@ const REJECT: ActionDef = {
   optimistic: { status: 'running' },
   promptsForText: true,
 };
+const EXTEND_ATTEMPTS: ActionDef = {
+  kind: 'extend_attempts',
+  label: 'Extend (+3)',
+  tone: 'neutral',
+  optimistic: null,
+  promptsForText: false,
+};
+const EXTEND_PR_ATTEMPTS: ActionDef = {
+  kind: 'extend_pr_attempts',
+  label: 'Extend PR fixes (+3)',
+  tone: 'neutral',
+  optimistic: null,
+  promptsForText: false,
+};
+const UPDATE_FROM_BASE: ActionDef = {
+  kind: 'update_from_base',
+  label: 'Rebase + revalidate',
+  tone: 'neutral',
+  optimistic: null,
+  promptsForText: false,
+};
+const SPAWN_FIX: ActionDef = {
+  kind: 'spawn_fix',
+  label: 'Spawn fix',
+  tone: 'neutral',
+  optimistic: null,
+  promptsForText: true,
+};
+const FORCE_COMPLETE: ActionDef = {
+  kind: 'force_complete',
+  label: 'Force complete',
+  tone: 'warn',
+  optimistic: { status: 'complete' },
+  promptsForText: true,
+};
+const RESUME_FAILED: ActionDef = {
+  kind: 'resume',
+  label: 'Resume',
+  tone: 'neutral',
+  optimistic: null, // Server picks the recovery path; status follows.
+  promptsForText: false,
+};
 
 const ACTIONS_BY_STATUS: Partial<Record<PodStatus, ActionDef[]>> = {
   running: [PAUSE, NUDGE, KILL],
@@ -73,7 +126,8 @@ const ACTIONS_BY_STATUS: Partial<Record<PodStatus, ActionDef[]>> = {
   provisioning: [KILL],
   validating: [KILL],
   validated: [APPROVE, REJECT, KILL],
-  review_required: [APPROVE, REJECT, KILL],
+  review_required: [APPROVE, REJECT, EXTEND_ATTEMPTS, SPAWN_FIX, KILL],
+  failed: [RESUME_FAILED, UPDATE_FROM_BASE, EXTEND_PR_ATTEMPTS, SPAWN_FIX, FORCE_COMPLETE, KILL],
 };
 
 export function availableActions(status: PodStatus): ActionDef[] {
@@ -114,5 +168,40 @@ export async function runAction(podId: string, kind: ActionKind, message?: strin
         body: JSON.stringify(message ? { feedback: message } : {}),
       });
       return;
+    case 'extend_attempts':
+      await apiFetch(`/pods/${podId}/extend-attempts`, {
+        method: 'POST',
+        body: JSON.stringify({ additionalAttempts: 3 }),
+      });
+      return;
+    case 'extend_pr_attempts':
+      await apiFetch(`/pods/${podId}/extend-pr-attempts`, {
+        method: 'POST',
+        body: JSON.stringify({ additionalAttempts: 3 }),
+      });
+      return;
+    case 'update_from_base':
+      await apiFetch(`/pods/${podId}/update-from-base`, { method: 'POST' });
+      return;
+    case 'spawn_fix':
+      await apiFetch(`/pods/${podId}/spawn-fix`, {
+        method: 'POST',
+        body: JSON.stringify({ message: message ?? '' }),
+      });
+      return;
+    case 'force_complete':
+      await apiFetch(`/pods/${podId}/force-complete`, {
+        method: 'POST',
+        body: JSON.stringify(message ? { reason: message } : {}),
+      });
+      return;
   }
+}
+
+/** Toggle the `skipValidation` flag on a running pod. Returns the new value. */
+export async function toggleSkipValidation(podId: string, skip: boolean): Promise<void> {
+  await apiFetch(`/pods/${podId}/skip-validation`, {
+    method: 'POST',
+    body: JSON.stringify({ skip }),
+  });
 }

@@ -1,6 +1,6 @@
 import type { PodStatus } from '@autopod/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { availableActions, runAction } from './pod-actions.js';
+import { availableActions, runAction, toggleSkipValidation } from './pod-actions.js';
 import { STORAGE_KEY } from './token.js';
 
 describe('availableActions', () => {
@@ -18,10 +18,29 @@ describe('availableActions', () => {
     expect(availableActions('awaiting_input').map((a) => a.kind)).toEqual(['kill']);
   });
 
-  it('validated + review_required pods expose approve, reject, kill', () => {
-    for (const status of ['validated', 'review_required'] as PodStatus[]) {
-      expect(availableActions(status).map((a) => a.kind)).toEqual(['approve', 'reject', 'kill']);
-    }
+  it('validated pods expose approve, reject, kill', () => {
+    expect(availableActions('validated').map((a) => a.kind)).toEqual(['approve', 'reject', 'kill']);
+  });
+
+  it('review_required pods add extend-attempts + spawn-fix to the bar', () => {
+    expect(availableActions('review_required').map((a) => a.kind)).toEqual([
+      'approve',
+      'reject',
+      'extend_attempts',
+      'spawn_fix',
+      'kill',
+    ]);
+  });
+
+  it('failed pods expose the full recovery set', () => {
+    expect(availableActions('failed').map((a) => a.kind)).toEqual([
+      'resume',
+      'update_from_base',
+      'extend_pr_attempts',
+      'spawn_fix',
+      'force_complete',
+      'kill',
+    ]);
   });
 
   it('terminal pods have no actions', () => {
@@ -105,5 +124,50 @@ describe('runAction', () => {
     await runAction('pod-1', 'reject', 'try again with stricter facts');
     const body = (spy.mock.calls[0]?.[1] as RequestInit).body;
     expect(body).toBe(JSON.stringify({ feedback: 'try again with stricter facts' }));
+  });
+
+  it('extend_attempts requests +3 by default', async () => {
+    const spy = mockFetch();
+    await runAction('pod-1', 'extend_attempts');
+    expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/extend-attempts');
+    const body = (spy.mock.calls[0]?.[1] as RequestInit).body;
+    expect(body).toBe(JSON.stringify({ additionalAttempts: 3 }));
+  });
+
+  it('extend_pr_attempts requests +3 by default', async () => {
+    const spy = mockFetch();
+    await runAction('pod-1', 'extend_pr_attempts');
+    expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/extend-pr-attempts');
+  });
+
+  it('update_from_base posts with no body', async () => {
+    const spy = mockFetch();
+    await runAction('pod-1', 'update_from_base');
+    expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/update-from-base');
+    expect((spy.mock.calls[0]?.[1] as RequestInit).body).toBeUndefined();
+  });
+
+  it('spawn_fix posts the supplied message', async () => {
+    const spy = mockFetch();
+    await runAction('pod-1', 'spawn_fix', 'fix the lint regression');
+    expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/spawn-fix');
+    const body = (spy.mock.calls[0]?.[1] as RequestInit).body;
+    expect(body).toBe(JSON.stringify({ message: 'fix the lint regression' }));
+  });
+
+  it('force_complete carries the reason when one is supplied', async () => {
+    const spy = mockFetch();
+    await runAction('pod-1', 'force_complete', 'merge conflict resolved by hand');
+    expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/force-complete');
+    const body = (spy.mock.calls[0]?.[1] as RequestInit).body;
+    expect(body).toBe(JSON.stringify({ reason: 'merge conflict resolved by hand' }));
+  });
+
+  it('toggleSkipValidation posts the skip flag', async () => {
+    const spy = mockFetch();
+    await toggleSkipValidation('pod-1', true);
+    expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/skip-validation');
+    const body = (spy.mock.calls[0]?.[1] as RequestInit).body;
+    expect(body).toBe(JSON.stringify({ skip: true }));
   });
 });

@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { ActionBar } from '../components/ActionBar.js';
 import { ActivityList } from '../components/ActivityList.js';
 import { EscalationCard } from '../components/EscalationCard.js';
+import { SkipValidationToggle } from '../components/SkipValidationToggle.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { ValidationSummary } from '../components/ValidationSummary.js';
 import { ApiError, AuthRequiredError, apiFetch } from '../lib/api.js';
@@ -86,6 +87,8 @@ export function PodDetail(): JSX.Element {
       ) : null}
 
       <ActionBar pod={data} />
+
+      <SkipValidationToggle pod={data} />
 
       {data.lastValidationResult ? <ValidationSummary result={data.lastValidationResult} /> : null}
 
