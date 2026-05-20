@@ -66,6 +66,7 @@ export function ActionBar({ pod }: Props): JSX.Element | null {
           title={prompt.label}
           placeholder="Type a message…"
           submitLabel="Send"
+          required={prompt.requiresMessage}
           onSubmit={(message) => {
             const action = prompt;
             setPrompt(null);

@@ -29,6 +29,8 @@ export interface ActionDef {
   optimistic: Partial<Pod> | null;
   /** When true, the UI opens a text-input modal before calling the action. */
   promptsForText: boolean;
+  /** When true, the modal rejects empty messages. */
+  requiresMessage?: boolean;
 }
 
 const PAUSE: ActionDef = {
@@ -58,6 +60,7 @@ const NUDGE: ActionDef = {
   tone: 'neutral',
   optimistic: null,
   promptsForText: true,
+  requiresMessage: true,
 };
 const APPROVE: ActionDef = {
   kind: 'approve',
@@ -101,6 +104,7 @@ const SPAWN_FIX: ActionDef = {
   tone: 'neutral',
   optimistic: null,
   promptsForText: true,
+  requiresMessage: true,
 };
 const FORCE_COMPLETE: ActionDef = {
   kind: 'force_complete',
