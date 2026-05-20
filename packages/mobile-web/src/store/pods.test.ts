@@ -112,11 +112,52 @@ describe('usePodsStore.applyEvent', () => {
     const before = [makePod('a', 'running')];
     usePodsStore.setState({ pods: before });
     usePodsStore.getState().applyEvent({
-      type: 'pod.agent_activity',
+      type: 'pod.firewall_denied',
       timestamp: 't',
       podId: 'a',
-      event: { type: 'status', timestamp: 't', message: 'x' } as never,
-    });
+    } as never);
     expect(usePodsStore.getState().pods).toBe(before);
+  });
+});
+
+describe('usePodsStore activity buffer', () => {
+  const initial = usePodsStore.getState();
+  beforeEach(() => {
+    usePodsStore.setState({ ...initial, pods: [], activity: {} });
+  });
+
+  it('agent_activity is ignored when the pod is not being tracked', () => {
+    usePodsStore.getState().applyEvent({
+      type: 'pod.agent_activity',
+      timestamp: 't',
+      podId: 'untracked',
+      event: { type: 'status', timestamp: 't', message: 'x' },
+    });
+    expect(usePodsStore.getState().activity).toEqual({});
+  });
+
+  it('agent_activity appends to the tracked pod and respects the cap', () => {
+    usePodsStore.getState().trackActivity('a', []);
+    for (let i = 0; i < 25; i += 1) {
+      usePodsStore.getState().applyEvent({
+        type: 'pod.agent_activity',
+        timestamp: `t${i}`,
+        podId: 'a',
+        event: { type: 'status', timestamp: `t${i}`, message: `m${i}` },
+      });
+    }
+    const buf = usePodsStore.getState().activity.a;
+    expect(buf?.length).toBe(20);
+    // Oldest dropped; newest retained
+    const first = buf?.[0];
+    const last = buf?.at(-1);
+    expect(first && 'message' in first ? first.message : '').toBe('m5');
+    expect(last && 'message' in last ? last.message : '').toBe('m24');
+  });
+
+  it('untrackActivity drops the buffer entirely', () => {
+    usePodsStore.getState().trackActivity('a', [{ type: 'status', timestamp: 't', message: 'x' }]);
+    usePodsStore.getState().untrackActivity('a');
+    expect(usePodsStore.getState().activity.a).toBeUndefined();
   });
 });

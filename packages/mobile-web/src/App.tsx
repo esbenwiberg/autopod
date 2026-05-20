@@ -3,6 +3,7 @@ import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { readStoredToken, readTokenFromHash } from './lib/token.js';
 import { WsClient } from './lib/ws-client.js';
 import { Landing } from './screens/Landing.js';
+import { PodDetail } from './screens/PodDetail.js';
 import { ScanAgain } from './screens/ScanAgain.js';
 import { usePodsStore } from './store/pods.js';
 
@@ -29,6 +30,7 @@ export function App(): JSX.Element {
     <HashRouter>
       <Routes>
         <Route path="/" element={<Landing />} />
+        <Route path="/pod/:id" element={<PodDetail />} />
         <Route path="/scan-again" element={<ScanAgain />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

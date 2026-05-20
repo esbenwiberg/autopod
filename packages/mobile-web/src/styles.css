@@ -232,3 +232,145 @@ code {
   margin-bottom: 0.75rem;
   font-size: 0.9rem;
 }
+
+.back-link {
+  display: inline-block;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+  padding: 0.25rem 0;
+  margin-bottom: 0.5rem;
+}
+
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.6rem;
+}
+
+.detail-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.detail-task {
+  font-size: 1rem;
+  line-height: 1.4;
+  margin: 0.4rem 0;
+}
+
+.detail-meta {
+  font-size: 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.validation-summary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  margin: 1rem 0;
+}
+
+.validation-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  margin-bottom: 0.55rem;
+  color: var(--muted);
+}
+
+.validation-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.validation-row {
+  display: grid;
+  grid-template-columns: 6rem auto 1fr;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.validation-label {
+  color: var(--muted);
+}
+
+.validation-note {
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-section {
+  margin-top: 1.25rem;
+}
+
+.activity-section h2 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+}
+
+.activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.activity-row {
+  display: grid;
+  grid-template-columns: 1.5rem 1fr auto;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.4rem 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.activity-row:first-child {
+  border-top: none;
+}
+
+.activity-glyph {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: center;
+  color: var(--muted);
+}
+
+.activity-text {
+  word-break: break-word;
+}
+
+.activity-time {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.activity-ok .activity-glyph {
+  color: var(--ok);
+}
+.activity-info .activity-glyph {
+  color: var(--progress);
+}
+.activity-warn .activity-glyph {
+  color: var(--warn);
+}
+.activity-danger .activity-glyph {
+  color: var(--danger);
+}

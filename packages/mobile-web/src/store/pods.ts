@@ -1,15 +1,22 @@
-import type { Pod, SystemEvent } from '@autopod/shared';
+import type { AgentEvent, Pod, SystemEvent } from '@autopod/shared';
 import { create } from 'zustand';
 import { AuthRequiredError, apiFetch } from '../lib/api.js';
+
+export const ACTIVITY_LIMIT = 20;
 
 interface PodsState {
   pods: Pod[];
   loading: boolean;
   error: string | null;
   connected: boolean;
+  /** Per-pod ring buffer of recent agent activity. Populated only while a
+   *  pod-detail screen is mounted (see `trackActivity` / `untrackActivity`). */
+  activity: Record<string, AgentEvent[]>;
   refresh: () => Promise<void>;
   applyEvent: (event: SystemEvent) => void;
   setConnected: (connected: boolean) => void;
+  trackActivity: (podId: string, seed: AgentEvent[]) => void;
+  untrackActivity: (podId: string) => void;
 }
 
 function patchPod(pods: Pod[], podId: string, patch: Partial<Pod>): Pod[] {
@@ -22,11 +29,18 @@ function patchPod(pods: Pod[], podId: string, patch: Partial<Pod>): Pod[] {
   return changed ? next : pods;
 }
 
+function appendCapped(buf: AgentEvent[] | undefined, event: AgentEvent): AgentEvent[] {
+  const base = buf ?? [];
+  const next = [...base, event];
+  return next.length > ACTIVITY_LIMIT ? next.slice(next.length - ACTIVITY_LIMIT) : next;
+}
+
 export const usePodsStore = create<PodsState>((set, get) => ({
   pods: [],
   loading: false,
   error: null,
   connected: false,
+  activity: {},
 
   refresh: async () => {
     set({ loading: true, error: null });
@@ -43,6 +57,18 @@ export const usePodsStore = create<PodsState>((set, get) => ({
   },
 
   setConnected: (connected) => set({ connected }),
+
+  trackActivity: (podId, seed) =>
+    set((state) => ({
+      activity: { ...state.activity, [podId]: seed.slice(-ACTIVITY_LIMIT) },
+    })),
+
+  untrackActivity: (podId) =>
+    set((state) => {
+      if (!(podId in state.activity)) return state;
+      const { [podId]: _omit, ...rest } = state.activity;
+      return { activity: rest };
+    }),
 
   applyEvent: (event) => {
     switch (event.type) {
@@ -92,10 +118,16 @@ export const usePodsStore = create<PodsState>((set, get) => ({
           }),
         });
         return;
+      case 'pod.agent_activity': {
+        // Append only when the detail screen is mounted for this pod — otherwise
+        // the global subscription would grow an unbounded map across the fleet.
+        const buf = get().activity[event.podId];
+        if (!buf) return;
+        set({ activity: { ...get().activity, [event.podId]: appendCapped(buf, event.event) } });
+        return;
+      }
       default:
-        // Many event types (agent_activity, validation_phase_*, scheduled_job_*, …)
-        // don't affect the list view. Ignored; step 4 picks up agent_activity for
-        // the per-pod activity tail.
+        // Many event types don't affect the views we currently render.
         return;
     }
   },
