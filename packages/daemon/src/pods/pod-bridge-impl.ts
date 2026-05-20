@@ -25,7 +25,11 @@ import { isPrivateIp } from '../api/ssrf-guard.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { HostBrowserRunner } from '../validation/host-browser-runner.js';
-import { hashDiff, runPreSubmitReview } from '../validation/pre-submit-review.js';
+import {
+  getPreSubmitCacheDecision,
+  hashDiff,
+  runPreSubmitReview,
+} from '../validation/pre-submit-review.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { MemoryRepository } from './memory-repository.js';
@@ -681,16 +685,28 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       // the re-call in the first place.
       const currentDiffHash = hashDiff(diff);
       const cached = pod.preSubmitReview;
-      const cacheMetadataMatches =
-        cached &&
-        cached.diffSource === diffSource &&
-        cached.filesReviewed === scope.filesReviewed &&
-        cached.linesAdded === scope.linesAdded &&
-        cached.linesRemoved === scope.linesRemoved &&
-        cached.containerId === (pod.containerId ?? null) &&
-        cached.worktreePath === (pod.worktreePath ?? null) &&
-        cached.startCommitSha === (pod.startCommitSha ?? null);
-      if (diff && cached && cached.diffHash === currentDiffHash && cacheMetadataMatches) {
+      const currentCacheScope = {
+        diffHash: currentDiffHash,
+        diffSource,
+        filesReviewed: scope.filesReviewed,
+        linesAdded: scope.linesAdded,
+        linesRemoved: scope.linesRemoved,
+        containerId: pod.containerId ?? null,
+        worktreePath: pod.worktreePath ?? null,
+        startCommitSha: pod.startCommitSha ?? null,
+      };
+      const cacheDecision = getPreSubmitCacheDecision(cached, currentCacheScope, {
+        requireMetadata: [
+          'diffSource',
+          'filesReviewed',
+          'linesAdded',
+          'linesRemoved',
+          'containerId',
+          'worktreePath',
+          'startCommitSha',
+        ],
+      });
+      if (diff && cached && cacheDecision.reusable) {
         logger.info(
           { podId, diffHash: currentDiffHash, diffSource, status: cached.status },
           'pre-submit review: returning cached verdict for unchanged diff',
@@ -715,17 +731,30 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           },
         };
       }
-      if (diff && cached && cached.diffHash === currentDiffHash) {
-        logger.warn(
+      if (diff && cached && !cacheDecision.reusable) {
+        logger.info(
           {
             podId,
-            diffHash: currentDiffHash,
+            reason: cacheDecision.reason,
+            cachedStatus: cached.status,
+            cachedDiffHash: cached.diffHash,
+            currentDiffHash,
             cachedSource: cached.diffSource,
-            diffSource,
+            currentSource: diffSource,
             cachedFilesReviewed: cached.filesReviewed,
-            filesReviewed: scope.filesReviewed,
+            currentFilesReviewed: scope.filesReviewed,
+            cachedLinesAdded: cached.linesAdded,
+            currentLinesAdded: scope.linesAdded,
+            cachedLinesRemoved: cached.linesRemoved,
+            currentLinesRemoved: scope.linesRemoved,
+            cachedContainerId: cached.containerId,
+            currentContainerId: pod.containerId ?? null,
+            cachedWorktreePath: cached.worktreePath,
+            currentWorktreePath: pod.worktreePath ?? null,
+            cachedStartCommitSha: cached.startCommitSha,
+            currentStartCommitSha: pod.startCommitSha ?? null,
           },
-          'pre-submit review: ignoring cached verdict because diff metadata changed',
+          'pre-submit review: ignoring cached verdict',
         );
       }
 

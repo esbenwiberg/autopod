@@ -458,12 +458,65 @@ describe('PodBridge.runPreSubmitReview', () => {
     expect(result.linesRemoved).toBe(0);
   });
 
-  it('returns the cached verdict without re-running the reviewer when the diff hash matches', async () => {
+  it('returns a cached pass without re-running the reviewer when the diff metadata matches', async () => {
     // Compute the hash the bridge will derive from the diff so the cache key
     // matches. Use the same hashing the bridge uses (sha256 / first 16 hex chars).
     const { hashDiff } = await import('../validation/pre-submit-review.js');
     const finalizedDiff = SAMPLE_DIFF; // No mode-only sections to strip.
     const expectedHash = hashDiff(finalizedDiff);
+
+    const { bridge, podId, podRepo } = buildBridgeWithWorktree({
+      containerDiff: SAMPLE_DIFF,
+      cachedVerdict: {
+        status: 'pass',
+        diffHash: expectedHash,
+        diffSource: 'container',
+        filesReviewed: 1,
+        linesAdded: 1,
+        linesRemoved: 0,
+        containerId: 'container-abc',
+        worktreePath: '/tmp/worktree',
+        startCommitSha: 'start-sha',
+        reasoning: 'cached: looks good',
+        issues: [],
+        model: 'sonnet',
+        checkedAt: '2025-01-01T00:00:00.000Z',
+      },
+      runResult: {
+        // This must NOT be returned — the cache hit short-circuits.
+        status: 'pass',
+        reasoning: 'should not be visible',
+        issues: [],
+        model: 'sonnet',
+        diffHash: 'fresh',
+        durationMs: 1,
+      },
+    });
+
+    const result = await bridge.runPreSubmitReview(podId, {});
+
+    expect(result.reusedCache).toBe(true);
+    expect(result.status).toBe('pass');
+    expect(result.reasoning).toBe('cached: looks good');
+    expect(result.issues).toEqual([]);
+    expect(result.cachedMetadata).toEqual(
+      expect.objectContaining({
+        diffSource: 'container',
+        filesReviewed: 1,
+        linesAdded: 1,
+        linesRemoved: 0,
+        startCommitSha: 'start-sha',
+      }),
+    );
+    expect(mockRunPreSubmitReview).not.toHaveBeenCalled();
+    // Cache is not re-written when we just returned from it.
+    const update = (podRepo as unknown as { update: ReturnType<typeof vi.fn> }).update;
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('runs a fresh review when a cached failure still matches the diff metadata', async () => {
+    const { hashDiff } = await import('../validation/pre-submit-review.js');
+    const expectedHash = hashDiff(SAMPLE_DIFF);
 
     const { bridge, podId, podRepo } = buildBridgeWithWorktree({
       containerDiff: SAMPLE_DIFF,
@@ -483,35 +536,32 @@ describe('PodBridge.runPreSubmitReview', () => {
         checkedAt: '2025-01-01T00:00:00.000Z',
       },
       runResult: {
-        // This must NOT be returned — the cache hit short-circuits.
         status: 'pass',
-        reasoning: 'should not be visible',
+        reasoning: 'fresh pass after fixes',
         issues: [],
         model: 'sonnet',
-        diffHash: 'fresh',
+        diffHash: 'fresh-hash',
         durationMs: 1,
       },
     });
 
     const result = await bridge.runPreSubmitReview(podId, {});
 
-    expect(result.reusedCache).toBe(true);
-    expect(result.status).toBe('fail');
-    expect(result.reasoning).toBe('cached: missing tests');
-    expect(result.issues).toEqual(['src/foo.ts:1: needs a test']);
-    expect(result.cachedMetadata).toEqual(
+    expect(result.reusedCache).toBeUndefined();
+    expect(result.cachedMetadata).toBeUndefined();
+    expect(result.status).toBe('pass');
+    expect(result.reasoning).toBe('fresh pass after fixes');
+    expect(mockRunPreSubmitReview).toHaveBeenCalledTimes(1);
+    const update = (podRepo as unknown as { update: ReturnType<typeof vi.fn> }).update;
+    expect(update).toHaveBeenCalledWith(
+      podId,
       expect.objectContaining({
-        diffSource: 'container',
-        filesReviewed: 1,
-        linesAdded: 1,
-        linesRemoved: 0,
-        startCommitSha: 'start-sha',
+        preSubmitReview: expect.objectContaining({
+          status: 'pass',
+          diffHash: 'fresh-hash',
+        }),
       }),
     );
-    expect(mockRunPreSubmitReview).not.toHaveBeenCalled();
-    // Cache is not re-written when we just returned from it.
-    const update = (podRepo as unknown as { update: ReturnType<typeof vi.fn> }).update;
-    expect(update).not.toHaveBeenCalled();
   });
 
   it('ignores a cached verdict when the diff metadata does not match', async () => {

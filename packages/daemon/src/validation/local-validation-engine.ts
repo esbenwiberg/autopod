@@ -92,7 +92,7 @@ import { applyDiffFilterToParsed } from './review-finding-filter.js';
 import { runToolUseReview } from './review-tool-runner.js';
 
 import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
-import { hashDiff } from './pre-submit-review.js';
+import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 
 /**
  * Local validation engine with build, health check, and AI task review.
@@ -3306,29 +3306,15 @@ export function pickCachedPreSubmit(
   config: ValidationEngineConfig,
 ): { status: 'pass'; reasoning: string; issues: string[] } | null {
   const cache = config.preSubmitReview;
-  if (!cache) return null;
-  if (cache.status !== 'pass') return null;
-  if (cache.diffHash !== hashDiff(config.diff)) return null;
-  if (
-    cache.startCommitSha !== undefined &&
-    cache.startCommitSha !== (config.startCommitSha ?? null)
-  ) {
-    return null;
-  }
-  if (
-    cache.filesReviewed !== undefined ||
-    cache.linesAdded !== undefined ||
-    cache.linesRemoved !== undefined
-  ) {
-    const scope = summarizeUnifiedDiff(config.diff);
-    if (
-      cache.filesReviewed !== scope.filesReviewed ||
-      cache.linesAdded !== scope.linesAdded ||
-      cache.linesRemoved !== scope.linesRemoved
-    ) {
-      return null;
-    }
-  }
+  const scope = summarizeUnifiedDiff(config.diff);
+  const decision = getPreSubmitCacheDecision(cache, {
+    diffHash: hashDiff(config.diff),
+    filesReviewed: scope.filesReviewed,
+    linesAdded: scope.linesAdded,
+    linesRemoved: scope.linesRemoved,
+    startCommitSha: config.startCommitSha ?? null,
+  });
+  if (!decision.reusable || !cache) return null;
   return {
     status: 'pass',
     reasoning: cache.reasoning,

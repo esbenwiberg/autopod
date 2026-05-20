@@ -181,6 +181,20 @@ describe('pickCachedPreSubmit (Tier 1 cache hit logic)', () => {
     expect(pickCachedPreSubmit(makeConfig('diff body', cache))).toBeNull();
   });
 
+  it('returns null for uncertain and skipped cached statuses', () => {
+    for (const status of ['uncertain', 'skipped'] as const) {
+      const cache = {
+        status,
+        diffHash: hashDiff('diff body'),
+        reasoning: 'not reusable',
+        issues: [],
+        model: 'sonnet',
+        checkedAt: new Date().toISOString(),
+      };
+      expect(pickCachedPreSubmit(makeConfig('diff body', cache))).toBeNull();
+    }
+  });
+
   it('returns null when the cached hash does not match the current diff', () => {
     const cache = {
       status: 'pass',

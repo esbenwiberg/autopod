@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { PreSubmitReviewSnapshot } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { parseReviewJson } from './local-validation-engine.js';
@@ -134,4 +135,61 @@ function buildPrompt(opts: PreSubmitReviewOpts): string {
 /** Cache key for pre-submit verdicts; collision resistance is the only requirement. */
 export function hashDiff(diff: string): string {
   return createHash('sha256').update(diff, 'utf8').digest('hex').slice(0, 16);
+}
+
+export interface PreSubmitReviewCacheScope {
+  diffHash: string;
+  diffSource?: PreSubmitReviewSnapshot['diffSource'];
+  filesReviewed?: number;
+  linesAdded?: number;
+  linesRemoved?: number;
+  containerId?: string | null;
+  worktreePath?: string | null;
+  startCommitSha?: string | null;
+}
+
+type PreSubmitReviewCacheMetadataKey = Exclude<keyof PreSubmitReviewCacheScope, 'diffHash'>;
+
+export type PreSubmitReviewCacheDecision =
+  | { reusable: true }
+  | {
+      reusable: false;
+      reason:
+        | 'no-cache'
+        | 'status-not-pass'
+        | 'diff-hash-mismatch'
+        | `${PreSubmitReviewCacheMetadataKey}-mismatch`;
+      field?: PreSubmitReviewCacheMetadataKey;
+    };
+
+export function getPreSubmitCacheDecision(
+  cache: PreSubmitReviewSnapshot | null | undefined,
+  current: PreSubmitReviewCacheScope,
+  opts?: { requireMetadata?: PreSubmitReviewCacheMetadataKey[] },
+): PreSubmitReviewCacheDecision {
+  if (!cache) return { reusable: false, reason: 'no-cache' };
+  if (cache.status !== 'pass') return { reusable: false, reason: 'status-not-pass' };
+  if (cache.diffHash !== current.diffHash) {
+    return { reusable: false, reason: 'diff-hash-mismatch' };
+  }
+
+  const required = new Set(opts?.requireMetadata ?? []);
+  const keys: PreSubmitReviewCacheMetadataKey[] = [
+    'diffSource',
+    'filesReviewed',
+    'linesAdded',
+    'linesRemoved',
+    'containerId',
+    'worktreePath',
+    'startCommitSha',
+  ];
+
+  for (const key of keys) {
+    if (!required.has(key) && cache[key] === undefined) continue;
+    if (cache[key] !== current[key]) {
+      return { reusable: false, reason: `${key}-mismatch`, field: key };
+    }
+  }
+
+  return { reusable: true };
 }
