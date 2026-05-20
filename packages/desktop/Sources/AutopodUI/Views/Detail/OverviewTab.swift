@@ -518,42 +518,7 @@ struct OverviewTab: View {
     // MARK: - Progress
 
     private func progressSection(_ phase: PhaseProgress) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Progress")
-                    .font(.system(.subheadline).weight(.semibold))
-                Spacer()
-                Text("\(phase.current) of \(phase.total)")
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-
-            ProgressView(value: Double(phase.current), total: Double(phase.total))
-                .tint(.green)
-
-            // Phase markers
-            HStack(spacing: 0) {
-                ForEach(1...phase.total, id: \.self) { step in
-                    HStack(spacing: 0) {
-                        Circle()
-                            .fill(step <= phase.current ? Color.green : Color(nsColor: .separatorColor))
-                            .frame(width: 6, height: 6)
-                        if step < phase.total {
-                            Rectangle()
-                                .fill(step < phase.current ? Color.green.opacity(0.3) : Color(nsColor: .separatorColor).opacity(0.3))
-                                .frame(height: 1)
-                        }
-                    }
-                }
-            }
-
-            Text(phase.description)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        AgentPhaseProgressView(phase: phase, variant: .compact)
     }
 
     // MARK: - Memory suggestions

@@ -116,7 +116,7 @@ struct WorkTab: View {
             promptCard
         case .plan:
             if let plan = pod.plan {
-                planCard(plan)
+                planCard(plan, phase: pod.phase)
             } else {
                 emptyWorkSection("No plan reported yet", icon: "list.bullet.clipboard")
             }
@@ -173,7 +173,30 @@ struct WorkTab: View {
 
     // MARK: - Plan
 
-    private func planCard(_ plan: SessionPlan) -> some View {
+    private enum PlanStepState {
+        case completed
+        case current
+        case upcoming
+        case neutral
+
+        var foreground: Color {
+            switch self {
+            case .completed: .green
+            case .current: .accentColor
+            case .upcoming, .neutral: .secondary
+            }
+        }
+
+        var fill: Color {
+            switch self {
+            case .completed: .green.opacity(0.16)
+            case .current: .accentColor.opacity(0.16)
+            case .upcoming, .neutral: Color(nsColor: .separatorColor).opacity(0.18)
+            }
+        }
+    }
+
+    private func planCard(_ plan: SessionPlan, phase: PhaseProgress?) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Image(systemName: "list.bullet.clipboard")
@@ -191,6 +214,11 @@ struct WorkTab: View {
                 }
             }
 
+            if let phase {
+                AgentPhaseProgressView(phase: phase, variant: .detailed, showChrome: false)
+                Divider()
+            }
+
             if !plan.summary.isEmpty {
                 Markdown(plan.summary)
                     .markdownTheme(.autopod)
@@ -203,23 +231,11 @@ struct WorkTab: View {
             if !plan.steps.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(plan.steps.enumerated()), id: \.offset) { index, step in
-                        HStack(alignment: .top, spacing: 10) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.blue.opacity(0.12))
-                                    .frame(width: 22, height: 22)
-                                Text("\(index + 1)")
-                                    .font(.system(.caption2, design: .rounded).weight(.semibold))
-                                    .foregroundStyle(.blue)
-                            }
-                            .padding(.top, 1)
-                            Markdown(step)
-                                .markdownTheme(.autopod)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .textSelection(.enabled)
-                        }
+                        planStepRow(
+                            index: index,
+                            step: step,
+                            state: planStepState(index: index, plan: plan, phase: phase)
+                        )
                     }
                 }
             }
@@ -227,6 +243,64 @@ struct WorkTab: View {
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func planStepState(index: Int, plan: SessionPlan, phase: PhaseProgress?) -> PlanStepState {
+        guard let phase, phase.total == plan.steps.count else {
+            return .neutral
+        }
+
+        let stepNumber = index + 1
+        let current = min(max(phase.current, 1), max(phase.total, 1))
+        if stepNumber < current { return .completed }
+        if stepNumber == current { return .current }
+        return .upcoming
+    }
+
+    private func planStepRow(index: Int, step: String, state: PlanStepState) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            planStepMarker(index: index, state: state)
+                .padding(.top, 1)
+
+            Markdown(step)
+                .markdownTheme(.autopod)
+                .font(.callout)
+                .foregroundStyle(state == .current ? .primary : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, state == .current ? 8 : 0)
+        .padding(.vertical, state == .current ? 6 : 0)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(state == .current ? Color.accentColor.opacity(0.08) : .clear)
+        )
+    }
+
+    private func planStepMarker(index: Int, state: PlanStepState) -> some View {
+        ZStack {
+            Circle()
+                .fill(state.fill)
+                .frame(width: 22, height: 22)
+                .overlay(
+                    Circle()
+                        .stroke(
+                            state.foreground.opacity(state == .upcoming ? 0.18 : 0.28),
+                            lineWidth: 1
+                        )
+                )
+
+            if state == .completed {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(state.foreground)
+            } else {
+                Text("\(index + 1)")
+                    .font(.system(.caption2, design: .rounded).weight(.semibold))
+                    .foregroundStyle(state.foreground)
+            }
+        }
     }
 
     // MARK: - Task summary
@@ -365,4 +439,28 @@ struct WorkTab: View {
 #Preview("Work — running") {
     WorkTab(pod: MockData.running)
         .frame(width: 550, height: 400)
+}
+
+#Preview("Work — aligned plan progress") {
+    WorkTab(
+        pod: Pod(
+            status: .running,
+            branch: "feature/progress",
+            profileName: "desktop",
+            task: "Make pod progress visible in the desktop detail views",
+            model: "sonnet",
+            startedAt: Date().addingTimeInterval(-12 * 60),
+            plan: SessionPlan(
+                summary: "Add shared progress presentation for Overview and Work plan views",
+                steps: [
+                    "Create a reusable compact phase progress component",
+                    "Use the compact component in Overview",
+                    "Show detailed progress in the Plan view",
+                    "Verify the desktop package builds",
+                ]
+            ),
+            phase: PhaseProgress(current: 3, total: 4, description: "Show detailed progress in the Plan view")
+        )
+    )
+    .frame(width: 650, height: 520)
 }
