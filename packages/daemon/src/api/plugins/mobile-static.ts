@@ -6,11 +6,12 @@ import type { FastifyInstance } from 'fastify';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function resolveMobileDist(): string | null {
+  // tsup bundles the daemon flat — the runtime `__dirname` is
+  // `packages/daemon/dist/`, so `../../` lands at `packages/`. Same relative
+  // layout in workspace dev and inside the production Docker image.
   const candidates = [
     process.env.AUTOPOD_MOBILE_DIST,
-    // dist/api/plugins → ../../../.. → packages/, then into mobile-web/dist.
-    // Same relative layout under workspace dev and inside the production image.
-    path.join(__dirname, '..', '..', '..', '..', 'mobile-web', 'dist'),
+    path.join(__dirname, '..', '..', 'mobile-web', 'dist'),
   ].filter((p): p is string => Boolean(p));
 
   for (const p of candidates) {
@@ -22,12 +23,11 @@ function resolveMobileDist(): string | null {
 /**
  * Serves the mobile PWA bundle (`packages/mobile-web/dist`) at `/mobile/*`.
  *
- * The static assets are public — auth is enforced client-side by the SPA, which
- * stores the dev token in localStorage and injects it into REST + WS calls.
- * Routes registered here opt out of the global Bearer-token preHandler via
- * `routeOptions.config.auth = false`.
+ * Static assets are public — the auth plugin bypasses the `/mobile/` prefix
+ * (see `auth.ts`). The SPA itself enforces auth client-side using the dev
+ * token paired via the `ap mobile pair` QR flow.
  *
- * `wildcard: false` keeps unknown paths under `/mobile/*` returning 404 rather
+ * `wildcard: false` keeps unknown sub-paths returning a clean 404 rather
  * than the SPA shell — deep links work via HashRouter (`/mobile/#/pod/abc`),
  * so a server-side catch-all is not needed.
  *
@@ -44,18 +44,12 @@ export async function mobileStaticPlugin(app: FastifyInstance): Promise<void> {
     return;
   }
 
-  await app.register(async (scope) => {
-    scope.addHook('onRoute', (routeOptions) => {
-      routeOptions.config = { ...routeOptions.config, auth: false };
-    });
-
-    await scope.register(import('@fastify/static'), {
-      root: mobileDist,
-      prefix: '/mobile/',
-      index: ['index.html'],
-      decorateReply: false,
-      wildcard: false,
-    });
+  await app.register(import('@fastify/static'), {
+    root: mobileDist,
+    prefix: '/mobile/',
+    index: ['index.html'],
+    decorateReply: false,
+    wildcard: false,
   });
 
   app.log.info({ root: mobileDist }, 'Mobile PWA mounted at /mobile/');

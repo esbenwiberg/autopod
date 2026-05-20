@@ -54,6 +54,10 @@ describe('authPlugin', () => {
 
     // A pod-token-protected route at /pods/:podId/preview (mirrors production)
     app.post('/pods/:podId/preview', { config: { auth: 'pod-token' } }, async () => ({ ok: true }));
+    // Routes for the /mobile prefix tests
+    app.get('/mobile/some-asset.js', async () => ({ ok: true }));
+    // A non-mobile route to verify auth is still enforced elsewhere
+    app.get('/pods', async () => ({ ok: true }));
     await app.ready();
   });
 
@@ -85,6 +89,16 @@ describe('authPlugin', () => {
       method: 'POST',
       url: '/pods/pod-abc/preview',
     });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('skips auth for the /mobile/ PWA prefix so the SPA shell is publicly reachable', async () => {
+    const res = await app.inject({ method: 'GET', url: '/mobile/some-asset.js' });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('still requires auth on routes outside /mobile/', async () => {
+    const res = await app.inject({ method: 'GET', url: '/pods' });
     expect(res.statusCode).toBe(401);
   });
 });
