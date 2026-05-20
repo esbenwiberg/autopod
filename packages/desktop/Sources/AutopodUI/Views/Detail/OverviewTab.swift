@@ -40,8 +40,8 @@ struct OverviewTab: View {
                     }
                 }
 
-                if pod.status == .failed || pod.status == .reviewRequired {
-                    errorSection
+                if pod.status == .reviewRequired {
+                    reviewRequiredSection
                 }
 
                 if let phase = pod.phase {
@@ -1035,23 +1035,20 @@ struct OverviewTab: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
-    // MARK: - Error
+    // MARK: - Review
 
-    private var errorSection: some View {
-        let isReview = pod.status == .reviewRequired
-        let accentColor: Color = isReview ? .orange : .red
+    private var reviewRequiredSection: some View {
+        let accentColor: Color = .orange
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(accentColor)
-                Text(isReview ? "Review Required" : "Error")
+                Text("Review Required")
                     .font(.system(.subheadline).weight(.semibold))
             }
-            if isReview {
-                Text("Validation attempts exhausted — a human should decide whether to extend or fix manually.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
+            Text("Validation attempts exhausted — a human should decide whether to extend or fix manually.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
             if let err = pod.errorSummary {
                 Text(err)
                     .font(.system(.callout, design: .monospaced))
