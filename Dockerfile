@@ -33,6 +33,7 @@ COPY packages/shared/package.json packages/shared/
 COPY packages/daemon/package.json packages/daemon/
 COPY packages/validator/package.json packages/validator/
 COPY packages/escalation-mcp/package.json packages/escalation-mcp/
+COPY packages/mobile-web/package.json packages/mobile-web/
 
 # Install dependencies
 RUN corepack enable pnpm && pnpm install --frozen-lockfile
@@ -42,6 +43,7 @@ COPY packages/shared/ packages/shared/
 COPY packages/daemon/ packages/daemon/
 COPY packages/validator/ packages/validator/
 COPY packages/escalation-mcp/ packages/escalation-mcp/
+COPY packages/mobile-web/ packages/mobile-web/
 COPY tsconfig.base.json ./
 
 # Build all packages
@@ -63,6 +65,8 @@ COPY --from=builder /app/packages/validator/dist ./packages/validator/dist
 COPY --from=builder /app/packages/validator/package.json ./packages/validator/
 COPY --from=builder /app/packages/escalation-mcp/dist ./packages/escalation-mcp/dist
 COPY --from=builder /app/packages/escalation-mcp/package.json ./packages/escalation-mcp/
+COPY --from=builder /app/packages/mobile-web/dist ./packages/mobile-web/dist
+COPY --from=builder /app/packages/mobile-web/package.json ./packages/mobile-web/
 
 # Copy workspace config for production install
 COPY --from=builder /app/package.json ./
