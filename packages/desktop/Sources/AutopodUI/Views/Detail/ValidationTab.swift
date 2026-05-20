@@ -2,6 +2,18 @@ import AutopodClient
 import Foundation
 import SwiftUI
 
+func validationPageScreenshot(
+  _ page: PageDetail,
+  proofOfWorkScreenshots: [ScreenshotRef]?
+) -> ScreenshotRef? {
+  if let screenshot = page.screenshot {
+    return screenshot
+  }
+  return proofOfWorkScreenshots?.first { ref in
+    ref.source == .smoke && ref.label == page.path
+  }
+}
+
 /// Validation tab — shows live per-phase progress chips + a detail panel for the selected phase.
 ///
 /// Data priority:
@@ -13,6 +25,8 @@ public struct ValidationTab: View {
   public let checks: ValidationChecks?
   public var actions: PodActions
   public var loadValidationHistory: ((String) async throws -> [StoredValidationResponse])?
+
+  @Environment(\.daemonBaseURL) private var daemonBaseURL
 
   @State private var selectedPhase: ValidationPhase? = nil
   @State private var selectedHistoryKey: String = "current"
@@ -129,7 +143,8 @@ public struct ValidationTab: View {
             passed: assertion.passed
           )
         },
-        loadTime: page.loadTime
+        loadTime: page.loadTime,
+        screenshot: mapScreenshotRef(page.screenshot)
       )
     }
     let acValidation: Bool? = response.acValidation.flatMap {
@@ -140,6 +155,7 @@ public struct ValidationTab: View {
         criterion: check.criterion,
         passed: check.passed,
         reasoning: check.reasoning,
+        screenshot: mapScreenshotRef(check.screenshot),
         validationType: check.validationType
       )
     }
@@ -167,6 +183,15 @@ public struct ValidationTab: View {
     let requirementsCheck = response.taskReview?.requirementsCheck?.map {
       RequirementCheckDetail(criterion: $0.criterion, met: $0.met, note: $0.note)
     }
+    let taskReviewScreenshots: [ScreenshotRef]? = {
+      guard let screenshots = response.taskReview?.screenshots, !screenshots.isEmpty else { return nil }
+      let refs = screenshots.compactMap { mapScreenshotRef($0) }
+      return refs.isEmpty ? nil : refs
+    }()
+    let proofOfWorkScreenshots: [ScreenshotRef]? = {
+      let refs = response.smoke.pages.compactMap { mapScreenshotRef($0.screenshot) }
+      return refs.isEmpty ? nil : refs
+    }()
 
     return ValidationChecks(
       smoke: response.smoke.status == "pass",
@@ -189,8 +214,17 @@ public struct ValidationTab: View {
       acChecks: acChecks,
       factValidation: factValidation,
       factChecks: factChecks,
-      requirementsCheck: requirementsCheck
+      requirementsCheck: requirementsCheck,
+      taskReviewScreenshots: taskReviewScreenshots,
+      proofOfWorkScreenshots: proofOfWorkScreenshots
     )
+  }
+
+  private func mapScreenshotRef(_ dto: ScreenshotRefResponse?) -> ScreenshotRef? {
+    guard let dto, let baseURL = daemonBaseURL else { return nil }
+    guard let source = ScreenshotRef.Source(rawValue: dto.source) else { return nil }
+    guard let url = URL(string: dto.url, relativeTo: baseURL)?.absoluteURL else { return nil }
+    return ScreenshotRef(url: url, source: source, label: dto.path)
   }
 
   private func mapTriState(_ status: String?) -> Bool? {
@@ -215,7 +249,9 @@ public struct ValidationTab: View {
   /// Combined ordered screenshot set for lightbox navigation: smoke → legacy → review.
   /// Derived from whichever source is live (progress from events, or final checks).
   private var screenshotSet: [ScreenshotRef] {
-    let pageShots = (progress?.pageDetails ?? displayedChecks?.pages ?? []).compactMap { $0.screenshot }
+    let pageShots = (progress?.pageDetails ?? displayedChecks?.pages ?? []).compactMap {
+      validationPageScreenshot($0, proofOfWorkScreenshots: displayedChecks?.proofOfWorkScreenshots)
+    }
     let acShots = (progress?.acChecks ?? displayedChecks?.acChecks ?? []).compactMap { $0.screenshot }
     let reviewShots = progress?.reviewDetail?.screenshots ?? displayedChecks?.taskReviewScreenshots ?? []
     return pageShots + acShots + reviewShots
@@ -948,6 +984,11 @@ public struct ValidationTab: View {
 
   @ViewBuilder
   private func pageRow(_ page: PageDetail) -> some View {
+    let screenshot = validationPageScreenshot(
+      page,
+      proofOfWorkScreenshots: displayedChecks?.proofOfWorkScreenshots
+    )
+
     VStack(alignment: .leading, spacing: 6) {
       HStack(spacing: 6) {
         Image(systemName: page.status == "pass" ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -991,7 +1032,7 @@ public struct ValidationTab: View {
           }
         }
       }
-      if let ref = page.screenshot {
+      if let ref = screenshot {
         ScreenshotThumbnail(ref: ref, allRefs: screenshotSet, onOpen: { openLightbox($0) })
       }
     }
