@@ -8,6 +8,7 @@ import { mobileStaticPlugin } from './mobile-static.js';
 describe('mobileStaticPlugin', () => {
   let tmpDir: string;
   let app: ReturnType<typeof Fastify>;
+  const originalDistEnv = process.env.AUTOPOD_MOBILE_DIST;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-mobile-static-'));
@@ -16,7 +17,7 @@ describe('mobileStaticPlugin', () => {
   afterEach(async () => {
     await app?.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
-    delete process.env.AUTOPOD_MOBILE_DIST;
+    process.env.AUTOPOD_MOBILE_DIST = originalDistEnv;
   });
 
   it('serves index.html at /mobile/', async () => {

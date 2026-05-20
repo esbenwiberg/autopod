@@ -15,6 +15,13 @@ export const configSchema = z.object({
       refreshInterval: z.number().int().min(500).max(10000).optional(),
     })
     .optional(),
+  mobile: z
+    .object({
+      // Tailnet hostname the laptop is reachable as, e.g. mymac.tail1234.ts.net.
+      // Cached from `tailscale status --json` on first `ap mobile pair`.
+      host: z.string().min(1).optional(),
+    })
+    .optional(),
 });
 
 export type CliConfig = z.infer<typeof configSchema>;

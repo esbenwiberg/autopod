@@ -4,6 +4,7 @@ import { getToken, initMsal } from './auth/token-manager.js';
 import { registerAuthCommands } from './commands/auth.js';
 import { registerDaemonCommands } from './commands/daemon.js';
 import { registerHistoryCommands } from './commands/history.js';
+import { registerMobileCommands } from './commands/mobile.js';
 import { registerPodCommands } from './commands/pod.js';
 import { registerProfileCommands } from './commands/profile.js';
 import { registerResearchCommands } from './commands/research.js';
@@ -51,6 +52,7 @@ registerValidateCommands(program, getClient);
 registerScheduleCommands(program, getClient);
 registerSeriesCommands(program, getClient);
 registerWatchCommands(program, getClient);
+registerMobileCommands(program);
 
 // Parse and handle errors
 async function main(): Promise<void> {
