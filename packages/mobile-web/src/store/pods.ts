@@ -13,6 +13,7 @@ interface PodsState {
    *  pod-detail screen is mounted (see `trackActivity` / `untrackActivity`). */
   activity: Record<string, AgentEvent[]>;
   refresh: () => Promise<void>;
+  upsertPod: (pod: Pod) => void;
   applyEvent: (event: SystemEvent) => void;
   setConnected: (connected: boolean) => void;
   trackActivity: (podId: string, seed: AgentEvent[]) => void;
@@ -58,6 +59,12 @@ export const usePodsStore = create<PodsState>((set, get) => ({
 
   setConnected: (connected) => set({ connected }),
 
+  upsertPod: (pod) =>
+    set((state) => {
+      const exists = state.pods.some((p) => p.id === pod.id);
+      return { pods: exists ? patchPod(state.pods, pod.id, pod) : [pod, ...state.pods] };
+    }),
+
   trackActivity: (podId, seed) =>
     set((state) => ({
       activity: { ...state.activity, [podId]: seed.slice(-ACTIVITY_LIMIT) },
@@ -77,11 +84,7 @@ export const usePodsStore = create<PodsState>((set, get) => ({
         // fields (pendingEscalation, lastValidationResult, …) are present.
         // Failures are non-fatal — the next /pods refresh will pick the pod up.
         apiFetch<Pod>(`/pods/${event.pod.id}`)
-          .then((pod) => {
-            const current = get().pods;
-            const exists = current.some((p) => p.id === pod.id);
-            set({ pods: exists ? patchPod(current, pod.id, pod) : [pod, ...current] });
-          })
+          .then((pod) => get().upsertPod(pod))
           .catch(() => undefined);
         return;
       }

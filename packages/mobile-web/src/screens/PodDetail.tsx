@@ -11,16 +11,15 @@ export function PodDetail(): JSX.Element {
   const { id = '' } = useParams<{ id: string }>();
   const pod = usePodsStore((s) => s.pods.find((p) => p.id === id));
   const activity = usePodsStore((s) => s.activity[id]) ?? [];
+  const upsertPod = usePodsStore((s) => s.upsertPod);
   const trackActivity = usePodsStore((s) => s.trackActivity);
   const untrackActivity = usePodsStore((s) => s.untrackActivity);
 
-  const [fetched, setFetched] = useState<Pod | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const data = pod ?? fetched;
-
-  // Fetch the pod row when it isn't already in the list store (deep-link case),
-  // and seed the activity ring buffer from /pods/:id/events?limit=20.
+  // Fetch the pod when it's not already in the store (deep-link case) so a
+  // subsequent navigate-back shows it in the landing list. Also seed the
+  // activity ring buffer.
   useEffect(() => {
     if (!id) return undefined;
 
@@ -28,11 +27,10 @@ export function PodDetail(): JSX.Element {
     if (!pod) {
       apiFetch<Pod>(`/pods/${id}`)
         .then((p) => {
-          if (!cancelled) setFetched(p);
+          if (!cancelled) upsertPod(p);
         })
         .catch((err) => {
-          if (cancelled) return;
-          if (err instanceof AuthRequiredError) return;
+          if (cancelled || err instanceof AuthRequiredError) return;
           if (err instanceof ApiError) setError(err.message);
         });
     }
@@ -47,16 +45,27 @@ export function PodDetail(): JSX.Element {
       cancelled = true;
       untrackActivity(id);
     };
-  }, [id, pod, trackActivity, untrackActivity]);
+  }, [id, pod, upsertPod, trackActivity, untrackActivity]);
 
-  if (!data) {
+  if (error) {
     return (
       <main>
         <BackLink />
-        <p className="muted">{error ?? 'Loading…'}</p>
+        <div className="error">{error}</div>
       </main>
     );
   }
+
+  if (!pod) {
+    return (
+      <main>
+        <BackLink />
+        <p className="muted">Loading…</p>
+      </main>
+    );
+  }
+
+  const data = pod;
 
   return (
     <main>
