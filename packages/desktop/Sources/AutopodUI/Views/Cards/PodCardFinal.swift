@@ -192,6 +192,7 @@ public struct SessionCardFinal: View {
                         pod.acFrom,
                         nil,
                         nil,
+                        nil,
                         nil
                     )
                 }

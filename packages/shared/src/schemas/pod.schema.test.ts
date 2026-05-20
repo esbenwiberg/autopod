@@ -48,6 +48,19 @@ describe('createPodRequestSchema', () => {
     } as unknown as Parameters<typeof createPodRequestSchema.parse>[0]);
     expect(parsed).not.toHaveProperty('referenceRepoPat');
   });
+
+  it('preserves single-brief metadata through parse', () => {
+    const parsed = createPodRequestSchema.parse({
+      profileName: 'primary',
+      task: 'task',
+      briefTitle: 'Contract brief',
+      touches: ['packages/desktop/Sources/App.swift'],
+      doesNotTouch: ['packages/daemon/src/pods/pod-manager.ts'],
+    });
+    expect(parsed.briefTitle).toBe('Contract brief');
+    expect(parsed.touches).toEqual(['packages/desktop/Sources/App.swift']);
+    expect(parsed.doesNotTouch).toEqual(['packages/daemon/src/pods/pod-manager.ts']);
+  });
 });
 
 describe('acDefinitionSchema', () => {

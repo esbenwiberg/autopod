@@ -15,8 +15,8 @@ public struct PodActions: Sendable {
   public var rework: @MainActor @Sendable (String) async -> Void
   public var fixManually: @MainActor @Sendable (String) async -> String?
   public var revalidate: @MainActor @Sendable (String) async -> Void
-  public var createPod: @MainActor @Sendable (String, String, String?, PodConfigRequest?, [AcDefinition]?, String?, String?, String?, [PimGroupRequest]?, [String]?, [ReferenceRepoRequest]?) async -> String?
-  // createPod params: profileName, task, model, pod, acceptanceCriteria, baseBranch, branchPrefix, acFrom, pimGroups, requireSidecars, referenceRepos → returns pod ID or nil
+  public var createPod: @MainActor @Sendable (String, String, String?, PodConfigRequest?, [AcDefinition]?, String?, String?, String?, [PimGroupRequest]?, [String]?, [ReferenceRepoRequest]?, BriefPodMetadata?) async -> String?
+  // createPod params: profileName, task, model, pod, acceptanceCriteria, baseBranch, branchPrefix, acFrom, pimGroups, requireSidecars, referenceRepos, briefMetadata → returns pod ID or nil
   /// Promote an interactive pod to agent-driven in place. `targetOutput` ∈ {pr, branch, artifact, none}.
   /// `instructions` is the human's typed handoff text from the sheet — composed into the agent's CLAUDE.md.
   /// `skipAgent` bypasses the runtime spawn entirely (only valid with pr/artifact targets).
@@ -70,6 +70,12 @@ public struct PodActions: Sendable {
   public var previewSeriesOnBranch: @MainActor @Sendable (
     _ profileName: String, _ branch: String, _ path: String
   ) async -> SeriesPreviewResponse?
+  /// Ask the daemon to parse one local `/prep` brief folder.
+  public var previewBriefFolder: @MainActor @Sendable (String) async -> ParsedBriefResponse?
+  /// Ask the daemon to parse one `/prep` brief folder on a git branch.
+  public var previewBriefOnBranch: @MainActor @Sendable (
+    _ profileName: String, _ branch: String, _ path: String
+  ) async -> ParsedBriefResponse?
   /// Most recent error from any preview call (nil if the last call succeeded
   /// or if no preview has been attempted). The sheet uses this to surface the
   /// real daemon error instead of a generic message.
@@ -107,7 +113,7 @@ public struct PodActions: Sendable {
     rework: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     fixManually: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
     revalidate: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
-    createPod: @escaping @MainActor @Sendable (String, String, String?, PodConfigRequest?, [AcDefinition]?, String?, String?, String?, [PimGroupRequest]?, [String]?, [ReferenceRepoRequest]?) async -> String? = { _, _, _, _, _, _, _, _, _, _, _ in nil },
+    createPod: @escaping @MainActor @Sendable (String, String, String?, PodConfigRequest?, [AcDefinition]?, String?, String?, String?, [PimGroupRequest]?, [String]?, [ReferenceRepoRequest]?, BriefPodMetadata?) async -> String? = { _, _, _, _, _, _, _, _, _, _, _, _ in nil },
     promote: @escaping @MainActor @Sendable (String, String?, String?, Bool) async -> Void = { _, _, _, _ in },
     attachTerminal: @escaping @MainActor @Sendable (String) -> Void = { _ in },
     approveAll: @escaping @MainActor @Sendable () async -> Void = {},
@@ -133,6 +139,8 @@ public struct PodActions: Sendable {
     kick: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     previewSeriesFolder: @escaping @MainActor @Sendable (String) async -> SeriesPreviewResponse? = { _ in nil },
     previewSeriesOnBranch: @escaping @MainActor @Sendable (String, String, String) async -> SeriesPreviewResponse? = { _, _, _ in nil },
+    previewBriefFolder: @escaping @MainActor @Sendable (String) async -> ParsedBriefResponse? = { _ in nil },
+    previewBriefOnBranch: @escaping @MainActor @Sendable (String, String, String) async -> ParsedBriefResponse? = { _, _, _ in nil },
     lastPreviewError: @escaping @MainActor @Sendable () -> String? = { nil },
     createSeries: @escaping @MainActor @Sendable (CreateSeriesRequest) async -> String? = { _ in nil },
     spawnDependent: @escaping @MainActor @Sendable (String, String, [String], String?, String?, [AcDefinition]?, String?) async -> String? = { _, _, _, _, _, _, _ in nil },
@@ -175,6 +183,8 @@ public struct PodActions: Sendable {
     self.kick = kick
     self.previewSeriesFolder = previewSeriesFolder
     self.previewSeriesOnBranch = previewSeriesOnBranch
+    self.previewBriefFolder = previewBriefFolder
+    self.previewBriefOnBranch = previewBriefOnBranch
     self.lastPreviewError = lastPreviewError
     self.createSeries = createSeries
     self.spawnDependent = spawnDependent

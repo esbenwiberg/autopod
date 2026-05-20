@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import AutopodClient
 
@@ -26,6 +27,13 @@ public struct CreateSessionSheet: View {
 
     @State private var selectedProfile = "my-app"
     @State private var task = ""
+    @State private var taskSource: TaskSource = .manual
+    @State private var briefFolderPath = ""
+    @State private var briefBranchPath = ""
+    @State private var briefPreview: ParsedBriefResponse?
+    @State private var isPreviewingBrief = false
+    @State private var isSubmitting = false
+    @State private var errorMessage: String?
     @State private var modelText = ""
     @State private var agentMode: String = "auto"
     @State private var outputTarget: String = "pr"
@@ -67,7 +75,29 @@ public struct CreateSessionSheet: View {
 
     private var isInteractive: Bool { agentMode == "interactive" }
     private var canCreate: Bool {
-        isInteractive || !task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if isSubmitting || selectedProfile.isEmpty { return false }
+        if isInteractive { return true }
+        switch taskSource {
+        case .manual:
+            return !task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .localFolder, .onBranch:
+            return briefPreview != nil
+        }
+    }
+
+    private enum TaskSource: String, CaseIterable, Identifiable {
+        case manual
+        case localFolder
+        case onBranch
+
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .manual:      "Manual task"
+            case .localFolder: "Local folder"
+            case .onBranch:    "Path on branch"
+            }
+        }
     }
 
     /// Profiles eligible to be picked as reference repos: any profile other
@@ -131,6 +161,9 @@ public struct CreateSessionSheet: View {
                             }
                         }
                         .labelsHidden()
+                        .onChange(of: selectedProfile) { _, _ in
+                            if taskSource == .onBranch { clearBriefPreview() }
+                        }
                     }
 
                     // Auto-attach badge — surfaces silently-spawned sidecars
@@ -167,6 +200,8 @@ public struct CreateSessionSheet: View {
                                     // Interactive pods default to branch-push on complete
                                     if outputTarget == "pr" { outputTarget = "branch" }
                                     validate = false
+                                    taskSource = .manual
+                                    clearBriefPreview()
                                 } else {
                                     if outputTarget == "none" || outputTarget == "branch" {
                                         outputTarget = "pr"
@@ -245,27 +280,16 @@ public struct CreateSessionSheet: View {
 
                     // Task (not for interactive)
                     if !isInteractive {
-                        formSection("Task") {
-                            TextEditor(text: $task)
-                                .font(.system(.body, design: .default))
-                                .frame(minHeight: 80, maxHeight: 150)
-                                .padding(6)
-                                .background(Color(nsColor: .controlBackgroundColor))
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-                                )
-                                .overlay(alignment: .topLeading) {
-                                    if task.isEmpty {
-                                        Text("Describe what the agent should build...")
-                                            .font(.body)
-                                            .foregroundStyle(.tertiary)
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 12)
-                                            .allowsHitTesting(false)
-                                    }
-                                }
+                        taskSourcePicker
+                        taskInputSection
+                        if let err = errorMessage {
+                            Text(err)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.red.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
                         }
                     }
 
@@ -280,6 +304,9 @@ public struct CreateSessionSheet: View {
                             TextField("main", text: $baseBranch)
                                 .textFieldStyle(.plain)
                                 .font(.system(.callout, design: .monospaced))
+                                .onChange(of: baseBranch) { _, _ in
+                                    if taskSource == .onBranch { clearBriefPreview() }
+                                }
                         }
                         .padding(8)
                         .background(Color(nsColor: .controlBackgroundColor))
@@ -407,33 +434,7 @@ public struct CreateSessionSheet: View {
                 Button("Cancel") { isPresented = false }
                     .keyboardShortcut(.cancelAction)
                 Button(isInteractive ? "Create Workspace" : "Create Pod") {
-                    Task {
-                        let model = modelText.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let pim = pimGroups.filter { !$0.groupId.isEmpty }
-                        let pod = PodConfigRequest(
-                            agentMode: agentMode,
-                            output: outputTarget,
-                            validate: validate,
-                            promotable: isInteractive
-                        )
-                        // Sidecars are auto-attached server-side based on profile
-                        // config; no need to set them per-pod from this sheet.
-                        // Briefs and CLI can still pass requireSidecars for
-                        // additive opt-in to non-auto-attached sidecars.
-                        let refs = resolvedReferenceRepos()
-                        let trimmedPrefix = branchPrefix.trimmingCharacters(in: .whitespaces)
-                        _ = await actions.createPod(
-                            selectedProfile, task, model.isEmpty ? nil : model,
-                            pod, nil,
-                            baseBranch.isEmpty ? nil : baseBranch,
-                            trimmedPrefix.isEmpty ? nil : trimmedPrefix,
-                            nil,
-                            pim.isEmpty ? nil : pim,
-                            nil,
-                            refs.isEmpty ? nil : refs
-                        )
-                        isPresented = false
-                    }
+                    Task { await submit() }
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
@@ -443,6 +444,246 @@ public struct CreateSessionSheet: View {
         }
         .frame(minWidth: 480, maxWidth: 480, minHeight: 580)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var taskSourcePicker: some View {
+        formSection("Task Source") {
+            Picker("", selection: $taskSource) {
+                ForEach(TaskSource.allCases) { source in
+                    Text(source.label).tag(source)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .onChange(of: taskSource) { _, _ in
+                clearBriefPreview()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var taskInputSection: some View {
+        switch taskSource {
+        case .manual:
+            manualTaskSection
+        case .localFolder:
+            localBriefSection
+        case .onBranch:
+            branchBriefSection
+        }
+    }
+
+    private var manualTaskSection: some View {
+        formSection("Task") {
+            TextEditor(text: $task)
+                .font(.system(.body, design: .default))
+                .frame(minHeight: 80, maxHeight: 150)
+                .padding(6)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                )
+                .overlay(alignment: .topLeading) {
+                    if task.isEmpty {
+                        Text("Describe what the agent should build...")
+                            .font(.body)
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 12)
+                            .allowsHitTesting(false)
+                    }
+                }
+        }
+    }
+
+    private var localBriefSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            formSection("Folder on daemon host") {
+                HStack(spacing: 8) {
+                    TextField("/path/to/brief", text: $briefFolderPath)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.callout, design: .monospaced))
+                        .onChange(of: briefFolderPath) { _, _ in clearBriefPreview() }
+                    Button("Pick...") { pickBriefFolder() }
+                }
+            }
+            if !briefFolderPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button(isPreviewingBrief ? "Parsing..." : "Preview Brief") {
+                    Task { await runBriefPreview() }
+                }
+                .disabled(isPreviewingBrief || isSubmitting)
+            }
+            if let briefPreview {
+                briefPreviewSection(briefPreview)
+            }
+        }
+    }
+
+    private var branchBriefSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            formSection("Path on base branch") {
+                TextField("specs/my-feature", text: $briefBranchPath)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.callout, design: .monospaced))
+                    .onChange(of: briefBranchPath) { _, _ in clearBriefPreview() }
+            }
+            if !baseBranch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !briefBranchPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                Button(isPreviewingBrief ? "Parsing..." : "Preview Brief") {
+                    Task { await runBriefPreview() }
+                }
+                .disabled(isPreviewingBrief || isSubmitting || selectedProfile.isEmpty)
+            } else {
+                Text("Set Base Branch and a path to preview.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+            if let briefPreview {
+                briefPreviewSection(briefPreview)
+            }
+        }
+    }
+
+    private func briefPreviewSection(_ brief: ParsedBriefResponse) -> some View {
+        let scenarioCount = brief.contract?.scenarios.count ?? 0
+        let factCount = brief.contract?.requiredFacts.count ?? 0
+        let reviewCount = brief.contract?.humanReview.count ?? 0
+        let sidecarCount = brief.requireSidecars?.count ?? 0
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(brief.title)
+                    .font(.system(.callout).weight(.semibold))
+                    .lineLimit(2)
+                Spacer()
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
+            HStack(spacing: 8) {
+                previewChip("\(scenarioCount) scenarios", color: .blue)
+                previewChip("\(factCount) facts", color: .green)
+                previewChip("\(reviewCount) review", color: .purple)
+                if sidecarCount > 0 {
+                    previewChip("\(sidecarCount) sidecars", color: .orange)
+                }
+            }
+            Text(brief.task)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func previewChip(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12))
+            .clipShape(Capsule())
+    }
+
+    private func pickBriefFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Select"
+        if panel.runModal() == .OK, let url = panel.url {
+            briefFolderPath = url.path
+            Task { await runBriefPreview() }
+        }
+    }
+
+    private func clearBriefPreview() {
+        briefPreview = nil
+        errorMessage = nil
+    }
+
+    private func runBriefPreview() async {
+        errorMessage = nil
+        isPreviewingBrief = true
+        defer { isPreviewingBrief = false }
+
+        let response: ParsedBriefResponse? = await {
+            switch taskSource {
+            case .manual:
+                return nil
+            case .localFolder:
+                let path = briefFolderPath.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !path.isEmpty else { return nil }
+                return await actions.previewBriefFolder(path)
+            case .onBranch:
+                let branch = baseBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+                let path = briefBranchPath.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !selectedProfile.isEmpty, !branch.isEmpty, !path.isEmpty else { return nil }
+                return await actions.previewBriefOnBranch(selectedProfile, branch, path)
+            }
+        }()
+
+        guard let response else {
+            errorMessage = actions.lastPreviewError() ?? "Could not parse that brief."
+            briefPreview = nil
+            return
+        }
+        briefPreview = response
+        task = response.task
+    }
+
+    private func submit() async {
+        isSubmitting = true
+        errorMessage = nil
+        defer { isSubmitting = false }
+
+        let model = modelText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pim = pimGroups.filter { !$0.groupId.isEmpty }
+        let pod = PodConfigRequest(
+            agentMode: agentMode,
+            output: outputTarget,
+            validate: validate,
+            promotable: isInteractive
+        )
+        let refs = resolvedReferenceRepos()
+        let trimmedPrefix = branchPrefix.trimmingCharacters(in: .whitespaces)
+        let trimmedBaseBranch = baseBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sourceBrief = taskSource == .manual ? nil : briefPreview
+        let requestTask = sourceBrief?.task ?? task
+        let metadata = sourceBrief.map {
+            BriefPodMetadata(
+                contract: $0.contract,
+                briefTitle: $0.title,
+                touches: $0.touches,
+                doesNotTouch: $0.doesNotTouch
+            )
+        }
+
+        let id = await actions.createPod(
+            selectedProfile,
+            requestTask,
+            model.isEmpty ? nil : model,
+            pod,
+            sourceBrief?.acceptanceCriteria,
+            trimmedBaseBranch.isEmpty ? nil : trimmedBaseBranch,
+            trimmedPrefix.isEmpty ? nil : trimmedPrefix,
+            nil,
+            pim.isEmpty ? nil : pim,
+            sourceBrief?.requireSidecars,
+            refs.isEmpty ? nil : refs,
+            metadata
+        )
+        if id != nil {
+            isPresented = false
+        } else {
+            errorMessage = "Pod creation failed."
+        }
     }
 
     /// Reference Repos picker — same UI used for both interactive (inside its

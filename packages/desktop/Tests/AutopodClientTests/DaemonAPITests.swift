@@ -199,11 +199,38 @@ import Testing
 }
 
 @Test func createSessionRequestEncodes() throws {
+  let contract = SpecContractResponse(
+    contractVersion: 1,
+    title: "Brief contract",
+    dependsOn: [],
+    scenarios: [
+      ContractScenarioResponse(
+        id: "scenario-ui",
+        given: ["A user opens New Pod"],
+        when: ["They preview a brief"],
+        then: ["The contract metadata is sent"]
+      ),
+    ],
+    requiredFacts: [
+      RequiredFactResponse(
+        id: "fact-wire",
+        proves: ["scenario-ui"],
+        kind: "unit-test",
+        artifact: FactArtifactResponse(path: "Tests/WireTests.swift", change: "update"),
+        command: "swift test --filter WireTests"
+      ),
+    ],
+    humanReview: []
+  )
   let req = CreateSessionRequest(
     profileName: "my-app",
     task: "Add OAuth login",
     model: "opus",
     acceptanceCriteria: [AcDefinition.fromString("Users can log in")],
+    contract: contract,
+    briefTitle: "Brief contract",
+    touches: ["packages/desktop/Sources/AutopodUI"],
+    doesNotTouch: ["packages/daemon/src/pods/pod-manager.ts"],
     outputMode: "pr"
   )
 
@@ -214,6 +241,12 @@ import Testing
   #expect(dict["model"] as? String == "opus")
   let acs = dict["acceptanceCriteria"] as? [[String: Any]]
   #expect(acs?.first?["test"] as? String == "Users can log in")
+  #expect(dict["briefTitle"] as? String == "Brief contract")
+  #expect(dict["touches"] as? [String] == ["packages/desktop/Sources/AutopodUI"])
+  #expect(dict["doesNotTouch"] as? [String] == ["packages/daemon/src/pods/pod-manager.ts"])
+  let encodedContract = dict["contract"] as? [String: Any]
+  #expect(encodedContract?["title"] as? String == "Brief contract")
+  #expect((encodedContract?["requiredFacts"] as? [[String: Any]])?.first?["id"] as? String == "fact-wire")
   // Optional fields should not be present when nil
   #expect(dict["branch"] == nil)
   #expect(dict["runtime"] == nil)

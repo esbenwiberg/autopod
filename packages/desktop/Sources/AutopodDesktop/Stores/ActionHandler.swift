@@ -37,14 +37,15 @@ public final class ActionHandler {
       rework: { [weak self] id in await self?.rework(id) },
       fixManually: { [weak self] id in await self?.fixManually(id) },
       revalidate: { [weak self] id in await self?.revalidate(id) },
-      createPod: { [weak self] profile, task, model, pod, ac, base, branchPrefix, acFrom, pimGroups, sidecars, refRepos in
+      createPod: { [weak self] profile, task, model, pod, ac, base, branchPrefix, acFrom, pimGroups, sidecars, refRepos, brief in
         await self?.createPod(
           profileName: profile, task: task, model: model,
           pod: pod, acceptanceCriteria: ac,
           baseBranch: base, branchPrefix: branchPrefix,
           acFrom: acFrom, pimGroups: pimGroups,
           requireSidecars: sidecars,
-          referenceRepos: refRepos
+          referenceRepos: refRepos,
+          briefMetadata: brief
         )
       },
       promote: { [weak self] id, target, instructions, skipAgent in
@@ -89,6 +90,12 @@ public final class ActionHandler {
       },
       previewSeriesOnBranch: { [weak self] profile, branch, path in
         await self?.previewSeriesOnBranch(profileName: profile, branch: branch, path: path) ?? nil
+      },
+      previewBriefFolder: { [weak self] path in
+        await self?.previewBriefFolder(path: path) ?? nil
+      },
+      previewBriefOnBranch: { [weak self] profile, branch, path in
+        await self?.previewBriefOnBranch(profileName: profile, branch: branch, path: path) ?? nil
       },
       lastPreviewError: { [weak self] in self?.lastPreviewError },
       createSeries: { [weak self] request in
@@ -343,7 +350,8 @@ public final class ActionHandler {
     baseBranch: String?, branchPrefix: String? = nil,
     acFrom: String?, pimGroups: [PimGroupRequest]? = nil,
     requireSidecars: [String]? = nil,
-    referenceRepos: [ReferenceRepoRequest]? = nil
+    referenceRepos: [ReferenceRepoRequest]? = nil,
+    briefMetadata: BriefPodMetadata? = nil
   ) async -> String? {
     pendingAction = "create"
     let req = CreateSessionRequest(
@@ -351,6 +359,10 @@ public final class ActionHandler {
       task: task,
       model: model?.isEmpty == true ? nil : model,
       acceptanceCriteria: acceptanceCriteria?.filter { !$0.outcome.isEmpty },
+      contract: briefMetadata?.contract,
+      briefTitle: briefMetadata?.briefTitle,
+      touches: briefMetadata?.touches,
+      doesNotTouch: briefMetadata?.doesNotTouch,
       pod: pod,
       baseBranch: baseBranch?.isEmpty == true ? nil : baseBranch,
       branchPrefix: branchPrefix?.isEmpty == true ? nil : branchPrefix,
@@ -571,6 +583,30 @@ public final class ActionHandler {
     lastPreviewError = nil
     do {
       return try await api.previewSeriesOnBranch(
+        profileName: profileName, branch: branch, path: path
+      )
+    } catch {
+      lastPreviewError = error.localizedDescription
+      return nil
+    }
+  }
+
+  public func previewBriefFolder(path: String) async -> ParsedBriefResponse? {
+    lastPreviewError = nil
+    do {
+      return try await api.previewBriefFolder(path: path)
+    } catch {
+      lastPreviewError = error.localizedDescription
+      return nil
+    }
+  }
+
+  public func previewBriefOnBranch(
+    profileName: String, branch: String, path: String
+  ) async -> ParsedBriefResponse? {
+    lastPreviewError = nil
+    do {
+      return try await api.previewBriefOnBranch(
         profileName: profileName, branch: branch, path: path
       )
     } catch {

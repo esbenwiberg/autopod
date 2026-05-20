@@ -107,6 +107,9 @@ export const createPodRequestSchema = z
     dependsOnPodIds: z.array(z.string().min(1).max(64)).max(32).optional(),
     seriesId: z.string().min(1).max(64).optional(),
     seriesName: z.string().min(1).max(128).optional(),
+    briefTitle: z.string().min(1).max(200).nullable().optional(),
+    touches: z.array(z.string().min(1).max(500)).max(100).optional(),
+    doesNotTouch: z.array(z.string().min(1).max(500)).max(100).optional(),
     pimGroups: z
       .array(
         z.object({

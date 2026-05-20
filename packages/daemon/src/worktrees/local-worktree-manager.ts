@@ -1322,6 +1322,37 @@ export class LocalWorktreeManager implements WorktreeManager {
         .filter(Boolean)
         .map((full) => ({ full, base: full.split('/').pop() ?? full }));
 
+      const directBrief = entries.find((e) => e.base === 'brief.md');
+      const directContract = entries.find((e) => e.base === 'contract.yaml');
+      if (directBrief && directContract) {
+        const readGitFile = async (filePath: string): Promise<string> => {
+          const { stdout } = await git(['show', `${treeRef}:${filePath}`], {
+            cwd: bareRepoPath,
+            maxBuffer: 2 * 1024 * 1024,
+          });
+          return stdout;
+        };
+        const readDoc = async (docPath: string): Promise<string> => {
+          try {
+            return (await readGitFile(docPath)).trim();
+          } catch {
+            return '';
+          }
+        };
+        return {
+          relPath: trimmedRelPath,
+          files: [
+            {
+              filename: baseName,
+              content: await readGitFile(directBrief.full),
+              contractContent: await readGitFile(directContract.full),
+            },
+          ],
+          purposeMd: await readDoc(`${specRootPath}/purpose.md`),
+          designMd: await readDoc(`${specRootPath}/design.md`),
+        };
+      }
+
       const dirEntries = entries.filter((e) => !e.base.includes('.'));
       const folderFiles: Array<{ filename: string; content: string; contractContent?: string }> =
         [];

@@ -295,6 +295,25 @@ public struct ReferenceRepoSummary: Codable, Sendable, Hashable {
   }
 }
 
+public struct BriefPodMetadata: Sendable, Hashable {
+  public var contract: SpecContractResponse?
+  public var briefTitle: String?
+  public var touches: [String]?
+  public var doesNotTouch: [String]?
+
+  public init(
+    contract: SpecContractResponse? = nil,
+    briefTitle: String? = nil,
+    touches: [String]? = nil,
+    doesNotTouch: [String]? = nil
+  ) {
+    self.contract = contract
+    self.briefTitle = briefTitle
+    self.touches = touches
+    self.doesNotTouch = doesNotTouch
+  }
+}
+
 // MARK: - Create pod request
 
 public struct CreateSessionRequest: Codable, Sendable {
@@ -307,6 +326,9 @@ public struct CreateSessionRequest: Codable, Sendable {
   public var skipValidation: Bool?
   public var acceptanceCriteria: [AcDefinition]?
   public var contract: SpecContractResponse?
+  public var briefTitle: String?
+  public var touches: [String]?
+  public var doesNotTouch: [String]?
   public var outputMode: String?
   public var pod: PodConfigRequest?
   public var baseBranch: String?
@@ -334,6 +356,9 @@ public struct CreateSessionRequest: Codable, Sendable {
     skipValidation: Bool? = nil,
     acceptanceCriteria: [AcDefinition]? = nil,
     contract: SpecContractResponse? = nil,
+    briefTitle: String? = nil,
+    touches: [String]? = nil,
+    doesNotTouch: [String]? = nil,
     outputMode: String? = nil,
     pod: PodConfigRequest? = nil,
     baseBranch: String? = nil,
@@ -356,6 +381,9 @@ public struct CreateSessionRequest: Codable, Sendable {
     self.skipValidation = skipValidation
     self.acceptanceCriteria = acceptanceCriteria
     self.contract = contract
+    self.briefTitle = briefTitle
+    self.touches = touches
+    self.doesNotTouch = doesNotTouch
     self.outputMode = outputMode
     self.pod = pod
     self.baseBranch = baseBranch
@@ -374,7 +402,7 @@ public struct CreateSessionRequest: Codable, Sendable {
   // struct keeps the local name `pod` for readability. Remap on the wire.
   private enum CodingKeys: String, CodingKey {
     case profileName, task, model, runtime, executionTarget, branch
-    case skipValidation, acceptanceCriteria, contract, outputMode
+    case skipValidation, acceptanceCriteria, contract, briefTitle, touches, doesNotTouch, outputMode
     case pod = "options"
     case baseBranch, branchPrefix, acFrom, linkedSessionId, pimGroups
     case dependsOnPodIds, seriesId, seriesName, requireSidecars
@@ -406,6 +434,8 @@ public struct ParsedBriefResponse: Codable, Sendable {
   public let dependsOn: [String]
   public let acceptanceCriteria: [AcDefinition]?
   public let contract: SpecContractResponse?
+  public let touches: [String]?
+  public let doesNotTouch: [String]?
   /// Per-brief sidecar requests (e.g. `["dagger"]`). Surfaced on the DAG
   /// preview so reviewers can see which pods will spawn privileged sidecars
   /// before submitting. Nil/empty = no sidecars.
@@ -417,6 +447,8 @@ public struct ParsedBriefResponse: Codable, Sendable {
     dependsOn: [String],
     acceptanceCriteria: [AcDefinition]? = nil,
     contract: SpecContractResponse? = nil,
+    touches: [String]? = nil,
+    doesNotTouch: [String]? = nil,
     requireSidecars: [String]? = nil
   ) {
     self.title = title
@@ -424,6 +456,8 @@ public struct ParsedBriefResponse: Codable, Sendable {
     self.dependsOn = dependsOn
     self.acceptanceCriteria = acceptanceCriteria
     self.contract = contract
+    self.touches = touches
+    self.doesNotTouch = doesNotTouch
     self.requireSidecars = requireSidecars
   }
 }

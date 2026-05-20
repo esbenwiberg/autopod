@@ -58,6 +58,17 @@ interface PreviewSeriesOnBranchRequest {
   path: string;
 }
 
+interface PreviewBriefFolderRequest {
+  folderPath: string;
+}
+
+interface PreviewBriefOnBranchRequest {
+  profileName: string;
+  branch: string;
+  /** Relative path in the repo, e.g. `specs/my-feature/briefs/01-ui`. */
+  path: string;
+}
+
 /**
  * Resolve the spec layout for a folder argument. Accepts either the spec root
  * (`specs/<feature>/` containing `briefs/`) or the briefs folder itself
@@ -110,6 +121,79 @@ function readBriefFiles(briefsDir: string): Array<{
       filename,
       content: readFileSync(join(briefsDir, filename), 'utf-8'),
     }));
+}
+
+function readSingleBriefFiles(specRoot: string): Array<{
+  filename: string;
+  content: string;
+  contractContent?: string;
+}> {
+  const briefPath = join(specRoot, 'brief.md');
+  const contractPath = join(specRoot, 'contract.yaml');
+  const hasDirectBrief = existsSync(briefPath);
+  const hasDirectContract = existsSync(contractPath);
+  if (hasDirectBrief || hasDirectContract) {
+    if (!hasDirectBrief) {
+      throw new AutopodError(`brief.md not found in ${specRoot}`, 'BRIEF_NOT_FOUND', 404);
+    }
+    if (!hasDirectContract) {
+      throw new AutopodError(`contract.yaml not found in ${specRoot}`, 'CONTRACT_NOT_FOUND', 404);
+    }
+    return [
+      {
+        filename: basename(specRoot),
+        content: readFileSync(briefPath, 'utf-8'),
+        contractContent: readFileSync(contractPath, 'utf-8'),
+      },
+    ];
+  }
+
+  const { briefsDir } = resolveSpecLayout(specRoot);
+  try {
+    return readBriefFiles(briefsDir);
+  } catch {
+    throw new AutopodError(`Cannot read brief folder: ${briefsDir}`, 'BRIEF_READ_FAILED', 400);
+  }
+}
+
+function parseSingleBrief(
+  briefFiles: Array<{ filename: string; content: string; contractContent?: string }>,
+  options: {
+    sourceDescription: string;
+    loadContextFile?: (path: string) => string;
+  },
+): ParsedBrief {
+  if (briefFiles.length === 0) {
+    throw new AutopodError(
+      `No contract brief found at ${options.sourceDescription}`,
+      'BRIEF_NOT_FOUND',
+      400,
+    );
+  }
+  if (briefFiles.length > 1) {
+    throw new AutopodError(
+      `Expected exactly one contract brief at ${options.sourceDescription}, found ${briefFiles.length}`,
+      'MULTIPLE_BRIEFS_FOUND',
+      400,
+    );
+  }
+
+  const [brief] = parseBriefs(briefFiles, options.loadContextFile);
+  if (!brief) {
+    throw new AutopodError(
+      `No contract brief found at ${options.sourceDescription}`,
+      'BRIEF_NOT_FOUND',
+      400,
+    );
+  }
+  if (!brief.contract) {
+    throw new AutopodError(
+      `contract.yaml is required for ${options.sourceDescription}`,
+      'CONTRACT_NOT_FOUND',
+      400,
+    );
+  }
+  return brief;
 }
 
 export function seriesRoutes(
@@ -308,6 +392,102 @@ export function seriesRoutes(
       seriesDescription: seriesDescription || undefined,
       seriesDesign: seriesDesign || undefined,
     };
+  });
+
+  // POST /pods/brief/preview — parse a single `/prep` spec folder on the
+  // daemon host. The folder itself must contain brief.md + contract.yaml.
+  app.post('/pods/brief/preview', async (request, reply) => {
+    const body = request.body as PreviewBriefFolderRequest;
+    if (!body?.folderPath || typeof body.folderPath !== 'string') {
+      reply.status(400);
+      return { error: 'folderPath is required' };
+    }
+    if (!isAbsolute(body.folderPath)) {
+      reply.status(400);
+      return { error: 'folderPath must be an absolute path' };
+    }
+
+    const folderPath = resolve(body.folderPath);
+    let stat: ReturnType<typeof statSync>;
+    try {
+      stat = statSync(folderPath);
+    } catch {
+      reply.status(404);
+      return { error: `Folder not found: ${folderPath}` };
+    }
+    if (!stat.isDirectory()) {
+      reply.status(400);
+      return { error: `Not a directory: ${folderPath}` };
+    }
+
+    const contextRoot = existsSync(join(folderPath, 'brief.md'))
+      ? folderPath
+      : resolveSpecLayout(folderPath).specRoot;
+    const loadContextFile = (p: string): string => {
+      if (isAbsolute(p) || p.includes('..')) return '';
+      try {
+        return readFileSync(resolve(contextRoot, p), 'utf-8').trim();
+      } catch {
+        return '';
+      }
+    };
+
+    try {
+      return parseSingleBrief(readSingleBriefFiles(folderPath), {
+        sourceDescription: folderPath,
+        loadContextFile,
+      });
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message, code: err.code };
+      }
+      throw err;
+    }
+  });
+
+  // POST /pods/brief/preview-branch — parse a single `/prep` folder directly
+  // from a git branch, without creating a checkout.
+  app.post('/pods/brief/preview-branch', async (request, reply) => {
+    const body = request.body as PreviewBriefOnBranchRequest;
+    if (!body?.profileName || !body?.branch || !body?.path) {
+      reply.status(400);
+      return { error: 'profileName, branch, and path are required' };
+    }
+
+    let profile: ReturnType<ProfileStore['get']>;
+    try {
+      profile = profileStore.get(body.profileName);
+    } catch {
+      reply.status(404);
+      return { error: `Profile not found: ${body.profileName}` };
+    }
+
+    if (!profile.repoUrl) {
+      reply.status(400);
+      return { error: 'Profile has no repoUrl — cannot read branch contents' };
+    }
+
+    try {
+      const contents = await worktreeManager.readBranchFolder({
+        repoUrl: profile.repoUrl,
+        branch: body.branch,
+        relPath: body.path,
+        pat: selectGitPat(profile),
+      });
+      return parseSingleBrief(contents.files, {
+        sourceDescription: `${body.path} on ${body.branch}`,
+      });
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message, code: err.code };
+      }
+      reply.status(400);
+      return {
+        error: err instanceof Error ? err.message : 'Failed to read branch brief folder',
+      };
+    }
   });
 
   // POST /pods/series/preview-branch — parse a spec folder directly from a

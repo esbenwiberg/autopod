@@ -369,6 +369,27 @@ public actor DaemonAPI {
     return try await request("POST", "/pods/series/preview-branch", body: body)
   }
 
+  /// Ask the daemon to parse one `/prep` folder containing `brief.md` and
+  /// `contract.yaml`.
+  public func previewBriefFolder(path: String) async throws -> ParsedBriefResponse {
+    let body = try JSONSerialization.data(withJSONObject: ["folderPath": path])
+    return try await request("POST", "/pods/brief/preview", body: body)
+  }
+
+  /// Parse one `/prep` folder living on a git branch.
+  public func previewBriefOnBranch(
+    profileName: String,
+    branch: String,
+    path: String
+  ) async throws -> ParsedBriefResponse {
+    let body = try JSONSerialization.data(withJSONObject: [
+      "profileName": profileName,
+      "branch": branch,
+      "path": path,
+    ])
+    return try await request("POST", "/pods/brief/preview-branch", body: body)
+  }
+
   // MARK: - Profiles
 
   public func listProfiles() async throws -> [ProfileResponse] {
