@@ -8,7 +8,7 @@ import { apiFetch } from './api.js';
  * Step 5 ships pause / resume / kill / nudge. Step 6 adds answer/approve/reject;
  * step 7 adds force-complete / extend-attempts / update-from-base / spawn-fix.
  */
-export type ActionKind = 'pause' | 'resume' | 'kill' | 'nudge';
+export type ActionKind = 'pause' | 'resume' | 'kill' | 'nudge' | 'approve' | 'reject';
 
 export interface ActionDef {
   kind: ActionKind;
@@ -48,14 +48,32 @@ const NUDGE: ActionDef = {
   optimistic: null,
   promptsForText: true,
 };
+const APPROVE: ActionDef = {
+  kind: 'approve',
+  label: 'Approve',
+  tone: 'neutral',
+  optimistic: { status: 'approved' },
+  promptsForText: false,
+};
+const REJECT: ActionDef = {
+  kind: 'reject',
+  label: 'Reject',
+  tone: 'warn',
+  // Server resets attempt counter; transition is back to `running` for rework.
+  optimistic: { status: 'running' },
+  promptsForText: true,
+};
 
 const ACTIONS_BY_STATUS: Partial<Record<PodStatus, ActionDef[]>> = {
   running: [PAUSE, NUDGE, KILL],
   paused: [RESUME, NUDGE, KILL],
+  // Answer surfaces as a dedicated card (EscalationCard) above the bar.
   awaiting_input: [KILL],
   queued: [KILL],
   provisioning: [KILL],
   validating: [KILL],
+  validated: [APPROVE, REJECT, KILL],
+  review_required: [APPROVE, REJECT, KILL],
 };
 
 export function availableActions(status: PodStatus): ActionDef[] {
@@ -85,6 +103,15 @@ export async function runAction(podId: string, kind: ActionKind, message?: strin
       await apiFetch(`/pods/${podId}/nudge`, {
         method: 'POST',
         body: JSON.stringify({ message: message ?? '' }),
+      });
+      return;
+    case 'approve':
+      await apiFetch(`/pods/${podId}/approve`, { method: 'POST', body: JSON.stringify({}) });
+      return;
+    case 'reject':
+      await apiFetch(`/pods/${podId}/reject`, {
+        method: 'POST',
+        body: JSON.stringify(message ? { feedback: message } : {}),
       });
       return;
   }

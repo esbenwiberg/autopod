@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ActionBar } from '../components/ActionBar.js';
 import { ActivityList } from '../components/ActivityList.js';
+import { EscalationCard } from '../components/EscalationCard.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { ValidationSummary } from '../components/ValidationSummary.js';
 import { ApiError, AuthRequiredError, apiFetch } from '../lib/api.js';
@@ -79,6 +80,10 @@ export function PodDetail(): JSX.Element {
       <p className="muted detail-meta">
         {data.profileName} · {data.runtime} · {data.model}
       </p>
+
+      {data.pendingEscalation ? (
+        <EscalationCard podId={data.id} escalation={data.pendingEscalation} />
+      ) : null}
 
       <ActionBar pod={data} />
 

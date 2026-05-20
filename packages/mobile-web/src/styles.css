@@ -467,3 +467,36 @@ code {
   gap: 0.5rem;
   margin-top: 0.75rem;
 }
+
+.escalation-card {
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid var(--warn);
+  border-radius: 0.75rem;
+  padding: 0.9rem 1rem;
+  margin: 1rem 0;
+}
+
+.escalation-header {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.escalation-question {
+  font-size: 1rem;
+  font-weight: 500;
+  margin: 0.4rem 0;
+}
+
+.escalation-context {
+  font-size: 0.85rem;
+  margin: 0.4rem 0;
+}
+
+.escalation-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.6rem 0;
+}

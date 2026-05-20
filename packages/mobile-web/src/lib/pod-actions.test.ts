@@ -14,8 +14,14 @@ describe('availableActions', () => {
     expect(labels).toEqual(['resume', 'nudge', 'kill']);
   });
 
-  it('awaiting_input pods only expose kill at this step (answer comes in step 6)', () => {
+  it('awaiting_input pods only expose kill (answer is the EscalationCard, not an ActionBar button)', () => {
     expect(availableActions('awaiting_input').map((a) => a.kind)).toEqual(['kill']);
+  });
+
+  it('validated + review_required pods expose approve, reject, kill', () => {
+    for (const status of ['validated', 'review_required'] as PodStatus[]) {
+      expect(availableActions(status).map((a) => a.kind)).toEqual(['approve', 'reject', 'kill']);
+    }
   });
 
   it('terminal pods have no actions', () => {
@@ -78,5 +84,26 @@ describe('runAction', () => {
     expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/nudge');
     const body = (spy.mock.calls[0]?.[1] as RequestInit).body;
     expect(body).toBe(JSON.stringify({ message: 'try the other config' }));
+  });
+
+  it('approve posts to /pods/:id/approve with an empty body', async () => {
+    const spy = mockFetch();
+    await runAction('pod-1', 'approve');
+    expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/approve');
+    expect((spy.mock.calls[0]?.[1] as RequestInit).body).toBe('{}');
+  });
+
+  it('reject without feedback posts an empty body', async () => {
+    const spy = mockFetch();
+    await runAction('pod-1', 'reject');
+    expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/reject');
+    expect((spy.mock.calls[0]?.[1] as RequestInit).body).toBe('{}');
+  });
+
+  it('reject with feedback puts it under `feedback`', async () => {
+    const spy = mockFetch();
+    await runAction('pod-1', 'reject', 'try again with stricter facts');
+    const body = (spy.mock.calls[0]?.[1] as RequestInit).body;
+    expect(body).toBe(JSON.stringify({ feedback: 'try again with stricter facts' }));
   });
 });
