@@ -7,6 +7,7 @@ public enum MockData: Sendable {
         running, runningEarly, validating,
         workspaceActive, workspaceComplete,
         workerFromWorkspace,
+        prFixParent, prFixPodFirstRound, prFixPodRecycled,
         queued, provisioning, merging, complete, killed,
     ]
 
@@ -168,6 +169,50 @@ public enum MockData: Sendable {
         diffStats: DiffStats(added: 56, removed: 8, files: 6),
         phase: PhaseProgress(current: 5, total: 10, description: "Implementing OAuth callback"),
         latestActivity: "Writing src/auth/google.ts"
+    )
+
+    // MARK: - PR fix pods
+
+    public static let prFixParent = Pod(
+        id: "crowded-muskox",
+        status: .mergePending, branch: "feature/persistent-tuna",
+        profileName: "teamplanner-agent", model: "claude-sonnet",
+        startedAt: .minutesAgo(80),
+        diffStats: DiffStats(added: 210, removed: 44, files: 12),
+        prUrl: URL(string: "https://dev.azure.com/org/project/_git/repo/pullrequest/13999"),
+        latestActivity: "Fix attempt 3/3 in progress",
+        fixPodId: "passing-puffin",
+        prFixAttempts: 3,
+        maxPrFixAttempts: 3
+    )
+
+    public static let prFixPodFirstRound = Pod(
+        id: "passing-puffin",
+        status: .running, branch: "feature/persistent-tuna",
+        profileName: "teamplanner-agent", model: "claude-sonnet",
+        startedAt: .minutesAgo(24),
+        baseBranch: "main",
+        diffStats: DiffStats(added: 18, removed: 4, files: 3),
+        phase: PhaseProgress(current: 2, total: 3, description: "Fixing review findings"),
+        latestActivity: "Applying PR feedback",
+        linkedSessionId: "crowded-muskox",
+        prFixAttempts: 1,
+        maxPrFixAttempts: 3
+    )
+
+    public static let prFixPodRecycled = Pod(
+        id: "passing-puffin",
+        status: .running, branch: "feature/persistent-tuna",
+        profileName: "teamplanner-agent", model: "claude-sonnet",
+        startedAt: .minutesAgo(9),
+        baseBranch: "main",
+        diffStats: DiffStats(added: 79, removed: 30, files: 7),
+        phase: PhaseProgress(current: 2, total: 3, description: "Running build and tests"),
+        latestActivity: "Build & Test",
+        linkedSessionId: "crowded-muskox",
+        prFixAttempts: 3,
+        maxPrFixAttempts: 3,
+        fixIteration: 2
     )
 
     // MARK: - Other states

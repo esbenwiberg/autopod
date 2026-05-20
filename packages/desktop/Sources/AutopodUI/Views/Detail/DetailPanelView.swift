@@ -302,6 +302,15 @@ public struct DetailPanelView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+                if let fixLifecycle = pod.prFixLifecycleLabel {
+                    Label(fixLifecycle, systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.indigo)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(fixLifecycle)
+                }
+
                 if let tagline = taskTagline {
                     Text(tagline)
                         .font(.caption)

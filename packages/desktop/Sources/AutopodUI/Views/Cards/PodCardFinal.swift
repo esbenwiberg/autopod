@@ -218,6 +218,11 @@ public struct SessionCardFinal: View {
                 if pod.seriesId != nil {
                     seriesChip
                 }
+                if pod.isPrFixPod, let parent = pod.linkedSessionId {
+                    fixParentChip(parent)
+                } else if pod.prFixAttempts > 0 {
+                    fixAttemptChip
+                }
                 if pod.fixIteration > 0 {
                     fixIterationChip
                 }
@@ -263,14 +268,39 @@ public struct SessionCardFinal: View {
         .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
-    private var fixIterationChip: some View {
-        Text("Fix \(pod.fixIteration)")
+    private func fixParentChip(_ parent: String) -> some View {
+        Text("for \(parent)")
+            .font(.system(.caption2).weight(.medium))
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(Color.indigo.opacity(0.10))
+            .foregroundStyle(Color.indigo)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .help("Fix pod for \(parent)")
+    }
+
+    private var fixAttemptChip: some View {
+        Text(pod.maxPrFixAttempts > 0 ? "fix \(pod.prFixAttempts)/\(pod.maxPrFixAttempts)" : "fix \(pod.prFixAttempts)")
             .font(.system(.caption2).weight(.medium))
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(Color.indigo.opacity(0.12))
             .foregroundStyle(Color.indigo)
             .clipShape(RoundedRectangle(cornerRadius: 4))
+            .help(pod.prFixAttemptLabel ?? "PR fix attempt")
+    }
+
+    private var fixIterationChip: some View {
+        Text("iter \(pod.fixIteration)")
+            .font(.system(.caption2).weight(.medium))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(Color.indigo.opacity(0.12))
+            .foregroundStyle(Color.indigo)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .help("Fix iteration \(pod.fixIteration)")
     }
 
     private var modeBadge: some View {
@@ -490,7 +520,7 @@ public struct SessionCardFinal: View {
                     Image(systemName: "link")
                         .font(.system(size: 9))
                         .foregroundStyle(.secondary)
-                    Text(pod.isWorkspace ? "fixes \(linked)" : "← \(linked)")
+                    Text(linkedPodText(linked))
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
@@ -523,6 +553,12 @@ public struct SessionCardFinal: View {
                 .lineLimit(1)
             }
         }
+    }
+
+    private func linkedPodText(_ linked: String) -> String {
+        if pod.isWorkspace { return "fixes \(linked)" }
+        if pod.isPrFixPod { return "fix pod for \(linked)" }
+        return "linked to \(linked)"
     }
 
     @ViewBuilder
@@ -1158,6 +1194,16 @@ struct QueueChip: View {
         SessionCardFinal(pod: MockData.workspaceActive, density: .detailed)
         SessionCardFinal(pod: MockData.workspaceComplete, density: .detailed)
         SessionCardFinal(pod: MockData.workerFromWorkspace, density: .detailed)
+    }
+    .padding(24)
+    .background(Color(nsColor: .windowBackgroundColor))
+}
+
+#Preview("PR fix lifecycle — detailed") {
+    HStack(alignment: .top, spacing: 10) {
+        SessionCardFinal(pod: MockData.prFixParent, density: .detailed)
+        SessionCardFinal(pod: MockData.prFixPodFirstRound, density: .detailed)
+        SessionCardFinal(pod: MockData.prFixPodRecycled, density: .detailed)
     }
     .padding(24)
     .background(Color(nsColor: .windowBackgroundColor))

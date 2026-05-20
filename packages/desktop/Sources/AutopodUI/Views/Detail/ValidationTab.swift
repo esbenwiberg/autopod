@@ -405,14 +405,15 @@ public struct ValidationTab: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
         }
-        if pod.fixIteration > 0 {
-          Text("Fix iteration \(pod.fixIteration)")
+        if let fixLifecycle = validationFixLabel {
+          Text(fixLifecycle)
             .font(.caption.weight(.semibold))
             .foregroundStyle(.indigo)
             .lineLimit(1)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(.indigo.opacity(0.12), in: Capsule())
+            .help(fixLifecycle)
         }
         validationHistoryMenu
       }
@@ -544,6 +545,12 @@ public struct ValidationTab: View {
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
     }
+  }
+
+  private var validationFixLabel: String? {
+    let parts = [pod.prFixAttemptLabel, pod.prFixIterationLabel].compactMap { $0 }
+    guard !parts.isEmpty else { return nil }
+    return parts.joined(separator: " · ")
   }
 
   @ViewBuilder

@@ -563,6 +563,13 @@ public struct Pod: Identifiable, Sendable {
     /// Linked pod ID for pod chaining (workspace ↔ worker handoff)
     public var linkedSessionId: String?
 
+    /// Canonical fix pod currently associated with this parent pod.
+    public var fixPodId: String?
+    /// Number of PR fix sessions spawned/recycled for this parent pod.
+    public var prFixAttempts: Int
+    /// Maximum PR fix sessions allowed before the parent pod fails.
+    public var maxPrFixAttempts: Int
+
     /// Snapshot of the resolved profile config at pod creation time
     public var profileSnapshot: Profile?
 
@@ -690,6 +697,9 @@ public struct Pod: Identifiable, Sendable {
         commitCount: Int = 0,
         taskSummary: TaskSummary? = nil,
         linkedSessionId: String? = nil,
+        fixPodId: String? = nil,
+        prFixAttempts: Int = 0,
+        maxPrFixAttempts: Int = 0,
         profileSnapshot: Profile? = nil,
         briefTitle: String? = nil,
         seriesId: String? = nil,
@@ -726,6 +736,9 @@ public struct Pod: Identifiable, Sendable {
         self.inputTokens = inputTokens; self.outputTokens = outputTokens
         self.costUsd = costUsd; self.commitCount = commitCount
         self.taskSummary = taskSummary; self.linkedSessionId = linkedSessionId
+        self.fixPodId = fixPodId
+        self.prFixAttempts = prFixAttempts
+        self.maxPrFixAttempts = maxPrFixAttempts
         self.profileSnapshot = profileSnapshot
         self.briefTitle = briefTitle
         self.seriesId = seriesId; self.seriesName = seriesName; self.seriesDescription = seriesDescription
@@ -777,6 +790,9 @@ public struct Pod: Identifiable, Sendable {
         commitCount: Int = 0,
         taskSummary: TaskSummary? = nil,
         linkedSessionId: String? = nil,
+        fixPodId: String? = nil,
+        prFixAttempts: Int = 0,
+        maxPrFixAttempts: Int = 0,
         profileSnapshot: Profile? = nil,
         seriesId: String? = nil,
         seriesName: String? = nil,
@@ -801,11 +817,49 @@ public struct Pod: Identifiable, Sendable {
             inputTokens: inputTokens, outputTokens: outputTokens,
             costUsd: costUsd, commitCount: commitCount,
             taskSummary: taskSummary, linkedSessionId: linkedSessionId,
+            fixPodId: fixPodId,
+            prFixAttempts: prFixAttempts,
+            maxPrFixAttempts: maxPrFixAttempts,
             profileSnapshot: profileSnapshot,
             seriesId: seriesId, seriesName: seriesName, seriesDescription: seriesDescription,
             dependsOnPodIds: dependsOnPodIds,
             dependencyStartedAt: dependencyStartedAt
         )
+    }
+}
+
+public extension Pod {
+    var isPrFixPod: Bool {
+        linkedSessionId != nil && !isWorkspace
+    }
+
+    var hasPrFixContext: Bool {
+        isPrFixPod || fixPodId != nil || prFixAttempts > 0
+    }
+
+    var prFixAttemptLabel: String? {
+        guard prFixAttempts > 0 else { return nil }
+        return maxPrFixAttempts > 0
+            ? "PR fix attempt \(prFixAttempts)/\(maxPrFixAttempts)"
+            : "PR fix attempt \(prFixAttempts)"
+    }
+
+    var prFixIterationLabel: String? {
+        guard fixIteration > 0 else { return nil }
+        return "iteration \(fixIteration)"
+    }
+
+    var prFixLifecycleLabel: String? {
+        if isPrFixPod, let parent = linkedSessionId {
+            let parts = [prFixAttemptLabel, prFixIterationLabel].compactMap { $0 }
+            let suffix = parts.isEmpty ? "" : " · \(parts.joined(separator: " · "))"
+            return "Fix pod for \(parent)\(suffix)"
+        }
+        if let fixPodId {
+            return [prFixAttemptLabel, "fix pod \(fixPodId)"].compactMap { $0 }
+                .joined(separator: " · ")
+        }
+        return prFixAttemptLabel
     }
 }
 

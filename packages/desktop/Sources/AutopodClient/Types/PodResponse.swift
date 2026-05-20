@@ -97,6 +97,7 @@ public struct SessionResponse: Codable, Sendable {
   public let costUsd: Double
   public let commitCount: Int
   public let lastCommitAt: String?
+  public let linkedPodId: String?
   public let linkedSessionId: String?
   public let taskSummary: TaskSummaryResponse?
   public let lastCorrectionMessage: String?
@@ -136,6 +137,12 @@ public struct SessionResponse: Codable, Sendable {
   /// Surfaced in the pod detail view so reviewers can see what the critic
   /// flagged before the daemon's full validation runs.
   public let preSubmitReview: PreSubmitReviewSnapshotResponse?
+  /// Number of PR fix sessions spawned/recycled for this parent pod.
+  public let prFixAttempts: Int?
+  /// Maximum PR fix sessions allowed before the parent pod fails.
+  public let maxPrFixAttempts: Int?
+  /// Canonical fix pod currently associated with this parent pod.
+  public let fixPodId: String?
   /// Iteration counter for the canonical fix pod. 0 for non-fix pods or the
   /// first round; increments each time the fix pod is re-enqueued for a new
   /// round of CI / review feedback.
@@ -160,7 +167,7 @@ public struct SessionResponse: Codable, Sendable {
     case pod = "options"
     case baseBranch, recoveryWorktreePath, lastHeartbeatAt
     case inputTokens, outputTokens, costUsd, commitCount, lastCommitAt
-    case linkedSessionId, taskSummary, lastCorrectionMessage, profileSnapshot
+    case linkedPodId, linkedSessionId, taskSummary, lastCorrectionMessage, profileSnapshot
     case dependsOnPodId, dependsOnPodIds, seriesId, seriesName, seriesDescription, seriesDesign, dependencyStartedAt
     case artifactsPath
     case requireSidecars, sidecarContainerIds, testRunBranches
@@ -169,6 +176,9 @@ public struct SessionResponse: Codable, Sendable {
     case briefTitle
     case referenceRepos
     case preSubmitReview
+    case prFixAttempts
+    case maxPrFixAttempts
+    case fixPodId
     case fixIteration
     case queueLength
     case recentQueueMessages

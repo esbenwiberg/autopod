@@ -174,6 +174,129 @@ import AutopodUI
   #expect(pod.runningAt == nil)
 }
 
+@Test func mapsPrFixContextFromLinkedPodId() throws {
+  let json = """
+  {
+    "id": "passing-puffin",
+    "profileName": "teamplanner-agent",
+    "task": "[PR FIX] Fix review findings",
+    "status": "running",
+    "model": "sonnet",
+    "runtime": "claude",
+    "executionTarget": "local",
+    "branch": "feature/persistent-tuna",
+    "containerId": "container-1",
+    "worktreePath": "/tmp/worktree",
+    "validationAttempts": 0,
+    "maxValidationAttempts": 3,
+    "lastValidationResult": null,
+    "pendingEscalation": null,
+    "escalationCount": 0,
+    "skipValidation": false,
+    "createdAt": "2026-04-01T09:00:00Z",
+    "startedAt": "2026-04-01T09:00:05Z",
+    "runningAt": "2026-04-01T09:00:35Z",
+    "completedAt": null,
+    "updatedAt": "2026-04-01T09:05:00Z",
+    "userId": "user-1",
+    "filesChanged": 5,
+    "linesAdded": 89,
+    "linesRemoved": 12,
+    "previewUrl": null,
+    "prUrl": "https://example.test/pr/1",
+    "plan": null,
+    "progress": null,
+    "claudeSessionId": null,
+    "outputMode": "pr",
+    "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
+    "baseBranch": "main",
+    "recoveryWorktreePath": null,
+    "lastHeartbeatAt": null,
+    "inputTokens": 15000,
+    "outputTokens": 3000,
+    "costUsd": 0.42,
+    "commitCount": 2,
+    "lastCommitAt": null,
+    "linkedPodId": "crowded-muskox",
+    "prFixAttempts": 3,
+    "maxPrFixAttempts": 3,
+    "fixIteration": 2
+  }
+  """.data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+
+  #expect(pod.linkedSessionId == "crowded-muskox")
+  #expect(pod.isPrFixPod)
+  #expect(pod.prFixAttempts == 3)
+  #expect(pod.maxPrFixAttempts == 3)
+  #expect(pod.fixIteration == 2)
+  #expect(pod.prFixLifecycleLabel == "Fix pod for crowded-muskox · PR fix attempt 3/3 · iteration 2")
+}
+
+@Test func mapsParentPrFixContextAndLegacyLinkedSessionId() throws {
+  let json = """
+  {
+    "id": "crowded-muskox",
+    "profileName": "teamplanner-agent",
+    "task": "Migrate WorkPackages",
+    "status": "merge_pending",
+    "model": "sonnet",
+    "runtime": "claude",
+    "executionTarget": "local",
+    "branch": "feature/persistent-tuna",
+    "containerId": null,
+    "worktreePath": "/tmp/worktree",
+    "validationAttempts": 1,
+    "maxValidationAttempts": 3,
+    "lastValidationResult": null,
+    "pendingEscalation": null,
+    "escalationCount": 0,
+    "skipValidation": false,
+    "createdAt": "2026-04-01T09:00:00Z",
+    "startedAt": "2026-04-01T09:00:05Z",
+    "runningAt": null,
+    "completedAt": null,
+    "updatedAt": "2026-04-01T09:05:00Z",
+    "userId": "user-1",
+    "filesChanged": 5,
+    "linesAdded": 89,
+    "linesRemoved": 12,
+    "previewUrl": null,
+    "prUrl": "https://example.test/pr/1",
+    "plan": null,
+    "progress": null,
+    "claudeSessionId": null,
+    "outputMode": "pr",
+    "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
+    "baseBranch": "main",
+    "recoveryWorktreePath": null,
+    "lastHeartbeatAt": null,
+    "inputTokens": 15000,
+    "outputTokens": 3000,
+    "costUsd": 0.42,
+    "commitCount": 2,
+    "lastCommitAt": null,
+    "linkedSessionId": "legacy-parent",
+    "prFixAttempts": 2,
+    "maxPrFixAttempts": 3,
+    "fixPodId": "passing-puffin",
+    "fixIteration": 0
+  }
+  """.data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+
+  #expect(pod.linkedSessionId == "legacy-parent")
+  #expect(!pod.isPrFixPod)
+  #expect(pod.fixPodId == "passing-puffin")
+  #expect(pod.prFixAttempts == 2)
+  #expect(pod.maxPrFixAttempts == 3)
+  #expect(pod.prFixLifecycleLabel == "PR fix attempt 2/3 · fix pod passing-puffin")
+}
+
 @Test func mapsAwaitingInputWithEscalation() throws {
   let json = """
   {
