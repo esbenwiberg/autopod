@@ -2,9 +2,9 @@
 name: prep
 description: >
   Plans a single-pod task by interviewing the user one question per turn,
-  scanning the codebase between answers, until acceptance criteria, validation
-  signal, skill references, and context+non-goals are all green. Then writes
-  one autopod-compatible brief at `specs/<task>/brief.md`. Use when the work
+  scanning the codebase between answers, until contract scenarios, required
+  facts, skill references, and context+non-goals are all green. Then writes
+  one autopod-compatible spec folder with `brief.md` and `contract.yaml`. Use when the work
   fits one pod (single concern, one or two packages, no architectural
   decisions). For 3+ modules or new contracts, use `/plan-feature` instead.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit, AskUserQuestion
@@ -12,10 +12,10 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit, AskUserQuestion
 
 # /prep
 
-Turn a rough single-pod task into one autopod-compatible brief at
-`specs/<task>/brief.md`. The brief uses the same YAML frontmatter shape as
-`/plan-feature` briefs (minus `depends_on`), so `ap pod create
-specs/<task>/brief.md` runs it without further clarification.
+Turn a rough single-pod task into one autopod-compatible spec folder at
+`specs/<task>/` with `brief.md` and `contract.yaml`. The brief carries task
+context; the contract carries scenarios and durable required facts, so
+`ap pod create --spec specs/<task>/` runs it without further clarification.
 
 Nothing is written until the coverage checklist is green and the user has
 greenlit.
@@ -26,8 +26,8 @@ greenlit.
   between modules.
 - The "what" is clear-ish; the "exactly which files / which checks" still
   needs grounding.
-- You're about to spawn a single autopod and want a brief with real ACs, not
-  a paragraph of vibes.
+- You're about to spawn a single autopod and want a brief plus executable
+  contract, not a paragraph of vibes.
 
 If the task touches **3+ modules**, introduces **new contracts** between
 packages, or needs **ADRs**, use `/plan-feature` instead. If you start `/prep`
@@ -76,32 +76,19 @@ The brief is held until **all four** dimensions are green. The task statement
 itself is implicit from the user's prompt — don't re-ask it, just confirm
 your understanding inline.
 
-1. **Acceptance criteria** — concrete done-conditions, written as the
-   `acceptance_criteria` YAML the daemon's validation engine consumes.
-   Three firing types:
-   - `api` — single HTTP probe (or short create-then-read chain) against
-     the running container. Skip for endpoints behind `[Authorize]` /
-     `RequiresUserType(<role>)` — the harness has no role impersonation and
-     the request will 401.
-   - `web` — browser DOM check via `validate_in_browser` (only when the
-     profile has a web UI).
-   - `cmd` — narrow shell check inside the container for things `api`/`web`
-     can't observe: a symbol stopped existing, a config flag flipped, a
-     generated file exists.
+1. **Contract** — concrete scenarios plus required facts in
+   `contract.yaml`. A scenario describes behavior in Given/When/Then form.
+   A required fact names the durable artifact that must be created/updated and
+   the narrow command the validator will run after the agent finishes.
 
-   **Banlist** (force-classified to `none`, theatre): `pnpm build`,
-   `pnpm test`, `dotnet build`, `dotnet test`, `npm test`, `tsc`, `eslint`,
-   `biome`, `cargo build`, `cargo test`, `make`. The pipeline runs these
-   already.
+   **Core principle: a required fact survives merge.** It must be a test,
+   contract test, type-level check, fixture, smoke script, or equivalent repo
+   artifact that future CI can keep running. Do not use generic pipeline
+   commands (`pnpm test`, `pnpm build`, `npx pnpm lint`) as facts; facts prove
+   specific behavior, while the pipeline proves the repo still builds.
 
-   **Core principle: an AC validates the OUTCOME, not the wiring.** Run
-   the test "would this AC still pass if the user can't see or use the
-   feature?" If yes, it's the wrong AC.
-
-   **Zero ACs is honest** when the brief only adds a TypeScript interface,
-   flips a config flag, or edits CLI/desktop with no inspectable surface.
-   Don't pad with `none`-typed entries — they're no-ops and create false
-   confidence. The Test expectations body section anchors instead.
+   Use `human_review` only for judgement that cannot honestly become a command
+   yet, and keep it narrow.
 
 2. **Skill references** — auto-detect from the files in scope and **ask the
    user to confirm** before writing.
@@ -122,7 +109,7 @@ your understanding inline.
    decisions the agent won't grep its way to, plus explicit out-of-scope
    fences. The guardrails. Examples:
 
-   - Migration prefix collision danger (CLAUDE.md note about
+   - Migration prefix collision danger (AGENTS.md note about
      `migration-prefix-check.sh`).
    - "This used to be done in pod-manager but moved to event-bus in the
      last refactor — don't follow stale grep hits."
@@ -154,8 +141,9 @@ After each user answer, before forming the next question:
 Do **not** silently decide. Propose a specific answer with a one-line
 rationale and ask for confirmation:
 
-> "Defaulting to `cmd` AC `rg -l 'OldEmitter' returns no matches` because
-> we're removing the symbol entirely. Confirm?"
+> "Defaulting to required fact `fact-old-emitter-removed` with command
+> `test -z "$(rg -l 'OldEmitter' packages/daemon/src)"` because we're removing
+> the symbol entirely. Confirm?"
 
 If the user agrees, mark the dimension green and cite the proposal as the
 answer. If they push back, treat their pushback as the new answer.
@@ -207,7 +195,8 @@ Only then proceed to write.
 
 ```
 specs/<task-slug>/
-└── brief.md
+├── brief.md
+└── contract.yaml
 ```
 
 `<task-slug>` is short kebab-case derived from the task (e.g.
@@ -223,19 +212,14 @@ just a stale `/prep` artifact.
 
 ### brief.md
 
-Match `/plan-feature`'s brief shape exactly, minus `depends_on` (single brief,
-no series ordering). The daemon's existing brief consumer reads this format —
-that's what makes the output autopod-compatible.
+Brief frontmatter carries scope only. Do not write `acceptance_criteria`;
+contract behavior lives in `contract.yaml`.
 
 #### Frontmatter
 
 ```yaml
 ---
 title: "Verb-led title matching the task"
-acceptance_criteria:
-  - { type: api, test: "POST /api/v2/foo with valid body", pass: "201 with body.id (uuid)", fail: "non-201 or missing id" }
-  - { type: web, test: "navigate /foo and click first row", pass: "detail panel renders", fail: "no panel or no title" }
-  - { type: cmd, test: "rg -l 'OldEmitter' packages/daemon/src", pass: "no matches", fail: "any match means a caller still uses the deleted symbol" }
 touches:
   - packages/daemon/src/pods/foo-repository.ts
   - packages/daemon/src/db/migrations/    # directory shorthand — anything under here
@@ -248,11 +232,6 @@ require_sidecars: [dagger]   # only when needed
 Field rules:
 
 - `title` — verb-led to match the filename / task slug.
-- `acceptance_criteria` — every entry must be a real automated check the
-  validation engine runs. Use `api` / `web` / `cmd` only. Don't list
-  build/test/lint commands (banlist auto-classifies to `none`). When no
-  `api`/`web`/`cmd` check applies, **leave `acceptance_criteria` out
-  entirely** rather than listing `none` entries.
 - `touches` / `does_not_touch` — advisory, not enforced. Directory shorthand
   (path ending in `/`) means "anything under this directory". Use explicit
   file paths otherwise — no globs.
@@ -260,6 +239,43 @@ Field rules:
 
 Note: no `depends_on` field. `/prep` produces a single brief; series
 ordering is `/plan-feature`'s job.
+
+### contract.yaml
+
+```yaml
+contract_version: 1
+title: "Verb-led title matching the task"
+depends_on: []
+scenarios:
+  - id: main-behavior
+    given:
+      - "the relevant existing state"
+    when:
+      - "the user or system action happens"
+    then:
+      - "the observable behavior changes"
+required_facts:
+  - id: fact-main-behavior
+    proves: [main-behavior]
+    kind: unit-test
+    artifact:
+      path: packages/example/src/example.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/example test -- example.test.ts
+human_review: []
+```
+
+Allowed `kind` values: `unit-test`, `integration-test`, `contract-test`,
+`browser-test`, `typecheck`, `lint-rule`, `smoke-script`, `custom-command`.
+Allowed `artifact.change` values: `create`, `update`, `touch`. Use only those
+exact values; never use `edit`, `modify`, or `write`.
+For web-visible behavior, prefer `browser-test` with a durable Playwright or
+equivalent browser test artifact. The worker creates/updates the proof artifact;
+Autopod runs the command and writes attempt-scoped `evidence.yaml`. Never ask the
+worker to author evidence directly.
+Browser/report facts may write attachments under
+`.autopod/evidence/<fact-id>/`; Autopod records those paths as screenshots,
+traces, videos, reports, logs, or generic artifacts in `evidence.yaml`.
 
 #### Body
 
@@ -283,7 +299,7 @@ Same paths as the YAML `does_not_touch` list — repeat for the same reason.
 
 ## Constraints
 The non-obvious context and gotchas captured during the interview. Quote
-2–3 lines from CLAUDE.md / ADRs / code where relevant; don't restate the
+2–3 lines from AGENTS.md / ADRs / code where relevant; don't restate the
 whole document.
 
 ## Skills to reference
@@ -297,10 +313,9 @@ naming the skill and why it applies. Example:
 ## Test expectations
 Which test files to add and what each covers, per behaviour (happy path,
 edge cases, error paths). Required for any brief that adds new code — this
-is the real anchor when the frontmatter has zero `api`/`web` ACs (which is
-common for `/prep` briefs, since most single-pod work is not behind an
-HTTP surface). Skip only when the brief is pure config / docs / dependency
-bumps with no logic to test.
+supports the required facts and keeps the proof artifact meaningful. Skip
+only when the brief is pure config / docs / dependency bumps with no logic
+to test.
 ```
 
 Optional sections (include only when they add value):
@@ -323,15 +338,15 @@ Before finishing:
 3. Commit and push.
 ```
 
-`/simplify` is process, not an AC — that's why it's a wrap-up step. ACs
-remain about observable outcomes only.
+`/simplify` is process, not a required fact — that's why it's a wrap-up step.
+Required facts remain about observable outcomes only.
 
 #### What briefs should NOT contain
 
 - "Files I'll create with full source" — the brief specifies *what* and
   *where*, not pre-written code.
-- Build/test/lint commands as ACs — `isCommandLikeAc()` force-classifies
-  them to `none` and the pipeline runs them anyway.
+- Generic build/test/lint commands as required facts — the pipeline runs them
+  anyway. Facts prove specific behavior.
 - ADR-length text — `/prep` briefs don't generate ADRs. If a decision feels
   ADR-worthy, that's an *Upgrade in place* signal.
 
@@ -363,12 +378,10 @@ was not done.
   `/plan-feature`. The *Upgrade in place* offer is mandatory when the
   triggers fire — not optional.
 - Auto-appending a suffix when `specs/<task-slug>/` exists. Refuse and ask.
-- Writing build/test/lint as ACs.
-- Padding `acceptance_criteria` with `none`-typed entries. Zero ACs + a
-  thorough `Test expectations` section is honest; an all-`none` AC list
-  is theatre.
-- Writing an `api` AC against an endpoint behind `[Authorize]` /
-  `RequiresUserType(<role>)`.
+- Writing generic build/test/lint as required facts.
+- Creating `human_review` entries for checks that could be executable facts.
+- Writing command facts against surfaces the harness cannot authenticate;
+  use a lower-level unit/integration/contract test artifact.
 - Treating the user's first concrete answer as a green light to draft.
   Each answer is a thread to pull, not a stop signal.
 - Silently deciding when the user defers — always propose-and-confirm.
