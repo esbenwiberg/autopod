@@ -1,4 +1,4 @@
-import type { ScanFinding, TaskSummary, ValidationResult } from '@autopod/shared';
+import type { ScanFinding, TaskSummary, ValidationResult, ValidationWaiver } from '@autopod/shared';
 import type { PrNarrative } from './pr-description-generator.js';
 
 export interface ScreenshotRef {
@@ -13,6 +13,7 @@ export interface PrBodyConfig {
   podId: string;
   profileName: string;
   validationResult: ValidationResult | null;
+  validationWaiver?: ValidationWaiver | null;
   filesChanged: number;
   linesAdded: number;
   linesRemoved: number;
@@ -107,6 +108,7 @@ export function buildPrBody(config: PrBodyConfig): string {
     podId,
     profileName,
     validationResult,
+    validationWaiver,
     filesChanged,
     linesAdded,
     linesRemoved,
@@ -227,6 +229,24 @@ export function buildPrBody(config: PrBodyConfig): string {
   }
 
   // ── Automated results ─────────────────────────────────────────────────────
+
+  if (validationWaiver) {
+    const failedPhases =
+      validationWaiver.failedPhases.length > 0
+        ? validationWaiver.failedPhases.join(', ')
+        : 'unknown';
+    const failedFacts =
+      validationWaiver.failedFactIds.length > 0
+        ? `\n- Failed facts: ${validationWaiver.failedFactIds.map(escapeMd).join(', ')}`
+        : '';
+    sections.push(`## Validation Waiver
+
+This PR was approved by a human despite failed validation.
+
+- Reason: ${escapeMd(validationWaiver.reason)}
+- Attempt: ${validationWaiver.attempt ?? 'unknown'}
+- Failed phases: ${escapeMd(failedPhases)}${failedFacts}`);
+  }
 
   if (validationResult) {
     const v = validationResult;

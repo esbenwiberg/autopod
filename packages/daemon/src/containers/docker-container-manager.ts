@@ -183,6 +183,33 @@ export class DockerContainerManager implements ContainerManager {
     this.logger = logger;
   }
 
+  private async isContainerListedAsRunning(containerId: string): Promise<boolean> {
+    try {
+      const containers = await boundedDockerCall(
+        this.docker.listContainers({ all: true, filters: { id: [containerId] } }),
+        {
+          label: 'container.list (start precheck)',
+          timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+          logger: this.logger,
+          containerId,
+        },
+      );
+      return containers.some(
+        (container) =>
+          (container.Id === containerId ||
+            container.Id.startsWith(containerId) ||
+            containerId.startsWith(container.Id)) &&
+          (container.State === 'running' || container.Status.startsWith('Up ')),
+      );
+    } catch (err) {
+      this.logger.debug(
+        { err, containerId },
+        'Could not pre-check container running state before start',
+      );
+      return false;
+    }
+  }
+
   private async containerRemovedAfterTimeout(
     container: Dockerode.Container,
     containerId: string,
@@ -381,6 +408,11 @@ export class DockerContainerManager implements ContainerManager {
 
   async start(containerId: string): Promise<void> {
     try {
+      if (await this.isContainerListedAsRunning(containerId)) {
+        this.logger.debug({ containerId }, 'Container already running');
+        return;
+      }
+
       const container = this.docker.getContainer(containerId);
       await boundedDockerCall(container.start(), {
         label: 'container.start',

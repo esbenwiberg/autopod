@@ -35,7 +35,9 @@ public struct DetailPanelView: View {
     public var loadValidationHistory: ((String) async throws -> [StoredValidationResponse])?
     public var isLoadingLogs: Bool
     public var logsLoadError: String?
+    public var limitedLogCount: Int?
     public var onReloadLogs: (() -> Void)?
+    public var onLoadAllLogs: (() -> Void)?
     /// Open the Create Series sheet pre-filled with this pod's branch + profile.
     /// Available on workspace pods (interactive) — both running (mid-flight handoff)
     /// and complete (post-hoc spawn). Nil-safe — menu items are gated on this being set.
@@ -64,7 +66,9 @@ public struct DetailPanelView: View {
         loadValidationHistory: ((String) async throws -> [StoredValidationResponse])? = nil,
         isLoadingLogs: Bool = false,
         logsLoadError: String? = nil,
+        limitedLogCount: Int? = nil,
         onReloadLogs: (() -> Void)? = nil,
+        onLoadAllLogs: (() -> Void)? = nil,
         onLaunchSeriesFromPod: ((Pod) -> Void)? = nil,
         requestedTab: Binding<DetailTab?> = .constant(nil)
     ) {
@@ -89,7 +93,9 @@ public struct DetailPanelView: View {
         self.loadValidationHistory = loadValidationHistory
         self.isLoadingLogs = isLoadingLogs
         self.logsLoadError = logsLoadError
+        self.limitedLogCount = limitedLogCount
         self.onReloadLogs = onReloadLogs
+        self.onLoadAllLogs = onLoadAllLogs
         self.onLaunchSeriesFromPod = onLaunchSeriesFromPod
         self._requestedTab = requestedTab
     }
@@ -135,7 +141,9 @@ public struct DetailPanelView: View {
                     sessionBranch: pod.branch,
                     isLoading: isLoadingLogs,
                     loadError: logsLoadError,
-                    onReload: onReloadLogs
+                    limitedEventCount: limitedLogCount,
+                    onReload: onReloadLogs,
+                    onLoadAll: onLoadAllLogs
                 )
                 case .diff:       DiffTab(pod: pod, diffString: diffString, onRefresh: onRefreshDiff)
                 case .work:       WorkTab(pod: pod, loadQuality: loadQuality)
@@ -358,6 +366,15 @@ public struct DetailPanelView: View {
         return String(line.prefix(maxLength - 3)).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
     }
 
+    private func formatRecoverWorktreeResult(_ result: RecoverWorktreeResponse) -> String {
+        guard let blockers = result.blockers, !blockers.isEmpty else {
+            return result.message
+        }
+        let preview = blockers.prefix(8).map { "  \($0.status) \($0.path)" }.joined(separator: "\n")
+        let suffix = blockers.count > 8 ? "\n  ... \(blockers.count - 8) more" : ""
+        return "\(result.message)\n\nBlocking paths:\n\(preview)\(suffix)"
+    }
+
 
     @ViewBuilder
     private var headerActions: some View {
@@ -372,7 +389,7 @@ public struct DetailPanelView: View {
                 Button {
                     Task {
                         if let result = await actions.recoverWorktree(pod.id) {
-                            recoverWorktreeResult = result.message
+                            recoverWorktreeResult = formatRecoverWorktreeResult(result)
                             recoverWorktreeSuccess = result.recovered
                         }
                     }
@@ -534,16 +551,16 @@ public struct DetailPanelView: View {
                 EmptyView()
 
             case .validated:
-                if pod.validationChecks?.allPassed != false {
-                    // All checks passed (or no checks yet) — approve is primary
+                if pod.validationChecks?.allPassed != false || pod.validationWaiver != nil {
+                    // All checks passed, or a human explicitly waived the failures.
                     Button {
                         Task { await actions.approve(pod.id) }
                     } label: {
-                        Label("Approve", systemImage: "checkmark")
+                        Label(pod.validationWaiver == nil ? "Approve" : "Approve Waived", systemImage: "checkmark")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .tint(.green)
+                    .tint(pod.validationWaiver == nil ? .green : .orange)
                     Button("Reject") {
                         showRejectFeedback = true
                     }

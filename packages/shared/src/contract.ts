@@ -109,6 +109,10 @@ function looksGenericCommand(command: string): boolean {
   return /^(pnpm|npm|yarn|bun)\s+(run\s+)?(test|build|lint)\s*$/.test(normalized);
 }
 
+function looksNarrowedCommand(command: string): boolean {
+  return /\s(--grep|-g)\s+\S+/.test(command) || /\s--testNamePattern(=|\s+)\S+/.test(command);
+}
+
 export function validateSpecContract(contract: SpecContract): void {
   assertUnique(
     contract.scenarios.map((s) => s.id),
@@ -124,8 +128,13 @@ export function validateSpecContract(contract: SpecContract): void {
   );
 
   const scenarioIds = new Set(contract.scenarios.map((s) => s.id));
+  const factsByCommand = new Map<string, RequiredFact[]>();
   const covered = new Set<string>();
   for (const fact of contract.requiredFacts) {
+    const sameCommand = factsByCommand.get(fact.command) ?? [];
+    sameCommand.push(fact);
+    factsByCommand.set(fact.command, sameCommand);
+
     for (const scenarioId of fact.proves) {
       if (!scenarioIds.has(scenarioId)) {
         throw new BriefParseError(
@@ -137,6 +146,14 @@ export function validateSpecContract(contract: SpecContract): void {
     if (looksGenericCommand(fact.command)) {
       throw new BriefParseError(
         `required_facts "${fact.id}" uses a generic command. Point at a scenario-specific command.`,
+      );
+    }
+  }
+  for (const [command, facts] of factsByCommand) {
+    if (facts.length > 1 && !looksNarrowedCommand(command)) {
+      const factIds = facts.map((f) => `"${f.id}"`).join(', ');
+      throw new BriefParseError(
+        `required_facts ${factIds} share the same broad command. Split the artifact or add --grep/-g so each fact proves only its scenario.`,
       );
     }
   }

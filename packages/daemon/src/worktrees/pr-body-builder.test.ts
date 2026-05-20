@@ -1,4 +1,4 @@
-import type { ValidationResult } from '@autopod/shared';
+import type { ValidationResult, ValidationWaiver } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import { type PrBodyConfig, buildPrBody, buildPrTitle, escapeMd } from './pr-body-builder.js';
 
@@ -102,6 +102,25 @@ describe('buildPrBody', () => {
   it('omits preview section when null', () => {
     const body = buildPrBody(baseConfig);
     expect(body).not.toContain('## Preview');
+  });
+
+  it('includes validation waiver details when failures were approved anyway', () => {
+    const waiver: ValidationWaiver = {
+      waivedAt: '2026-05-20T10:00:00.000Z',
+      waivedBy: 'human',
+      reason: 'Manual inspection passed; fact harness was flaky',
+      attempt: 2,
+      failedPhases: ['facts'],
+      failedFactIds: ['fact-workpackages-page-v2'],
+    };
+
+    const body = buildPrBody({ ...baseConfig, validationWaiver: waiver });
+
+    expect(body).toContain('## Validation Waiver');
+    expect(body).toContain('Manual inspection passed');
+    expect(body).toContain('- Attempt: 2');
+    expect(body).toContain('- Failed phases: facts');
+    expect(body).toContain('- Failed facts: fact-workpackages-page-v2');
   });
 
   it('includes validation results table when present', () => {

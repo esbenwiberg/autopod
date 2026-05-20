@@ -762,6 +762,7 @@ describe('reconcileLocalSessions', () => {
     expect(result.recovered).toContain('val-2');
     const pod = podRepo.getOrThrow('val-2');
     expect(pod.status).toBe('queued');
+    expect(pod.skipAgent).toBe(true);
     expect(enqueuedSessions).toContain('val-2');
   });
 
@@ -799,6 +800,7 @@ describe('reconcileLocalSessions', () => {
     expect(result.recovered).toContain('val-3');
     const pod = podRepo.getOrThrow('val-3');
     expect(pod.status).toBe('queued');
+    expect(pod.skipAgent).toBe(true);
     expect(enqueuedSessions).toContain('val-3');
   });
 
@@ -836,6 +838,7 @@ describe('reconcileLocalSessions', () => {
     expect(result.recovered).toContain('val-4');
     const pod = podRepo.getOrThrow('val-4');
     expect(pod.status).toBe('queued');
+    expect(pod.skipAgent).toBe(true);
     expect(enqueuedSessions).toContain('val-4');
   });
 

@@ -87,6 +87,8 @@ export interface RestoreFromHeadResult {
   reason: string;
   /** Number of paths restored (zero on refusal). */
   restoredCount: number;
+  /** Non-recoverable porcelain entries that blocked restore, when available. */
+  blockers?: Array<{ status: string; path: string }>;
 }
 
 export interface RestoreFromHeadOptions {
@@ -152,7 +154,7 @@ export interface WorktreeManager {
     options?: { force?: boolean; pat?: string },
   ): Promise<void>;
   /** Pull latest changes from origin for the current branch. */
-  pullBranch(worktreePath: string): Promise<{ newCommits: boolean }>;
+  pullBranch(worktreePath: string, pat?: string): Promise<{ newCommits: boolean }>;
   /**
    * Fetch latest origin/<baseBranch> and rebase the current branch onto it.
    *

@@ -3,14 +3,16 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { AcDefinition } from '@autopod/shared';
+import { type AcDefinition, parseSpecContract } from '@autopod/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type {
   ValidationEngineConfig,
   ValidationPhaseCallbacks,
 } from '../interfaces/validation-engine.js';
+import type { HostBrowserRunner } from './host-browser-runner.js';
 import {
+  artifactChangeSatisfied,
   buildReviewPrompt,
   classifyAcTypes,
   createLocalValidationEngine,
@@ -34,6 +36,121 @@ import {
 function ac(outcome: string, type: AcDefinition['type'] = 'none'): AcDefinition {
   return { type, outcome };
 }
+
+describe('artifactChangeSatisfied', () => {
+  const diff = `diff --git a/Client/src/Foo.ts b/Client/src/Foo.ts
+index 111..222 100644
+--- a/Client/src/Foo.ts
++++ b/Client/src/Foo.ts
+@@ -1 +1 @@
+-old
++new
+diff --git a/Client/tests/page.spec.ts b/Client/tests/page.spec.ts
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/Client/tests/page.spec.ts
+@@ -0,0 +1 @@
++test('page', () => {});
+`;
+
+  it('treats directory artifacts as changed when any child path changed', () => {
+    expect(artifactChangeSatisfied(diff, 'Client/src', 'update')).toBe(true);
+  });
+
+  it('requires create artifacts to be newly added', () => {
+    expect(artifactChangeSatisfied(diff, 'Client/tests/page.spec.ts', 'create')).toBe(true);
+    expect(artifactChangeSatisfied(diff, 'Client/src', 'create')).toBe(false);
+  });
+
+  it('treats touch as an existence-only change requirement', () => {
+    expect(artifactChangeSatisfied('', 'Client/src', 'touch')).toBe(true);
+  });
+});
+
+describe('required fact execution', () => {
+  it('runs browser-test fact commands on the host when a host browser runner is available', async () => {
+    const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-fact-host-'));
+    const execCommands: string[] = [];
+    const containerManager = {
+      execInContainer: vi.fn(async (_containerId: string, command: string[]) => {
+        const shell = command[2] ?? '';
+        execCommands.push(shell);
+        if (shell.includes('git reset --hard HEAD')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('test -e')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('sha256sum')) {
+          return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('.autopod/evidence')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        throw new Error(`unexpected container command: ${shell}`);
+      }),
+    } as unknown as ContainerManager;
+    const hostBrowserRunner: HostBrowserRunner = {
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+      readScreenshot: vi.fn(async () => ''),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => path.join(worktreePath, '.autopod/screenshots')),
+    };
+    const engine = createLocalValidationEngine(containerManager, undefined, hostBrowserRunner);
+
+    try {
+      const result = await engine.validate({
+        podId: 'pod-facts',
+        containerId: 'container-facts',
+        previewUrl: 'http://127.0.0.1:3000',
+        buildCommand: '',
+        startCommand: '',
+        healthPath: '/',
+        healthTimeout: 1,
+        smokePages: [],
+        attempt: 1,
+        task: 'prove browser fact host execution',
+        hasWebUi: false,
+        worktreePath,
+        skipPhases: ['review'],
+        diff: `diff --git a/Client/tests/facts.spec.ts b/Client/tests/facts.spec.ts
+new file mode 100644
+--- /dev/null
++++ b/Client/tests/facts.spec.ts
+@@ -0,0 +1 @@
++test('fact', () => {});
+`,
+        contract: parseSpecContract(`contract_version: 1
+title: Browser facts
+depends_on: []
+scenarios:
+  - id: page
+    given: ["state"]
+    when: ["open page"]
+    then: ["page works"]
+required_facts:
+  - id: fact-page
+    proves: [page]
+    kind: browser-test
+    artifact:
+      path: Client/tests/facts.spec.ts
+      change: create
+    command: printf host-fact
+human_review: []
+`),
+      });
+
+      expect(result.factValidation?.status).toBe('pass');
+      expect(result.factValidation?.results[0]?.stdout).toBe('host-fact');
+      expect(hostBrowserRunner.isAvailable).toHaveBeenCalled();
+      expect(execCommands).not.toContain('printf host-fact');
+    } finally {
+      await fs.rm(worktreePath, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('stripMarkdownFences', () => {
   it('strips ```json fences', () => {

@@ -65,6 +65,7 @@ public struct SessionResponse: Codable, Sendable {
   public let validationAttempts: Int
   public let maxValidationAttempts: Int
   public let lastValidationResult: ValidationResponse?
+  public let validationWaiver: ValidationWaiverResponse?
   public let lastValidationFindings: [ValidationFindingResponse]?
   public let pendingEscalation: EscalationResponse?
   public let escalationCount: Int
@@ -153,7 +154,7 @@ public struct SessionResponse: Codable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case id, profileName, task, status, model, runtime, executionTarget, branch
     case containerId, worktreePath, validationAttempts, maxValidationAttempts, reworkCount
-    case lastValidationResult, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
+    case lastValidationResult, validationWaiver, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
     case createdAt, startedAt, runningAt, completedAt, updatedAt, userId
     case filesChanged, linesAdded, linesRemoved, previewUrl, hasWebUi, prUrl
     case mergeBlockReason, plan, progress, acceptanceCriteria, contract, claudeSessionId
@@ -174,6 +175,15 @@ public struct SessionResponse: Codable, Sendable {
     case queueLength
     case recentQueueMessages
   }
+}
+
+public struct ValidationWaiverResponse: Codable, Sendable {
+  public let waivedAt: String
+  public let waivedBy: String
+  public let reason: String
+  public let attempt: Int?
+  public let failedPhases: [String]
+  public let failedFactIds: [String]
 }
 
 /// Wire type for a single queued feedback message (mirrors `FixFeedback` from

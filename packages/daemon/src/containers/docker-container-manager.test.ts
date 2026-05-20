@@ -64,6 +64,7 @@ function createMockDocker(container = createMockContainer()) {
   return {
     createContainer: vi.fn().mockResolvedValue(container),
     getContainer: vi.fn().mockReturnValue(container),
+    listContainers: vi.fn().mockResolvedValue([]),
     modem: {
       demuxStream: vi.fn(
         (
@@ -394,6 +395,20 @@ describe('DockerContainerManager', () => {
       await manager.start('abc123');
 
       expect(container.start).toHaveBeenCalled();
+    });
+
+    it('does not call Docker start when the container is already listed as running', async () => {
+      docker.listContainers.mockResolvedValue([
+        {
+          Id: 'abc123deadbeef',
+          State: 'running',
+          Status: 'Up 3 hours (healthy)',
+        },
+      ]);
+
+      await manager.start('abc123');
+
+      expect(container.start).not.toHaveBeenCalled();
     });
 
     it('swallows 304 (already running)', async () => {

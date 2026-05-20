@@ -90,6 +90,7 @@ describe('PodRepository', () => {
       expect(pod.worktreePath).toBeNull();
       expect(pod.validationAttempts).toBe(0);
       expect(pod.lastValidationResult).toBeNull();
+      expect(pod.validationWaiver).toBeNull();
       expect(pod.pendingEscalation).toBeNull();
       expect(pod.escalationCount).toBe(0);
       expect(pod.startedAt).toBeNull();
@@ -222,6 +223,47 @@ describe('PodRepository', () => {
       repo.update('sess-001', { lastValidationResult: { overall: 'pass' } });
       repo.update('sess-001', { lastValidationResult: null });
       expect(repo.getOrThrow('sess-001').lastValidationResult).toBeNull();
+    });
+
+    it('should store and retrieve validationWaiver as JSON', () => {
+      repo.insert(validSession);
+      repo.update('sess-001', {
+        validationWaiver: {
+          waivedAt: '2026-05-20T10:00:00.000Z',
+          waivedBy: 'human',
+          reason: 'fact harness was unavailable; work inspected manually',
+          attempt: 2,
+          failedPhases: ['facts'],
+          failedFactIds: ['fact-workpackages-page-v2'],
+        },
+      });
+
+      const pod = repo.getOrThrow('sess-001');
+      expect(pod.validationWaiver).toEqual({
+        waivedAt: '2026-05-20T10:00:00.000Z',
+        waivedBy: 'human',
+        reason: 'fact harness was unavailable; work inspected manually',
+        attempt: 2,
+        failedPhases: ['facts'],
+        failedFactIds: ['fact-workpackages-page-v2'],
+      });
+    });
+
+    it('should clear validationWaiver with null', () => {
+      repo.insert(validSession);
+      repo.update('sess-001', {
+        validationWaiver: {
+          waivedAt: '2026-05-20T10:00:00.000Z',
+          waivedBy: 'human',
+          reason: 'temporary override',
+          attempt: 1,
+          failedPhases: ['review'],
+          failedFactIds: [],
+        },
+      });
+      repo.update('sess-001', { validationWaiver: null });
+
+      expect(repo.getOrThrow('sess-001').validationWaiver).toBeNull();
     });
 
     it('should store and retrieve pendingEscalation as JSON', () => {

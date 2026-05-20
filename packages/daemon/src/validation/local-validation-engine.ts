@@ -22,6 +22,13 @@ import type { ValidationPhaseCallbacks } from '../interfaces/validation-engine.j
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ValidationEngine, ValidationEngineConfig } from '../interfaces/validation-engine.js';
 import { buildSupervisorCommand } from '../pods/preview-supervisor.js';
+import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
+import type { HostBrowserRunner } from './host-browser-runner.js';
+import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
+import { runAgenticReview } from './review-agentic-runner.js';
+import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
+import { applyDiffFilterToParsed } from './review-finding-filter.js';
+import { runToolUseReview } from './review-tool-runner.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -85,14 +92,6 @@ async function resetWorktreeToHead(
     }
   }
 }
-import type { HostBrowserRunner } from './host-browser-runner.js';
-import { runAgenticReview } from './review-agentic-runner.js';
-import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
-import { applyDiffFilterToParsed } from './review-finding-filter.js';
-import { runToolUseReview } from './review-tool-runner.js';
-
-import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
-import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 
 /**
  * Local validation engine with build, health check, and AI task review.
@@ -355,7 +354,7 @@ export function createLocalValidationEngine(
           if (tier1Pass && config.contract?.requiredFacts.length)
             onProgress?.('Checking required facts…');
           factValidation = tier1Pass
-            ? await runFactValidation(containerManager, config, log)
+            ? await runFactValidation(containerManager, config, log, hostBrowserRunner)
             : { status: 'skip', results: [] };
           factsStatus = factValidation.status;
         }
@@ -796,6 +795,7 @@ async function runFactValidation(
   containerManager: ContainerManager,
   config: ValidationEngineConfig,
   log?: Logger,
+  hostBrowserRunner?: HostBrowserRunner,
 ): Promise<FactValidationResult> {
   const facts = config.contract?.requiredFacts ?? [];
   if (facts.length === 0) {
@@ -808,7 +808,11 @@ async function runFactValidation(
 
   for (const fact of facts) {
     const artifactPath = normalizeContractPath(fact.artifact.path);
-    const artifactChanged = diffMentionsPath(config.diff, artifactPath);
+    const artifactChanged = artifactChangeSatisfied(
+      config.diff,
+      artifactPath,
+      fact.artifact.change,
+    );
     const artifactExists = await artifactExistsInContainer(
       containerManager,
       config,
@@ -823,15 +827,14 @@ async function runFactValidation(
     let commandError: string | undefined;
     const commandStart = Date.now();
     try {
-      commandResult = await containerManager.execInContainer(
-        config.containerId,
-        ['sh', '-c', fact.command],
-        {
-          cwd,
-          timeout: config.testTimeout ?? 600_000,
-          ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
-        },
-      );
+      commandResult =
+        fact.kind === 'browser-test' && hostBrowserRunner && config.worktreePath
+          ? await runBrowserFactOnHost(fact.command, config, hostBrowserRunner, log)
+          : await containerManager.execInContainer(config.containerId, ['sh', '-c', fact.command], {
+              cwd,
+              timeout: config.testTimeout ?? 600_000,
+              ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
+            });
     } catch (err) {
       const partial = (err as { partialOutput?: string })?.partialOutput;
       commandError = err instanceof Error ? err.message : String(err);
@@ -848,7 +851,9 @@ async function runFactValidation(
     const passed = artifactExists && artifactChanged && commandPassed;
     const failedReasons = [
       artifactExists ? null : `artifact ${artifactPath} does not exist`,
-      artifactChanged ? null : `artifact ${artifactPath} was not changed in this diff`,
+      artifactChanged
+        ? null
+        : `artifact ${artifactPath} does not satisfy ${fact.artifact.change} requirement`,
       commandPassed ? null : `command exited ${commandResult.exitCode}`,
     ].filter((reason): reason is string => reason !== null);
 
@@ -871,7 +876,7 @@ async function runFactValidation(
       },
       attachments,
       reasoning: passed
-        ? `Fact ${fact.id} passed: ${artifactPath} exists, was changed, and command exited 0.`
+        ? `Fact ${fact.id} passed: ${artifactPath} exists, satisfies ${fact.artifact.change}, and command exited 0.`
         : `Fact ${fact.id} failed: ${failedReasons.join('; ')}.${commandError ? ` ${commandError}` : ''}`,
       stdout: commandResult.stdout.slice(0, 20_000),
       stderr: commandResult.stderr.slice(0, 20_000),
@@ -884,6 +889,55 @@ async function runFactValidation(
     'fact validation complete',
   );
   return { status, results };
+}
+
+async function runBrowserFactOnHost(
+  command: string,
+  config: ValidationEngineConfig,
+  hostBrowserRunner: HostBrowserRunner,
+  log?: Logger,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const available = await hostBrowserRunner.isAvailable();
+  if (!available) {
+    throw new Error('Host Playwright is not available for browser-test fact execution');
+  }
+  if (!config.worktreePath) {
+    throw new Error('Host worktree path is required for browser-test fact execution');
+  }
+
+  const env = {
+    ...process.env,
+    ...(config.extraExecEnv ?? {}),
+    AUTOPOD_PREVIEW_URL: config.previewUrl,
+    AUTOPOD_CONTAINER_BASE_URL: config.containerBaseUrl ?? config.previewUrl,
+  };
+  log?.info({ command, worktreePath: config.worktreePath }, 'running browser-test fact on host');
+  try {
+    const result = await execFileAsync('sh', ['-c', command], {
+      cwd: config.worktreePath,
+      env,
+      timeout: config.testTimeout ?? 600_000,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    return {
+      stdout: String(result.stdout),
+      stderr: String(result.stderr),
+      exitCode: 0,
+    };
+  } catch (err) {
+    const execErr = err as NodeJS.ErrnoException & {
+      stdout?: string;
+      stderr?: string;
+      code?: number | string;
+      killed?: boolean;
+    };
+    const exitCode = typeof execErr.code === 'number' ? execErr.code : execErr.killed ? 124 : 1;
+    return {
+      stdout: execErr.stdout ?? '',
+      stderr: execErr.stderr ?? (err instanceof Error ? err.message : String(err)),
+      exitCode,
+    };
+  }
 }
 
 async function artifactExistsInContainer(
@@ -986,16 +1040,36 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-function diffMentionsPath(diff: string, path: string): boolean {
+export function artifactChangeSatisfied(
+  diff: string,
+  path: string,
+  change: 'create' | 'update' | 'touch',
+): boolean {
+  if (change === 'touch') return true;
   const normalized = normalizeContractPath(path);
-  return diff
-    .split('\n')
-    .some(
-      (line) =>
-        line === `+++ b/${normalized}` ||
-        line === `--- a/${normalized}` ||
-        line.startsWith(`diff --git a/${normalized} b/${normalized}`),
-    );
+  const entries = parseDiffEntries(diff).filter(
+    (entry) => entry.path === normalized || entry.path.startsWith(`${normalized}/`),
+  );
+  if (change === 'create') return entries.some((entry) => entry.created);
+  return entries.length > 0;
+}
+
+function parseDiffEntries(diff: string): Array<{ path: string; created: boolean }> {
+  const entries: Array<{ path: string; created: boolean }> = [];
+  let current: { path: string; created: boolean } | null = null;
+  for (const line of diff.split('\n')) {
+    const match = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+    if (match) {
+      current = { path: normalizeContractPath(match[2] ?? match[1] ?? ''), created: false };
+      entries.push(current);
+      continue;
+    }
+    if (!current) continue;
+    if (line === 'new file mode' || line.startsWith('new file mode ') || line === '--- /dev/null') {
+      current.created = true;
+    }
+  }
+  return entries;
 }
 
 // ── Lint phase ──────────────────────────────────────────────────────────────

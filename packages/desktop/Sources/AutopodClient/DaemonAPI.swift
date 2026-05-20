@@ -239,8 +239,10 @@ public actor DaemonAPI {
     try await request("GET", "/pods/\(id)/validations")
   }
 
-  public func getSessionEvents(_ id: String) async throws -> [AgentEventResponse] {
-    try await request("GET", "/pods/\(id)/events")
+  public func getSessionEvents(_ id: String, limit: Int? = nil) async throws -> [AgentEventResponse] {
+    var query: [String: String] = [:]
+    if let limit { query["limit"] = "\(limit)" }
+    return try await request("GET", "/pods/\(id)/events", query: query)
   }
 
   public func getPodQuality(_ id: String) async throws -> PodQualitySignals {
@@ -815,6 +817,12 @@ public struct ResumeResponse: Codable, Sendable {
 public struct RecoverWorktreeResponse: Codable, Sendable {
   public let recovered: Bool
   public let message: String
+  public let blockers: [RecoverWorktreeBlocker]?
+}
+
+public struct RecoverWorktreeBlocker: Codable, Sendable {
+  public let status: String
+  public let path: String
 }
 
 public struct SyncBranchResponse: Codable, Sendable {

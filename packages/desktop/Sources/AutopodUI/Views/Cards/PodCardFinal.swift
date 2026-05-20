@@ -343,7 +343,11 @@ public struct SessionCardFinal: View {
                 .font(.caption)
                 .foregroundStyle(.orange)
         case .validated:
-            if pod.validationChecks?.allPassed != false {
+            if pod.validationWaiver != nil {
+                Label("Approved with validation waiver", systemImage: "checkmark.seal")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else if pod.validationChecks?.allPassed != false {
                 Label("Ready for review", systemImage: "checkmark.seal")
                     .font(.caption)
                     .foregroundStyle(.green)
@@ -691,18 +695,18 @@ public struct SessionCardFinal: View {
                         checkItem("Review", status: checks.review)
                     }
                 }
-                if pod.validationChecks?.allPassed != false {
-                    // All checks passed — approve is primary
+                if pod.validationChecks?.allPassed != false || pod.validationWaiver != nil {
+                    // All checks passed, or a human explicitly waived the failures.
                     HStack(spacing: 6) {
                         Button {
                             Task { await actions.approve(pod.id) }
                         } label: {
-                            Label("Approve", systemImage: "checkmark")
+                            Label(pod.validationWaiver == nil ? "Approve" : "Approve Waived", systemImage: "checkmark")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
-                        .tint(.green)
+                        .tint(pod.validationWaiver == nil ? .green : .orange)
                         Button("Reject") {
                             showRejectFeedback = true
                         }

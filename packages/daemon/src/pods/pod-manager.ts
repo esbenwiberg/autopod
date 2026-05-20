@@ -38,6 +38,7 @@ import type {
   ValidationOverridePayload,
   ValidationPhase,
   ValidationResult,
+  ValidationWaiver,
 } from '@autopod/shared';
 import {
   AUTOPOD_INSTRUCTIONS_PATH,
@@ -169,12 +170,47 @@ function summarizeValidationPhases(result: ValidationResult): string {
         ? 'pass'
         : 'fail';
   const acStatus = result.acValidation?.status ?? 'skip';
+  const factsStatus = result.factValidation?.status ?? 'skip';
   const reviewStatus = result.taskReview?.status ?? 'skip';
   return (
     `lint: ${lintStatus}, sast: ${sastStatus}, build: ${buildStatus}, ` +
     `tests: ${testStatus}, health: ${healthStatus}, pages: ${pagesStatus}, ` +
-    `ac: ${acStatus}, review: ${reviewStatus}`
+    `ac: ${acStatus}, facts: ${factsStatus}, review: ${reviewStatus}`
   );
+}
+
+function failedValidationPhases(result: ValidationResult | null): string[] {
+  if (!result) return [];
+  const failed: string[] = [];
+  if (result.lint?.status === 'fail') failed.push('lint');
+  if (result.sast?.status === 'fail') failed.push('sast');
+  if (result.smoke.build.status === 'fail') failed.push('build');
+  if (result.test?.status === 'fail') failed.push('tests');
+  if (result.smoke.health.status === 'fail') failed.push('health');
+  if (result.smoke.pages.some((p) => p.status === 'fail')) failed.push('pages');
+  if (result.acValidation?.status === 'fail') failed.push('ac');
+  if (result.factValidation?.status === 'fail') failed.push('facts');
+  if (result.taskReview && result.taskReview.status !== 'pass') failed.push('review');
+  return failed;
+}
+
+function failedFactIds(result: ValidationResult | null): string[] {
+  return (
+    result?.factValidation?.results
+      .filter((fact) => fact.status === 'fail' || fact.passed === false)
+      .map((fact) => fact.factId) ?? []
+  );
+}
+
+function buildValidationWaiver(result: ValidationResult | null, reason?: string): ValidationWaiver {
+  return {
+    waivedAt: new Date().toISOString(),
+    waivedBy: 'human',
+    reason: reason?.trim() || 'Approved anyway by operator',
+    attempt: result?.attempt ?? null,
+    failedPhases: failedValidationPhases(result),
+    failedFactIds: failedFactIds(result),
+  };
 }
 
 /** Format a `mergeBlockReason` string for a rebase that produced conflicts.
@@ -890,7 +926,11 @@ export interface PodManager {
    * Pulls files from the container (which must still be running), repopulates the worktree,
    * and retries the auto-commit. Clears `worktreeCompromised` on success.
    */
-  recoverWorktree(podId: string): Promise<{ recovered: boolean; message: string }>;
+  recoverWorktree(podId: string): Promise<{
+    recovered: boolean;
+    message: string;
+    blockers?: Array<{ status: string; path: string }>;
+  }>;
 }
 
 /**
@@ -3026,6 +3066,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         podModel: pod.model,
         handoffInstructions: pod.handoffInstructions ?? undefined,
         validationResult: pod.lastValidationResult ?? null,
+        validationWaiver: pod.validationWaiver,
         filesChanged: pod.filesChanged,
         linesAdded: pod.linesAdded,
         linesRemoved: pod.linesRemoved,
@@ -5825,6 +5866,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   podModel: refreshed.model,
                   handoffInstructions: refreshed.handoffInstructions ?? undefined,
                   validationResult: refreshed.lastValidationResult ?? null,
+                  validationWaiver: refreshed.validationWaiver,
                   filesChanged: refreshed.filesChanged,
                   linesAdded: refreshed.linesAdded,
                   linesRemoved: refreshed.linesRemoved,
@@ -6313,6 +6355,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podModel: pod.model,
             handoffInstructions: pod.handoffInstructions ?? undefined,
             validationResult: null,
+            validationWaiver: pod.validationWaiver,
             filesChanged: pod.filesChanged,
             linesAdded: pod.linesAdded,
             linesRemoved: pod.linesRemoved,
@@ -7577,10 +7620,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Skip-validation may have been toggled while this run was in flight — bypass result.
         if (s2.skipValidation) {
-          emitActivityStatus(podId, 'Validation skipped by human toggle — marking as validated');
-          logger.info({ podId, attempt }, 'skip_validation set mid-run — bypassing result');
+          const validationWaiver =
+            result.overall === 'fail'
+              ? buildValidationWaiver(result, 'Validation skipped by human toggle')
+              : null;
+          emitActivityStatus(
+            podId,
+            validationWaiver
+              ? `Validation waived by human toggle — failed phases: ${validationWaiver.failedPhases.join(', ') || 'unknown'}`
+              : 'Validation skipped by human toggle — marking as validated',
+          );
+          logger.info(
+            { podId, attempt, validationWaiver },
+            'skip_validation set mid-run — bypassing result',
+          );
           pendingUpdateFromBaseIntents.delete(podId);
-          const validatedPod = transition(s2, 'validated');
+          const validatedPod = transition(
+            s2,
+            'validated',
+            validationWaiver ? { validationWaiver } : undefined,
+          );
           maybeTriggerDependents(validatedPod);
           return;
         }
@@ -7709,6 +7768,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   podModel: s2.model,
                   handoffInstructions: s2.handoffInstructions ?? undefined,
                   validationResult: result,
+                  validationWaiver: s3.validationWaiver,
                   filesChanged: s3.filesChanged,
                   linesAdded: s3.linesAdded,
                   linesRemoved: s3.linesRemoved,
@@ -7900,14 +7960,33 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           400,
         );
       }
+      const revalidationWorktreePath = pod.worktreePath;
+      let newCommits = false;
+      const requeueValidationOnly = (message: string): { newCommits: boolean; result: 'fail' } => {
+        emitActivityStatus(podId, message);
+        podRepo.update(podId, {
+          validationAttempts: 0,
+          containerId: null,
+          recoveryWorktreePath: revalidationWorktreePath,
+          skipAgent: true,
+          lastValidationResult: null,
+        });
+        transition(podRepo.getOrThrow(podId), 'queued');
+        enqueueSession(podId);
+        logger.info({ podId }, 'Revalidation queued with fresh container and skipAgent');
+        return { newCommits, result: 'fail' };
+      };
 
+      const profile = profileStore.get(pod.profileName);
       // Pull latest from remote branch (human may have pushed fixes). Failures are
       // tolerated when force=true so a resume with no remote access (e.g. revoked
       // PAT) still reaches the validation engine on the existing worktree.
       emitActivityStatus(podId, 'Pulling latest changes from remote branch…');
-      let newCommits = false;
       try {
-        const pullResult = await worktreeManager.pullBranch(pod.worktreePath);
+        const pullResult = await worktreeManager.pullBranch(
+          pod.worktreePath,
+          selectGitPat(profile),
+        );
         newCommits = pullResult.newCommits;
       } catch (err) {
         if (!force) throw err;
@@ -7936,10 +8015,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podRepo.update(podId, { validationAttempts: 0 });
 
       // Pre-push security scan: human-pushed fixes also need to clear the gate.
-      const profile = profileStore.get(pod.profileName);
       await runPushCheckpointScan(pod, profile);
 
       // Transition to validating
+      if (!pod.containerId && force) {
+        return requeueValidationOnly(
+          'Resume: container missing — re-provisioning for validation only',
+        );
+      }
       transition(pod, 'validating');
 
       // Re-run validation (force=true restarts container, but we don't want agent retry on failure)
@@ -7969,8 +8052,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         } catch (err) {
           if (isExpectedDockerError(err, [404])) {
             podRepo.update(podId, { containerId: null });
+            if (force) {
+              transition(podRepo.getOrThrow(podId), 'failed');
+              return requeueValidationOnly(
+                'Resume: container no longer exists — re-provisioning for validation only',
+              );
+            }
             throw new AutopodError(
-              `Container for pod ${podId} no longer exists — use "Retry" to re-provision with a fresh agent run`,
+              `Container for pod ${podId} no longer exists — use "Retry" to re-provision`,
               'CONTAINER_NOT_FOUND',
               409,
             );
@@ -8181,6 +8270,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   podModel: s2.model,
                   handoffInstructions: s2.handoffInstructions ?? undefined,
                   validationResult: result,
+                  validationWaiver: s3.validationWaiver,
                   filesChanged: s3.filesChanged,
                   linesAdded: s3.linesAdded,
                   linesRemoved: s3.linesRemoved,
@@ -8844,11 +8934,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const note = reason
         ? `[FORCE APPROVED] ${reason}`
         : '[FORCE APPROVED] Human overrode validation — no further agent run needed';
-      podRepo.update(podId, { lastCorrectionMessage: note });
+      const validationWaiver =
+        pod.lastValidationResult?.overall === 'fail'
+          ? buildValidationWaiver(pod.lastValidationResult, reason)
+          : null;
+      podRepo.update(podId, {
+        lastCorrectionMessage: note,
+        ...(validationWaiver ? { validationWaiver } : {}),
+      });
 
       // Resolve any pending escalation so it doesn't dangle in the audit trail
       // and pendingEscalation gets cleared on the transition.
-      const updates: Partial<Pod> = {};
+      const updates: Partial<PodUpdates> = {};
       if (pod.pendingEscalation) {
         escalationRepo.update(pod.pendingEscalation.id, {
           respondedAt: new Date().toISOString(),
@@ -8858,8 +8955,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         updates.pendingEscalation = null;
       }
       const approvedPod = transition(pod, 'validated', updates);
-      emitActivityStatus(podId, 'Force approved — validation bypassed by human');
-      logger.info({ podId, reason }, 'Pod force-approved, transitioning to validated');
+      emitActivityStatus(
+        podId,
+        validationWaiver
+          ? `Force approved with validation waiver — failed phases: ${validationWaiver.failedPhases.join(', ') || 'unknown'}`
+          : 'Force approved — validation bypassed by human',
+      );
+      logger.info(
+        { podId, reason, validationWaiver },
+        'Pod force-approved, transitioning to validated',
+      );
       maybeTriggerDependents(approvedPod);
     },
 
@@ -9013,8 +9118,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           respondedBy: 'human',
           response: '[skip-validation] dismissed by human',
         });
-        const updated = transition(pod, 'validated', { pendingEscalation: null });
-        emitActivityStatus(podId, 'Validation skipped — recurring findings dismissed by human');
+        const validationWaiver =
+          pod.lastValidationResult?.overall === 'fail'
+            ? buildValidationWaiver(
+                pod.lastValidationResult,
+                'Validation skipped — recurring findings dismissed by human',
+              )
+            : null;
+        const updated = transition(pod, 'validated', {
+          pendingEscalation: null,
+          ...(validationWaiver ? { validationWaiver } : {}),
+        });
+        emitActivityStatus(
+          podId,
+          validationWaiver
+            ? 'Validation waived — recurring findings dismissed by human'
+            : 'Validation skipped — recurring findings dismissed by human',
+        );
         logger.info(
           { podId, escalationId },
           'skip_validation resolved validation_override escalation',
@@ -9564,7 +9684,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     },
 
-    async recoverWorktree(podId: string): Promise<{ recovered: boolean; message: string }> {
+    async recoverWorktree(podId: string): Promise<{
+      recovered: boolean;
+      message: string;
+      blockers?: Array<{ status: string; path: string }>;
+    }> {
       const pod = podRepo.getOrThrow(podId);
       if (!pod.worktreeCompromised) {
         throw new AutopodError(
@@ -9640,6 +9764,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           message: pod.containerId
             ? `Container not reachable and bare-repo restore refused: ${restored.reason}`
             : `No container to recover from; bare-repo restore refused: ${restored.reason}`,
+          blockers: restored.blockers,
         };
       }
       podRepo.update(podId, { worktreeCompromised: false });

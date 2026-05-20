@@ -188,6 +188,7 @@ function createMockWorktreeManager(): WorktreeManager {
     commitPendingChanges: vi.fn(async () => false),
     commitPendingChangesWithGeneratedMessage: vi.fn(async () => false),
     pushBranch: vi.fn(async () => {}),
+    pullBranch: vi.fn(async () => ({ newCommits: false })),
     rebaseOntoBase: vi.fn(async () => ({ alreadyUpToDate: false, rebased: true, conflicts: [] })),
     getCommitLog: vi.fn(async () => 'abc1234 feat: implement feature\ndef5678 fix: edge case'),
     readBranchFolder: vi.fn(async ({ relPath }) => ({
@@ -3999,6 +4000,47 @@ describe('PodManager', () => {
       expect(ctx.prManager.createPr).not.toHaveBeenCalled();
     });
 
+    it('Path 2: missing container during forced revalidation requeues validation-only', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, {
+        validationOverall: 'fail',
+        containerId: 'container-missing',
+      });
+      vi.mocked(ctx.containerManager.start).mockRejectedValueOnce(
+        Object.assign(new Error('No such container'), { statusCode: 404 }),
+      );
+
+      const result = await manager.revalidateSession(pod.id, { force: true });
+
+      expect(result).toEqual({ newCommits: false, result: 'fail' });
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('queued');
+      expect(refreshed.skipAgent).toBe(true);
+      expect(refreshed.containerId).toBeNull();
+      expect(refreshed.recoveryWorktreePath).toBe('/tmp/worktree/abc');
+      expect(refreshed.validationAttempts).toBe(0);
+      expect(refreshed.lastValidationResult).toBeNull();
+      expect(ctx.enqueuedSessions).toEqual([pod.id, pod.id]);
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
+    it('Path 2: passes the profile PAT when pulling during forced revalidation', async () => {
+      const ctx = createTestContext(undefined, { githubPat: 'test-github-pat' });
+      const { manager, pod } = setupFailedPod(ctx, {
+        validationOverall: 'fail',
+        containerId: null,
+      });
+
+      await manager.revalidateSession(pod.id, { force: true });
+
+      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith(
+        '/tmp/worktree/abc',
+        'test-github-pat',
+      );
+    });
+
     it('rejects when pod is not in failed status', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
@@ -4039,6 +4081,81 @@ describe('PodManager', () => {
       });
       // Refused before any push attempt.
       expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('forceApprove — validation waivers', () => {
+    function setupFailedFactPod(ctx: TestContext) {
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Migrate frontend WorkPackage reads' },
+        'user-1',
+      );
+      const validationResult: ValidationResult = {
+        podId: pod.id,
+        attempt: 2,
+        timestamp: '2026-05-20T10:00:00.000Z',
+        smoke: {
+          status: 'pass',
+          build: { status: 'pass', output: '', duration: 42_000 },
+          health: {
+            status: 'pass',
+            url: 'http://127.0.0.1:3000/health',
+            responseCode: 200,
+            duration: 100,
+          },
+          pages: [],
+        },
+        factValidation: {
+          status: 'fail',
+          results: [
+            {
+              factId: 'fact-workpackages-page-v2',
+              proves: ['workpackages-page'],
+              kind: 'browser-test',
+              artifactPath: 'Client/tests/parallel/workpackages/workpackages.spec.ts',
+              command: 'npx playwright test tests/parallel/workpackages/workpackages.spec.ts',
+              passed: false,
+              status: 'fail',
+              reasoning: 'command exited 1',
+            },
+          ],
+        },
+        taskReview: null,
+        overall: 'fail',
+        duration: 63_000,
+      };
+      ctx.podRepo.update(pod.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/worktree/abc',
+        containerId: 'container-xyz',
+        lastValidationResult: validationResult,
+      });
+      ctx.podRepo.update(pod.id, { status: 'running' });
+      ctx.podRepo.update(pod.id, { status: 'validating' });
+      ctx.podRepo.update(pod.id, { status: 'failed' });
+      return { manager, pod };
+    }
+
+    it('records failed phases and fact ids when a failed pod is approved anyway', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedFactPod(ctx);
+
+      await manager.forceApprove(pod.id, 'manual inspection passed after harness failure');
+
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('validated');
+      expect(refreshed.lastCorrectionMessage).toBe(
+        '[FORCE APPROVED] manual inspection passed after harness failure',
+      );
+      expect(refreshed.validationWaiver).toMatchObject({
+        waivedBy: 'human',
+        reason: 'manual inspection passed after harness failure',
+        attempt: 2,
+        failedPhases: ['facts'],
+        failedFactIds: ['fact-workpackages-page-v2'],
+      });
+      expect(refreshed.validationWaiver?.waivedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });
   });
 

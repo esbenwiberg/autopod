@@ -4,6 +4,7 @@ import type {
   ScreenshotRef,
   TaskSummary,
   ValidationResult,
+  ValidationWaiver,
 } from '@autopod/shared';
 
 export interface CreatePrConfig {
@@ -27,6 +28,8 @@ export interface CreatePrConfig {
   podModel: string;
   /** Validation result to include in PR body */
   validationResult: ValidationResult | null;
+  /** Human waiver recorded when a failed validation was approved anyway. */
+  validationWaiver?: ValidationWaiver | null;
   /** Diff stats */
   filesChanged: number;
   linesAdded: number;

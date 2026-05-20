@@ -47,4 +47,72 @@ human_review: []
 `),
     ).toThrow(/kind must be one of/);
   });
+
+  it('rejects multiple facts that share the same broad command', () => {
+    expect(() =>
+      parseSpecContract(`contract_version: 1
+title: Broad facts
+depends_on: []
+scenarios:
+  - id: api
+    given: ["state"]
+    when: ["request"]
+    then: ["response"]
+  - id: page
+    given: ["state"]
+    when: ["open page"]
+    then: ["page works"]
+required_facts:
+  - id: fact-api
+    proves: [api]
+    kind: contract-test
+    artifact:
+      path: tests/workpackages.spec.ts
+      change: create
+    command: npx playwright test tests/workpackages.spec.ts
+  - id: fact-page
+    proves: [page]
+    kind: browser-test
+    artifact:
+      path: tests/workpackages.spec.ts
+      change: create
+    command: npx playwright test tests/workpackages.spec.ts
+human_review: []
+`),
+    ).toThrow(/share the same broad command/);
+  });
+
+  it('allows shared fact commands when they are narrowed by grep', () => {
+    const contract = parseSpecContract(`contract_version: 1
+title: Narrow facts
+depends_on: []
+scenarios:
+  - id: api
+    given: ["state"]
+    when: ["request"]
+    then: ["response"]
+  - id: api-extra
+    given: ["state"]
+    when: ["request"]
+    then: ["extra response"]
+required_facts:
+  - id: fact-api
+    proves: [api]
+    kind: contract-test
+    artifact:
+      path: tests/workpackages.spec.ts
+      change: create
+    command: npx playwright test tests/workpackages.spec.ts --grep @workpackages-v2
+  - id: fact-api-extra
+    proves: [api-extra]
+    kind: contract-test
+    artifact:
+      path: tests/workpackages.spec.ts
+      change: create
+    command: npx playwright test tests/workpackages.spec.ts --grep @workpackages-v2
+human_review: []
+`);
+
+    expect(contract.requiredFacts).toHaveLength(2);
+  });
 });

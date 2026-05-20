@@ -627,6 +627,9 @@ public struct Pod: Identifiable, Sendable {
     /// Whether validation is toggled off at runtime — the next validation result will be bypassed.
     public var skipValidation: Bool
 
+    /// Human override recorded when failed validation was approved anyway.
+    public var validationWaiver: ValidationWaiver?
+
     /// Human-readable title from the brief's YAML frontmatter. Nil for standalone pods.
     public var briefTitle: String?
 
@@ -743,6 +746,7 @@ public struct Pod: Identifiable, Sendable {
         testRunBranches: [String] = [],
         worktreeCompromised: Bool = false,
         skipValidation: Bool = false,
+        validationWaiver: ValidationWaiver? = nil,
         preSubmitReview: PreSubmitReviewSnapshot? = nil,
         fixIteration: Int = 0,
         queueLength: Int = 0,
@@ -777,6 +781,7 @@ public struct Pod: Identifiable, Sendable {
         self.testRunBranches = testRunBranches
         self.worktreeCompromised = worktreeCompromised
         self.skipValidation = skipValidation
+        self.validationWaiver = validationWaiver
         self.preSubmitReview = preSubmitReview
         self.fixIteration = fixIteration
         self.queueLength = queueLength
@@ -846,6 +851,31 @@ public struct Pod: Identifiable, Sendable {
             dependsOnPodIds: dependsOnPodIds,
             dependencyStartedAt: dependencyStartedAt
         )
+    }
+}
+
+public struct ValidationWaiver: Sendable, Equatable {
+    public var waivedAt: Date
+    public var waivedBy: String
+    public var reason: String
+    public var attempt: Int?
+    public var failedPhases: [String]
+    public var failedFactIds: [String]
+
+    public init(
+        waivedAt: Date,
+        waivedBy: String,
+        reason: String,
+        attempt: Int?,
+        failedPhases: [String],
+        failedFactIds: [String]
+    ) {
+        self.waivedAt = waivedAt
+        self.waivedBy = waivedBy
+        self.reason = reason
+        self.attempt = attempt
+        self.failedPhases = failedPhases
+        self.failedFactIds = failedFactIds
     }
 }
 

@@ -268,6 +268,7 @@ export class AdoPrManager implements PrManager {
       podId: config.podId,
       profileName: config.profileName,
       validationResult: config.validationResult,
+      validationWaiver: config.validationWaiver,
       filesChanged: config.filesChanged,
       linesAdded: config.linesAdded,
       linesRemoved: config.linesRemoved,

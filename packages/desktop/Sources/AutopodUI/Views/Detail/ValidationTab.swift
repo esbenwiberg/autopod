@@ -740,6 +740,9 @@ public struct ValidationTab: View {
   }
 
   private var validationSummaryTitle: String {
+    if pod.validationWaiver != nil {
+      return "Approved with validation waiver"
+    }
     if let failed = displayedPhases.first(where: { phaseStatus($0) == .failed }) {
       return "\(failed.displayName) needs attention"
     }
@@ -759,6 +762,10 @@ public struct ValidationTab: View {
     let contractSummary = pod.contract.map {
       "\($0.scenarios.count) scenarios, \($0.requiredFacts.count) required facts, \($0.humanReview.count) human review checks."
     }
+    if let waiver = pod.validationWaiver {
+      let facts = waiver.failedFactIds.isEmpty ? "" : " Failed facts: \(waiver.failedFactIds.joined(separator: ", "))."
+      return ["Human override: \(waiver.reason).\(facts)", contractSummary].compactMap { $0 }.joined(separator: " ")
+    }
     if let failed = displayedPhases.first(where: { phaseStatus($0) == .failed }) {
       return [failed.displayName + " failed.", contractSummary].compactMap { $0 }.joined(separator: " ")
     }
@@ -769,6 +776,7 @@ public struct ValidationTab: View {
   }
 
   private var validationSummaryIcon: String {
+    if pod.validationWaiver != nil { return "checkmark.seal.fill" }
     if displayedPhases.contains(where: { phaseStatus($0) == .failed }) { return "xmark.seal.fill" }
     if displayedPhases.contains(where: { phaseStatus($0) == .running }) { return "arrow.triangle.2.circlepath" }
     if displayedChecks?.allPassed == true { return "checkmark.seal.fill" }
@@ -776,6 +784,7 @@ public struct ValidationTab: View {
   }
 
   private var validationSummaryColor: Color {
+    if pod.validationWaiver != nil { return .orange }
     if displayedPhases.contains(where: { phaseStatus($0) == .failed }) { return .red }
     if displayedPhases.contains(where: { phaseStatus($0) == .running }) { return .blue }
     if displayedChecks?.allPassed == true { return .green }

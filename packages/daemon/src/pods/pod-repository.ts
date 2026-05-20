@@ -17,6 +17,7 @@ import type {
   TaskSummary,
   ValidationOverride,
   ValidationResult,
+  ValidationWaiver,
 } from '@autopod/shared';
 import {
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
@@ -146,6 +147,7 @@ export interface PodUpdates {
   taskSummary?: TaskSummary | null;
   preSubmitReview?: PreSubmitReviewSnapshot | null;
   validationOverrides?: ValidationOverride[] | null;
+  validationWaiver?: ValidationWaiver | null;
   profileSnapshot?: Profile | null;
   prFixAttempts?: number;
   fixIteration?: number;
@@ -365,6 +367,9 @@ function rowToSession(row: Record<string, unknown>): Pod {
       : null,
     validationOverrides: row.validation_overrides
       ? JSON.parse(row.validation_overrides as string)
+      : null,
+    validationWaiver: row.validation_waiver
+      ? (JSON.parse(row.validation_waiver as string) as ValidationWaiver)
       : null,
     pimGroups: row.pim_groups ? (JSON.parse(row.pim_groups as string) as PimGroupConfig[]) : null,
     profileSnapshot: profileSnapshotData,
@@ -697,6 +702,11 @@ export function createPodRepository(db: Database.Database): PodRepository {
         setClauses.push('validation_overrides = @validationOverrides');
         params.validationOverrides =
           changes.validationOverrides !== null ? JSON.stringify(changes.validationOverrides) : null;
+      }
+      if (changes.validationWaiver !== undefined) {
+        setClauses.push('validation_waiver = @validationWaiver');
+        params.validationWaiver =
+          changes.validationWaiver !== null ? JSON.stringify(changes.validationWaiver) : null;
       }
       if (changes.profileSnapshot !== undefined) {
         setClauses.push('profile_snapshot = @profileSnapshot');

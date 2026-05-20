@@ -73,6 +73,21 @@ export type PodStatus =
   | 'killing'
   | 'killed';
 
+export interface ValidationWaiver {
+  /** ISO timestamp when an operator bypassed failed validation. */
+  waivedAt: string;
+  /** Human identity if available; currently "human" for desktop/API force-approve. */
+  waivedBy: string;
+  /** Operator-supplied reason or the daemon default. */
+  reason: string;
+  /** Validation attempt that produced the waived result. */
+  attempt: number | null;
+  /** Failed validation phases at waiver time (e.g. ["facts", "review"]). */
+  failedPhases: string[];
+  /** Failed required fact IDs at waiver time. Empty when facts were not the failure. */
+  failedFactIds: string[];
+}
+
 export interface Pod {
   id: string;
   profileName: string;
@@ -166,6 +181,7 @@ export interface Pod {
    */
   preSubmitReview: PreSubmitReviewSnapshot | null;
   validationOverrides: ValidationOverride[] | null;
+  validationWaiver: ValidationWaiver | null;
   pimGroups: PimGroupConfig[] | null;
   /** Snapshot of the resolved profile config at pod creation time (after inheritance). */
   profileSnapshot: Profile | null;

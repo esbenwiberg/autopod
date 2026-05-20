@@ -279,6 +279,11 @@ async function recoverSession(
     recoveryWorktreePath: pod.worktreePath,
     validationAttempts: 0,
     lastRecoveryTrigger: trigger,
+    // A pod in `validating` has already completed its agent run. After a daemon
+    // restart, re-provision a fresh container and jump straight back to
+    // validation instead of spawning/resuming the agent and risking duplicate
+    // edits.
+    ...(previousStatus === 'validating' ? { skipAgent: true } : {}),
   });
 
   emitStatusChanged(pod.id, previousStatus, 'queued', eventBus);

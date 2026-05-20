@@ -340,6 +340,7 @@ public enum PodMapper {
     )
     result.worktreeCompromised = response.worktreeCompromised ?? false
     result.skipValidation = response.skipValidation
+    result.validationWaiver = mapValidationWaiver(response.validationWaiver)
     result.preSubmitReview = mapPreSubmitReview(response.preSubmitReview)
     result.fixIteration = response.fixIteration ?? 0
     result.queueLength = response.queueLength ?? 0
@@ -367,6 +368,18 @@ public enum PodMapper {
       issues: snapshot.issues,
       model: snapshot.model,
       checkedAt: checkedAt
+    )
+  }
+
+  static func mapValidationWaiver(_ waiver: ValidationWaiverResponse?) -> ValidationWaiver? {
+    guard let waiver else { return nil }
+    return ValidationWaiver(
+      waivedAt: isoFormatter.date(from: waiver.waivedAt) ?? Date(),
+      waivedBy: waiver.waivedBy,
+      reason: waiver.reason,
+      attempt: waiver.attempt,
+      failedPhases: waiver.failedPhases,
+      failedFactIds: waiver.failedFactIds
     )
   }
 

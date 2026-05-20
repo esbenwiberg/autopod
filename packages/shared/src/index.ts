@@ -19,6 +19,7 @@ export type {
   PodSummary,
   ReferenceRepo,
   PreSubmitReviewSnapshot,
+  ValidationWaiver,
   QualityGrade,
   QualitySignals,
   PodQualityScore,

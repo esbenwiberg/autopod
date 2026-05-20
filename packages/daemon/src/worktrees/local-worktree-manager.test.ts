@@ -696,6 +696,7 @@ describe('LocalWorktreeManager', () => {
       expect(result.restored).toBe(false);
       expect(result.restoredCount).toBe(0);
       expect(result.reason).toMatch(/Refusing to restore/);
+      expect(result.blockers).toEqual([{ status: 'M', path: 'src/touched.ts' }]);
 
       // Critical: must NOT have run checkout — that would silently lose the modification.
       const calls = execFileMock.mock.calls.map((c) => (c[1] as string[]).join(' '));
@@ -709,6 +710,7 @@ describe('LocalWorktreeManager', () => {
 
       expect(result.restored).toBe(false);
       expect(result.reason).toMatch(/Refusing to restore/);
+      expect(result.blockers).toEqual([{ status: 'M', path: 'src/staged.ts' }]);
     });
 
     it('explicit recovery refreshes a stale index and restores tracked modifications', async () => {
@@ -737,6 +739,7 @@ describe('LocalWorktreeManager', () => {
 
       expect(result.restored).toBe(false);
       expect(result.reason).toMatch(/Refusing to restore/);
+      expect(result.blockers).toEqual([{ status: '??', path: 'new-file.txt' }]);
     });
 
     it('treats a clean working tree as restored (nothing to do, no compromise)', async () => {
@@ -1029,6 +1032,40 @@ describe('LocalWorktreeManager', () => {
       const pushCall = pushedArgs.find((a) => a.includes('push'));
       expect(pushCall).toBeDefined();
       expect(pushCall).toContain('HEAD:refs/heads/feat/security');
+    });
+  });
+
+  describe('pullBranch', () => {
+    it('uses an explicit profile PAT instead of relying only on the in-memory cache', async () => {
+      const calls: string[][] = [];
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          calls.push(args);
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd === 'rev-parse HEAD') {
+            cb(null, { stdout: 'abc123\n', stderr: '' });
+          } else if (cmd.includes('rev-parse --git-common-dir')) {
+            cb(null, { stdout: '/tmp/test-cache/org_repo.git\n', stderr: '' });
+          } else if (cmd.includes('remote get-url origin')) {
+            cb(null, { stdout: 'https://github.com/org/repo.git\n', stderr: '' });
+          } else if (cmd.includes('rev-parse --abbrev-ref HEAD')) {
+            cb(null, { stdout: 'feat/security\n', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await manager.pullBranch('/tmp/worktree/sess', 'profile-pat');
+
+      const fetchCall = calls.find((args) => args[0] === 'fetch');
+      expect(fetchCall).toEqual([
+        'fetch',
+        'https://x-access-token:profile-pat@github.com/org/repo.git',
+        'feat/security',
+      ]);
     });
   });
 

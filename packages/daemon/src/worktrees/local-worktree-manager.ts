@@ -985,6 +985,10 @@ export class LocalWorktreeManager implements WorktreeManager {
         restored: false,
         reason: `Refusing to restore — ${blockers.length} non-deletion change${blockers.length === 1 ? '' : 's'} present (sample: ${sample})`,
         restoredCount: 0,
+        blockers: blockers.slice(0, 50).map((entry) => ({
+          status: entry.slice(0, 2).trim() || entry.slice(0, 2),
+          path: entry.slice(3),
+        })),
       };
     }
 
@@ -1146,12 +1150,12 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
   }
 
-  async pullBranch(worktreePath: string): Promise<{ newCommits: boolean }> {
+  async pullBranch(worktreePath: string, pat?: string): Promise<{ newCommits: boolean }> {
     this.logger.info({ worktreePath }, 'Pulling latest from origin');
     const { stdout: headBefore } = await git(['rev-parse', 'HEAD'], {
       cwd: worktreePath,
     });
-    const authUrl = await this.getAuthUrl(worktreePath);
+    const authUrl = await this.getAuthUrl(worktreePath, pat);
     const { stdout: branch } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: worktreePath,
     });
@@ -1470,24 +1474,27 @@ export class LocalWorktreeManager implements WorktreeManager {
     return undefined;
   }
 
-  private async getAuthUrl(worktreePath: string): Promise<string> {
+  private async getAuthUrl(worktreePath: string, pat?: string): Promise<string> {
     const { stdout: commonDir } = await git(['rev-parse', '--git-common-dir'], {
       cwd: worktreePath,
     });
     const bareRepoPath = path.resolve(worktreePath, commonDir.trim());
+    if (pat) {
+      this.patCache.set(bareRepoPath, pat);
+    }
     const { stdout: remoteUrl } = await git(['remote', 'get-url', 'origin'], {
       cwd: bareRepoPath,
     });
     const cleanUrl = remoteUrl.trim();
-    const pat = this.patCache.get(bareRepoPath);
-    if (!pat) {
+    const authPat = pat ?? this.patCache.get(bareRepoPath);
+    if (!authPat) {
       this.logger.warn(
         { bareRepoPath },
         'No PAT cached for this repo — git push/fetch will fail without credentials. ' +
           'Add a GitHub PAT to the profile.',
       );
     }
-    return pat ? this.injectPat(cleanUrl, pat) : cleanUrl;
+    return authPat ? this.injectPat(cleanUrl, authPat) : cleanUrl;
   }
 
   /** Inject a PAT into an https remote URL: https://host/... → https://x-access-token:PAT@host/...
