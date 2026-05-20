@@ -46,8 +46,8 @@ public final class EventStream {
   private var historicalRequestedScope: [String: HistoricalEventScope] = [:]
 
   private static let globalEventCap = 500
-  private static let sessionEventCap = 1000
-  private static let defaultHistoricalEventLimit = 500
+  private static let sessionEventCap = 300
+  private static let defaultHistoricalEventLimit = 300
 
   // Throttle: batch event mutations to avoid flooding SwiftUI's AttributeGraph
   private var pendingGlobalEvents: [AgentEvent] = []
