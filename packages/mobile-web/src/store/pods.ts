@@ -47,12 +47,16 @@ export const usePodsStore = create<PodsState>((set, get) => ({
   applyEvent: (event) => {
     switch (event.type) {
       case 'pod.created': {
-        // Server sends `PodSummary` not full `Pod`. Fetch the canonical row to
-        // get fields like `pendingEscalation` and `lastValidationResult`.
-        void apiFetch<Pod>(`/pods/${event.pod.id}`).then((pod) => {
-          const exists = get().pods.some((p) => p.id === pod.id);
-          set({ pods: exists ? patchPod(get().pods, pod.id, pod) : [pod, ...get().pods] });
-        });
+        // Server sends `PodSummary`; refetch the canonical Pod so detail-view
+        // fields (pendingEscalation, lastValidationResult, …) are present.
+        // Failures are non-fatal — the next /pods refresh will pick the pod up.
+        apiFetch<Pod>(`/pods/${event.pod.id}`)
+          .then((pod) => {
+            const current = get().pods;
+            const exists = current.some((p) => p.id === pod.id);
+            set({ pods: exists ? patchPod(current, pod.id, pod) : [pod, ...current] });
+          })
+          .catch(() => undefined);
         return;
       }
       case 'pod.status_changed':
