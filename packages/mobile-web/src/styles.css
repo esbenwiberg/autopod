@@ -69,14 +69,33 @@ code {
   border: 1px solid var(--border);
   border-radius: 999px;
   height: 2.25rem;
-  width: 2.25rem;
-  font-size: 1.1rem;
+  padding: 0 0.7rem;
+  font-size: 1.05rem;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
 }
 
 .refresh-button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.conn-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.conn-dot-live {
+  background: var(--ok);
+  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.2);
+}
+
+.conn-dot-offline {
+  background: var(--muted);
 }
 
 .tabs {

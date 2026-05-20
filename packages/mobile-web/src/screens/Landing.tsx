@@ -11,6 +11,7 @@ export function Landing(): JSX.Element {
   const pods = usePodsStore((s) => s.pods);
   const loading = usePodsStore((s) => s.loading);
   const error = usePodsStore((s) => s.error);
+  const connected = usePodsStore((s) => s.connected);
   const refresh = usePodsStore((s) => s.refresh);
   const [tab, setTab] = useState<Tab>('needs-me');
 
@@ -35,8 +36,13 @@ export function Landing(): JSX.Element {
           className="refresh-button"
           onClick={() => void refresh()}
           disabled={loading}
-          aria-label="Refresh"
+          aria-label={connected ? 'Live — tap to force refresh' : 'Disconnected — tap to retry'}
+          title={connected ? 'live' : 'reconnecting…'}
         >
+          <span
+            className={connected ? 'conn-dot conn-dot-live' : 'conn-dot conn-dot-offline'}
+            aria-hidden="true"
+          />
           {loading ? '…' : '↻'}
         </button>
       </header>
