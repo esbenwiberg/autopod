@@ -2,6 +2,24 @@ import Foundation
 
 // MARK: - Profile (mirrors packages/shared/src/types/profile.ts)
 
+public enum PatExpiryStatus: Sendable, Equatable {
+    case none
+    case invalid
+    case ok(daysRemaining: Int)
+    case soon(daysRemaining: Int)
+    case expired(daysOverdue: Int)
+
+    public var isWarning: Bool {
+        if case .soon = self { return true }
+        return false
+    }
+
+    public var isExpired: Bool {
+        if case .expired = self { return true }
+        return false
+    }
+}
+
 public struct Profile: Identifiable, Sendable {
     public var id: String { name }
     public var name: String
@@ -55,6 +73,9 @@ public struct Profile: Identifiable, Sendable {
     public var githubPat: String?
     public var adoPat: String?
     public var registryPat: String?
+    public var githubPatExpiresAt: String?
+    public var adoPatExpiresAt: String?
+    public var registryPatExpiresAt: String?
 
     // Network policy
     public var networkEnabled: Bool
@@ -149,6 +170,19 @@ public struct Profile: Identifiable, Sendable {
     public var mcpServerCount: Int { mcpServers.count }
     public var claudeMdSectionCount: Int { claudeMdSections.count }
     public var skillCount: Int { skills.count }
+    public var githubPatExpiryStatus: PatExpiryStatus { Self.patExpiryStatus(githubPatExpiresAt) }
+    public var adoPatExpiryStatus: PatExpiryStatus { Self.patExpiryStatus(adoPatExpiresAt) }
+    public var registryPatExpiryStatus: PatExpiryStatus { Self.patExpiryStatus(registryPatExpiresAt) }
+
+    public var worstConfiguredPatExpiryStatus: PatExpiryStatus? {
+        var statuses: [PatExpiryStatus] = []
+        if hasGithubPat { statuses.append(githubPatExpiryStatus) }
+        if hasAdoPat { statuses.append(adoPatExpiryStatus) }
+        if hasRegistryPat { statuses.append(registryPatExpiryStatus) }
+        if let expired = statuses.first(where: \.isExpired) { return expired }
+        if let warning = statuses.first(where: \.isWarning) { return warning }
+        return statuses.first
+    }
 
     public var version: Int
     public var createdAt: Date
@@ -178,6 +212,8 @@ public struct Profile: Identifiable, Sendable {
         issueWatcherEnabled: Bool = false, issueWatcherLabelPrefix: String = "autopod",
         hasGithubPat: Bool = false, hasAdoPat: Bool = false, hasRegistryPat: Bool = false,
         githubPat: String? = nil, adoPat: String? = nil, registryPat: String? = nil,
+        githubPatExpiresAt: String? = nil, adoPatExpiresAt: String? = nil,
+        registryPatExpiresAt: String? = nil,
         networkEnabled: Bool = false, networkMode: NetworkPolicyMode = .restricted,
         allowedHosts: [String] = [], allowPackageManagers: Bool = false,
         privateRegistries: [PrivateRegistry] = [], smokePages: [SmokePage] = [],
@@ -240,6 +276,9 @@ public struct Profile: Identifiable, Sendable {
         self.hasGithubPat = hasGithubPat; self.hasAdoPat = hasAdoPat
         self.hasRegistryPat = hasRegistryPat
         self.githubPat = githubPat; self.adoPat = adoPat; self.registryPat = registryPat
+        self.githubPatExpiresAt = githubPatExpiresAt
+        self.adoPatExpiresAt = adoPatExpiresAt
+        self.registryPatExpiresAt = registryPatExpiresAt
         self.networkEnabled = networkEnabled; self.networkMode = networkMode
         self.allowedHosts = allowedHosts; self.allowPackageManagers = allowPackageManagers
         self.privateRegistries = privateRegistries
@@ -280,6 +319,41 @@ public struct Profile: Identifiable, Sendable {
         self.providerCredentialsType = providerCredentialsType
         self.version = version
         self.createdAt = createdAt; self.updatedAt = updatedAt
+    }
+
+    public static func patExpiryStatus(
+        _ value: String?,
+        now: Date = Date(),
+        warningDays: Int = 7
+    ) -> PatExpiryStatus {
+        guard let value, !value.isEmpty else { return .none }
+        guard let expiry = dateOnly(value) else { return .invalid }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let today = calendar.startOfDay(for: now)
+        let days = calendar.dateComponents([.day], from: today, to: expiry).day ?? 0
+        if days < 0 { return .expired(daysOverdue: abs(days)) }
+        if days <= warningDays { return .soon(daysRemaining: days) }
+        return .ok(daysRemaining: days)
+    }
+
+    private static func dateOnly(_ value: String) -> Date? {
+        let parts = value.split(separator: "-")
+        guard parts.count == 3,
+              let year = Int(parts[0]),
+              let month = Int(parts[1]),
+              let day = Int(parts[2]) else {
+            return nil
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let components = DateComponents(calendar: calendar, year: year, month: month, day: day)
+        guard let date = calendar.date(from: components) else { return nil }
+        let roundTrip = calendar.dateComponents([.year, .month, .day], from: date)
+        guard roundTrip.year == year, roundTrip.month == month, roundTrip.day == day else {
+            return nil
+        }
+        return date
     }
 }
 

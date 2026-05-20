@@ -88,9 +88,12 @@ interface TestProfileOverrides {
   defaultBranch?: string;
   privateRegistries?: string;
   registryPat?: string;
+  registryPatExpiresAt?: string;
   branchPrefix?: string;
   githubPat?: string;
+  githubPatExpiresAt?: string;
   adoPat?: string;
+  adoPatExpiresAt?: string;
   prProvider?: 'github' | 'ado';
 }
 
@@ -104,14 +107,14 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       name, repo_url, default_branch, template, build_command, start_command,
       health_path, health_timeout, validation_pages, max_validation_attempts,
       default_model, default_runtime, escalation_config,
-      private_registries, registry_pat, branch_prefix,
-      pr_provider, github_pat, ado_pat
+      private_registries, registry_pat, registry_pat_expires_at, branch_prefix,
+      pr_provider, github_pat, github_pat_expires_at, ado_pat, ado_pat_expires_at
     ) VALUES (
       @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
       @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
       @defaultModel, @defaultRuntime, @escalationConfig,
-      @privateRegistries, @registryPat, @branchPrefix,
-      @prProvider, @githubPat, @adoPat
+      @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix,
+      @prProvider, @githubPat, @githubPatExpiresAt, @adoPat, @adoPatExpiresAt
     )
   `).run({
     name,
@@ -135,10 +138,13 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     }),
     privateRegistries: opts.privateRegistries ?? '[]',
     registryPat: opts.registryPat ?? null,
+    registryPatExpiresAt: opts.registryPatExpiresAt ?? null,
     branchPrefix: opts.branchPrefix ?? 'autopod/',
     prProvider: opts.prProvider ?? 'github',
     githubPat: opts.githubPat ?? null,
+    githubPatExpiresAt: opts.githubPatExpiresAt ?? null,
     adoPat: opts.adoPat ?? null,
+    adoPatExpiresAt: opts.adoPatExpiresAt ?? null,
   });
 }
 
@@ -304,10 +310,13 @@ function createTestContext(
         testCommand: (row.test_command as string) ?? null,
         prProvider: (row.pr_provider as 'github' | 'ado') ?? 'github',
         adoPat: (row.ado_pat as string) ?? null,
+        adoPatExpiresAt: (row.ado_pat_expires_at as string) ?? null,
         githubPat: (row.github_pat as string) ?? null,
+        githubPatExpiresAt: (row.github_pat_expires_at as string) ?? null,
         skills: JSON.parse((row.skills as string) ?? '[]'),
         privateRegistries: JSON.parse((row.private_registries as string) ?? '[]'),
         registryPat: (row.registry_pat as string) ?? null,
+        registryPatExpiresAt: (row.registry_pat_expires_at as string) ?? null,
         branchPrefix: (row.branch_prefix as string) ?? 'autopod/',
         containerMemoryGb: (row.container_memory_gb as number | null) ?? null,
         buildTimeout: (row.build_timeout as number | null) ?? 300,
@@ -437,6 +446,55 @@ describe('PodManager', () => {
       );
 
       expect(ctx.enqueuedSessions).toContain(pod.id);
+    });
+
+    it('blocks creation when the selected GitHub PAT is expired', () => {
+      const ctx = createTestContext(undefined, {
+        prProvider: 'github',
+        githubPat: 'ghp_secret',
+        githubPatExpiresAt: '2000-01-01',
+      });
+      const manager = createPodManager(ctx.deps);
+
+      expect(() =>
+        manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1'),
+      ).toThrow(/expired GitHub PAT|PAT_EXPIRED/);
+    });
+
+    it('allows creation when the selected PAT expires soon but has not expired', () => {
+      const soon = new Date();
+      soon.setDate(soon.getDate() + 1);
+      const expiresAt = [
+        soon.getFullYear(),
+        `${soon.getMonth() + 1}`.padStart(2, '0'),
+        `${soon.getDate()}`.padStart(2, '0'),
+      ].join('-');
+      const ctx = createTestContext(undefined, {
+        prProvider: 'github',
+        githubPat: 'ghp_secret',
+        githubPatExpiresAt: expiresAt,
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do stuff' },
+        'user-1',
+      );
+
+      expect(pod.status).toBe('queued');
+    });
+
+    it('blocks creation when registry auth falls back to an expired ADO PAT', () => {
+      const ctx = createTestContext(undefined, {
+        privateRegistries: JSON.stringify([{ type: 'npm', url: 'https://registry.example.com' }]),
+        adoPat: 'ado_secret',
+        adoPatExpiresAt: '2000-01-01',
+      });
+      const manager = createPodManager(ctx.deps);
+
+      expect(() =>
+        manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1'),
+      ).toThrow(/expired ADO PAT used for registry auth|PAT_EXPIRED/);
     });
 
     it('uses profile branchPrefix for auto-generated branch names', () => {

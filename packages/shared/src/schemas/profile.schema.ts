@@ -95,6 +95,25 @@ const privateRegistrySchema = z.object({
   scope: z.string().startsWith('@').optional(),
 });
 
+const dateOnlySchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expiry date must use YYYY-MM-DD')
+  .refine((value) => {
+    const [yearRaw, monthRaw, dayRaw] = value.split('-');
+    const year = Number(yearRaw);
+    const month = Number(monthRaw);
+    const day = Number(dayRaw);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+      return false;
+    }
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return (
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day
+    );
+  }, 'Expiry date must be a valid calendar date');
+
 export const pimActivationConfigSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('group'),
@@ -293,9 +312,12 @@ const createProfileBaseSchema = z.object({
   mergePollIntervalSec: z.number().int().min(5).max(3600).nullable().optional().default(null),
   prProvider: z.enum(['github', 'ado']).nullable().default('github'),
   adoPat: z.string().min(1).nullable().default(null),
+  adoPatExpiresAt: dateOnlySchema.nullable().default(null),
   githubPat: z.string().min(1).nullable().default(null),
+  githubPatExpiresAt: dateOnlySchema.nullable().default(null),
   privateRegistries: z.array(privateRegistrySchema).nullable().default([]),
   registryPat: z.string().min(1).nullable().default(null),
+  registryPatExpiresAt: dateOnlySchema.nullable().default(null),
   branchPrefix: z
     .string()
     .min(1)

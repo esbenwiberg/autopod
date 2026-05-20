@@ -110,9 +110,12 @@ import Testing
     "testTimeout": 600,
     "prProvider": "github",
     "adoPat": null,
+    "adoPatExpiresAt": null,
     "githubPat": "encrypted-value",
+    "githubPatExpiresAt": "2026-06-01",
     "privateRegistries": [],
     "registryPat": null,
+    "registryPatExpiresAt": null,
     "containerMemoryGb": 4.0,
     "version": 1,
     "createdAt": "2026-03-01T00:00:00Z",
@@ -127,6 +130,7 @@ import Testing
   #expect(profile.networkPolicy?.mode == "restricted")
   #expect(profile.networkPolicy?.allowedHosts.first == "api.stripe.com")
   #expect(profile.githubPat == "encrypted-value")
+  #expect(profile.githubPatExpiresAt == "2026-06-01")
   #expect(profile.containerMemoryGb == 4.0)
 }
 

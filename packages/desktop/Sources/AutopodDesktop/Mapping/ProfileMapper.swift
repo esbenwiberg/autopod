@@ -70,6 +70,9 @@ public enum ProfileMapper {
       hasGithubPat: response.githubPat != nil,
       hasAdoPat: response.adoPat != nil,
       hasRegistryPat: response.registryPat != nil,
+      githubPatExpiresAt: response.githubPatExpiresAt,
+      adoPatExpiresAt: response.adoPatExpiresAt,
+      registryPatExpiresAt: response.registryPatExpiresAt,
       networkEnabled: response.networkPolicy?.enabled ?? false,
       networkMode: networkMode,
       allowedHosts: response.networkPolicy?.allowedHosts ?? [],
@@ -272,6 +275,9 @@ public enum ProfileMapper {
     if let v = profile.githubPat { d["githubPat"] = v }
     if let v = profile.adoPat { d["adoPat"] = v }
     if let v = profile.registryPat { d["registryPat"] = v }
+    d["githubPatExpiresAt"] = profile.githubPatExpiresAt ?? NSNull()
+    d["adoPatExpiresAt"] = profile.adoPatExpiresAt ?? NSNull()
+    d["registryPatExpiresAt"] = profile.registryPatExpiresAt ?? NSNull()
     if let v = profile.extendsProfile { d["extends"] = v }
     if let v = profile.workerProfile { d["workerProfile"] = v }
 

@@ -343,4 +343,31 @@ describe('ProfileValidator', () => {
       expect(result.valid).toBe(false);
     });
   });
+
+  describe('PAT expiry metadata', () => {
+    it('accepts valid date-only expiry fields', () => {
+      const result = validateProfile({
+        ...validInput,
+        githubPatExpiresAt: '2026-06-01',
+        adoPatExpiresAt: '2026-07-01',
+        registryPatExpiresAt: '2026-08-01',
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('rejects malformed or impossible expiry dates', () => {
+      const result = validateProfile({
+        ...validInput,
+        githubPatExpiresAt: '2026-02-30',
+        adoPatExpiresAt: '06/01/2026',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('githubPatExpiresAt'),
+          expect.stringContaining('adoPatExpiresAt'),
+        ]),
+      );
+    });
+  });
 });

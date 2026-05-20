@@ -50,9 +50,12 @@ public struct ProfileResponse: Codable, Sendable {
   public var mergePollIntervalSec: Int?
   public var prProvider: String?
   public var adoPat: String?
+  public var adoPatExpiresAt: String?
   public var githubPat: String?
+  public var githubPatExpiresAt: String?
   public var privateRegistries: [PrivateRegistryResponse]
   public var registryPat: String?
+  public var registryPatExpiresAt: String?
   public var containerMemoryGb: Double?
   public var issueWatcherEnabled: Bool?
   public var issueWatcherLabelPrefix: String?
@@ -131,9 +134,12 @@ public struct ProfileResponse: Codable, Sendable {
     mergePollIntervalSec = try c.decodeIfPresent(Int.self, forKey: .mergePollIntervalSec)
     prProvider = try c.decodeIfPresent(String.self, forKey: .prProvider)
     adoPat = try c.decodeIfPresent(String.self, forKey: .adoPat)
+    adoPatExpiresAt = try c.decodeIfPresent(String.self, forKey: .adoPatExpiresAt)
     githubPat = try c.decodeIfPresent(String.self, forKey: .githubPat)
+    githubPatExpiresAt = try c.decodeIfPresent(String.self, forKey: .githubPatExpiresAt)
     privateRegistries = (try c.decodeIfPresent([PrivateRegistryResponse].self, forKey: .privateRegistries)) ?? []
     registryPat = try c.decodeIfPresent(String.self, forKey: .registryPat)
+    registryPatExpiresAt = try c.decodeIfPresent(String.self, forKey: .registryPatExpiresAt)
     containerMemoryGb = try c.decodeIfPresent(Double.self, forKey: .containerMemoryGb)
     issueWatcherEnabled = try c.decodeIfPresent(Bool.self, forKey: .issueWatcherEnabled)
     issueWatcherLabelPrefix = try c.decodeIfPresent(String.self, forKey: .issueWatcherLabelPrefix)
@@ -165,6 +171,7 @@ public struct ProfileResponse: Codable, Sendable {
     escalation = .init(); mcpServers = []; claudeMdSections = []; skills = []
     outputMode = "pr"; modelProvider = "anthropic"; buildTimeout = 300
     testTimeout = 600; prProvider = "github"; privateRegistries = []
+    adoPatExpiresAt = nil; githubPatExpiresAt = nil; registryPatExpiresAt = nil
     version = 1; createdAt = ""; updatedAt = ""
   }
 }

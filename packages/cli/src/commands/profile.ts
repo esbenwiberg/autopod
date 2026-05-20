@@ -65,6 +65,14 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         if (data.extends) {
           console.log(`${chalk.bold('Extends:')}    ${data.extends}`);
         }
+        const patExpiries = [
+          data.githubPat ? `GitHub ${data.githubPatExpiresAt ?? '(no expiry)'}` : null,
+          data.adoPat ? `ADO ${data.adoPatExpiresAt ?? '(no expiry)'}` : null,
+          data.registryPat ? `Registry ${data.registryPatExpiresAt ?? '(no expiry)'}` : null,
+        ].filter(Boolean);
+        if (patExpiries.length > 0) {
+          console.log(`${chalk.bold('PAT expiry:')} ${patExpiries.join(', ')}`);
+        }
         if (data.smokePages.length > 0) {
           console.log(
             `${chalk.bold('Pages:')}      ${data.smokePages.map((p) => p.path).join(', ')}`,
@@ -149,6 +157,9 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         mcpServers: [],
         claudeMdSections: [],
         extends: null,
+        githubPatExpiresAt: null,
+        adoPatExpiresAt: null,
+        registryPatExpiresAt: null,
         actionPolicy: {
           enabledGroups: ['github-issues', 'github-prs'],
           // actionOverrides:

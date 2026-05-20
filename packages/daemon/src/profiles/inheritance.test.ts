@@ -292,6 +292,14 @@ describe('resolveInheritance', () => {
     expect(resolved.registryPat).toBe('child-pat');
   });
 
+  it('should inherit PAT expiry metadata from parent when child has null', () => {
+    const parent = makeProfile({ name: 'parent', githubPatExpiresAt: '2026-06-01' });
+    const child = makeProfile({ name: 'child', githubPatExpiresAt: null, extends: 'parent' });
+
+    const resolved = resolveInheritance(child, parent);
+    expect(resolved.githubPatExpiresAt).toBe('2026-06-01');
+  });
+
   describe('mergeStrategy: replace', () => {
     it('replaces smokePages, discarding parent', () => {
       const parent = makeProfile({

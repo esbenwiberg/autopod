@@ -153,9 +153,12 @@ export function rowToProfile(
     preflightConflictPolicy: nullableStr(row.preflight_conflict_policy) as 'warn' | 'block' | null,
     prProvider: nullableStr(row.pr_provider) as Profile['prProvider'],
     adoPat: decryptPat(row.ado_pat),
+    adoPatExpiresAt: nullableStr(row.ado_pat_expires_at),
     githubPat: decryptPat(row.github_pat),
+    githubPatExpiresAt: nullableStr(row.github_pat_expires_at),
     privateRegistries: JSON.parse((row.private_registries as string) ?? '[]') as PrivateRegistry[],
     registryPat: decryptPat(row.registry_pat),
+    registryPatExpiresAt: nullableStr(row.registry_pat_expires_at),
     branchPrefix: nullableStr(row.branch_prefix),
     containerMemoryGb: nullableNum(row.container_memory_gb),
     buildTimeout: nullableNum(row.build_timeout),
@@ -301,8 +304,9 @@ export function createProfileStore(
           default_model, reviewer_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
           agent_mode, output_target, validate, promotable,
-          model_provider, provider_credentials, test_command, pr_provider, ado_pat, github_pat,
-          private_registries, registry_pat, branch_prefix, container_memory_gb,
+          model_provider, provider_credentials, test_command, pr_provider,
+          ado_pat, ado_pat_expires_at, github_pat, github_pat_expires_at,
+          private_registries, registry_pat, registry_pat_expires_at, branch_prefix, container_memory_gb,
           build_timeout, test_timeout, build_env,
           lint_command, lint_timeout, sast_command, sast_timeout,
           merge_poll_interval_sec,
@@ -322,8 +326,9 @@ export function createProfileStore(
           @defaultModel, @reviewerModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
           @agentMode, @outputTarget, @validate, @promotable,
-          @modelProvider, @providerCredentials, @testCommand, @prProvider, @adoPat, @githubPat,
-          @privateRegistries, @registryPat, @branchPrefix, @containerMemoryGb,
+          @modelProvider, @providerCredentials, @testCommand, @prProvider,
+          @adoPat, @adoPatExpiresAt, @githubPat, @githubPatExpiresAt,
+          @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix, @containerMemoryGb,
           @buildTimeout, @testTimeout, @buildEnv,
           @lintCommand, @lintTimeout, @sastCommand, @sastTimeout,
           @mergePollIntervalSec,
@@ -379,9 +384,12 @@ export function createProfileStore(
         preflightConflictPolicy: parsed.preflightConflictPolicy ?? null,
         prProvider: parsed.prProvider,
         adoPat: encryptPat(parsed.adoPat),
+        adoPatExpiresAt: parsed.adoPatExpiresAt ?? null,
         githubPat: encryptPat(parsed.githubPat),
+        githubPatExpiresAt: parsed.githubPatExpiresAt ?? null,
         privateRegistries: JSON.stringify(parsed.privateRegistries ?? []),
         registryPat: encryptPat(parsed.registryPat),
+        registryPatExpiresAt: parsed.registryPatExpiresAt ?? null,
         branchPrefix: parsed.branchPrefix,
         containerMemoryGb: parsed.containerMemoryGb ?? null,
         buildTimeout: parsed.buildTimeout,
@@ -638,9 +646,17 @@ export function createProfileStore(
         setClauses.push('ado_pat = @adoPat');
         fieldMap.adoPat = encryptPat(parsed.adoPat);
       }
+      if (parsed.adoPatExpiresAt !== undefined) {
+        setClauses.push('ado_pat_expires_at = @adoPatExpiresAt');
+        fieldMap.adoPatExpiresAt = parsed.adoPatExpiresAt ?? null;
+      }
       if (parsed.githubPat !== undefined) {
         setClauses.push('github_pat = @githubPat');
         fieldMap.githubPat = encryptPat(parsed.githubPat);
+      }
+      if (parsed.githubPatExpiresAt !== undefined) {
+        setClauses.push('github_pat_expires_at = @githubPatExpiresAt');
+        fieldMap.githubPatExpiresAt = parsed.githubPatExpiresAt ?? null;
       }
       if (parsed.privateRegistries !== undefined) {
         setClauses.push('private_registries = @privateRegistries');
@@ -649,6 +665,10 @@ export function createProfileStore(
       if (parsed.registryPat !== undefined) {
         setClauses.push('registry_pat = @registryPat');
         fieldMap.registryPat = encryptPat(parsed.registryPat);
+      }
+      if (parsed.registryPatExpiresAt !== undefined) {
+        setClauses.push('registry_pat_expires_at = @registryPatExpiresAt');
+        fieldMap.registryPatExpiresAt = parsed.registryPatExpiresAt ?? null;
       }
       if (parsed.branchPrefix !== undefined) {
         setClauses.push('branch_prefix = @branchPrefix');

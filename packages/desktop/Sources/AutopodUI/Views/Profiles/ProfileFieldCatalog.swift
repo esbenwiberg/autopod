@@ -338,16 +338,34 @@ public enum ProfileOverrideCatalog {
             help: "Personal access token for GitHub PR and action operations."
         ),
         .init(
+            key: "githubPatExpiresAt",
+            label: "GitHub PAT Expiry",
+            section: .credentials,
+            help: "Date the GitHub PAT expires, formatted as YYYY-MM-DD."
+        ),
+        .init(
             key: "adoPat",
             label: "ADO PAT",
             section: .credentials,
             help: "Personal access token for Azure DevOps."
         ),
         .init(
+            key: "adoPatExpiresAt",
+            label: "ADO PAT Expiry",
+            section: .credentials,
+            help: "Date the ADO PAT expires, formatted as YYYY-MM-DD."
+        ),
+        .init(
             key: "registryPat",
             label: "Registry PAT",
             section: .credentials,
             help: "PAT used by private npm/NuGet registries."
+        ),
+        .init(
+            key: "registryPatExpiresAt",
+            label: "Registry PAT Expiry",
+            section: .credentials,
+            help: "Date the registry PAT expires, formatted as YYYY-MM-DD."
         ),
 
         // MARK: Injections

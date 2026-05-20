@@ -530,6 +530,19 @@ describe('ProfileStore', () => {
       expect(profile.registryPat).toBe('my-secret-pat');
     });
 
+    it('should preserve PAT expiry metadata through create/get', () => {
+      store.create({
+        ...validInput,
+        githubPatExpiresAt: '2026-06-01',
+        adoPatExpiresAt: '2026-07-01',
+        registryPatExpiresAt: '2026-08-01',
+      });
+      const profile = store.get('my-app');
+      expect(profile.githubPatExpiresAt).toBe('2026-06-01');
+      expect(profile.adoPatExpiresAt).toBe('2026-07-01');
+      expect(profile.registryPatExpiresAt).toBe('2026-08-01');
+    });
+
     it('should default privateRegistries to empty array', () => {
       store.create(validInput);
       const profile = store.get('my-app');
@@ -579,6 +592,27 @@ describe('ProfileStore', () => {
       });
       expect(updated.privateRegistries).toEqual(registries);
       expect(updated.registryPat).toBe('updated-pat');
+    });
+
+    it('should update and clear PAT expiry metadata', () => {
+      store.create(validInput);
+      const updated = store.update('my-app', {
+        githubPatExpiresAt: '2026-06-01',
+        adoPatExpiresAt: '2026-07-01',
+        registryPatExpiresAt: '2026-08-01',
+      });
+      expect(updated.githubPatExpiresAt).toBe('2026-06-01');
+      expect(updated.adoPatExpiresAt).toBe('2026-07-01');
+      expect(updated.registryPatExpiresAt).toBe('2026-08-01');
+
+      const cleared = store.update('my-app', {
+        githubPatExpiresAt: null,
+        adoPatExpiresAt: null,
+        registryPatExpiresAt: null,
+      });
+      expect(cleared.githubPatExpiresAt).toBeNull();
+      expect(cleared.adoPatExpiresAt).toBeNull();
+      expect(cleared.registryPatExpiresAt).toBeNull();
     });
   });
 

@@ -479,8 +479,8 @@ struct ProfileCard: View {
                 if profile.networkEnabled {
                     statBadge(icon: "shield.checkered", label: profile.networkMode.label, color: .green)
                 }
-                if profile.hasGithubPat || profile.hasAdoPat {
-                    statBadge(icon: "key.fill", label: profile.prProvider.label, color: .orange)
+                if profile.hasGithubPat || profile.hasAdoPat || profile.hasRegistryPat {
+                    statBadge(icon: credentialBadgeIcon, label: credentialBadgeLabel, color: credentialBadgeColor)
                 }
                 if profile.mcpServerCount > 0 {
                     statBadge(icon: "server.rack", label: "\(profile.mcpServerCount)", color: .purple)
@@ -536,6 +536,39 @@ struct ProfileCard: View {
 
     private var strokeWidth: CGFloat {
         isHighlighted ? 2 : 0.5
+    }
+
+    private var credentialBadgeIcon: String {
+        switch profile.worstConfiguredPatExpiryStatus {
+        case .some(.expired(_)):
+            "key.slash.fill"
+        case .some(.soon(_)):
+            "key.fill"
+        default:
+            "key.fill"
+        }
+    }
+
+    private var credentialBadgeLabel: String {
+        switch profile.worstConfiguredPatExpiryStatus {
+        case .some(.expired(_)):
+            "Expired"
+        case .some(.soon(_)):
+            "Expiring"
+        default:
+            profile.prProvider.label
+        }
+    }
+
+    private var credentialBadgeColor: Color {
+        switch profile.worstConfiguredPatExpiryStatus {
+        case .some(.expired(_)):
+            .red
+        case .some(.soon(_)):
+            .orange
+        default:
+            .orange
+        }
     }
 
     private var templateIcon: some View {

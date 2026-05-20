@@ -84,6 +84,7 @@ import type {
 } from '../interfaces/index.js';
 import { selectGitPat } from '../profiles/index.js';
 import type { ProfileStore } from '../profiles/index.js';
+import { assertNoExpiredPat } from '../profiles/pat-expiry.js';
 import {
   buildClaudeConfigFiles,
   buildProviderEnv,
@@ -3202,6 +3203,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   return {
     createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod {
       const profile = profileStore.get(request.profileName);
+      assertNoExpiredPat(profile);
       const model = request.model ?? profile.defaultModel ?? 'opus';
       const runtime = request.runtime ?? profile.defaultRuntime ?? 'claude';
       const executionTarget = request.executionTarget ?? profile.executionTarget ?? 'local';

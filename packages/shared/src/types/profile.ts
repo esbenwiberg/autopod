@@ -145,12 +145,18 @@ export interface Profile {
   prProvider: 'github' | 'ado' | null;
   /** ADO Personal Access Token (encrypted at rest). Required when prProvider is 'ado'. */
   adoPat: string | null;
+  /** Date-only PAT expiry metadata, formatted as YYYY-MM-DD. Non-secret. */
+  adoPatExpiresAt?: string | null;
   /** GitHub Personal Access Token (encrypted at rest). Used for PR creation and action read access. */
   githubPat: string | null;
+  /** Date-only PAT expiry metadata, formatted as YYYY-MM-DD. Non-secret. */
+  githubPatExpiresAt?: string | null;
   /** Private package registries (npm/NuGet) for Azure DevOps feeds */
   privateRegistries: PrivateRegistry[];
   /** PAT for authenticating against private registries (encrypted at rest) */
   registryPat: string | null;
+  /** Date-only PAT expiry metadata, formatted as YYYY-MM-DD. Non-secret. */
+  registryPatExpiresAt?: string | null;
   /** Branch name prefix for auto-generated session branches. Defaults to 'autopod/'. */
   branchPrefix: string | null;
   /** Container memory limit in GB. null = no limit (Docker default). */

@@ -21,6 +21,31 @@ const VALID_TEMPLATES: StackTemplate[] = [
 ];
 
 const DANGEROUS_PATTERNS = [/rm\s+-rf\s+\//, /\bsudo\b/, /curl\s.*\|\s*bash/, /wget\s.*\|\s*bash/];
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidDateOnly(value: string): boolean {
+  if (!DATE_ONLY_PATTERN.test(value)) return false;
+  const [yearRaw, monthRaw, dayRaw] = value.split('-');
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  );
+}
+
+function validateDateOnlyField(
+  input: Record<string, unknown>,
+  field: 'githubPatExpiresAt' | 'adoPatExpiresAt' | 'registryPatExpiresAt',
+  errors: string[],
+): void {
+  const value = input[field];
+  if (value === undefined || value === null) return;
+  if (typeof value !== 'string' || !isValidDateOnly(value)) {
+    errors.push(`${field} must be a valid YYYY-MM-DD date or null`);
+  }
+}
 
 export function validateProfile(input: Record<string, unknown>): ProfileValidationResult {
   const errors: string[] = [];
@@ -245,6 +270,10 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
       errors.push("preflightConflictPolicy must be 'warn' or 'block'");
     }
   }
+
+  validateDateOnlyField(input, 'githubPatExpiresAt', errors);
+  validateDateOnlyField(input, 'adoPatExpiresAt', errors);
+  validateDateOnlyField(input, 'registryPatExpiresAt', errors);
 
   // ACI backend does not support iptables-based network isolation.
   // Reject restricted/deny-all network policies for ACI profiles at write time

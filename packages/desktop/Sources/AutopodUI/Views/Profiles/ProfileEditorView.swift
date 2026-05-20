@@ -1828,14 +1828,20 @@ public struct ProfileEditorView: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(.blue.opacity(0.15), lineWidth: 0.5))
 
-        patRow("GitHub PAT", value: $profile.githubPat, isSet: profile.hasGithubPat,
+        patRow("GitHub PAT", value: $profile.githubPat, expiresAt: $profile.githubPatExpiresAt,
+               expiryStatus: profile.githubPatExpiryStatus, isSet: profile.hasGithubPat,
                isInherited: inheritedFields.contains("githubPat"),
+               isExpiryInherited: inheritedFields.contains("githubPatExpiresAt"),
                help: "Personal access token for GitHub — needed for PR creation and private repo cloning.")
-        patRow("ADO PAT", value: $profile.adoPat, isSet: profile.hasAdoPat,
+        patRow("ADO PAT", value: $profile.adoPat, expiresAt: $profile.adoPatExpiresAt,
+               expiryStatus: profile.adoPatExpiryStatus, isSet: profile.hasAdoPat,
                isInherited: inheritedFields.contains("adoPat"),
+               isExpiryInherited: inheritedFields.contains("adoPatExpiresAt"),
                help: "Azure DevOps token — needed for ADO repos, PRs, and package feeds.")
-        patRow("Registry PAT", value: $profile.registryPat, isSet: profile.hasRegistryPat,
+        patRow("Registry PAT", value: $profile.registryPat, expiresAt: $profile.registryPatExpiresAt,
+               expiryStatus: profile.registryPatExpiryStatus, isSet: profile.hasRegistryPat,
                isInherited: inheritedFields.contains("registryPat"),
+               isExpiryInherited: inheritedFields.contains("registryPatExpiresAt"),
                help: "Token for private npm or NuGet registries configured below.")
 
         Divider().padding(.vertical, 4)
@@ -2677,6 +2683,14 @@ public struct ProfileEditorView: View {
                     set: { profile.githubPat = $0.isEmpty ? nil : $0 }
                 ),
                 isSet: profile.hasGithubPat)
+        case "githubPatExpiresAt":
+            dateOnlyCard(field,
+                value: Binding(
+                    get: { profile.githubPatExpiresAt ?? "" },
+                    set: { profile.githubPatExpiresAt = $0.isEmpty ? nil : $0 }
+                ),
+                parent: editorPayload?.parent?.githubPatExpiresAt ?? "",
+                status: profile.githubPatExpiryStatus)
         case "adoPat":
             patCard(field,
                 value: Binding(
@@ -2684,6 +2698,14 @@ public struct ProfileEditorView: View {
                     set: { profile.adoPat = $0.isEmpty ? nil : $0 }
                 ),
                 isSet: profile.hasAdoPat)
+        case "adoPatExpiresAt":
+            dateOnlyCard(field,
+                value: Binding(
+                    get: { profile.adoPatExpiresAt ?? "" },
+                    set: { profile.adoPatExpiresAt = $0.isEmpty ? nil : $0 }
+                ),
+                parent: editorPayload?.parent?.adoPatExpiresAt ?? "",
+                status: profile.adoPatExpiryStatus)
         case "registryPat":
             patCard(field,
                 value: Binding(
@@ -2691,6 +2713,14 @@ public struct ProfileEditorView: View {
                     set: { profile.registryPat = $0.isEmpty ? nil : $0 }
                 ),
                 isSet: profile.hasRegistryPat)
+        case "registryPatExpiresAt":
+            dateOnlyCard(field,
+                value: Binding(
+                    get: { profile.registryPatExpiresAt ?? "" },
+                    set: { profile.registryPatExpiresAt = $0.isEmpty ? nil : $0 }
+                ),
+                parent: editorPayload?.parent?.registryPatExpiresAt ?? "",
+                status: profile.registryPatExpiryStatus)
 
         // MARK: Injections (merge-special)
         case "mcpServers":
@@ -2744,6 +2774,29 @@ public struct ProfileEditorView: View {
             TextField(placeholder, text: value)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.callout, design: .monospaced))
+            parentLine(parent.isEmpty ? "(none)" : parent)
+        }
+    }
+
+    private func dateOnlyCard(
+        _ field: ProfileOverrideField,
+        value: Binding<String>,
+        parent: String,
+        status: PatExpiryStatus
+    ) -> some View {
+        overrideCardShell(field: field) {
+            HStack(spacing: 8) {
+                TextField("YYYY-MM-DD", text: value)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.callout, design: .monospaced))
+                    .frame(width: 150)
+                Button("Clear") { value.wrappedValue = "" }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                expiryStatusLabel(status)
+                Spacer()
+            }
             parentLine(parent.isEmpty ? "(none)" : parent)
         }
     }
@@ -3681,11 +3734,14 @@ public struct ProfileEditorView: View {
     private func patRow(
         _ label: String,
         value: Binding<String?>,
+        expiresAt: Binding<String?>,
+        expiryStatus: PatExpiryStatus,
         isSet: Bool,
         isInherited: Bool = false,
+        isExpiryInherited: Bool = false,
         help: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
                 Text(label)
                     .font(.caption)
@@ -3718,6 +3774,55 @@ public struct ProfileEditorView: View {
             ))
             .textFieldStyle(.roundedBorder)
             .font(.system(.caption, design: .monospaced))
+
+            HStack(spacing: 8) {
+                Text("Expires")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 48, alignment: .leading)
+                TextField("YYYY-MM-DD", text: Binding(
+                    get: { expiresAt.wrappedValue ?? "" },
+                    set: { expiresAt.wrappedValue = $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.caption, design: .monospaced))
+                .frame(width: 132)
+                Button {
+                    expiresAt.wrappedValue = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.borderless)
+                .help("Clear expiry date")
+                expiryStatusLabel(expiryStatus, isInherited: isExpiryInherited)
+                Spacer()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func expiryStatusLabel(
+        _ status: PatExpiryStatus,
+        isInherited: Bool = false
+    ) -> some View {
+        let suffix = isInherited ? " inherited" : ""
+        switch status {
+        case .none:
+            Label("No expiry date\(suffix)", systemImage: "calendar")
+                .foregroundStyle(.tertiary)
+        case .invalid:
+            Label("Invalid date", systemImage: "xmark.circle.fill")
+                .foregroundStyle(.red)
+        case .ok(_):
+            Label("Expiry set\(suffix)", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.secondary)
+        case .soon(let daysRemaining):
+            Label("Expires in \(daysRemaining)d\(suffix)", systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+        case .expired(_):
+            Label("Expired\(suffix)", systemImage: "xmark.octagon.fill")
+                .foregroundStyle(.red)
         }
     }
 }
