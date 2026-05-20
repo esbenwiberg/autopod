@@ -14,6 +14,8 @@ interface PodsState {
   activity: Record<string, AgentEvent[]>;
   refresh: () => Promise<void>;
   upsertPod: (pod: Pod) => void;
+  /** Apply an in-place patch — used for optimistic action UI. */
+  patchPodLocal: (podId: string, patch: Partial<Pod>) => void;
   applyEvent: (event: SystemEvent) => void;
   setConnected: (connected: boolean) => void;
   trackActivity: (podId: string, seed: AgentEvent[]) => void;
@@ -64,6 +66,8 @@ export const usePodsStore = create<PodsState>((set, get) => ({
       const exists = state.pods.some((p) => p.id === pod.id);
       return { pods: exists ? patchPod(state.pods, pod.id, pod) : [pod, ...state.pods] };
     }),
+
+  patchPodLocal: (podId, patch) => set((state) => ({ pods: patchPod(state.pods, podId, patch) })),
 
   trackActivity: (podId, seed) =>
     set((state) => ({

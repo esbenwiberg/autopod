@@ -1,6 +1,7 @@
 import type { AgentEvent, Pod } from '@autopod/shared';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { ActionBar } from '../components/ActionBar.js';
 import { ActivityList } from '../components/ActivityList.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { ValidationSummary } from '../components/ValidationSummary.js';
@@ -78,6 +79,8 @@ export function PodDetail(): JSX.Element {
       <p className="muted detail-meta">
         {data.profileName} · {data.runtime} · {data.model}
       </p>
+
+      <ActionBar pod={data} />
 
       {data.lastValidationResult ? <ValidationSummary result={data.lastValidationResult} /> : null}
 
