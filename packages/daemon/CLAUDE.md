@@ -11,7 +11,7 @@ src/
 ├── api/              # Fastify server, routes, plugins, WebSocket, MCP proxy
 ├── containers/       # Docker + ACI container managers, network isolation
 ├── runtimes/         # Claude / Codex / Copilot stream parsers
-├── validation/       # Multi-phase validation engine (build, health, smoke, AI review)
+├── validation/       # Multi-phase validation engine (lint/SAST/build/test/pages/facts/review)
 ├── profiles/         # Profile store, inheritance resolution, Zod validation
 ├── actions/          # Action engine, registry, audit trail
 ├── db/               # SQLite connection, migration runner, .sql files
@@ -34,8 +34,10 @@ src/
 
 ```
 queued → provisioning → running → validating → validated → approved → merging → complete
-                                     ↓                        ↓
-                                   failed ←──── retry ────── rejected
+                                     ↓                        ↓             ↓
+                                   failed ←──── retry ────── rejected  merge_pending
+                                     ↓
+                               review_required
 
 Any non-terminal state → killing → killed
 running → awaiting_input (escalation) → running (on response)
@@ -51,8 +53,8 @@ queued → provisioning → running → complete  (branch auto-pushed on contain
 
 All transitions are validated at runtime. Key helpers:
 - `validateTransition(from, to)` — throws `InvalidStateTransitionError` on illegal moves
-- `isTerminalState(status)` — `complete | killed | failed`
-- `canReceiveMessage(status)` — `awaiting_input`
+- `isTerminalState(status)` — `complete | killed`
+- `canReceiveMessage(status)` — `awaiting_input | paused`
 - `canPause(status)` / `canNudge(status)` / `canKill(status)`
 
 **Never call `pod.status = x` directly** — always go through `podRepository.updateStatus()` which
@@ -70,7 +72,7 @@ calls `validateTransition` first.
 4. **Provider credentials** — inject model provider tokens (Anthropic/MAX/Foundry), write files into container
 5. **Agent spawn / resume** — start the runtime stream; Claude supports mid-stream recovery via `claude_session_id`
 6. **Event consumption** — process `AgentEvent` stream: tool-use, escalations, progress reports, completion
-7. **Validation** — multi-phase: build → health check → Playwright smoke → AI task review
+7. **Validation** — multi-phase: lint → SAST → build → test → health → pages → AC → facts → AI task review
 8. **Completion** — merge PR (if `autoMerge`) or push branch; transition to `complete`
 
 ### Retries and validation loops
@@ -171,7 +173,7 @@ add test cases to the co-located `.test.ts` covering partial chunks, multi-event
 
 Runs inside the pod container in phases:
 1. **Build** — runs `profile.buildCommand`; captures stdout/stderr
-2. **Health check** — polls `profile.healthCheckUrl` until 200 or timeout
+2. **Health check** — polls `profile.healthPath` until 200 or timeout
 3. **Smoke** — `@autopod/validator` generates a Playwright script; executed inside container; results parsed
 4. **AI task review** — sends diff + task description to an AI model; returns pass/fail with notes
 

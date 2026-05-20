@@ -230,13 +230,15 @@ public struct FeatureDetailPanelView: View {
 
     private var validationPhaseDiagram: some View {
         let phases: [(String, String, Color)] = [
+            ("checkmark.rectangle", "Lint", .blue),
+            ("shield.lefthalf.filled", "SAST", .red),
             ("hammer", "Build", .blue),
             ("testtube.2", "Test", .cyan),
             ("heart.text.clipboard", "Health", .teal),
-            ("globe", "Smoke", .green),
-            ("checkmark.seal", "Facts", .mint),
-            ("brain.head.profile", "AI Review", .purple),
-            ("checkmark.seal", "Overall", .green),
+            ("globe", "Pages", .green),
+            ("checkmark.seal", "AC", .mint),
+            ("doc.badge.gearshape", "Facts", .orange),
+            ("brain.head.profile", "Review", .purple),
         ]
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
@@ -508,7 +510,7 @@ public struct FeatureDetailPanelView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             }
-            Text("30-day retention · event replay · PII sanitized before broadcast")
+            Text("Persisted replay · REST backfill · PII sanitized before broadcast")
                 .font(.system(size: 9))
                 .foregroundStyle(.tertiary)
                 .padding(.top, 2)
@@ -607,6 +609,7 @@ public struct FeatureDetailPanelView: View {
             ("exclamationmark.shield", "Safety", .red),
             ("star.circle", "Quality", .purple),
             ("bubble.left.and.exclamationmark.bubble.right", "Escalations", .orange),
+            ("cpu", "Models", .cyan),
         ]
         return VStack(spacing: 6) {
             FeatureFlowLayout(spacing: 4) {

@@ -76,7 +76,8 @@ This is the single most important practice. Containerization is what makes blast
 - Behavioral guards (`canKill`, `canPause`, `canPromote`, `canFail`) checked at the call site, not buried in the storage layer.
 
 ### 7. Validation Gates
-- Multi-phase: build → health check → smoke (Playwright) → AI task review. Each phase persists its own result.
+- Multi-phase: lint → SAST → build → test → health → pages → AC → required facts → AI task review. Each phase persists its own result.
+- Deterministic gates run before AI-backed review. If code cannot build, test, or prove required facts, the reviewer is skipped and the agent gets concrete correction output first.
 - Build logs capped at 10k chars; diffs at 50k. Back-pressure against context bombs.
 - Up to three validation attempts; each failure feeds *correction context*, not a blind retry.
 

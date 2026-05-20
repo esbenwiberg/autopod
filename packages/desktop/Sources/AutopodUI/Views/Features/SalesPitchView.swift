@@ -49,10 +49,10 @@ public struct SalesPitchView: View {
 
     private var statsRow: some View {
         HStack(spacing: 14) {
-            statCard(number: "15", label: "States in the\nsession lifecycle", color: .blue)
-            statCard(number: "7", label: "Validation phases\nbefore merge", color: .green)
+            statCard(number: "15", label: "States in the\npod lifecycle", color: .blue)
+            statCard(number: "9", label: "Validation gates\nbefore review", color: .green)
             statCard(number: "13+", label: "MCP tools for\nagent escalation", color: .cyan)
-            statCard(number: "6", label: "Fleet analytics\ndashboards", color: .orange)
+            statCard(number: "7", label: "Fleet analytics\ndashboards", color: .orange)
         }
     }
 
@@ -320,15 +320,15 @@ public struct SalesPitchView: View {
                 icon: "checkmark.shield.fill",
                 color: .green,
                 title: "Trust Nothing, Verify Everything",
-                body: "7-phase validation pipeline: build, test, health check, Playwright smoke, required facts, AI review, overall — proof-of-work evidence at every phase. Interrupt in-flight validation, dismiss recurring false positives, or grant more attempts.",
-                tags: ["Playwright", "Screenshots", "LLM Review", "Auto-Retry"]
+                body: "Nine gated checks: lint, SAST, build, test, health, Playwright smoke, acceptance criteria, required facts, and AI review — with proof-of-work evidence per attempt.",
+                tags: ["Lint", "SAST", "Facts", "Screenshots"]
             ),
             SellingPoint(
                 icon: "eye.fill",
                 color: .teal,
                 title: "Full Visibility",
-                body: "Watch agents think in real time. Every tool call, file change, and decision streamed to your desktop. 30-day event replay if you miss anything.",
-                tags: ["WebSocket", "Live Events", "30d Replay"]
+                body: "Watch agents think in real time. Tool calls, MCP calls, file changes, reasoning, plans, and progress stream to your desktop with persisted replay.",
+                tags: ["WebSocket", "MCP Filter", "Replay"]
             ),
             SellingPoint(
                 icon: "cpu",
@@ -362,8 +362,8 @@ public struct SalesPitchView: View {
                 icon: "chart.bar.xaxis",
                 color: .indigo,
                 title: "Fleet Visibility",
-                body: "Six analytics dashboards — cost by phase and model, first-pass reliability rate, throughput MTTM, safety events and quarantine scores, quality composites, escalation patterns. Know what your agents are doing.",
-                tags: ["Cost", "Reliability", "Safety", "Quality"]
+                body: "Seven analytics dashboards — cost by phase and model, first-pass reliability rate, throughput MTTM, safety events and quarantine scores, quality composites, escalation patterns, and model performance. Know what your agents are doing.",
+                tags: ["Cost", "Quality", "Safety", "Models"]
             ),
         ]
     }
@@ -373,7 +373,7 @@ public struct SalesPitchView: View {
             ("text.cursor", "Describe", "Your task", .gray),
             ("shippingbox", "Provision", "Container spins up", .blue),
             ("brain.head.profile", "Code", "Agent works", .purple),
-            ("testtube.2", "Validate", "8-phase pipeline", .cyan),
+            ("testtube.2", "Validate", "9 gated checks", .cyan),
             ("person.fill.checkmark", "Review", "Human approval", .orange),
             ("arrow.triangle.merge", "Merge", "PR created", .indigo),
             ("checkmark.circle.fill", "Done", "Branch merged", .green),

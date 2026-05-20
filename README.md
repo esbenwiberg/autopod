@@ -25,7 +25,7 @@ You describe a task. autopod spins up an isolated container, lets an AI agent wo
 ```
 $ ap run my-app "Add a dark mode toggle to the settings page" --model opus
 
-  Session a1b2c3d4 created (profile: my-app, model: opus)
+  Pod a1b2c3d4 created (profile: my-app, model: opus)
   Provisioning container...
   Agent running...
 
@@ -83,7 +83,7 @@ If it doesn't pass, the agent gets structured feedback and tries again. If it do
                     └───────────┘
 ```
 
-### Session Lifecycle
+### Pod Lifecycle
 
 Every task follows a state machine:
 
@@ -117,47 +117,39 @@ Validation is a multi-phase pipeline with two loops — each phase must pass bef
 
 | Phase | What happens | Configurable via |
 |-------|-------------|------------------|
-| **1. Build** | Runs your build command inside the container | `profile.build` |
-| **2. Test** | Runs your test suite (skipped if not configured) | `profile.testCommand` |
-| **3. Health check** | Starts the app and waits for HTTP 200 | `profile.start`, `profile.health` |
-| **4. Smoke pages** | Playwright visits configured pages, checks assertions | `profile.smokePages` |
-| **5. AC validation** | Reviewer generates browser checks from acceptance criteria, executed via Playwright | `session.acceptanceCriteria` |
-| **6. AI task review** | A separate model reviews the diff against the original task | `profile.escalation.askAi.model` |
+| **1. Lint** | Runs optional static linting before build | `profile.lintCommand`, `profile.lintTimeout` |
+| **2. SAST** | Runs optional security/static-analysis checks | `profile.sastCommand`, `profile.sastTimeout` |
+| **3. Build** | Runs your build command inside the container | `profile.buildCommand`, `profile.buildTimeout` |
+| **4. Test** | Runs your test suite (skipped if not configured) | `profile.testCommand`, `profile.testTimeout` |
+| **5. Health check** | Starts the app and waits for HTTP 200 | `profile.startCommand`, `profile.healthPath` |
+| **6. Smoke pages** | Playwright visits configured pages and checks assertions | `profile.smokePages` |
+| **7. AC validation** | Classifies acceptance criteria as web/API/cmd/none and validates what can be executed | `pod.acceptanceCriteria` |
+| **8. Required facts** | Runs contract-backed proof commands and checks declared artifacts | `pod.contract.requiredFacts` |
+| **9. AI task review** | A separate model reviews the diff, task, contract, and prior findings | `profile.reviewerModel` |
 
-If any phase fails, the agent gets structured feedback (console errors, build output, screenshot diffs, AC failures, reviewer notes) and retries automatically. The AI reviewer receives tiered context: the diff, original task, and findings from prior attempts.
+Autopod then computes an overall pass/fail decision from those phases. If any required phase fails, the agent gets structured feedback (console errors, build output, screenshot diffs, fact failures, AC failures, reviewer notes) and retries automatically. The AI reviewer receives tiered context: the diff, original task, contract, and findings from prior attempts.
 
-Every validation attempt is stored with full results and **proof-of-work screenshots** — one per smoke page and per AC criterion. Screenshots are grouped by phase (smoke → ac → review) and accessible via `GET /pods/:id/screenshots`. View the **validation report** (`GET /sessions/:id/report`) for a visual timeline of all attempts.
+Every validation attempt is stored with full results and **proof-of-work screenshots** — one per smoke page, AC browser check, and review screenshot. Screenshots are served from authenticated URLs like `GET /pods/:id/screenshots/:source/:filename`. Contract fact evidence is also exportable as `GET /pods/:id/validations/:attempt/evidence.yaml`.
 
 After validation, the container is **stopped** (not removed). Launch an on-demand **preview** to interact with the agent's work in a real browser before approving.
 
-**When retries are exhausted** (`maxValidationAttempts` reached), the session moves to `review_required` instead of just failing. From there you can:
+**When retries are exhausted** (`maxValidationAttempts` reached), the pod moves to `review_required` instead of just failing. From there you can:
 
-```bash
-ap extend-attempts <id>      # Grant more attempts — agent retries with accumulated feedback
-ap fix-manually <id>         # Create a linked workspace pod for human edits, then re-validate
-ap reject <id> "<feedback>"  # Reject and restart fresh with your notes
-```
+- Grant more validation attempts from the desktop/API so the agent retries with accumulated feedback.
+- Create a linked manual-fix workspace from the desktop/API, then re-validate.
+- Reject from the CLI with `ap reject <id> "<feedback>"` to restart with your notes.
 
-**Interrupt in-flight validation:**
+**Operator overrides:**
 
-```bash
-ap interrupt <id>            # Stop a running validation immediately (returns partial results)
-```
-
-**Per-finding overrides** — dismiss individual AI reviewer findings that are recurring false positives without blocking the overall review:
-
-```bash
-ap override <id> <finding-id> --dismiss    # Mark finding as accepted
-ap override <id> <finding-id> --guidance "Use our custom date helper instead"
-```
+The daemon also supports interrupting in-flight validation and queueing per-finding validation overrides (`dismiss` or `guidance`) through the desktop/API. Overrides are persisted as auditable human decisions and merged into the next review pass.
 
 ---
 
 ## Features
 
 <table>
-<tr><td>🔀</td><td><b>Multi-agent parallelism</b></td><td>Run 10, 20, 50 sessions across repos simultaneously</td></tr>
-<tr><td>✅</td><td><b>Multi-phase validation</b></td><td>Build → Test → Health → Smoke pages → AC validation → AI review</td></tr>
+<tr><td>🔀</td><td><b>Multi-agent parallelism</b></td><td>Run 10, 20, 50 pods across repos simultaneously</td></tr>
+<tr><td>✅</td><td><b>Multi-phase validation</b></td><td>Lint → SAST → Build → Test → Health → Smoke → AC → Facts → AI review</td></tr>
 <tr><td>🤖</td><td><b>Multi-runtime</b></td><td>Claude, Codex, or GitHub Copilot — swap with a flag</td></tr>
 <tr><td>🔑</td><td><b>Multi-provider auth</b></td><td>Anthropic API, Claude MAX/PRO (OAuth), Azure Foundry, or Copilot tokens</td></tr>
 <tr><td>🆘</td><td><b>Escalation via MCP</b></td><td>Agents can pause and ask for help (human or AI)</td></tr>
@@ -168,27 +160,27 @@ ap override <id> <finding-id> --guidance "Use our custom date helper instead"
 <tr><td>🐳</td><td><b>Image warming</b></td><td>Pre-bake dependencies into Docker images for fast spin-up</td></tr>
 <tr><td>💬</td><td><b>Teams notifications</b></td><td>Rich Adaptive Cards with inline screenshots</td></tr>
 <tr><td>🔄</td><td><b>Correction loops</b></td><td>Reject with feedback, agent retries from where it left off</td></tr>
-<tr><td>🌐</td><td><b>On-demand previews</b></td><td><code>ap open &lt;id&gt;</code> spins up a live preview of any session's work</td></tr>
-<tr><td>🔌</td><td><b>Session injection</b></td><td>Plug in external MCP servers and CLAUDE.md content at daemon or profile level</td></tr>
-<tr><td>🏗️</td><td><b>Git-native PRs</b></td><td>GitHub and Azure DevOps — every session gets its own branch</td></tr>
+<tr><td>🌐</td><td><b>On-demand previews</b></td><td><code>ap open &lt;id&gt;</code> spins up a live preview of any pod's work</td></tr>
+<tr><td>🔌</td><td><b>Pod injection</b></td><td>Plug in external MCP servers and CLAUDE.md content at daemon or profile level</td></tr>
+<tr><td>🏗️</td><td><b>Git-native PRs</b></td><td>GitHub and Azure DevOps — every pod gets its own branch</td></tr>
 <tr><td>🧪</td><td><b>Workspace pods</b></td><td>Interactive containers for manual prep, then hand off to automated agents</td></tr>
 <tr><td>🔐</td><td><b>Private registries</b></td><td>npm and NuGet feeds from Azure DevOps — credentials injected automatically</td></tr>
 <tr><td>⚡</td><td><b>Skills injection</b></td><td>Custom slash commands from local files or GitHub repos, injected into agent containers</td></tr>
-<tr><td>🖥️</td><td><b>macOS desktop app</b></td><td>Native SwiftUI app for session monitoring — three-column layout, live terminal, diff viewer, live preview screenshots</td></tr>
-<tr><td>♻️</td><td><b>Session recovery</b></td><td>Daemon auto-recovers in-flight sessions on restart — no lost work on redeploy</td></tr>
-<tr><td>💡</td><td><b>Liveness heartbeat</b></td><td>Green/yellow/red dot per session — spot stalled agents at a glance in desktop</td></tr>
-<tr><td>🧠</td><td><b>Memory stores</b></td><td>Agents suggest persistent knowledge (global/profile/session scoped) — humans approve, approved content injected into future sessions</td></tr>
+<tr><td>🖥️</td><td><b>macOS desktop app</b></td><td>Native SwiftUI app for pod monitoring — three-column layout, live terminal, diff viewer, live preview screenshots</td></tr>
+<tr><td>♻️</td><td><b>Pod recovery</b></td><td>Daemon auto-recovers in-flight pods on restart — no lost work on redeploy</td></tr>
+<tr><td>💡</td><td><b>Liveness heartbeat</b></td><td>Green/yellow/red dot per pod — spot stalled agents at a glance in desktop</td></tr>
+<tr><td>🧠</td><td><b>Memory stores</b></td><td>Agents suggest persistent knowledge (global/profile/pod scoped) — humans approve, approved content injected into future pods</td></tr>
 <tr><td>🔁</td><td><b>Validation interrupt & overrides</b></td><td>Interrupt in-flight validation, dismiss recurring false-positive findings, queue per-finding guidance</td></tr>
-<tr><td>⚡</td><td><b>Azure PIM activation</b></td><td>Workspace pods can activate Azure PIM groups for elevated access — auto-deactivated on session end</td></tr>
-<tr><td>📜</td><td><b>History analysis workspace</b></td><td><code>ap history</code> creates a workspace pre-loaded with session history data for pattern analysis</td></tr>
-<tr><td>📌</td><td><b>Profile versioning</b></td><td>Every profile update auto-increments a version counter; sessions snapshot the exact profile used at creation</td></tr>
+<tr><td>⚡</td><td><b>Azure PIM activation</b></td><td>Workspace pods can activate Azure PIM groups for elevated access — auto-deactivated when the pod ends</td></tr>
+<tr><td>📜</td><td><b>History analysis workspace</b></td><td><code>ap history</code> creates a workspace pre-loaded with pod history data for pattern analysis</td></tr>
+<tr><td>📌</td><td><b>Profile versioning</b></td><td>Every profile update auto-increments a version counter; pods snapshot the exact profile used at creation</td></tr>
 <tr><td>☁️</td><td><b>Local or cloud containers</b></td><td>Run agent pods on local Docker or Azure Container Instances — swap with <code>executionTarget</code> on the profile</td></tr>
 <tr><td>📅</td><td><b>Scheduled jobs</b></td><td>Cron-triggered pods — recurring security audits, dependency checks, nightly regressions</td></tr>
 <tr><td>🔗</td><td><b>Series workflows</b></td><td>Multi-pod DAGs with dependency chains and three PR modes: single branch, stacked, or none</td></tr>
 <tr><td>🏷️</td><td><b>Issue watcher</b></td><td>Label a GitHub or ADO issue — autopod spawns a pod, posts progress comments, and updates labels automatically</td></tr>
 <tr><td>📊</td><td><b>Analytics dashboard</b></td><td>Fleet metrics: cost by phase/model, first-pass rate, throughput, safety events, quality scores</td></tr>
 <tr><td>🔧</td><td><b>Auto fix pods</b></td><td>On CI failure or review comments, the daemon spawns a fix pod with sanitized feedback — up to <code>maxPrFixAttempts</code></td></tr>
-<tr><td>📸</td><td><b>Proof-of-work screenshots</b></td><td>Every validation run captures Playwright screenshots per phase — smoke, AC, and review — stored with the session</td></tr>
+<tr><td>📸</td><td><b>Proof-of-work evidence</b></td><td>Validation captures screenshots and contract fact evidence per attempt — smoke, AC, facts, and review</td></tr>
 </table>
 
 ---
@@ -216,7 +208,7 @@ ap run my-app "Add a dark mode toggle to the settings page"
 Build every workspace package through Turbo:
 
 ```bash
-npm run build
+npx pnpm build
 ```
 
 ## Test
@@ -224,7 +216,7 @@ npm run build
 Run the full Vitest suite:
 
 ```bash
-npm test
+npx pnpm test
 ```
 
 ## Architecture
@@ -336,7 +328,7 @@ Available templates:
 | `go124-pw` | Go 1.24 + Playwright | Go with Chromium for browser validation |
 | `custom` | Bring your own | Custom Dockerfile |
 
-### 7. Run your first session
+### 7. Run your first pod
 
 ```bash
 ap run my-app "Add a contact form to the about page with name, email, and message fields"
@@ -353,8 +345,8 @@ ap ls
 # See what the agent did
 ap diff a1b2c3d4
 
-# Look at the screenshots
-ap screenshots a1b2c3d4
+# Inspect validation evidence
+ap status a1b2c3d4
 
 # Happy? Ship it.
 ap approve a1b2c3d4
@@ -402,57 +394,46 @@ ap profile action-override set <name> <action> --approval
 ap profile action-override remove <name> <action>
 ```
 
-### Sessions
+### Pods
 
 ```bash
 # Create
-ap run <profile> "<task>"                   # Start a session
+ap run <profile> "<task>"                   # Start a pod
 ap run <profile> "<task>" --model opus      # Override model
 ap run <profile> "<task>" --runtime codex   # Use Codex runtime
 ap run <profile> "<task>" --runtime copilot # Use Copilot runtime
 ap run <profile> "<task>" --branch feat/x   # Custom branch name
-ap run <profile> "<task>" --no-validate     # Skip auto-validation
-ap run <profile> "<task>" --ac "criterion"  # Add acceptance criteria (repeatable)
+ap run <profile> "<task>" --skip-validation # Skip auto-validation
 ap run <profile> "<task>" --base-branch feat/plan  # Branch from a specific base (e.g. workspace output)
 ap run <profile> "<task>" --ac-from specs/ac.md    # Load acceptance criteria from a file in the repo
 
 # Monitor
-ap ls                                       # List sessions
+ap ls                                       # List pods
 ap ls --status running                      # Filter by status
 ap ls --json                                # JSON output (for scripting)
-ap status <id>                              # Full session details
+ap status <id>                              # Full pod details
 ap logs <id>                                # Stream agent activity
 ap logs <id> --build                        # Build/validation logs
 
 # Interact
-ap tell <id> "<message>"                    # Send message (also resumes paused sessions)
+ap tell <id> "<message>"                    # Send message (also resumes paused pods)
 ap tell <id> --file instructions.md         # Message from file
 ap tell <id> --stdin                        # Pipe from stdin
-ap pause <id>                               # Pause a running session
+ap pause <id>                               # Pause a running pod
 ap nudge <id> "<message>"                   # Send nudge (agent picks up async)
 
 # Validate & Preview
 ap validate <id>                            # Trigger validation manually
-ap revalidate <id>                          # Pull latest + re-validate only (no agent rework)
-ap interrupt <id>                           # Stop in-flight validation, return partial results
-ap open <id>                                # Spin up live preview (restarts stopped container)
-ap report <id>                              # Open validation report in browser
-ap diff <id>                                # Show git diff
-ap diff <id> --stat                         # Diff summary only
-
-# Validation overrides (dismiss recurring false-positive findings)
-ap override <id> <finding-id> --dismiss
-ap override <id> <finding-id> --guidance "<note>"
-
-# review_required resolution
-ap extend-attempts <id>                     # Grant more validation attempts
-ap fix-manually <id>                        # Create linked workspace for human edits
+ap open <id>                                # Open the pod's current preview URL, if one is available
+ap diff <id>                                # Show the last validation diff
+ap update-from-base <id>                    # Rebase pod branch onto latest base and restart validation
+ap kick <id> --reason "stuck"               # Re-enqueue a stuck queued pod or free a stuck slot
 
 # Complete
 ap approve <id>                             # Create PR and merge
 ap approve <id> --squash                    # Squash merge
 ap reject <id> "<feedback>"                 # Reject — agent retries with your feedback
-ap kill <id>                                # Kill session, discard work
+ap kill <id>                                # Kill pod, discard work
 
 # Bulk operations
 ap approve --all-validated                  # Approve everything that passed
@@ -467,26 +448,26 @@ ap stats                                    # Aggregate counts by status, avg du
 ```bash
 ap workspace <profile> [description]        # Spin up an interactive container (no agent)
 ap workspace <profile> -b feat/plan-auth    # With explicit branch name
-ap workspace <profile> --pim-group <spec>   # Activate PIM group on session start
+ap workspace <profile> --pim-group <spec>   # Activate PIM group on pod start
 ap attach <id>                              # Shell into a workspace pod (auto-pushes on exit)
 ```
 
 ### History Analysis
 
 ```bash
-ap history <profile>              # Create a workspace pre-loaded with session history data
+ap history <profile>              # Create a workspace pre-loaded with pod history data
 ap history <profile> --since 7d   # Filter by recency (e.g. 7d, 30d, 2w)
-ap history <profile> --failures   # Only include failed/review_required sessions
-ap history <profile> --limit 50   # Max sessions to load (default: 100)
+ap history <profile> --failures   # Only include failed/review_required pods
+ap history <profile> --limit 50   # Max pods to load (default: 100)
 ```
 
-The history workspace gets a SQLite database of past sessions — events, validation results, escalations, costs — mounted at `/workspace/history.db`. Use it with an AI agent to analyse patterns: recurring failures, common blockers, token waste.
+The history workspace gets a SQLite database of past pods — events, validation results, escalations, costs — mounted at `/workspace/history.db`. Use it with an AI agent to analyse patterns: recurring failures, common blockers, token waste.
 
 ### Memories
 
 ```bash
 ap memory list                              # List approved memories
-ap memory list --scope profile              # Filter by scope (global | profile | session)
+ap memory list --scope profile              # Filter by scope (global | profile | pod)
 ap memory show <id>                         # Show memory content
 ap memory approve <id>                      # Approve a suggested memory
 ap memory reject <id>                       # Reject a suggestion
@@ -507,28 +488,65 @@ ap series create <spec-folder>              # Create series from a briefs/ spec 
 ap series status <series-id>               # Status of all pods + cost rollup
 ```
 
-**Brief frontmatter** (one `.md` file per pod in `briefs/`):
+**Brief layout** (one folder per pod in `briefs/`):
 
-```yaml
+```
+specs/auth-rewrite/
+  purpose.md
+  design.md
+  briefs/
+    01-schema/
+      brief.md
+      contract.yaml
+    02-routes/
+      brief.md
+      contract.yaml
+```
+
+`brief.md` carries task text and advisory scope:
+
+```md
 ---
-title: "Implement OAuth routes"
-task: |
-  Add /auth/login and /auth/callback endpoints per the spec in docs/oauth.md
-depends_on:
-  - "Schema migration"          # Fan-in: wait for this pod's PR to merge
 touches:
   - "src/auth/"
 does_not_touch:
   - "src/admin/"
-acceptance_criteria:
-  - type: "code_diff"
-    test: "OAuth routes render without JS errors"
 context_files:
-  - "docs/oauth-spec.md"        # Resolved relative to spec root
+  - "docs/oauth-spec.md"
 ---
+
+## Task
+
+Add `/auth/login` and `/auth/callback` endpoints per the spec.
 ```
 
-Add `purpose.md` and `design.md` at the spec root for context injected into every pod's CLAUDE.md.
+`contract.yaml` carries dependencies and executable proof:
+
+```yaml
+contract_version: 1
+title: "Implement OAuth routes"
+depends_on:
+  - "Schema migration"
+scenarios:
+  - id: oauth-routes
+    given:
+      - "the API server is running"
+    when:
+      - "the user visits /auth/login"
+    then:
+      - "the login route responds without server errors"
+required_facts:
+  - id: fact-oauth-routes-test
+    proves: ["oauth-routes"]
+    kind: integration-test
+    artifact:
+      path: "packages/daemon/src/auth/oauth-routes.test.ts"
+      change: create
+    command: "npx pnpm --filter @autopod/daemon test -- oauth-routes"
+human_review: []
+```
+
+Add `purpose.md` and `design.md` at the spec root for context injected into every pod's CLAUDE.md. Brief frontmatter `acceptance_criteria` and markdown `## Acceptance Criteria` sections are no longer accepted for runnable specs; use `contract.yaml` scenarios, required facts, and human review items instead.
 
 ### Scheduled Jobs
 
@@ -575,11 +593,17 @@ ap profile create my-app \
 
 # Additional options (set in profile YAML)
 # containerMemoryGb: 4        # Container memory limit (default: no limit)
+# buildEnv: { NODE_OPTIONS: "--max-old-space-size=4096" }
+# lintCommand: "npx pnpm lint"
+# sastCommand: "semgrep --config=p/security-audit ."
+# skipValidationPhases: ["pages", "ac"]  # lint|sast|build|test|health|pages|ac|review
+# hasWebUi: true             # false skips health/pages browser checks
 # buildTimeout: 300           # Build phase timeout in seconds (default: 300)
 # testTimeout: 600            # Test phase timeout in seconds (default: 600)
-# branchPrefix: "autopod"     # Prefix for auto-generated branch names (default: "autopod")
+# branchPrefix: "autopod/"    # Prefix for auto-generated branch names (default: "autopod/")
 # executionTarget: local      # "local" (Docker) or "aci" (Azure Container Instances)
-# workerProfile: "my-app"     # For workspace pods: which profile to use for the follow-up worker session
+# workerProfile: "my-app"     # For workspace pods: which profile to use for the follow-up worker pod
+# githubPatExpiresAt: "2026-12-31"  # Non-secret expiry metadata checked on pod creation
 ```
 
 ### PR providers
@@ -622,26 +646,38 @@ Assertion types: `exists`, `visible`, `text_contains`, `count`.
 
 ### Acceptance criteria
 
-For task-specific validation, pass acceptance criteria when creating a session:
+For task-specific validation, pass acceptance criteria from a file when creating a pod:
 
 ```bash
 ap run my-app "Add dark mode" \
-  --ac "Settings page has a dark mode toggle" \
-  --ac "Toggle persists after page refresh" \
-  --ac "Dark mode applies to all pages"
+  --ac-from specs/dark-mode-ac.md
 ```
 
-The validation engine independently verifies each criterion in a browser using a separate reviewer model. The agent also has access to a `validate_in_browser` MCP tool for self-checking during development.
+The AC file format is one criterion per line, with optional `- ` prefixes and blank lines ignored:
 
-### Test command
+```md
+- Settings page has a dark mode toggle
+- Toggle persists after page refresh
+- Dark mode applies to all pages
+```
 
-Add automated test execution to the validation pipeline:
+The validation engine classifies criteria as web, API, command, or reviewer-owned checks. Web criteria use a real browser and screenshots; command/API criteria can run deterministically; reviewer-owned criteria are checked by the AI task reviewer. The agent also has access to a `validate_in_browser` MCP tool for self-checking during development.
+
+For runnable specs created by `/prep` or `/plan-feature`, put executable proof in `contract.yaml` (`scenarios`, `required_facts`, and optional `human_review`) rather than brief frontmatter ACs. Required facts run during validation and produce attempt-scoped evidence YAML.
+
+### Validation commands
+
+Add deterministic checks to the validation pipeline:
 
 ```yaml
+lintCommand: "npx pnpm lint"
+sastCommand: "semgrep --config=p/security-audit ."
 testCommand: "npm test"
+buildEnv:
+  NODE_OPTIONS: "--max-old-space-size=4096"
 ```
 
-Tests run after the build phase and before the health check. If tests fail, the agent gets the stdout/stderr output as feedback and retries.
+Lint and SAST run before build. Tests run after build and before health/browser checks. If a deterministic phase fails, AC and AI review are skipped for that attempt; the agent receives stdout/stderr output as feedback and retries.
 
 ### Private Registries
 
@@ -660,9 +696,10 @@ privateRegistries:
 
 # PAT for authenticating (encrypted at rest)
 registryPat: "<your-ado-pat>"
+registryPatExpiresAt: "2026-12-31"  # optional YYYY-MM-DD expiry metadata
 ```
 
-At session startup, autopod generates `.npmrc` and/or `NuGet.config` files in the container workspace with embedded auth tokens. Child profiles inherit and merge registries from parent profiles (deduped by URL).
+At pod startup, autopod generates `.npmrc` and/or `NuGet.config` files in the container workspace with embedded auth tokens. Child profiles inherit and merge registries from parent profiles (deduped by URL). If a configured GitHub, ADO, or registry PAT has an expiry date in the past, pod creation is blocked with `PAT_EXPIRED` so the agent does not burn time on known-bad credentials.
 
 ### Network Policy
 
@@ -689,7 +726,7 @@ networkPolicy:
 
   # Shorthand: automatically add all common package manager hosts.
   # Covers npm, yarn, pypi, crates.io, nuget, golang, rubygems, debian apt, etc.
-  allow_package_managers: true
+  allowPackageManagers: true
 ```
 
 **How `restricted` mode works — HAProxy SNI proxy:**
@@ -700,7 +737,7 @@ This means egress policy is enforced at the hostname level even for HTTPS, witho
 
 **Built-in default hosts** (always allowed unless `replaceDefaults: true`):
 
-`api.anthropic.com`, `api.openai.com`, `registry.npmjs.org`, `pypi.org`, `github.com`, `*.githubusercontent.com`, `pkgs.dev.azure.com`, `platform.claude.com`, GitHub Copilot endpoints.
+`api.anthropic.com`, `api.openai.com`, `registry.npmjs.org`, `pypi.org`, NuGet hosts, Azure CDN hosts, `pkgs.dev.azure.com`, `platform.claude.com`, and GitHub Copilot endpoints. `github.com` / `raw.githubusercontent.com` are intentionally not on the default list; add them explicitly only for profiles that need direct GitHub egress (for example, GitHub-hosted package dependencies).
 
 **Live updates** — patching a profile's `networkPolicy` via the API immediately re-applies firewall rules to all running containers using that profile. No restart needed.
 
@@ -716,9 +753,9 @@ escalation:
   askAi:
     enabled: true                 # Allow agent to ask cheaper model
     model: sonnet                 # Also used as the AI reviewer model in validation
-    maxCalls: 5                   # Max AI-to-AI escalations per session
+    maxCalls: 5                   # Max AI-to-AI escalations per pod
   autoPauseAfter: 3              # Auto-escalate after N consecutive failures
-  humanResponseTimeout: 3600000  # 1 hour before auto-killing stalled session
+  humanResponseTimeout: 3600000  # 1 hour before auto-killing stalled pod
 ```
 
 > **Note:** `escalation.askAi.model` does double duty — it's both the model agents consult during work *and* the model that reviews their output in the AI task review validation phase.
@@ -744,22 +781,22 @@ foundryConfig:
   project: "my-project"
 ```
 
-For **MAX/PRO**, the daemon handles OAuth token lifecycle automatically — pre-flight refresh before session start, post-session persistence of rotated tokens.
+For **MAX/PRO**, the daemon handles OAuth token lifecycle automatically — pre-flight refresh before pod start, post-pod persistence of rotated tokens.
 
 For **Copilot**, use `ap profile auth-copilot <name>` for interactive OAuth setup. Supported token types: OAuth (`gho_`), fine-grained PAT (`github_pat_`), and GitHub App (`ghu_`). Classic PATs (`ghp_`) are not supported.
 
-### Session Injection (MCP Servers & CLAUDE.md)
+### Pod Injection (MCP Servers & CLAUDE.md)
 
-Profiles can inject additional MCP servers and CLAUDE.md content sections into agent sessions. This is how you plug in external tools (like [Prism](https://github.com/esbenwiberg/prism) for codebase context) without modifying autopod itself.
+Profiles can inject additional MCP servers and CLAUDE.md content sections into agent pods. This is how you plug in external tools (like [Prism](https://github.com/esbenwiberg/prism) for codebase context) without modifying autopod itself.
 
 Injections work at two tiers with merge semantics:
 
 ```
-Daemon config (defaults for all sessions)
+Daemon config (defaults for all pods)
     ↓ merge
 Profile config (repo-specific overrides/additions)
     ↓ result
-Session receives the merged set
+Pod receives the merged set
 ```
 
 Profile entries override daemon entries with the same key (`name` for MCP servers, `heading` for sections).
@@ -787,7 +824,7 @@ claudeMdSections:
     priority: 20
     content: "Always use TypeScript strict mode. Never use `any`."
 
-  # Dynamic section — fetched from an API when the session starts
+  # Dynamic section — fetched from an API when the pod starts
   - heading: "Codebase Architecture"
     priority: 10
     maxTokens: 4000
@@ -804,7 +841,7 @@ claudeMdSections:
 
 #### Daemon-level defaults
 
-Set MCP servers and sections that apply to all sessions via environment variables:
+Set MCP servers and sections that apply to all pods via environment variables:
 
 ```bash
 DAEMON_MCP_SERVERS='[{"name":"prism","url":"https://prism.internal/mcp"}]'
@@ -926,21 +963,22 @@ Injected MCP servers are automatically proxied through the daemon. Auth headers 
 
 ### Azure PIM Groups
 
-For workspace pods that need elevated Azure access, configure PIM groups directly on the profile or pass them at session creation:
+For workspace pods that need elevated Azure access, configure PIM activations directly on the profile or pass group activations at pod creation:
 
 ```yaml
-pimGroups:
-  - groupId: "00000000-0000-0000-0000-000000000000"
+pimActivations:
+  - type: group
+    groupId: "00000000-0000-0000-0000-000000000000"
     displayName: "Contributor on prod-rg"
-    duration: 60          # minutes (default: 60)
-    justification: "Autopod workspace session"
+    duration: "PT1H"
+    justification: "Autopod workspace pod"
 ```
 
 ```bash
-ap workspace my-app --pim-group "Contributor on prod-rg:60m"
+ap workspace my-app --pim-group "00000000-0000-0000-0000-000000000000:Contributor on prod-rg"
 ```
 
-PIM groups are activated automatically when the workspace starts and deactivated when it ends. Only groups pre-configured on the session can be activated — agents cannot escalate beyond what was declared.
+PIM groups are activated automatically when the workspace starts and deactivated when it ends. Only groups pre-configured on the pod can be activated — agents cannot escalate beyond what was declared.
 
 ### Execution Targets
 
@@ -954,33 +992,33 @@ executionTarget: aci     # Run containers in Azure Container Instances
 |--|--|--|
 | Setup | Docker socket | Azure subscription + ACR |
 | Cost | Host resources | Pay-per-second |
-| Isolation | Docker bridge per session | Per ACI container group |
+| Isolation | Docker bridge per pod | Per ACI container group |
 | Scale | Host CPU/memory | Azure quota |
 | Cold start | Fast (cached image) | ~30s (pull from ACR) |
 
-For ACI, set `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_LOCATION`, `ACR_USERNAME`, `ACR_PASSWORD` and run `ap profile warm <name>` to push the image to ACR before your first session.
+For ACI, set `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_LOCATION`, `ACR_USERNAME`, `ACR_PASSWORD` and run `ap profile warm <name>` to push the image to ACR before your first pod.
 
 ### Profile Versioning
 
-Every `ap profile edit` or API update auto-increments `profile.version`. When a session is created, autopod snapshots the full resolved profile (including inherited values) and stores it with the session. You can always audit exactly which config produced a given session's output — even after the profile has changed.
+Every `ap profile edit` or API update auto-increments `profile.version`. When a pod is created, autopod snapshots the full resolved profile (including inherited values) and stores it with the pod. You can always audit exactly which config produced a given pod's output — even after the profile has changed.
 
 ```bash
 ap profile show my-app    # Shows current version number
-ap status <session-id>    # Shows "profile: my-app v3 · branch: autopod/abc123ef"
+ap status <pod-id>        # Shows "profile: my-app v3 · branch: autopod/abc123ef"
 ```
 
 ### Memory Stores
 
-Agents can suggest persistent knowledge that carries across sessions. Humans approve suggestions before they're used.
+Agents can suggest persistent knowledge that carries across pods. Humans approve suggestions before they're used.
 
 ```yaml
-# Memory is scoped — available only to matching sessions
-# global  → all sessions on this daemon
-# profile → all sessions using this profile
-# session → this session only (auto-scoped by the agent)
+# Memory is scoped — available only to matching pods
+# global  → all pods on this daemon
+# profile → all pods using this profile
+# pod     → this pod only (auto-scoped by the agent)
 ```
 
-The daemon injects approved memories into each session's CLAUDE.md at provisioning time. This lets agents accumulate institutional knowledge — common patterns, known gotchas, team conventions — without baking it into profile config.
+The daemon injects approved memories into each pod's CLAUDE.md at provisioning time. This lets agents accumulate institutional knowledge — common patterns, known gotchas, team conventions — without baking it into profile config.
 
 ```bash
 ap memory list                     # List all approved memories
@@ -1023,12 +1061,13 @@ The daemon exposes fleet metrics at `/pods/analytics/*`. All endpoints accept a 
 
 | Endpoint | What it returns |
 |----------|----------------|
-| `GET /pods/analytics/cost` | Total spend, daily sparkline, breakdown by phase and by profile+model, top 10 sessions by cost, waste (killed/failed) |
+| `GET /pods/analytics/cost` | Total spend, daily sparkline, breakdown by phase and by profile+model, top 10 pods by cost, waste (killed/failed) |
 | `GET /pods/analytics/reliability` | First-pass rate, daily sparkline, funnel counts, drop-off points, per-stage failure rates, profile heatmap |
-| `GET /pods/analytics/throughput` | Sessions per day, MTTM, queue depth by hour, time-in-status percentiles |
+| `GET /pods/analytics/throughput` | Pods per day, MTTM, queue depth by hour, time-in-status percentiles |
 | `GET /pods/analytics/safety` | PII + injection event counts, quarantine score histogram, network policy distribution, audit chain integrity |
-| `GET /pods/analytics/quality` | Composite quality score (0–100) per session, aggregated signals |
+| `GET /pods/analytics/quality` | Composite quality score (0–100) per pod, aggregated signals |
 | `GET /pods/analytics/escalations` | Escalation counts by type and by profile |
+| `GET /pods/analytics/models` | Per-model leaderboard, runtime aggregates, failure-stage matrix, and what-if inputs |
 
 The macOS desktop app surfaces these in a dedicated Analytics tab with sparklines and drill-downs.
 
@@ -1060,8 +1099,8 @@ autopod ships with full Azure infrastructure as code via Bicep.
 
 | Resource | Purpose |
 |----------|---------|
-| **Container Apps Environment** | Runs the daemon + agent pods |
-| **Container Registry (ACR)** | Stores Docker images |
+| **Container Apps Environment** | Runs the daemon container |
+| **Container Registry (ACR)** | Stores daemon and warmed pod images |
 | **Key Vault** | Holds API keys, PATs, webhook URLs |
 | **Log Analytics** | Centralized structured logging |
 | **Managed Identity** | No credentials in code, ever |
@@ -1113,11 +1152,11 @@ GET /health?detail=full
 autopod/
   packages/
     shared/            # Types, errors, constants, sanitization — the contract between packages
-    daemon/            # Fastify server, session orchestration, SQLite state
+    daemon/            # Fastify server, pod orchestration, SQLite state
       src/actions/     #   Action control plane (handlers, registry, audit)
       src/providers/   #   Multi-provider model auth (env builder, credential refresh)
       src/runtimes/    #   Runtime adapters (Claude, Codex, Copilot)
-      src/validation/  #   Multi-phase validation pipeline (smoke, AC, AI review, reports)
+      src/validation/  #   Validation pipeline (lint/SAST/build/test/pages/facts/review)
       src/worktrees/   #   Git worktree + PR management (GitHub, ADO)
     cli/               # Commander CLI
     escalation-mcp/    # MCP server injected into agent containers (escalation, actions, browser validation)
@@ -1158,7 +1197,7 @@ cd packages/desktop
 xcodebuild -scheme Autopod -configuration Debug build
 ```
 
-The app connects to the same daemon via HTTP/WebSocket. Features: three-column session browser, live terminal (SwiftTerm), diff viewer, validation report panel, and a session token-based auth flow.
+The app connects to the same daemon via HTTP/WebSocket. Features: three-column pod browser, live terminal (SwiftTerm), diff viewer, validation report panel, and a pod token-based auth flow.
 
 ### Tech stack
 
@@ -1202,7 +1241,7 @@ Agent pods are ephemeral — they spin up, do work, and die. You only pay for co
 <details>
 <summary><b>What happens if the agent gets stuck?</b></summary>
 
-It can escalate via MCP tools: `ask_human` pauses and notifies you, `ask_ai` gets a second opinion from a cheaper model, `report_blocker` declares a hard stop. You can also proactively pause a session (`ap pause`) and nudge the agent with new instructions (`ap nudge`) without killing its work.
+It can escalate via MCP tools: `ask_human` pauses and notifies you, `ask_ai` gets a second opinion from a cheaper model, `report_blocker` declares a hard stop. You can also proactively pause a pod (`ap pause`) and nudge the agent with new instructions (`ap nudge`) without killing its work.
 </details>
 
 <details>
@@ -1226,7 +1265,7 @@ Always. Nothing merges without an explicit `ap approve`. The `validated` state m
 <details>
 <summary><b>Can I use this for non-web projects?</b></summary>
 
-The validation layer (Playwright screenshots + AI review) is geared towards web apps. For non-web projects, use `--no-validate` to skip auto-validation and review diffs manually, or configure `testCommand` to run your test suite as the primary validation.
+Yes. Set `hasWebUi: false` on the profile and lean on `lintCommand`, `sastCommand`, `buildCommand`, `testCommand`, command/API acceptance criteria, required facts, and AI task review. Browser smoke and web-ui AC checks are skipped when there is no frontend.
 </details>
 
 <details>
@@ -1250,13 +1289,13 @@ Yes. Add `privateRegistries` to your profile with your Azure DevOps feed URLs an
 <details>
 <summary><b>Is there a desktop app?</b></summary>
 
-Yes — `packages/desktop` is a native macOS app built with SwiftUI and AppKit. It gives you a three-column session browser (sidebar → session list → detail panel), a live terminal view (SwiftTerm), a diff viewer, and a validation report tab. Build with Xcode. It connects to the same daemon as the CLI.
+Yes — `packages/desktop` is a native macOS app built with SwiftUI and AppKit. It gives you a three-column pod browser (sidebar → pod list → detail panel), a live terminal view (SwiftTerm), a diff viewer, and a validation report tab. Build with Xcode. It connects to the same daemon as the CLI.
 </details>
 
 <details>
-<summary><b>What happens if the daemon restarts mid-session?</b></summary>
+<summary><b>What happens if the daemon restarts mid-pod?</b></summary>
 
-autopod recovers. On startup, the daemon scans for sessions that were `provisioning` or `running` at shutdown and re-attaches to their containers. Work in progress is not lost — the agent resumes from where the container left off.
+autopod recovers. On startup, the daemon scans for pods that were `provisioning` or `running` at shutdown and re-attaches to their containers. Work in progress is not lost — the agent resumes from where the container left off.
 </details>
 
 ---

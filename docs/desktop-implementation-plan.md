@@ -1,6 +1,6 @@
 # Autopod Desktop — Architecture Reference
 
-macOS native app (Swift/Xcode, macOS 15+) for monitoring and managing Autopod sessions. Built with SwiftUI, swift-concurrency, and the SwiftTerm terminal emulator.
+macOS native app (Swift/Xcode, macOS 15+) for monitoring and managing Autopod pods. Built with SwiftUI, swift-concurrency, and the SwiftTerm terminal emulator.
 
 ---
 
@@ -13,7 +13,7 @@ Package.swift (AutopodDesktop)
   ├── AutopodDesktop   (library)     — @Observable stores, app wiring, scene config
   └── AutopodDesktopExe (executable) — @main entry point; depends on all three libraries
 
-External dependency: SwiftTerm (terminal emulator embedded in session detail view)
+External dependency: SwiftTerm (terminal emulator embedded in pod detail view)
 
 Test target: AutopodClientTests — depends on AutopodClient, AutopodUI, AutopodDesktop
 ```
@@ -22,7 +22,7 @@ Test target: AutopodClientTests — depends on AutopodClient, AutopodUI, Autopod
 
 **AutopodClient** is testable in isolation. Owns the `DaemonAPI` actor (REST) and `EventSocket` (WebSocket). No SwiftUI imports.
 
-**AutopodDesktop** wires client to views. `SessionStore` and `ProfileStore` are `@Observable @MainActor` classes that observe `AutopodClient` and publish state to the view layer.
+**AutopodDesktop** wires client to views. `PodStore`, `ProfileStore`, and related stores are `@Observable @MainActor` classes that observe `AutopodClient` and publish state to the view layer.
 
 **AutopodDesktopExe** is the thin `@main` struct — one file, a `WindowGroup`, a `Settings` scene.
 
@@ -35,7 +35,7 @@ Daemon REST  ←→  DaemonAPI (actor, async/await)
                       ↓
 Daemon /events WS ←→ EventSocket (reconnect + replay)
                       ↓
-               SessionStore (@Observable, @MainActor)
+               PodStore (@Observable, @MainActor)
                       ↓
                SwiftUI Views (automatic re-render)
 ```
@@ -54,31 +54,46 @@ Canonical reference for what the desktop app consumes.
 GET  /health                              → { status: "ok", version: string, timestamp: string }
 GET  /version                             → { version: string }
 
-GET  /sessions                            → Session[]
-GET  /sessions/:id                        → Session
-GET  /sessions/stats                      → { [status]: count }
-POST /sessions                            → Session  (body: CreateSessionRequest)
-POST /sessions/:id/approve                → { ok }   (body: { squash?: bool })
-POST /sessions/:id/reject                 → { ok }   (body: { feedback?: string })
-POST /sessions/:id/message                → { ok }   (body: { message: string })
-POST /sessions/:id/nudge                  → { ok }   (body: { message: string })
-POST /sessions/:id/kill                   → { ok }
-POST /sessions/:id/complete               → { ok }   (workspace pods only)
-POST /sessions/:id/validate               → { ok }   (force re-validate)
-POST /sessions/:id/pause                  → { ok }
-DEL  /sessions/:id                        → 204
-POST /sessions/approve-all                → { approved: string[] }
-POST /sessions/kill-failed                → { killed: string[] }
-GET  /sessions/:id/validations            → ValidationResult[]
-GET  /sessions/:id/report/token           → { token, reportUrl }
-GET  /sessions/:id/diff                   → { files: DiffFile[], stats: { added, removed, changed } }
+GET  /pods                                → Pod[]
+GET  /pods/:id                            → Pod
+GET  /pods/stats                          → { total, byStatus }
+POST /pods                                → Pod  (body: CreatePodRequest)
+POST /pods/:id/approve                    → { ok }   (body: { squash?: bool })
+POST /pods/:id/reject                     → { ok }   (body: { feedback?: string })
+POST /pods/:id/message                    → { ok }   (body: { message: string })
+POST /pods/:id/nudge                      → { ok }   (body: { message: string })
+POST /pods/:id/pause                      → { ok }
+POST /pods/:id/kill                       → { ok }
+POST /pods/:id/complete                   → { ok }   (interactive pods)
+POST /pods/:id/promote                    → { ok }   (interactive → agent driven)
+POST /pods/:id/validate                   → { ok }   (force validation)
+POST /pods/:id/revalidate                 → RevalidateResponse
+POST /pods/:id/interrupt-validation       → 204
+POST /pods/:id/validation-overrides       → 204
+POST /pods/:id/force-approve              → { ok }
+POST /pods/:id/fix-manually               → Pod
+POST /pods/:id/preview                    → { previewUrl }
+DEL  /pods/:id                            → 204
+POST /pods/approve-all                    → PodSummary[]
+POST /pods/kill-failed                    → PodSummary[]
+GET  /pods/:id/validations                → StoredValidation[]
+GET  /pods/:id/validations/:attempt/evidence.yaml → YAML fact evidence
+GET  /pods/:id/events?limit=500           → AgentEvent[]
+GET  /pods/:id/quality                    → PodQualitySignals
+GET  /pods/:id/diff                       → canonical, preview, uncommitted, and per-commit diffs
 
 GET  /profiles                            → Profile[]
 GET  /profiles/:name                      → Profile
+GET  /profiles/:name/editor               → { raw, resolved }
 POST /profiles                            → Profile  (body: full profile)
 PUT  /profiles/:name                      → Profile  (body: full profile)
 DEL  /profiles/:name                      → 204
 POST /profiles/:name/warm                 → { tag, digest, sizeMb, buildDuration }
+
+GET  /pods/analytics/{cost|reliability|quality|safety|throughput|escalations|models}
+GET  /memory                              → MemoryEntry[]
+GET  /scheduled-jobs                      → ScheduledJob[]
+GET  /issue-watcher                       → WatchedIssue[]
 ```
 
 ### WebSocket — `/events?token=<token>`
@@ -86,24 +101,32 @@ POST /profiles/:name/warm                 → { tag, digest, sizeMb, buildDurati
 Client sends:
 ```json
 { "type": "subscribe_all" }
-{ "type": "subscribe", "sessionId": "<id>" }
-{ "type": "unsubscribe", "sessionId": "<id>" }
+{ "type": "subscribe", "podId": "<id>" }
+{ "type": "unsubscribe", "podId": "<id>" }
 { "type": "replay", "lastEventId": <int> }
 ```
 
 Server sends (`SystemEvent` union):
 ```
-session.created              → { session: SessionSummary }
-session.status_changed       → { sessionId, previousStatus, newStatus }
-session.agent_activity       → { sessionId, event: AgentEvent }
-session.validation_started   → { sessionId, attempt }
-session.validation_completed → { sessionId, result: ValidationResult }
-session.escalation_created   → { sessionId, escalation: EscalationRequest }
-session.escalation_resolved  → { sessionId, escalationId, response }
-session.completed            → { sessionId, finalStatus, summary }
+pod.created                    → { pod: PodSummary }
+pod.status_changed             → { podId, previousStatus, newStatus }
+pod.agent_activity             → { podId, event: AgentEvent }
+pod.validation_started         → { podId, attempt }
+pod.validation_phase_started   → { podId, phase }
+pod.validation_phase_completed → { podId, phase, phaseStatus, ...phaseResult }
+pod.validation_completed       → { podId, result: ValidationResult }
+pod.escalation_created         → { podId, escalation: EscalationRequest }
+pod.escalation_resolved        → { podId, escalationId, response }
+pod.completed                  → { podId, finalStatus, summary }
+memory.suggestion_created      → { podId, memoryEntry }
+validation.override_queued     → { podId, override }
+scheduled_job.*                → scheduled job lifecycle events
+issue_watcher.*                → issue watcher lifecycle events
+host.resumed                   → daemon wake/reconcile signal
+pod.firewall_denied            → restricted-egress denial
 ```
 
-All events include `_eventId: number` (for replay on reconnect) and `timestamp: string`.
+Persisted events include `_eventId: number` (for replay on reconnect) and `timestamp: string`. Replay is capped; long-disconnected clients should refresh pod lists and use `GET /pods/:id/events?limit=N` for log backfill.
 
 ### Auth
 

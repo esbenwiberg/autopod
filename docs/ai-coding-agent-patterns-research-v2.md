@@ -1,5 +1,9 @@
 # Research: AI Coding Agent Patterns & Lessons for Autopod
 
+> Status: research snapshot. Some implementation references use legacy "session"
+> terminology from before Autopod's pod-first model and should not be read as
+> current API or file-path documentation.
+
 ## Sources Analyzed
 - OpenAI: "Harness Engineering: Leveraging Codex in an Agent-First World"
 - OpenAI Cookbook: "Using PLANS.md for multi-hour problem solving" (ExecPlans)

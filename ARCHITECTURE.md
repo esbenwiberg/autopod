@@ -20,13 +20,13 @@ This document covers system design — how the pieces fit together and why they'
 │                                                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
 │  │  Pod Manager │  │  API routes  │  │  WebSocket event bus │  │
-│  │  (lifecycle  │  │  (REST)      │  │  (9 event types,     │  │
-│  │   + queue)   │  │              │  │   30-day replay)     │  │
+│  │  (lifecycle  │  │  (REST)      │  │  (persisted events   │  │
+│  │   + queue)   │  │              │  │   + replay)          │  │
 │  └──────┬───────┘  └──────────────┘  └──────────────────────┘  │
 │         │                                                       │
 │  ┌──────▼───────┐  ┌──────────────┐  ┌──────────────────────┐  │
 │  │  Container   │  │  Runtimes    │  │  Validation engine   │  │
-│  │  manager     │  │  Claude      │  │  (7 phases,          │  │
+│  │  manager     │  │  Claude      │  │  (gated phases,      │  │
 │  │  (Docker/ACI)│  │  Codex       │  │   Playwright,        │  │
 │  └──────────────┘  │  Copilot     │  │   AI review)         │  │
 │                    └──────────────┘  └──────────────────────┘  │
@@ -102,7 +102,7 @@ Key invariants:
 1. **Provision** — clone bare repo, strip PAT from remote URL, start Docker container (or ACI instance)
 2. **Inject** — generate CLAUDE.md (task + profile sections + memories + skills), write escalation MCP config, apply network policy
 3. **Run runtime** — spawn Claude/Codex/Copilot, stream `AgentEvent`s, monitor escalations
-4. **Validate** — run 7-phase pipeline: build → test → health → smoke → AC → AI review → overall
+4. **Validate** — run lint → SAST → build → test → health → pages → AC → facts → review, then compute the overall decision
 5. **Retry or escalate** — on failure, send structured correction feedback and re-run agent; on exhausted retries, move to `review_required`
 6. **Merge** — create PR (GitHub or ADO), poll for merge, handle CI failures by spawning fix pods
 
@@ -128,19 +128,24 @@ All agent output (tool responses, action results, event broadcasts) passes throu
 
 ## Validation Pipeline
 
-The 7-phase pipeline runs after the agent reports completion. Each phase gates the next.
+The validation pipeline runs after the agent reports completion. Deterministic phases gate the AI-backed phases so the system does not spend review tokens on code that cannot build, test, or satisfy required facts.
 
 | Phase | What runs | Configurable via |
 |-------|-----------|-----------------|
-| 1. Build | `profile.buildCommand` inside container | `buildCommand`, `buildTimeout` |
-| 2. Test | `profile.testCommand` inside container | `testCommand`, `testTimeout` |
-| 3. Health check | HTTP poll for 200 at `profile.healthPath` | `healthPath`, `healthTimeout` |
-| 4. Smoke | Playwright scripts from `profile.smokePages` on daemon host | `smokePages` |
-| 5. AC validation | LLM evaluates each criterion against running app in browser | `session.acceptanceCriteria` |
-| 6. AI task review | Reviewer model checks diff vs original task + all prior findings | `profile.escalation.askAi.model` |
-| 7. Overall | Pass only if all required phases pass | `profile.skipValidationPhases` |
+| 1. Lint | Optional lint command | `lintCommand`, `lintTimeout` |
+| 2. SAST | Optional static/security analysis command | `sastCommand`, `sastTimeout` |
+| 3. Build | `profile.buildCommand` inside container | `buildCommand`, `buildTimeout`, `buildEnv` |
+| 4. Test | `profile.testCommand` inside container | `testCommand`, `testTimeout`, `buildEnv` |
+| 5. Health check | HTTP poll for 200 at `profile.healthPath` | `startCommand`, `healthPath`, `healthTimeout`, `hasWebUi` |
+| 6. Pages | Playwright scripts from `profile.smokePages` | `smokePages` |
+| 7. AC validation | Classifies ACs as web/API/cmd/none and executes what it can | `pod.acceptanceCriteria` |
+| 8. Required facts | Runs contract proof commands and checks declared artifacts | `pod.contract.requiredFacts` |
+| 9. AI task review | Reviewer model checks diff vs task + contract + prior findings | `reviewerModel`, `reviewDepth` |
+| 10. Overall | Pass only if required phases pass | `skipValidationPhases` |
 
-**Proof-of-work screenshots** are captured at phases 4, 5, and 6 — one PNG per smoke page and AC criterion. Stored on disk under `.autopod-data/screenshots/<podId>/`, accessible via the API.
+Profile-level `skipValidationPhases` supports `lint`, `sast`, `build`, `test`, `health`, `pages`, `ac`, and `review`. Contract facts are the durable proof layer and are not exposed as a profile skip in the public schema.
+
+**Proof-of-work evidence** is captured at the browser/review phases as screenshot refs and at the facts phase as command/artifact evidence. Screenshots are stored on disk under `.autopod-data/screenshots/<podId>/` and served through authenticated `/pods/:podId/screenshots/:source/:filename` URLs. Fact evidence can be rendered as `/pods/:podId/validations/:attempt/evidence.yaml`.
 
 On failure, the agent receives tiered correction context: console errors, build output, screenshot diffs, AC failures, and AI reviewer notes. After `maxValidationAttempts`, the pod moves to `review_required`.
 
@@ -172,13 +177,13 @@ All state lives in SQLite (`better-sqlite3`), at `DB_PATH` (default `./autopod.d
 
 Migrations live in `packages/daemon/src/db/migrations/` as sequenced `NNN_*.sql` files. The runner uses the numeric prefix as schema version — **two files sharing the same prefix is a silent bug** (second one is skipped forever). A pre-commit hook (`migration-prefix-check.sh`) blocks collisions locally.
 
-Key tables: `pods`, `pod_events`, `profiles`, `memories`, `escalations`, `action_audit`, `safety_events`, `quality_scores`, `scheduled_jobs`, `issue_watcher`, `series`, `validation_results`, `screenshots`.
+Key tables: `pods`, `events`, `validations`, `profiles`, `memories`, `escalations`, `action_audit`, `safety_events`, `pod_quality_scores`, `scheduled_jobs`, `issue_watcher`, and `series`. Large screenshot bytes live on disk, not in SQLite.
 
 ---
 
 ## Real-time Streaming
 
-The daemon exposes a WebSocket endpoint at `GET /ws`. Clients authenticate via token query param, then send structured messages:
+The daemon exposes a WebSocket endpoint at `GET /events?token=<token>`. Clients authenticate via token query param, then send structured messages:
 
 ```
 subscribe   { type: "subscribe",     podId: "abc123" }
@@ -186,9 +191,9 @@ all         { type: "subscribe_all"                   }
 replay      { type: "replay",        lastEventId: 42  }
 ```
 
-The event bus persists events to `pod_events`, sanitizes PII via `processContentDeep()`, then broadcasts to all subscribed connections. Events carry monotonic `_eventId` for gap-free replay. 30-day retention. Heartbeat pings every 30s.
+The event bus persists events to `events`, sanitizes PII via `processContentDeep()` before broadcast, and tags wire events with monotonic `_eventId` values for replay. Replay is paged and capped at 10,000 events; clients that fall farther behind resync through REST. Heartbeat pings every 30s.
 
-Nine system event types: `pod.created`, `status_changed`, `agent_activity`, `validation_started`, `validation_completed`, `escalation_created`, `escalation_resolved`, `pod.completed`, `memory.suggestion_created`.
+System events are namespaced by source: pod lifecycle (`pod.created`, `pod.status_changed`, `pod.agent_activity`, validation phase start/complete, budgets, preflight/worktree warnings, firewall denies), escalations, memory suggestions, scheduled jobs, issue watcher events, and host wake/resume reconciliation.
 
 ---
 
@@ -210,11 +215,11 @@ Dynamic action tools — one MCP tool per `ActionDefinition` from the profile's 
 
 Series decompose large features into dependency-ordered pods. The spec folder contains:
 
-- `briefs/` — one `.md` file per pod with YAML frontmatter (`title`, `task`, `depends_on`, `touches`, `does_not_touch`, `acceptance_criteria`, `context_files`)
+- `briefs/` — one folder per pod, each with `brief.md` and `contract.yaml`
 - `purpose.md` — why this series exists (injected into every pod's CLAUDE.md)
 - `design.md` — implementation design (injected into every pod's CLAUDE.md)
 
-The daemon resolves the `depends_on` graph topologically (Kahn's algorithm) and spawns pods in order. Three PR modes:
+`brief.md` carries task text, `context_files`, and advisory scope (`touches`, `does_not_touch`, `require_sidecars`). `contract.yaml` carries the runnable contract: `depends_on`, scenarios, required facts, and human review items. The daemon resolves the `depends_on` graph topologically and spawns pods in order. Three PR modes:
 
 - **`single`** — all pods share one branch; non-root pods wait for their parent to complete; only the final pod creates a PR.
 - **`stacked`** — each pod gets its own PR; non-root pods wait for the parent PR to merge before starting.
@@ -224,7 +229,7 @@ The daemon resolves the `depends_on` graph topologically (Kahn's algorithm) and 
 
 ## Analytics
 
-Six fleet dashboards, all queryable via `GET /pods/analytics/*?days=N`:
+Seven fleet dashboards, all queryable via `GET /pods/analytics/*?days=N`:
 
 | Dashboard | Key signals |
 |-----------|------------|
@@ -234,6 +239,7 @@ Six fleet dashboards, all queryable via `GET /pods/analytics/*?days=N`:
 | **Safety** | PII + injection events, quarantine score histogram, network policy distribution, audit chain integrity |
 | **Quality** | Composite score (0–100) per pod: read:edit ratio, blind edits, validation pass, fix attempt count |
 | **Escalations** | Total by type and by profile, daily sparkline |
+| **Models** | Per-model leaderboard, runtime aggregates, failure-stage matrix, and what-if simulator inputs |
 
 All queries filter to a **terminal cohort**: non-workspace pods with final status (complete, killed, failed) that completed within the window.
 

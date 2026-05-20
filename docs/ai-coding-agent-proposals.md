@@ -1,5 +1,10 @@
 # Detailed Proposals: Improvements Derived from Industry Research
 
+> Status: historical proposal material. This document predates the current pod-first
+> terminology and `processPod()` orchestration entry point, so names such as
+> "session", `processSession()`, and `packages/daemon/src/sessions/*` should be
+> treated as legacy references until the proposal itself is refreshed.
+
 These proposals come from analyzing how OpenAI (Codex/Harness Engineering), Stripe (Minions), Logic Inc, and matklad's ARCHITECTURE.md patterns apply to autopod. Each is something autopod doesn't already have.
 
 ---
