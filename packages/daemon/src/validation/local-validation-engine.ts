@@ -750,7 +750,7 @@ async function runFactValidation(
     const commandStart = Date.now();
     try {
       commandResult =
-        fact.kind === 'browser-test' && hostBrowserRunner && config.worktreePath
+        fact.kind === 'browser-test'
           ? await runBrowserFactOnHost(fact.command, config, hostBrowserRunner, log)
           : await containerManager.execInContainer(config.containerId, ['sh', '-c', fact.command], {
               cwd,
@@ -816,12 +816,29 @@ async function runFactValidation(
 async function runBrowserFactOnHost(
   command: string,
   config: ValidationEngineConfig,
-  hostBrowserRunner: HostBrowserRunner,
+  hostBrowserRunner: HostBrowserRunner | undefined,
   log?: Logger,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const available = await hostBrowserRunner.isAvailable();
-  if (!available) {
-    throw new Error('Host Playwright is not available for browser-test fact execution');
+  if (!hostBrowserRunner) {
+    throw new Error(
+      'Host Playwright is not available for browser-test fact execution: daemon was not wired with a host browser runner',
+    );
+  }
+  const availability = await hostBrowserRunner.getAvailability();
+  if (!availability.available) {
+    const details = [
+      availability.reason,
+      availability.playwrightPackagePath
+        ? `playwright=${availability.playwrightPackagePath}`
+        : 'playwright=<not resolved>',
+      availability.playwrightCwd ? `cwd=${availability.playwrightCwd}` : 'cwd=<not resolved>',
+      availability.exitCode !== undefined ? `exit=${availability.exitCode}` : null,
+      availability.stderr ? `stderr=${availability.stderr.slice(0, 500)}` : null,
+      availability.cached ? 'cached=true' : 'cached=false',
+    ].filter((detail): detail is string => detail !== null);
+    throw new Error(
+      `Host Playwright is not available for browser-test fact execution: ${details.join('; ')}`,
+    );
   }
   if (!config.worktreePath) {
     throw new Error('Host worktree path is required for browser-test fact execution');

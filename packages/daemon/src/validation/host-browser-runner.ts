@@ -12,7 +12,22 @@ export interface BrowserRunResult {
   exitCode: number;
 }
 
+export interface HostBrowserAvailability {
+  available: boolean;
+  cached: boolean;
+  checkedAt: string;
+  reason: string;
+  playwrightPackagePath: string | null;
+  playwrightCwd: string | null;
+  chromiumExecutablePath: string | null;
+  exitCode?: number;
+  stderr?: string;
+}
+
 export interface HostBrowserRunner {
+  /** Check whether Playwright Chromium is usable on the host, with diagnostics. */
+  getAvailability(): Promise<HostBrowserAvailability>;
+
   /** Check whether Playwright Chromium is usable on the host. */
   isAvailable(): Promise<boolean>;
 
@@ -34,7 +49,7 @@ export interface HostBrowserRunner {
  * Child processes spawned with `cwd` set to this directory can
  * `import 'playwright'` since ESM resolution walks up from cwd.
  */
-function resolvePlaywrightCwd(): string | null {
+function resolvePlaywright(): { cwd: string; packagePath: string } | null {
   try {
     const require = createRequire(import.meta.url);
     const pwEntry = require.resolve('playwright');
@@ -42,7 +57,7 @@ function resolvePlaywrightCwd(): string | null {
     // Walk up to the package directory that has playwright in its node_modules
     const parts = pwEntry.split('/node_modules/');
     if (parts.length >= 2) {
-      return parts[0];
+      return { cwd: parts[0] ?? '', packagePath: pwEntry };
     }
     return null;
   } catch {
@@ -50,14 +65,22 @@ function resolvePlaywrightCwd(): string | null {
   }
 }
 
-export function createHostBrowserRunner(logger: Logger): HostBrowserRunner {
+interface HostBrowserRunnerOptions {
+  probeAvailability?: () => Promise<Omit<HostBrowserAvailability, 'cached' | 'checkedAt'>>;
+}
+
+export function createHostBrowserRunner(
+  logger: Logger,
+  options: HostBrowserRunnerOptions = {},
+): HostBrowserRunner {
   const log = logger.child({ component: 'host-browser-runner' });
   const baseDir = join(tmpdir(), 'autopod-browser');
-  let available: boolean | null = null;
+  let availableCache: HostBrowserAvailability | null = null;
 
   // Resolve the cwd that has playwright in its node_modules at construction
   // time. Child processes spawned with this cwd can `import 'playwright'`.
-  const pwCwd = resolvePlaywrightCwd();
+  const playwright = resolvePlaywright();
+  const pwCwd = playwright?.cwd ?? null;
 
   function sessionDir(podId: string): string {
     return join(baseDir, podId);
@@ -83,34 +106,98 @@ export function createHostBrowserRunner(logger: Logger): HostBrowserRunner {
     };
   }
 
+  async function defaultProbeAvailability(): Promise<
+    Omit<HostBrowserAvailability, 'cached' | 'checkedAt'>
+  > {
+    if (!playwright || !pwCwd) {
+      return {
+        available: false,
+        reason: 'Playwright package not found from the daemon module path',
+        playwrightPackagePath: null,
+        playwrightCwd: null,
+        chromiumExecutablePath: null,
+      };
+    }
+
+    try {
+      // Verify chromium binary is actually installed.
+      const result = await runNode(
+        `import { chromium } from 'playwright'; console.log(chromium.executablePath());`,
+        { timeout: 10_000, ...childSpawnOpts() },
+      );
+      const executablePath = result.stdout.trim();
+      if (result.exitCode === 0 && executablePath.length > 0) {
+        return {
+          available: true,
+          reason: 'Host Playwright Chromium probe succeeded',
+          playwrightPackagePath: playwright.packagePath,
+          playwrightCwd: pwCwd,
+          chromiumExecutablePath: executablePath,
+          exitCode: result.exitCode,
+          stderr: result.stderr || undefined,
+        };
+      }
+      return {
+        available: false,
+        reason: 'Host Playwright Chromium probe did not produce an executable path',
+        playwrightPackagePath: playwright.packagePath,
+        playwrightCwd: pwCwd,
+        chromiumExecutablePath: executablePath || null,
+        exitCode: result.exitCode,
+        stderr: result.stderr || undefined,
+      };
+    } catch (err) {
+      return {
+        available: false,
+        reason: err instanceof Error ? err.message : String(err),
+        playwrightPackagePath: playwright.packagePath,
+        playwrightCwd: pwCwd,
+        chromiumExecutablePath: null,
+      };
+    }
+  }
+
   return {
-    async isAvailable(): Promise<boolean> {
-      if (available !== null) return available;
-
-      if (!pwCwd) {
-        available = false;
-        log.info('Playwright package not found — browser validation will fall back to container');
-        return false;
+    async getAvailability(): Promise<HostBrowserAvailability> {
+      if (availableCache) {
+        return { ...availableCache, cached: true };
       }
 
-      try {
-        // Verify chromium binary is actually installed
-        const result = await runNode(
-          `import { chromium } from 'playwright'; console.log(chromium.executablePath());`,
-          { timeout: 10_000, ...childSpawnOpts() },
+      const probe = await (options.probeAvailability ?? defaultProbeAvailability)();
+      const availability = {
+        ...probe,
+        cached: false,
+        checkedAt: new Date().toISOString(),
+      };
+
+      if (availability.available) {
+        availableCache = availability;
+        log.info(
+          {
+            playwrightPackagePath: availability.playwrightPackagePath,
+            playwrightCwd: availability.playwrightCwd,
+            chromiumExecutablePath: availability.chromiumExecutablePath,
+          },
+          'Host Playwright available — browser validation will run on host',
         );
-        available = result.exitCode === 0 && result.stdout.trim().length > 0;
-      } catch {
-        available = false;
-      }
-
-      if (available) {
-        log.info('Host Playwright available — browser validation will run on host');
       } else {
-        log.info('Host Playwright not available — browser validation will fall back to container');
+        log.warn(
+          {
+            reason: availability.reason,
+            playwrightPackagePath: availability.playwrightPackagePath,
+            playwrightCwd: availability.playwrightCwd,
+            exitCode: availability.exitCode,
+            stderr: availability.stderr,
+          },
+          'Host Playwright not available — browser validation cannot run host browser checks',
+        );
       }
 
-      return available;
+      return availability;
+    },
+
+    async isAvailable(): Promise<boolean> {
+      return (await this.getAvailability()).available;
     },
 
     async runScript(

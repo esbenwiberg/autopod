@@ -56,7 +56,10 @@ index 0000000..3333333
 });
 
 describe('required fact execution', () => {
-  it('runs browser-test fact commands on the host when a host browser runner is available', async () => {
+  async function validateBrowserFact(options: {
+    hostBrowserRunner?: HostBrowserRunner;
+    command?: string;
+  }) {
     const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-fact-host-'));
     const execCommands: string[] = [];
     const containerManager = {
@@ -78,14 +81,11 @@ describe('required fact execution', () => {
         throw new Error(`unexpected container command: ${shell}`);
       }),
     } as unknown as ContainerManager;
-    const hostBrowserRunner: HostBrowserRunner = {
-      isAvailable: vi.fn(async () => true),
-      runScript: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
-      readScreenshot: vi.fn(async () => ''),
-      cleanup: vi.fn(async () => {}),
-      screenshotDir: vi.fn(() => path.join(worktreePath, '.autopod/screenshots')),
-    };
-    const engine = createLocalValidationEngine(containerManager, undefined, hostBrowserRunner);
+    const engine = createLocalValidationEngine(
+      containerManager,
+      undefined,
+      options.hostBrowserRunner,
+    );
 
     try {
       const result = await engine.validate({
@@ -124,18 +124,87 @@ required_facts:
     artifact:
       path: Client/tests/facts.spec.ts
       change: create
-    command: printf host-fact
+    command: ${options.command ?? 'printf host-fact'}
 human_review: []
 `),
       });
-
-      expect(result.factValidation?.status).toBe('pass');
-      expect(result.factValidation?.results[0]?.stdout).toBe('host-fact');
-      expect(hostBrowserRunner.isAvailable).toHaveBeenCalled();
-      expect(execCommands).not.toContain('printf host-fact');
+      return { result, execCommands };
     } finally {
       await fs.rm(worktreePath, { recursive: true, force: true });
     }
+  }
+
+  it('runs browser-test fact commands on the host when a host browser runner is available', async () => {
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: true,
+        cached: false,
+        checkedAt: '2026-05-20T00:00:00.000Z',
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      })),
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+      readScreenshot: vi.fn(async () => ''),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp/autopod/screenshots'),
+    };
+
+    const { result, execCommands } = await validateBrowserFact({ hostBrowserRunner });
+
+    expect(result.factValidation?.status).toBe('pass');
+    expect(result.factValidation?.results[0]?.stdout).toBe('host-fact');
+    expect(hostBrowserRunner.getAvailability).toHaveBeenCalled();
+    expect(hostBrowserRunner.isAvailable).not.toHaveBeenCalled();
+    expect(execCommands).not.toContain('printf host-fact');
+  });
+
+  it('fails browser-test facts with host diagnostics when host Playwright is unavailable', async () => {
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: false,
+        cached: false,
+        checkedAt: '2026-05-20T00:00:00.000Z',
+        reason: 'chromium probe failed',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: null,
+        exitCode: 1,
+        stderr: 'browser missing',
+      })),
+      isAvailable: vi.fn(async () => false),
+      runScript: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+      readScreenshot: vi.fn(async () => ''),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp/autopod/screenshots'),
+    };
+
+    const { result, execCommands } = await validateBrowserFact({
+      hostBrowserRunner,
+      command: 'printf should-not-run',
+    });
+
+    expect(result.factValidation?.status).toBe('fail');
+    expect(result.factValidation?.results[0]?.stderr).toContain('chromium probe failed');
+    expect(result.factValidation?.results[0]?.stderr).toContain(
+      'playwright=/repo/node_modules/playwright/index.js',
+    );
+    expect(result.factValidation?.results[0]?.stderr).toContain('stderr=browser missing');
+    expect(execCommands).not.toContain('printf should-not-run');
+  });
+
+  it('keeps browser-test facts host-only when no host runner is wired', async () => {
+    const { result, execCommands } = await validateBrowserFact({
+      command: 'printf should-not-run',
+    });
+
+    expect(result.factValidation?.status).toBe('fail');
+    expect(result.factValidation?.results[0]?.stderr).toContain(
+      'daemon was not wired with a host browser runner',
+    );
+    expect(execCommands).not.toContain('printf should-not-run');
   });
 });
 

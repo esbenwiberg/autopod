@@ -2,7 +2,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHostBrowserRunner } from './host-browser-runner.js';
 
 const logger = pino({ level: 'silent' });
@@ -13,6 +13,61 @@ describe('HostBrowserRunner', () => {
 
   afterEach(async () => {
     await runner.cleanup(testSessionId);
+  });
+
+  describe('getAvailability', () => {
+    it('caches successful availability probes', async () => {
+      const probeAvailability = vi.fn(async () => ({
+        available: true,
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      }));
+      const diagnosticRunner = createHostBrowserRunner(logger, { probeAvailability });
+
+      const first = await diagnosticRunner.getAvailability();
+      const second = await diagnosticRunner.getAvailability();
+
+      expect(first.available).toBe(true);
+      expect(first.cached).toBe(false);
+      expect(second.available).toBe(true);
+      expect(second.cached).toBe(true);
+      expect(probeAvailability).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries failed availability probes instead of caching unavailable forever', async () => {
+      const probeAvailability = vi
+        .fn()
+        .mockResolvedValueOnce({
+          available: false,
+          reason: 'chromium missing',
+          playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+          playwrightCwd: '/repo',
+          chromiumExecutablePath: null,
+          exitCode: 1,
+          stderr: 'missing executable',
+        })
+        .mockResolvedValueOnce({
+          available: true,
+          reason: 'ok now',
+          playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+          playwrightCwd: '/repo',
+          chromiumExecutablePath: '/chrome',
+        });
+      const diagnosticRunner = createHostBrowserRunner(logger, { probeAvailability });
+
+      const first = await diagnosticRunner.getAvailability();
+      const second = await diagnosticRunner.getAvailability();
+
+      expect(first.available).toBe(false);
+      expect(first.cached).toBe(false);
+      expect(first.reason).toBe('chromium missing');
+      expect(second.available).toBe(true);
+      expect(second.cached).toBe(false);
+      expect(second.chromiumExecutablePath).toBe('/chrome');
+      expect(probeAvailability).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('runScript', () => {
