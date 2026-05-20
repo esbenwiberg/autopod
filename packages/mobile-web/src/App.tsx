@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { readStoredToken, readTokenFromHash } from './lib/token.js';
 import { WsClient } from './lib/ws-client.js';
+import { About } from './screens/About.js';
 import { Create } from './screens/Create.js';
 import { Landing } from './screens/Landing.js';
 import { PodDetail } from './screens/PodDetail.js';
@@ -33,6 +34,7 @@ export function App(): JSX.Element {
         <Route path="/" element={<Landing />} />
         <Route path="/create" element={<Create />} />
         <Route path="/pod/:id" element={<PodDetail />} />
+        <Route path="/about" element={<About />} />
         <Route path="/scan-again" element={<ScanAgain />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

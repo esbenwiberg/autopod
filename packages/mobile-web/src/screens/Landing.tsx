@@ -80,12 +80,18 @@ export function Landing(): JSX.Element {
       <section className="pod-list">
         {filtered.length === 0 && !loading ? (
           <p className="empty">
-            {tab === 'needs-me' ? 'Nothing waiting on you. ☕' : 'No active pods.'}
+            {tab === 'needs-me' ? 'Nothing waiting on you.' : 'No active pods.'}
           </p>
         ) : (
           filtered.map((pod) => <PodCard key={pod.id} pod={pod} />)
         )}
       </section>
+
+      <footer className="app-footer">
+        <Link to="/about" className="muted footer-link">
+          About
+        </Link>
+      </footer>
     </main>
   );
 }

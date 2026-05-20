@@ -104,6 +104,35 @@ code {
   margin-top: 1rem;
 }
 
+.app-footer {
+  text-align: center;
+  margin-top: 2rem;
+  padding: 0.5rem 0;
+  font-size: 0.85rem;
+}
+
+.footer-link {
+  text-decoration: none;
+}
+
+.about-list {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: 0.5rem 1rem;
+  margin: 1rem 0;
+}
+
+.about-list dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.about-list dd {
+  margin: 0;
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
 .refresh-button {
   appearance: none;
   background: var(--surface);
