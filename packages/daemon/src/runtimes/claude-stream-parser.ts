@@ -49,8 +49,28 @@ interface ClaudeStreamEvent {
   [key: string]: unknown;
 }
 
-/** File-modifying tools whose output we map to AgentFileChangeEvent. */
-const FILE_CHANGE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
+/** Built-in Claude tools whose output we map to AgentFileChangeEvent. */
+const BUILTIN_FILE_CHANGE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
+
+/** MCP tools known to mutate files. */
+const MCP_FILE_MODIFY_TOOLS = new Set([
+  'mcp__serena__replace_content',
+  'mcp__serena__replace_symbol_body',
+  'mcp__serena__insert_after_symbol',
+  'mcp__serena__insert_before_symbol',
+]);
+
+function stringField(input: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  return null;
+}
+
+function fileChangePath(input: Record<string, unknown>): string {
+  return stringField(input, ['file_path', 'path', 'relative_path']) ?? 'unknown';
+}
 
 /**
  * Parses NDJSON output from `claude --output-format stream-json` into
@@ -115,13 +135,12 @@ export class ClaudeStreamParser {
       return { type: 'status', timestamp: ts, message: block.text.slice(0, 2000) };
     }
     if (block.type === 'tool_use' && block.name) {
-      if (FILE_CHANGE_TOOLS.has(block.name)) {
+      if (BUILTIN_FILE_CHANGE_TOOLS.has(block.name) || MCP_FILE_MODIFY_TOOLS.has(block.name)) {
         const input = block.input ?? {};
-        const filePath = (input.file_path ?? input.path ?? 'unknown') as string;
         return {
           type: 'file_change',
           timestamp: ts,
-          path: filePath,
+          path: fileChangePath(input),
           action: block.name === 'Write' ? 'create' : 'modify',
         };
       }

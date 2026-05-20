@@ -275,6 +275,39 @@ describe('ClaudeStreamParser.mapContentBlock', () => {
     expect(result).toMatchObject({ type: 'file_change', action: 'create' });
   });
 
+  it('maps Serena replace_content tool_use block to file_change modify event', () => {
+    const block = {
+      type: 'tool_use',
+      name: 'mcp__serena__replace_content',
+      input: {
+        relative_path: 'Infrastructure/AgentMode/Seeding/Seeders/ProjectSeeder.cs',
+        mode: 'literal',
+        needle: 'statusActive',
+        repl: 'statusCompleted',
+      },
+    };
+    const result = ClaudeStreamParser.mapContentBlock(block, TS);
+    expect(result).toMatchObject({
+      type: 'file_change',
+      path: 'Infrastructure/AgentMode/Seeding/Seeders/ProjectSeeder.cs',
+      action: 'modify',
+    });
+  });
+
+  it('keeps non-mutating Serena lookup tools as tool_use events', () => {
+    const block = {
+      type: 'tool_use',
+      name: 'mcp__serena__find_symbol',
+      input: { name_path: 'ProjectSeeder', relative_path: 'Infrastructure' },
+    };
+    const result = ClaudeStreamParser.mapContentBlock(block, TS);
+    expect(result).toMatchObject({
+      type: 'tool_use',
+      tool: 'mcp__serena__find_symbol',
+      input: { name_path: 'ProjectSeeder', relative_path: 'Infrastructure' },
+    });
+  });
+
   it('returns null for unrecognised block types', () => {
     const block = { type: 'image', source: { type: 'base64', data: '...' } };
     const result = ClaudeStreamParser.mapContentBlock(block, TS);

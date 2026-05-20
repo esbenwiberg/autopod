@@ -1031,9 +1031,17 @@ function generateCodeNavigationRules(
   lines.push('## Code Navigation Rules');
   lines.push('');
   lines.push(
-    'Code-intel MCPs are active. Use them for ALL symbol navigation and code exploration. ' +
+    'Code-intel MCPs are active. Use them for symbol navigation, references, ' +
+      'implementations, type hierarchy, and code exploration. ' +
       'Do NOT use grep, find, cat, or file reads to discover symbols, callers, or implementations — ' +
       'the semantic tools are faster and more accurate.',
+  );
+  lines.push(
+    'For file edits, use built-in `Edit`, `MultiEdit`, or `Write` for simple literal changes, ' +
+      'local replacements, and new files. Use a semantic MCP refactor or rename tool only when ' +
+      'the loaded schema explicitly offers one for a reference-aware rename/refactor. ' +
+      'Do not use Serena `replace_content` for routine text edits unless semantic lookup context ' +
+      'is needed or no built-in edit path is suitable.',
   );
   lines.push('');
   lines.push('| Task | Tool |');

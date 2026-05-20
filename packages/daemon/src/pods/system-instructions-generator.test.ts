@@ -218,6 +218,14 @@ describe('generateSystemInstructions', () => {
     );
 
     expect(md).toContain('## Code Navigation Rules');
+    expect(md).toContain(
+      'Use them for symbol navigation, references, implementations, type hierarchy, and code exploration.',
+    );
+    expect(md).toContain('use built-in `Edit`, `MultiEdit`, or `Write` for simple literal changes');
+    expect(md).toContain(
+      'Use a semantic MCP refactor or rename tool only when the loaded schema explicitly offers one',
+    );
+    expect(md).toContain('Do not use Serena `replace_content` for routine text edits');
     expect(md).toContain('mcp__serena__find_symbol');
     expect(md).toContain('mcp__serena__find_referencing_symbols');
     // roslyn rows must be absent when only serena is active
