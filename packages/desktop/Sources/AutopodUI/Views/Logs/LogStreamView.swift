@@ -29,7 +29,7 @@ public struct LogStreamView: View {
         self.onLoadAll = onLoadAll
     }
 
-    @State private var activeFilters: Set<AgentEventType> = []
+    @State private var activeFilters: Set<LogEventFilter> = []
     @State private var searchText = ""
     @State private var pinnedToBottom = true
     @State private var expandedEventId: Int?
@@ -42,18 +42,18 @@ public struct LogStreamView: View {
             // Always filter tool_result noise (same as CLI)
             !event.type.isNoise
             && (showReasoning || event.type != .reasoning)
-            && (activeFilters.isEmpty || activeFilters.contains(event.type))
+            && (activeFilters.isEmpty || activeFilters.contains { $0.matches(event) })
             && (searchText.isEmpty || event.summary.localizedCaseInsensitiveContains(searchText)
                 || (event.detail?.localizedCaseInsensitiveContains(searchText) ?? false))
         }
     }
 
-    private var filterPillTypes: [AgentEventType] {
-        var types: [AgentEventType] = [
-            .status, .toolUse, .fileChange,
-            .escalation, .plan, .progress, .error,
+    private var filterPillTypes: [LogEventFilter] {
+        var types: [LogEventFilter] = [
+            .eventType(.status), .eventType(.toolUse), .mcp, .eventType(.fileChange),
+            .eventType(.escalation), .eventType(.plan), .eventType(.progress), .eventType(.error),
         ]
-        if showReasoning { types.append(.reasoning) }
+        if showReasoning { types.append(.eventType(.reasoning)) }
         return types
     }
 
@@ -137,8 +137,8 @@ public struct LogStreamView: View {
                 Spacer()
 
                 // Type filter pills
-                ForEach(filterPillTypes, id: \.rawValue) { type in
-                    filterPill(type)
+                ForEach(filterPillTypes, id: \.self) { filter in
+                    filterPill(filter)
                 }
             }
         }
@@ -147,26 +147,29 @@ public struct LogStreamView: View {
         .background(.ultraThinMaterial)
     }
 
-    private func filterPill(_ type: AgentEventType) -> some View {
-        let isActive = activeFilters.contains(type)
+    private func filterPill(_ filter: LogEventFilter) -> some View {
+        let isActive = activeFilters.contains(filter)
         return Button {
-            if isActive { activeFilters.remove(type) }
-            else { activeFilters.insert(type) }
+            if isActive { activeFilters.remove(filter) }
+            else { activeFilters.insert(filter) }
         } label: {
             HStack(spacing: 3) {
-                Image(systemName: type.icon)
+                Image(systemName: filter.icon)
                     .font(.system(size: 9))
-                Text(type.label)
+                Text(filter.label)
             }
             .font(.system(.caption2).weight(isActive ? .semibold : .regular))
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
-            .background(isActive ? type.color.opacity(0.15) : Color.clear)
-            .foregroundStyle(isActive ? type.color : .secondary)
+            .background(isActive ? filter.color.opacity(0.15) : Color.clear)
+            .foregroundStyle(isActive ? filter.color : .secondary)
             .clipShape(RoundedRectangle(cornerRadius: 4))
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
-                    .stroke(isActive ? type.color.opacity(0.3) : Color(nsColor: .separatorColor), lineWidth: 0.5)
+                    .stroke(
+                        isActive ? filter.color.opacity(0.3) : Color(nsColor: .separatorColor),
+                        lineWidth: 0.5
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -331,6 +334,43 @@ public struct LogStreamView: View {
                     }
                 }
             }
+        }
+    }
+}
+
+private enum LogEventFilter: Hashable {
+    case eventType(AgentEventType)
+    case mcp
+
+    var label: String {
+        switch self {
+        case .eventType(let type): type.label
+        case .mcp: "MCP"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .eventType(let type): type.icon
+        case .mcp: "point.3.connected.trianglepath.dotted"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .eventType(let type): type.color
+        case .mcp: .teal
+        }
+    }
+
+    func matches(_ event: AgentEvent) -> Bool {
+        switch self {
+        case .eventType(.toolUse):
+            return event.type == .toolUse && !event.isMCPToolCall
+        case .eventType(let type):
+            return event.type == type
+        case .mcp:
+            return event.isMCPToolCall
         }
     }
 }
