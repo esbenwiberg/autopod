@@ -45,6 +45,19 @@ function seedSessionWithProfile(db: Database.Database): void {
   ).run();
 }
 
+function agentActivity(message: string, podId = 'sess-001'): SystemEvent {
+  return {
+    type: 'pod.agent_activity',
+    timestamp: new Date().toISOString(),
+    podId,
+    event: {
+      type: 'status',
+      timestamp: new Date().toISOString(),
+      message,
+    },
+  };
+}
+
 describe('EventRepository', () => {
   let db: Database.Database;
   let repo: EventRepository;
@@ -248,6 +261,47 @@ describe('EventRepository', () => {
 
     it('should return empty array for pod with no events', () => {
       expect(repo.getForSession('sess-001')).toEqual([]);
+    });
+
+    it('should return latest typed session events in ascending order', () => {
+      db.prepare(
+        `INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id)
+         VALUES ('sess-002', 'test-app', 'other task', 'queued', 'opus', 'claude', 'main', 'user-1')`,
+      ).run();
+
+      const statusEvent: SystemEvent = {
+        type: 'pod.status_changed',
+        timestamp: new Date().toISOString(),
+        podId: 'sess-001',
+        previousStatus: 'queued',
+        newStatus: 'running',
+      };
+
+      for (let i = 1; i <= 6; i++) {
+        repo.insert(agentActivity(`message-${i}`));
+        repo.insert(statusEvent);
+        repo.insert(agentActivity(`other-${i}`, 'sess-002'));
+      }
+
+      const events = repo.getForSession('sess-001', {
+        type: 'pod.agent_activity',
+        latest: 3,
+      });
+
+      expect(events).toHaveLength(3);
+      expect(events.map((e) => e.type)).toEqual([
+        'pod.agent_activity',
+        'pod.agent_activity',
+        'pod.agent_activity',
+      ]);
+      expect(
+        events.map((e) => {
+          const payload = e.payload as Extract<SystemEvent, { type: 'pod.agent_activity' }>;
+          return payload.event.type === 'status' ? payload.event.message : null;
+        }),
+      ).toEqual(['message-4', 'message-5', 'message-6']);
+      expect(events[0]?.id).toBeLessThan(events[1]?.id ?? 0);
+      expect(events[1]?.id).toBeLessThan(events[2]?.id ?? 0);
     });
   });
 });

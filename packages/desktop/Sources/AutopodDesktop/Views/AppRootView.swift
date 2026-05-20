@@ -58,6 +58,13 @@ public struct AppRootView: View {
     return nil
   }
 
+  private var selectedSessionLimitedLogCount: Int? {
+    guard let id = podStore.selectedSessionId,
+          let scope = eventStream?.historicalEventScope[id],
+          case .latest(let count) = scope else { return nil }
+    return count
+  }
+
   public var body: some View {
     MainView(
       pods: podStore.pods,
@@ -83,9 +90,14 @@ public struct AppRootView: View {
       },
       isLoadingLogs: selectedSessionIsLoadingLogs,
       logsLoadError: selectedSessionLogsError,
+      limitedLogCount: selectedSessionLimitedLogCount,
       onReloadLogs: {
         guard let id = podStore.selectedSessionId, let api = connectionManager.api else { return }
-        eventStream?.loadHistoricalEvents(podId: id, api: api)
+        eventStream?.reloadHistoricalEvents(podId: id, api: api)
+      },
+      onLoadAllLogs: {
+        guard let id = podStore.selectedSessionId, let api = connectionManager.api else { return }
+        eventStream?.loadHistoricalEvents(podId: id, api: api, scope: .full)
       },
       sessionDiffs: podStore.sessionDiffs,
       terminalState: terminalManager?.state ?? "disconnected",

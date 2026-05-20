@@ -24,7 +24,9 @@ public struct MainView: View {
     public var loadEventsForPod: ((String) -> Void)?
     public var isLoadingLogs: Bool
     public var logsLoadError: String?
+    public var limitedLogCount: Int?
     public var onReloadLogs: (() -> Void)?
+    public var onLoadAllLogs: (() -> Void)?
     public var sessionDiffs: [String: String]
     public var terminalState: String
     public var terminalDataPipe: TerminalDataPipe?
@@ -92,7 +94,9 @@ public struct MainView: View {
         loadEventsForPod: ((String) -> Void)? = nil,
         isLoadingLogs: Bool = false,
         logsLoadError: String? = nil,
+        limitedLogCount: Int? = nil,
         onReloadLogs: (() -> Void)? = nil,
+        onLoadAllLogs: (() -> Void)? = nil,
         sessionDiffs: [String: String] = [:],
         terminalState: String = "disconnected",
         terminalDataPipe: TerminalDataPipe? = nil,
@@ -151,7 +155,9 @@ public struct MainView: View {
         self.loadEventsForPod = loadEventsForPod
         self.isLoadingLogs = isLoadingLogs
         self.logsLoadError = logsLoadError
+        self.limitedLogCount = limitedLogCount
         self.onReloadLogs = onReloadLogs
+        self.onLoadAllLogs = onLoadAllLogs
         self.sessionDiffs = sessionDiffs
         self.terminalState = terminalState
         self.terminalDataPipe = terminalDataPipe
@@ -504,7 +510,9 @@ public struct MainView: View {
                     loadValidationHistory: loadValidationHistory,
                     isLoadingLogs: isLoadingLogs,
                     logsLoadError: logsLoadError,
+                    limitedLogCount: limitedLogCount,
                     onReloadLogs: onReloadLogs,
+                    onLoadAllLogs: onLoadAllLogs,
                     onLaunchSeriesFromPod: { seriesFromPod = $0 },
                     requestedTab: $requestedDetailTab
                 )

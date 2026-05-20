@@ -14,6 +14,16 @@ public final class EventStream {
     case idle, loading, loaded, failed(String)
   }
 
+  public enum HistoricalEventScope: Equatable {
+    case latest(Int)
+    case full
+
+    var limit: Int? {
+      if case .latest(let count) = self { return count }
+      return nil
+    }
+  }
+
   // MARK: - State
 
   public private(set) var connectionState: String = "Disconnected"
@@ -25,14 +35,19 @@ public final class EventStream {
   /// Load state for the historical REST fetch (keyed by pod ID)
   public private(set) var historicalLoadState: [String: HistoricalLoadState] = [:]
 
+  /// Coverage of the historical events currently loaded into `sessionEvents`.
+  public private(set) var historicalEventScope: [String: HistoricalEventScope] = [:]
+
   private var eventSocket: EventSocket?
   private let podStore: PodStore
   private weak var memoryStore: MemoryStore?
   private weak var scheduledJobStore: ScheduledJobStore?
   private var eventIdCounter = 0
+  private var historicalRequestedScope: [String: HistoricalEventScope] = [:]
 
   private static let globalEventCap = 500
   private static let sessionEventCap = 1000
+  private static let defaultHistoricalEventLimit = 500
 
   // Throttle: batch event mutations to avoid flooding SwiftUI's AttributeGraph
   private var pendingGlobalEvents: [AgentEvent] = []
@@ -105,22 +120,45 @@ public final class EventStream {
   /// Load historical agent events for a pod from the daemon REST API.
   /// Always refetches; reconciles by preserving any live (positive-ID) events
   /// already in the buffer so a stale partial WS buffer doesn't suppress the backfill.
-  public func loadHistoricalEvents(podId: String, api: DaemonAPI) {
+  public func loadHistoricalEvents(
+    podId: String,
+    api: DaemonAPI,
+    scope explicitScope: HistoricalEventScope? = nil
+  ) {
+    let requestedScope =
+      explicitScope
+      ?? historicalRequestedScope[podId]
+      ?? .latest(Self.defaultHistoricalEventLimit)
+    historicalRequestedScope[podId] = requestedScope
     historicalLoadState[podId] = .loading
     Task {
       do {
-        let events = try await api.getSessionEvents(podId)
+        let events = try await api.getSessionEvents(podId, limit: requestedScope.limit)
         let mapped = events.enumerated().map { (i, e) in
           // Use negative IDs so they never collide with the live eventIdCounter (which starts at 1)
           mapAgentEvent(e, id: -(events.count - i))
         }
         let liveEvents = (sessionEvents[podId] ?? []).filter { $0.id > 0 }
         sessionEvents[podId] = mapped + liveEvents
+        let loadedScope: HistoricalEventScope = {
+          switch requestedScope {
+          case .full:
+            return .full
+          case .latest(let limit):
+            return events.count < limit ? .full : .latest(limit)
+          }
+        }()
+        historicalEventScope[podId] = loadedScope
+        historicalRequestedScope[podId] = loadedScope
         historicalLoadState[podId] = .loaded
       } catch {
         historicalLoadState[podId] = .failed(error.localizedDescription)
       }
     }
+  }
+
+  public func reloadHistoricalEvents(podId: String, api: DaemonAPI) {
+    loadHistoricalEvents(podId: podId, api: api, scope: historicalRequestedScope[podId])
   }
 
   // MARK: - Event dispatch
@@ -322,7 +360,7 @@ public final class EventStream {
     for (podId, event) in pendingSessionEvents {
       var buffer = sessionEvents[podId, default: []]
       buffer.append(event)
-      if buffer.count > Self.sessionEventCap {
+      if historicalEventScope[podId] != .full && buffer.count > Self.sessionEventCap {
         buffer.removeFirst(buffer.count - Self.sessionEventCap)
       }
       sessionEvents[podId] = buffer

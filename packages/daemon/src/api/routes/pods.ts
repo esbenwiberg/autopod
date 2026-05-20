@@ -40,6 +40,13 @@ function parseEscalationsScope(query: Record<string, unknown>): EscalationsAnaly
   return null;
 }
 
+function parsePositiveIntegerQueryParam(raw: unknown): number | null | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'string' || !/^[1-9]\d*$/.test(raw)) return null;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
 export function podRoutes(
   app: FastifyInstance,
   podManager: PodManager,
@@ -208,26 +215,31 @@ export function podRoutes(
   });
 
   // GET /pods/:podId/events — agent activity events for log replay
-  app.get('/pods/:podId/events', async (request) => {
+  app.get('/pods/:podId/events', async (request, reply) => {
     const { podId } = request.params as { podId: string };
+    const query = request.query as { limit?: string };
+    const limit = parsePositiveIntegerQueryParam(query.limit);
+    if (limit === null) {
+      reply.status(400);
+      return { error: 'limit must be a positive integer', code: 'invalid_limit' };
+    }
     // Verify pod exists (throws 404 if not found)
     podManager.getSession(podId);
     if (!eventRepo) return [];
-    const stored = eventRepo.getForSession(podId);
-    return stored
-      .filter((e) => e.type === 'pod.agent_activity')
-      .map((e) => {
-        const raw = (e.payload as unknown as { event: Record<string, unknown> }).event;
-        // Normalize legacy events where `output` was stored as a content-block array
-        // (produced before the claude-stream-parser fix in c97af9a).
-        if (raw && typeof raw === 'object' && Array.isArray(raw.output)) {
-          const joined = (raw.output as Array<{ text?: string }>)
-            .map((b) => b.text ?? '')
-            .join('\n');
-          return { ...raw, output: joined || undefined };
-        }
-        return raw;
-      });
+    const stored = eventRepo.getForSession(podId, {
+      type: 'pod.agent_activity',
+      latest: limit,
+    });
+    return stored.map((e) => {
+      const raw = (e.payload as unknown as { event: Record<string, unknown> }).event;
+      // Normalize legacy events where `output` was stored as a content-block array
+      // (produced before the claude-stream-parser fix in c97af9a).
+      if (raw && typeof raw === 'object' && Array.isArray(raw.output)) {
+        const joined = (raw.output as Array<{ text?: string }>).map((b) => b.text ?? '').join('\n');
+        return { ...raw, output: joined || undefined };
+      }
+      return raw;
+    });
   });
 
   // GET /pods/:podId/quality — behavioural quality signals computed on the fly

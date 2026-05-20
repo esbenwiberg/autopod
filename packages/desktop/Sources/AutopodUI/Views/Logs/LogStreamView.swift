@@ -7,20 +7,26 @@ public struct LogStreamView: View {
     public let sessionBranch: String
     public var isLoading: Bool
     public var loadError: String?
+    public var limitedEventCount: Int?
     public var onReload: (() -> Void)?
+    public var onLoadAll: (() -> Void)?
 
     public init(
         events: [AgentEvent],
         sessionBranch: String,
         isLoading: Bool = false,
         loadError: String? = nil,
-        onReload: (() -> Void)? = nil
+        limitedEventCount: Int? = nil,
+        onReload: (() -> Void)? = nil,
+        onLoadAll: (() -> Void)? = nil
     ) {
         self.events = events
         self.sessionBranch = sessionBranch
         self.isLoading = isLoading
         self.loadError = loadError
+        self.limitedEventCount = limitedEventCount
         self.onReload = onReload
+        self.onLoadAll = onLoadAll
     }
 
     @State private var activeFilters: Set<AgentEventType> = []
@@ -51,6 +57,11 @@ public struct LogStreamView: View {
         return types
     }
 
+    private var historyStatusLabel: String? {
+        guard let limitedEventCount else { return nil }
+        return "Latest \(limitedEventCount)"
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -70,9 +81,25 @@ public struct LogStreamView: View {
                 Text(sessionBranch)
                     .font(.system(.subheadline, design: .monospaced).weight(.medium))
                 Spacer()
+                if let historyStatusLabel {
+                    Text(historyStatusLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Text("\(filteredEvents.count) events")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if limitedEventCount != nil, let onLoadAll {
+                    Button {
+                        onLoadAll()
+                    } label: {
+                        Label("Load All", systemImage: "arrow.down.doc")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help("Load full log history")
+                    .disabled(isLoading)
+                }
                 Button {
                     copyLogsToClipboard()
                 } label: {

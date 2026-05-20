@@ -12,7 +12,13 @@ export interface StoredEvent {
 export interface EventRepository {
   insert(event: SystemEvent): number; // returns auto-increment id
   getSince(lastId: number, limit?: number): StoredEvent[];
-  getForSession(podId: string): StoredEvent[];
+  getForSession(
+    podId: string,
+    options?: {
+      type?: string;
+      latest?: number;
+    },
+  ): StoredEvent[];
 }
 
 /** Extract podId from event payload if present. */
@@ -63,10 +69,27 @@ export function createEventRepository(db: Database.Database): EventRepository {
       return rows.map(rowToStoredEvent);
     },
 
-    getForSession(podId: string): StoredEvent[] {
-      const rows = db
-        .prepare('SELECT * FROM events WHERE pod_id = ? ORDER BY id ASC')
-        .all(podId) as Record<string, unknown>[];
+    getForSession(podId: string, options = {}): StoredEvent[] {
+      const clauses = ['pod_id = @podId'];
+      const params: { podId: string; type?: string; latest?: number } = { podId };
+      if (options.type) {
+        clauses.push('type = @type');
+        params.type = options.type;
+      }
+
+      const where = clauses.join(' AND ');
+      const rows =
+        options.latest === undefined
+          ? (db
+              .prepare(`SELECT * FROM events WHERE ${where} ORDER BY id ASC`)
+              .all(params) as Record<string, unknown>[])
+          : (db
+              .prepare(
+                `SELECT * FROM (
+                  SELECT * FROM events WHERE ${where} ORDER BY id DESC LIMIT @latest
+                ) ORDER BY id ASC`,
+              )
+              .all({ ...params, latest: options.latest }) as Record<string, unknown>[]);
       return rows.map(rowToStoredEvent);
     },
   };
