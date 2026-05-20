@@ -1,7 +1,14 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "entry": ["packages/*/src/index.ts", "packages/daemon/src/index.ts", "packages/cli/src/index.ts"],
-  "project": ["packages/*/src/**/*.ts", "packages/*/tsup.config.ts", "scripts/**/*.ts"],
+  "entry": [
+    "packages/*/src/index.ts",
+    "packages/daemon/src/index.ts",
+    "packages/cli/src/index.ts",
+    "packages/mobile-web/src/main.tsx",
+    "packages/mobile-web/vite.config.ts",
+    "packages/mobile-web/vitest.config.ts"
+  ],
+  "project": ["packages/*/src/**/*.{ts,tsx}", "packages/*/tsup.config.ts", "scripts/**/*.ts"],
   "ignore": ["packages/*/dist/**", "packages/desktop/**", ".repofit/**"],
   "ignoreDependencies": ["@types/node", "typescript", "vitest"]
 }
