@@ -11,7 +11,7 @@ export interface WatchedIssueCandidate {
   url: string;
   labels: string[];
   triggerLabel: string;
-  acceptanceCriteria?: string[];
+  requirements?: string[];
 }
 
 export interface IssueClient {
@@ -35,22 +35,7 @@ export function createIssueClient(profile: Profile): IssueClient {
   return new AdoIssueClient({ orgUrl, project, pat: profile.adoPat ?? '' });
 }
 
-/**
- * Parse GitHub-flavored markdown checkboxes as acceptance criteria.
- * Works for both checked `- [x]` and unchecked `- [ ]` items.
- */
-export function parseAcceptanceCriteria(body: string): string[] | undefined {
-  const checkboxPattern = /^[-*]\s+\[[ x]\]\s+(.+)$/gm;
-  const criteria: string[] = [];
-  for (const match of body.matchAll(checkboxPattern)) {
-    criteria.push(match[1].trim());
-  }
-  return criteria.length > 0 ? criteria : undefined;
-}
-
-/**
- * Strip HTML tags from a string (for ADO descriptions / acceptance criteria fields).
- */
+/** Strip HTML tags from a string (for ADO descriptions / requirements fields). */
 export function stripHtml(html: string): string {
   return html
     .replace(/<br\s*\/?>/gi, '\n')

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractMarkdownAcSection, parseBriefFrontmatter, parseBriefs } from './parse-briefs.js';
+import { parseBriefFrontmatter, parseBriefs } from './parse-briefs.js';
 
 describe('parseBriefFrontmatter', () => {
   it('returns empty frontmatter and body as-is when no fence', () => {
@@ -8,68 +8,12 @@ describe('parseBriefFrontmatter', () => {
     expect(body).toBe('Just a body');
   });
 
-  it('throws BriefParseError when AC uses legacy "test" key', () => {
-    const content = `---
-acceptance_criteria:
-  - type: cmd
-    test: "grep -rn 'AddTPGraphClient\\|ITPGraphClient' /workspace"
-    pass: match found
-    fail: no match
----
-Body`;
-    expect(() => parseBriefFrontmatter(content)).toThrow('AC field "test" is not allowed');
-  });
-
   it('parses YAML frontmatter and trims body', () => {
     const content = '---\ntitle: My Brief\ndepends_on: [other]\n---\n\nBody text\n';
     const { frontmatter, body } = parseBriefFrontmatter(content);
     expect(frontmatter.title).toBe('My Brief');
     expect(frontmatter.depends_on).toEqual(['other']);
     expect(body).toBe('Body text');
-  });
-
-  it('throws BriefParseError when AC "hint" is mangled into an object', () => {
-    // A shell-command hint with unescaped quotes makes YAML collapse `hint`
-    // and the following `polarity` key into one mapping.
-    const content = `---
-acceptance_criteria:
-  - type: cmd
-    outcome: reasoning event variant exists
-    hint: {grep -nE "type":"reasoning",
-    polarity: expect-output}
----
-Body`;
-    expect(() => parseBriefFrontmatter(content)).toThrow('AC field "hint" must be a string');
-  });
-
-  it('rejects acceptance_criteria frontmatter for runnable specs', () => {
-    const content =
-      '---\nacceptance_criteria:\n  - type: api\n    outcome: GET /health returns 200\n    hint: GET /api/health\n---\nBody\n';
-    expect(() => parseBriefFrontmatter(content)).toThrow(
-      'acceptance_criteria frontmatter is no longer supported',
-    );
-  });
-});
-
-describe('extractMarkdownAcSection', () => {
-  it('extracts AC section content', () => {
-    const body =
-      '## Overview\n\nSome text\n\n## Acceptance Criteria\n\n- [ ] First criterion\n- [ ] Second criterion\n\n## Next Section\n\nMore text';
-    expect(extractMarkdownAcSection(body)).toBe('- [ ] First criterion\n- [ ] Second criterion');
-  });
-
-  it('handles AC section at end of file', () => {
-    const body = '## Overview\n\nSome text\n\n## Acceptance Criteria\n\n- [ ] Only criterion';
-    expect(extractMarkdownAcSection(body)).toBe('- [ ] Only criterion');
-  });
-
-  it('returns empty string when no AC section', () => {
-    expect(extractMarkdownAcSection('## Overview\n\nNo ACs here')).toBe('');
-  });
-
-  it('is case-insensitive for heading', () => {
-    const body = '## acceptance criteria\n\n- item';
-    expect(extractMarkdownAcSection(body)).toBe('- item');
   });
 });
 
@@ -129,11 +73,6 @@ describe('parseBriefs', () => {
     expect(briefs[0]?.task).toContain('Do this');
   });
 
-  it('returns undefined acceptanceCriteria when brief has no ACs', () => {
-    const briefs = parseBriefs([{ filename: '01-task.md', content: 'Just a task' }]);
-    expect(briefs[0]?.acceptanceCriteria).toBeUndefined();
-  });
-
   it('parses a sibling contract.yaml and uses it as title/dependencies', () => {
     const content = `---
 title: Ignored brief title
@@ -161,46 +100,6 @@ human_review: []
     expect(briefs[0]?.title).toBe('Contract title');
     expect(briefs[0]?.dependsOn).toEqual(['00-base']);
     expect(briefs[0]?.contract?.requiredFacts[0]?.id).toBe('fact-behavior');
-    expect(briefs[0]?.acceptanceCriteria).toBeUndefined();
-  });
-
-  it('rejects markdown ## Acceptance Criteria sections', () => {
-    const content = `# Brief 01: My Task
-
-## Objective
-
-Do some work.
-
-## Acceptance Criteria
-
-- [ ] Types exported from shared
-- [ ] Unit tests pass
-- [ ] No TS errors
-
-## Estimated Scope
-
-Small`;
-    expect(() => parseBriefs([{ filename: '01-task.md', content }])).toThrow(
-      'Markdown Acceptance Criteria sections are no longer supported',
-    );
-  });
-
-  it('rejects YAML acceptance_criteria even when markdown section exists', () => {
-    const content = `---
-acceptance_criteria:
-  - type: web
-    outcome: /dashboard renders with nav
-    hint: /dashboard
----
-
-## Acceptance Criteria
-
-- [ ] This should be ignored
-
-## End`;
-    expect(() => parseBriefs([{ filename: '01-task.md', content }])).toThrow(
-      'acceptance_criteria frontmatter is no longer supported',
-    );
   });
 
   it('extracts require_sidecars from frontmatter (snake_case)', () => {
@@ -271,28 +170,5 @@ Body`;
     ]);
     expect(emptyLists[0]?.touches).toBeUndefined();
     expect(emptyLists[0]?.doesNotTouch).toBeUndefined();
-  });
-
-  it('rejects real-world style brief with checkbox ACs', () => {
-    const content = `# Brief 01: Runner protocol contracts
-
-## Objective
-
-Define the shared wire protocol and placement types in @autopod/shared.
-
-## Acceptance Criteria
-
-- [ ] \`RunnerIdentity\`, \`RunnerCapabilities\`, \`RunnerRecord\` types exported from shared.
-- [ ] \`Placement\` discriminated union exported from shared.
-- [ ] \`RUNNER_PROTOCOL_VERSION\` exported from constants.
-- [ ] Daemon package builds cleanly after the move.
-- [ ] No new runtime dependencies added to @autopod/shared.
-
-## Estimated Scope
-
-Files: 4 modified/created | Complexity: low`;
-    expect(() => parseBriefs([{ filename: '01-protocol-contracts.md', content }])).toThrow(
-      'Markdown Acceptance Criteria sections are no longer supported',
-    );
   });
 });

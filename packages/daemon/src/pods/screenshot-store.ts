@@ -17,7 +17,7 @@ export interface ScreenshotStore {
   read(ref: ScreenshotRef): Promise<Buffer>;
   /**
    * List all refs for a pod in canonical order:
-   * smoke → ac → review, filename-sorted within each bucket.
+   * smoke → review, filename-sorted within each bucket.
    */
   list(podId: string): Promise<ScreenshotRef[]>;
   /** Delete the entire per-pod tree. Idempotent (no error when dir is missing). */
@@ -58,7 +58,7 @@ function validateFilename(filename: string): string {
   return lower;
 }
 
-const SOURCE_ORDER: ScreenshotSource[] = ['smoke', 'ac', 'review'];
+const SOURCE_ORDER: ScreenshotSource[] = ['smoke', 'review'];
 
 /**
  * Create a filesystem-backed screenshot store.

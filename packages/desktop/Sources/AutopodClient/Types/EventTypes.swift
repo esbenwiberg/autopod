@@ -35,7 +35,6 @@ public struct RawSystemEvent: Codable, Sendable {
   public let sastResult: SastResultResponse?
   public let healthResult: HealthResultResponse?
   public let pageResults: [PageResultResponse]?
-  public let acResult: AcValidationResponse?
   public let factResult: FactValidationResponse?
   public let reviewResult: TaskReviewResponse?
 
@@ -71,7 +70,6 @@ public enum ValidationPhase: String, Sendable, CaseIterable {
   case test
   case health
   case pages
-  case ac
   case facts
   case review
 
@@ -83,7 +81,6 @@ public enum ValidationPhase: String, Sendable, CaseIterable {
     case .sast: return "SAST"
     case .health: return "Health"
     case .pages: return "Pages"
-    case .ac: return "Legacy"
     case .facts: return "Facts"
     case .review: return "Review"
     }
@@ -102,7 +99,6 @@ public struct ValidationPhaseResult: Sendable {
   public let sastResult: SastResultResponse?
   public let healthResult: HealthResultResponse?
   public let pageResults: [PageResultResponse]?
-  public let acResult: AcValidationResponse?
   public let factResult: FactValidationResponse?
   public let reviewResult: TaskReviewResponse?
 
@@ -114,7 +110,6 @@ public struct ValidationPhaseResult: Sendable {
     sastResult = raw.sastResult
     healthResult = raw.healthResult
     pageResults = raw.pageResults
-    acResult = raw.acResult
     factResult = raw.factResult
     reviewResult = raw.reviewResult
   }

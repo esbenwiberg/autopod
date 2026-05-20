@@ -48,9 +48,8 @@ public struct EvidenceTab: View {
 
   private var screenshotSet: [ScreenshotRef] {
     let pageShots = pod.validationChecks?.proofOfWorkScreenshots ?? []
-    let acShots = pod.validationChecks?.acChecks?.compactMap { $0.screenshot } ?? []
     let reviewShots = pod.validationChecks?.taskReviewScreenshots ?? []
-    return pageShots + acShots + reviewShots
+    return pageShots + reviewShots
   }
 
   public var body: some View {

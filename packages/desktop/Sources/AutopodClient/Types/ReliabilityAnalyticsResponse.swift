@@ -73,7 +73,7 @@ public struct DropPodEntry: Decodable, Equatable, Sendable {
 // MARK: - Stage failures
 
 public enum ValidationStage: String, Decodable, CaseIterable, Sendable {
-    case build, health, smoke, test, lint, sast, acValidation, taskReview
+    case build, health, smoke, test, lint, sast, facts, taskReview
 }
 
 public struct StageFailureRow: Decodable, Equatable, Sendable {

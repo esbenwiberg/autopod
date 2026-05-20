@@ -36,12 +36,10 @@ import AutopodUI
     "prUrl": null,
     "plan": { "summary": "Add OAuth flow", "steps": ["Setup", "Implement"] },
     "progress": { "phase": "implementation", "description": "Writing routes", "currentPhase": 3, "totalPhases": 5 },
-    "acceptanceCriteria": [{"type":"none","outcome":"Users can sign in"}],
     "claudeSessionId": null,
     "outputMode": "pr",
     "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
     "baseBranch": null,
-    "acFrom": null,
     "recoveryWorktreePath": null,
     "lastHeartbeatAt": null,
     "inputTokens": 15000,
@@ -66,7 +64,6 @@ import AutopodUI
   #expect(pod.phase?.current == 3)
   #expect(pod.phase?.total == 5)
   #expect(pod.containerUrl?.absoluteString == "http://localhost:3001")
-  #expect(pod.acceptanceCriteria?.first?.outcome == "Users can sign in")
   #expect(pod.costUsd == 0.42)
   #expect(pod.commitCount == 2)
   #expect(pod.isWorkspace == false)
@@ -106,12 +103,10 @@ import AutopodUI
     "prUrl": null,
     "plan": null,
     "progress": null,
-    "acceptanceCriteria": null,
     "claudeSessionId": null,
     "outputMode": "pr",
     "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
     "baseBranch": null,
-    "acFrom": null,
     "recoveryWorktreePath": null,
     "lastHeartbeatAt": null,
     "inputTokens": 0,
@@ -159,12 +154,10 @@ import AutopodUI
     "prUrl": null,
     "plan": null,
     "progress": null,
-    "acceptanceCriteria": null,
     "claudeSessionId": null,
     "outputMode": "pr",
     "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
     "baseBranch": null,
-    "acFrom": null,
     "recoveryWorktreePath": null,
     "lastHeartbeatAt": null,
     "inputTokens": 0,
@@ -219,12 +212,10 @@ import AutopodUI
     "prUrl": null,
     "plan": null,
     "progress": null,
-    "acceptanceCriteria": null,
     "claudeSessionId": null,
     "outputMode": "pr",
     "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
     "baseBranch": null,
-    "acFrom": null,
     "recoveryWorktreePath": null,
     "lastHeartbeatAt": null,
     "inputTokens": 5000,
@@ -284,12 +275,10 @@ import AutopodUI
     "prUrl": null,
     "plan": null,
     "progress": null,
-    "acceptanceCriteria": null,
     "claudeSessionId": null,
     "outputMode": "pr",
     "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
     "baseBranch": null,
-    "acFrom": null,
     "recoveryWorktreePath": null,
     "lastHeartbeatAt": null,
     "inputTokens": 5000,
@@ -339,12 +328,10 @@ import AutopodUI
     "prUrl": null,
     "plan": null,
     "progress": null,
-    "acceptanceCriteria": null,
     "claudeSessionId": null,
     "outputMode": "workspace",
     "options": { "agentMode": "interactive", "output": "branch", "validate": false, "promotable": true },
     "baseBranch": null,
-    "acFrom": null,
     "recoveryWorktreePath": null,
     "lastHeartbeatAt": null,
     "inputTokens": 0,
@@ -395,12 +382,10 @@ import AutopodUI
     "prUrl": null,
     "plan": null,
     "progress": null,
-    "acceptanceCriteria": null,
     "claudeSessionId": null,
     "outputMode": "workspace",
     "options": { "agentMode": "interactive", "output": "pr", "validate": false, "promotable": true },
     "baseBranch": null,
-    "acFrom": null,
     "recoveryWorktreePath": null,
     "lastHeartbeatAt": null,
     "inputTokens": 0,
@@ -457,12 +442,10 @@ import AutopodUI
     "prUrl": null,
     "plan": null,
     "progress": null,
-    "acceptanceCriteria": null,
     "claudeSessionId": null,
     "outputMode": "workspace",
     "options": { "agentMode": "interactive", "output": "artifact", "validate": false, "promotable": true },
     "baseBranch": null,
-    "acFrom": null,
     "recoveryWorktreePath": null,
     "lastHeartbeatAt": null,
     "inputTokens": 0,
@@ -562,12 +545,10 @@ import AutopodUI
     "prUrl": null,
     "plan": null,
     "progress": null,
-    "acceptanceCriteria": null,
     "claudeSessionId": null,
     "outputMode": "pr",
     "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
     "baseBranch": null,
-    "acFrom": null,
     "recoveryWorktreePath": null,
     "lastHeartbeatAt": null,
     "inputTokens": 0,
@@ -641,10 +622,10 @@ import AutopodUI
     "userId": "user-1",
     "filesChanged": 0, "linesAdded": 0, "linesRemoved": 0,
     "previewUrl": null, "prUrl": null,
-    "plan": null, "progress": null, "acceptanceCriteria": null,
+    "plan": null, "progress": null,
     "claudeSessionId": null, "outputMode": "pr",
     "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
-    "baseBranch": null, "acFrom": null, "recoveryWorktreePath": null, "lastHeartbeatAt": null,
+    "baseBranch": null, "recoveryWorktreePath": null, "lastHeartbeatAt": null,
     "inputTokens": 0, "outputTokens": 0, "costUsd": 0, "commitCount": 0, "lastCommitAt": null,
     "lastValidationResult": {
       "podId": "ord-test",
@@ -675,18 +656,6 @@ import AutopodUI
           }
         ]
       },
-      "acValidation": {
-        "status": "pass",
-        "model": "claude",
-        "results": [
-          {
-            "criterion": "AC1",
-            "passed": true,
-            "reasoning": "ok",
-            "screenshot": { "url": "/pods/ord-test/screenshots/ac/0.png", "source": "ac", "path": "AC1" }
-          }
-        ]
-      },
       "taskReview": {
         "status": "pass",
         "reasoning": "good",
@@ -712,28 +681,21 @@ import AutopodUI
   #expect(pow?.first?.label == "/about")  // first page in JSON
   #expect(pow?.last?.label == "/root")
 
-  // AC screenshot
-  let acShot = pod.validationChecks?.acChecks?.first?.screenshot
-  #expect(acShot?.source == .ac)
-  #expect(acShot?.url.absoluteString == "http://127.0.0.1:3100/pods/ord-test/screenshots/ac/0.png")
-
   // Review screenshots
   let reviewShots = pod.validationChecks?.taskReviewScreenshots
   #expect(reviewShots?.count == 1)
   #expect(reviewShots?.first?.source == .review)
 
-  // Combined canonical ordering (mirrors ValidationTab.screenshotSet: smoke → ac → review).
+  // Combined canonical ordering (mirrors ValidationTab.screenshotSet: smoke -> review).
   // This is the array the lightbox receives for arrow-key navigation.
   let combined: [ScreenshotRef] =
     (pod.validationChecks?.proofOfWorkScreenshots ?? []) +
-    (pod.validationChecks?.acChecks?.compactMap { $0.screenshot } ?? []) +
     (pod.validationChecks?.taskReviewScreenshots ?? [])
-  #expect(combined.count == 4)
-  #expect(combined.map(\.source) == [.smoke, .smoke, .ac, .review])
+  #expect(combined.count == 3)
+  #expect(combined.map(\.source) == [.smoke, .smoke, .review])
   #expect(combined[0].label == "/about")
   #expect(combined[1].label == "/root")
-  #expect(combined[2].label == "AC1")
-  #expect(combined[3].label == "0")
+  #expect(combined[2].label == "0")
 }
 
 // MARK: - hasWebUi mapping tests (brief 02)
@@ -768,12 +730,10 @@ private let minimalSessionJson = """
   "prUrl": null,
   "plan": null,
   "progress": null,
-  "acceptanceCriteria": null,
   "claudeSessionId": null,
   "outputMode": "pr",
   "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
   "baseBranch": null,
-  "acFrom": null,
   "recoveryWorktreePath": null,
   "lastHeartbeatAt": null,
   "inputTokens": 0,

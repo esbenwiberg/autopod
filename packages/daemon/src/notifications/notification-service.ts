@@ -41,7 +41,7 @@ function pickFailureReason(result: ValidationResult): string {
   if (result.test?.status === 'fail') return 'Tests failed';
   if (result.smoke.health.status === 'fail') return 'Health check failed';
   if (result.smoke.pages.some((p) => p.status === 'fail')) return 'Page checks failed';
-  if (result.acValidation?.status === 'fail') return 'Acceptance criteria failed';
+  if (result.factValidation?.status === 'fail') return 'Required facts failed';
   if (result.taskReview?.status === 'fail') {
     return result.taskReview.reasoning?.trim() || 'Task review failed';
   }

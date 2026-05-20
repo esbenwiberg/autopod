@@ -1,5 +1,4 @@
 import type { IssueClient, WatchedIssueCandidate } from './issue-client.js';
-import { parseAcceptanceCriteria } from './issue-client.js';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 const GITHUB_API_VERSION = '2022-11-28';
@@ -72,7 +71,6 @@ export class GitHubIssueClient implements IssueClient {
         url: issue.html_url,
         labels: issue.labels.map((l) => l.name),
         triggerLabel: matchingLabel.name,
-        acceptanceCriteria: parseAcceptanceCriteria(body),
       });
     }
 

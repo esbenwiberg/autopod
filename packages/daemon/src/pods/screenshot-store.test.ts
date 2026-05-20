@@ -37,14 +37,6 @@ describe('ScreenshotStore', () => {
     expect(bytes).toEqual(TINY_PNG);
   });
 
-  it('write and read round-trip for ac source', async () => {
-    const store = createScreenshotStore(tmpDir);
-    const ref = await store.write('pod2', 'ac', '0-check.png', TINY_PNG);
-    const bytes = await store.read(ref);
-    expect(bytes).toEqual(TINY_PNG);
-    expect(ref.source).toBe('ac');
-  });
-
   it('write and read round-trip for review source', async () => {
     const store = createScreenshotStore(tmpDir);
     const ref = await store.write('pod3', 'review', 'screenshot.png', TINY_PNG);
@@ -99,14 +91,12 @@ describe('ScreenshotStore', () => {
 
   // ── list ordering invariant ──────────────────────────────────────
 
-  it('list returns refs in smoke→ac→review order, filename-sorted within bucket', async () => {
+  it('list returns refs in smoke -> review order, filename-sorted within bucket', async () => {
     const store = createScreenshotStore(tmpDir);
     const podId = 'pod-list';
     // Write out-of-canonical-order
     await store.write(podId, 'review', 'z.png', TINY_PNG);
-    await store.write(podId, 'ac', 'b.png', TINY_PNG);
     await store.write(podId, 'smoke', 'b.png', TINY_PNG);
-    await store.write(podId, 'ac', 'a.png', TINY_PNG);
     await store.write(podId, 'smoke', 'a.png', TINY_PNG);
     await store.write(podId, 'review', 'a.png', TINY_PNG);
 
@@ -114,8 +104,6 @@ describe('ScreenshotStore', () => {
     expect(refs.map((r) => `${r.source}/${r.filename}`)).toEqual([
       'smoke/a.png',
       'smoke/b.png',
-      'ac/a.png',
-      'ac/b.png',
       'review/a.png',
       'review/z.png',
     ]);

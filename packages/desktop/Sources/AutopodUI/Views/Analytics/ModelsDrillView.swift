@@ -681,7 +681,7 @@ private struct FlowLayout: Layout {
 // MARK: - Section 3: Failure-stage matrix
 
 private let modelsStageOrder: [ValidationStage] = [
-    .build, .health, .smoke, .test, .lint, .sast, .acValidation, .taskReview,
+    .build, .health, .smoke, .test, .lint, .sast, .facts, .taskReview,
 ]
 
 private struct ModelsFailureMatrixSectionView: View {
@@ -777,7 +777,7 @@ private extension ValidationStage {
         case .test:         return "test"
         case .lint:         return "lint"
         case .sast:         return "sast"
-        case .acValidation: return "acVal"
+        case .facts:        return "facts"
         case .taskReview:   return "review"
         }
     }

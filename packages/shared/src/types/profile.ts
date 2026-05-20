@@ -171,8 +171,7 @@ export interface Profile {
   tokenBudgetPolicy: 'soft' | 'hard' | null;
   /** How many times a user may approve budget extensions per session. null = unlimited. */
   maxBudgetExtensions: number | null;
-  /** Whether the project has a web frontend. When false, AC validation skips browser checks
-   *  and the classifier will not produce web-ui validation types. Default true. */
+  /** Whether the project has a web frontend. Default true. */
   hasWebUi: boolean | null;
   /** Whether the issue/work-item watcher is enabled for this profile */
   issueWatcherEnabled: boolean | null;
@@ -225,12 +224,6 @@ export interface Profile {
    * Use to retire controls that have become dead weight as models improve.
    */
   skipValidationPhases: ValidationPhase[] | null;
-  /**
-   * When true, the harness evaluates the agent's reported plan against the
-   * pod's acceptance criteria before implementation begins. Feedback is
-   * delivered as a nudge the agent picks up via check_messages.
-   */
-  evaluatePlan: boolean | null;
   createdAt: string;
   updatedAt: string;
 }

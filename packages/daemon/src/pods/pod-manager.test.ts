@@ -2659,22 +2659,6 @@ describe('PodManager', () => {
         expect(pod.outputMode).toBe('pr');
         expect(pod.baseBranch).toBe('main');
       });
-
-      it('stores acFrom on the pod', () => {
-        const ctx = createTestContext();
-        const manager = createPodManager(ctx.deps);
-
-        const pod = manager.createSession(
-          {
-            profileName: 'test-profile',
-            task: 'Execute plan',
-            acFrom: 'specs/auth/acceptance-criteria.md',
-          },
-          'user-1',
-        );
-
-        expect(pod.acFrom).toBe('specs/auth/acceptance-criteria.md');
-      });
     });
 
     describe('processPod', () => {
@@ -2812,38 +2796,6 @@ describe('PodManager', () => {
         // are required for subsequent build phases to keep their incremental state.
         expect(cleanCalls[0]?.[1]).not.toContain('-x');
         expect(cleanCalls[0]?.[1]).not.toContain('-fdx');
-      });
-
-      it('reads acFrom file and populates acceptanceCriteria', async () => {
-        const ctx = createTestContext();
-        const manager = createPodManager(ctx.deps);
-
-        // Create a temp file for the AC
-        const fs = await import('node:fs/promises');
-        const tmpPath = '/tmp/worktree/abc';
-        await fs.mkdir(`${tmpPath}/specs`, { recursive: true });
-        await fs.writeFile(`${tmpPath}/specs/ac.md`, '- Login works\n- Logout works\n');
-
-        const pod = manager.createSession(
-          {
-            profileName: 'test-profile',
-            task: 'Execute plan',
-            outputMode: 'workspace',
-            acFrom: 'specs/ac.md',
-          },
-          'user-1',
-        );
-
-        await manager.processPod(pod.id);
-
-        const updated = manager.getSession(pod.id);
-        expect(updated.acceptanceCriteria).toEqual([
-          { type: 'none', outcome: 'Login works' },
-          { type: 'none', outcome: 'Logout works' },
-        ]);
-
-        // Cleanup
-        await fs.rm(`${tmpPath}/specs`, { recursive: true, force: true });
       });
     });
 

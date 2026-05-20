@@ -3,7 +3,6 @@ import type { MemoryEntry } from './memory.js';
 import type { PodStatus, PodSummary } from './pod.js';
 import type { AgentEvent } from './runtime.js';
 import type {
-  AcValidationResult,
   BuildResult,
   FactValidationResult,
   HealthResult,
@@ -22,7 +21,6 @@ export type ValidationPhase =
   | 'sast'
   | 'health'
   | 'pages'
-  | 'ac'
   | 'facts'
   | 'review';
 
@@ -112,7 +110,6 @@ export interface ValidationPhaseCompletedEvent {
   sastResult?: SastResult;
   healthResult?: HealthResult;
   pageResults?: PageResult[];
-  acResult?: AcValidationResult | null;
   factResult?: FactValidationResult | null;
   reviewResult?: TaskReviewResult | null;
 }

@@ -1,4 +1,3 @@
-import type { AcDefinition } from './ac.js';
 import type { OutputMode } from './actions.js';
 import type { SpecContract } from './contract.js';
 import type { EscalationRequest } from './escalation.js';
@@ -144,7 +143,6 @@ export interface Pod {
     currentPhase: number;
     totalPhases: number;
   } | null;
-  acceptanceCriteria: AcDefinition[] | null;
   contract?: SpecContract | null;
   claudeSessionId: string | null;
   codexSessionId: string | null;
@@ -159,7 +157,6 @@ export interface Pod {
    */
   outputMode: OutputMode;
   baseBranch: string | null;
-  acFrom: string | null;
   recoveryWorktreePath: string | null;
   reworkReason: string | null;
   reworkCount: number;
@@ -353,12 +350,6 @@ export interface Pod {
    */
   deployBaselineHashes: Record<string, string> | null;
   /**
-   * Agent's self-reported verification status for each acceptance criterion,
-   * submitted alongside `report_task_summary`. Null until the agent submits it.
-   * Discrepancies with automated findings are surfaced in correction messages.
-   */
-  acSelfReport: Array<{ criterion: string; verified: boolean; notes?: string }> | null;
-  /**
    * Token counts consumed by harness-side AI calls (e.g. AI review, plan evaluation)
    * and per-attempt agent runs. Keyed by phase name. Populated as each phase completes;
    * null until any harness AI call or agent run completes.
@@ -392,7 +383,6 @@ export interface CreatePodRequest {
   /** Override the profile's branch prefix for this pod (e.g. 'hotfix/'). Ignored when branch is set. */
   branchPrefix?: string;
   skipValidation?: boolean;
-  acceptanceCriteria?: AcDefinition[];
   contract?: SpecContract;
   /**
    * Per-pod override of the profile's pod options. Each field is
@@ -406,7 +396,6 @@ export interface CreatePodRequest {
    */
   outputMode?: OutputMode;
   baseBranch?: string;
-  acFrom?: string;
   linkedPodId?: string;
   /** PIM groups to activate for the duration of this pod */
   pimGroups?: PimGroupConfig[];

@@ -7,7 +7,7 @@ import SwiftUI
 ///
 /// - Parameters:
 ///   - ref: The screenshot reference. When nil, the view renders nothing.
-///   - allRefs: The full ordered set for this validation attempt (smoke → ac → review).
+///   - allRefs: The full ordered set for this validation attempt (smoke -> review).
 ///              Passed into the lightbox for arrow-key navigation.
 ///   - onOpen: Called with the index of this ref within `allRefs` when the thumbnail is clicked.
 ///   - maxHeight: Maximum rendered height in points (default 300).

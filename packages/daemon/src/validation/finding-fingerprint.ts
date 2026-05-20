@@ -16,41 +16,21 @@ export function fingerprintText(text: string): string {
 
 /**
  * Builds a stable finding ID for a given source and text.
- * Format: 'ac:<hash>' | 'fact:<hash>' | 'review:<hash>' | 'req:<hash>'
+ * Format: 'fact:<hash>' | 'review:<hash>' | 'req:<hash>'
  */
 export function findingId(source: ValidationFinding['source'], text: string): string {
   const prefix =
-    source === 'ac_validation'
-      ? 'ac'
-      : source === 'fact_validation'
-        ? 'fact'
-        : source === 'task_review'
-          ? 'review'
-          : 'req';
+    source === 'fact_validation' ? 'fact' : source === 'task_review' ? 'review' : 'req';
   return `${prefix}:${fingerprintText(text)}`;
 }
 
 /**
  * Walks a ValidationResult and extracts all failed findings as ValidationFinding objects.
- * Only extracts from AI-driven checks (AC validation, task review, requirements check) —
+ * Only extracts from reviewable checks (required facts, task review, requirements check) —
  * build/health/smoke failures are objective and not subject to human override.
  */
 export function extractFindings(result: ValidationResult): ValidationFinding[] {
   const findings: ValidationFinding[] = [];
-
-  // AC validation failures
-  if (result.acValidation?.status === 'fail') {
-    for (const check of result.acValidation.results) {
-      if (!check.passed) {
-        findings.push({
-          id: findingId('ac_validation', check.criterion),
-          source: 'ac_validation',
-          description: check.criterion,
-          reasoning: check.reasoning,
-        });
-      }
-    }
-  }
 
   // Required fact failures
   if (result.factValidation?.status === 'fail') {

@@ -272,7 +272,7 @@ const createProfileBaseSchema = z.object({
   smokePages: z.array(smokePageSchema).nullable().default([]),
   maxValidationAttempts: z.number().int().min(1).max(10).nullable().default(3),
   defaultModel: z.string().nullable().default('opus'),
-  /** Optional reviewer model for AC validation / task review. Falls back to defaultModel when null. */
+  /** Optional reviewer model for task review. Falls back to defaultModel when null. */
   reviewerModel: z.string().nullable().default(null),
   defaultRuntime: z.enum(['claude', 'codex', 'copilot']).nullable().default('claude'),
   executionTarget: z.enum(['local', 'aci']).nullable().default('local'),
@@ -357,10 +357,9 @@ const createProfileBaseSchema = z.object({
   securityScan: securityScanPolicySchema.nullable().default(null),
   codeIntelligence: codeIntelligenceConfigSchema.nullable().default(null),
   skipValidationPhases: z
-    .array(z.enum(['lint', 'sast', 'build', 'test', 'health', 'pages', 'ac', 'review']))
+    .array(z.enum(['lint', 'sast', 'build', 'test', 'health', 'pages', 'facts', 'review']))
     .nullable()
     .default(null),
-  evaluatePlan: z.boolean().nullable().default(null),
   deployment: z
     .object({
       enabled: z.boolean(),

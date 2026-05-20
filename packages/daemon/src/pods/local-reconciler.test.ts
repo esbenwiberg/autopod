@@ -52,11 +52,9 @@ function makeSession(overrides: Partial<Pod> & { id: string; status: PodStatus }
     prUrl: null,
     plan: null,
     progress: null,
-    acceptanceCriteria: null,
     claudeSessionId: null,
     outputMode: 'pr',
     baseBranch: null,
-    acFrom: null,
     recoveryWorktreePath: null,
     ...overrides,
   };
@@ -147,10 +145,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('ses-1', {
       containerId: 'ctr-old',
@@ -194,10 +190,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('ses-exhausted', {
       containerId: 'ctr-exhausted',
@@ -230,10 +224,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('ses-loopy', {
       containerId: 'ctr-loopy',
@@ -270,10 +262,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('ses-counted', {
       containerId: 'ctr-counted',
@@ -305,10 +295,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('ses-2', {
       containerId: 'ctr-old',
@@ -347,11 +335,9 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'workspace',
       options: { agentMode: 'interactive', output: 'branch', validate: false, promotable: true },
       baseBranch: null,
-      acFrom: null,
     });
     // No worktreePath — interactive pod that was killed/restarted before worktree was created
     podRepo.update('int-1', { containerId: 'ctr-old' });
@@ -387,11 +373,9 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'workspace',
       options: { agentMode: 'interactive', output: 'branch', validate: false, promotable: true },
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('ws-alive', {
       containerId: 'ctr-alive',
@@ -426,10 +410,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('ses-handoff', {
       containerId: 'ctr-handoff',
@@ -465,10 +447,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
 
     const result = await reconcileLocalSessions(deps);
@@ -496,10 +476,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
 
     const result = await reconcileLocalSessions(deps);
@@ -529,10 +507,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.insert({
       id: 'ses-dep',
@@ -546,10 +522,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
       dependsOnPodIds: ['ses-parent'],
     });
 
@@ -579,10 +553,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('ses-5', {
       containerId: 'ctr-gone',
@@ -615,10 +587,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('mix-1', {
       worktreePath: '/tmp/worktree/mix-1',
@@ -638,10 +608,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('mix-2', {
       worktreePath: '/tmp/worktree/mix-2',
@@ -661,10 +629,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
 
     // Mock access: mix-1 exists, mix-2 does not
@@ -696,10 +662,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('val-1', {
       containerId: 'ctr-old',
@@ -742,10 +706,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('val-2', {
       containerId: 'ctr-old',
@@ -781,10 +743,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('val-3', {
       containerId: 'ctr-old',
@@ -819,10 +779,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('val-4', {
       containerId: 'ctr-old',
@@ -867,10 +825,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
 
     // Even though worktree "exists", ACI pods should be ignored
@@ -902,10 +858,8 @@ describe('reconcileLocalSessions', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     // No worktreePath, no containerId — access will still be called on null
     // which should trigger the "worktree missing" path → killed
@@ -936,10 +890,8 @@ describe('reconcileLocalSessions — trigger param', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('wake-capped', {
       containerId: 'ctr-wake',
@@ -976,10 +928,8 @@ describe('reconcileLocalSessions — trigger param', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('wake-stamp', {
       containerId: 'ctr-stamp',
@@ -1009,10 +959,8 @@ describe('reconcileLocalSessions — trigger param', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('restart-counted', {
       containerId: 'ctr-restart',
@@ -1047,10 +995,8 @@ describe('reconcileLocalSessions — trigger param', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
     podRepo.update('restart-capped', {
       containerId: 'ctr-rcap',
@@ -1084,10 +1030,8 @@ describe('reconcileLocalSessions — trigger param', () => {
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
-      acceptanceCriteria: null,
       outputMode: 'pr',
       baseBranch: null,
-      acFrom: null,
     });
 
     let pod = podRepo.getOrThrow('col-test');

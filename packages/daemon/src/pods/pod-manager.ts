@@ -6,7 +6,6 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import type {
-  AcValidationResult,
   AgentEvent,
   BuildResult,
   CreatePodRequest,
@@ -101,7 +100,6 @@ import { buildGitHubImageUrl, collectScreenshots } from '../validation/screensho
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import { DeletionGuardError, GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
-import { readAcFile } from './ac-file-parser.js';
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
@@ -153,7 +151,7 @@ function injectPatIntoUrl(url: string, pat: string): string {
   return url.replace(/^https:\/\/([^@]*@)?/, `https://x-access-token:${pat}@`);
 }
 
-/** Single-line per-phase summary used in activity log lines. Covers all eight
+/** Single-line per-phase summary used in activity log lines. Covers all active
  * phases the validation engine produces — partial summaries can otherwise
  * contradict an `overall: fail` (e.g. tests/pages failed but only build/health
  * shown). Order matches pipeline order so the first `fail` is the failing gate. */
@@ -169,13 +167,12 @@ function summarizeValidationPhases(result: ValidationResult): string {
       : result.smoke.pages.every((p) => p.status === 'pass')
         ? 'pass'
         : 'fail';
-  const acStatus = result.acValidation?.status ?? 'skip';
   const factsStatus = result.factValidation?.status ?? 'skip';
   const reviewStatus = result.taskReview?.status ?? 'skip';
   return (
     `lint: ${lintStatus}, sast: ${sastStatus}, build: ${buildStatus}, ` +
     `tests: ${testStatus}, health: ${healthStatus}, pages: ${pagesStatus}, ` +
-    `ac: ${acStatus}, facts: ${factsStatus}, review: ${reviewStatus}`
+    `facts: ${factsStatus}, review: ${reviewStatus}`
   );
 }
 
@@ -188,7 +185,6 @@ function failedValidationPhases(result: ValidationResult | null): string[] {
   if (result.test?.status === 'fail') failed.push('tests');
   if (result.smoke.health.status === 'fail') failed.push('health');
   if (result.smoke.pages.some((p) => p.status === 'fail')) failed.push('pages');
-  if (result.acValidation?.status === 'fail') failed.push('ac');
   if (result.factValidation?.status === 'fail') failed.push('facts');
   if (result.taskReview && result.taskReview.status !== 'pass') failed.push('review');
   return failed;
@@ -2828,7 +2824,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       pod.taskSummary?.actualSummary,
       pod.taskSummary?.how,
       ...(pod.touches ?? []),
-      ...(pod.acceptanceCriteria ?? []).flatMap((ac) => [ac.outcome, ac.hint]),
     ]
       .filter(Boolean)
       .join('\n')
@@ -2904,8 +2899,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           eventBus.emit({ ...base, healthResult: phaseResult as HealthResult });
         } else if (phase === 'pages') {
           eventBus.emit({ ...base, pageResults: phaseResult as PageResult[] });
-        } else if (phase === 'ac') {
-          eventBus.emit({ ...base, acResult: phaseResult as AcValidationResult | null });
         } else if (phase === 'facts') {
           eventBus.emit({ ...base, factResult: phaseResult as FactValidationResult | null });
         } else if (phase === 'review') {
@@ -3393,12 +3386,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             creatorName: creator?.name ?? null,
             maxValidationAttempts: profile.maxValidationAttempts ?? 3,
             skipValidation,
-            acceptanceCriteria: request.acceptanceCriteria ?? null,
             contract: request.contract ?? null,
             options: resolvedPod,
             outputMode: effectiveOutputMode,
             baseBranch: effectiveBaseBranch,
-            acFrom: request.acFrom ?? null,
             linkedPodId: request.linkedPodId ?? null,
             pimGroups: (() => {
               if (request.pimGroups != null) return request.pimGroups;
@@ -3847,23 +3838,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               }
             }
           }
-        }
-
-        // If acFrom is set, read acceptance criteria from the worktree
-        if (pod.acFrom && worktreePath) {
-          const criteria = await readAcFile(worktreePath, pod.acFrom);
-          // File-sourced criteria are plain lines — wrap each as a minimal
-          // AcDefinition so the validation engine can treat them uniformly.
-          const wrapped = criteria.map((outcome) => ({
-            type: 'none' as const,
-            outcome,
-          }));
-          podRepo.update(podId, { acceptanceCriteria: wrapped });
-          pod = podRepo.getOrThrow(podId);
-          logger.info(
-            { podId, acFrom: pod.acFrom, count: criteria.length },
-            'Loaded acceptance criteria from file',
-          );
         }
 
         // Security scan: inspect cloned worktree for secrets / PII / prompt
@@ -7359,7 +7333,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           sastCommand: profile.sastCommand ?? undefined,
           sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
           reviewerModel: profile.reviewerModel || profile.defaultModel || 'sonnet',
-          acceptanceCriteria: pod.acceptanceCriteria ?? undefined,
           contract: pod.contract ?? undefined,
           codeReviewSkill,
           commitLog: commitLog || undefined,
@@ -8117,7 +8090,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               sastCommand: profile.sastCommand ?? undefined,
               sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
               reviewerModel: profile.reviewerModel || profile.defaultModel || 'sonnet',
-              acceptanceCriteria: pod.acceptanceCriteria ?? undefined,
               contract: pod.contract ?? undefined,
               codeReviewSkill,
               commitLog: commitLog || undefined,

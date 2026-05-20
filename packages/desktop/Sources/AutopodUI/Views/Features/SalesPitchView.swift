@@ -320,7 +320,7 @@ public struct SalesPitchView: View {
                 icon: "checkmark.shield.fill",
                 color: .green,
                 title: "Trust Nothing, Verify Everything",
-                body: "Nine gated checks: lint, SAST, build, test, health, Playwright smoke, acceptance criteria, required facts, and AI review — with proof-of-work evidence per attempt.",
+                body: "Eight gated checks: lint, SAST, build, test, health, Playwright smoke, required facts, and AI review — with proof-of-work evidence per attempt.",
                 tags: ["Lint", "SAST", "Facts", "Screenshots"]
             ),
             SellingPoint(

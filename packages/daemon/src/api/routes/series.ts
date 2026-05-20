@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import {
-  type AcDefinition,
   AutopodError,
   type SpecContract,
   generateId,
@@ -18,7 +17,6 @@ interface ParsedBrief {
   title: string;
   task: string;
   dependsOn: string[];
-  acceptanceCriteria?: AcDefinition[];
   contract?: SpecContract;
   /** Per-brief advisory list of files this pod expects to modify. */
   touches?: string[];
@@ -277,7 +275,6 @@ export function seriesRoutes(
             touches: brief.touches,
             doesNotTouch: brief.doesNotTouch,
             prMode,
-            acceptanceCriteria: brief.acceptanceCriteria,
             contract: brief.contract,
             options: { agentMode: 'auto', output },
             // Per-brief sidecars (e.g. Dagger engine for a pipeline-wiring pod).

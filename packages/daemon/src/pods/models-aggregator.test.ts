@@ -427,7 +427,7 @@ describe('computeModelsAnalytics', () => {
         'test',
         'lint',
         'sast',
-        'acValidation',
+        'facts',
         'taskReview',
       ]);
     }

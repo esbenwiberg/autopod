@@ -58,11 +58,9 @@ function makeSession(id: string): Pod {
     mergeBlockReason: null,
     plan: null,
     progress: null,
-    acceptanceCriteria: null,
     claudeSessionId: null,
     outputMode: 'pr' as const,
     baseBranch: null,
-    acFrom: null,
     recoveryWorktreePath: null,
     reworkReason: null,
     lastHeartbeatAt: null,
@@ -354,7 +352,7 @@ describe('ScheduledJobManager', () => {
       await manager.tick();
 
       expect(deps.podManager.createSession).not.toHaveBeenCalled();
-      // nextRunAt must NOT advance when we skip due to active pod (AC #24)
+      // nextRunAt must NOT advance when we skip due to active pod
       const unchanged = deps.scheduledJobRepo.getOrThrow(job.id);
       expect(unchanged.nextRunAt).toBe(pastDate);
     });

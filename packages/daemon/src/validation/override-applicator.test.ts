@@ -22,7 +22,7 @@ function makeBaseResult(overrides?: Partial<ValidationResult>): ValidationResult
 }
 
 function makeDismiss(
-  source: 'ac_validation' | 'task_review' | 'requirements_check',
+  source: 'task_review' | 'requirements_check' | 'fact_validation',
   text: string,
 ): ValidationOverride {
   return {
@@ -63,30 +63,6 @@ describe('applyOverrides', () => {
       },
     ];
     expect(applyOverrides(result, overrides)).toEqual(result);
-  });
-
-  it('dismisses AC validation findings', () => {
-    const result = makeBaseResult({
-      acValidation: {
-        status: 'fail',
-        results: [
-          { criterion: 'Button disables on submit', passed: false, reasoning: 'Not found' },
-          { criterion: 'Form shows errors', passed: true, reasoning: 'OK' },
-        ],
-        model: 'sonnet',
-      },
-    });
-
-    const overrides = [makeDismiss('ac_validation', 'Button disables on submit')];
-    const patched = applyOverrides(result, overrides);
-
-    // biome-ignore lint/style/noNonNullAssertion: test data guarantees field presence
-    expect(patched.acValidation!.results[0]!.passed).toBe(true);
-    // biome-ignore lint/style/noNonNullAssertion: test data guarantees field presence
-    expect(patched.acValidation!.results[0]!.reasoning).toContain('[DISMISSED BY HUMAN]');
-    // biome-ignore lint/style/noNonNullAssertion: test data guarantees field presence
-    expect(patched.acValidation!.status).toBe('pass');
-    expect(patched.overall).toBe('pass');
   });
 
   it('dismisses task review issues', () => {
@@ -158,6 +134,70 @@ describe('applyOverrides', () => {
     expect(patched.overall).toBe('pass');
   });
 
+  it('dismisses required fact findings and recomputes fact validation', () => {
+    const result = makeBaseResult({
+      factValidation: {
+        status: 'fail',
+        results: [
+          {
+            factId: 'fact-login',
+            proves: ['login'],
+            artifactPath: 'packages/app/login.test.ts',
+            command: 'npm test -- login',
+            passed: false,
+            status: 'fail',
+            reasoning: 'Command failed',
+          },
+        ],
+      },
+    });
+
+    const overrides = [makeDismiss('fact_validation', 'fact-login')];
+    const patched = applyOverrides(result, overrides);
+
+    expect(patched.factValidation?.results[0]?.passed).toBe(true);
+    expect(patched.factValidation?.results[0]?.status).toBe('pass');
+    expect(patched.factValidation?.results[0]?.reasoning).toContain('[DISMISSED BY HUMAN]');
+    expect(patched.factValidation?.status).toBe('pass');
+    expect(patched.overall).toBe('pass');
+  });
+
+  it('keeps fact validation failing when only some fact findings are dismissed', () => {
+    const result = makeBaseResult({
+      factValidation: {
+        status: 'fail',
+        results: [
+          {
+            factId: 'fact-login',
+            proves: ['login'],
+            artifactPath: 'packages/app/login.test.ts',
+            command: 'npm test -- login',
+            passed: false,
+            status: 'fail',
+            reasoning: 'Command failed',
+          },
+          {
+            factId: 'fact-logout',
+            proves: ['logout'],
+            artifactPath: 'packages/app/logout.test.ts',
+            command: 'npm test -- logout',
+            passed: false,
+            status: 'fail',
+            reasoning: 'Command failed',
+          },
+        ],
+      },
+    });
+
+    const overrides = [makeDismiss('fact_validation', 'fact-login')];
+    const patched = applyOverrides(result, overrides);
+
+    expect(patched.factValidation?.results[0]?.passed).toBe(true);
+    expect(patched.factValidation?.results[1]?.passed).toBe(false);
+    expect(patched.factValidation?.status).toBe('fail');
+    expect(patched.overall).toBe('fail');
+  });
+
   it('does not override objective failures (build/health/smoke)', () => {
     const result = makeBaseResult({
       smoke: {
@@ -204,33 +244,5 @@ describe('applyOverrides', () => {
     // biome-ignore lint/style/noNonNullAssertion: test data guarantees field presence
     expect(result.taskReview!.status).toBe('fail');
     expect(result.overall).toBe('fail');
-  });
-
-  it('handles mixed AC + review overrides', () => {
-    const result = makeBaseResult({
-      acValidation: {
-        status: 'fail',
-        results: [{ criterion: 'Form validates email', passed: false, reasoning: 'Nope' }],
-        model: 'sonnet',
-      },
-      taskReview: {
-        status: 'fail',
-        reasoning: 'Issues',
-        issues: ['Missing error handling'],
-        model: 'sonnet',
-        screenshots: [],
-        diff: 'd',
-      },
-    });
-
-    const overrides = [
-      makeDismiss('ac_validation', 'Form validates email'),
-      makeDismiss('task_review', 'Missing error handling'),
-    ];
-    const patched = applyOverrides(result, overrides);
-
-    expect(patched.acValidation?.status).toBe('pass');
-    expect(patched.taskReview?.status).toBe('pass');
-    expect(patched.overall).toBe('pass');
   });
 });

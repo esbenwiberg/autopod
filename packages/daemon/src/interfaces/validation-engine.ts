@@ -1,6 +1,4 @@
 import type {
-  AcCheckResult,
-  AcDefinition,
   PreSubmitReviewSnapshot,
   SpecContract,
   TaskSummary,
@@ -42,7 +40,6 @@ export interface ValidationEngineConfig {
   sastCommand?: string | null;
   /** SAST phase timeout in ms. Default 300_000 (5 min). */
   sastTimeout?: number;
-  acceptanceCriteria?: AcDefinition[];
   contract?: SpecContract;
   /** Repo-specific review rules loaded from e.g. skills/code-review.md in the worktree */
   codeReviewSkill?: string;
@@ -75,8 +72,7 @@ export interface ValidationEngineConfig {
   reviewDepth?: 'standard' | 'auto' | 'deep';
   /** Findings dismissed by human reviewer — exclude from review prompt */
   overrides?: ValidationOverride[];
-  /** Whether the project has a web frontend. When false, the AC classifier will not
-   *  produce web-ui checks and agents are not told to use validate_in_browser. Default true. */
+  /** Whether the project has a web frontend. When false, browser-oriented validation is skipped. */
   hasWebUi?: boolean;
   /**
    * Per-exec env vars injected into build/test/lint/SAST commands.
@@ -106,7 +102,6 @@ export interface ValidationPhaseCallbacks {
     status: 'pass' | 'fail' | 'skip',
     result: unknown,
   ) => void;
-  onAcProgress?: (completed: number, total: number, latest: AcCheckResult) => void;
 }
 
 export interface ValidationEngine {

@@ -122,55 +122,6 @@ describe('formatFeedback', () => {
       expect(result).toContain('Wrong font');
     });
 
-    it('includes AC validation failures when present', () => {
-      const result = mockValidationResult({});
-      result.acValidation = {
-        status: 'fail',
-        results: [
-          {
-            criterion: 'Settings page has dark mode toggle',
-            passed: true,
-            reasoning: 'Found toggle',
-          },
-          {
-            criterion: 'Dark mode changes background to black',
-            passed: false,
-            reasoning: 'Background remained white after toggling',
-          },
-        ],
-        model: 'opus',
-      };
-      const output = formatFeedback({
-        type: 'validation_failure',
-        result,
-        task: 'Add dark mode',
-        attempt: 1,
-        maxAttempts: 3,
-      });
-      expect(output).toContain('Acceptance Criteria Failures');
-      expect(output).toContain('Dark mode changes background to black');
-      expect(output).toContain('Background remained white');
-      // Passed ACs should NOT be in the failure section
-      expect(output).not.toContain('Settings page has dark mode toggle');
-    });
-
-    it('omits AC section when all ACs pass', () => {
-      const result = mockValidationResult({ taskReviewFailed: true });
-      result.acValidation = {
-        status: 'pass',
-        results: [{ criterion: 'Page loads', passed: true, reasoning: 'Loaded fine' }],
-        model: 'opus',
-      };
-      const output = formatFeedback({
-        type: 'validation_failure',
-        result,
-        task: 'Fix stuff',
-        attempt: 1,
-        maxAttempts: 3,
-      });
-      expect(output).not.toContain('Acceptance Criteria Failures');
-    });
-
     it('renders unmet requirementsCheck items as a separate section', () => {
       const result = mockValidationResult({ taskReviewFailed: true });
       result.taskReview = {
@@ -196,7 +147,7 @@ describe('formatFeedback', () => {
         attempt: 1,
         maxAttempts: 3,
       });
-      expect(output).toContain('Unmet Acceptance Criteria (code review)');
+      expect(output).toContain('Unmet Human Review Requirements');
       expect(output).toContain('ConsecutiveFailureCount increments on failure');
       expect(output).toContain('No increment logic in diff');
       // Met items should not appear in this section
@@ -221,7 +172,7 @@ describe('formatFeedback', () => {
         attempt: 1,
         maxAttempts: 3,
       });
-      expect(output).not.toContain('Unmet Acceptance Criteria (code review)');
+      expect(output).not.toContain('Unmet Human Review Requirements');
     });
 
     it('uses fallback note when requirementsCheck item has no note', () => {
@@ -249,7 +200,7 @@ describe('formatFeedback', () => {
       const result = mockValidationResult({ taskReviewFailed: true });
       result.taskReview = {
         status: 'fail',
-        reasoning: 'Code issues plus missing AC',
+        reasoning: 'Code issues plus missing requirement',
         issues: ['Bad error handling'],
         model: 'opus',
         screenshots: [],
@@ -263,7 +214,7 @@ describe('formatFeedback', () => {
         attempt: 1,
         maxAttempts: 3,
       });
-      const unmetPos = output.indexOf('Unmet Acceptance Criteria (code review)');
+      const unmetPos = output.indexOf('Unmet Human Review Requirements');
       const reviewPos = output.indexOf('Task Review Issues');
       expect(unmetPos).toBeGreaterThanOrEqual(0);
       expect(reviewPos).toBeGreaterThanOrEqual(0);
@@ -311,27 +262,7 @@ describe('formatFeedback', () => {
       expect(result).toContain('Add a contact page with email and phone fields');
     });
 
-    it('mentions upstream-skipped AC + Review when tier-1 failed', () => {
-      const base = mockValidationResult({ buildFailed: true });
-      const result = formatFeedback({
-        type: 'validation_failure',
-        result: {
-          ...base,
-          acValidation: null,
-          acSkipReason: 'upstream-failed',
-          taskReview: null,
-          reviewSkipKind: 'upstream-failed',
-          reviewSkipReason: 'Skipped — earlier validation phases failed',
-        },
-        task: 'Add a contact page',
-        attempt: 1,
-        maxAttempts: 3,
-      });
-      expect(result).toContain('Build Errors');
-      expect(result).toContain('skipped because earlier validation phases failed');
-    });
-
-    it('does not mention upstream-skipped note when AC and Review actually ran', () => {
+    it('does not mention upstream-skipped note when Review actually ran', () => {
       const result = formatFeedback({
         type: 'validation_failure',
         result: mockValidationResult({ buildFailed: true, taskReviewFailed: true }),

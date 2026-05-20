@@ -21,19 +21,6 @@ export function applyOverrides(
   // Deep clone to avoid mutating the original
   const patched: ValidationResult = JSON.parse(JSON.stringify(result));
 
-  // Apply to AC validation results
-  if (patched.acValidation && patched.acValidation.results.length > 0) {
-    for (const check of patched.acValidation.results) {
-      if (!check.passed && isDismissed(dismissedIds, 'ac_validation', check.criterion)) {
-        check.passed = true;
-        check.reasoning = `[DISMISSED BY HUMAN] ${check.reasoning}`;
-      }
-    }
-    // Recompute AC status
-    const anyFailed = patched.acValidation.results.some((r) => !r.passed);
-    patched.acValidation.status = anyFailed ? 'fail' : 'pass';
-  }
-
   // Apply to task review issues
   if (patched.taskReview && patched.taskReview.status === 'fail') {
     patched.taskReview.issues = patched.taskReview.issues.filter(
@@ -59,6 +46,23 @@ export function applyOverrides(
     }
   }
 
+  // Apply to required fact findings. Facts are deterministic checks, but a human
+  // can explicitly dismiss one through validation_override when it is no longer
+  // relevant for the current pod.
+  if (patched.factValidation && patched.factValidation.status === 'fail') {
+    for (const check of patched.factValidation.results) {
+      if (!check.passed && isDismissed(dismissedIds, 'fact_validation', check.factId)) {
+        check.passed = true;
+        check.status = 'pass';
+        check.reasoning = `[DISMISSED BY HUMAN] ${check.reasoning}`;
+      }
+    }
+
+    if (patched.factValidation.results.every((check) => check.passed)) {
+      patched.factValidation.status = 'pass';
+    }
+  }
+
   // Recompute overall
   patched.overall = computeOverall(patched);
 
@@ -71,7 +75,7 @@ export function applyOverrides(
  */
 function isDismissed(
   dismissedIds: Set<string>,
-  source: 'ac_validation' | 'task_review' | 'requirements_check',
+  source: 'fact_validation' | 'task_review' | 'requirements_check',
   text: string,
 ): boolean {
   return dismissedIds.has(findingId(source, text));
@@ -83,9 +87,9 @@ function computeOverall(result: ValidationResult): 'pass' | 'fail' {
   if (result.smoke.health.status === 'fail') return 'fail';
   if (result.smoke.pages.some((p) => p.status === 'fail')) return 'fail';
   if (result.test?.status === 'fail') return 'fail';
+  if (result.factValidation?.status === 'fail') return 'fail';
 
-  // AI-driven checks after overrides
-  if (result.acValidation?.status === 'fail') return 'fail';
+  // Review-driven checks after overrides
   if (result.taskReview?.status === 'fail') return 'fail';
 
   return 'pass';

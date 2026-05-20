@@ -11,6 +11,5 @@ export {
   type IssueClient,
   type WatchedIssueCandidate,
   createIssueClient,
-  parseAcceptanceCriteria,
   stripHtml,
 } from './issue-client.js';

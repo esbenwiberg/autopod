@@ -5,6 +5,7 @@ export interface IssueWatcherRepository {
   create(issue: Omit<WatchedIssue, 'id' | 'createdAt' | 'updatedAt'>): WatchedIssue;
   exists(provider: string, issueId: string, profileName: string): boolean;
   updateStatus(id: number, status: WatchedIssueStatus): void;
+  updatePod(id: number, podId: string, phase: WatchedIssue['phase']): void;
   findBySessionId(podId: string): WatchedIssue | null;
   list(filters?: {
     profileName?: string;
@@ -22,6 +23,7 @@ function rowToWatchedIssue(row: Record<string, unknown>): WatchedIssue {
     issueTitle: row.issue_title as string,
     status: row.status as WatchedIssueStatus,
     podId: (row.pod_id as string) ?? null,
+    phase: (row.phase as WatchedIssue['phase'] | null) ?? 'working',
     triggerLabel: row.trigger_label as string,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
@@ -35,10 +37,10 @@ export function createIssueWatcherRepository(db: Database.Database): IssueWatche
         .prepare(
           `INSERT INTO watched_issues (
             profile_name, provider, issue_id, issue_url, issue_title,
-            status, pod_id, trigger_label
+            status, pod_id, phase, trigger_label
           ) VALUES (
             @profileName, @provider, @issueId, @issueUrl, @issueTitle,
-            @status, @podId, @triggerLabel
+            @status, @podId, @phase, @triggerLabel
           )`,
         )
         .run({
@@ -49,6 +51,7 @@ export function createIssueWatcherRepository(db: Database.Database): IssueWatche
           issueTitle: issue.issueTitle,
           status: issue.status,
           podId: issue.podId,
+          phase: issue.phase ?? 'working',
           triggerLabel: issue.triggerLabel,
         });
 
@@ -71,6 +74,12 @@ export function createIssueWatcherRepository(db: Database.Database): IssueWatche
       db.prepare(
         "UPDATE watched_issues SET status = ?, updated_at = datetime('now') WHERE id = ?",
       ).run(status, id);
+    },
+
+    updatePod(id, podId, phase) {
+      db.prepare(
+        "UPDATE watched_issues SET pod_id = ?, phase = ?, updated_at = datetime('now') WHERE id = ?",
+      ).run(podId, phase, id);
     },
 
     findBySessionId(podId) {

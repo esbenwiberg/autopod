@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { type AcDefinition, parseSpecContract } from '@autopod/shared';
+import { parseSpecContract } from '@autopod/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type {
@@ -14,28 +14,15 @@ import type { HostBrowserRunner } from './host-browser-runner.js';
 import {
   artifactChangeSatisfied,
   buildReviewPrompt,
-  classifyAcTypes,
   createLocalValidationEngine,
-  deduplicateAcsByBaseText,
   enforceRequirementsStatus,
-  executeCmdChecks,
   normalizeReviewIssue,
-  parseAcInstructionsJson,
-  parseAcResults,
-  parseApiCheckSpecs,
-  parseClassificationJson,
   parseReviewJson,
   parseWarningCount,
-  restartSupervisorIfDown,
   runHealthCheck,
   startAppStabilityMonitor,
   stripMarkdownFences,
 } from './local-validation-engine.js';
-
-/** Build a minimal AcDefinition for tests — shorthand for the string-only fixtures. */
-function ac(outcome: string, type: AcDefinition['type'] = 'none'): AcDefinition {
-  return { type, outcome };
-}
 
 describe('artifactChangeSatisfied', () => {
   const diff = `diff --git a/Client/src/Foo.ts b/Client/src/Foo.ts
@@ -174,750 +161,6 @@ describe('stripMarkdownFences', () => {
   });
 });
 
-describe('parseAcInstructionsJson', () => {
-  it('parses valid JSON array', () => {
-    const input = JSON.stringify([
-      { criterion: 'Has toggle', instruction: 'Navigate to /settings' },
-      { criterion: 'Toggle works', instruction: 'Click toggle' },
-    ]);
-    const result = parseAcInstructionsJson(input);
-    expect(result).toEqual([
-      { criterion: 'Has toggle', instruction: 'Navigate to /settings' },
-      { criterion: 'Toggle works', instruction: 'Click toggle' },
-    ]);
-  });
-
-  it('handles markdown-fenced JSON', () => {
-    const input = '```json\n[{"criterion": "Test", "instruction": "Do thing"}]\n```';
-    const result = parseAcInstructionsJson(input);
-    expect(result).toEqual([{ criterion: 'Test', instruction: 'Do thing' }]);
-  });
-
-  it('filters out malformed entries', () => {
-    const input = JSON.stringify([
-      { criterion: 'Valid', instruction: 'Do thing' },
-      { criterion: 'Missing instruction' },
-      { instruction: 'Missing criterion' },
-      'not an object',
-    ]);
-    const result = parseAcInstructionsJson(input);
-    expect(result).toEqual([{ criterion: 'Valid', instruction: 'Do thing' }]);
-  });
-
-  it('returns null for non-array JSON', () => {
-    expect(parseAcInstructionsJson('{"not": "array"}')).toBeNull();
-  });
-
-  it('returns null for garbage input', () => {
-    expect(parseAcInstructionsJson('this is not json at all')).toBeNull();
-  });
-
-  it('extracts JSON from surrounding text', () => {
-    const input = 'Here are the checks:\n[{"criterion": "AC", "instruction": "Do it"}]\nDone!';
-    const result = parseAcInstructionsJson(input);
-    expect(result).toEqual([{ criterion: 'AC', instruction: 'Do it' }]);
-  });
-});
-
-describe('parseAcResults', () => {
-  const instructions = [
-    { criterion: 'Has toggle', instruction: 'Check toggle' },
-    { criterion: 'Toggle works', instruction: 'Click toggle' },
-  ];
-
-  it('parses results from stdout markers', () => {
-    const stdout = `
-Some log output
-__AUTOPOD_AC_RESULTS_START__
-[
-  {"criterion": "Has toggle", "passed": true, "reasoning": "Found it"},
-  {"criterion": "Toggle works", "passed": false, "reasoning": "Broken"}
-]
-__AUTOPOD_AC_RESULTS_END__
-More log output
-`;
-    const result = parseAcResults(stdout, instructions);
-    expect(result).toEqual([
-      { criterion: 'Has toggle', passed: true, reasoning: 'Found it' },
-      { criterion: 'Toggle works', passed: false, reasoning: 'Broken' },
-    ]);
-  });
-
-  it('returns failures when markers are missing', () => {
-    const result = parseAcResults('no markers here', instructions);
-    expect(result).toHaveLength(2);
-    expect(result[0].passed).toBe(false);
-    expect(result[0].criterion).toBe('Has toggle');
-    expect(result[0].reasoning).toContain('parseable');
-  });
-
-  it('returns failures when JSON is invalid', () => {
-    const stdout = '__AUTOPOD_AC_RESULTS_START__\nnot json\n__AUTOPOD_AC_RESULTS_END__';
-    const result = parseAcResults(stdout, instructions);
-    expect(result).toHaveLength(2);
-    expect(result.every((r) => !r.passed)).toBe(true);
-  });
-
-  it('handles missing results for some instructions', () => {
-    const stdout = `__AUTOPOD_AC_RESULTS_START__
-[{"criterion": "Has toggle", "passed": true, "reasoning": "OK"}]
-__AUTOPOD_AC_RESULTS_END__`;
-    const result = parseAcResults(stdout, instructions);
-    expect(result).toHaveLength(2);
-    expect(result[0].passed).toBe(true);
-    expect(result[1].passed).toBe(false);
-    expect(result[1].reasoning).toContain('No result');
-  });
-
-  it('uses instruction criterion not stdout criterion', () => {
-    const stdout = `__AUTOPOD_AC_RESULTS_START__
-[{"criterion": "WRONG", "passed": true, "reasoning": "OK"}]
-__AUTOPOD_AC_RESULTS_END__`;
-    const result = parseAcResults(stdout, instructions);
-    // The criterion comes from the instructions, not the parsed output
-    expect(result[0].criterion).toBe('Has toggle');
-  });
-});
-
-describe('parseClassificationJson', () => {
-  const acTypeExport = 'ScheduledJob type is exported from @autopod/shared';
-  const acApiEndpoint = 'POST /scheduled-jobs returns 201';
-  const acUiToggle = 'Settings page has a dark mode toggle';
-  const acs: AcDefinition[] = [ac(acTypeExport), ac(acApiEndpoint), ac(acUiToggle)];
-
-  it('parses valid classification array', () => {
-    const input = JSON.stringify([
-      {
-        criterion: acTypeExport,
-        validationType: 'none',
-        reason: 'TypeScript export — verified by diff',
-      },
-      { criterion: acApiEndpoint, validationType: 'api', reason: 'HTTP endpoint status check' },
-      { criterion: acUiToggle, validationType: 'web-ui', reason: 'Visual UI element' },
-    ]);
-    const result = parseClassificationJson(input, acs);
-    expect(result).toHaveLength(3);
-    expect(result?.at(0)?.validationType).toBe('none');
-    expect(result?.at(1)?.validationType).toBe('api');
-    expect(result?.at(2)?.validationType).toBe('web-ui');
-  });
-
-  it('handles markdown-fenced JSON', () => {
-    const input = `\`\`\`json\n${JSON.stringify([{ criterion: acTypeExport, validationType: 'none', reason: 'type check' }])}\n\`\`\``;
-    const result = parseClassificationJson(input, [ac(acTypeExport)]);
-    expect(result).toHaveLength(1);
-    expect(result?.at(0)?.validationType).toBe('none');
-  });
-
-  it('filters out entries with invalid validationType', () => {
-    const input = JSON.stringify([
-      { criterion: acTypeExport, validationType: 'none', reason: 'ok' },
-      { criterion: acApiEndpoint, validationType: 'browser', reason: 'invalid type' },
-    ]);
-    const result = parseClassificationJson(input, acs);
-    // 'browser' is not a valid type — filtered; missing AC falls back to none
-    const types = result?.map((r) => r.validationType) ?? [];
-    expect(types).not.toContain('browser');
-  });
-
-  it('backfills missing ACs as none', () => {
-    const input = JSON.stringify([
-      { criterion: acTypeExport, validationType: 'none', reason: 'type check' },
-    ]);
-    const result = parseClassificationJson(input, acs);
-    expect(result).toHaveLength(3);
-    const missing = result?.filter((r) => r.criterion !== acTypeExport) ?? [];
-    expect(missing.every((r) => r.validationType === 'none')).toBe(true);
-  });
-
-  it('classifies a single AC from the LLM result', () => {
-    const input = JSON.stringify([
-      { criterion: acApiEndpoint, validationType: 'api', reason: 'endpoint' },
-    ]);
-    const result = parseClassificationJson(input, [ac(acApiEndpoint, 'api')]);
-    expect(result?.at(0)?.validationType).toBe('api');
-    expect(result?.at(0)?.criterion).toBe(acApiEndpoint);
-  });
-
-  it('returns null for garbage input', () => {
-    expect(parseClassificationJson('not json at all', acs)).toBeNull();
-  });
-
-  it('returns null for non-array JSON', () => {
-    expect(parseClassificationJson('{"not": "array"}', acs)).toBeNull();
-  });
-
-  it('extracts JSON from surrounding text', () => {
-    const jsonPart = JSON.stringify([
-      { criterion: acApiEndpoint, validationType: 'api', reason: 'endpoint' },
-    ]);
-    const result = parseClassificationJson(`Here is my answer:\n${jsonPart}\nDone.`, [
-      ac(acApiEndpoint),
-    ]);
-    expect(result).toHaveLength(1);
-    expect(result?.at(0)?.validationType).toBe('api');
-  });
-});
-
-describe('classifyAcTypes', () => {
-  // Minimal config stub — classifyAcTypes only reads acceptanceCriteria and hasWebUi
-  // in the declared-types path, so we don't need to wire real validation infra.
-  function configWith(acs: AcDefinition[], hasWebUi = true): ValidationEngineConfig {
-    return {
-      podId: 'sess-1',
-      containerId: 'c1',
-      previewUrl: 'http://localhost:3000',
-      buildCommand: 'npm run build',
-      startCommand: 'npm start',
-      healthPath: '/health',
-      healthTimeout: 30_000,
-      smokePages: [],
-      attempt: 1,
-      task: 'test task',
-      diff: '',
-      reviewerModel: 'sonnet',
-      acceptanceCriteria: acs,
-      hasWebUi,
-    };
-  }
-
-  it('skips the LLM when every AC has a brief-declared type', async () => {
-    const acs: AcDefinition[] = [
-      { type: 'none', outcome: 'Types exported' },
-      { type: 'api', outcome: 'POST /jobs returns 201', hint: 'POST /api/jobs' },
-      { type: 'web', outcome: 'Settings has toggle', hint: '/settings' },
-    ];
-    // If the LLM were invoked, this would spawn a `claude` subprocess and hang or fail;
-    // resolving synchronously proves the short-circuit path ran.
-    const result = await classifyAcTypes(configWith(acs));
-    expect(result).toHaveLength(3);
-    expect(result?.[0]).toMatchObject({
-      criterion: 'Types exported',
-      validationType: 'none',
-    });
-    expect(result?.[1]?.validationType).toBe('api');
-    // Brief `type: web` maps to engine `web-ui`.
-    expect(result?.[2]?.validationType).toBe('web-ui');
-    // Reason signals the skip path so logs remain diagnosable.
-    expect(result?.[0]?.reason).toMatch(/brief/i);
-  });
-
-  it('downgrades web-ui to none when hasWebUi is false', async () => {
-    const acs: AcDefinition[] = [
-      { type: 'web', outcome: 'Settings has toggle', hint: '/settings' },
-      { type: 'api', outcome: 'POST /jobs returns 201', hint: 'POST /api/jobs' },
-    ];
-    const result = await classifyAcTypes(configWith(acs, false));
-    expect(result?.[0]?.validationType).toBe('none');
-    expect(result?.[1]?.validationType).toBe('api');
-  });
-
-  it('returns [] for empty input without invoking the LLM', async () => {
-    const result = await classifyAcTypes(configWith([]));
-    expect(result).toEqual([]);
-  });
-
-  it('passes brief `type: cmd` through as engine `cmd` and propagates hint + polarity', async () => {
-    // Regression: classifyAcTypes was dropping `hint` and `polarity` when building
-    // ClassifiedAc, so executeCmdChecks fell back to running the `outcome` text as
-    // a shell command. Make sure both fields survive classification.
-    const acs: AcDefinition[] = [
-      {
-        type: 'cmd',
-        outcome: "rg -l 'OldEventEmitter' packages/daemon/src returns no matches",
-        hint: "rg -l 'OldEventEmitter' packages/daemon/src",
-        polarity: 'expect-no-output',
-      },
-    ];
-    const result = await classifyAcTypes(configWith(acs));
-    expect(result).toHaveLength(1);
-    expect(result?.[0]?.validationType).toBe('cmd');
-    expect(result?.[0]?.command).toBe("rg -l 'OldEventEmitter' packages/daemon/src");
-    expect(result?.[0]?.polarity).toBe('expect-no-output');
-    // criterion stays the human description — it's what surfaces in UI / review prompts.
-    expect(result?.[0]?.criterion).toBe(
-      "rg -l 'OldEventEmitter' packages/daemon/src returns no matches",
-    );
-  });
-
-  it('demotes banned build/test/lint commands to none even when declared cmd', async () => {
-    // The banlist runs before declared-type evaluation, so anything matching
-    // COMMAND_LIKE_AC_PATTERNS lands as 'none' regardless of authorial intent.
-    const acs: AcDefinition[] = [
-      { type: 'cmd', outcome: 'pnpm build', hint: 'pnpm build' },
-      { type: 'cmd', outcome: 'dotnet test ./Tests', hint: 'dotnet test ./Tests' },
-      { type: 'cmd', outcome: 'npx tsc --noEmit', hint: 'npx tsc --noEmit' },
-    ];
-    const result = await classifyAcTypes(configWith(acs));
-    expect(result).toHaveLength(3);
-    for (const r of result ?? []) {
-      expect(r.validationType).toBe('none');
-    }
-  });
-});
-
-describe('executeCmdChecks', () => {
-  function configWith(): ValidationEngineConfig {
-    return {
-      podId: 'sess-1',
-      containerId: 'c1',
-      previewUrl: 'http://localhost:3000',
-      buildCommand: 'npm run build',
-      startCommand: 'npm start',
-      healthPath: '/health',
-      healthTimeout: 30_000,
-      smokePages: [],
-      attempt: 1,
-      task: 'test task',
-      diff: '',
-      reviewerModel: 'sonnet',
-      acceptanceCriteria: [],
-      hasWebUi: true,
-    };
-  }
-
-  function makeContainerManager(
-    handler: (cmd: string[]) => { stdout: string; stderr: string; exitCode: number },
-  ): ContainerManager {
-    const execInContainer = vi.fn(async (_id: string, cmd: string[]) => handler(cmd));
-    return { execInContainer } as unknown as ContainerManager;
-  }
-
-  it('passes when an exit-zero command succeeds (default polarity)', async () => {
-    const cm = makeContainerManager(() => ({ stdout: 'ok\n', stderr: '', exitCode: 0 }));
-    const result = await executeCmdChecks(cm, configWith(), [
-      {
-        criterion: 'NewMw.cs is registered',
-        command: 'test -f Application/Auth/NewMw.cs',
-        polarity: 'exit-zero',
-        validationType: 'cmd',
-        reason: 'declared in brief',
-      },
-    ]);
-    expect(result).toHaveLength(1);
-    expect(result[0]?.passed).toBe(true);
-    expect(result[0]?.validationType).toBe('cmd');
-  });
-
-  it('fails when an exit-zero command exits non-zero', async () => {
-    const cm = makeContainerManager(() => ({
-      stdout: '',
-      stderr: 'no such file',
-      exitCode: 1,
-    }));
-    const result = await executeCmdChecks(cm, configWith(), [
-      {
-        criterion: 'NewMw.cs is registered',
-        command: 'test -f Application/Auth/NewMw.cs',
-        polarity: 'exit-zero',
-        validationType: 'cmd',
-        reason: 'declared in brief',
-      },
-    ]);
-    expect(result[0]?.passed).toBe(false);
-    expect(result[0]?.reasoning).toContain('no such file');
-  });
-
-  it('expect-no-output: passes when grep finds nothing', async () => {
-    // rg returns exit 1 when there are no matches; that's the pass condition.
-    const cm = makeContainerManager(() => ({ stdout: '', stderr: '', exitCode: 1 }));
-    const result = await executeCmdChecks(cm, configWith(), [
-      {
-        criterion: 'OldEventEmitter is removed from daemon source',
-        command: "rg -l 'OldEventEmitter' packages/daemon/src",
-        polarity: 'expect-no-output',
-        validationType: 'cmd',
-        reason: 'declared in brief',
-      },
-    ]);
-    expect(result[0]?.passed).toBe(true);
-  });
-
-  it('expect-no-output: fails when grep emits a match', async () => {
-    const cm = makeContainerManager(() => ({
-      stdout: 'packages/daemon/src/old.ts\n',
-      stderr: '',
-      exitCode: 0,
-    }));
-    const result = await executeCmdChecks(cm, configWith(), [
-      {
-        criterion: 'OldEventEmitter is removed from daemon source',
-        command: "rg -l 'OldEventEmitter' packages/daemon/src",
-        polarity: 'expect-no-output',
-        validationType: 'cmd',
-        reason: 'declared in brief',
-      },
-    ]);
-    expect(result[0]?.passed).toBe(false);
-    expect(result[0]?.reasoning).toContain('packages/daemon/src/old.ts');
-  });
-
-  it('expect-output: passes when grep emits output (positive registration AC)', async () => {
-    const cm = makeContainerManager(() => ({
-      stdout: 'Client/src/context/network/http/QueryProvider/queryKeys.ts\n',
-      stderr: '',
-      exitCode: 0,
-    }));
-    const result = await executeCmdChecks(cm, configWith(), [
-      {
-        criterion: 'RESOURCE_PLANNER_TOP_ROW query key is registered',
-        command:
-          "grep -l 'RESOURCE_PLANNER_TOP_ROW' Client/src/context/network/http/QueryProvider/queryKeys.ts",
-        polarity: 'expect-output',
-        validationType: 'cmd',
-        reason: 'declared in brief',
-      },
-    ]);
-    expect(result[0]?.passed).toBe(true);
-  });
-
-  it('expect-output: fails when grep emits nothing even with exit 0', async () => {
-    // grep exits 1 when no match, but some commands exit 0 with empty stdout —
-    // either way, expect-output requires non-empty stdout.
-    const cm = makeContainerManager(() => ({ stdout: '', stderr: '', exitCode: 0 }));
-    const result = await executeCmdChecks(cm, configWith(), [
-      {
-        criterion: 'thing is registered',
-        command: 'grep -l THING file.ts',
-        polarity: 'expect-output',
-        validationType: 'cmd',
-        reason: 'declared in brief',
-      },
-    ]);
-    expect(result[0]?.passed).toBe(false);
-  });
-
-  it('defaults to exit-zero polarity when polarity is omitted', async () => {
-    const cm = makeContainerManager(() => ({ stdout: '', stderr: '', exitCode: 0 }));
-    const result = await executeCmdChecks(cm, configWith(), [
-      {
-        criterion: 'file exists',
-        command: 'test -f Client/src/TopTotalRow.tsx',
-        validationType: 'cmd',
-        reason: 'declared in brief',
-      },
-    ]);
-    expect(result[0]?.passed).toBe(true);
-  });
-
-  it('REGRESSION: executes ac.command, NOT ac.criterion (the human description)', async () => {
-    // The bug we're fixing: executeCmdChecks used to run `sh -c ac.criterion`
-    // where criterion was the outcome description like "LogStreamingHub is
-    // mapped in SignalRMiddlewareEx.cs". The shell would try to exec
-    // "LogStreamingHub" as a command, exit 127, and fail every cmd AC.
-    let executed: string | null = null;
-    const execInContainer = vi.fn(async (_id: string, cmd: string[]) => {
-      executed = cmd[2] ?? null;
-      return { stdout: 'match\n', stderr: '', exitCode: 0 };
-    });
-    const cm = { execInContainer } as unknown as ContainerManager;
-
-    const result = await executeCmdChecks(cm, configWith(), [
-      {
-        criterion: 'LogStreamingHub is mapped in SignalRMiddlewareEx.cs',
-        command: "grep 'MapHub<LogStreamingHub>' Frameworks/PF.SignalR/SignalRMiddlewareEx.cs",
-        polarity: 'expect-output',
-        validationType: 'cmd',
-        reason: 'declared in brief',
-      },
-    ]);
-
-    expect(executed).toBe(
-      "grep 'MapHub<LogStreamingHub>' Frameworks/PF.SignalR/SignalRMiddlewareEx.cs",
-    );
-    expect(executed).not.toBe('LogStreamingHub is mapped in SignalRMiddlewareEx.cs');
-    expect(result[0]?.passed).toBe(true);
-  });
-
-  it('fails explicitly when command (hint) is missing — does NOT exec the criterion', async () => {
-    const execInContainer = vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 }));
-    const cm = { execInContainer } as unknown as ContainerManager;
-    const result = await executeCmdChecks(cm, configWith(), [
-      {
-        criterion: 'Some human-readable outcome',
-        // command intentionally omitted
-        validationType: 'cmd',
-        reason: 'declared in brief',
-      },
-    ]);
-    expect(execInContainer).not.toHaveBeenCalled();
-    expect(result[0]?.passed).toBe(false);
-    expect(result[0]?.reasoning).toMatch(/hint/i);
-  });
-
-  it('returns failed results when the container is missing', async () => {
-    const cm = makeContainerManager(() => ({ stdout: '', stderr: '', exitCode: 0 }));
-    const config = { ...configWith(), containerId: undefined as unknown as string };
-    const result = await executeCmdChecks(cm, config, [
-      {
-        criterion: 'thing exists',
-        command: 'echo hi',
-        polarity: 'exit-zero',
-        validationType: 'cmd',
-        reason: 'declared in brief',
-      },
-    ]);
-    expect(result[0]?.passed).toBe(false);
-    expect(result[0]?.reasoning).toMatch(/no container/i);
-  });
-
-  it('captures execInContainer errors as a failed result', async () => {
-    const execInContainer = vi.fn(async () => {
-      throw new Error('docker exec timeout');
-    });
-    const cm = { execInContainer } as unknown as ContainerManager;
-    const result = await executeCmdChecks(cm, configWith(), [
-      {
-        criterion: 'thing exists',
-        command: 'echo hi',
-        polarity: 'exit-zero',
-        validationType: 'cmd',
-        reason: 'declared in brief',
-      },
-    ]);
-    expect(result[0]?.passed).toBe(false);
-    expect(result[0]?.reasoning).toContain('docker exec timeout');
-  });
-});
-
-describe('parseApiCheckSpecs', () => {
-  it('parses valid specs with numeric expectedStatus', () => {
-    const input = JSON.stringify([
-      { criterion: 'POST /jobs returns 201', method: 'POST', path: '/jobs', expectedStatus: 201 },
-      { criterion: 'GET /users returns 200', method: 'GET', path: '/users', expectedStatus: 200 },
-    ]);
-    const result = parseApiCheckSpecs(input);
-    expect(result).toHaveLength(2);
-    expect(result?.[0]?.expectedStatus).toBe(201);
-    expect(result?.[1]?.expectedStatus).toBe(200);
-  });
-
-  it('coerces string expectedStatus "201" to number 201', () => {
-    const input = JSON.stringify([
-      {
-        criterion: 'POST /jobs returns 201',
-        method: 'POST',
-        path: '/jobs',
-        expectedStatus: '201',
-      },
-    ]);
-    const result = parseApiCheckSpecs(input);
-    expect(result).toHaveLength(1);
-    expect(result?.[0]?.expectedStatus).toBe(201);
-    expect(typeof result?.[0]?.expectedStatus).toBe('number');
-  });
-
-  it('drops spec when expectedStatus is a non-numeric string', () => {
-    const input = JSON.stringify([
-      { criterion: 'POST /jobs returns 201', method: 'POST', path: '/jobs', expectedStatus: 'ok' },
-    ]);
-    const result = parseApiCheckSpecs(input);
-    expect(result).toHaveLength(0);
-  });
-
-  it('drops spec when expectedStatus is missing entirely', () => {
-    const input = JSON.stringify([
-      { criterion: 'POST /jobs returns 201', method: 'POST', path: '/jobs' },
-    ]);
-    const result = parseApiCheckSpecs(input);
-    expect(result).toHaveLength(0);
-  });
-
-  it('parses markdown-wrapped JSON', () => {
-    const inner = JSON.stringify([
-      { criterion: 'POST /jobs returns 201', method: 'POST', path: '/jobs', expectedStatus: 201 },
-    ]);
-    const result = parseApiCheckSpecs(`\`\`\`json\n${inner}\n\`\`\``);
-    expect(result).toHaveLength(1);
-    expect(result?.[0]?.expectedStatus).toBe(201);
-  });
-
-  it('returns null for garbage input', () => {
-    expect(parseApiCheckSpecs('this is not json at all')).toBeNull();
-  });
-
-  it('returns null for non-array JSON', () => {
-    expect(parseApiCheckSpecs('{"criterion": "x", "method": "GET"}')).toBeNull();
-  });
-
-  it('extracts JSON from surrounding prose', () => {
-    const inner = JSON.stringify([
-      { criterion: 'GET /users returns 200', method: 'GET', path: '/users', expectedStatus: 200 },
-    ]);
-    const result = parseApiCheckSpecs(`Here are the specs:\n${inner}\nDone.`);
-    expect(result).toHaveLength(1);
-    expect(result?.[0]?.method).toBe('GET');
-  });
-
-  it('preserves optional bodyContains field', () => {
-    const input = JSON.stringify([
-      {
-        criterion: 'GET /users returns 200',
-        method: 'GET',
-        path: '/users',
-        expectedStatus: 200,
-        bodyContains: '"id"',
-      },
-    ]);
-    const result = parseApiCheckSpecs(input);
-    expect(result).toHaveLength(1);
-    expect(result?.[0]?.bodyContains).toBe('"id"');
-  });
-
-  it('preserves captureAs and captureField fields', () => {
-    const input = JSON.stringify([
-      {
-        criterion: 'POST /jobs returns 201',
-        method: 'POST',
-        path: '/jobs',
-        expectedStatus: 201,
-        captureAs: 'jobId',
-        captureField: 'id',
-      },
-    ]);
-    const result = parseApiCheckSpecs(input);
-    expect(result).toHaveLength(1);
-    expect(result?.[0]?.captureAs).toBe('jobId');
-    expect(result?.[0]?.captureField).toBe('id');
-  });
-
-  it('preserves dependsOn field for chained specs', () => {
-    const input = JSON.stringify([
-      {
-        criterion: 'GET /jobs/{id} returns 200',
-        method: 'GET',
-        path: '/jobs/{jobId}',
-        expectedStatus: 200,
-        dependsOn: 'POST /jobs returns 201',
-      },
-    ]);
-    const result = parseApiCheckSpecs(input);
-    expect(result).toHaveLength(1);
-    expect(result?.[0]?.dependsOn).toBe('POST /jobs returns 201');
-    expect(result?.[0]?.path).toBe('/jobs/{jobId}');
-  });
-
-  it('parses a chained create-then-fetch spec set', () => {
-    const input = JSON.stringify([
-      {
-        criterion: 'POST /jobs creates a job',
-        method: 'POST',
-        path: '/jobs',
-        expectedStatus: 201,
-        requestBody: { name: 'test' },
-        captureAs: 'jobId',
-        captureField: 'id',
-      },
-      {
-        criterion: 'GET /jobs/{id} returns the job',
-        method: 'GET',
-        path: '/jobs/{jobId}',
-        expectedStatus: 200,
-        dependsOn: 'POST /jobs creates a job',
-      },
-    ]);
-    const result = parseApiCheckSpecs(input);
-    expect(result).toHaveLength(2);
-    expect(result?.[0]?.captureAs).toBe('jobId');
-    expect(result?.[1]?.dependsOn).toBe('POST /jobs creates a job');
-    expect(result?.[1]?.path).toBe('/jobs/{jobId}');
-  });
-});
-
-describe('deduplicateAcsByBaseText', () => {
-  it('passes through non-duplicate criteria unchanged', () => {
-    const acs = [
-      ac('POST /jobs returns 201'),
-      ac('GET /jobs returns 200'),
-      ac('DELETE /jobs/{id} returns 204'),
-    ];
-    const { deduped } = deduplicateAcsByBaseText(acs);
-    expect(deduped).toHaveLength(3);
-    expect(deduped.map((d) => d.outcome)).toEqual(acs.map((a) => a.outcome));
-  });
-
-  it('deduplicates exact duplicates', () => {
-    const acs = [ac('POST /jobs returns 201'), ac('POST /jobs returns 201')];
-    const { deduped } = deduplicateAcsByBaseText(acs);
-    expect(deduped).toHaveLength(1);
-    expect(deduped[0]?.outcome).toBe('POST /jobs returns 201');
-  });
-
-  it('deduplicates when one AC is the other plus a parenthetical suffix', () => {
-    const short = 'POST /jobs returns 201';
-    const long =
-      'POST /jobs returns 201 (HTTP status code is directly verifiable via a POST request)';
-    const { deduped } = deduplicateAcsByBaseText([ac(short), ac(long)]);
-    expect(deduped).toHaveLength(1);
-    // Keeps the longer (more informative) form
-    expect(deduped[0]?.outcome).toBe(long);
-  });
-
-  it('deduplicates and keeps longest when long form comes first', () => {
-    const short = 'ConsecutiveFailureCount increments by 1 on each failure';
-    const long =
-      'ConsecutiveFailureCount increments by 1 on each failure (ConsecutiveFailureCount is a persisted job field verifiable via GET /api/schedule/jobs/{id} after induced failures.)';
-    const { deduped } = deduplicateAcsByBaseText([ac(long), ac(short)]);
-    expect(deduped).toHaveLength(1);
-    expect(deduped[0]?.outcome).toBe(long);
-  });
-
-  it('expandResult maps canonical result back to all original criteria', () => {
-    const short = 'POST /jobs returns 201';
-    const long = 'POST /jobs returns 201 (HTTP status code is directly verifiable)';
-    const { expandResult } = deduplicateAcsByBaseText([ac(short), ac(long)]);
-
-    const compactResults = [
-      {
-        criterion: long,
-        passed: true,
-        validationType: 'api' as const,
-        reasoning: 'POST /jobs → 201',
-      },
-    ];
-    const expanded = expandResult(compactResults);
-    expect(expanded).toHaveLength(2);
-    // Short form gets a result too (re-mapped from the canonical long form)
-    const shortResult = expanded.find((r) => r.criterion === short);
-    expect(shortResult).toBeDefined();
-    expect(shortResult?.passed).toBe(true);
-    // Long form result is also present
-    const longResult = expanded.find((r) => r.criterion === long);
-    expect(longResult).toBeDefined();
-    expect(longResult?.passed).toBe(true);
-  });
-
-  it('expandResult propagates failures to all matching originals', () => {
-    const short = 'GET /jobs/{id} returns 200';
-    const long = 'GET /jobs/{id} returns 200 (use the id from the POST response)';
-    const { expandResult } = deduplicateAcsByBaseText([ac(short), ac(long)]);
-
-    const compactResults = [
-      {
-        criterion: long,
-        passed: false,
-        validationType: 'api' as const,
-        reasoning: 'GET /jobs/1 → 404',
-      },
-    ];
-    const expanded = expandResult(compactResults);
-    expect(expanded).toHaveLength(2);
-    expect(expanded.every((r) => !r.passed)).toBe(true);
-  });
-
-  it('handles criteria with no near-duplicates mixed with ones that do have near-duplicates', () => {
-    const unique = 'GET /health returns 200';
-    const short = 'POST /jobs returns 201';
-    const long = 'POST /jobs returns 201 (verifiable via a POST request)';
-    const { deduped } = deduplicateAcsByBaseText([ac(unique), ac(short), ac(long)]);
-    expect(deduped).toHaveLength(2);
-    const outcomes = deduped.map((d) => d.outcome);
-    expect(outcomes).toContain(unique);
-    expect(outcomes).toContain(long);
-    expect(outcomes).not.toContain(short);
-  });
-});
-
 describe('enforceRequirementsStatus', () => {
   it('returns null unchanged', () => {
     expect(enforceRequirementsStatus(null)).toBeNull();
@@ -980,7 +223,7 @@ describe('enforceRequirementsStatus', () => {
       status: 'pass' as const,
       reasoning: 'Mostly fine',
       issues: ['minor nit'],
-      requirementsCheck: [{ criterion: 'Some AC', met: false, note: 'Not done' }],
+      requirementsCheck: [{ criterion: 'Some requirement', met: false, note: 'Not done' }],
     };
     const result = enforceRequirementsStatus(parsed);
     expect(result?.reasoning).toBe('Mostly fine');
@@ -1005,62 +248,55 @@ describe('buildReviewPrompt', () => {
     reviewerModel: 'claude-opus-4-6',
   };
 
-  it('renders DIFF VERIFICATION REQUIRED section when noneAcCriteria is provided', () => {
-    const noneAcs = ['Scheduler runs on startup', 'ConsecutiveFailureCount increments on failure'];
-    const prompt = buildReviewPrompt(baseConfig, undefined, noneAcs);
+  const contract = parseSpecContract(`contract_version: 1
+title: Scheduler
+depends_on: []
+scenarios:
+  - id: startup
+    given: ["the daemon starts"]
+    when: ["the scheduler initializes"]
+    then: ["recurring jobs are registered"]
+required_facts:
+  - id: fact-startup
+    proves: [startup]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/scheduled-jobs/scheduler.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- scheduled-job-manager.test.ts
+human_review:
+  - id: review-failure-count
+    covers: [startup]
+    criterion: ConsecutiveFailureCount increments on failure
+    reason: Requires judgment over the diff, not a deterministic command
+`);
+
+  it('renders diff-verification requirements from contract human review items', () => {
+    const prompt = buildReviewPrompt({ ...baseConfig, contract });
     expect(prompt).toContain('REQUIREMENTS — DIFF VERIFICATION REQUIRED');
-    expect(prompt).toContain('Scheduler runs on startup');
     expect(prompt).toContain('ConsecutiveFailureCount increments on failure');
     expect(prompt).toContain('YOU ARE THE ONLY CHECK');
   });
 
-  it('renders AUTO-VERIFIED section for non-none ACs when noneAcCriteria is provided', () => {
-    const config = {
-      ...baseConfig,
-      acceptanceCriteria: [ac('POST /api/jobs returns 201'), ac('Scheduler runs on startup')],
-    };
-    const noneAcs = ['Scheduler runs on startup'];
-    const prompt = buildReviewPrompt(config, undefined, noneAcs);
-    expect(prompt).toContain('ACCEPTANCE CRITERIA — AUTO-VERIFIED');
-    expect(prompt).toContain('POST /api/jobs returns 201');
-    expect(prompt).toContain('REQUIREMENTS — DIFF VERIFICATION REQUIRED');
-    expect(prompt).toContain('Scheduler runs on startup');
-    // The auto-verified section should NOT include the none AC
-    const autoSectionMatch = prompt.match(/AUTO-VERIFIED[\s\S]*?DIFF VERIFICATION/);
-    expect(autoSectionMatch?.[0]).not.toContain('Scheduler runs on startup');
-  });
-
-  it('omits DIFF VERIFICATION section when noneAcCriteria is empty', () => {
-    const config = { ...baseConfig, acceptanceCriteria: [ac('POST /api/jobs returns 201')] };
-    const prompt = buildReviewPrompt(config, undefined, []);
+  it('omits diff-verification requirements when the contract has no human review items', () => {
+    const noHumanReview = { ...contract, humanReview: [] };
+    const prompt = buildReviewPrompt({ ...baseConfig, contract: noHumanReview });
     expect(prompt).not.toContain('DIFF VERIFICATION REQUIRED');
   });
 
-  it('omits AUTO-VERIFIED section when all ACs are none-classified', () => {
-    const config = { ...baseConfig, acceptanceCriteria: [ac('Scheduler runs on startup')] };
-    const noneAcs = ['Scheduler runs on startup'];
-    const prompt = buildReviewPrompt(config, undefined, noneAcs);
-    expect(prompt).not.toContain('AUTO-VERIFIED');
-    expect(prompt).toContain('DIFF VERIFICATION REQUIRED');
-  });
-
-  it('omits requirementsCheck from JSON format comment when no none ACs', () => {
-    const config = { ...baseConfig, acceptanceCriteria: [ac('POST /api/jobs returns 201')] };
-    const prompt = buildReviewPrompt(config, undefined, []);
-    // Standard requirementsCheck format (not the diff-only variant)
+  it('includes requirementsCheck only when human review items exist', () => {
+    const prompt = buildReviewPrompt({ ...baseConfig, contract });
     expect(prompt).toContain('"requirementsCheck"');
-    expect(prompt).not.toContain('DIFF VERIFICATION REQUIRED');
+
+    const noHumanReview = { ...contract, humanReview: [] };
+    const promptWithoutHumanReview = buildReviewPrompt({ ...baseConfig, contract: noHumanReview });
+    expect(promptWithoutHumanReview).not.toContain('"requirementsCheck"');
   });
 
-  it('instructs reviewer to include only DIFF VERIFICATION criteria in requirementsCheck', () => {
-    const config = {
-      ...baseConfig,
-      acceptanceCriteria: [ac('POST /api/jobs returns 201'), ac('Scheduler runs on startup')],
-    };
-    const noneAcs = ['Scheduler runs on startup'];
-    const prompt = buildReviewPrompt(config, undefined, noneAcs);
+  it('instructs reviewer to include only diff-verification requirements in requirementsCheck', () => {
+    const prompt = buildReviewPrompt({ ...baseConfig, contract });
     expect(prompt).toContain('Include ONLY the "DIFF VERIFICATION REQUIRED" requirements');
-    expect(prompt).toContain('Do NOT include auto-verified');
+    expect(prompt).toContain('Do NOT include required facts');
   });
 });
 
@@ -1322,7 +558,7 @@ describe('validate() — hasWebUi gating', () => {
   });
 });
 
-describe('validate() — tier-1 gate', () => {
+describe('validate() — facts + review gate', () => {
   function stubContainerManager(): ContainerManager {
     const fail = (name: string) =>
       vi.fn(() => Promise.reject(new Error(`stub: ${name} unexpectedly called`)));
@@ -1375,77 +611,70 @@ describe('validate() — tier-1 gate', () => {
     };
   }
 
-  it('skips AC + Review with upstream-failed reason when build fails', async () => {
+  it('skips Facts + Review with upstream-failed reason when build fails', async () => {
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
 
     const completed: Array<{ phase: string; status: string }> = [];
     const result = await engine.validate(
-      baseConfig({ buildCommand: 'npm run build', acceptanceCriteria: ['AC: it works'] }),
+      baseConfig({ buildCommand: 'npm run build' }),
       undefined,
       undefined,
       { onPhaseCompleted: (phase, status) => completed.push({ phase, status }) },
     );
 
     expect(result.smoke.build.status).toBe('fail');
-    expect(result.acValidation).toBeNull();
-    expect(result.acSkipReason).toBe('upstream-failed');
+    expect(result.factValidation).toEqual({ status: 'skip', results: [] });
     expect(result.taskReview).toBeNull();
     expect(result.reviewSkipKind).toBe('upstream-failed');
     expect(result.reviewSkipReason).toMatch(/earlier validation phases failed/i);
     expect(result.overall).toBe('fail');
 
-    const acEvent = completed.find((c) => c.phase === 'ac');
+    const factsEvent = completed.find((c) => c.phase === 'facts');
     const reviewEvent = completed.find((c) => c.phase === 'review');
-    expect(acEvent?.status).toBe('skip');
+    expect(factsEvent?.status).toBe('skip');
     expect(reviewEvent?.status).toBe('skip');
   });
 
-  it('skips AC + Review when lint fails', async () => {
+  it('skips Facts + Review when lint fails', async () => {
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
 
-    const result = await engine.validate(
-      baseConfig({ lintCommand: 'eslint .', acceptanceCriteria: ['AC: it works'] }),
-    );
+    const result = await engine.validate(baseConfig({ lintCommand: 'eslint .' }));
 
     expect(result.lint?.status).toBe('fail');
-    expect(result.acSkipReason).toBe('upstream-failed');
+    expect(result.factValidation?.status).toBe('skip');
     expect(result.reviewSkipKind).toBe('upstream-failed');
     expect(result.overall).toBe('fail');
   });
 
-  it('skips AC + Review when SAST fails', async () => {
+  it('skips Facts + Review when SAST fails', async () => {
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
 
-    const result = await engine.validate(
-      baseConfig({ sastCommand: 'semgrep', acceptanceCriteria: ['AC: it works'] }),
-    );
+    const result = await engine.validate(baseConfig({ sastCommand: 'semgrep' }));
 
     expect(result.sast?.status).toBe('fail');
-    expect(result.acSkipReason).toBe('upstream-failed');
+    expect(result.factValidation?.status).toBe('skip');
     expect(result.reviewSkipKind).toBe('upstream-failed');
     expect(result.overall).toBe('fail');
   });
 
-  it('skips AC + Review when tests fail', async () => {
+  it('skips Facts + Review when tests fail', async () => {
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
 
-    const result = await engine.validate(
-      baseConfig({ testCommand: 'vitest', acceptanceCriteria: ['AC: it works'] }),
-    );
+    const result = await engine.validate(baseConfig({ testCommand: 'vitest' }));
 
     expect(result.test?.status).toBe('fail');
-    expect(result.acSkipReason).toBe('upstream-failed');
+    expect(result.factValidation?.status).toBe('skip');
     expect(result.reviewSkipKind).toBe('upstream-failed');
     expect(result.overall).toBe('fail');
   });
 
-  it('runs AC + Review when all tier-1 phases pass-or-skip', async () => {
+  it('runs Facts + Review when all tier-1 phases pass-or-skip', async () => {
     // hasWebUi=false → health/pages auto-skip. No build/test/lint/sast commands
-    // → those skip too. tier1Pass should be true and AC should be invoked.
+    // → those skip too. tier1Pass should be true and facts should be invoked.
     // diff='' makes the review short-circuit with 'No code changes detected',
     // which classifies as 'no-changes' (NOT upstream-failed).
     const cm = stubContainerManager();
@@ -1453,8 +682,7 @@ describe('validate() — tier-1 gate', () => {
 
     const result = await engine.validate(baseConfig());
 
-    // No AC criteria configured → AC is null but reason is no-criteria, not upstream-failed
-    expect(result.acSkipReason).toBe('no-criteria');
+    expect(result.factValidation).toEqual({ status: 'skip', results: [] });
     // Review path was taken (no diff → 'no-changes' kind)
     expect(result.taskReview).toBeNull();
     expect(result.reviewSkipKind).toBe('no-changes');
@@ -1462,14 +690,13 @@ describe('validate() — tier-1 gate', () => {
     expect(result.overall).toBe('pass');
   });
 
-  it('marks profile-skip on AC when skipPhases includes ac', async () => {
+  it('marks profile-skip on Facts when skipPhases includes facts', async () => {
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
 
-    const result = await engine.validate(baseConfig({ skipPhases: ['ac'] }));
+    const result = await engine.validate(baseConfig({ skipPhases: ['facts'] }));
 
-    expect(result.acValidation).toBeNull();
-    expect(result.acSkipReason).toBe('profile-skip');
+    expect(result.factValidation).toEqual({ status: 'skip', results: [] });
   });
 
   it('marks profile-skip on Review when skipPhases includes review', async () => {
@@ -1890,94 +1117,6 @@ describe('runHealthCheck — supervisor spawn', () => {
     expect(result.status).toBe('pass');
     const supervisorCalls = execCalls.filter((c) => c.includes('export START_COMMAND'));
     expect(supervisorCalls).toHaveLength(0);
-  });
-});
-
-describe('restartSupervisorIfDown — post-Claude reachability guard', () => {
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
-  });
-
-  function makeConfig(): ValidationEngineConfig {
-    return {
-      podId: 'pod-rsid',
-      containerId: 'c-rsid',
-      previewUrl: 'http://127.0.0.1:9002',
-      buildCommand: '',
-      startCommand: 'pnpm dev',
-      healthPath: '/health',
-      healthTimeout: 5,
-      smokePages: [],
-      attempt: 1,
-      task: 'test',
-      diff: '',
-    };
-  }
-
-  it('does not exec kill+restart when server is reachable', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({ status: 200, text: () => Promise.resolve('ok') }),
-    );
-    const execCmds: string[] = [];
-    const cm = {
-      execInContainer: vi.fn(async (_id: string, cmd: string[]) => {
-        if (cmd[2]) execCmds.push(cmd[2]);
-        return { stdout: '', stderr: '', exitCode: 0 };
-      }),
-    } as unknown as ContainerManager;
-
-    await restartSupervisorIfDown(cm, makeConfig());
-
-    const restartCalls = execCmds.filter((c) => c.includes('kill -9'));
-    expect(restartCalls).toHaveLength(0);
-  });
-
-  it('kills old supervisor and spawns fresh one when server is unreachable', async () => {
-    vi.useFakeTimers();
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
-    const execCmds: string[] = [];
-    const cm = {
-      execInContainer: vi.fn(async (_id: string, cmd: string[]) => {
-        if (cmd[2]) execCmds.push(cmd[2]);
-        return { stdout: '', stderr: '', exitCode: 0 };
-      }),
-    } as unknown as ContainerManager;
-
-    const promise = restartSupervisorIfDown(cm, makeConfig());
-    await vi.advanceTimersByTimeAsync(30_000);
-    await promise;
-
-    // Should have called execInContainer with a kill+respawn command
-    const restartCalls = execCmds.filter(
-      (c) => c.includes('kill -9') && c.includes('autopod-supervisor.pid'),
-    );
-    expect(restartCalls).toHaveLength(1);
-    // The restart command also includes buildSupervisorCommand output
-    expect(restartCalls[0]).toContain('export START_COMMAND');
-  });
-
-  it('marks criterion failed when server stays down after restart (permanent failure)', async () => {
-    vi.useFakeTimers();
-    // Server always unreachable → restartSupervisorIfDown runs but server never comes up
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
-
-    const cm = {
-      execInContainer: vi.fn(async (_id: string, cmd: string[]) => {
-        const c = cmd[2] ?? '';
-        if (c.includes('kill -9') || c.includes('export START_COMMAND')) {
-          return { stdout: '', stderr: '', exitCode: 0 };
-        }
-        return { stdout: '', stderr: '', exitCode: 0 };
-      }),
-    } as unknown as ContainerManager;
-
-    const config = makeConfig();
-    // Call restartSupervisorIfDown directly — it should not throw even when permanently unreachable
-    const promise = restartSupervisorIfDown(cm, config);
-    await vi.advanceTimersByTimeAsync(30_000);
-    await expect(promise).resolves.toBeUndefined();
   });
 });
 

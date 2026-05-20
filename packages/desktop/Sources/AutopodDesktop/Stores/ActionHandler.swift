@@ -37,12 +37,12 @@ public final class ActionHandler {
       rework: { [weak self] id in await self?.rework(id) },
       fixManually: { [weak self] id in await self?.fixManually(id) },
       revalidate: { [weak self] id in await self?.revalidate(id) },
-      createPod: { [weak self] profile, task, model, pod, ac, base, branchPrefix, acFrom, pimGroups, sidecars, refRepos, brief in
+      createPod: { [weak self] profile, task, model, pod, base, branchPrefix, pimGroups, sidecars, refRepos, brief in
         await self?.createPod(
           profileName: profile, task: task, model: model,
-          pod: pod, acceptanceCriteria: ac,
+          pod: pod,
           baseBranch: base, branchPrefix: branchPrefix,
-          acFrom: acFrom, pimGroups: pimGroups,
+          pimGroups: pimGroups,
           requireSidecars: sidecars,
           referenceRepos: refRepos,
           briefMetadata: brief
@@ -101,14 +101,13 @@ public final class ActionHandler {
       createSeries: { [weak self] request in
         await self?.createSeries(request) ?? nil
       },
-      spawnDependent: { [weak self] profile, task, parents, seriesId, seriesName, ac, base in
+      spawnDependent: { [weak self] profile, task, parents, seriesId, seriesName, base in
         await self?.spawnDependent(
           profileName: profile,
           task: task,
           dependsOnPodIds: parents,
           seriesId: seriesId,
           seriesName: seriesName,
-          acceptanceCriteria: ac,
           baseBranch: base
         ) ?? nil
       },
@@ -346,9 +345,9 @@ public final class ActionHandler {
 
   public func createPod(
     profileName: String, task: String, model: String?,
-    pod: PodConfigRequest?, acceptanceCriteria: [AcDefinition]?,
+    pod: PodConfigRequest?,
     baseBranch: String?, branchPrefix: String? = nil,
-    acFrom: String?, pimGroups: [PimGroupRequest]? = nil,
+    pimGroups: [PimGroupRequest]? = nil,
     requireSidecars: [String]? = nil,
     referenceRepos: [ReferenceRepoRequest]? = nil,
     briefMetadata: BriefPodMetadata? = nil
@@ -358,7 +357,6 @@ public final class ActionHandler {
       profileName: profileName,
       task: task,
       model: model?.isEmpty == true ? nil : model,
-      acceptanceCriteria: acceptanceCriteria?.filter { !$0.outcome.isEmpty },
       contract: briefMetadata?.contract,
       briefTitle: briefMetadata?.briefTitle,
       touches: briefMetadata?.touches,
@@ -366,7 +364,6 @@ public final class ActionHandler {
       pod: pod,
       baseBranch: baseBranch?.isEmpty == true ? nil : baseBranch,
       branchPrefix: branchPrefix?.isEmpty == true ? nil : branchPrefix,
-      acFrom: acFrom?.isEmpty == true ? nil : acFrom,
       pimGroups: pimGroups?.filter { !$0.groupId.isEmpty },
       requireSidecars: (requireSidecars?.isEmpty ?? true) ? nil : requireSidecars,
       referenceRepos: (referenceRepos?.isEmpty ?? true) ? nil : referenceRepos
@@ -445,9 +442,7 @@ public final class ActionHandler {
         validate: source.pod.validate,
         promotable: source.pod.promotable
       ),
-      acceptanceCriteria: source.acceptanceCriteria,
-      baseBranch: source.branch,
-      acFrom: source.acFrom
+      baseBranch: source.branch
     )
     pendingAction = nil
     return result
@@ -662,7 +657,6 @@ public final class ActionHandler {
     dependsOnPodIds: [String],
     seriesId: String?,
     seriesName: String?,
-    acceptanceCriteria: [AcDefinition]?,
     baseBranch: String?
   ) async -> String? {
     pendingAction = "spawn-dependent"
@@ -670,7 +664,6 @@ public final class ActionHandler {
     let req = CreateSessionRequest(
       profileName: profileName,
       task: task,
-      acceptanceCriteria: acceptanceCriteria?.filter { !$0.outcome.isEmpty },
       pod: PodConfigRequest(agentMode: "auto", output: "pr", validate: true, promotable: false),
       baseBranch: baseBranch?.isEmpty == true ? nil : baseBranch,
       dependsOnPodIds: dependsOnPodIds,

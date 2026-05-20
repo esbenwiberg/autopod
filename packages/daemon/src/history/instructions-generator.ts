@@ -77,7 +77,7 @@ SELECT profile_name, COUNT(*) FROM pods GROUP BY profile_name;
 3. **Spot token waste** — expensive pods with poor outcomes
 4. **Suggest agent-instruction improvements** — with specific text snippets to add
 5. **Propose skill ideas** — reusable slash commands that prevent common issues
-6. **Flag profile config issues** — validation settings, acceptance criteria, build commands
+6. **Flag profile config issues** — validation settings, contract requirements, build commands
 
 ## Output Format
 

@@ -188,9 +188,9 @@ describe('stripMarkdownFences', () => {
 describe('validateInBrowser', () => {
   const MOCK_SCREENSHOT_REF = {
     podId: 'sess-1',
-    source: 'ac' as const,
+    source: 'review' as const,
     filename: 'check-0.png',
-    relativePath: 'screenshots/sess-1/ac/check-0.png',
+    relativePath: 'screenshots/sess-1/review/check-0.png',
   };
 
   function makeBridge(scriptOutput: string) {

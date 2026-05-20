@@ -81,19 +81,4 @@ describe('PodBridge.reportTaskSummary — lock-on-first-write', () => {
     // activity log shows the agent did call the tool.
     expect(arg.event?.actualSummary).toBe('second');
   });
-
-  it('still updates acSelfReport on a locked re-report (acceptance criteria can flip)', () => {
-    const { bridge, podRepo, podId } = buildBridge();
-
-    bridge.reportTaskSummary(podId, 'original', [], 'how', [{ criterion: 'AC1', verified: false }]);
-    bridge.reportTaskSummary(podId, 'second', [], 'how-2', [
-      { criterion: 'AC1', verified: true, notes: 'fixed in pre-submit cycle' },
-    ]);
-
-    const pod = podRepo.getOrThrow(podId);
-    expect(pod.taskSummary?.actualSummary).toBe('original');
-    expect(pod.acSelfReport).toEqual([
-      { criterion: 'AC1', verified: true, notes: 'fixed in pre-submit cycle' },
-    ]);
-  });
 });

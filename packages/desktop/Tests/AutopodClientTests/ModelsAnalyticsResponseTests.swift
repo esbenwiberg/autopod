@@ -204,7 +204,7 @@ import Testing
 // MARK: - Stage label decode: all 8 byte-for-byte
 
 @Test func modelsFailureStageCellStageLabelsDecodeCorrectly() throws {
-    let stages = ["build", "health", "smoke", "test", "lint", "sast", "acValidation", "taskReview"]
+    let stages = ["build", "health", "smoke", "test", "lint", "sast", "facts", "taskReview"]
     for rawStage in stages {
         let json = """
         {"stage":"\(rawStage)","podsRan":10,"podsFailed":2,"failureRate":0.2}
@@ -249,7 +249,7 @@ private func makeFullModelsFixtureJSON() -> String {
       {"stage":"test","podsRan":130,"podsFailed":20,"failureRate":0.154},
       {"stage":"lint","podsRan":125,"podsFailed":3,"failureRate":0.024},
       {"stage":"sast","podsRan":120,"podsFailed":1,"failureRate":0.008},
-      {"stage":"acValidation","podsRan":0,"podsFailed":0,"failureRate":0.0},
+      {"stage":"facts","podsRan":0,"podsFailed":0,"failureRate":0.0},
       {"stage":"taskReview","podsRan":0,"podsFailed":0,"failureRate":0.0}
     ]
     """

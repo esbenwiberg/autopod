@@ -90,11 +90,6 @@ public enum MockData: Sendable {
                     loadTime: 800
                 ),
             ],
-            acValidation: false,
-            acChecks: [
-                AcCheckDetail(criterion: "Login form renders correctly", passed: false, reasoning: "Login form element not found — page returns 502", validationType: "web-ui"),
-                AcCheckDetail(criterion: "OAuth tokens stored encrypted at rest", passed: true, reasoning: "Verified AES-256 encryption in storage layer", validationType: "none"),
-            ],
             requirementsCheck: [
                 RequirementCheckDetail(criterion: "OAuth callback handles errors", met: false, note: "No error handling in callback route"),
                 RequirementCheckDetail(criterion: "Pod middleware preserved", met: true, note: "Fully met"),
@@ -170,12 +165,6 @@ public enum MockData: Sendable {
         profileName: "my-app", model: "claude-opus",
         startedAt: .minutesAgo(6),
         baseBranch: "plan/auth-redesign",
-        acFrom: "specs/auth-ac.md",
-        acceptanceCriteria: [
-            AcDefinition(outcome: "Users can sign in with Google OAuth"),
-            AcDefinition(outcome: "OAuth tokens are stored encrypted at rest"),
-            AcDefinition(outcome: "Existing pod middleware is preserved"),
-        ],
         diffStats: DiffStats(added: 56, removed: 8, files: 6),
         phase: PhaseProgress(current: 5, total: 10, description: "Implementing OAuth callback"),
         latestActivity: "Writing src/auth/google.ts"

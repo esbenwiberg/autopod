@@ -192,7 +192,6 @@ export function rowToProfile(
     skipValidationPhases: row.skip_validation_phases
       ? (JSON.parse(row.skip_validation_phases as string) as ValidationPhase[])
       : null,
-    evaluatePlan: row.evaluate_plan != null ? Boolean(row.evaluate_plan) : null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -318,7 +317,7 @@ export function createProfileStore(
           merge_strategy,
           sidecars, trusted_source, test_pipeline, security_scan, code_intelligence,
           deployment,
-          skip_validation_phases, evaluate_plan,
+          skip_validation_phases,
           created_at, updated_at
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand, @buildWorkDir,
@@ -340,7 +339,7 @@ export function createProfileStore(
           @mergeStrategy,
           @sidecars, @trustedSource, @testPipeline, @securityScan, @codeIntelligence,
           @deployment,
-          @skipValidationPhases, @evaluatePlan,
+          @skipValidationPhases,
           @createdAt, @updatedAt
         )
       `).run({
@@ -428,7 +427,6 @@ export function createProfileStore(
         skipValidationPhases: parsed.skipValidationPhases
           ? JSON.stringify(parsed.skipValidationPhases)
           : null,
-        evaluatePlan: parsed.evaluatePlan === null ? null : parsed.evaluatePlan ? 1 : 0,
         createdAt: now,
         updatedAt: now,
       });
@@ -786,11 +784,6 @@ export function createProfileStore(
           ? JSON.stringify(parsed.skipValidationPhases)
           : null;
       }
-      if (parsed.evaluatePlan !== undefined) {
-        setClauses.push('evaluate_plan = @evaluatePlan');
-        fieldMap.evaluatePlan = parsed.evaluatePlan === null ? null : parsed.evaluatePlan ? 1 : 0;
-      }
-
       if (setClauses.length === 0) {
         return this.get(name);
       }

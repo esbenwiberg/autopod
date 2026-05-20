@@ -470,16 +470,7 @@ describe('computeReliabilityAnalytics', () => {
 
     const entry = need(result.profileHeatmap[0]);
     const stageNames = entry.stages.map((s) => s.stage);
-    const canonical = [
-      'build',
-      'health',
-      'smoke',
-      'test',
-      'lint',
-      'sast',
-      'acValidation',
-      'taskReview',
-    ];
+    const canonical = ['build', 'health', 'smoke', 'test', 'lint', 'sast', 'facts', 'taskReview'];
     const filtered = canonical.filter((s) => stageNames.includes(s as never));
     expect(stageNames).toEqual(filtered);
   });

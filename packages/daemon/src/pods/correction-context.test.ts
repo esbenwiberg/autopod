@@ -38,7 +38,6 @@ function mockSession(overrides: Partial<Pod> = {}): Pod {
     prUrl: null,
     plan: null,
     progress: null,
-    acceptanceCriteria: null,
     claudeSessionId: null,
     ...overrides,
   };
@@ -189,26 +188,6 @@ describe('determineFailedStep', () => {
     );
   });
 
-  it('returns ac_validation when AC validation fails (smoke passes)', () => {
-    const result = mockValidationResult({});
-    result.acValidation = {
-      status: 'fail',
-      results: [{ criterion: 'Has toggle', passed: false, reasoning: 'Not found' }],
-      model: 'opus',
-    };
-    expect(determineFailedStep(result)).toBe('ac_validation');
-  });
-
-  it('prioritizes smoke over ac_validation', () => {
-    const result = mockValidationResult({ pageFailed: true });
-    result.acValidation = {
-      status: 'fail',
-      results: [{ criterion: 'Has toggle', passed: false, reasoning: 'Not found' }],
-      model: 'opus',
-    };
-    expect(determineFailedStep(result)).toBe('smoke');
-  });
-
   it('prioritizes build over health', () => {
     expect(
       determineFailedStep(mockValidationResult({ buildFailed: true, healthFailed: true })),
@@ -307,28 +286,6 @@ describe('buildCorrectionContext', () => {
       cm,
     );
     expect(context.screenshotDescriptions).toEqual([]);
-  });
-
-  it('includes AC validation failures in screenshot descriptions', async () => {
-    const cm = mockContainerManager();
-    const result = mockValidationResult({});
-    result.acValidation = {
-      status: 'fail',
-      results: [
-        { criterion: 'Has toggle', passed: true, reasoning: 'Found it' },
-        { criterion: 'Toggle works', passed: false, reasoning: 'Click had no effect' },
-      ],
-      model: 'opus',
-    };
-    const context = await buildCorrectionContext(mockSession(), mockProfile(), result, cm);
-    expect(context.screenshotDescriptions).toContainEqual(expect.stringContaining('Toggle works'));
-    expect(context.screenshotDescriptions).toContainEqual(
-      expect.stringContaining('Click had no effect'),
-    );
-    // Passing ACs should not appear
-    expect(context.screenshotDescriptions).not.toContainEqual(
-      expect.stringContaining('Has toggle'),
-    );
   });
 
   it('includes test/lint/sast failures in screenshot descriptions', async () => {

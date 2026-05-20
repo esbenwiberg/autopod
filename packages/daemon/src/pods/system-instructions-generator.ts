@@ -357,65 +357,6 @@ export function generateSystemInstructions(
     }
   }
 
-  if (pod.acceptanceCriteria && pod.acceptanceCriteria.length > 0) {
-    lines.push('## Acceptance Criteria');
-    lines.push('');
-    const hasWebUi = profile.hasWebUi ?? true;
-    if (hasWebUi) {
-      lines.push(
-        'Your changes must satisfy these criteria. The system will independently verify each one after you commit — criteria are checked via browser, HTTP request, or code review depending on their type:',
-      );
-    } else {
-      lines.push(
-        'Your changes must satisfy these criteria. The system will independently verify each one after you commit via API probing and diff review:',
-      );
-    }
-    lines.push('');
-    // Acceptance criteria are user-supplied — wrap in boundary markers.
-    lines.push('<!-- BEGIN USER ACCEPTANCE CRITERIA -->');
-    for (const ac of pod.acceptanceCriteria) {
-      const typeLabel =
-        ac.type === 'web'
-          ? 'browser'
-          : ac.type === 'api'
-            ? 'API'
-            : ac.type === 'cmd'
-              ? 'cmd'
-              : 'code';
-      lines.push(`- [${typeLabel}] ${ac.outcome}`);
-      if (ac.hint) lines.push(`  - Hint: ${ac.hint}`);
-      if (ac.type === 'cmd' && ac.polarity) lines.push(`  - Polarity: ${ac.polarity}`);
-    }
-    lines.push('<!-- END USER ACCEPTANCE CRITERIA -->');
-    lines.push('');
-
-    if (hasWebUi) {
-      lines.push('### Self-Validation');
-      lines.push('');
-      lines.push(
-        'Before committing, use the `validate_in_browser` tool to verify your work against the acceptance criteria above. ' +
-          'This opens a real browser in your container. Pass the localhost URL of your running app and natural language checks describing what to verify.',
-      );
-      lines.push('');
-      lines.push('Example:');
-      lines.push('```');
-      lines.push('validate_in_browser({');
-      lines.push('  url: "http://localhost:3000/settings",');
-      lines.push('  checks: [');
-      lines.push('    "Verify there is a dark mode toggle that is visible and clickable",');
-      lines.push('    "Verify the page title contains Settings"');
-      lines.push('  ]');
-      lines.push('})');
-      lines.push('```');
-      lines.push('');
-      lines.push(
-        'Your self-validation results are NOT shared with the independent reviewer — ' +
-          'they exist to help you catch issues early, like a developer testing before pushing.',
-      );
-      lines.push('');
-    }
-  }
-
   if (pod.seriesId) {
     lines.push('## Series Handover Protocol');
     lines.push('');
@@ -536,11 +477,7 @@ export function generateSystemInstructions(
       hasCodeIntel
         ? `**Code-intel MCPs are active — use ${codeIntelExamples}, etc. for ALL symbol discovery. Do NOT use grep, find, or file reads to locate symbols.** `
         : ''
-    }Then call \`report_plan\` with a concrete one-line summary of what this pod will change or investigate, plus numbered steps. The summary is shown as the pod tagline in the UI, so do not use generic text like "Task", "Implement the request", or markdown headings.${
-      profile.evaluatePlan
-        ? ' After calling `report_plan`, immediately call `check_messages` — the harness may have queued feedback on your plan against the acceptance criteria.'
-        : ''
-    }`,
+    }Then call \`report_plan\` with a concrete one-line summary of what this pod will change or investigate, plus numbered steps. The summary is shown as the pod tagline in the UI, so do not use generic text like "Task", "Implement the request", or markdown headings.`,
   );
   lines.push(
     '2. **Report progress**: Break your work into 3-6 phases. Call `report_progress` at each transition.',
@@ -589,15 +526,6 @@ export function generateSystemInstructions(
       'Use an empty array if you followed the plan exactly. ' +
       'Only include meaningful plan deviations — not minor style choices or trivial reorderings.',
   );
-  if (pod.acceptanceCriteria?.length) {
-    lines.push(
-      '   - `acChecklist`: include one entry per acceptance criterion from this pod. ' +
-        'Set `verified: true` only if you actually tested or observed the criterion passing ' +
-        '(via `validate_in_browser`, `validate_locally`, or direct manual inspection). ' +
-        'Set `verified: false` if you could not check it. Honest reporting matters — ' +
-        'discrepancies with the automated validator are surfaced to the reviewer.',
-    );
-  }
   if (pod.contract?.requiredFacts.length) {
     lines.push(
       '   - `factEvidence`: include one entry per required fact from `contract.yaml`. ' +
@@ -752,8 +680,8 @@ export function generateSystemInstructions(
   );
   lines.push(
     '- **Validation also runs after you finish**: the system independently re-runs build, tests, ' +
-      'health checks, smoke tests, and AC validation as a safety net. ' +
-      'For contract-based pods, it also verifies every required fact command from `contract.yaml`. ' +
+      'health checks, smoke tests, required facts, and AI review as a safety net. ' +
+      'For contract-based pods, it verifies every required fact command from `contract.yaml`. ' +
       'Always run the pre-completion checks listed in Guidelines first — failures caught there are ' +
       'cheap; failures caught after will loop you back with correction feedback. ' +
       '`validate_in_browser` remains available for browser-based self-checks.',

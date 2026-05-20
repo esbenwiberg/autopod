@@ -122,7 +122,7 @@ Each phase ships a working slice: migration (if any) → daemon endpoint → Swi
 - Reliability card: first-pass success %, top failure stage, avg `rework_count`.
 - Right-pane drill:
   - Click any drop → list of pods that exited at that band (with terminal status).
-  - Failure-stage breakdown (build / health / smoke / lint / sast / acValidation / taskReview) from `validations` table.
+  - Failure-stage breakdown (build / health / smoke / lint / sast / facts / taskReview) from `validations` table.
   - Per-profile failure heatmap (profile rows × stage cols).
 
 **Daemon work**

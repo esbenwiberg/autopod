@@ -80,7 +80,6 @@ function makeSession(overrides?: Partial<Pod>): Pod {
     prUrl: null,
     plan: null,
     progress: null,
-    acceptanceCriteria: null,
     claudeSessionId: null,
     pimGroups: null,
     ...overrides,
@@ -348,48 +347,6 @@ describe('generateSystemInstructions', () => {
     expect(md).not.toContain('<!-- BEGIN HANDOFF CONTEXT -->');
   });
 
-  it('includes acceptance criteria when pod has ACs', () => {
-    const md = generateSystemInstructions(
-      makeProfile(),
-      makeSession({
-        acceptanceCriteria: [
-          {
-            type: 'web',
-            outcome: 'Settings page has a dark mode toggle',
-            hint: '/settings',
-          },
-          {
-            type: 'none',
-            outcome: 'Toggle persists after refresh',
-          },
-        ],
-      }),
-      'http://localhost:8080/mcp/x',
-    );
-    expect(md).toContain('## Acceptance Criteria');
-    expect(md).toContain('- [browser] Settings page has a dark mode toggle');
-    expect(md).toContain('- [code] Toggle persists after refresh');
-    expect(md).toContain('independently verify');
-  });
-
-  it('omits acceptance criteria section when null', () => {
-    const md = generateSystemInstructions(
-      makeProfile(),
-      makeSession({ acceptanceCriteria: null }),
-      'http://localhost:8080/mcp/x',
-    );
-    expect(md).not.toContain('## Acceptance Criteria');
-  });
-
-  it('omits acceptance criteria section when empty array', () => {
-    const md = generateSystemInstructions(
-      makeProfile(),
-      makeSession({ acceptanceCriteria: [] }),
-      'http://localhost:8080/mcp/x',
-    );
-    expect(md).not.toContain('## Acceptance Criteria');
-  });
-
   it('includes validate_in_browser tool in MCP tools list', () => {
     const md = generateSystemInstructions(
       makeProfile(),
@@ -397,29 +354,6 @@ describe('generateSystemInstructions', () => {
       'http://localhost:8080/mcp/x',
     );
     expect(md).toContain('validate_in_browser');
-  });
-
-  it('includes self-validation section when pod has acceptance criteria', () => {
-    const md = generateSystemInstructions(
-      makeProfile(),
-      makeSession({
-        acceptanceCriteria: [{ type: 'none', outcome: 'Page loads without errors' }],
-      }),
-      'http://localhost:8080/mcp/x',
-    );
-    expect(md).toContain('### Self-Validation');
-    expect(md).toContain('validate_in_browser');
-    expect(md).toContain('localhost URL');
-    expect(md).toContain('NOT shared with the independent reviewer');
-  });
-
-  it('omits self-validation section when no acceptance criteria', () => {
-    const md = generateSystemInstructions(
-      makeProfile(),
-      makeSession({ acceptanceCriteria: null }),
-      'http://localhost:8080/mcp/x',
-    );
-    expect(md).not.toContain('### Self-Validation');
   });
 
   it('includes guidelines', () => {

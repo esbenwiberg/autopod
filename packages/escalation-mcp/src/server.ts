@@ -141,25 +141,6 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         .describe(
           'Deviations from the original plan. Use an empty array if you followed the plan exactly.',
         ),
-      acChecklist: z
-        .array(
-          z.object({
-            criterion: z.string().describe('The acceptance criterion text (quote it exactly)'),
-            verified: z
-              .boolean()
-              .describe(
-                'True only if you actually tested or inspected this criterion (via validate_in_browser, validate_locally, or manual inspection). Honest reporting matters — discrepancies with automated validation are surfaced to the reviewer.',
-              ),
-            notes: z
-              .string()
-              .optional()
-              .describe('How you verified it, or why you could not verify it'),
-          }),
-        )
-        .optional()
-        .describe(
-          'Self-verification status for each acceptance criterion. Include one entry per criterion. Use verified: false if you were unable to check it.',
-        ),
       factEvidence: z
         .array(
           z.object({

@@ -1,21 +1,6 @@
 import { z } from 'zod';
 import { partialPodOptionsSchema } from './action-definition.schema.js';
 
-export const acTypeSchema = z.enum(['none', 'api', 'web', 'cmd']);
-export const acPolaritySchema = z.enum(['expect-output', 'expect-no-output', 'exit-zero']);
-
-const acBaseFields = {
-  outcome: z.string().min(1).max(200),
-  hint: z.string().max(500).optional(),
-};
-
-export const acDefinitionSchema = z.discriminatedUnion('type', [
-  z.object({ ...acBaseFields, type: z.literal('none') }),
-  z.object({ ...acBaseFields, type: z.literal('api') }),
-  z.object({ ...acBaseFields, type: z.literal('web') }),
-  z.object({ ...acBaseFields, type: z.literal('cmd'), polarity: acPolaritySchema.optional() }),
-]);
-
 const contractScenarioFields: Record<string, z.ZodTypeAny> = {
   id: z.string().min(1).max(128),
   given: z.array(z.string().min(1)).min(1),
@@ -83,7 +68,6 @@ export const createPodRequestSchema = z
       .refine((s) => !s.includes('..'), 'Branch prefix cannot contain ".."')
       .optional(),
     skipValidation: z.boolean().optional(),
-    acceptanceCriteria: z.array(acDefinitionSchema).optional(),
     contract: specContractSchema.optional(),
     options: partialPodOptionsSchema.optional(),
     outputMode: z.enum(['pr', 'artifact', 'workspace']).optional(),
@@ -93,14 +77,6 @@ export const createPodRequestSchema = z
       .max(128)
       .regex(/^[a-zA-Z0-9.\-_/]+$/, 'Branch name contains invalid characters')
       .refine((s) => !s.includes('..'), 'Branch name cannot contain ".."')
-      .optional(),
-    acFrom: z
-      .string()
-      .min(1)
-      .max(500)
-      .refine((p) => !p.startsWith('/') && !p.includes('..'), {
-        message: 'acFrom must be a relative path without ".." segments',
-      })
       .optional(),
     linkedPodId: z.string().min(1).max(64).optional(),
     dependsOnPodId: z.string().min(1).max(64).optional(),

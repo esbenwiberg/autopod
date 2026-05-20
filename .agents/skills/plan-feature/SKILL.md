@@ -794,7 +794,7 @@ require_sidecars: [dagger]   # only when needed
 ---
 ```
 
-Do not put `depends_on` or `acceptance_criteria` in `brief.md`.
+Keep dependency markers and proof data out of `brief.md`.
 Dependency and proof data live in `contract.yaml`.
 
 Field rules:

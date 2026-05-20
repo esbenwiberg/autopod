@@ -1,5 +1,4 @@
 // Types
-export type { AcType, AcDefinition, AcPolarity } from './types/ac.js';
 export type {
   ContractScenario,
   FactArtifactChange,
@@ -153,8 +152,6 @@ export type {
   AssertionResult,
   TaskReviewResult,
   RequirementsCheckItem,
-  AcValidationResult,
-  AcCheckResult,
   ValidationFinding,
   ValidationOverride,
   ScreenshotRef,
@@ -273,9 +270,6 @@ export {
   createPodRequestSchema,
   podStatusSchema,
   sendMessageSchema,
-  acDefinitionSchema,
-  acTypeSchema,
-  acPolaritySchema,
 } from './schemas/pod.schema.js';
 
 export {
@@ -338,9 +332,6 @@ export type {
 
 // ID generation utility
 export { generateId, generatePodId } from './id.js';
-
-// AC list parser
-export { parseAcList } from './parse-ac-list.js';
 
 // Series brief parsing (CLI + daemon share this)
 export type { BriefFrontmatter, ParsedBrief, BriefFile } from './series/parse-briefs.js';

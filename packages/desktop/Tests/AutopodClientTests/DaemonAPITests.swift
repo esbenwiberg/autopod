@@ -46,11 +46,9 @@ import Testing
     "prUrl": null,
     "plan": { "summary": "Add OAuth flow", "steps": ["Setup routes", "Add middleware"] },
     "progress": { "phase": "implementation", "description": "Writing routes", "currentPhase": 3, "totalPhases": 5 },
-    "acceptanceCriteria": [{"type":"none","outcome":"Users can sign in with Google"}],
     "claudeSessionId": null,
     "outputMode": "pr",
     "baseBranch": null,
-    "acFrom": null,
     "recoveryWorktreePath": null,
     "lastHeartbeatAt": null,
     "inputTokens": 15000,
@@ -66,7 +64,6 @@ import Testing
   #expect(pod.status == "running")
   #expect(pod.plan?.steps.count == 2)
   #expect(pod.progress?.currentPhase == 3)
-  #expect(pod.acceptanceCriteria?.first?.outcome == "Users can sign in with Google")
   #expect(pod.costUsd == 0.42)
   #expect(pod.commitCount == 2)
 }
@@ -155,7 +152,6 @@ import Testing
       }]
     },
     "test": { "status": "pass", "duration": 120, "stdout": "All tests passed", "stderr": null },
-    "acValidation": null,
     "taskReview": {
       "status": "pass",
       "reasoning": "Implementation looks correct",
@@ -230,7 +226,6 @@ import Testing
     profileName: "my-app",
     task: "Add OAuth login",
     model: "opus",
-    acceptanceCriteria: [AcDefinition.fromString("Users can log in")],
     contract: contract,
     briefTitle: "Brief contract",
     touches: ["packages/desktop/Sources/AutopodUI"],
@@ -243,8 +238,6 @@ import Testing
   #expect(dict["profileName"] as? String == "my-app")
   #expect(dict["task"] as? String == "Add OAuth login")
   #expect(dict["model"] as? String == "opus")
-  let acs = dict["acceptanceCriteria"] as? [[String: Any]]
-  #expect(acs?.first?["test"] as? String == "Users can log in")
   #expect(dict["briefTitle"] as? String == "Brief contract")
   #expect(dict["touches"] as? [String] == ["packages/desktop/Sources/AutopodUI"])
   #expect(dict["doesNotTouch"] as? [String] == ["packages/daemon/src/pods/pod-manager.ts"])

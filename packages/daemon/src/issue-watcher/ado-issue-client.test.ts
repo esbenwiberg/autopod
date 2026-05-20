@@ -75,10 +75,7 @@ describe('AdoIssueClient', () => {
       expect(candidates[0].title).toBe('Fix dark mode');
       expect(candidates[0].body).toBe('Dark mode is broken');
       expect(candidates[0].triggerLabel).toBe('autopod');
-      expect(candidates[0].acceptanceCriteria).toEqual([
-        'Dark mode toggle works',
-        'Theme persists',
-      ]);
+      expect(candidates[0].requirements).toEqual(['Dark mode toggle works', 'Theme persists']);
     });
 
     it('sends Basic auth header', async () => {

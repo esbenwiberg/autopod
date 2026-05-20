@@ -45,7 +45,6 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('-b, --branch <branch>', 'Target branch name')
     .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
     .option('--base-branch <branch>', 'Branch from a specific base (e.g. workspace output)')
-    .option('--ac-from <path>', 'Load acceptance criteria from a file in the repo')
     .option('--skip-validation', 'Skip validation phase')
     .option(
       '-s, --sidecar <name>',
@@ -63,7 +62,6 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           branch?: string;
           branchPrefix?: string;
           baseBranch?: string;
-          acFrom?: string;
           skipValidation?: boolean;
           sidecar: string[];
         },
@@ -78,7 +76,6 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             branch: opts.branch,
             branchPrefix: opts.branchPrefix,
             baseBranch: opts.baseBranch,
-            acFrom: opts.acFrom,
             skipValidation: opts.skipValidation,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
           }),
@@ -109,7 +106,6 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('-b, --branch <branch>', 'Target branch name')
     .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
     .option('--base-branch <branch>', 'Branch from a specific base')
-    .option('--ac-from <path>', 'Load acceptance criteria from a file in the repo')
     .option(
       '-s, --sidecar <name>',
       'Companion sidecar to spawn (e.g. "dagger"). Repeatable. Requires the profile to have sidecars.<name> enabled; privileged sidecars also require trustedSource.',
@@ -141,7 +137,6 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           branch?: string;
           branchPrefix?: string;
           baseBranch?: string;
-          acFrom?: string;
           sidecar: string[];
           refRepo: string[];
           refFromProfile: string[];
@@ -199,7 +194,6 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             branch: opts.branch,
             branchPrefix: opts.branchPrefix,
             baseBranch: opts.baseBranch,
-            acFrom: opts.acFrom,
             options: podOptions,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
             referenceRepos,
@@ -339,7 +333,11 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           console.log(chalk.dim('  (Auto-hoisted to deeper review tier — still flagged)\n'));
           for (const [i, f] of p.findings.entries()) {
             const sourceLabel =
-              f.source === 'ac_validation' ? 'AC' : f.source === 'task_review' ? 'Review' : 'Req';
+              f.source === 'fact_validation'
+                ? 'Fact'
+                : f.source === 'task_review'
+                  ? 'Review'
+                  : 'Req';
             console.log(`  ${chalk.bold(`[${i + 1}]`)} ${sourceLabel}: "${f.description}"`);
             if (f.reasoning) {
               console.log(`      ${chalk.dim(`→ ${f.reasoning}`)}`);
@@ -626,7 +624,6 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('-b, --branch <branch>', 'target branch name')
     .option('--branch-prefix <prefix>', 'override branch prefix (e.g. hotfix/)')
     .option('--base-branch <branch>', 'branch from a specific base')
-    .option('--ac-from <path>', 'load acceptance criteria from a file in the repo')
     .option('--skip-validation', 'skip validation phase')
     .option(
       '-s, --sidecar <name>',
@@ -646,7 +643,6 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           branch?: string;
           branchPrefix?: string;
           baseBranch?: string;
-          acFrom?: string;
           skipValidation?: boolean;
           sidecar: string[];
         },
@@ -698,7 +694,6 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             branch: opts.branch,
             branchPrefix: opts.branchPrefix,
             baseBranch: opts.baseBranch,
-            acFrom: opts.acFrom,
             skipValidation: opts.skipValidation,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
           }),

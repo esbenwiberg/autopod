@@ -193,7 +193,7 @@ export class AdoPrManager implements PrManager {
    * PR body omits the screenshots section.
    *
    * Filename format: `{source}-{filename}` (e.g. `smoke-0-root.png`). Concatenating
-   * the source bucket prevents collisions when smoke, ac, and review buckets contain
+   * the source bucket prevents collisions when smoke and review buckets contain
    * files with the same base name within the same PR.
    *
    * If uploads 401/403, the ADO PAT likely lacks Code (Read & Write) scope
@@ -209,7 +209,7 @@ export class AdoPrManager implements PrManager {
       try {
         // biome-ignore lint/style/noNonNullAssertion: screenshotStore is checked before this method is called
         const bytes = await this.screenshotStore!.read(ref);
-        // Source prefix prevents filename collisions across smoke/ac/review buckets
+        // Source prefix prevents filename collisions across smoke/review buckets
         const attachmentFilename = `${ref.source}-${ref.filename}`;
         const response = (await this.rawFetch(
           `${this.baseUrl}/pullRequests/${prId}/attachments/${encodeURIComponent(attachmentFilename)}?api-version=7.1`,

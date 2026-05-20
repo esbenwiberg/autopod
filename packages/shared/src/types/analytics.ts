@@ -296,7 +296,7 @@ export interface EscalationsAnalyticsResponse {
 
 // ── Models analytics ──────────────────────────────────────────────────────────
 
-/** The 8 validation stages tracked in the failure-stage matrix.
+/** The validation stages tracked in the failure-stage matrix.
  *  Mirrors the ValidationStage union in reliability-aggregator.ts — keep in sync. */
 export type ValidationStage =
   | 'build'
@@ -305,7 +305,7 @@ export type ValidationStage =
   | 'test'
   | 'lint'
   | 'sast'
-  | 'acValidation'
+  | 'facts'
   | 'taskReview';
 
 /** Stage failure cell. Mirrors reliability-aggregator's profileHeatmap stage entry. */

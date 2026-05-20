@@ -1,5 +1,4 @@
 import type {
-  AcValidationResult,
   PageResult,
   Pod,
   ScreenshotRef,
@@ -10,7 +9,7 @@ import type {
 
 export interface ScreenshotRefDto {
   url: string;
-  source: 'smoke' | 'ac' | 'review';
+  source: 'smoke' | 'review';
   path: string;
 }
 
@@ -30,17 +29,6 @@ function serializePages(pages: PageResult[]): unknown[] {
   });
 }
 
-function serializeAcValidation(ac: AcValidationResult): unknown {
-  return {
-    ...ac,
-    results: ac.results.map((check) => {
-      if (!check.screenshot) return check;
-      const { screenshot, ...rest } = check;
-      return { ...rest, screenshot: toScreenshotRefDto(screenshot, check.criterion) };
-    }),
-  };
-}
-
 function serializeTaskReview(review: TaskReviewResult): unknown {
   return {
     ...review,
@@ -57,9 +45,6 @@ export function serializeValidationResult(result: ValidationResult): unknown {
   return {
     ...result,
     smoke: { ...result.smoke, pages: serializePages(result.smoke.pages) },
-    acValidation: result.acValidation
-      ? serializeAcValidation(result.acValidation)
-      : result.acValidation,
     taskReview: result.taskReview ? serializeTaskReview(result.taskReview) : result.taskReview,
   };
 }
@@ -75,7 +60,7 @@ export function serializePodForWire(pod: Pod): unknown {
 
 /**
  * Convert a SystemEvent to its wire-format equivalent. Validation events carry
- * ValidationResult / AcValidationResult / TaskReviewResult / PageResult[] which
+ * ValidationResult / TaskReviewResult / PageResult[] which
  * all embed ScreenshotRef internally; everything else passes through unchanged.
  */
 export function serializeSystemEventForWire(event: SystemEvent): SystemEvent {
@@ -89,9 +74,6 @@ export function serializeSystemEventForWire(event: SystemEvent): SystemEvent {
       const next = { ...event };
       if (event.pageResults) {
         next.pageResults = serializePages(event.pageResults) as PageResult[];
-      }
-      if (event.acResult) {
-        next.acResult = serializeAcValidation(event.acResult) as AcValidationResult;
       }
       if (event.reviewResult) {
         next.reviewResult = serializeTaskReview(event.reviewResult) as TaskReviewResult;

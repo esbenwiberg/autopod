@@ -1,9 +1,13 @@
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import {
   type CreatePodRequest,
   type Pod,
   type Profile,
   type SystemEvent,
+  type WatchedIssue,
   collectPiiPatternNames,
+  parseBriefs,
   processContent,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
@@ -59,19 +63,20 @@ export function createIssueWatcherService(
     triggerLabel: string,
     labelPrefix: string,
     currentProfile: Profile,
-  ): { profileName: string; outputMode?: 'artifact' } | null {
+  ): { profileName: string; output: 'artifact' | 'planner' } | null {
     // Bare label → use current profile
     if (triggerLabel === labelPrefix) {
-      return { profileName: currentProfile.name };
+      return { profileName: currentProfile.name, output: 'planner' };
     }
 
     // Prefixed label → extract suffix
     const suffix = triggerLabel.slice(labelPrefix.length + 1);
-    if (!suffix) return { profileName: currentProfile.name };
+    if (!suffix) return { profileName: currentProfile.name, output: 'planner' };
 
-    // Special case: artifact output mode
+    // Historical advertised route: `autopod:artifact` means this profile in
+    // artifact output mode, not a profile literally named "artifact".
     if (suffix === 'artifact') {
-      return { profileName: currentProfile.name, outputMode: 'artifact' };
+      return { profileName: currentProfile.name, output: 'artifact' };
     }
 
     // Route to named profile
@@ -101,7 +106,142 @@ export function createIssueWatcherService(
       return null;
     }
 
-    return { profileName: suffix };
+    return { profileName: suffix, output: 'planner' };
+  }
+
+  function issueSpecSlug(issueId: string): string {
+    const safeId = issueId
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+    return `issue-${safeId || 'work-item'}`;
+  }
+
+  function buildPlannerTask(input: {
+    issueId: string;
+    issueUrl: string;
+    title: string;
+    body: string;
+    requirements: string[];
+    specSlug: string;
+  }): string {
+    const requirementsSection =
+      input.requirements.length > 0
+        ? `\n\n## Requirements From Work Item\n${input.requirements.map((r) => `- ${r}`).join('\n')}`
+        : '';
+
+    return `You are the planning pod for this issue. Do not implement the product change.
+
+Use the injected \`/prep\` skill to create a single-pod implementation spec. The \`/prep\` skill is available in this planner pod through injected skills.
+
+Important interaction rule: when \`/prep\` would normally ask the human a question, use the \`ask_ai\` skill/tool first and continue from that answer. Only use \`ask_human\` if \`ask_ai\` cannot resolve the question confidently or the answer requires a real product-owner decision.
+
+Write exactly this spec folder:
+
+\`specs/${input.specSlug}/\`
+
+It must contain \`brief.md\` and \`contract.yaml\` compatible with \`ap pod create --spec\`. Use contract scenarios, required facts, and human-review items where appropriate. Commit only the spec files and any directly required planning context.
+
+## Source Issue
+
+ID: ${input.issueId}
+URL: ${input.issueUrl}
+Title: ${input.title}
+
+## Body
+
+${input.body}${requirementsSection}
+`;
+  }
+
+  function buildDirectIssueTask(input: {
+    issueId: string;
+    issueUrl: string;
+    title: string;
+    body: string;
+    requirements: string[];
+  }): string {
+    const requirementsSection =
+      input.requirements.length > 0
+        ? `\n\n## Requirements From Work Item\n${input.requirements.map((r) => `- ${r}`).join('\n')}`
+        : '';
+
+    return `Implement this issue.
+
+## Source Issue
+
+ID: ${input.issueId}
+URL: ${input.issueUrl}
+Title: ${input.title}
+
+## Body
+
+${input.body}${requirementsSection}
+`;
+  }
+
+  function readPlannerBrief(plannerPod: Pod, issueId: string) {
+    if (!plannerPod.worktreePath) {
+      throw new Error(`Planner pod ${plannerPod.id} has no worktree path`);
+    }
+    const specSlug = issueSpecSlug(issueId);
+    const specRoot = path.join(plannerPod.worktreePath, 'specs', specSlug);
+    const briefPath = path.join(specRoot, 'brief.md');
+    const contractPath = path.join(specRoot, 'contract.yaml');
+    if (!existsSync(briefPath)) {
+      throw new Error(
+        `Planner pod did not write ${path.relative(plannerPod.worktreePath, briefPath)}`,
+      );
+    }
+    if (!existsSync(contractPath)) {
+      throw new Error(
+        `Planner pod did not write ${path.relative(plannerPod.worktreePath, contractPath)}`,
+      );
+    }
+
+    const [brief] = parseBriefs(
+      [
+        {
+          filename: specSlug,
+          content: readFileSync(briefPath, 'utf8'),
+          contractContent: readFileSync(contractPath, 'utf8'),
+        },
+      ],
+      (contextPath) => readFileSync(path.join(specRoot, contextPath), 'utf8'),
+    );
+    if (!brief?.contract) {
+      throw new Error(`Planner pod wrote an invalid contract spec at specs/${specSlug}`);
+    }
+    return { brief, specSlug };
+  }
+
+  async function markIssueFailed(input: {
+    client: IssueClient;
+    prefix: string;
+    tracked: WatchedIssue;
+    podId: string;
+    comment: string;
+  }): Promise<void> {
+    issueWatcherRepo.updateStatus(input.tracked.id, 'failed');
+    try {
+      await input.client.removeLabel(input.tracked.issueId, `${input.prefix}:in-progress`);
+      await input.client.addLabel(input.tracked.issueId, `${input.prefix}:failed`);
+      await input.client.addComment(input.tracked.issueId, input.comment);
+    } catch (err) {
+      logger.warn(
+        { err, podId: input.podId, issueId: input.tracked.issueId },
+        'Failed to update failed issue labels/comment',
+      );
+    }
+
+    eventBus.emit({
+      type: 'issue_watcher.completed',
+      timestamp: new Date().toISOString(),
+      profileName: input.tracked.profileName,
+      issueUrl: input.tracked.issueUrl,
+      podId: input.podId,
+      outcome: 'failed',
+    });
   }
 
   async function processCandidate(
@@ -135,7 +275,7 @@ export function createIssueWatcherService(
       return;
     }
 
-    // Issue title/body/ACs come from anyone who can file or comment on an issue —
+    // Issue title/body/requirements come from anyone who can file or comment on an issue —
     // treat as untrusted. Quarantine wraps prompt-injection patterns in markers
     // the agent can recognize; PII sanitization strips secrets before storage.
     const sanitizeUntrusted = (text: string) =>
@@ -146,12 +286,12 @@ export function createIssueWatcherService(
 
     const titleResult = sanitizeUntrusted(candidate.title);
     const bodyResult = sanitizeUntrusted(candidate.body);
-    const acResults = candidate.acceptanceCriteria?.map(sanitizeUntrusted);
+    const requirementResults = candidate.requirements?.map(sanitizeUntrusted);
 
     const allThreats = [
       ...titleResult.threats,
       ...bodyResult.threats,
-      ...(acResults?.flatMap((r) => r.threats) ?? []),
+      ...(requirementResults?.flatMap((r) => r.threats) ?? []),
     ];
     if (allThreats.length > 0) {
       logger.warn(
@@ -161,7 +301,7 @@ export function createIssueWatcherService(
           quarantined:
             titleResult.quarantined ||
             bodyResult.quarantined ||
-            (acResults?.some((r) => r.quarantined) ?? false),
+            (requirementResults?.some((r) => r.quarantined) ?? false),
           threatPatterns: [...new Set(allThreats.map((t) => t.pattern))],
           threatCount: allThreats.length,
         },
@@ -176,7 +316,7 @@ export function createIssueWatcherService(
       const sanitizedAll = [
         titleResult.text,
         bodyResult.text,
-        ...(acResults?.map((r) => r.text) ?? []),
+        ...(requirementResults?.map((r) => r.text) ?? []),
       ].join('\n');
       const payloadExcerpt = sanitizedAll.slice(0, 256);
 
@@ -193,11 +333,9 @@ export function createIssueWatcherService(
         );
       }
 
-      const originalAll = [
-        candidate.title,
-        candidate.body,
-        ...(candidate.acceptanceCriteria ?? []),
-      ].join('\n');
+      const originalAll = [candidate.title, candidate.body, ...(candidate.requirements ?? [])].join(
+        '\n',
+      );
       for (const patternName of collectPiiPatternNames(originalAll)) {
         safetyRowIds.push(
           safetyEventsRepo.insert({
@@ -212,19 +350,52 @@ export function createIssueWatcherService(
       }
     }
 
-    const task = `${titleResult.text}\n\n${bodyResult.text}`;
-    const request: CreatePodRequest = {
-      profileName: target.profileName,
-      task,
-      branchPrefix: `issue-${candidate.id}/`,
-      acceptanceCriteria: acResults?.map((r) => ({
-        type: 'none' as const,
-        test: r.text,
-        pass: 'criterion satisfied',
-        fail: 'criterion not satisfied',
-      })),
-      outputMode: target.outputMode,
-    };
+    const specSlug = issueSpecSlug(candidate.id);
+    const seriesId = `issue-${provider}-${candidate.id}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+    const seriesName = `Issue ${candidate.id}: ${titleResult.text}`.slice(0, 120);
+    const requirements = requirementResults?.map((r) => r.text) ?? [];
+    const request: CreatePodRequest =
+      target.output === 'artifact'
+        ? {
+            profileName: target.profileName,
+            task: buildDirectIssueTask({
+              issueId: candidate.id,
+              issueUrl: candidate.url,
+              title: titleResult.text,
+              body: bodyResult.text,
+              requirements,
+            }),
+            branchPrefix: `issue-${candidate.id}/`,
+            skipValidation: true,
+            options: { agentMode: 'auto', output: 'artifact', validate: false },
+            seriesId,
+            seriesName,
+            seriesDescription: `Implement issue ${candidate.id}: ${titleResult.text}`,
+            briefTitle: `Issue ${candidate.id}`,
+          }
+        : {
+            profileName: target.profileName,
+            task: buildPlannerTask({
+              issueId: candidate.id,
+              issueUrl: candidate.url,
+              title: titleResult.text,
+              body: bodyResult.text,
+              requirements,
+              specSlug,
+            }),
+            branchPrefix: `issue-${candidate.id}/`,
+            skipValidation: true,
+            options: { agentMode: 'auto', output: 'branch', validate: false },
+            seriesId,
+            seriesName,
+            seriesDescription: `Plan and implement issue ${candidate.id}: ${titleResult.text}`,
+            briefTitle: `Plan issue ${candidate.id}`,
+            prMode: 'single',
+            autoApprove: true,
+          };
 
     let pod: Pod;
     try {
@@ -260,6 +431,7 @@ export function createIssueWatcherService(
       issueTitle: candidate.title,
       status: 'in_progress',
       podId: pod.id,
+      phase: target.output === 'artifact' ? 'working' : 'planning',
       triggerLabel: candidate.triggerLabel,
     });
 
@@ -274,7 +446,12 @@ export function createIssueWatcherService(
 
     // Post status comment
     try {
-      await client.addComment(candidate.id, `autopod pod \`${pod.id}\` started for this issue.`);
+      await client.addComment(
+        candidate.id,
+        target.output === 'artifact'
+          ? `autopod artifact pod \`${pod.id}\` started for this issue.`
+          : `autopod planner pod \`${pod.id}\` started for this issue. It will write a /prep spec, then start the implementation pod.`,
+      );
     } catch (err) {
       logger.warn({ err, issueId: candidate.id }, 'Failed to post status comment on issue');
     }
@@ -294,6 +471,7 @@ export function createIssueWatcherService(
         issueId: candidate.id,
         podId: pod.id,
         profile: target.profileName,
+        output: target.output,
       },
       'Issue picked up and pod created',
     );
@@ -389,12 +567,70 @@ export function createIssueWatcherService(
         const client = issueClientFactory(profile);
         const prefix = profile.issueWatcherLabelPrefix;
 
+        if (newStatus === 'complete' && tracked.phase === 'planning') {
+          let plannerPod: Pod;
+          let specSlug: string;
+          let worker: Pod;
+          try {
+            plannerPod = podManager.getSession(podId);
+            const planned = readPlannerBrief(plannerPod, tracked.issueId);
+            specSlug = planned.specSlug;
+            const { brief } = planned;
+            worker = podManager.createSession(
+              {
+                profileName: tracked.profileName,
+                task: brief.task,
+                contract: brief.contract,
+                branch: plannerPod.branch,
+                baseBranch: plannerPod.baseBranch ?? undefined,
+                branchPrefix: `issue-${tracked.issueId}/`,
+                seriesId: plannerPod.seriesId,
+                seriesName: plannerPod.seriesName,
+                seriesDescription: plannerPod.seriesDescription,
+                seriesDesign: plannerPod.seriesDesign,
+                briefTitle: brief.title,
+                touches: brief.touches,
+                doesNotTouch: brief.doesNotTouch,
+                requireSidecars: brief.requireSidecars,
+                prMode: 'single',
+                options: { agentMode: 'auto', output: 'pr', validate: true },
+              },
+              ISSUE_WATCHER_USER_ID,
+            );
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            logger.error(
+              { err, issueId: tracked.issueId, plannerPodId: podId },
+              'Issue watcher planner handoff failed',
+            );
+            await markIssueFailed({
+              client,
+              prefix,
+              tracked,
+              podId,
+              comment: `autopod planner pod \`${podId}\` completed, but implementation handoff failed: ${message}`,
+            });
+            return;
+          }
+
+          issueWatcherRepo.updatePod(tracked.id, worker.id, 'working');
+          await client.addComment(
+            tracked.issueId,
+            `autopod planner pod \`${podId}\` completed \`specs/${specSlug}\`; implementation pod \`${worker.id}\` started and will open the final PR.`,
+          );
+          logger.info(
+            { issueId: tracked.issueId, plannerPodId: podId, workerPodId: worker.id },
+            'Issue watcher planner completed; worker pod created',
+          );
+          return;
+        }
+
         if (newStatus === 'complete') {
           await client.removeLabel(tracked.issueId, `${prefix}:in-progress`);
           await client.addLabel(tracked.issueId, `${prefix}:done`);
           await client.addComment(
             tracked.issueId,
-            `autopod pod \`${podId}\` completed successfully.`,
+            `autopod implementation pod \`${podId}\` completed successfully.`,
           );
           issueWatcherRepo.updateStatus(tracked.id, 'done');
         } else {

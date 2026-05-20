@@ -2,11 +2,7 @@ import type { ScreenshotSource } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ScreenshotStore } from '../../pods/screenshot-store.js';
 
-const VALID_SOURCES: ReadonlySet<ScreenshotSource> = new Set<ScreenshotSource>([
-  'smoke',
-  'ac',
-  'review',
-]);
+const VALID_SOURCES: ReadonlySet<ScreenshotSource> = new Set<ScreenshotSource>(['smoke', 'review']);
 
 function isScreenshotSource(value: string): value is ScreenshotSource {
   return VALID_SOURCES.has(value as ScreenshotSource);
@@ -33,7 +29,7 @@ export function screenshotRoutes(app: FastifyInstance, screenshotStore: Screensh
 
     if (!isScreenshotSource(source)) {
       reply.status(400);
-      return { error: 'source must be one of: smoke, ac, review' };
+      return { error: 'source must be one of: smoke, review' };
     }
 
     if (filename.includes('..') || filename.includes('/') || !SAFE_FILENAME_RE.test(filename)) {

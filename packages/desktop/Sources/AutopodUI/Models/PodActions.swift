@@ -15,8 +15,8 @@ public struct PodActions: Sendable {
   public var rework: @MainActor @Sendable (String) async -> Void
   public var fixManually: @MainActor @Sendable (String) async -> String?
   public var revalidate: @MainActor @Sendable (String) async -> Void
-  public var createPod: @MainActor @Sendable (String, String, String?, PodConfigRequest?, [AcDefinition]?, String?, String?, String?, [PimGroupRequest]?, [String]?, [ReferenceRepoRequest]?, BriefPodMetadata?) async -> String?
-  // createPod params: profileName, task, model, pod, acceptanceCriteria, baseBranch, branchPrefix, acFrom, pimGroups, requireSidecars, referenceRepos, briefMetadata → returns pod ID or nil
+  public var createPod: @MainActor @Sendable (String, String, String?, PodConfigRequest?, String?, String?, [PimGroupRequest]?, [String]?, [ReferenceRepoRequest]?, BriefPodMetadata?) async -> String?
+  // createPod params: profileName, task, model, pod, baseBranch, branchPrefix, pimGroups, requireSidecars, referenceRepos, briefMetadata -> returns pod ID or nil
   /// Promote an interactive pod to agent-driven in place. `targetOutput` ∈ {pr, branch, artifact, none}.
   /// `instructions` is the human's typed handoff text from the sheet — composed into the agent's CLAUDE.md.
   /// `skipAgent` bypasses the runtime spawn entirely (only valid with pr/artifact targets).
@@ -90,7 +90,6 @@ public struct PodActions: Sendable {
     _ dependsOnPodIds: [String],
     _ seriesId: String?,
     _ seriesName: String?,
-    _ acceptanceCriteria: [AcDefinition]?,
     _ baseBranch: String?
   ) async -> String?
   /// Commit + push a workspace pod's branch without changing pod state.
@@ -113,7 +112,7 @@ public struct PodActions: Sendable {
     rework: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     fixManually: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
     revalidate: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
-    createPod: @escaping @MainActor @Sendable (String, String, String?, PodConfigRequest?, [AcDefinition]?, String?, String?, String?, [PimGroupRequest]?, [String]?, [ReferenceRepoRequest]?, BriefPodMetadata?) async -> String? = { _, _, _, _, _, _, _, _, _, _, _, _ in nil },
+    createPod: @escaping @MainActor @Sendable (String, String, String?, PodConfigRequest?, String?, String?, [PimGroupRequest]?, [String]?, [ReferenceRepoRequest]?, BriefPodMetadata?) async -> String? = { _, _, _, _, _, _, _, _, _, _ in nil },
     promote: @escaping @MainActor @Sendable (String, String?, String?, Bool) async -> Void = { _, _, _, _ in },
     attachTerminal: @escaping @MainActor @Sendable (String) -> Void = { _ in },
     approveAll: @escaping @MainActor @Sendable () async -> Void = {},
@@ -143,7 +142,7 @@ public struct PodActions: Sendable {
     previewBriefOnBranch: @escaping @MainActor @Sendable (String, String, String) async -> ParsedBriefResponse? = { _, _, _ in nil },
     lastPreviewError: @escaping @MainActor @Sendable () -> String? = { nil },
     createSeries: @escaping @MainActor @Sendable (CreateSeriesRequest) async -> String? = { _ in nil },
-    spawnDependent: @escaping @MainActor @Sendable (String, String, [String], String?, String?, [AcDefinition]?, String?) async -> String? = { _, _, _, _, _, _, _ in nil },
+    spawnDependent: @escaping @MainActor @Sendable (String, String, [String], String?, String?, String?) async -> String? = { _, _, _, _, _, _ in nil },
     syncWorkspaceBranch: @escaping @MainActor @Sendable (String) async -> SyncBranchResponse? = { _ in nil },
     updateFromBase: @escaping @MainActor @Sendable (String) async -> UpdateFromBaseResponse? = { _ in nil }
   ) {

@@ -111,7 +111,7 @@ import Testing
         ("test", .test),
         ("lint", .lint),
         ("sast", .sast),
-        ("acValidation", .acValidation),
+        ("facts", .facts),
         ("taskReview", .taskReview),
     ]
     for (raw, expected) in cases {

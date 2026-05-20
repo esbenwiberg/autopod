@@ -91,13 +91,13 @@ describe('screenshotRoutes', () => {
       expect(res.rawPayload).toEqual(SMALL_PNG);
     });
 
-    it('serves ac and review source buckets', async () => {
+    it('serves review source bucket', async () => {
       const podId = 'pod-abc123';
-      await screenshotStore.write(podId, 'ac', '0.png', SMALL_PNG);
+      await screenshotStore.write(podId, 'review', '0.png', SMALL_PNG);
 
       const res = await app.inject({
         method: 'GET',
-        url: `/pods/${podId}/screenshots/ac/0.png`,
+        url: `/pods/${podId}/screenshots/review/0.png`,
         headers: { authorization: 'Bearer any-token' },
       });
 

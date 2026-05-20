@@ -1,7 +1,7 @@
 import type { PageAssertion } from './profile.js';
 import type { DeviationsAssessment } from './task-summary.js';
 
-export type ScreenshotSource = 'smoke' | 'ac' | 'review';
+export type ScreenshotSource = 'smoke' | 'review';
 
 export interface ScreenshotRef {
   podId: string;
@@ -19,14 +19,7 @@ export interface ValidationResult {
   test?: { status: 'pass' | 'fail' | 'skip'; duration: number; stdout?: string; stderr?: string };
   lint?: LintResult;
   sast?: SastResult;
-  acValidation?: AcValidationResult | null;
   factValidation?: FactValidationResult | null;
-  /**
-   * Machine-readable reason when acValidation is null. Lets the UI distinguish
-   * "skipped because earlier phases failed" from "skipped because no criteria
-   * were defined" without parsing free-form strings.
-   */
-  acSkipReason?: 'upstream-failed' | 'profile-skip' | 'health-failed' | 'no-criteria';
   taskReview: TaskReviewResult | null;
   /** Human-readable reason when taskReview is null (e.g. "No code changes detected") */
   reviewSkipReason?: string;
@@ -103,26 +96,6 @@ export interface AssertionResult {
   passed: boolean;
 }
 
-export interface AcCheckResult {
-  /** The original acceptance criterion text */
-  criterion: string;
-  /** Whether the check passed */
-  passed: boolean;
-  /** Reference to the on-disk screenshot of the relevant page state */
-  screenshot?: ScreenshotRef;
-  /** Reviewer/executor reasoning about why it passed or failed */
-  reasoning: string;
-  /** How this criterion was (or was not) validated */
-  validationType?: 'web-ui' | 'api' | 'cmd' | 'none';
-}
-
-export interface AcValidationResult {
-  status: 'pass' | 'fail' | 'skip';
-  results: AcCheckResult[];
-  /** The model used to generate and execute checks */
-  model: string;
-}
-
 export interface FactCheckResult {
   factId: string;
   proves: string[];
@@ -170,7 +143,7 @@ export interface TaskReviewResult {
   model: string;
   screenshots: ScreenshotRef[];
   diff: string;
-  /** Per-AC requirements coverage check */
+  /** Per-contract human-review requirements coverage check */
   requirementsCheck?: RequirementsCheckItem[];
   /** Reviewer's assessment of agent-reported and detected deviations */
   deviationsAssessment?: DeviationsAssessment;
@@ -180,12 +153,12 @@ export interface TaskReviewResult {
 
 /** A single failed finding extracted from a ValidationResult for recurring-detection. */
 export interface ValidationFinding {
-  /** Stable ID: 'ac:<hash>' | 'review:<hash>' | 'req:<hash>' */
+  /** Stable ID: 'fact:<hash>' | 'review:<hash>' | 'req:<hash>' */
   id: string;
-  source: 'ac_validation' | 'fact_validation' | 'task_review' | 'requirements_check';
+  source: 'fact_validation' | 'task_review' | 'requirements_check';
   /** Human-readable description of the finding */
   description: string;
-  /** Reviewer reasoning (for AC checks) */
+  /** Reviewer or validator reasoning */
   reasoning?: string;
 }
 

@@ -107,11 +107,11 @@ describe('ValidationRepository', () => {
        VALUES ('sess-3', 'test-profile', 'test task', 'opus', 'claude', 'main', 'user-1')`,
     ).run();
 
-    const acRef: ScreenshotRef = {
+    const reviewRef: ScreenshotRef = {
       podId: 'sess-3',
-      source: 'ac',
+      source: 'review',
       filename: '1-0.png',
-      relativePath: 'screenshots/sess-3/ac/1-0.png',
+      relativePath: 'screenshots/sess-3/review/1-0.png',
     };
 
     const result: ValidationResult = {
@@ -139,17 +139,12 @@ describe('ValidationRepository', () => {
           },
         ],
       },
-      acValidation: {
-        status: 'pass',
-        results: [{ criterion: 'test', passed: true, reasoning: 'ok', screenshot: acRef }],
-        model: 'sonnet',
-      },
       taskReview: {
         status: 'pass',
         reasoning: 'looks good',
         issues: [],
         model: 'sonnet',
-        screenshots: [],
+        screenshots: [reviewRef],
         diff: 'diff',
       },
       overall: 'pass',
@@ -163,10 +158,9 @@ describe('ValidationRepository', () => {
     // ScreenshotRef on smoke page survived roundtrip
     expect(stored?.result.smoke.pages[0]?.screenshot?.source).toBe('smoke');
     expect(stored?.result.smoke.pages[0]?.screenshot?.filename).toBe('0-root.png');
-    // ScreenshotRef on AC check survived roundtrip
-    const checks = stored?.result.acValidation?.results;
-    expect(checks?.[0]?.screenshot?.source).toBe('ac');
-    expect(checks?.[0]?.screenshot?.filename).toBe('1-0.png');
+    // ScreenshotRef on review survived roundtrip
+    expect(stored?.result.taskReview?.screenshots[0]?.source).toBe('review');
+    expect(stored?.result.taskReview?.screenshots[0]?.filename).toBe('1-0.png');
     // No base64 strings anywhere
     const raw = JSON.stringify(stored?.result);
     expect(raw).not.toContain('screenshotBase64');

@@ -34,8 +34,8 @@ import Testing
         label: "/"
     )
     let wrongSource = ScreenshotRef(
-        url: URL(string: "http://127.0.0.1:3100/ac.png")!,
-        source: .ac,
+        url: URL(string: "http://127.0.0.1:3100/review.png")!,
+        source: .review,
         label: "/"
     )
     let wrongPath = ScreenshotRef(

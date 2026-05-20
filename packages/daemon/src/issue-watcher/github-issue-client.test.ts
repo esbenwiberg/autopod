@@ -56,7 +56,8 @@ describe('GitHubIssueClient', () => {
       expect(candidates[0].id).toBe('1');
       expect(candidates[0].title).toBe('Fix bug');
       expect(candidates[0].triggerLabel).toBe('autopod');
-      expect(candidates[0].acceptanceCriteria).toEqual(['Fix login', 'Fix logout']);
+      expect(candidates[0].body).toContain('Fix login');
+      expect(candidates[0].requirements).toBeUndefined();
     });
 
     it('matches prefixed labels like autopod:backend', async () => {

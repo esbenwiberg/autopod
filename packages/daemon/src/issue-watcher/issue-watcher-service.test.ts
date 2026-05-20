@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { Pod, Profile, SystemEvent } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,13 +30,35 @@ function insertTestSession(db: Database.Database, id: string) {
 
 function createMockSessionManager(db: Database.Database) {
   let nextId = 1;
+  const sessions = new Map<string, Pod>();
   return {
-    createSession: vi.fn().mockImplementation(() => {
+    createSession: vi.fn().mockImplementation((request: Record<string, unknown> = {}) => {
       const id = `sess-${nextId++}`;
       insertTestSession(db, id);
-      return { id, status: 'queued' } as unknown as Pod;
+      const pod = {
+        id,
+        status: 'queued',
+        branch: (request.branch as string | undefined) ?? 'test-branch',
+        baseBranch: (request.baseBranch as string | undefined) ?? 'main',
+        worktreePath: null,
+        seriesId: request.seriesId,
+        seriesName: request.seriesName,
+        seriesDescription: request.seriesDescription,
+        seriesDesign: request.seriesDesign,
+      } as unknown as Pod;
+      sessions.set(id, pod);
+      return pod;
+    }),
+    getSession: vi.fn((id: string) => {
+      const pod = sessions.get(id);
+      if (!pod) throw new Error(`Session not found: ${id}`);
+      return pod;
     }),
     refreshNetworkPolicy: vi.fn(),
+    setSession(id: string, pod: Partial<Pod>) {
+      const existing = sessions.get(id) ?? ({ id } as Pod);
+      sessions.set(id, { ...existing, ...pod } as Pod);
+    },
   };
 }
 
@@ -134,6 +159,38 @@ describe('IssueWatcherService', () => {
     return { service, eventBus, issueWatcherRepo, client, safetyEventsRepo };
   }
 
+  function writePlannerSpec(worktreePath: string, issueId: string) {
+    const specDir = path.join(worktreePath, 'specs', `issue-${issueId}`);
+    fs.mkdirSync(specDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(specDir, 'brief.md'),
+      `---
+title: Implement issue
+---
+Implement the issue.`,
+    );
+    fs.writeFileSync(
+      path.join(specDir, 'contract.yaml'),
+      `contract_version: 1
+title: Implement issue
+scenarios:
+  - id: behavior
+    given: ["existing state"]
+    when: ["the issue is implemented"]
+    then: ["the behavior works"]
+required_facts:
+  - id: fact-behavior
+    proves: [behavior]
+    kind: unit-test
+    artifact:
+      path: packages/app/issue.test.ts
+      change: create
+    command: npx pnpm test -- issue.test.ts
+human_review: []
+`,
+    );
+  }
+
   it('picks up an issue and creates a pod', async () => {
     const candidates: WatchedIssueCandidate[] = [
       {
@@ -143,7 +200,7 @@ describe('IssueWatcherService', () => {
         url: 'https://github.com/org/repo/issues/42',
         labels: ['autopod'],
         triggerLabel: 'autopod',
-        acceptanceCriteria: ['Login works'],
+        requirements: ['Login works'],
       },
     ];
 
@@ -159,14 +216,11 @@ describe('IssueWatcherService', () => {
     const createCall = mockSessionManager.createSession.mock.calls[0];
     expect(createCall[0].profileName).toBe('test-profile');
     expect(createCall[0].task).toContain('Fix login bug');
-    expect(createCall[0].acceptanceCriteria).toEqual([
-      {
-        type: 'none',
-        test: 'Login works',
-        pass: 'criterion satisfied',
-        fail: 'criterion not satisfied',
-      },
-    ]);
+    expect(createCall[0].task).toContain('/prep');
+    expect(createCall[0].task).toContain('ask_ai');
+    expect(createCall[0].task).toContain('Login works');
+    expect(createCall[0].options).toEqual({ agentMode: 'auto', output: 'branch', validate: false });
+    expect(createCall[0].skipValidation).toBe(true);
     expect(createCall[0].branchPrefix).toBe('issue-42/');
 
     // Should have swapped labels
@@ -180,6 +234,47 @@ describe('IssueWatcherService', () => {
     const tracked = issueWatcherRepo.list();
     expect(tracked).toHaveLength(1);
     expect(tracked[0].podId).toBe('sess-1');
+    expect(tracked[0].phase).toBe('planning');
+    expect(tracked[0].status).toBe('in_progress');
+  });
+
+  it('preserves autopod:artifact as a direct artifact-output pod route', async () => {
+    const candidates: WatchedIssueCandidate[] = [
+      {
+        id: '77',
+        title: 'Write research report',
+        body: 'Produce a markdown report',
+        url: 'https://github.com/org/repo/issues/77',
+        labels: ['autopod:artifact'],
+        triggerLabel: 'autopod:artifact',
+      },
+    ];
+
+    const { service, issueWatcherRepo, client } = createService(candidates);
+    service.start();
+
+    await new Promise((r) => setTimeout(r, 50));
+    service.stop();
+
+    expect(mockSessionManager.createSession).toHaveBeenCalledTimes(1);
+    const createCall = mockSessionManager.createSession.mock.calls[0];
+    expect(createCall[0].profileName).toBe('test-profile');
+    expect(createCall[0].task).toContain('Write research report');
+    expect(createCall[0].task).not.toContain('/prep');
+    expect(createCall[0].options).toEqual({
+      agentMode: 'auto',
+      output: 'artifact',
+      validate: false,
+    });
+    expect(createCall[0].skipValidation).toBe(true);
+
+    expect(client.removeLabel).toHaveBeenCalledWith('77', 'autopod:artifact');
+    expect(client.addLabel).toHaveBeenCalledWith('77', 'autopod:in-progress');
+
+    const tracked = issueWatcherRepo.list();
+    expect(tracked).toHaveLength(1);
+    expect(tracked[0].podId).toBe('sess-1');
+    expect(tracked[0].phase).toBe('working');
     expect(tracked[0].status).toBe('in_progress');
   });
 
@@ -241,7 +336,7 @@ describe('IssueWatcherService', () => {
     expect(mockSessionManager.createSession).not.toHaveBeenCalled();
   });
 
-  it('handles pod completion by swapping labels', async () => {
+  it('handles worker pod completion by swapping labels', async () => {
     const candidates: WatchedIssueCandidate[] = [
       {
         id: '42',
@@ -253,7 +348,7 @@ describe('IssueWatcherService', () => {
       },
     ];
 
-    const { service, eventBus, client } = createService(candidates);
+    const { service, eventBus, issueWatcherRepo, client } = createService(candidates);
     service.start();
     await new Promise((r) => setTimeout(r, 50));
 
@@ -262,7 +357,11 @@ describe('IssueWatcherService', () => {
     (client.removeLabel as ReturnType<typeof vi.fn>).mockClear();
     (client.addComment as ReturnType<typeof vi.fn>).mockClear();
 
-    // Simulate pod completion
+    const tracked = issueWatcherRepo.list()[0];
+    if (!tracked) throw new Error('expected tracked issue');
+    issueWatcherRepo.updatePod(tracked.id, 'sess-1', 'working');
+
+    // Simulate worker pod completion
     eventBus.emit({
       type: 'pod.status_changed',
       timestamp: new Date().toISOString(),
@@ -313,6 +412,89 @@ describe('IssueWatcherService', () => {
     service.stop();
 
     expect(client.addLabel).toHaveBeenCalledWith('42', 'autopod:failed');
+  });
+
+  it('marks the issue failed when planner handoff cannot read the spec', async () => {
+    const candidates: WatchedIssueCandidate[] = [
+      {
+        id: '42',
+        title: 'Fix bug',
+        body: '',
+        url: 'https://github.com/org/repo/issues/42',
+        labels: ['autopod'],
+        triggerLabel: 'autopod',
+      },
+    ];
+    const worktreePath = fs.mkdtempSync(path.join(os.tmpdir(), 'issue-planner-missing-'));
+
+    const { service, eventBus, issueWatcherRepo, client } = createService(candidates);
+    service.start();
+    await new Promise((r) => setTimeout(r, 50));
+
+    mockSessionManager.setSession('sess-1', { worktreePath, branch: 'issue-42/planner' });
+    (client.addLabel as ReturnType<typeof vi.fn>).mockClear();
+    (client.removeLabel as ReturnType<typeof vi.fn>).mockClear();
+    (client.addComment as ReturnType<typeof vi.fn>).mockClear();
+
+    eventBus.emit({
+      type: 'pod.status_changed',
+      timestamp: new Date().toISOString(),
+      podId: 'sess-1',
+      previousStatus: 'running',
+      newStatus: 'complete',
+    } as SystemEvent);
+
+    await new Promise((r) => setTimeout(r, 50));
+    service.stop();
+    fs.rmSync(worktreePath, { recursive: true, force: true });
+
+    expect(issueWatcherRepo.list()[0]?.status).toBe('failed');
+    expect(client.removeLabel).toHaveBeenCalledWith('42', 'autopod:in-progress');
+    expect(client.addLabel).toHaveBeenCalledWith('42', 'autopod:failed');
+    expect(client.addComment).toHaveBeenCalledWith('42', expect.stringContaining('handoff failed'));
+  });
+
+  it('marks the issue failed when planner handoff cannot create the worker pod', async () => {
+    const candidates: WatchedIssueCandidate[] = [
+      {
+        id: '42',
+        title: 'Fix bug',
+        body: '',
+        url: 'https://github.com/org/repo/issues/42',
+        labels: ['autopod'],
+        triggerLabel: 'autopod',
+      },
+    ];
+    const worktreePath = fs.mkdtempSync(path.join(os.tmpdir(), 'issue-planner-worker-'));
+
+    const { service, eventBus, issueWatcherRepo, client } = createService(candidates);
+    service.start();
+    await new Promise((r) => setTimeout(r, 50));
+
+    writePlannerSpec(worktreePath, '42');
+    mockSessionManager.setSession('sess-1', { worktreePath, branch: 'issue-42/planner' });
+    mockSessionManager.createSession.mockImplementationOnce(() => {
+      throw new Error('queue full');
+    });
+    (client.addLabel as ReturnType<typeof vi.fn>).mockClear();
+    (client.removeLabel as ReturnType<typeof vi.fn>).mockClear();
+    (client.addComment as ReturnType<typeof vi.fn>).mockClear();
+
+    eventBus.emit({
+      type: 'pod.status_changed',
+      timestamp: new Date().toISOString(),
+      podId: 'sess-1',
+      previousStatus: 'running',
+      newStatus: 'complete',
+    } as SystemEvent);
+
+    await new Promise((r) => setTimeout(r, 50));
+    service.stop();
+    fs.rmSync(worktreePath, { recursive: true, force: true });
+
+    expect(issueWatcherRepo.list()[0]?.status).toBe('failed');
+    expect(client.addLabel).toHaveBeenCalledWith('42', 'autopod:failed');
+    expect(client.addComment).toHaveBeenCalledWith('42', expect.stringContaining('queue full'));
   });
 
   it('skips and warns when issue watcher enabled but no PAT in inheritance chain', async () => {

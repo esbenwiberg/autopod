@@ -265,7 +265,6 @@ public struct SpawnDependentSheet: View {
             parentIds,
             seriesId,
             seriesName,
-            initiator.acceptanceCriteria,
             baseBranch.isEmpty ? nil : baseBranch
         )
         if let id {

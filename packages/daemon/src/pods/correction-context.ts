@@ -13,7 +13,6 @@ export interface CorrectionContext {
     | 'tests'
     | 'health'
     | 'smoke'
-    | 'ac_validation'
     | 'fact_validation'
     | 'task_review';
   validationResult: ValidationResult;
@@ -92,15 +91,6 @@ export async function buildCorrectionContext(
     screenshotDescriptions.push(parts.join('\n'));
   }
 
-  // AC validation failures
-  if (validationResult.acValidation?.status === 'fail') {
-    for (const check of validationResult.acValidation.results) {
-      if (!check.passed) {
-        screenshotDescriptions.push(`AC failed: "${check.criterion}" — ${check.reasoning}`);
-      }
-    }
-  }
-
   // Task review issues
   if (validationResult.taskReview?.status === 'fail') {
     screenshotDescriptions.push(...validationResult.taskReview.issues);
@@ -128,7 +118,6 @@ export function determineFailedStep(result: ValidationResult): CorrectionContext
   if (result.smoke.health.status === 'fail') return 'health';
   const hasPageFailure = result.smoke.pages.some((p) => p.status === 'fail');
   if (hasPageFailure) return 'smoke';
-  if (result.acValidation?.status === 'fail') return 'ac_validation';
   if (result.factValidation?.status === 'fail') return 'fact_validation';
   return 'task_review';
 }
@@ -170,28 +159,6 @@ export async function buildCorrectionMessage(
     lines.push('');
     lines.push('### Project Instructions (reminder)');
     lines.push(context.customInstructions);
-  }
-
-  // Surface AC self-verification discrepancies
-  const selfReport = pod.acSelfReport;
-  if (selfReport?.length && validationResult.acValidation?.status === 'fail') {
-    const failingCriteria = validationResult.acValidation.results
-      .filter((r) => r.status === 'fail')
-      .map((r) => r.criterion);
-
-    const falsePositives = selfReport.filter(
-      (r) => r.verified && failingCriteria.some((f) => f === r.criterion),
-    );
-
-    if (falsePositives.length) {
-      lines.push('');
-      lines.push('### Self-Verification Discrepancy');
-      lines.push('You marked these criteria as verified, but the automated validator disagrees:');
-      for (const r of falsePositives) {
-        lines.push(`- ${r.criterion}${r.notes ? ` (your notes: ${r.notes})` : ''}`);
-      }
-      lines.push('Revise your implementation — these are not passing.');
-    }
   }
 
   return lines.join('\n');

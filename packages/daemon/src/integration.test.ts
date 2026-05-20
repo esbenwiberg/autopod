@@ -904,7 +904,7 @@ describe('Integration', () => {
       expect(getRes.json().status).toBe('complete');
     });
 
-    it('POST /pods accepts baseBranch and acFrom parameters', async () => {
+    it('POST /pods accepts baseBranch parameter', async () => {
       await app.inject({
         method: 'POST',
         url: '/profiles',
@@ -920,36 +920,12 @@ describe('Integration', () => {
           profileName: 'test-app',
           task: 'Execute the plan',
           baseBranch: 'feat/plan-auth',
-          acFrom: 'specs/auth/acceptance-criteria.md',
         },
       });
 
       expect(res.statusCode).toBe(201);
       const pod = res.json();
       expect(pod.baseBranch).toBe('feat/plan-auth');
-      expect(pod.acFrom).toBe('specs/auth/acceptance-criteria.md');
-    });
-
-    it('POST /pods rejects acFrom with path traversal', async () => {
-      await app.inject({
-        method: 'POST',
-        url: '/profiles',
-        headers: { authorization: 'Bearer test-token' },
-        payload: validProfileInput,
-      });
-
-      const res = await app.inject({
-        method: 'POST',
-        url: '/pods',
-        headers: { authorization: 'Bearer test-token' },
-        payload: {
-          profileName: 'test-app',
-          task: 'Evil pod',
-          acFrom: '../../etc/passwd',
-        },
-      });
-
-      expect(res.statusCode).toBe(400);
     });
   });
 
@@ -1191,39 +1167,6 @@ describe('Integration', () => {
       // All three share the root's branch (single-mode invariant).
       expect(a.branch).toBe(base.branch);
       expect(b.branch).toBe(base.branch);
-    });
-
-    it('POST /pods/series accepts structured AcDefinition acceptance criteria', async () => {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/pods/series',
-        headers: { authorization: 'Bearer test-token' },
-        payload: {
-          seriesName: 'ac-test',
-          profile: 'test-app',
-          briefs: [
-            {
-              title: 'with-acs',
-              task: 'Task with ACs',
-              dependsOn: [],
-              acceptanceCriteria: [
-                { type: 'none', outcome: 'npx pnpm build exits cleanly' },
-                {
-                  type: 'api',
-                  outcome: 'GET /health returns 200',
-                  hint: 'GET /api/health',
-                },
-              ],
-            },
-          ],
-        },
-      });
-
-      expect(res.statusCode).toBe(201);
-      const body = res.json();
-      expect(body.pods[0].acceptanceCriteria).toHaveLength(2);
-      expect(body.pods[0].acceptanceCriteria[0].type).toBe('none');
-      expect(body.pods[0].acceptanceCriteria[1].type).toBe('api');
     });
 
     it('POST /pods/series forces agentMode:auto even when profile defaults to interactive', async () => {

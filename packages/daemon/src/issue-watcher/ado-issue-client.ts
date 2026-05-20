@@ -95,16 +95,16 @@ export class AdoIssueClient implements IssueClient {
         : '';
       const body = description.length > 10_000 ? description.slice(0, 10_000) : description;
 
-      // Parse acceptance criteria from the dedicated ADO field
-      const acHtml = wi.fields['Microsoft.VSTS.Common.AcceptanceCriteria'];
-      let acceptanceCriteria: string[] | undefined;
-      if (acHtml) {
-        const acText = stripHtml(acHtml);
-        const lines = acText
+      // Carry ADO's dedicated requirements field into the planner prompt.
+      const requirementsHtml = wi.fields['Microsoft.VSTS.Common.AcceptanceCriteria'];
+      let requirements: string[] | undefined;
+      if (requirementsHtml) {
+        const requirementsText = stripHtml(requirementsHtml);
+        const lines = requirementsText
           .split('\n')
           .map((l) => l.trim())
           .filter((l) => l.length > 0);
-        if (lines.length > 0) acceptanceCriteria = lines;
+        if (lines.length > 0) requirements = lines;
       }
 
       candidates.push({
@@ -114,7 +114,7 @@ export class AdoIssueClient implements IssueClient {
         url: wi._links.html.href,
         labels: tags,
         triggerLabel: matchingTag,
-        acceptanceCriteria,
+        requirements,
       });
     }
 

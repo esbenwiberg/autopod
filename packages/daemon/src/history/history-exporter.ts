@@ -113,7 +113,7 @@ function extractFailedPhases(result: ValidationResult): string[] {
     if (page.status === 'fail') phases.push(`smoke:${page.path}`);
   }
   if (result.test?.status === 'fail') phases.push('test');
-  if (result.acValidation?.status === 'fail') phases.push('ac_validation');
+  if (result.factValidation?.status === 'fail') phases.push('facts');
   if (result.taskReview?.status === 'fail') phases.push('review');
   return phases;
 }
@@ -596,7 +596,7 @@ WHERE task_summary IS NOT NULL
 
 1. **Recurring build errors**: Same error across multiple pods → update agent instructions with build fix guidance
 2. **Frequent escalations**: Same question asked repeatedly → document the answer in agent instructions or create a skill
-3. **Validation rework loops**: Sessions that fail validation multiple times on the same issue → add clearer acceptance criteria
+3. **Validation rework loops**: Sessions that fail validation multiple times on the same issue → add clearer contract facts or reviewer guidance
 4. **High-cost failures**: Expensive pods that ultimately fail → investigate if task scope is too ambitious
 5. **Agent deviations**: Frequent plan deviations → improve task descriptions or system instructions
 6. **Profile-specific patterns**: One profile failing more than others → review its configuration
@@ -606,7 +606,7 @@ WHERE task_summary IS NOT NULL
 When you find a pattern, suggest one of:
 - **Agent-instruction update**: Specific text to add/change in AGENTS.md, CLAUDE.md, or profile instructions
 - **Skill idea**: A reusable slash command that could prevent the issue
-- **Profile config change**: Adjustments to validation, build commands, or acceptance criteria
+- **Profile config change**: Adjustments to validation, build commands, or contract requirements
 - **Task description improvement**: How to write better task descriptions
 `;
 }

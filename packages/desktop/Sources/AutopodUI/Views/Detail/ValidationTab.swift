@@ -147,18 +147,6 @@ public struct ValidationTab: View {
         screenshot: mapScreenshotRef(page.screenshot)
       )
     }
-    let acValidation: Bool? = response.acValidation.flatMap {
-      $0.status == "skip" ? nil : ($0.status == "pass")
-    }
-    let acChecks = response.acValidation?.results.map { check in
-      AcCheckDetail(
-        criterion: check.criterion,
-        passed: check.passed,
-        reasoning: check.reasoning,
-        screenshot: mapScreenshotRef(check.screenshot),
-        validationType: check.validationType
-      )
-    }
     let factValidation: Bool? = response.factValidation.flatMap {
       $0.status == "skip" ? nil : ($0.status == "pass")
     }
@@ -207,11 +195,8 @@ public struct ValidationTab: View {
       reviewReasoning: response.taskReview?.reasoning,
       reviewSkipReason: response.reviewSkipReason,
       reviewSkipKind: response.reviewSkipKind,
-      acSkipReason: response.acSkipReason,
       healthCheck: healthCheck,
       pages: pages,
-      acValidation: acValidation,
-      acChecks: acChecks,
       factValidation: factValidation,
       factChecks: factChecks,
       requirementsCheck: requirementsCheck,
@@ -242,19 +227,17 @@ public struct ValidationTab: View {
   /// The phase to show in the detail panel — user pick, then auto-running, else nil.
   private var displayPhase: ValidationPhase? {
     if let selectedPhase { return selectedPhase }
-    let active = progress?.activePhase
-    return active == .ac ? nil : active
+    return progress?.activePhase
   }
 
-  /// Combined ordered screenshot set for lightbox navigation: smoke → legacy → review.
+  /// Combined ordered screenshot set for lightbox navigation: smoke -> review.
   /// Derived from whichever source is live (progress from events, or final checks).
   private var screenshotSet: [ScreenshotRef] {
     let pageShots = (progress?.pageDetails ?? displayedChecks?.pages ?? []).compactMap {
       validationPageScreenshot($0, proofOfWorkScreenshots: displayedChecks?.proofOfWorkScreenshots)
     }
-    let acShots = (progress?.acChecks ?? displayedChecks?.acChecks ?? []).compactMap { $0.screenshot }
     let reviewShots = progress?.reviewDetail?.screenshots ?? displayedChecks?.taskReviewScreenshots ?? []
-    return pageShots + acShots + reviewShots
+    return pageShots + reviewShots
   }
 
   private func openLightbox(_ index: Int) {
@@ -310,8 +293,6 @@ public struct ValidationTab: View {
         return pages.allSatisfy { $0.status == "pass" } ? .passed : .failed
       }
       return .skipped
-    case .ac:
-      return switch c.acValidation { case true: .passed; case false: .failed; default: .skipped }
     case .facts:
       return switch c.factValidation { case true: .passed; case false: .failed; default: .skipped }
     case .review:
@@ -330,10 +311,6 @@ public struct ValidationTab: View {
         let count = p.pageCount
         if p.pages.status == .running { return "running…" }
         return count > 0 ? "\(count) pages" : nil
-      case .ac:
-        let count = p.acTotalCount
-        if p.ac.status == .running { return "running…" }
-        return count > 0 ? "\(count) legacy" : nil
       case .facts:
         let count = p.factTotalCount
         if p.facts.status == .running { return "running…" }
@@ -350,8 +327,6 @@ public struct ValidationTab: View {
       switch phase {
       case .pages:
         return c.pages.map { "\($0.count) pages" }
-      case .ac:
-        return c.acChecks.map { "\($0.count) legacy" }
       case .facts:
         return c.factChecks.map { "\($0.count) facts" }
       default:
@@ -816,17 +791,10 @@ public struct ValidationTab: View {
       case .sast:    sastDetail
       case .health:  healthDetail
       case .pages:   pagesDetail
-      case .ac:      acDetail
       case .facts:   factsDetail
       case .review:  reviewDetail
       }
     } else {
-      let criteria = pod.acceptanceCriteria ?? []
-      // Legacy criteria list stays visible when older pods have criteria,
-      // regardless of validation state.
-      if !criteria.isEmpty {
-        acListSection(criteria: criteria, acChecks: progress?.acChecks ?? displayedChecks?.acChecks)
-      }
       if progress == nil && displayedChecks == nil {
         // Empty state — no validation run yet
         VStack(spacing: 10) {
@@ -841,7 +809,7 @@ public struct ValidationTab: View {
           }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.top, criteria.isEmpty ? 40 : 16)
+        .padding(.top, 40)
       } else {
         // Prompt to click a chip
         Text("Select a phase above to see details")
@@ -1050,30 +1018,6 @@ public struct ValidationTab: View {
                 ? Color(nsColor: .controlBackgroundColor)
                 : Color.red.opacity(0.05))
     .clipShape(RoundedRectangle(cornerRadius: 8))
-  }
-
-  @ViewBuilder
-  private var acDetail: some View {
-    let status = phaseStatus(.ac)
-    let acChecks: [AcCheckDetail]? = progress?.acChecks ?? displayedChecks?.acChecks
-    let criteria = pod.acceptanceCriteria
-
-    VStack(alignment: .leading, spacing: 12) {
-      phaseStatusRow(status: status, passLabel: "Legacy checks verified",
-                     failLabel: "Legacy checks failed",
-                     skipLabel: acSkipLabel(reason: displayedChecks?.acSkipReason))
-      if let criteria, !criteria.isEmpty {
-        acListSection(criteria: criteria, acChecks: acChecks)
-      } else if let acChecks, !acChecks.isEmpty {
-        // No explicit criteria list — show from results
-        VStack(alignment: .leading, spacing: 8) {
-          ForEach(Array(acChecks.enumerated()), id: \.offset) { _, check in
-            acCheckRow(check)
-          }
-        }
-      }
-      correctionMessageBlock
-    }
   }
 
   @ViewBuilder
@@ -1402,116 +1346,6 @@ public struct ValidationTab: View {
   }
 
   @ViewBuilder
-  private func acCheckRow(_ check: AcCheckDetail) -> some View {
-    let statusColor: Color = check.passed ? .green : .red
-    HStack(alignment: .top, spacing: 0) {
-      Rectangle()
-        .fill(statusColor.opacity(0.7))
-        .frame(width: 3)
-      VStack(alignment: .leading, spacing: 8) {
-        HStack(alignment: .top, spacing: 8) {
-          Image(systemName: check.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
-            .font(.system(size: 13))
-            .foregroundStyle(check.passed ? .green : .red)
-            .padding(.top, 1)
-          Text(check.criterion)
-            .font(.callout.weight(.medium))
-            .fixedSize(horizontal: false, vertical: true)
-          Spacer(minLength: 4)
-          if let type = check.validationType { triageBadge(type) }
-        }
-        if !check.reasoning.isEmpty {
-          Text(check.reasoning)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-        }
-        if let ref = check.screenshot {
-          ScreenshotThumbnail(ref: ref, allRefs: screenshotSet, onOpen: { openLightbox($0) })
-        }
-      }
-      .padding(10)
-    }
-    .background(Color(nsColor: .controlBackgroundColor))
-    .clipShape(RoundedRectangle(cornerRadius: 8))
-    .overlay(RoundedRectangle(cornerRadius: 8).stroke(statusColor.opacity(0.15), lineWidth: 1))
-  }
-
-  @ViewBuilder
-  private func acCriterionCard(criterion: AcDefinition, result: AcCheckDetail?, index _: Int) -> some View {
-    let firing = acIsFiring(criterion, result)
-    let statusColor: Color = firing
-      ? (result.map { $0.passed ? .green : .red } ?? Color.secondary)
-      : Color.secondary
-    HStack(alignment: .top, spacing: 0) {
-      Rectangle()
-        .fill(statusColor.opacity(0.7))
-        .frame(width: 3)
-      VStack(alignment: .leading, spacing: 8) {
-        HStack(alignment: .top, spacing: 8) {
-          if !firing {
-            Image(systemName: "minus.circle")
-              .font(.system(size: 13))
-              .foregroundStyle(Color.secondary)
-              .padding(.top, 1)
-          } else if let result {
-            Image(systemName: result.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
-              .font(.system(size: 13))
-              .foregroundStyle(result.passed ? .green : .red)
-              .padding(.top, 1)
-          } else {
-            Image(systemName: "circle.dashed")
-              .font(.system(size: 13))
-              .foregroundStyle(Color.secondary)
-              .padding(.top, 1)
-          }
-          VStack(alignment: .leading, spacing: 2) {
-            Text(criterion.outcome)
-              .font(.callout.weight(.medium))
-              .foregroundStyle(firing ? .primary : .secondary)
-              .fixedSize(horizontal: false, vertical: true)
-            if let hint = criterion.hint, !hint.isEmpty {
-              Text(hint)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-          }
-          Spacer(minLength: 4)
-          HStack(spacing: 4) {
-            if !firing { decorativeAcBadge() }
-            if criterion.type != .none { acTypeBadge(criterion.type) }
-            if let type = result?.validationType { triageBadge(type) }
-          }
-        }
-        if let reasoning = result?.reasoning, !reasoning.isEmpty {
-          Text(reasoning)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-        }
-        if let ref = result?.screenshot {
-          ScreenshotThumbnail(ref: ref, allRefs: screenshotSet, onOpen: { openLightbox($0) })
-        }
-      }
-      .padding(10)
-    }
-    .background(Color(nsColor: .controlBackgroundColor))
-    .clipShape(RoundedRectangle(cornerRadius: 8))
-    .overlay(RoundedRectangle(cornerRadius: 8).stroke(statusColor.opacity(0.15), lineWidth: 1))
-  }
-
-  @ViewBuilder
   private var reviewDetail: some View {
     let status = phaseStatus(.review)
     let detail: ReviewPhaseDetail? = progress?.reviewDetail
@@ -1627,19 +1461,6 @@ public struct ValidationTab: View {
         .background(Color.black.opacity(0.2))
         .clipShape(RoundedRectangle(cornerRadius: 6))
       }
-    }
-  }
-
-  /// Label for the legacy criteria chip when status is .skipped, derived from the backend's
-  /// machine-readable `acSkipReason` so the UI can distinguish "tier-1 failed"
-  /// from "no criteria configured" instead of showing a generic message.
-  private func acSkipLabel(reason: String?) -> String {
-    switch reason {
-    case "upstream-failed": return "Skipped — earlier validation phases failed"
-    case "profile-skip": return "Legacy criteria validation disabled by profile"
-    case "health-failed": return "Skipped — health check failed"
-    case "no-criteria": return "No legacy criteria configured"
-    default: return "Legacy criteria validation skipped"
     }
   }
 
@@ -2011,125 +1832,6 @@ public struct ValidationTab: View {
     .padding(16)
     .frame(width: 280)
     .onDisappear { overrideAction = "dismiss"; overrideReason = ""; overrideGuidance = "" }
-  }
-
-  @ViewBuilder
-  private func acListSection(criteria: [AcDefinition], acChecks: [AcCheckDetail]?) -> some View {
-    let firing = firingCount(criteria, acChecks)
-    let total = criteria.count
-    let title: String = total == 0
-      ? "Legacy Criteria (0)"
-      : (firing == total
-          ? "Legacy Criteria (\(total))"
-          : "Legacy Criteria (\(firing) firing / \(total))")
-    CollapsibleSection(
-      title: title,
-      icon: "checklist",
-      initiallyExpanded: acChecks?.contains(where: { !$0.passed }) == true
-    ) {
-      VStack(alignment: .leading, spacing: 6) {
-        if let source = pod.acFrom {
-          HStack(spacing: 3) {
-            Image(systemName: "doc.text").font(.system(size: 9))
-            Text(source).font(.system(.caption2, design: .monospaced))
-          }
-          .foregroundStyle(.tertiary)
-        }
-        if total > 0 && firing == 0 {
-          HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "info.circle").font(.system(size: 10))
-            Text("No firing legacy checks — every criterion is `none` (build/test/grep commands and undeclared types are no-ops). Pass/fail falls back to required facts, the diff reviewer, and pipeline build/test.")
-              .font(.caption2)
-              .fixedSize(horizontal: false, vertical: true)
-          }
-          .foregroundStyle(.secondary)
-          .padding(.bottom, 4)
-        }
-        ForEach(Array(criteria.enumerated()), id: \.offset) { idx, criterion in
-          let result: AcCheckDetail? = {
-            guard let acChecks else { return nil }
-            return acChecks.first(where: { $0.criterion == criterion.outcome })
-                ?? (idx < acChecks.count ? acChecks[idx] : nil)
-          }()
-          acCriterionCard(criterion: criterion, result: result, index: idx)
-        }
-      }
-    }
-  }
-
-  /// True when this legacy criterion actually gates pass/fail in the validation engine.
-  /// Mirrors `local-validation-engine.ts` — `api`, `web`, and `cmd` types fire.
-  /// Any criterion classified to `none` post-execution is decorative (the
-  /// banlist demotes shell-command criteria that look like build/test/lint to none).
-  private func acIsFiring(_ criterion: AcDefinition, _ result: AcCheckDetail?) -> Bool {
-    if let v = result?.validationType {
-      return v == "api" || v == "web-ui" || v == "cmd"
-    }
-    if criterion.type == .cmd, isCommandLikeAcText(criterion.outcome) { return false }
-    return criterion.type == .api || criterion.type == .web || criterion.type == .cmd
-  }
-
-  private func firingCount(_ criteria: [AcDefinition], _ checks: [AcCheckDetail]?) -> Int {
-    criteria.enumerated().reduce(0) { acc, pair in
-      let (idx, c) = pair
-      let result: AcCheckDetail? = {
-        guard let checks else { return nil }
-        return checks.first(where: { $0.criterion == c.outcome })
-            ?? (idx < checks.count ? checks[idx] : nil)
-      }()
-      return acc + (acIsFiring(c, result) ? 1 : 0)
-    }
-  }
-
-  /// Mirrors the tightened slash-command regex in
-  /// `packages/daemon/src/validation/local-validation-engine.ts` (ADR-024) so
-  /// the desktop can pre-classify shell-command-only ACs as decorative before
-  /// the engine runs. Only fires for single-token `/<lowercase>` outcomes —
-  /// declared web ACs with `/pr-dashboard ...` prose are trusted.
-  private func isCommandLikeAcText(_ text: String) -> Bool {
-    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    if t.isEmpty { return false }
-    return t.range(of: #"^/[a-z][a-z0-9-]*\s*$"#, options: .regularExpression) != nil
-  }
-
-  private func acTypeBadge(_ type: AcDefinition.AcType) -> some View {
-    let color: Color = switch type {
-    case .web: .blue
-    case .api: .orange
-    case .cmd: .purple
-    case .none: .secondary
-    }
-    return Text(type.label.lowercased())
-      .font(.system(.caption2, design: .monospaced))
-      .padding(.horizontal, 5).padding(.vertical, 2)
-      .background(color.opacity(0.12))
-      .foregroundStyle(color)
-      .clipShape(Capsule())
-  }
-
-  private func decorativeAcBadge() -> some View {
-    Text("decorative")
-      .font(.system(.caption2, design: .monospaced))
-      .padding(.horizontal, 5).padding(.vertical, 2)
-      .background(Color.secondary.opacity(0.12))
-      .foregroundStyle(Color.secondary)
-      .clipShape(Capsule())
-      .help("Not gated by the validation engine — pass/fail falls back to the diff reviewer.")
-  }
-
-  private func triageBadge(_ type: String) -> some View {
-    let (label, color): (String, Color) = switch type {
-    case "web-ui": ("web-ui", .blue)
-    case "api":    ("api",    .orange)
-    case "cmd":    ("cmd",    .purple)
-    default:       ("none",   Color.secondary)
-    }
-    return Text(label)
-      .font(.system(.caption2, design: .monospaced))
-      .padding(.horizontal, 5).padding(.vertical, 2)
-      .background(color.opacity(0.12))
-      .foregroundStyle(color)
-      .clipShape(Capsule())
   }
 
   private func factBadge(_ label: String) -> some View {

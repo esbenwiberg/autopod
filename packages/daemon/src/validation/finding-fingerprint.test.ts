@@ -48,10 +48,6 @@ describe('fingerprintText', () => {
 // ── findingId ────────────────────────────────────────────────────────────────
 
 describe('findingId', () => {
-  it('prefixes with ac: for ac_validation', () => {
-    expect(findingId('ac_validation', 'Button should be disabled')).toMatch(/^ac:[0-9a-f]{12}$/);
-  });
-
   it('prefixes with review: for task_review', () => {
     expect(findingId('task_review', 'Missing tests')).toMatch(/^review:[0-9a-f]{12}$/);
   });
@@ -60,6 +56,10 @@ describe('findingId', () => {
     expect(findingId('requirements_check', 'Login form validates email')).toMatch(
       /^req:[0-9a-f]{12}$/,
     );
+  });
+
+  it('prefixes with fact: for fact_validation', () => {
+    expect(findingId('fact_validation', 'fact-login')).toMatch(/^fact:[0-9a-f]{12}$/);
   });
 });
 
@@ -89,28 +89,30 @@ describe('extractFindings', () => {
     expect(extractFindings(result)).toEqual([]);
   });
 
-  it('extracts failed AC validation checks', () => {
+  it('extracts failed required facts', () => {
     const result = makeBaseResult({
-      acValidation: {
+      factValidation: {
         status: 'fail',
         results: [
-          { criterion: 'Button disables on submit', passed: true, reasoning: 'OK' },
           {
-            criterion: 'Email validates format',
+            factId: 'fact-login',
+            proves: ['login'],
+            kind: 'unit-test',
+            artifactPath: 'packages/app/login.test.ts',
+            command: 'npx vitest login.test.ts',
             passed: false,
-            reasoning: 'No validation visible',
+            reasoning: 'test failed',
           },
         ],
-        model: 'sonnet',
       },
     });
 
     const findings = extractFindings(result);
     expect(findings).toHaveLength(1);
-    expect(findings[0]?.source).toBe('ac_validation');
-    expect(findings[0]?.description).toBe('Email validates format');
-    expect(findings[0]?.reasoning).toBe('No validation visible');
-    expect(findings[0]?.id).toMatch(/^ac:/);
+    expect(findings[0]?.source).toBe('fact_validation');
+    expect(findings[0]?.description).toBe('fact-login: npx vitest login.test.ts');
+    expect(findings[0]?.reasoning).toBe('test failed');
+    expect(findings[0]?.id).toMatch(/^fact:/);
   });
 
   it('extracts failed task review issues', () => {
@@ -172,10 +174,18 @@ describe('extractFindings', () => {
 
   it('extracts from all sources when all have failures', () => {
     const result = makeBaseResult({
-      acValidation: {
+      factValidation: {
         status: 'fail',
-        results: [{ criterion: 'AC1', passed: false, reasoning: 'Nope' }],
-        model: 'sonnet',
+        results: [
+          {
+            factId: 'fact-email',
+            proves: ['email'],
+            artifactPath: 'packages/app/email.test.ts',
+            command: 'npx vitest email.test.ts',
+            passed: false,
+            reasoning: 'Nope',
+          },
+        ],
       },
       taskReview: {
         status: 'fail',
@@ -191,7 +201,7 @@ describe('extractFindings', () => {
     const findings = extractFindings(result);
     expect(findings).toHaveLength(3);
     expect(findings.map((f) => f.source)).toEqual([
-      'ac_validation',
+      'fact_validation',
       'task_review',
       'requirements_check',
     ]);
@@ -225,7 +235,9 @@ describe('detectRecurringFindings', () => {
 
   it('handles cross-source matches (same text, different prefix)', () => {
     // These should NOT match because IDs have different prefixes
-    const current = [{ id: 'ac:aaa', source: 'ac_validation' as const, description: 'Same text' }];
+    const current = [
+      { id: 'req:aaa', source: 'requirements_check' as const, description: 'Same text' },
+    ];
     const previous = [
       { id: 'review:aaa', source: 'task_review' as const, description: 'Same text' },
     ];

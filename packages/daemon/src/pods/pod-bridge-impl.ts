@@ -34,7 +34,6 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { MemoryRepository } from './memory-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
-import { evaluatePlanAgainstAc } from './plan-evaluator.js';
 import { computePodDiff, summarizeDiff } from './pod-diff-fetcher.js';
 import type { ContainerManagerFactory, PodManager } from './pod-manager.js';
 import type { PodRepository } from './pod-repository.js';
@@ -203,19 +202,6 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         podId,
         event: { type: 'plan', summary, steps, timestamp: new Date().toISOString() },
       });
-
-      // Fire-and-forget plan evaluation against AC when the profile opts in.
-      const pod = podManager.getSession(podId);
-      const profile = profileStore.get(pod.profileName);
-      if (profile.evaluatePlan && pod.acceptanceCriteria?.length) {
-        evaluatePlanAgainstAc(summary, steps, pod.acceptanceCriteria, profile, logger)
-          .then((feedback) => {
-            if (feedback) {
-              nudgeRepo.queue(podId, `**Plan review:** ${feedback}`);
-            }
-          })
-          .catch((err) => logger.warn({ err, podId }, 'Plan evaluation failed'));
-      }
     },
 
     reportProgress(
@@ -251,7 +237,6 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       actualSummary: string,
       deviations: Array<{ step: string; planned: string; actual: string; reason: string }>,
       how?: string,
-      acChecklist?: Array<{ criterion: string; verified: boolean; notes?: string }>,
       factEvidence?: FactEvidence[],
     ): void {
       podManager.touchHeartbeat(podId);
@@ -260,15 +245,12 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       // the agent to call report_task_summary "as your very last step" each
       // time. Without this guard, the original task summary gets clobbered
       // by a fix-cycle summary like "Fixed the two medium-severity issues…".
-      // acChecklist is intentionally still updatable — verified counts can
-      // legitimately flip as later iterations fix failing criteria.
       const existing = podRepo.getOrThrow(podId);
       const summaryAlreadySet = existing.taskSummary != null;
       logger.info(
         {
           podId,
           deviationCount: deviations.length,
-          acChecklistCount: acChecklist?.length ?? 0,
           factEvidenceCount: factEvidence?.length ?? 0,
           actualSummary: actualSummary.slice(0, 100),
           preservedExistingSummary: summaryAlreadySet,
@@ -283,9 +265,6 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       } else if (factEvidence != null && existing.taskSummary) {
         updates.taskSummary = { ...existing.taskSummary, factEvidence };
       }
-      if (acChecklist != null) {
-        updates.acSelfReport = acChecklist;
-      }
       if (Object.keys(updates).length > 0) {
         podRepo.update(podId, updates);
       }
@@ -298,7 +277,6 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           actualSummary,
           how,
           deviations,
-          acChecklist,
           factEvidence,
           timestamp: new Date().toISOString(),
         },

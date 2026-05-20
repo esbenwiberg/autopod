@@ -33,7 +33,6 @@ export interface PodBridge {
     actualSummary: string,
     deviations: Array<{ step: string; planned: string; actual: string; reason: string }>,
     how?: string,
-    acChecklist?: Array<{ criterion: string; verified: boolean; notes?: string }>,
     factEvidence?: FactEvidence[],
   ): void;
   consumeMessages(podId: string): { hasMessage: boolean; message?: string };

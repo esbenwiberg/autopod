@@ -237,7 +237,7 @@ describe('applyDiffFilterToParsed', () => {
   it('does NOT flip when an unmet requirement is the real fail reason', () => {
     const parsed: ParsedReviewLike = {
       status: 'fail',
-      reasoning: 'AC not met',
+      reasoning: 'Requirement not met',
       issues: ['[HIGH] Frameworks/PF.Graph/GraphRequests.cs:110 broken'],
       requirementsCheck: [{ criterion: 'must do X', met: false, note: 'absent in diff' }],
     };

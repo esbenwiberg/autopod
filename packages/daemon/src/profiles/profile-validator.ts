@@ -146,7 +146,7 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     errors.push('defaultModel must not be empty');
   }
 
-  // Reviewer model — used for AC validation and task review; defaults to defaultModel at runtime
+  // Reviewer model — used for task review; defaults to defaultModel at runtime
   const reviewerModel = input.reviewerModel;
   if (reviewerModel !== undefined && reviewerModel !== null && typeof reviewerModel !== 'string') {
     errors.push('reviewerModel must be a string');
@@ -379,7 +379,7 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     }
   }
 
-  const VALID_PHASES = ['lint', 'sast', 'build', 'test', 'health', 'pages', 'ac', 'review'];
+  const VALID_PHASES = ['lint', 'sast', 'build', 'test', 'health', 'pages', 'facts', 'review'];
   const skipValidationPhases = input.skipValidationPhases;
   if (skipValidationPhases != null) {
     if (!Array.isArray(skipValidationPhases)) {

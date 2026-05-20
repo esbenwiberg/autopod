@@ -1,10 +1,4 @@
-import type {
-  AcValidationResult,
-  Pod,
-  ScreenshotRef,
-  TaskReviewResult,
-  ValidationResult,
-} from '@autopod/shared';
+import type { Pod, ScreenshotRef, TaskReviewResult, ValidationResult } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import {
   serializePodForWire,
@@ -82,19 +76,7 @@ describe('serializeValidationResult', () => {
     expect(out.smoke.pages[0]?.screenshot).toBeUndefined();
   });
 
-  it('rewrites AC and task-review screenshots and labels them with their context', () => {
-    const ac: AcValidationResult = {
-      status: 'pass',
-      model: 'claude',
-      results: [
-        {
-          criterion: 'Login button is visible',
-          passed: true,
-          screenshot: ref({ source: 'ac', filename: '0.png' }),
-          reasoning: 'visible',
-        },
-      ],
-    };
+  it('rewrites task-review screenshots and labels them with their context', () => {
     const review: TaskReviewResult = {
       status: 'pass',
       reasoning: 'looks good',
@@ -103,16 +85,10 @@ describe('serializeValidationResult', () => {
       screenshots: [ref({ source: 'review', filename: '0.png' })],
       diff: '',
     };
-    const v = { ...baseValidation(), acValidation: ac, taskReview: review };
+    const v = { ...baseValidation(), taskReview: review };
     const out = serializeValidationResult(v) as {
-      acValidation: { results: Array<{ screenshot: { path: string; url: string } }> };
       taskReview: { screenshots: Array<{ path: string; url: string }> };
     };
-    expect(out.acValidation.results[0]?.screenshot).toEqual({
-      url: '/pods/pod-12345/screenshots/ac/0.png',
-      source: 'ac',
-      path: 'Login button is visible',
-    });
     expect(out.taskReview.screenshots[0]).toEqual({
       url: '/pods/pod-12345/screenshots/review/0.png',
       source: 'review',

@@ -96,15 +96,15 @@ public struct DiffStats: Sendable {
 // MARK: - Screenshot reference (UI model)
 
 /// A screenshot captured during pod validation, resolved to an absolute URL.
-/// Set ordering for lightbox navigation: `smoke → ac → review`, filename-sorted within bucket.
+/// Set ordering for lightbox navigation: `smoke → review`, filename-sorted within bucket.
 public struct ScreenshotRef: Hashable, Sendable, Identifiable {
     public var id: String { url.absoluteString }
     public let url: URL
     public let source: Source
-    public let label: String  // page path | criterion text | review index
+    public let label: String  // page path | review index
 
     public enum Source: String, Sendable {
-        case smoke, ac, review
+        case smoke, review
     }
 
     public init(url: URL, source: Source, label: String) {
@@ -150,18 +150,6 @@ public struct PageDetail: Sendable {
         self.path = path; self.status = status
         self.consoleErrors = consoleErrors; self.assertions = assertions; self.loadTime = loadTime
         self.screenshot = screenshot
-    }
-}
-
-public struct AcCheckDetail: Sendable {
-    public let criterion: String
-    public let passed: Bool
-    public let reasoning: String
-    public let screenshot: ScreenshotRef?
-    public let validationType: String?  // "web-ui" | "api" | "none"
-    public init(criterion: String, passed: Bool, reasoning: String, screenshot: ScreenshotRef? = nil, validationType: String? = nil) {
-        self.criterion = criterion; self.passed = passed; self.reasoning = reasoning
-        self.screenshot = screenshot; self.validationType = validationType
     }
 }
 
@@ -223,12 +211,8 @@ public struct ValidationChecks: Sendable {
     public let reviewSkipReason: String?
     /// Machine-readable kind paired with reviewSkipReason — see backend ValidationResult.
     public let reviewSkipKind: String?
-    /// Machine-readable reason when legacy criteria validation was skipped — see backend ValidationResult.
-    public let acSkipReason: String?
     public let healthCheck: HealthCheckDetail?
     public let pages: [PageDetail]?
-    public let acValidation: Bool?
-    public let acChecks: [AcCheckDetail]?
     public let factValidation: Bool?
     public let factChecks: [FactCheckDetail]?
     public let requirementsCheck: [RequirementCheckDetail]?
@@ -246,11 +230,8 @@ public struct ValidationChecks: Sendable {
         reviewReasoning: String? = nil,
         reviewSkipReason: String? = nil,
         reviewSkipKind: String? = nil,
-        acSkipReason: String? = nil,
         healthCheck: HealthCheckDetail? = nil,
         pages: [PageDetail]? = nil,
-        acValidation: Bool? = nil,
-        acChecks: [AcCheckDetail]? = nil,
         factValidation: Bool? = nil,
         factChecks: [FactCheckDetail]? = nil,
         requirementsCheck: [RequirementCheckDetail]? = nil,
@@ -267,9 +248,7 @@ public struct ValidationChecks: Sendable {
         self.reviewReasoning = reviewReasoning
         self.reviewSkipReason = reviewSkipReason
         self.reviewSkipKind = reviewSkipKind
-        self.acSkipReason = acSkipReason
         self.healthCheck = healthCheck; self.pages = pages
-        self.acValidation = acValidation; self.acChecks = acChecks
         self.factValidation = factValidation; self.factChecks = factChecks
         self.requirementsCheck = requirementsCheck
         self.taskReviewScreenshots = taskReviewScreenshots
@@ -279,7 +258,7 @@ public struct ValidationChecks: Sendable {
 
     public var allPassed: Bool {
         smoke && (tests ?? true) && (lint ?? true) && (sast ?? true)
-        && (review ?? true) && (acValidation ?? true) && (factValidation ?? true)
+        && (review ?? true) && (factValidation ?? true)
     }
 }
 
@@ -348,7 +327,6 @@ public struct ValidationProgress: Sendable {
     public var sast: ValidationPhaseState
     public var health: ValidationPhaseState
     public var pages: ValidationPhaseState
-    public var ac: ValidationPhaseState
     public var facts: ValidationPhaseState
     public var review: ValidationPhaseState
 
@@ -359,13 +337,11 @@ public struct ValidationProgress: Sendable {
     public var sastOutput: String?           // SAST stdout/stderr
     public var healthDetail: HealthCheckDetail?
     public var pageDetails: [PageDetail]?
-    public var acChecks: [AcCheckDetail]?
     public var factChecks: [FactCheckDetail]?
     public var reviewDetail: ReviewPhaseDetail?
 
     // Counts for chip sub-labels
     public var pageCount: Int
-    public var acTotalCount: Int
     public var factTotalCount: Int
 
     // The currently running phase (drives auto-selection in the chip row)
@@ -376,8 +352,8 @@ public struct ValidationProgress: Sendable {
         return ValidationProgress(
             attempt: attempt,
             build: idle, test: idle, lint: idle, sast: idle,
-            health: idle, pages: idle, ac: idle, facts: idle, review: idle,
-            pageCount: 0, acTotalCount: 0, factTotalCount: 0
+            health: idle, pages: idle, facts: idle, review: idle,
+            pageCount: 0, factTotalCount: 0
         )
     }
 
@@ -389,7 +365,6 @@ public struct ValidationProgress: Sendable {
         case .sast:    return sast
         case .health:  return health
         case .pages:   return pages
-        case .ac:      return ac
         case .facts:   return facts
         case .review:  return review
         }
@@ -405,7 +380,6 @@ public struct ValidationProgress: Sendable {
         case .sast:    sast    = s
         case .health:  health  = s
         case .pages:   pages   = s
-        case .ac:      ac      = s
         case .facts:   facts   = s
         case .review:  review  = s
         }
@@ -460,16 +434,6 @@ public struct ValidationProgress: Sendable {
                     },
                     loadTime: page.loadTime,
                     screenshot: resolveScreenshot(page.screenshot)
-                )
-            }
-        case .ac:
-            ac = ValidationPhaseState(status: ps)
-            acTotalCount = result.acResult?.results.count ?? 0
-            acChecks = result.acResult?.results.map { check in
-                AcCheckDetail(
-                    criterion: check.criterion, passed: check.passed,
-                    reasoning: check.reasoning, screenshot: resolveScreenshot(check.screenshot),
-                    validationType: check.validationType
                 )
             }
         case .facts:
@@ -566,10 +530,6 @@ public struct Pod: Identifiable, Sendable {
 
     /// Base branch this pod was forked from (workspace handoff)
     public var baseBranch: String?
-    /// Path to legacy criteria file loaded from repo (workspace handoff)
-    public var acFrom: String?
-    /// Acceptance criteria (loaded from acFrom or manual input)
-    public var acceptanceCriteria: [AcDefinition]?
     /// Executable contract for contract-based pods.
     public var contract: SpecContractResponse?
 
@@ -708,8 +668,6 @@ public struct Pod: Identifiable, Sendable {
         startedAt: Date,
         updatedAt: Date = Date(),
         baseBranch: String? = nil,
-        acFrom: String? = nil,
-        acceptanceCriteria: [AcDefinition]? = nil,
         contract: SpecContractResponse? = nil,
         diffStats: DiffStats? = nil,
         escalationQuestion: String? = nil,
@@ -758,7 +716,6 @@ public struct Pod: Identifiable, Sendable {
         self.branch = branch; self.profileName = profileName; self.task = task
         self.model = model; self.startedAt = startedAt; self.runningAt = runningAt; self.updatedAt = updatedAt
         self.baseBranch = baseBranch
-        self.acFrom = acFrom; self.acceptanceCriteria = acceptanceCriteria
         self.contract = contract
         self.diffStats = diffStats; self.escalationQuestion = escalationQuestion
         self.escalationOptions = escalationOptions; self.escalationType = escalationType
@@ -800,8 +757,6 @@ public struct Pod: Identifiable, Sendable {
         startedAt: Date,
         updatedAt: Date = Date(),
         baseBranch: String? = nil,
-        acFrom: String? = nil,
-        acceptanceCriteria: [AcDefinition]? = nil,
         diffStats: DiffStats? = nil,
         escalationQuestion: String? = nil,
         escalationOptions: [String]? = nil,
@@ -834,7 +789,7 @@ public struct Pod: Identifiable, Sendable {
             pod: PodConfig.fromLegacy(outputMode.rawValue),
             branch: branch, profileName: profileName, task: task, model: model,
             startedAt: startedAt, updatedAt: updatedAt,
-            baseBranch: baseBranch, acFrom: acFrom, acceptanceCriteria: acceptanceCriteria,
+            baseBranch: baseBranch,
             diffStats: diffStats,
             escalationQuestion: escalationQuestion, escalationOptions: escalationOptions,
             escalationType: escalationType,

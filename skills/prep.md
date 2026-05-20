@@ -212,8 +212,8 @@ just a stale `/prep` artifact.
 
 ### brief.md
 
-Brief frontmatter carries scope only. Do not write `acceptance_criteria`;
-contract behavior lives in `contract.yaml`.
+Brief frontmatter carries scope only. Keep behavioral proof in
+`contract.yaml`.
 
 #### Frontmatter
 

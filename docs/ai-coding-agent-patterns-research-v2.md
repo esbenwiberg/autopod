@@ -86,7 +86,7 @@ Autopod's `system-instructions-generator.ts` already builds container CLAUDE.md 
 - Autofix patterns applied automatically for known failure types
 
 **OpenAI -- Validation is Non-Negotiable**:
-- Plans must include exact test commands, expected outputs, and behavioral acceptance criteria
+- Plans must include exact test commands, expected outputs, and behavioral proof
 - "Without tests, Codex verifies its work using its own judgment. Tests create an external source of truth"
 - Custom linter errors **inject remediation instructions** directly into agent context -- linters teach, not just block
 - Every milestone verified before proceeding to the next
@@ -406,9 +406,9 @@ Ona achieves 50% reduction in PR review time and 88% acceptance rate on agent co
 - Leaves structured reviews with inline comments and quick fixes
 - Can push improvements to PR directly before human review
 
-**Autopod relevance**: Autopod's AI task review in validation already does something similar (sends diff + task + acceptance criteria to AI). Could be extended to:
+**Autopod relevance**: Autopod's AI task review in validation already does something similar (sends diff + task + contract requirements to AI). Could be extended to:
 1. Run as a standalone automation on any PR (not just autopod-created ones)
-2. Cross-reference against session task description and acceptance criteria
+2. Cross-reference against session task description, required facts, and contract requirements
 3. Push auto-fixes for common issues
 
 ### Spec-to-Shipped Lifecycle
@@ -493,7 +493,7 @@ These are powerful because they leverage autopod's existing infrastructure (memo
 
 ### Already covered by existing features
 
-- **ExecPlan / structured plans** -- the `/prep` skill (`skills/prep.md`) already decomposes tasks into spec suites with briefs, contracts, ADRs, validation plans, and acceptance criteria. The `/exec` skill (`skills/exec.md`) orchestrates multi-brief execution with subagents, handover chains, dependency DAGs, parallel dispatch, and drift detection. This is functionally equivalent to OpenAI's ExecPlan pattern.
+- **ExecPlan / structured plans** -- the `/prep` skill (`skills/prep.md`) already decomposes tasks into spec suites with briefs, contracts, ADRs, validation plans, and required facts. The `/exec` skill (`skills/exec.md`) orchestrates multi-brief execution with subagents, handover chains, dependency DAGs, parallel dispatch, and drift detection. This is functionally equivalent to OpenAI's ExecPlan pattern.
 - **Session forking** -- already supported in autopod's session lifecycle
 - **Configurable retry caps** -- `maxValidationAttempts` is already per-profile configurable (Stripe's 2-round finding validates this design; consider whether the default should be lowered)
 - **Image warming / warm container pools** -- image warming already exists via `image-builder.ts` and `acr-client.ts` for Azure Container Registry. Pre-built images with deps/caches are already supported

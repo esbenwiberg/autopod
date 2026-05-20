@@ -109,7 +109,7 @@ public enum ModelsRuntimeKind: String, Decodable, CaseIterable, Sendable {
 public struct ModelsFailureStageRow: Decodable, Equatable, Sendable {
     /// Canonical model key. May be "<unknown>".
     public let model: String
-    /// Always 8 entries in the fixed order: build, health, smoke, test, lint, sast, acValidation, taskReview.
+    /// Always 8 entries in the fixed order: build, health, smoke, test, lint, sast, facts, taskReview.
     public let stages: [StageFailureRow]
 }
 

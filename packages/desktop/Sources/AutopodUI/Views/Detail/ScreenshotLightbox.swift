@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Full-resolution screenshot viewer with arrow-key navigation across a validation
-/// attempt's screenshot set (smoke → ac → review, filename-sorted within bucket).
+/// attempt's screenshot set (smoke -> review, filename-sorted within bucket).
 ///
 /// Presented as a full-frame overlay with a translucent dark backdrop:
 /// ```swift

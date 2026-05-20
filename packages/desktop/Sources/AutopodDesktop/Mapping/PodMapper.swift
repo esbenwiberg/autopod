@@ -145,14 +145,6 @@ public enum PodMapper {
           screenshot: mapScreenshotRef(p.screenshot, baseURL: baseURL)
         )
       }
-      let acValidation: Bool? = v.acValidation.flatMap { $0.status == "skip" ? nil : ($0.status == "pass") }
-      let acChecks: [AcCheckDetail]? = v.acValidation?.results.map { r in
-        AcCheckDetail(
-          criterion: r.criterion, passed: r.passed, reasoning: r.reasoning,
-          screenshot: mapScreenshotRef(r.screenshot, baseURL: baseURL),
-          validationType: r.validationType
-        )
-      }
       let factValidation: Bool? = v.factValidation.flatMap { $0.status == "skip" ? nil : ($0.status == "pass") }
       let factChecks: [FactCheckDetail]? = v.factValidation?.results.map { r in
         FactCheckDetail(
@@ -198,11 +190,8 @@ public enum PodMapper {
         reviewReasoning: v.taskReview?.reasoning,
         reviewSkipReason: v.reviewSkipReason,
         reviewSkipKind: v.reviewSkipKind,
-        acSkipReason: v.acSkipReason,
         healthCheck: healthCheck,
         pages: pages,
-        acValidation: acValidation,
-        acChecks: acChecks,
         factValidation: factValidation,
         factChecks: factChecks,
         requirementsCheck: requirementsCheck,
@@ -302,8 +291,6 @@ public enum PodMapper {
       startedAt: parseDate(response.startedAt ?? response.createdAt),
       updatedAt: parseDate(response.updatedAt),
       baseBranch: response.baseBranch,
-      acFrom: response.acFrom,
-      acceptanceCriteria: response.acceptanceCriteria,
       contract: response.contract,
       diffStats: diffStats,
       escalationQuestion: escalationQuestion,

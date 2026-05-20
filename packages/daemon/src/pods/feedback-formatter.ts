@@ -143,19 +143,6 @@ function formatValidationFailure(input: ValidationFeedback): string {
     }
   }
 
-  // AC validation failures
-  if (result.acValidation && result.acValidation.status === 'fail') {
-    const failed = result.acValidation.results.filter((r) => !r.passed);
-    if (failed.length > 0) {
-      lines.push('### Acceptance Criteria Failures');
-      for (const check of failed) {
-        lines.push(`**${check.criterion}**:`);
-        lines.push(`- ${check.reasoning}`);
-      }
-      lines.push('');
-    }
-  }
-
   // Required fact failures
   if (result.factValidation && result.factValidation.status === 'fail') {
     const failed = result.factValidation.results.filter((r) => !r.passed);
@@ -174,13 +161,13 @@ function formatValidationFailure(input: ValidationFeedback): string {
     }
   }
 
-  // Unmet "none" ACs surfaced by the AI reviewer
+  // Unmet human-review requirements surfaced by the AI reviewer
   if (result.taskReview?.requirementsCheck) {
-    const unmetNoneAcs = result.taskReview.requirementsCheck.filter((r) => !r.met);
-    if (unmetNoneAcs.length > 0) {
-      lines.push('### Unmet Acceptance Criteria (code review)');
-      lines.push('The following criteria were not met according to the code reviewer:');
-      for (const item of unmetNoneAcs) {
+    const unmetRequirements = result.taskReview.requirementsCheck.filter((r) => !r.met);
+    if (unmetRequirements.length > 0) {
+      lines.push('### Unmet Human Review Requirements');
+      lines.push('The following requirements were not met according to the code reviewer:');
+      for (const item of unmetRequirements) {
         lines.push(`**${item.criterion}**:`);
         lines.push(`- ${item.note ?? 'Not implemented or evidence absent in the diff'}`);
       }
@@ -202,16 +189,15 @@ function formatValidationFailure(input: ValidationFeedback): string {
     lines.push('');
   }
 
-  // When AC + Review were gated out by tier-1 failures, tell the agent why
+  // When Facts + Review were gated out by tier-1 failures, tell the agent why
   // those sections are missing — otherwise it may assume those checks passed.
   if (
-    result.acSkipReason === 'upstream-failed' &&
     result.reviewSkipKind === 'upstream-failed' &&
-    result.acValidation === null &&
-    result.taskReview === null
+    result.taskReview === null &&
+    result.factValidation?.status === 'skip'
   ) {
     lines.push(
-      'Note: acceptance-criteria checks, required facts, and AI code review were skipped because earlier validation phases failed. They will run automatically once the issues above are fixed.',
+      'Note: required facts and AI code review were skipped because earlier validation phases failed. They will run automatically once the issues above are fixed.',
     );
     lines.push('');
   }

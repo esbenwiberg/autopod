@@ -26,7 +26,7 @@ export type ValidationStage =
   | 'test'
   | 'lint'
   | 'sast'
-  | 'acValidation'
+  | 'facts'
   | 'taskReview';
 
 export interface ReliabilityAnalyticsResponse {
@@ -105,7 +105,7 @@ const STAGES: ValidationStage[] = [
   'test',
   'lint',
   'sast',
-  'acValidation',
+  'facts',
   'taskReview',
 ];
 
@@ -142,7 +142,7 @@ interface StoredValidationResult {
   test?: { status?: string } | null;
   lint?: { status?: string } | null;
   sast?: { status?: string } | null;
-  acValidation?: { status?: string } | null;
+  factValidation?: { status?: string } | null;
   taskReview?: { status?: string } | null;
 }
 
@@ -420,12 +420,12 @@ export function computeReliabilityAnalytics(
         }
       }
 
-      if (vr.acValidation !== undefined && vr.acValidation !== null) {
-        stageRan.acValidation.add(pod.id);
-        pMap.acValidation.ran.add(pod.id);
-        if (vr.acValidation.status === 'fail') {
-          stageFailed.acValidation.add(pod.id);
-          pMap.acValidation.failed.add(pod.id);
+      if (vr.factValidation !== undefined && vr.factValidation !== null) {
+        stageRan.facts.add(pod.id);
+        pMap.facts.ran.add(pod.id);
+        if (vr.factValidation.status === 'fail') {
+          stageFailed.facts.add(pod.id);
+          pMap.facts.failed.add(pod.id);
         }
       }
 

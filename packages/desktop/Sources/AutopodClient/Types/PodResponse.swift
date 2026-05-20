@@ -85,13 +85,11 @@ public struct SessionResponse: Codable, Sendable {
   public let mergeBlockReason: String?
   public let plan: PlanResponse?
   public let progress: ProgressResponse?
-  public let acceptanceCriteria: [AcDefinition]?
   public let contract: SpecContractResponse?
   public let claudeSessionId: String?
   public let outputMode: String
   public let pod: PodConfigResponse?
   public let baseBranch: String?
-  public let acFrom: String?
   public let recoveryWorktreePath: String?
   public let lastHeartbeatAt: String?
   public let inputTokens: Int
@@ -157,10 +155,10 @@ public struct SessionResponse: Codable, Sendable {
     case lastValidationResult, validationWaiver, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
     case createdAt, startedAt, runningAt, completedAt, updatedAt, userId
     case filesChanged, linesAdded, linesRemoved, previewUrl, hasWebUi, prUrl
-    case mergeBlockReason, plan, progress, acceptanceCriteria, contract, claudeSessionId
+    case mergeBlockReason, plan, progress, contract, claudeSessionId
     case outputMode
     case pod = "options"
-    case baseBranch, acFrom, recoveryWorktreePath, lastHeartbeatAt
+    case baseBranch, recoveryWorktreePath, lastHeartbeatAt
     case inputTokens, outputTokens, costUsd, commitCount, lastCommitAt
     case linkedSessionId, taskSummary, lastCorrectionMessage, profileSnapshot
     case dependsOnPodId, dependsOnPodIds, seriesId, seriesName, seriesDescription, seriesDesign, dependencyStartedAt
@@ -337,7 +335,6 @@ public struct CreateSessionRequest: Codable, Sendable {
   public var executionTarget: String?
   public var branch: String?
   public var skipValidation: Bool?
-  public var acceptanceCriteria: [AcDefinition]?
   public var contract: SpecContractResponse?
   public var briefTitle: String?
   public var touches: [String]?
@@ -346,7 +343,6 @@ public struct CreateSessionRequest: Codable, Sendable {
   public var pod: PodConfigRequest?
   public var baseBranch: String?
   public var branchPrefix: String?
-  public var acFrom: String?
   public var linkedSessionId: String?
   public var pimGroups: [PimGroupRequest]?
   // Series fields — populated when spawning a follow-up pod or launching a series.
@@ -367,7 +363,6 @@ public struct CreateSessionRequest: Codable, Sendable {
     executionTarget: String? = nil,
     branch: String? = nil,
     skipValidation: Bool? = nil,
-    acceptanceCriteria: [AcDefinition]? = nil,
     contract: SpecContractResponse? = nil,
     briefTitle: String? = nil,
     touches: [String]? = nil,
@@ -376,7 +371,6 @@ public struct CreateSessionRequest: Codable, Sendable {
     pod: PodConfigRequest? = nil,
     baseBranch: String? = nil,
     branchPrefix: String? = nil,
-    acFrom: String? = nil,
     linkedSessionId: String? = nil,
     pimGroups: [PimGroupRequest]? = nil,
     dependsOnPodIds: [String]? = nil,
@@ -392,7 +386,6 @@ public struct CreateSessionRequest: Codable, Sendable {
     self.executionTarget = executionTarget
     self.branch = branch
     self.skipValidation = skipValidation
-    self.acceptanceCriteria = acceptanceCriteria
     self.contract = contract
     self.briefTitle = briefTitle
     self.touches = touches
@@ -401,7 +394,6 @@ public struct CreateSessionRequest: Codable, Sendable {
     self.pod = pod
     self.baseBranch = baseBranch
     self.branchPrefix = branchPrefix
-    self.acFrom = acFrom
     self.linkedSessionId = linkedSessionId
     self.pimGroups = pimGroups
     self.dependsOnPodIds = dependsOnPodIds
@@ -415,9 +407,9 @@ public struct CreateSessionRequest: Codable, Sendable {
   // struct keeps the local name `pod` for readability. Remap on the wire.
   private enum CodingKeys: String, CodingKey {
     case profileName, task, model, runtime, executionTarget, branch
-    case skipValidation, acceptanceCriteria, contract, briefTitle, touches, doesNotTouch, outputMode
+    case skipValidation, contract, briefTitle, touches, doesNotTouch, outputMode
     case pod = "options"
-    case baseBranch, branchPrefix, acFrom, linkedSessionId, pimGroups
+    case baseBranch, branchPrefix, linkedSessionId, pimGroups
     case dependsOnPodIds, seriesId, seriesName, requireSidecars
     case referenceRepos
   }
@@ -445,7 +437,6 @@ public struct ParsedBriefResponse: Codable, Sendable {
   public let title: String
   public let task: String
   public let dependsOn: [String]
-  public let acceptanceCriteria: [AcDefinition]?
   public let contract: SpecContractResponse?
   public let touches: [String]?
   public let doesNotTouch: [String]?
@@ -458,7 +449,6 @@ public struct ParsedBriefResponse: Codable, Sendable {
     title: String,
     task: String,
     dependsOn: [String],
-    acceptanceCriteria: [AcDefinition]? = nil,
     contract: SpecContractResponse? = nil,
     touches: [String]? = nil,
     doesNotTouch: [String]? = nil,
@@ -467,7 +457,6 @@ public struct ParsedBriefResponse: Codable, Sendable {
     self.title = title
     self.task = task
     self.dependsOn = dependsOn
-    self.acceptanceCriteria = acceptanceCriteria
     self.contract = contract
     self.touches = touches
     self.doesNotTouch = doesNotTouch

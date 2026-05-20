@@ -68,11 +68,11 @@ calls `validateTransition` first.
 2. **Skill resolution** — fetch custom slash-command content (local file or GitHub); failures are non-fatal and skipped
 3. **System instructions** — `system-instructions-generator.ts` builds the container's `CLAUDE.md` with:
    task description, injected sections, MCP servers, actions, skills, build/start commands, smoke pages,
-   acceptance criteria, and custom instructions
+   required facts, contract requirements, and custom instructions
 4. **Provider credentials** — inject model provider tokens (Anthropic/MAX/Foundry), write files into container
 5. **Agent spawn / resume** — start the runtime stream; Claude supports mid-stream recovery via `claude_session_id`
 6. **Event consumption** — process `AgentEvent` stream: tool-use, escalations, progress reports, completion
-7. **Validation** — multi-phase: lint → SAST → build → test → health → pages → AC → facts → AI task review
+7. **Validation** — multi-phase: lint → SAST → build → test → health → pages → facts → AI task review
 8. **Completion** — merge PR (if `autoMerge`) or push branch; transition to `complete`
 
 ### Retries and validation loops
@@ -124,7 +124,7 @@ prefix. Browse the dir for the canonical list; key reference points:
   progress/resume, action policy + audit, model providers, ADO PR, skills, private
   registries, heartbeat, token usage, commit tracking
 - 022–097 — recent waves: safety events (ADR-018), audit chain (ADR-019),
-  network-policy snapshot (ADR-020), sleep recovery (ADR-021), AC self-report,
+  network-policy snapshot (ADR-020), sleep recovery (ADR-021), legacy self-report,
   phase token usage (ADR-016), screenshot retention (ADR-017), watchdog/kick,
   preflight conflict policy
 

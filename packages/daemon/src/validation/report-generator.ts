@@ -65,18 +65,6 @@ export async function generateValidationReport(
     }
   }
 
-  // Gather AC check screenshots
-  const acScreenshots: Array<{ criterion: string; dataUrl: string }> = [];
-  if (screenshotStore && result.acValidation) {
-    for (const check of result.acValidation.results) {
-      if (!check.screenshot) continue;
-      const dataUrl = await readScreenshotAsDataUrl(check.screenshot, screenshotStore, logger);
-      if (dataUrl) {
-        acScreenshots.push({ criterion: check.criterion, dataUrl });
-      }
-    }
-  }
-
   // Gather task review screenshots
   const reviewScreenshots: string[] = [];
   if (screenshotStore && result.taskReview) {
@@ -96,14 +84,6 @@ export async function generateValidationReport(
       (s) =>
         `<div class="screenshot"><p class="caption">Page: ${escapeHtml(s.path)}</p>` +
         `<img src="${s.dataUrl}" alt="Screenshot of ${escapeHtml(s.path)}" /></div>`,
-    )
-    .join('\n');
-
-  const acImagesHtml = acScreenshots
-    .map(
-      (s) =>
-        `<div class="screenshot"><p class="caption">${escapeHtml(s.criterion)}</p>` +
-        `<img src="${s.dataUrl}" alt="AC screenshot" /></div>`,
     )
     .join('\n');
 
@@ -135,7 +115,6 @@ export async function generateValidationReport(
   <p>Status: <strong class="${statusClass}">${statusLabel}</strong></p>
   <p>Duration: ${result.duration} ms</p>
   ${smokeImagesHtml ? `<h2>Smoke Screenshots</h2>\n${smokeImagesHtml}` : ''}
-  ${acImagesHtml ? `<h2>Acceptance Criteria Screenshots</h2>\n${acImagesHtml}` : ''}
   ${reviewImagesHtml ? `<h2>Review Screenshots</h2>\n${reviewImagesHtml}` : ''}
 </body>
 </html>`;

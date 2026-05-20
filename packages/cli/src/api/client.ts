@@ -7,7 +7,6 @@ import {
   ValidationError,
 } from '@autopod/shared';
 import type {
-  AcDefinition,
   CreatePodRequest,
   CreateScheduledJobRequest,
   Pod,
@@ -27,7 +26,6 @@ export interface CreateSeriesRequest {
     title: string;
     task: string;
     dependsOn: string[];
-    acceptanceCriteria?: AcDefinition[];
     contract?: SpecContract;
     /** Per-brief advisory list of files this pod expects to modify. */
     touches?: string[];

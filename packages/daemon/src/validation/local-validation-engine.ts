@@ -1,11 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type {
-  AcCheckResult,
-  AcDefinition,
-  AcPolarity,
-  AcType,
-  AcValidationResult,
   DeviationsAssessment,
   FactCheckResult,
   FactValidationResult,
@@ -34,7 +29,7 @@ const execFileAsync = promisify(execFile);
 
 /**
  * Reset the worktree to HEAD on both filesystems validation evaluates against:
- * the container's `/workspace` (build/lint/sast/test/health/pages/ac all run
+ * the container's `/workspace` (build/lint/sast/test/health/pages all run
  * there via `execInContainer`) and the daemon-host worktree at `worktreePath`
  * (Tier-2/3 reviewers run there with `Read`/`read_file` access).
  *
@@ -63,7 +58,7 @@ async function resetWorktreeToHead(
 ): Promise<void> {
   const cmd = 'git reset --hard HEAD && git clean -fd';
 
-  // Container side — feeds Lint/SAST/Build/Tests/Health/Pages/AC.
+  // Container side — feeds Lint/SAST/Build/Tests/Health/Pages/Facts.
   // Always run at /workspace (repo root) regardless of buildWorkDir, so
   // untracked files anywhere in the worktree are removed, not just the
   // build subdir.
@@ -113,10 +108,7 @@ export function createLocalValidationEngine(
   screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
 ): ValidationEngine {
   const log = logger?.child({ component: 'local-validation-engine' });
-  // Cache classification results within this engine instance.
-  // Key: sorted AC texts joined with '|'. Value: ClassifiedAc[].
-  // Prevents non-deterministic re-classification across validation retry attempts.
-  const acClassificationCache = new Map<string, ClassifiedAc[]>();
+  void screenshotStore;
 
   return {
     async validate(
@@ -206,7 +198,7 @@ export function createLocalValidationEngine(
 
         // ── Phase 5: Health check ──────────────────────────────────────
         // Skipped when the profile has no web UI — there's nothing to start,
-        // no endpoint to poll, and downstream Pages/AC web-ui phases are
+        // no endpoint to poll, and downstream Pages validation is
         // inapplicable too.
         checkAbort();
         const skipForNoWebUi = config.hasWebUi === false;
@@ -236,7 +228,7 @@ export function createLocalValidationEngine(
         callbacks?.onPhaseCompleted?.('health', healthResult.status, healthResult);
 
         // After health passes, watch for post-startup crashes in the background.
-        // If the app goes down during smoke/AC phases, abort validation with a
+        // If the app goes down during smoke/review-adjacent phases, abort validation with a
         // clear "app crashed" message rather than a cryptic ERR_CONNECTION_REFUSED.
         if (healthResult.status === 'pass' && config.startCommand) {
           stopMonitor = startAppStabilityMonitor(config.previewUrl + config.healthPath, () => {
@@ -281,7 +273,7 @@ export function createLocalValidationEngine(
         // ── Tier-1 gate ────────────────────────────────────────────────
         // Cheap deterministic phases (lint/sast/build/test/health/pages) must
         // all pass-or-skip before we spend money on the AI tiers. If any
-        // failed, AC + Review are skipped — the agent gets the tier-1 findings
+        // failed, facts + review are skipped — the agent gets the tier-1 findings
         // first and AI checks only run on code that's actually buildable.
         // 'skip' counts as pass (legit skips: no test command, no smoke pages,
         // no web UI, profile-level skipPhases).
@@ -293,54 +285,7 @@ export function createLocalValidationEngine(
           healthResult.status !== 'fail' &&
           pagesStatus !== 'fail';
 
-        // ── Phase 7: AC Validation ────────────────────────────────────
-        // Run when tier-1 is fully green AND health passed-or-skipped.
-        // (Health-skip means the profile has no web UI; web-ui criteria are
-        // auto-downgraded to 'none' and routed through the diff reviewer.)
-        checkAbort();
-        let acValidation: Awaited<ReturnType<typeof runAcValidation>> | null;
-        let acStatus: 'pass' | 'fail' | 'skip';
-        let acSkipReason: ValidationResult['acSkipReason'];
-        if (skipPhases.includes('ac')) {
-          acValidation = null;
-          acStatus = 'skip';
-          acSkipReason = 'profile-skip';
-        } else {
-          callbacks?.onPhaseStarted?.('ac');
-          const healthGateOk = healthResult.status === 'pass' || healthResult.status === 'skip';
-          const acGateOk = tier1Pass && healthGateOk;
-          if (acGateOk && config.acceptanceCriteria?.length)
-            onProgress?.('Checking acceptance criteria…');
-          acValidation = acGateOk
-            ? await runAcValidation(
-                containerManager,
-                config,
-                log,
-                hostBrowserRunner,
-                acClassificationCache,
-                screenshotStore,
-              )
-            : null;
-          acStatus = acValidation?.status ?? 'skip';
-          if (acValidation === null) {
-            acSkipReason = !tier1Pass
-              ? 'upstream-failed'
-              : !healthGateOk
-                ? 'health-failed'
-                : config.acceptanceCriteria?.length
-                  ? undefined
-                  : 'no-criteria';
-          }
-        }
-        callbacks?.onPhaseCompleted?.('ac', acStatus, acValidation);
-
-        // Collect "none"-classified ACs so the AI reviewer can own them
-        const noneAcCriteria: string[] =
-          acValidation?.results
-            .filter((r) => r.validationType === 'none')
-            .map((r) => r.criterion) ?? [];
-
-        // ── Phase 8: Required Facts ────────────────────────────────────
+        // ── Phase 7: Required Facts ────────────────────────────────────
         // Contract facts are the post-merge survival layer: concrete artifacts
         // and commands the validator can execute without model interpretation.
         checkAbort();
@@ -360,7 +305,7 @@ export function createLocalValidationEngine(
         }
         callbacks?.onPhaseCompleted?.('facts', factsStatus, factValidation);
 
-        // ── Phase 9: AI Task Review ────────────────────────────────────
+        // ── Phase 8: AI Task Review ────────────────────────────────────
         checkAbort();
         let taskReview: TaskReviewResult | null;
         let reviewSkipReason: string | undefined;
@@ -397,7 +342,7 @@ export function createLocalValidationEngine(
             }
           }
 
-          const reviewRun = await runTaskReview(config, log, reviewContext, noneAcCriteria);
+          const reviewRun = await runTaskReview(config, log, reviewContext);
           taskReview = reviewRun.result;
           reviewSkipReason = reviewRun.skipReason;
           if (taskReview === null && reviewRun.skipReason) {
@@ -413,7 +358,7 @@ export function createLocalValidationEngine(
           taskReview === null ? 'skip' : taskReview.status === 'fail' ? 'fail' : 'pass';
         callbacks?.onPhaseCompleted?.('review', reviewStatus, taskReview);
 
-        // ── Phase 10: Overall result ───────────────────────────────────
+        // ── Phase 9: Overall result ───────────────────────────────────
         const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
         const healthOk = healthResult.status === 'pass' || healthResult.status === 'skip';
         const smokeStatus =
@@ -421,7 +366,6 @@ export function createLocalValidationEngine(
             ? ('pass' as const)
             : ('fail' as const);
 
-        const acFailed = acValidation !== null && acValidation.status === 'fail';
         const factsFailed = factValidation !== null && factValidation.status === 'fail';
         // Timeouts and infra errors during review are not code quality failures.
         // Only treat review as a blocker when it returns an actual opinion (pass/fail).
@@ -431,7 +375,6 @@ export function createLocalValidationEngine(
         const isReviewBlocker = reviewSkipKind === 'review-failed';
         const overall =
           tier1Pass &&
-          !acFailed &&
           !factsFailed &&
           ((taskReview === null && !isReviewBlocker) || taskReview?.status === 'pass')
             ? ('pass' as const)
@@ -452,9 +395,7 @@ export function createLocalValidationEngine(
           test: testResult,
           lint: lintResult,
           sast: sastResult,
-          acValidation,
           factValidation,
-          acSkipReason,
           taskReview,
           reviewSkipReason,
           reviewSkipKind,
@@ -497,32 +438,13 @@ function makeInterruptedResult(
       pages: [],
     },
     test: { status: 'skip', duration: 0 },
-    acValidation: null,
-    acSkipReason: 'upstream-failed',
+    factValidation: { status: 'skip', results: [] },
     taskReview: null,
     reviewSkipReason: reason,
     reviewSkipKind: 'upstream-failed',
     overall: 'fail',
     duration: Date.now() - startTime,
   };
-}
-
-/**
-/** Retry polling a URL until it returns 2xx or all attempts are exhausted. */
-async function pollUntilReachable(
-  url: string,
-  opts: { attempts: number; intervalMs: number },
-): Promise<boolean> {
-  for (let i = 0; i < opts.attempts; i++) {
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(3_000) });
-      if (res.status >= 200 && res.status < 300) return true;
-    } catch {
-      // connection refused or timeout — keep retrying
-    }
-    if (i < opts.attempts - 1) await sleep(opts.intervalMs);
-  }
-  return false;
 }
 
 /**
@@ -1201,7 +1123,7 @@ export async function runHealthCheck(
   log?.info({ startCommand: config.startCommand, url, timeoutMs }, 'starting app for health check');
 
   // Start the app under the supervisor (never-give-up restarter) so crashes
-  // during the health-poll window and later during AC generation are recovered
+  // during the health-poll window and later browser checks are recovered
   // automatically. The supervisor writes to /tmp/autopod-start.log (same path
   // the old fire-and-forget used), so all existing log-tailing code is unaffected.
   const startLogPath = '/tmp/autopod-start.log';
@@ -1419,1292 +1341,6 @@ function makeSyntheticFailure(path: string, error: string): PageResult {
   };
 }
 
-// ── AC Validation phase ─────────────────────────────────────────────────────
-
-export type AcValidationType = 'web-ui' | 'api' | 'cmd' | 'none';
-
-export interface ClassifiedAc {
-  criterion: string;
-  validationType: AcValidationType;
-  reason: string;
-  /** Author-declared pass condition from the brief frontmatter, if present. */
-  pass?: string;
-  /** Author-declared fail condition from the brief frontmatter, if present. */
-  fail?: string;
-  /**
-   * Shell command to execute for `cmd` ACs — sourced from `AcDefinition.hint`.
-   * Carrying this separately from `criterion` (the human-readable outcome text)
-   * prevents the executor from accidentally running the outcome description as
-   * a shell command (e.g. `sh -c "LogStreamingHub is mapped in …"`).
-   */
-  command?: string;
-  /** Polarity for `cmd` ACs — determines pass/fail interpretation of the command result. */
-  polarity?: AcPolarity;
-}
-
-/** Map brief-declared `AcType` to the engine's internal `AcValidationType`. */
-function mapBriefType(t: AcType): AcValidationType {
-  if (t === 'web') return 'web-ui';
-  if (t === 'cmd') return 'cmd';
-  return t;
-}
-
-const COMMAND_LIKE_AC_PATTERNS: RegExp[] = [
-  /^run\s+`/i, // run `some command`
-  /^execute\s+`/i, // execute `some command`
-  /^`[^`]+`$/, // entire criterion is a backtick-quoted command
-  /^dotnet\s/i, // dotnet build / test / run
-  /^npm\s/i, // npm run / test / build
-  /^npx\s/i, // npx ...
-  /^pnpm\s/i, // pnpm ...
-  /^yarn\s/i, // yarn ...
-  /^cargo\s/i, // cargo build / test
-  /^make\s/i, // make <target>
-  /^\.\/\S/, // ./script.sh
-  /^\/[a-z]/i, // /simplify, /review, /fix etc. (slash commands)
-];
-
-/**
- * Returns true when an AC text describes a shell command or slash-command step
- * rather than a testable behavioural outcome. These are always classified 'none'.
- */
-export function isCommandLikeAc(text: string): boolean {
-  const t = text.trim();
-  return COMMAND_LIKE_AC_PATTERNS.some((re) => re.test(t));
-}
-
-/**
- * Assign a validation type to each AC. Brief-declared types are authoritative —
- * the LLM classifier is only invoked for legacy paths where `type` is absent.
- *
- * Command-like ACs (shell commands, slash commands) are always forced to 'none'
- * regardless of any declared type, since they describe procedural steps rather
- * than testable behavioural outcomes.
- */
-export async function classifyAcTypes(
-  config: ValidationEngineConfig,
-  log?: Logger,
-): Promise<ClassifiedAc[] | null> {
-  const allAcs = config.acceptanceCriteria ?? [];
-  if (allAcs.length === 0) return [];
-
-  const hasWebUi = config.hasWebUi ?? true;
-
-  // Pre-pass: force command-like ACs to 'none' regardless of any declared type.
-  const commandResults: ClassifiedAc[] = [];
-  const acs = allAcs.filter((ac) => {
-    if (isCommandLikeAc(ac.outcome)) {
-      log?.info({ criterion: ac.outcome }, 'AC is command-like — forcing to none');
-      commandResults.push({
-        criterion: ac.outcome,
-        validationType: 'none',
-        reason: 'Command-like criterion — evaluated by diff reviewer',
-      });
-      return false;
-    }
-    return true;
-  });
-
-  if (acs.length === 0) {
-    const byText = new Map(commandResults.map((r) => [r.criterion, r]));
-    return allAcs.map(
-      (ac) =>
-        byText.get(ac.outcome) ?? {
-          criterion: ac.outcome,
-          validationType: 'none' as const,
-          reason: 'Command-like criterion — evaluated by diff reviewer',
-        },
-    );
-  }
-
-  // Brief frontmatter and the pod repository both produce `AcDefinition` with a
-  // declared `type` — trust it and skip the LLM classification entirely.
-  const allDeclared = acs.every(
-    (ac) => ac.type === 'none' || ac.type === 'api' || ac.type === 'web' || ac.type === 'cmd',
-  );
-
-  let classifiedRemaining: ClassifiedAc[];
-  if (allDeclared) {
-    log?.info({ acCount: acs.length }, 'using brief-declared AC types, skipping LLM classifier');
-    classifiedRemaining = acs.map((ac) => {
-      let validationType = mapBriefType(ac.type);
-      // Respect `hasWebUi: false` — downgrade to 'none' rather than run a
-      // browser phase against a project that has no frontend.
-      if (validationType === 'web-ui' && !hasWebUi) validationType = 'none';
-      const classified: ClassifiedAc = {
-        criterion: ac.outcome,
-        validationType,
-        reason: 'declared in brief frontmatter',
-      };
-      if (ac.type === 'cmd') {
-        classified.command = ac.hint;
-        classified.polarity = ac.polarity;
-      }
-      return classified;
-    });
-  } else {
-    // Fallback: ask the LLM when types weren't declared (reserved for future
-    // ingestion paths that produce `AcDefinition`s without a type).
-    const acList = acs.map((ac, i) => `${i + 1}. ${ac.outcome}`).join('\n');
-    const webUiRestriction = hasWebUi
-      ? ''
-      : '\nIMPORTANT: This project has NO web frontend. Do not classify any criterion as "web-ui". Use "api" or "none" only.\n';
-
-    const prompt = `You are a QA automation planner. For each acceptance criterion, decide how it should be validated automatically by a test harness that can only make synchronous HTTP requests to a running server.
-
-## Validation types
-
-### "api" — only use this when ALL of the following are true:
-1. The check is a single synchronous HTTP request (or a short sequence: create → then read/delete).
-2. The expected behaviour is observable in the HTTP response immediately — no waiting for background workers, timers, cron jobs, schedulers, or queued tasks to execute.
-3. The check does NOT require a specific authenticated user role or credential that the test harness won't have.
-4. The endpoint and expected response shape are deterministic from the criterion text alone.
-
-### "web-ui" — verify by navigating a real browser and checking DOM elements. Only for criteria that require a human-visible frontend.${webUiRestriction}
-
-### "none" — use for EVERYTHING else:
-- TypeScript type exports, internal code structure, SQL migrations
-- Any criterion whose observable state depends on a background process, scheduler, cron job, timer, or async worker having already executed (e.g. "Status is set to Succeeded after job runs", "ConsecutiveFailureCount increments", "IsEnabled is set to false after N failures")
-- Auth/RBAC behaviour that requires a specific role credential the harness won't possess (e.g. "a non-Administrator user receives 403")
-- Criteria that mention "after a run completes", "on each tick", "on startup", "after N consecutive failures" — these require the scheduler to have fired, which a synchronous HTTP check cannot trigger or wait for
-- Desktop/native app changes, CLI output formats, anything only verifiable by reading the diff or running unit tests
-
-## Decision rule (use it literally)
-Ask yourself: "Can I write a single curl command (or a create-then-read chain) that, RIGHT NOW against the live server, observes the required state without waiting for any background process?" If NO → use "none".
-
-Task context: ${config.task}
-
-Acceptance Criteria:
-${acList}
-
-Diff of changes (for context):
-${config.diff ? config.diff.slice(0, 4000) : '(no diff available)'}
-
-Respond with a JSON array. Each element must have:
-- "criterion": exact original text (copy verbatim)
-- "validationType": "web-ui" | "api" | "none"
-- "reason": one short sentence explaining your classification
-
-Respond ONLY with the JSON array, no markdown fences or extra text.`;
-
-    try {
-      const reviewTimeout = config.reviewTimeout ?? 300_000;
-      const { stdout } = await runClaudeCli({
-        model: config.reviewerModel ?? 'sonnet',
-        input: prompt,
-        timeout: reviewTimeout,
-      });
-
-      const llmResult = parseClassificationJson(stdout.trim(), acs);
-      if (llmResult === null) return null;
-      classifiedRemaining = llmResult;
-    } catch (err) {
-      log?.warn({ err }, 'failed to classify AC types, falling back to none');
-      return null;
-    }
-  }
-
-  // Merge command-forced results with the classified remainder, restoring original order.
-  const byText = new Map<string, ClassifiedAc>();
-  for (const r of commandResults) byText.set(r.criterion, r);
-  for (const r of classifiedRemaining) byText.set(r.criterion, r);
-  return allAcs.map(
-    (ac) =>
-      byText.get(ac.outcome) ?? {
-        criterion: ac.outcome,
-        validationType: 'none' as const,
-        reason: 'Classification unavailable — falling back to diff reviewer',
-      },
-  );
-}
-
-/** Parse and validate the classification JSON response from the LLM. */
-export function parseClassificationJson(
-  raw: string,
-  originalAcs: AcDefinition[],
-): ClassifiedAc[] | null {
-  const cleaned = stripMarkdownFences(raw);
-  const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) return null;
-
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    if (!Array.isArray(parsed)) return null;
-
-    const validTypes = new Set<string>(['web-ui', 'api', 'cmd', 'none']);
-    const results = parsed.filter(
-      (item: unknown): item is ClassifiedAc =>
-        typeof item === 'object' &&
-        item !== null &&
-        typeof (item as Record<string, unknown>).criterion === 'string' &&
-        validTypes.has((item as Record<string, unknown>).validationType as string) &&
-        typeof (item as Record<string, unknown>).reason === 'string',
-    );
-
-    // If we got fewer results than ACs, fall back any missing ones to 'none'.
-    if (results.length < originalAcs.length) {
-      const covered = new Set(results.map((r) => r.criterion));
-      for (const ac of originalAcs) {
-        if (!covered.has(ac.outcome)) {
-          results.push({
-            criterion: ac.outcome,
-            validationType: 'none',
-            reason: 'Not classified by LLM',
-          });
-        }
-      }
-    }
-
-    return results;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Deduplicates acceptance criteria that differ only by an appended parenthetical
- * testability-guidance suffix.  For example:
- *   "POST /jobs returns 201"
- *   "POST /jobs returns 201 (HTTP status code verifiable via a POST request)"
- * are treated as the same criterion; we keep the longer (more informative) form
- * and expose an `expandResult` function to fan results back out to ALL originals.
- *
- * @internal Exported for testing.
- */
-export function deduplicateAcsByBaseText(criteria: AcDefinition[]): {
-  deduped: AcDefinition[];
-  expandResult: (results: AcCheckResult[]) => AcCheckResult[];
-} {
-  // Normalise: strip trailing " (...)" parenthetical that /prep adds for testability context.
-  function baseText(ac: string): string {
-    return ac.replace(/\s+\([^)]*\)\s*$/, '').trim();
-  }
-
-  // Map from base text → longest original AC (by outcome length) that shares it.
-  const canonical = new Map<string, AcDefinition>();
-  for (const ac of criteria) {
-    const base = baseText(ac.outcome);
-    const existing = canonical.get(base);
-    if (!existing || ac.outcome.length > existing.outcome.length) {
-      canonical.set(base, ac);
-    }
-  }
-
-  const deduped = [...canonical.values()];
-
-  // For each original criterion, find which canonical outcome it maps to.
-  const originalToCanonical = new Map<AcDefinition, string>();
-  for (const ac of criteria) {
-    const canon = canonical.get(baseText(ac.outcome));
-    if (canon) originalToCanonical.set(ac, canon.outcome);
-  }
-
-  function expandResult(results: AcCheckResult[]): AcCheckResult[] {
-    const byCanonical = new Map(results.map((r) => [r.criterion, r]));
-    const expanded: AcCheckResult[] = [];
-    for (const ac of criteria) {
-      const canonText = originalToCanonical.get(ac);
-      const result = canonText ? byCanonical.get(canonText) : undefined;
-      if (result) {
-        // Re-emit the result under the original criterion text so the feedback
-        // message shows the text the user actually wrote.
-        expanded.push({ ...result, criterion: ac.outcome });
-      } else {
-        // Fallback: shouldn't happen, but don't silently drop a criterion
-        expanded.push({
-          criterion: ac.outcome,
-          passed: false,
-          validationType: 'none' as const,
-          reasoning: 'No result available for this criterion',
-        });
-      }
-    }
-    return expanded;
-  }
-
-  return { deduped, expandResult };
-}
-
-async function runAcValidation(
-  containerManager: ContainerManager,
-  config: ValidationEngineConfig,
-  log?: Logger,
-  hostBrowserRunner?: HostBrowserRunner,
-  acClassificationCache?: Map<string, ClassifiedAc[]>,
-  screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
-): Promise<AcValidationResult | null> {
-  if (!config.acceptanceCriteria || config.acceptanceCriteria.length === 0) {
-    log?.info('no acceptance criteria provided, skipping AC validation');
-    return null;
-  }
-
-  if (!config.reviewerModel) {
-    log?.info('no reviewer model configured, skipping AC validation');
-    return null;
-  }
-
-  log?.info(
-    { acCount: config.acceptanceCriteria.length, model: config.reviewerModel },
-    'running AC validation',
-  );
-
-  // Step 1: Deduplicate ACs before classification.
-  // Near-duplicates arise when a spec file contains both a short form and a long form with
-  // appended parenthetical testability guidance, e.g.:
-  //   "POST /jobs returns 201"
-  //   "POST /jobs returns 201 (HTTP status code is directly verifiable via a POST request)"
-  // Both forms are semantically the same criterion.  We normalise by keeping the longest
-  // form for each base text and map results back to ALL matching originals.
-  const { deduped: dedupedCriteria, expandResult } = deduplicateAcsByBaseText(
-    config.acceptanceCriteria,
-  );
-  const dedupedConfig =
-    dedupedCriteria.length < config.acceptanceCriteria.length
-      ? { ...config, acceptanceCriteria: dedupedCriteria }
-      : config;
-
-  // Step 2: Classify each AC by validation type (cached to prevent non-deterministic re-classification)
-  const cacheKey = dedupedCriteria
-    .map((ac) => ac.outcome)
-    .sort()
-    .join('|');
-  const cachedClassification = acClassificationCache?.get(cacheKey) ?? null;
-  const classified = cachedClassification ?? (await classifyAcTypes(dedupedConfig, log));
-  if (classified && classified.length > 0 && !cachedClassification) {
-    acClassificationCache?.set(cacheKey, classified);
-  }
-  if (!classified || classified.length === 0) {
-    log?.warn('AC classification failed, marking all as diff-reviewed');
-    const fallbackResults: AcCheckResult[] = (config.acceptanceCriteria ?? []).map((ac) => ({
-      criterion: ac.outcome,
-      passed: true,
-      validationType: 'none' as const,
-      reasoning: 'Classification failed — evaluated by diff reviewer',
-    }));
-    return { status: 'pass', results: fallbackResults, model: config.reviewerModel };
-  }
-
-  log?.info(
-    {
-      webUi: classified.filter((c) => c.validationType === 'web-ui').length,
-      api: classified.filter((c) => c.validationType === 'api').length,
-      cmd: classified.filter((c) => c.validationType === 'cmd').length,
-      none: classified.filter((c) => c.validationType === 'none').length,
-      deduped: config.acceptanceCriteria.length - dedupedCriteria.length,
-    },
-    'AC classification complete',
-  );
-
-  // Step 3: Split by type
-  const webUiAcs = classified.filter((c) => c.validationType === 'web-ui');
-  const apiAcs = classified.filter((c) => c.validationType === 'api');
-  const cmdAcs = classified.filter((c) => c.validationType === 'cmd');
-  const noneAcs = classified.filter((c) => c.validationType === 'none');
-
-  // Step 4: Execute each bucket (using dedupedConfig so the LLM sees clean, non-duplicate ACs)
-  const noneResults: AcCheckResult[] = noneAcs.map((c) => ({
-    criterion: c.criterion,
-    passed: true,
-    validationType: 'none' as const,
-    reasoning: `Automated check not applicable (${c.reason}) — evaluated by diff reviewer`,
-  }));
-
-  const apiResults = apiAcs.length > 0 ? await executeApiChecks(dedupedConfig, apiAcs, log) : [];
-
-  const cmdResults =
-    cmdAcs.length > 0 ? await executeCmdChecks(containerManager, dedupedConfig, cmdAcs, log) : [];
-
-  let browserResults: AcCheckResult[] = [];
-  if (webUiAcs.length > 0) {
-    const webUiInstructions = await generateAcInstructions(dedupedConfig, webUiAcs, log);
-    if (webUiInstructions && webUiInstructions.length > 0) {
-      browserResults = await executeAcChecks(
-        containerManager,
-        dedupedConfig,
-        webUiInstructions,
-        log,
-        hostBrowserRunner,
-        screenshotStore,
-      );
-    } else {
-      browserResults = webUiAcs.map((c) => ({
-        criterion: c.criterion,
-        passed: false,
-        validationType: 'web-ui' as const,
-        reasoning: 'Failed to generate browser validation instructions',
-      }));
-    }
-  }
-
-  // Step 5: Expand deduplicated results back to original criteria.
-  // When two original ACs mapped to the same canonical form (e.g., one has a
-  // parenthetical suffix), both get the same result so neither shows as "missing".
-  const compactResults: AcCheckResult[] = [
-    ...browserResults,
-    ...apiResults,
-    ...cmdResults,
-    ...noneResults,
-  ];
-  const results: AcCheckResult[] = expandResult(compactResults);
-
-  // Only count automated checks (web-ui and api) for pass/fail determination
-  const automatedResults = results.filter((r) => r.validationType !== 'none');
-  const allPassed = automatedResults.length === 0 || automatedResults.every((r) => r.passed);
-
-  log?.info(
-    {
-      acCount: results.length,
-      automated: automatedResults.length,
-      passCount: automatedResults.filter((r) => r.passed).length,
-      failCount: automatedResults.filter((r) => !r.passed).length,
-      diffReviewed: noneResults.length,
-    },
-    'AC validation complete',
-  );
-
-  return {
-    status: allPassed ? 'pass' : 'fail',
-    results,
-    model: config.reviewerModel,
-  };
-}
-
-/** Reviewer LLM generates natural language validation instructions from ACs. */
-async function generateAcInstructions(
-  config: ValidationEngineConfig,
-  webUiAcs: ClassifiedAc[],
-  log?: Logger,
-): Promise<Array<{ criterion: string; instruction: string }> | null> {
-  const acList = webUiAcs
-    .map((ac, i) => {
-      const hints =
-        ac.pass || ac.fail
-          ? `\n   Pass: ${ac.pass ?? '(no explicit pass condition)'}\n   Fail: ${ac.fail ?? '(no explicit fail condition)'}`
-          : '';
-      return `${i + 1}. ${ac.criterion}${hints}`;
-    })
-    .join('\n');
-
-  const prompt = `You are a QA reviewer for a web application. Your job is to generate browser-based validation instructions for each acceptance criterion.
-
-Task: ${config.task}
-
-Acceptance Criteria:
-${acList}
-
-Diff of changes made:
-${config.diff || '(no diff available)'}
-
-The application is running at: ${config.previewUrl}
-
-For each acceptance criterion, generate a specific validation instruction that can be carried out in a browser. The instruction should describe:
-- Which URL to navigate to
-- What to look for on the page
-- What constitutes a pass vs fail
-
-Respond with a JSON array. Each element must have:
-- "criterion": the original acceptance criterion text (copy exactly)
-- "instruction": a natural language instruction for a browser automation tool
-
-Example:
-[
-  {
-    "criterion": "Settings page has a dark mode toggle",
-    "instruction": "Navigate to /settings. Look for a toggle, switch, or checkbox element related to 'dark mode' or 'theme'. Verify it is visible and interactive. Take a screenshot."
-  }
-]
-
-Respond ONLY with the JSON array, no markdown fences or extra text.`;
-
-  try {
-    const reviewTimeout = config.reviewTimeout ?? 300_000;
-    const { stdout } = await runClaudeCli({
-      model: config.reviewerModel ?? 'sonnet',
-      input: prompt,
-      timeout: reviewTimeout,
-    });
-
-    return parseAcInstructionsJson(stdout.trim());
-  } catch (err) {
-    log?.warn({ err }, 'failed to generate AC validation instructions');
-    return null;
-  }
-}
-
-interface ApiCheckSpec {
-  criterion: string;
-  method: string;
-  path: string;
-  expectedStatus: number;
-  bodyContains?: string;
-  requestBody?: unknown;
-  /**
-   * Variable name to capture from this response (e.g. "jobId").
-   * Used when a POST creates a resource whose ID is needed by later checks.
-   */
-  captureAs?: string;
-  /**
-   * Dot-separated JSON field path to extract from the response body (e.g. "id" or "data.id").
-   * Required when captureAs is set.
-   */
-  captureField?: string;
-  /**
-   * Criterion text of the spec this one depends on.
-   * The dependent spec runs AFTER its dependency and may use {variableName} in path.
-   */
-  dependsOn?: string;
-}
-
-/** Execute HTTP-based AC checks for api-type criteria. */
-async function executeApiChecks(
-  config: ValidationEngineConfig,
-  apiAcs: ClassifiedAc[],
-  log?: Logger,
-): Promise<AcCheckResult[]> {
-  const acList = apiAcs
-    .map((c, i) => {
-      const hints =
-        c.pass || c.fail
-          ? `\n   Pass: ${c.pass ?? '(no explicit pass condition)'}\n   Fail: ${c.fail ?? '(no explicit fail condition)'}`
-          : '';
-      return `${i + 1}. ${c.criterion} (${c.reason})${hints}`;
-    })
-    .join('\n');
-
-  const prompt = `You are a QA automation engineer. Generate HTTP request specs to validate each acceptance criterion against a running server.
-
-Server base URL: ${config.previewUrl}
-
-## Criteria to validate (YOUR OUTPUT MUST HAVE ONE SPEC PER CRITERION)
-${acList}
-
-## Output format — one JSON object per criterion above
-
-Fields:
-- "criterion": COPY the criterion text VERBATIM from the numbered list above. Do NOT paraphrase, shorten, or alter it.
-- "method": HTTP method (GET, POST, PUT, DELETE, PATCH)
-- "path": URL path — use {varName} placeholders for runtime IDs (explained below)
-- "expectedStatus": HTTP status code as a NUMBER (e.g. 200, 201, 400, 404)
-- "bodyContains": optional string that must appear in the JSON response body
-- "requestBody": optional JSON object for POST/PUT/PATCH
-
-## Chained requests (for endpoints that need a resource to exist first)
-
-REST APIs typically use server-generated UUIDs, not integer IDs like 1, 2, 3.
-Never hardcode integer IDs in paths — use the chaining mechanism below instead.
-
-To create a resource and then use its ID in later specs:
-- On the CREATE spec: add "captureAs": "someVar" and "captureField": "id"
-- On the DEPENDENT spec: add "dependsOn": "<verbatim criterion of the create spec>"
-  and use {someVar} in the path
-
-## Example (uses a FICTIONAL blog API — do NOT copy these criterion texts into your output)
-
-[
-  {
-    "criterion": "POST /api/articles creates an article and returns 201",
-    "method": "POST", "path": "/api/articles", "expectedStatus": 201,
-    "requestBody": {"title": "Test", "body": "Hello"},
-    "captureAs": "articleId", "captureField": "id"
-  },
-  {
-    "criterion": "DELETE /api/articles/{id} returns 204",
-    "method": "DELETE", "path": "/api/articles/{articleId}", "expectedStatus": 204,
-    "dependsOn": "POST /api/articles creates an article and returns 201"
-  }
-]
-
-## Rules
-1. Output MUST contain exactly one spec for EVERY criterion in the numbered list — no omissions.
-2. The "criterion" value MUST be copied character-for-character from the numbered list.
-3. Use {varName} placeholders instead of hardcoded integer IDs.
-4. Keep requestBody minimal — just enough to pass validation.
-
-Respond ONLY with a JSON array, no markdown fences or extra text.`;
-
-  let specs: ApiCheckSpec[] = [];
-  const reviewTimeout = config.reviewTimeout ?? 300_000;
-  let parseAttempt = 0;
-  while (parseAttempt < 2) {
-    try {
-      const { stdout } = await runClaudeCli({
-        model: config.reviewerModel ?? 'sonnet',
-        input: prompt,
-        timeout: reviewTimeout,
-      });
-      const rawOutput = stdout.trim();
-      const parsed = parseApiCheckSpecs(rawOutput, log);
-      if (parsed !== null) {
-        specs = parsed;
-        break;
-      }
-      parseAttempt++;
-      if (parseAttempt < 2) {
-        log?.warn(
-          { rawPreview: rawOutput.slice(0, 500) },
-          'parseApiCheckSpecs returned null — retrying LLM call',
-        );
-      } else {
-        log?.warn(
-          { rawPreview: rawOutput.slice(0, 500) },
-          'parseApiCheckSpecs returned null after retry — gap-filling all API ACs',
-        );
-      }
-    } catch (err) {
-      log?.warn({ err }, 'failed to generate API check specs');
-      return apiAcs.map((c) => ({
-        criterion: c.criterion,
-        passed: false,
-        validationType: 'api' as const,
-        reasoning: 'Failed to generate API check specification (LLM call error)',
-      }));
-    }
-  }
-
-  const specsWereGenerated = specs.length > 0;
-  const results: AcCheckResult[] = [];
-
-  // Execute specs in dependency order so captured variables are available.
-  // Build a lookup by criterion for fast dependency resolution.
-  const specsByCriterion = new Map(specs.map((s) => [s.criterion, s]));
-  const captured = new Map<string, string>(); // varName → captured value
-
-  // Topological sort: specs with no dependsOn go first; dependent specs follow.
-  const independent = specs.filter((s) => !s.dependsOn);
-  const dependent = specs.filter((s) => !!s.dependsOn);
-  const orderedSpecs = [...independent, ...dependent];
-
-  for (const spec of orderedSpecs) {
-    // If this spec depends on another, skip it if its dependency failed (no variable captured).
-    if (spec.dependsOn && spec.captureAs === undefined) {
-      const dep = specsByCriterion.get(spec.dependsOn);
-      if (dep?.captureAs && !captured.has(dep.captureAs)) {
-        results.push({
-          criterion: spec.criterion,
-          passed: false,
-          validationType: 'api',
-          reasoning: `Skipped: dependency "${spec.dependsOn}" did not capture a variable (setup failed)`,
-        });
-        continue;
-      }
-    }
-
-    // Interpolate {varName} placeholders in the path using captured values.
-    const resolvedPath = spec.path.replace(
-      /\{(\w+)\}/g,
-      (_, name) => captured.get(name) ?? `{${name}}`,
-    );
-
-    try {
-      const url = `${config.previewUrl.replace(/\/$/, '')}${resolvedPath}`;
-      const options: RequestInit = {
-        method: spec.method,
-        headers: { 'Content-Type': 'application/json' },
-      };
-      if (spec.requestBody && ['POST', 'PUT', 'PATCH'].includes(spec.method.toUpperCase())) {
-        options.body = JSON.stringify(spec.requestBody);
-      }
-
-      const response = await fetch(url, options);
-      const statusOk = response.status === spec.expectedStatus;
-
-      // Always read the body — we need it for capture and for diagnostic info on failure.
-      const responseBody = await response.text();
-
-      // Capture a value from the response if requested.
-      if (spec.captureAs && spec.captureField && response.status >= 200 && response.status < 300) {
-        try {
-          const json = JSON.parse(responseBody) as Record<string, unknown>;
-          const value = spec.captureField
-            .split('.')
-            .reduce<unknown>((obj, key) => (obj as Record<string, unknown>)?.[key], json);
-          if (typeof value === 'string' || typeof value === 'number') {
-            captured.set(spec.captureAs, String(value));
-            log?.debug({ varName: spec.captureAs, value }, 'captured variable from API response');
-          }
-        } catch {
-          log?.warn(
-            { captureField: spec.captureField },
-            'failed to extract capture field from response',
-          );
-        }
-      }
-
-      let bodyOk = true;
-      let bodyNote = '';
-      if (spec.bodyContains) {
-        bodyOk = responseBody.includes(spec.bodyContains);
-        bodyNote = bodyOk
-          ? ` Response body contains "${spec.bodyContains}".`
-          : ` Response body does NOT contain "${spec.bodyContains}".`;
-      }
-
-      // For failing checks, include the first 300 chars of the response body so the agent
-      // can understand WHY the request was rejected (e.g. validation error details on 400s).
-      const failureBodyHint =
-        !statusOk && responseBody
-          ? ` Response: ${responseBody.slice(0, 300)}${responseBody.length > 300 ? '…' : ''}`
-          : '';
-
-      const passed = statusOk && bodyOk;
-      results.push({
-        criterion: spec.criterion,
-        passed,
-        validationType: 'api',
-        reasoning: passed
-          ? `${spec.method} ${resolvedPath} → ${response.status} (expected ${spec.expectedStatus}).${bodyNote}`
-          : `${spec.method} ${resolvedPath} → ${response.status} (expected ${spec.expectedStatus}).${bodyNote}${failureBodyHint}`,
-      });
-    } catch (err) {
-      results.push({
-        criterion: spec.criterion,
-        passed: false,
-        validationType: 'api',
-        reasoning: `HTTP check failed: ${err instanceof Error ? err.message : String(err)}`,
-      });
-    }
-  }
-
-  // Ensure every API AC has a result, even if spec generation missed it.
-  // Use fuzzy matching: normalise both sides to lower-case trimmed text so minor
-  // whitespace or capitalisation differences from the LLM don't cause a false miss.
-  // Also treat a result as covering an AC when one is a leading substring of the other
-  // (handles cases where the LLM slightly truncates or extends the criterion text).
-  function normCriterion(s: string): string {
-    return s.toLowerCase().replace(/\s+/g, ' ').trim();
-  }
-  const coveredNorm = new Set(results.map((r) => normCriterion(r.criterion)));
-
-  function isCovered(ac: string): boolean {
-    const n = normCriterion(ac);
-    if (coveredNorm.has(n)) return true;
-    // Check prefix match: result is a prefix of AC (LLM truncated) or AC is a prefix of result
-    for (const c of coveredNorm) {
-      if (n.startsWith(c) || c.startsWith(n)) return true;
-    }
-    return false;
-  }
-
-  for (const ac of apiAcs) {
-    if (!isCovered(ac.criterion)) {
-      results.push({
-        criterion: ac.criterion,
-        passed: false,
-        validationType: 'api',
-        reasoning: specsWereGenerated
-          ? 'No HTTP check spec was generated for this criterion (criterion missing from LLM response)'
-          : 'No HTTP check spec was generated for this criterion (JSON parse failure after retry)',
-      });
-    }
-  }
-
-  return results;
-}
-
-/** @internal Exported for testing. */
-export function parseApiCheckSpecs(raw: string, log?: Logger): ApiCheckSpec[] | null {
-  const cleaned = stripMarkdownFences(raw);
-  const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) return null;
-
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    if (!Array.isArray(parsed)) return null;
-
-    const results: ApiCheckSpec[] = [];
-    for (const item of parsed as unknown[]) {
-      if (typeof item !== 'object' || item === null) {
-        log?.warn({ item }, 'parseApiCheckSpecs: dropping non-object spec entry');
-        continue;
-      }
-      const rec = item as Record<string, unknown>;
-
-      // LLM frequently returns "200" (string) — coerce it to a number
-      if (typeof rec.expectedStatus === 'string' && /^\d+$/.test(rec.expectedStatus)) {
-        rec.expectedStatus = Number.parseInt(rec.expectedStatus, 10);
-      }
-
-      const missingFields: string[] = [];
-      if (typeof rec.criterion !== 'string') missingFields.push('criterion');
-      if (typeof rec.method !== 'string') missingFields.push('method');
-      if (typeof rec.path !== 'string') missingFields.push('path');
-      if (typeof rec.expectedStatus !== 'number') missingFields.push('expectedStatus');
-
-      if (missingFields.length > 0) {
-        log?.warn(
-          { criterion: rec.criterion, missingFields },
-          'parseApiCheckSpecs: dropping spec — failed type guard',
-        );
-        continue;
-      }
-
-      // Pass through optional fields without validating — they are used at execution time
-      results.push(rec as unknown as ApiCheckSpec);
-    }
-    return results;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Execute `cmd`-typed ACs as shell commands inside the container. Each AC's
- * criterion text *is* the command to run. Pass/fail is decided from the exit
- * code, with a small set of pass-hint heuristics for grep-style "no match"
- * semantics.
- *
- * `cmd` ACs are intended for narrow assertions the api/web buckets cannot
- * observe (a symbol stopped existing, a generated file is present, an
- * inventory flag flipped). Build / test / lint commands are filtered out
- * upstream by `isCommandLikeAc()` and never reach this path.
- *
- * @internal Exported for testing.
- */
-export async function executeCmdChecks(
-  containerManager: ContainerManager,
-  config: ValidationEngineConfig,
-  cmdAcs: ClassifiedAc[],
-  log?: Logger,
-): Promise<AcCheckResult[]> {
-  const containerId = config.containerId;
-  if (!containerId) {
-    return cmdAcs.map((c) => ({
-      criterion: c.criterion,
-      passed: false,
-      validationType: 'cmd' as const,
-      reasoning: 'No container available to execute cmd AC',
-    }));
-  }
-
-  const results = await Promise.all(
-    cmdAcs.map(async (ac) => {
-      // Guard against running the human-readable outcome as a shell command —
-      // that's the bug this whole change is fixing. If the brief omitted the
-      // hint, fail the check explicitly rather than exec'ing the description.
-      if (!ac.command || ac.command.trim() === '') {
-        log?.warn(
-          { criterion: ac.criterion },
-          'cmd AC missing hint — cannot execute, marking failed',
-        );
-        return {
-          criterion: ac.criterion,
-          passed: false,
-          validationType: 'cmd' as const,
-          reasoning:
-            'cmd AC has no hint (shell command) — author must add a `hint` field to the brief AC',
-        } satisfies AcCheckResult;
-      }
-
-      try {
-        const exec = await containerManager.execInContainer(containerId, ['sh', '-c', ac.command], {
-          timeout: 30_000,
-        });
-        const stdoutTrimmed = exec.stdout.trim();
-        const stdoutPreview = exec.stdout.slice(0, 800);
-        const stderrPreview = exec.stderr.slice(0, 400);
-        const polarity: AcPolarity = ac.polarity ?? 'exit-zero';
-        let passed: boolean;
-        switch (polarity) {
-          case 'expect-output':
-            passed = exec.exitCode === 0 && stdoutTrimmed !== '';
-            break;
-          case 'expect-no-output':
-            passed = exec.exitCode !== 0 || stdoutTrimmed === '';
-            break;
-          default:
-            passed = exec.exitCode === 0;
-            break;
-        }
-        const reasoning = passed
-          ? `Command exited ${exec.exitCode} (polarity ${polarity})${stdoutTrimmed ? ` with output: ${stdoutPreview}` : ' (no output)'}`
-          : `Command exited ${exec.exitCode} (polarity ${polarity}). stdout: ${stdoutPreview || '(empty)'} stderr: ${stderrPreview || '(empty)'}`;
-        return {
-          criterion: ac.criterion,
-          passed,
-          validationType: 'cmd' as const,
-          reasoning,
-        } satisfies AcCheckResult;
-      } catch (err) {
-        log?.warn({ err, criterion: ac.criterion }, 'cmd AC execution failed');
-        return {
-          criterion: ac.criterion,
-          passed: false,
-          validationType: 'cmd' as const,
-          reasoning: `cmd AC failed to execute: ${err instanceof Error ? err.message : String(err)}`,
-        } satisfies AcCheckResult;
-      }
-    }),
-  );
-
-  return results;
-}
-
-function buildAcScriptPrompt(
-  instructions: Array<{ criterion: string; instruction: string }>,
-  baseUrl: string,
-  screenshotDir: string,
-  mode: 'host' | 'container',
-): string {
-  const instructionList = instructions
-    .map((inst, i) => `Check ${i + 1}: "${inst.criterion}"\nInstruction: ${inst.instruction}`)
-    .join('\n\n');
-
-  const importLine =
-    mode === 'host'
-      ? `import { chromium } from 'playwright';`
-      : `import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); const { chromium } = require('playwright');`;
-
-  return `You are a browser automation expert. Generate a Playwright script (ESM, using @playwright/test's chromium) that executes the following validation checks against a running web application.
-
-Base URL: ${baseUrl}
-Screenshot directory: ${screenshotDir}
-
-Checks to perform:
-${instructionList}
-
-Requirements:
-- Use \`${importLine}\` (${mode === 'host' ? 'standard ESM import' : 'ESM import ignores NODE_PATH, so use createRequire for CJS resolution'})
-- Launch chromium with \`{ headless: true, args: ['--no-sandbox'] }\`
-- Create browser context with \`{ locale: 'en-US' }\` to avoid locale issues
-- For each check: navigate to the appropriate URL with \`{ waitUntil: 'domcontentloaded' }\`, then \`await page.waitForTimeout(2000)\` for JS rendering, perform the validation, take a screenshot
-- Save screenshots as ${screenshotDir}/check-{index}.png (0-indexed)
-- After all checks, output a JSON result between markers:
-  __AUTOPOD_AC_RESULTS_START__
-  [
-    { "criterion": "...", "passed": true/false, "reasoning": "what you found" }
-  ]
-  __AUTOPOD_AC_RESULTS_END__
-- Exit code 0 regardless of pass/fail (failures are data, not errors)
-- Wrap each check in try/catch — if one fails, continue to the next
-- Use a 15 second timeout for each navigation
-
-Respond ONLY with the script code. No markdown fences, no explanation.`;
-}
-
-/** Executor LLM generates and runs a Playwright script from instructions. */
-/**
- * Post-Claude reachability guard.
- *
- * Claude script generation takes 10-60s during which the dev server may crash.
- * The pre-generation probe (below) only covers startup jitter; this covers the
- * generation window. Retry budget = 1: one restart attempt, then proceed
- * regardless so legitimate failures are not hidden by infinite retries.
- *
- * @internal Exported for testing.
- */
-export async function restartSupervisorIfDown(
-  cm: ContainerManager,
-  config: ValidationEngineConfig,
-  log?: Logger,
-): Promise<void> {
-  if (!config.startCommand) return;
-  const reachable = await pollUntilReachable(config.previewUrl, { attempts: 2, intervalMs: 1_000 });
-  if (reachable) return;
-
-  log?.warn(
-    { podId: config.podId },
-    'Server unreachable after script generation — restarting supervisor',
-  );
-
-  const startCwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
-  const kickCmd = `kill -9 $(cat /tmp/autopod-supervisor.pid 2>/dev/null) 2>/dev/null; ${buildSupervisorCommand(config.startCommand)}`;
-
-  await cm
-    .execInContainer(config.containerId, ['sh', '-c', kickCmd], { cwd: startCwd })
-    .catch((err) => log?.warn({ err }, 'Supervisor restart errored'));
-
-  // Give the server time to come back up (up to ~10s)
-  await pollUntilReachable(config.previewUrl, { attempts: 5, intervalMs: 2_000 });
-}
-
-async function executeAcChecks(
-  containerManager: ContainerManager,
-  config: ValidationEngineConfig,
-  instructions: Array<{ criterion: string; instruction: string }>,
-  log?: Logger,
-  hostBrowserRunner?: HostBrowserRunner,
-  screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
-): Promise<AcCheckResult[]> {
-  const useHost = hostBrowserRunner && (await hostBrowserRunner.isAvailable());
-  const reviewTimeout = config.reviewTimeout ?? 300_000;
-  const execTimeout = instructions.length * 45_000 + 30_000;
-
-  // Guard against the race between health-check pass and Playwright execution.
-  // Dev servers sometimes respond to the health poll once and then crash during
-  // startup; a brief retry window catches momentary jitter without masking real failures.
-  if (useHost && config.startCommand) {
-    const reachable = await pollUntilReachable(config.previewUrl, {
-      attempts: 4,
-      intervalMs: 1_500,
-    });
-    if (!reachable) {
-      return instructions.map((inst) => ({
-        criterion: inst.criterion,
-        passed: false,
-        reasoning: `App not reachable at ${config.previewUrl} — ensure the start command keeps the server running`,
-      }));
-    }
-  }
-
-  async function generateScript(mode: 'host' | 'container'): Promise<string> {
-    const baseUrl =
-      mode === 'host' ? config.previewUrl : (config.containerBaseUrl ?? config.previewUrl);
-    const screenshotDir =
-      mode === 'host'
-        ? `${hostBrowserRunner?.screenshotDir(config.podId)}/ac`
-        : '/tmp/autopod-ac-screenshots';
-    const prompt = buildAcScriptPrompt(instructions, baseUrl, screenshotDir, mode);
-    const { stdout } = await runClaudeCli({
-      model: config.reviewerModel ?? 'sonnet',
-      input: prompt,
-      timeout: reviewTimeout,
-    });
-    return stripMarkdownFences(stdout.trim());
-  }
-
-  try {
-    if (useHost) {
-      const hostScript = await generateScript('host');
-      // Post-Claude reachability guard (second check — first is above before generateScript)
-      await restartSupervisorIfDown(containerManager, config, log);
-      const hostResult = await executeAcOnHost(
-        hostBrowserRunner,
-        config,
-        hostScript,
-        instructions,
-        execTimeout,
-        log,
-        screenshotStore,
-      );
-      if (hostResult !== null) return hostResult;
-      // Host Playwright produced no markers — fall back to container with a freshly generated script
-      log?.warn({ podId: config.podId }, 'Host AC checks failed — falling back to container');
-      const containerScript = await generateScript('container');
-      // Post-Claude reachability guard for the container fallback path
-      await restartSupervisorIfDown(containerManager, config, log);
-      return await executeAcInContainer(
-        containerManager,
-        config,
-        containerScript,
-        instructions,
-        execTimeout,
-        log,
-        screenshotStore,
-      );
-    }
-
-    const containerScript = await generateScript('container');
-    // Post-Claude reachability guard
-    await restartSupervisorIfDown(containerManager, config, log);
-    return await executeAcInContainer(
-      containerManager,
-      config,
-      containerScript,
-      instructions,
-      execTimeout,
-      log,
-      screenshotStore,
-    );
-  } catch (err) {
-    log?.warn({ err }, 'AC check execution failed');
-    return instructions.map((inst) => ({
-      criterion: inst.criterion,
-      passed: false,
-      reasoning: `Execution failed: ${err}`,
-    }));
-  }
-}
-
-async function executeAcOnHost(
-  hostBrowserRunner: HostBrowserRunner,
-  config: ValidationEngineConfig,
-  script: string,
-  instructions: Array<{ criterion: string; instruction: string }>,
-  timeout: number,
-  log?: Logger,
-  screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
-): Promise<AcCheckResult[] | null> {
-  const screenshotDir = `${hostBrowserRunner.screenshotDir(config.podId)}/ac`;
-
-  const result = await hostBrowserRunner.runScript(script, {
-    timeout,
-    podId: config.podId,
-  });
-
-  // If the script crashed before writing markers (e.g. Chromium couldn't reach the host port),
-  // return null so the caller can fall back to container execution.
-  const hasMarkers =
-    result.stdout.includes('__AUTOPOD_AC_RESULTS_START__') &&
-    result.stdout.includes('__AUTOPOD_AC_RESULTS_END__');
-  if (!hasMarkers) {
-    log?.warn(
-      { podId: config.podId, stderr: result.stderr.slice(0, 500) },
-      'Host AC browser script produced no result markers — falling back to container',
-    );
-    return null;
-  }
-
-  const parsed = parseAcResults(result.stdout, instructions);
-
-  for (let i = 0; i < parsed.length; i++) {
-    try {
-      const b64 = await hostBrowserRunner.readScreenshot(`${screenshotDir}/check-${i}.png`);
-      if (screenshotStore) {
-        const bytes = Buffer.from(b64, 'base64');
-        const filename = `${config.attempt}-${i}.png`;
-        parsed[i].screenshot = await screenshotStore.write(config.podId, 'ac', filename, bytes);
-      }
-    } catch {
-      // Screenshot might not exist
-    }
-  }
-
-  log?.info({ mode: 'host', checkCount: parsed.length }, 'AC checks executed on host');
-
-  return parsed;
-}
-
-async function executeAcInContainer(
-  containerManager: ContainerManager,
-  config: ValidationEngineConfig,
-  script: string,
-  instructions: Array<{ criterion: string; instruction: string }>,
-  timeout: number,
-  log?: Logger,
-  screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
-): Promise<AcCheckResult[]> {
-  const scriptPath = '/tmp/autopod-ac-validation.mjs';
-  await containerManager.writeFile(config.containerId, scriptPath, script);
-
-  await containerManager.execInContainer(
-    config.containerId,
-    ['mkdir', '-p', '/tmp/autopod-ac-screenshots'],
-    { cwd: '/workspace' },
-  );
-
-  const result = await containerManager.execInContainer(
-    config.containerId,
-    ['sh', '-c', `NODE_PATH=\${NODE_PATH:-$(npm root -g)} node ${scriptPath}`],
-    { cwd: '/workspace', timeout },
-  );
-
-  const parsed = parseAcResults(result.stdout, instructions, result.stderr);
-
-  for (let i = 0; i < parsed.length; i++) {
-    try {
-      const b64Result = await containerManager.execInContainer(
-        config.containerId,
-        ['sh', '-c', `base64 -w0 /tmp/autopod-ac-screenshots/check-${i}.png 2>/dev/null`],
-        { timeout: 10_000 },
-      );
-      if (b64Result.exitCode === 0 && b64Result.stdout.trim() && screenshotStore) {
-        const bytes = Buffer.from(b64Result.stdout.trim(), 'base64');
-        const filename = `${config.attempt}-${i}.png`;
-        parsed[i].screenshot = await screenshotStore.write(config.podId, 'ac', filename, bytes);
-      }
-    } catch {
-      // Screenshot might not exist if the check crashed
-    }
-  }
-
-  log?.info({ mode: 'container', checkCount: parsed.length }, 'AC checks executed in container');
-
-  return parsed;
-}
-
-/** @internal Exported for testing. Parse the reviewer's JSON array of AC instructions. */
-export function parseAcInstructionsJson(
-  raw: string,
-): Array<{ criterion: string; instruction: string }> | null {
-  const cleaned = stripMarkdownFences(raw);
-  const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) return null;
-
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    if (!Array.isArray(parsed)) return null;
-
-    return parsed
-      .filter(
-        (item: unknown): item is { criterion: string; instruction: string } =>
-          typeof item === 'object' &&
-          item !== null &&
-          typeof (item as Record<string, unknown>).criterion === 'string' &&
-          typeof (item as Record<string, unknown>).instruction === 'string',
-      )
-      .map((item) => ({ criterion: item.criterion, instruction: item.instruction }));
-  } catch {
-    return null;
-  }
-}
-
-/** @internal Exported for testing. Parse AC results from the Playwright script's stdout markers.
- *  `rawOutput` (stderr or combined output) is included in the fallback reasoning when the script
- *  crashes before emitting markers, so the agent knows why validation failed.
- */
-export function parseAcResults(
-  stdout: string,
-  instructions: Array<{ criterion: string; instruction: string }>,
-  rawOutput?: string,
-): AcCheckResult[] {
-  const startMarker = '__AUTOPOD_AC_RESULTS_START__';
-  const endMarker = '__AUTOPOD_AC_RESULTS_END__';
-
-  const startIdx = stdout.indexOf(startMarker);
-  const endIdx = stdout.indexOf(endMarker);
-
-  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
-    // Script crashed before writing result markers — include raw output so the
-    // agent can diagnose whether the app was unreachable, Playwright failed, etc.
-    const detail = rawOutput?.trim().slice(0, 400);
-    const reasoning = detail
-      ? `Script produced no result markers. Output: ${detail}`
-      : 'Script did not produce parseable results';
-    return instructions.map((inst) => ({
-      criterion: inst.criterion,
-      passed: false,
-      reasoning,
-    }));
-  }
-
-  const jsonStr = stdout.slice(startIdx + startMarker.length, endIdx).trim();
-
-  try {
-    const parsed = JSON.parse(jsonStr);
-    if (!Array.isArray(parsed)) {
-      return instructions.map((inst) => ({
-        criterion: inst.criterion,
-        passed: false,
-        reasoning: 'Script output was not a JSON array',
-      }));
-    }
-
-    // Map results back to instructions, preserving order
-    return instructions.map((inst, i) => {
-      const result = parsed[i];
-      if (!result || typeof result !== 'object') {
-        return {
-          criterion: inst.criterion,
-          passed: false,
-          reasoning: 'No result returned for this check',
-        };
-      }
-      return {
-        criterion: inst.criterion,
-        passed: Boolean(result.passed),
-        reasoning:
-          typeof result.reasoning === 'string' ? result.reasoning : 'No reasoning provided',
-      };
-    });
-  } catch {
-    return instructions.map((inst) => ({
-      criterion: inst.criterion,
-      passed: false,
-      reasoning: 'Failed to parse script output as JSON',
-    }));
-  }
-}
-
 /** @internal Exported for testing. Strip markdown code fences from LLM output. */
 export function stripMarkdownFences(text: string): string {
   return text
@@ -2722,27 +1358,14 @@ export function stripMarkdownFences(text: string): string {
 export function buildReviewPrompt(
   config: ValidationEngineConfig,
   reviewContext?: ReviewContext,
-  noneAcCriteria: string[] = [],
 ): string {
-  const allAcs = config.acceptanceCriteria ?? [];
   const contract = config.contract;
-  const humanReviewCriteria =
+  const diffReviewCriteria =
     contract?.humanReview.map(
       (item) =>
         `[human_review:${item.id}] covers ${item.covers.join(', ')} — ${item.criterion} Reason: ${item.reason}`,
     ) ?? [];
-  const diffReviewCriteria = [...noneAcCriteria, ...humanReviewCriteria];
-
-  // ACs already verified by the automated harness (api + web-ui)
-  const autoVerifiedAcs = allAcs.filter((ac) => !noneAcCriteria.includes(ac.outcome));
-
-  // For backward-compat: we still need acList as a boolean signal for step numbering
-  const acList = allAcs.length > 0 || diffReviewCriteria.length > 0 ? true : null;
-
-  const autoSection =
-    autoVerifiedAcs.length > 0
-      ? `\n## ACCEPTANCE CRITERIA — AUTO-VERIFIED\nThe following were already checked by the automated test harness (HTTP calls / browser). You do not need to re-verify these unless you spot a code defect that would cause them to fail at runtime:\n${autoVerifiedAcs.map((ac, i) => `${i + 1}. ${ac.outcome}`).join('\n')}\n`
-      : '';
+  const hasRequirements = diffReviewCriteria.length > 0;
 
   const noneSection =
     diffReviewCriteria.length > 0
@@ -2846,7 +1469,7 @@ ${repoRulesSection}
 ## TASK
 
 ${config.task}
-${contractSection}${autoSection}${noneSection}${planSection}${taskSummarySection}${briefScopeSection}
+${contractSection}${noneSection}${planSection}${taskSummarySection}${briefScopeSection}
 ${commitLogSection}${contextSection}## DIFF
 
 ${config.diff}
@@ -2864,22 +1487,13 @@ For each item in the "REQUIREMENTS — DIFF VERIFICATION REQUIRED" section above
 - Benefit of the doubt: if the diff is ambiguous or you can't tell, default to met=true. Only fail when you have clear evidence of absence or incorrectness.
 - Add a brief note explaining your assessment.
 
-Do NOT include auto-verified acceptance criteria or required fact commands in requirementsCheck.
+Do NOT include required fact commands in requirementsCheck.
 
 `
-    : acList
-      ? `### Step 1: Requirements check
-
-For each acceptance criterion above, determine whether the diff addresses it:
-- Mark met=true only if the diff clearly and fully implements the criterion
-- Mark met=false if the criterion is unaddressed or only partially implemented
-- Add a brief note if the criterion is partially met or needs context
-
-`
-      : ''
+    : ''
 }${
   taskSummarySection
-    ? `### ${acList ? 'Step 2' : 'Step 1'}: Deviation assessment
+    ? `### ${hasRequirements ? 'Step 2' : 'Step 1'}: Deviation assessment
 
 Compare the ORIGINAL PLAN (if provided) with the AGENT TASK SUMMARY and the DIFF:
 
@@ -2897,7 +1511,7 @@ An undisclosed deviation that the diff reveals IS a negative signal.
 
 `
     : ''
-}### ${acList ? (taskSummarySection ? 'Step 3' : 'Step 2') : taskSummarySection ? 'Step 2' : 'Step 1'}: Code review
+}### ${hasRequirements ? (taskSummarySection ? 'Step 3' : 'Step 2') : taskSummarySection ? 'Step 2' : 'Step 1'}: Code review
 
 Review ONLY the changed code across these dimensions. Only raise medium, high, or critical severity issues — skip anything below that bar:
 
@@ -2923,7 +1537,7 @@ Review ONLY the changed code across these dimensions. Only raise medium, high, o
 
 Before including any issue, ask yourself:
 - Is this actually in the diff (not pre-existing code)?
-- Could this be intentional per the task description or acceptance criteria?
+- Could this be intentional per the task description or contract?
 - Does the existing codebase use similar patterns?
 - Is this medium/high severity, not just a nit?
 - Would I want this feedback if I were the author?
@@ -2937,7 +1551,7 @@ Respond ONLY with a JSON object — no markdown fences, no extra text:
 {
   "status": "pass" | "fail" | "uncertain",
   "reasoning": "one or two sentence summary of the overall assessment",
-  ${diffReviewCriteria.length > 0 ? '"requirementsCheck": [\n    // Include ONLY the "DIFF VERIFICATION REQUIRED" requirements. Do NOT include auto-verified criteria or required facts.\n    { "criterion": "...", "met": true|false, "note": "optional" }\n  ],\n  ' : acList ? '"requirementsCheck": [{ "criterion": "...", "met": true|false, "note": "optional" }],\n  ' : ''}${taskSummarySection ? '"deviationsAssessment": {\n    "disclosedDeviations": [{ "step": "...", "reasoning": "...", "verdict": "justified"|"questionable"|"unjustified" }],\n    "undisclosedDeviations": ["description of gap between plan and diff that was not reported"]\n  },\n  ' : ''}"issues": ["[SEVERITY] short description — each entry MUST be a plain string, not an object. Format: \\"[HIGH] Missing null check in foo()\\". Allowed severities: MEDIUM, HIGH, CRITICAL. Omit anything below medium."]
+  ${diffReviewCriteria.length > 0 ? '"requirementsCheck": [\n    // Include ONLY the "DIFF VERIFICATION REQUIRED" requirements. Do NOT include required facts.\n    { "criterion": "...", "met": true|false, "note": "optional" }\n  ],\n  ' : ''}${taskSummarySection ? '"deviationsAssessment": {\n    "disclosedDeviations": [{ "step": "...", "reasoning": "...", "verdict": "justified"|"questionable"|"unjustified" }],\n    "undisclosedDeviations": ["description of gap between plan and diff that was not reported"]\n  },\n  ' : ''}"issues": ["[SEVERITY] short description — each entry MUST be a plain string, not an object. Format: \\"[HIGH] Missing null check in foo()\\". Allowed severities: MEDIUM, HIGH, CRITICAL. Omit anything below medium."]
 }
 
 Status rules:
@@ -3066,7 +1680,6 @@ async function runTaskReview(
   config: ValidationEngineConfig,
   log?: Logger,
   reviewContext?: ReviewContext,
-  noneAcCriteria: string[] = [],
 ): Promise<{
   result: TaskReviewResult | null;
   skipReason?: string;
@@ -3085,7 +1698,7 @@ async function runTaskReview(
   log?.info({ model: config.reviewerModel }, 'running AI task review');
 
   const diffIsTruncated = config.diff?.includes('⚠ DIFF TRUNCATED:') ?? false;
-  const prompt = buildReviewPrompt(config, reviewContext, noneAcCriteria);
+  const prompt = buildReviewPrompt(config, reviewContext);
   const reviewTimeout = config.reviewTimeout ?? 300_000;
   const reviewDepth = config.reviewDepth ?? 'auto';
 

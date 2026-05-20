@@ -15,7 +15,7 @@ public struct ValidationOverrideResponse: Codable, Sendable {
 
 public struct ValidationFindingResponse: Codable, Sendable {
   public let id: String
-  public let source: String  // "ac_validation" | "fact_validation" | "task_review" | "requirements_check"
+  public let source: String  // "fact_validation" | "task_review" | "requirements_check"
   public let description: String
   public let reasoning: String?
 }
@@ -26,8 +26,8 @@ public struct ValidationFindingResponse: Codable, Sendable {
 /// Field names match the daemon's wire shape exactly — no remapping.
 public struct ScreenshotRefResponse: Codable, Sendable, Hashable {
   public let url: String     // "/pods/:podId/screenshots/:source/:filename"
-  public let source: String  // "smoke" | "ac" | "review"
-  public let path: String    // page path | criterion text | index
+  public let source: String  // "smoke" | "review"
+  public let path: String    // page path | review index
 }
 
 // MARK: - Validation result (mirrors packages/shared/src/types/validation.ts)
@@ -40,12 +40,7 @@ public struct ValidationResponse: Codable, Sendable {
   public let test: TestResultResponse?
   public let lint: LintResultResponse?
   public let sast: SastResultResponse?
-  public let acValidation: AcValidationResponse?
   public let factValidation: FactValidationResponse?
-  /// Machine-readable skip reason when acValidation is null. Lets the UI tell
-  /// "skipped because earlier phases failed" apart from "no criteria configured".
-  /// Values: "upstream-failed" | "profile-skip" | "health-failed" | "no-criteria".
-  public let acSkipReason: String?
   public let taskReview: TaskReviewResponse?
   public let reviewSkipReason: String?
   /// Machine-readable kind paired with reviewSkipReason. Values:
@@ -135,31 +130,6 @@ public struct SastResultResponse: Codable, Sendable {
   public let status: String
   public let output: String
   public let duration: Int
-}
-
-// MARK: - Legacy Criteria Validation
-
-public struct AcValidationResponse: Codable, Sendable {
-  public let status: String
-  public let results: [AcCheckResponse]
-  public let model: String
-}
-
-public struct AcCheckResponse: Codable, Sendable {
-  public let criterion: String
-  public let passed: Bool
-  public let screenshot: ScreenshotRefResponse?
-  public let reasoning: String
-  public let validationType: String?  // "web-ui" | "api" | "none"
-
-  public init(from decoder: any Decoder) throws {
-    let c = try decoder.container(keyedBy: CodingKeys.self)
-    criterion = try c.decode(String.self, forKey: .criterion)
-    passed = try decodeBoolOrInt(c, key: .passed)
-    screenshot = try c.decodeIfPresent(ScreenshotRefResponse.self, forKey: .screenshot)
-    reasoning = try c.decode(String.self, forKey: .reasoning)
-    validationType = try c.decodeIfPresent(String.self, forKey: .validationType)
-  }
 }
 
 // MARK: - Fact Validation

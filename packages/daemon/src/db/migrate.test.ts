@@ -186,9 +186,6 @@ function buildLegacyDb(db: Database.Database): void {
         { path: '/about', screenshotBase64: 'def456base64==', passed: true },
       ],
     },
-    acValidation: {
-      checks: [{ criterion: 'Has title', screenshot: 'ghiScreenshotBase64==', passed: true }],
-    },
     taskReview: {
       screenshots: ['img1base64==', 'img2base64=='],
       passed: true,
@@ -230,16 +227,12 @@ describe('runMigrations — migration 091 (drop screenshot blobs)', () => {
     };
     const result = JSON.parse(row.result) as {
       smoke: { pages: Array<{ screenshotBase64?: string }> };
-      acValidation: { checks: Array<{ screenshot?: string }> };
       taskReview: { screenshots?: unknown[] };
     };
 
     // smoke pages — screenshotBase64 removed
     expect(result.smoke.pages[0]?.screenshotBase64).toBeUndefined();
     expect(result.smoke.pages[1]?.screenshotBase64).toBeUndefined();
-
-    // AC checks — screenshot removed
-    expect(result.acValidation.checks[0]?.screenshot).toBeUndefined();
 
     // taskReview.screenshots — set to empty array
     expect(result.taskReview.screenshots).toEqual([]);
@@ -296,5 +289,88 @@ describe('runMigrations — migration 091 (drop screenshot blobs)', () => {
     expect(hasColumn(db, 'validations', 'screenshots')).toBe(true);
 
     db.close();
+  });
+});
+
+// ── Migration 104 — remove acceptance criteria ──────────────────────────────
+
+const MIGRATION_104_PATH = new URL(
+  '../../src/db/migrations/104_remove_acceptance_criteria.sql',
+  import.meta.url,
+);
+const MIGRATION_104_SQL = fs.readFileSync(MIGRATION_104_PATH, 'utf-8');
+
+function buildPre104Db(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_version (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE profiles (
+      name TEXT PRIMARY KEY,
+      skip_validation_phases TEXT,
+      evaluate_plan INTEGER
+    );
+    CREATE TABLE pods (
+      id TEXT PRIMARY KEY,
+      last_validation_result TEXT,
+      acceptance_criteria TEXT,
+      ac_from TEXT,
+      ac_self_report TEXT
+    );
+    CREATE TABLE validations (
+      id TEXT PRIMARY KEY,
+      result TEXT
+    );
+    CREATE TABLE watched_issues (
+      id INTEGER PRIMARY KEY,
+      pod_id TEXT
+    );
+  `);
+  db.prepare('INSERT INTO schema_version (version) VALUES (103)').run();
+}
+
+describe('runMigrations — migration 104 (remove acceptance criteria)', () => {
+  let tmpDir: string;
+  let migrationsDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'migrate-104-test-'));
+    migrationsDir = path.join(tmpDir, 'migrations');
+    fs.mkdirSync(migrationsDir);
+    fs.writeFileSync(
+      path.join(migrationsDir, '104_remove_acceptance_criteria.sql'),
+      MIGRATION_104_SQL,
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('rewrites skipped ac phase settings to facts and deduplicates existing facts', () => {
+    const db = new Database(':memory:');
+    buildPre104Db(db);
+    db.prepare(
+      'INSERT INTO profiles (name, skip_validation_phases, evaluate_plan) VALUES (?, ?, ?)',
+    ).run('legacy-ac', JSON.stringify(['ac']), 1);
+    db.prepare(
+      'INSERT INTO profiles (name, skip_validation_phases, evaluate_plan) VALUES (?, ?, ?)',
+    ).run('mixed', JSON.stringify(['lint', 'ac', 'facts', 'test']), 1);
+
+    runMigrations(db, migrationsDir, logger);
+
+    const rows = db.prepare('SELECT name, skip_validation_phases FROM profiles').all() as Array<{
+      name: string;
+      skip_validation_phases: string;
+    }>;
+    const phasesByProfile = new Map(
+      rows.map((row) => [row.name, JSON.parse(row.skip_validation_phases) as string[]]),
+    );
+    expect(phasesByProfile.get('legacy-ac')).toEqual(['facts']);
+    expect(phasesByProfile.get('mixed')).toEqual(['lint', 'facts', 'test']);
+    expect(hasColumn(db, 'profiles', 'evaluate_plan')).toBe(false);
+    expect(hasColumn(db, 'pods', 'acceptance_criteria')).toBe(false);
+    expect(hasColumn(db, 'watched_issues', 'phase')).toBe(true);
   });
 });

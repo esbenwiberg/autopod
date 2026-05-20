@@ -35,7 +35,7 @@ const STAGES: ValidationStage[] = [
   'test',
   'lint',
   'sast',
-  'acValidation',
+  'facts',
   'taskReview',
 ];
 
@@ -100,7 +100,7 @@ interface StoredValidationResult {
   test?: { status?: string } | null;
   lint?: { status?: string } | null;
   sast?: { status?: string } | null;
-  acValidation?: { status?: string } | null;
+  factValidation?: { status?: string } | null;
   taskReview?: { status?: string } | null;
 }
 
@@ -443,9 +443,9 @@ export function computeModelsAnalytics(
         if (sr.status === 'fail') sa[stage].failed.add(row.podId);
       }
     }
-    if (parsed.acValidation !== undefined && parsed.acValidation !== null) {
-      sa.acValidation.ran.add(row.podId);
-      if (parsed.acValidation.status === 'fail') sa.acValidation.failed.add(row.podId);
+    if (parsed.factValidation !== undefined && parsed.factValidation !== null) {
+      sa.facts.ran.add(row.podId);
+      if (parsed.factValidation.status === 'fail') sa.facts.failed.add(row.podId);
     }
     if (parsed.taskReview !== undefined && parsed.taskReview !== null) {
       sa.taskReview.ran.add(row.podId);

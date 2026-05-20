@@ -1,5 +1,4 @@
 import type {
-  AcDefinition,
   AgentMode,
   ExecutionTarget,
   NetworkPolicyMode,
@@ -44,14 +43,12 @@ export interface NewPod {
   creatorName?: string | null;
   maxValidationAttempts: number;
   skipValidation: boolean;
-  acceptanceCriteria?: AcDefinition[] | null;
   contract?: SpecContract | null;
   /** New-style pod options. If omitted, derived from `outputMode`. */
   options?: PodOptions;
   /** Legacy field — still persisted for wire back-compat. */
   outputMode: OutputMode;
   baseBranch?: string | null;
-  acFrom?: string | null;
   linkedPodId?: string | null;
   pimGroups?: PimGroupConfig[] | null;
   /** Existing PR URL (set at creation for fix pods to skip PR creation) */
@@ -130,7 +127,6 @@ export interface PodUpdates {
   } | null;
   claudeSessionId?: string | null;
   codexSessionId?: string | null;
-  acceptanceCriteria?: AcDefinition[] | null;
   contract?: SpecContract | null;
   recoveryWorktreePath?: string | null;
   reworkReason?: string | null;
@@ -175,7 +171,6 @@ export interface PodUpdates {
   kickedReason?: string | null;
   skipAgent?: boolean;
   deployBaselineHashes?: Record<string, string> | null;
-  acSelfReport?: Array<{ criterion: string; verified: boolean; notes?: string }> | null;
   phaseTokenUsage?: PhaseTokenUsage | null;
   networkPolicyResolved?: NetworkPolicyMode | null;
   lastRecoveryTrigger?: 'wake' | 'restart' | null;
@@ -208,10 +203,6 @@ export interface PodRepository {
 }
 
 /**
- * Normalize acceptance_criteria from DB — supports both old string[] (legacy)
- * and new AcDefinition[] (structured). Strings are wrapped as type:'none'.
- */
-/**
  * Parse the depends_on_pod_ids JSON array column, falling back to the legacy
  * single-value depends_on_pod_id column for rows that predate migration 048.
  */
@@ -230,38 +221,6 @@ function parseDependsOnPodIds(rawArray: unknown, rawSingle: unknown): string[] {
     return [rawSingle];
   }
   return [];
-}
-
-function parseAcceptanceCriteria(raw: unknown): AcDefinition[] | null {
-  if (!raw) return null;
-  let parsed: unknown[];
-  try {
-    parsed = JSON.parse(raw as string) as unknown[];
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(parsed)) return null;
-  return parsed.map((item) => {
-    if (typeof item !== 'object' || item === null) {
-      throw new Error(
-        'Legacy acceptance_criteria shape detected: item is not an object. Run the wrap-up SQL to clear legacy rows.',
-      );
-    }
-    const obj = item as Record<string, unknown>;
-    for (const legacyKey of ['test', 'pass', 'fail'] as const) {
-      if (legacyKey in obj) {
-        throw new Error(
-          `Legacy acceptance_criteria shape detected: field "${legacyKey}" found. Run the wrap-up SQL to clear legacy rows.`,
-        );
-      }
-    }
-    if (typeof obj.outcome !== 'string' || obj.outcome.length === 0) {
-      throw new Error(
-        `Invalid acceptance_criteria item: "outcome" is missing or empty. Run the wrap-up SQL to clear legacy rows.`,
-      );
-    }
-    return item as AcDefinition;
-  });
 }
 
 /**
@@ -341,14 +300,12 @@ function rowToSession(row: Record<string, unknown>): Pod {
     mergeBlockReason: (row.merge_block_reason as string) ?? null,
     plan: row.plan ? JSON.parse(row.plan as string) : null,
     progress: row.progress ? JSON.parse(row.progress as string) : null,
-    acceptanceCriteria: parseAcceptanceCriteria(row.acceptance_criteria),
     contract: row.contract ? (JSON.parse(row.contract as string) as SpecContract) : null,
     claudeSessionId: (row.claude_session_id as string) ?? null,
     codexSessionId: (row.codex_session_id as string) ?? null,
     options: readPodFromRow(row),
     outputMode: (row.output_mode as OutputMode) ?? 'pr',
     baseBranch: (row.base_branch as string) ?? null,
-    acFrom: (row.ac_from as string) ?? null,
     recoveryWorktreePath: (row.recovery_worktree_path as string) ?? null,
     reworkReason: (row.rework_reason as string) ?? null,
     reworkCount: (row.rework_count as number) ?? 0,
@@ -423,13 +380,6 @@ function rowToSession(row: Record<string, unknown>): Pod {
     deployBaselineHashes: row.deploy_baseline_hashes
       ? (JSON.parse(row.deploy_baseline_hashes as string) as Record<string, string>)
       : null,
-    acSelfReport: row.ac_self_report
-      ? (JSON.parse(row.ac_self_report as string) as Array<{
-          criterion: string;
-          verified: boolean;
-          notes?: string;
-        }>)
-      : null,
     phaseTokenUsage: row.phase_token_usage
       ? (JSON.parse(row.phase_token_usage as string) as Partial<
           Record<'review' | 'plan_eval', { inputTokens: number; outputTokens: number }>
@@ -460,18 +410,18 @@ export function createPodRepository(db: Database.Database): PodRepository {
       db.prepare(`
         INSERT INTO pods (
           id, profile_name, task, status, model, runtime, execution_target, branch,
-          user_id, creator_email, creator_name, max_validation_attempts, skip_validation, acceptance_criteria, contract,
+          user_id, creator_email, creator_name, max_validation_attempts, skip_validation, contract,
           output_mode, agent_mode, output_target, validate, promotable,
-          base_branch, ac_from, linked_pod_id, pim_groups, pr_url,
+          base_branch, linked_pod_id, pim_groups, pr_url,
           token_budget, reference_repos, scheduled_job_id,
           depends_on_pod_id, depends_on_pod_ids, series_id, series_name, series_description,
           series_design, brief_title, touches, does_not_touch, pr_mode, wait_for_merge,
           require_sidecars, auto_approve, disable_ask_human
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
-          @userId, @creatorEmail, @creatorName, @maxValidationAttempts, @skipValidation, @acceptanceCriteria, @contract,
+          @userId, @creatorEmail, @creatorName, @maxValidationAttempts, @skipValidation, @contract,
           @outputMode, @agentMode, @outputTarget, @validate, @promotable,
-          @baseBranch, @acFrom, @linkedPodId, @pimGroups, @prUrl,
+          @baseBranch, @linkedPodId, @pimGroups, @prUrl,
           @tokenBudget, @referenceRepos, @scheduledJobId,
           @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName, @seriesDescription,
           @seriesDesign, @briefTitle, @touches, @doesNotTouch, @prMode, @waitForMerge,
@@ -491,7 +441,6 @@ export function createPodRepository(db: Database.Database): PodRepository {
         creatorName: pod.creatorName ?? null,
         maxValidationAttempts: pod.maxValidationAttempts,
         skipValidation: pod.skipValidation ? 1 : 0,
-        acceptanceCriteria: pod.acceptanceCriteria ? JSON.stringify(pod.acceptanceCriteria) : null,
         contract: pod.contract ? JSON.stringify(pod.contract) : null,
         outputMode: legacyOutputMode,
         agentMode: podOpts.agentMode,
@@ -499,7 +448,6 @@ export function createPodRepository(db: Database.Database): PodRepository {
         validate: podOpts.validate ? 1 : 0,
         promotable: podOpts.promotable ? 1 : 0,
         baseBranch: pod.baseBranch ?? null,
-        acFrom: pod.acFrom ?? null,
         linkedPodId: pod.linkedPodId ?? null,
         pimGroups: pod.pimGroups ? JSON.stringify(pod.pimGroups) : null,
         prUrl: pod.prUrl ?? null,
@@ -630,11 +578,6 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.codexSessionId !== undefined) {
         setClauses.push('codex_session_id = @codexSessionId');
         params.codexSessionId = changes.codexSessionId;
-      }
-      if (changes.acceptanceCriteria !== undefined) {
-        setClauses.push('acceptance_criteria = @acceptanceCriteria');
-        params.acceptanceCriteria =
-          changes.acceptanceCriteria !== null ? JSON.stringify(changes.acceptanceCriteria) : null;
       }
       if (changes.contract !== undefined) {
         setClauses.push('contract = @contract');
@@ -825,11 +768,6 @@ export function createPodRepository(db: Database.Database): PodRepository {
           changes.deployBaselineHashes !== null
             ? JSON.stringify(changes.deployBaselineHashes)
             : null;
-      }
-      if (changes.acSelfReport !== undefined) {
-        setClauses.push('ac_self_report = @acSelfReport');
-        params.acSelfReport =
-          changes.acSelfReport !== null ? JSON.stringify(changes.acSelfReport) : null;
       }
       if (changes.phaseTokenUsage !== undefined) {
         setClauses.push('phase_token_usage = @phaseTokenUsage');

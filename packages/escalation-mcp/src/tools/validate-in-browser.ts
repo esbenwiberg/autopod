@@ -101,7 +101,7 @@ async function tryHostExecution(
       const entry = results[i];
       if (entry && b64) {
         const bytes = Buffer.from(b64, 'base64');
-        entry.screenshot = await bridge.storeScreenshot(podId, 'ac', `check-${i}.png`, bytes);
+        entry.screenshot = await bridge.storeScreenshot(podId, 'review', `check-${i}.png`, bytes);
       }
     } catch {
       // Screenshot may not exist if the check crashed before taking one
@@ -146,7 +146,7 @@ async function runInContainer(
       const entry = results[i];
       if (entry && b64.exitCode === 0 && b64.stdout.trim()) {
         const bytes = Buffer.from(b64.stdout.trim(), 'base64');
-        entry.screenshot = await bridge.storeScreenshot(podId, 'ac', `check-${i}.png`, bytes);
+        entry.screenshot = await bridge.storeScreenshot(podId, 'review', `check-${i}.png`, bytes);
       }
     } catch {
       // Screenshot may not exist if the check crashed before taking one

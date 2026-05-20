@@ -66,11 +66,11 @@ describe('ScheduledJobRepository', () => {
     db.prepare(`
       INSERT INTO pods (
         id, profile_name, task, status, model, runtime, execution_target, branch,
-        user_id, max_validation_attempts, skip_validation, acceptance_criteria,
+        user_id, max_validation_attempts, skip_validation,
         output_mode, scheduled_job_id
       ) VALUES (
         'linked-sess', 'test-profile', 'task', 'killed', 'opus', 'claude', 'local', 'main',
-        'user-1', 3, 0, NULL, 'pr', ?
+        'user-1', 3, 0, 'pr', ?
       )
     `).run(job.id);
 
@@ -152,11 +152,11 @@ describe('ScheduledJobRepository', () => {
     db.prepare(`
       INSERT INTO pods (
         id, profile_name, task, status, model, runtime, execution_target, branch,
-        user_id, max_validation_attempts, skip_validation, acceptance_criteria,
+        user_id, max_validation_attempts, skip_validation,
         output_mode, scheduled_job_id
       ) VALUES (
         'sess-1', 'test-profile', 'task', 'running', 'opus', 'claude', 'local', 'main',
-        'user-1', 3, 0, NULL, 'pr', ?
+        'user-1', 3, 0, 'pr', ?
       )
     `).run(job.id);
 
@@ -164,11 +164,11 @@ describe('ScheduledJobRepository', () => {
     db.prepare(`
       INSERT INTO pods (
         id, profile_name, task, status, model, runtime, execution_target, branch,
-        user_id, max_validation_attempts, skip_validation, acceptance_criteria,
+        user_id, max_validation_attempts, skip_validation,
         output_mode, scheduled_job_id
       ) VALUES (
         'sess-2', 'test-profile', 'task', 'complete', 'opus', 'claude', 'local', 'main',
-        'user-1', 3, 0, NULL, 'pr', ?
+        'user-1', 3, 0, 'pr', ?
       )
     `).run(job.id);
 
