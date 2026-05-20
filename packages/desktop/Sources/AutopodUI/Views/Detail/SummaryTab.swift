@@ -168,36 +168,7 @@ struct WorkTab: View {
     // MARK: - Prompt
 
     private var promptCard: some View {
-        HStack(alignment: .top, spacing: 0) {
-            Rectangle()
-                .fill(Color.accentColor.opacity(0.5))
-                .frame(width: 3)
-                .clipShape(RoundedRectangle(cornerRadius: 1.5))
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 4) {
-                    Image(systemName: "text.quote")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                    Text("Task")
-                        .font(.system(.caption, design: .default).weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                        .tracking(0.3)
-                }
-                Markdown(pod.task)
-                    .markdownTheme(.autopod)
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-        }
-        .background(Color(nsColor: .windowBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.12), lineWidth: 1))
+        TaskStructuredView(markdown: pod.task)
     }
 
     // MARK: - Plan
