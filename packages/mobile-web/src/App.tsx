@@ -1,23 +1,23 @@
-import { useEffect, useState } from 'react';
-import { readStoredToken, readTokenFromHash } from './lib/token.js';
+import { useEffect } from 'react';
+import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { readTokenFromHash } from './lib/token.js';
+import { Landing } from './screens/Landing.js';
+import { ScanAgain } from './screens/ScanAgain.js';
 
 export function App(): JSX.Element {
-  const [tokenLoaded, setTokenLoaded] = useState(false);
-
   useEffect(() => {
-    // Pair flow lands the phone here with `#token=<hex>` in the URL.
-    // Stash it and scrub the fragment so the token doesn't sit in
-    // browser history / shared screenshots.
+    // Pair flow lands the phone with `#token=<hex>` in the URL — stash it +
+    // scrub the fragment so the token doesn't sit in browser history.
     readTokenFromHash();
-    setTokenLoaded(Boolean(readStoredToken()));
   }, []);
 
   return (
-    <main>
-      <h1>Autopod</h1>
-      <p className={tokenLoaded ? 'ok' : 'warn'}>
-        {tokenLoaded ? 'token loaded ✓' : 'no token — scan the QR from `ap mobile pair`'}
-      </p>
-    </main>
+    <HashRouter>
+      <Routes>
+        <Route path="/" element={<Landing />} />
+        <Route path="/scan-again" element={<ScanAgain />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </HashRouter>
   );
 }
