@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { PodCard } from '../components/PodCard.js';
 import { byRecency, isActive, needsMe } from '../lib/pod-filters.js';
 import { usePodsStore } from '../store/pods.js';
@@ -31,20 +32,29 @@ export function Landing(): JSX.Element {
     <main>
       <header className="app-header">
         <h1>Autopod</h1>
-        <button
-          type="button"
-          className="refresh-button"
-          onClick={() => void refresh()}
-          disabled={loading}
-          aria-label={connected ? 'Live — tap to force refresh' : 'Disconnected — tap to retry'}
-          title={connected ? 'live' : 'reconnecting…'}
-        >
-          <span
-            className={connected ? 'conn-dot conn-dot-live' : 'conn-dot conn-dot-offline'}
-            aria-hidden="true"
-          />
-          {loading ? '…' : '↻'}
-        </button>
+        <div className="header-actions">
+          <Link
+            to="/create"
+            className="action-btn action-primary header-create"
+            aria-label="New pod"
+          >
+            + New
+          </Link>
+          <button
+            type="button"
+            className="refresh-button"
+            onClick={() => void refresh()}
+            disabled={loading}
+            aria-label={connected ? 'Live — tap to force refresh' : 'Disconnected — tap to retry'}
+            title={connected ? 'live' : 'reconnecting…'}
+          >
+            <span
+              className={connected ? 'conn-dot conn-dot-live' : 'conn-dot conn-dot-offline'}
+              aria-hidden="true"
+            />
+            {loading ? '…' : '↻'}
+          </button>
+        </div>
       </header>
 
       <nav className="tabs">

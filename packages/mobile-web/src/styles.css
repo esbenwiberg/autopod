@@ -62,6 +62,48 @@ code {
   padding: 0.5rem 0 1rem;
 }
 
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.header-create {
+  text-decoration: none;
+  padding: 0.45rem 0.85rem;
+  flex: 0 0 auto;
+  min-width: auto;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.form-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.form-select {
+  appearance: none;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.7rem;
+  font-size: 1rem;
+  font-family: inherit;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
 .refresh-button {
   appearance: none;
   background: var(--surface);
