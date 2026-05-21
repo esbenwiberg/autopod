@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createHostBrowserRunner } from './host-browser-runner.js';
+import { createHostBrowserRunner, resolvePlaywrightCwdFromEntry } from './host-browser-runner.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -16,6 +16,20 @@ describe('HostBrowserRunner', () => {
   });
 
   describe('getAvailability', () => {
+    it('uses the innermost node_modules parent for pnpm Playwright paths', () => {
+      expect(
+        resolvePlaywrightCwdFromEntry(
+          '/repo/node_modules/.pnpm/playwright@1.59.1/node_modules/playwright/index.js',
+        ),
+      ).toBe('/repo/node_modules/.pnpm/playwright@1.59.1');
+    });
+
+    it('uses the package parent for hoisted Playwright paths', () => {
+      expect(
+        resolvePlaywrightCwdFromEntry('/repo/packages/daemon/node_modules/playwright/index.js'),
+      ).toBe('/repo/packages/daemon');
+    });
+
     it('caches successful availability probes', async () => {
       const probeAvailability = vi.fn(async () => ({
         available: true,

@@ -49,17 +49,23 @@ export interface HostBrowserRunner {
  * Child processes spawned with `cwd` set to this directory can
  * `import 'playwright'` since ESM resolution walks up from cwd.
  */
+export function resolvePlaywrightCwdFromEntry(pwEntry: string): string | null {
+  const marker = '/node_modules/playwright/';
+  const markerIndex = pwEntry.lastIndexOf(marker);
+  if (markerIndex === -1) return null;
+  return pwEntry.slice(0, markerIndex);
+}
+
 function resolvePlaywright(): { cwd: string; packagePath: string } | null {
   try {
     const require = createRequire(import.meta.url);
     const pwEntry = require.resolve('playwright');
-    // pwEntry is something like .../packages/daemon/node_modules/playwright/index.js
-    // Walk up to the package directory that has playwright in its node_modules
-    const parts = pwEntry.split('/node_modules/');
-    if (parts.length >= 2) {
-      return { cwd: parts[0] ?? '', packagePath: pwEntry };
-    }
-    return null;
+    // pwEntry can be a pnpm real path like
+    // .../node_modules/.pnpm/playwright@x.y.z/node_modules/playwright/index.js.
+    // Use the innermost node_modules/playwright parent so bare ESM imports
+    // resolve from the child process cwd.
+    const cwd = resolvePlaywrightCwdFromEntry(pwEntry);
+    return cwd ? { cwd, packagePath: pwEntry } : null;
   } catch {
     return null;
   }
