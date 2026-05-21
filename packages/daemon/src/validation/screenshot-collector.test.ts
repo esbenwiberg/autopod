@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildAdoAttachmentRef,
   buildGitHubImageUrl,
+  collectFactScreenshots,
   collectScreenshots,
 } from './screenshot-collector.js';
 
@@ -135,6 +136,63 @@ describe('collectScreenshots', () => {
     // Index prefix ensures disambiguation
     expect(result[0]?.ref.filename).toBe('0-root.png');
     expect(result[1]?.ref.filename).toBe('1-about.png');
+  });
+});
+
+describe('collectFactScreenshots', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('promotes fact PNG attachments into the screenshot store', async () => {
+    const pngBuffer = Buffer.from('fact-png-data');
+    mockedFs.readFile.mockResolvedValue(pngBuffer);
+    const store = makeMockStore();
+    const factValidation = {
+      status: 'pass' as const,
+      results: [
+        {
+          factId: 'fact-page',
+          proves: ['page'],
+          kind: 'browser-test',
+          artifactPath: 'tests/fact.spec.ts',
+          command: 'node fact.mjs',
+          passed: true,
+          reasoning: 'Fact passed.',
+          attachments: [
+            {
+              kind: 'screenshot' as const,
+              path: '.autopod/evidence/fact-page/screenshot.png',
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = await collectFactScreenshots(
+      '/tmp/worktree/abc',
+      factValidation,
+      store,
+      'pod-1',
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.ref.source).toBe('fact');
+    expect(result[0]?.ref.filename).toBe('fact-page-0-screenshot.png');
+    expect(factValidation.results[0]?.attachments?.[0]?.screenshot).toEqual(result[0]?.ref);
+    expect(mockedFs.readFile).toHaveBeenCalledWith(
+      '/tmp/worktree/abc/.autopod/evidence/fact-page/screenshot.png',
+    );
+    expect(store.write).toHaveBeenCalledWith(
+      'pod-1',
+      'fact',
+      'fact-page-0-screenshot.png',
+      pngBuffer,
+    );
   });
 });
 

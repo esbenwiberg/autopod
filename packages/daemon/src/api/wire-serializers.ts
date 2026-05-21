@@ -1,7 +1,9 @@
 import type {
+  FactValidationResult,
   PageResult,
   Pod,
   ScreenshotRef,
+  ScreenshotSource,
   SystemEvent,
   TaskReviewResult,
   ValidationResult,
@@ -9,7 +11,7 @@ import type {
 
 export interface ScreenshotRefDto {
   url: string;
-  source: 'smoke' | 'review';
+  source: ScreenshotSource;
   path: string;
 }
 
@@ -36,6 +38,24 @@ function serializeTaskReview(review: TaskReviewResult): unknown {
   };
 }
 
+function serializeFactValidation(factValidation: FactValidationResult | null | undefined): unknown {
+  if (!factValidation) return factValidation;
+  return {
+    ...factValidation,
+    results: factValidation.results.map((fact) => ({
+      ...fact,
+      attachments: fact.attachments?.map((attachment) => {
+        if (!attachment.screenshot) return attachment;
+        const { screenshot, ...rest } = attachment;
+        return {
+          ...rest,
+          screenshot: toScreenshotRefDto(screenshot, attachment.label ?? attachment.path),
+        };
+      }),
+    })),
+  };
+}
+
 /**
  * Transform a stored ValidationResult, replacing all ScreenshotRef fields with
  * ScreenshotRefDto shapes suitable for the API wire format. Returns a new
@@ -45,6 +65,7 @@ export function serializeValidationResult(result: ValidationResult): unknown {
   return {
     ...result,
     smoke: { ...result.smoke, pages: serializePages(result.smoke.pages) },
+    factValidation: serializeFactValidation(result.factValidation),
     taskReview: result.taskReview ? serializeTaskReview(result.taskReview) : result.taskReview,
   };
 }

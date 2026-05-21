@@ -177,7 +177,13 @@ public struct ValidationTab: View {
       return refs.isEmpty ? nil : refs
     }()
     let proofOfWorkScreenshots: [ScreenshotRef]? = {
-      let refs = response.smoke.pages.compactMap { mapScreenshotRef($0.screenshot) }
+      let smokeRefs = response.smoke.pages.compactMap { mapScreenshotRef($0.screenshot) }
+      let factRefs = (response.factValidation?.results ?? []).flatMap { fact in
+        (fact.attachments ?? []).compactMap { attachment in
+          mapScreenshotRef(attachment.screenshot)
+        }
+      }
+      let refs = smokeRefs + factRefs
       return refs.isEmpty ? nil : refs
     }()
 

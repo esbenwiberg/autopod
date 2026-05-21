@@ -96,7 +96,7 @@ public struct DiffStats: Sendable {
 // MARK: - Screenshot reference (UI model)
 
 /// A screenshot captured during pod validation, resolved to an absolute URL.
-/// Set ordering for lightbox navigation: `smoke → review`, filename-sorted within bucket.
+/// Set ordering for lightbox navigation: `smoke → fact → review`, filename-sorted within bucket.
 public struct ScreenshotRef: Hashable, Sendable, Identifiable {
     public var id: String { url.absoluteString }
     public let url: URL
@@ -104,7 +104,7 @@ public struct ScreenshotRef: Hashable, Sendable, Identifiable {
     public let label: String  // page path | review index
 
     public enum Source: String, Sendable {
-        case smoke, review
+        case smoke, fact, review
     }
 
     public init(url: URL, source: Source, label: String) {

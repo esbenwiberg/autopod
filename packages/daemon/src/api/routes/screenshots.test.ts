@@ -129,6 +129,7 @@ describe('screenshotRoutes', () => {
       expect(res.statusCode).toBe(400);
       const body = JSON.parse(res.body) as { error: string };
       expect(body.error).toContain('smoke');
+      expect(body.error).toContain('fact');
     });
   });
 

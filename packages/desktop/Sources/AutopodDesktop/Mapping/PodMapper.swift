@@ -164,9 +164,15 @@ public enum PodMapper {
         return refs.isEmpty ? nil : refs
       }()
       let proofOfWorkScreenshots: [ScreenshotRef]? = {
-        let shots = v.smoke.pages.compactMap { p in
+        let smokeShots = v.smoke.pages.compactMap { p in
           mapScreenshotRef(p.screenshot, baseURL: baseURL)
         }
+        let factShots = (v.factValidation?.results ?? []).flatMap { fact in
+          (fact.attachments ?? []).compactMap { attachment in
+            mapScreenshotRef(attachment.screenshot, baseURL: baseURL)
+          }
+        }
+        let shots = smokeShots + factShots
         return shots.isEmpty ? nil : shots
       }()
       let dismissedFindingIds = Set(

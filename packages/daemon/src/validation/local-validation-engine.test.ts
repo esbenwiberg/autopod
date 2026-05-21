@@ -161,6 +161,36 @@ human_review: []
     expect(execCommands).not.toContain('printf host-fact');
   });
 
+  it('collects browser-test fact attachments written on the host', async () => {
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: true,
+        cached: false,
+        checkedAt: '2026-05-20T00:00:00.000Z',
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      })),
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+      readScreenshot: vi.fn(async () => ''),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp/autopod/screenshots'),
+    };
+
+    const { result } = await validateBrowserFact({
+      hostBrowserRunner,
+      command: 'printf png > "$AUTOPOD_FACT_SCREENSHOT_PATH"; printf host-fact',
+    });
+
+    expect(result.factValidation?.status).toBe('pass');
+    expect(result.factValidation?.results[0]?.attachments).toContainEqual({
+      kind: 'screenshot',
+      path: '.autopod/evidence/fact-page/screenshot.png',
+    });
+  });
+
   it('fails browser-test facts with host diagnostics when host Playwright is unavailable', async () => {
     const hostBrowserRunner: HostBrowserRunner = {
       getAvailability: vi.fn(async () => ({

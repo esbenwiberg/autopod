@@ -96,7 +96,11 @@ import { cleanupCodexState, ensureCodexStateDir } from '../runtimes/codex-state-
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
-import { buildGitHubImageUrl, collectScreenshots } from '../validation/screenshot-collector.js';
+import {
+  buildGitHubImageUrl,
+  collectFactScreenshots,
+  collectScreenshots,
+} from '../validation/screenshot-collector.js';
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import { DeletionGuardError, GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
@@ -7395,6 +7399,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           validationAbortControllers.delete(podId);
         }
 
+        // Host browser facts write evidence directly to the host worktree. Collect
+        // those screenshots before syncWorkspaceBack mirrors /workspace over it.
+        if (pod.worktreePath && result.factValidation?.results.length && screenshotStore) {
+          try {
+            const screenshots = await collectFactScreenshots(
+              pod.worktreePath,
+              result.factValidation,
+              screenshotStore,
+              pod.id,
+            );
+            logger.info({ podId, count: screenshots.length }, 'Collected host fact screenshots');
+          } catch (err) {
+            logger.warn({ err, podId }, 'Failed to collect host fact screenshots');
+          }
+        }
+
         // Sync workspace after validation — screenshots and build artifacts are now in /workspace
         if (pod.containerId && pod.worktreePath) {
           try {
@@ -7424,6 +7444,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             logger.info({ podId, count: screenshots.length }, 'Collected validation screenshots');
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to collect screenshots');
+          }
+        }
+
+        if (pod.worktreePath && result.factValidation?.results.length && screenshotStore) {
+          try {
+            const screenshots = await collectFactScreenshots(
+              pod.worktreePath,
+              result.factValidation,
+              screenshotStore,
+              pod.id,
+            );
+            logger.info({ podId, count: screenshots.length }, 'Collected fact screenshots');
+          } catch (err) {
+            logger.warn({ err, podId }, 'Failed to collect fact screenshots');
           }
         }
 

@@ -91,11 +91,12 @@ describe('ScreenshotStore', () => {
 
   // ── list ordering invariant ──────────────────────────────────────
 
-  it('list returns refs in smoke -> review order, filename-sorted within bucket', async () => {
+  it('list returns refs in smoke -> fact -> review order, filename-sorted within bucket', async () => {
     const store = createScreenshotStore(tmpDir);
     const podId = 'pod-list';
     // Write out-of-canonical-order
     await store.write(podId, 'review', 'z.png', TINY_PNG);
+    await store.write(podId, 'fact', 'proof.png', TINY_PNG);
     await store.write(podId, 'smoke', 'b.png', TINY_PNG);
     await store.write(podId, 'smoke', 'a.png', TINY_PNG);
     await store.write(podId, 'review', 'a.png', TINY_PNG);
@@ -104,6 +105,7 @@ describe('ScreenshotStore', () => {
     expect(refs.map((r) => `${r.source}/${r.filename}`)).toEqual([
       'smoke/a.png',
       'smoke/b.png',
+      'fact/proof.png',
       'review/a.png',
       'review/z.png',
     ]);

@@ -1,7 +1,7 @@
 import type { PageAssertion } from './profile.js';
 import type { DeviationsAssessment } from './task-summary.js';
 
-export type ScreenshotSource = 'smoke' | 'review';
+export type ScreenshotSource = 'smoke' | 'fact' | 'review';
 
 export interface ScreenshotRef {
   podId: string;
@@ -123,6 +123,8 @@ export interface FactEvidenceAttachment {
   kind: 'screenshot' | 'trace' | 'video' | 'report' | 'log' | 'artifact';
   path: string;
   label?: string;
+  /** Reference to the on-disk screenshot when this attachment is a collected PNG screenshot. */
+  screenshot?: ScreenshotRef;
 }
 
 export interface FactValidationResult {

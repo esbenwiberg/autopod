@@ -1,6 +1,6 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import type { PageResult, ScreenshotRef } from '@autopod/shared';
+import type { FactValidationResult, PageResult, ScreenshotRef } from '@autopod/shared';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import { slugifyPagePath } from '../pods/screenshot-store.js';
 
@@ -8,6 +8,12 @@ export interface CollectedScreenshot {
   /** Validation page path (e.g. '/', '/about') */
   pagePath: string;
   /** The stored screenshot reference */
+  ref: ScreenshotRef;
+}
+
+export interface CollectedFactScreenshot {
+  factId: string;
+  attachmentPath: string;
   ref: ScreenshotRef;
 }
 
@@ -46,6 +52,55 @@ export async function collectScreenshots(
       collected.push({ pagePath: page.path, ref });
     } catch {
       // Screenshot file doesn't exist (validation may have failed before capture)
+    }
+  }
+
+  return collected;
+}
+
+/**
+ * Collect PNG screenshots declared by required-fact attachments and promote
+ * them into the same on-disk screenshot store used by smoke/review evidence.
+ *
+ * Fact commands still own what constitutes meaningful proof. The validator's
+ * job here is plumbing: if a fact wrote `.autopod/evidence/<fact-id>/*.png`,
+ * make that image visible in Proof of Work instead of burying it in YAML.
+ */
+export async function collectFactScreenshots(
+  worktreePath: string,
+  factValidation: FactValidationResult | null | undefined,
+  store: ScreenshotStore,
+  podId: string,
+): Promise<CollectedFactScreenshot[]> {
+  const collected: CollectedFactScreenshot[] = [];
+  const facts = factValidation?.results ?? [];
+
+  for (const fact of facts) {
+    const attachments = fact.attachments ?? [];
+    for (let idx = 0; idx < attachments.length; idx++) {
+      const attachment = attachments[idx];
+      if (!attachment || attachment.kind !== 'screenshot') continue;
+      if (path.isAbsolute(attachment.path)) continue;
+      if (!attachment.path.toLowerCase().endsWith('.png')) continue;
+
+      const hostPath = path.resolve(worktreePath, attachment.path);
+      const worktreeRoot = path.resolve(worktreePath);
+      if (hostPath !== worktreeRoot && !hostPath.startsWith(`${worktreeRoot}${path.sep}`)) {
+        continue;
+      }
+
+      try {
+        const buffer = await fsp.readFile(hostPath);
+        const basename = path.basename(attachment.path, path.extname(attachment.path));
+        const safeFactId = fact.factId.replace(/[^A-Za-z0-9._-]/g, '_') || 'fact';
+        const safeBase = basename.replace(/[^A-Za-z0-9._-]/g, '_') || 'screenshot';
+        const filename = `${safeFactId}-${idx}-${safeBase}.png`;
+        const ref = await store.write(podId, 'fact', filename, buffer);
+        attachment.screenshot = ref;
+        collected.push({ factId: fact.factId, attachmentPath: attachment.path, ref });
+      } catch {
+        // Screenshot file doesn't exist or could not be read; keep the textual attachment.
+      }
     }
   }
 

@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { mkdir, readdir } from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
   DeviationsAssessment,
@@ -751,11 +753,15 @@ async function runFactValidation(
     try {
       commandResult =
         fact.kind === 'browser-test'
-          ? await runBrowserFactOnHost(fact.command, config, hostBrowserRunner, log)
+          ? await runBrowserFactOnHost(fact.command, fact.id, config, hostBrowserRunner, log)
           : await containerManager.execInContainer(config.containerId, ['sh', '-c', fact.command], {
               cwd,
               timeout: config.testTimeout ?? 600_000,
-              ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
+              env: {
+                ...(config.extraExecEnv ?? {}),
+                AUTOPOD_FACT_EVIDENCE_DIR: `/workspace/.autopod/evidence/${fact.id}`,
+                AUTOPOD_FACT_SCREENSHOT_PATH: `/workspace/.autopod/evidence/${fact.id}/screenshot.png`,
+              },
             });
     } catch (err) {
       const partial = (err as { partialOutput?: string })?.partialOutput;
@@ -769,7 +775,10 @@ async function runFactValidation(
     const durationMs = Date.now() - commandStart;
 
     const commandPassed = commandResult.exitCode === 0;
-    const attachments = await collectFactAttachments(containerManager, config, fact.id, log);
+    const attachments =
+      fact.kind === 'browser-test' && config.worktreePath
+        ? await collectHostFactAttachments(config.worktreePath, fact.id, log)
+        : await collectFactAttachments(containerManager, config, fact.id, log);
     const passed = artifactExists && artifactChanged && commandPassed;
     const failedReasons = [
       artifactExists ? null : `artifact ${artifactPath} does not exist`,
@@ -815,6 +824,7 @@ async function runFactValidation(
 
 async function runBrowserFactOnHost(
   command: string,
+  factId: string,
   config: ValidationEngineConfig,
   hostBrowserRunner: HostBrowserRunner | undefined,
   log?: Logger,
@@ -844,11 +854,16 @@ async function runBrowserFactOnHost(
     throw new Error('Host worktree path is required for browser-test fact execution');
   }
 
+  const evidenceDir = path.join(config.worktreePath, '.autopod', 'evidence', factId);
+  await mkdir(evidenceDir, { recursive: true });
+
   const env = {
     ...process.env,
     ...(config.extraExecEnv ?? {}),
     AUTOPOD_PREVIEW_URL: config.previewUrl,
     AUTOPOD_CONTAINER_BASE_URL: config.containerBaseUrl ?? config.previewUrl,
+    AUTOPOD_FACT_EVIDENCE_DIR: evidenceDir,
+    AUTOPOD_FACT_SCREENSHOT_PATH: path.join(evidenceDir, 'screenshot.png'),
   };
   log?.info({ command, worktreePath: config.worktreePath }, 'running browser-test fact on host');
   try {
@@ -925,6 +940,47 @@ async function collectFactAttachments(
     log?.warn({ err, factId }, 'required fact attachment collection failed');
     return [];
   }
+}
+
+async function collectHostFactAttachments(
+  worktreePath: string,
+  factId: string,
+  log?: Logger,
+): Promise<FactCheckResult['attachments']> {
+  const evidenceDir = path.join(worktreePath, '.autopod', 'evidence', factId);
+  const root = path.resolve(worktreePath);
+  const attachments: NonNullable<FactCheckResult['attachments']> = [];
+
+  async function walk(dir: string): Promise<void> {
+    let entries: Awaited<ReturnType<typeof readdir>>;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+
+      const rel = path.relative(root, fullPath);
+      if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue;
+      attachments.push({ kind: attachmentKindForPath(rel), path: rel });
+      if (attachments.length >= 100) return;
+    }
+  }
+
+  try {
+    await walk(evidenceDir);
+  } catch (err) {
+    log?.warn({ err, factId }, 'required fact host attachment collection failed');
+  }
+
+  return attachments;
 }
 
 function attachmentKindForPath(

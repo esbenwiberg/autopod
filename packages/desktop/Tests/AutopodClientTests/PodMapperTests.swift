@@ -779,6 +779,31 @@ import AutopodUI
           }
         ]
       },
+      "factValidation": {
+        "status": "pass",
+        "results": [
+          {
+            "factId": "fact-page",
+            "proves": ["page"],
+            "kind": "browser-test",
+            "artifactPath": "tests/fact.spec.ts",
+            "command": "node fact.mjs",
+            "passed": true,
+            "reasoning": "Fact passed.",
+            "attachments": [
+              {
+                "kind": "screenshot",
+                "path": ".autopod/evidence/fact-page/screenshot.png",
+                "screenshot": {
+                  "url": "/pods/ord-test/screenshots/fact/fact-page-0-screenshot.png",
+                  "source": "fact",
+                  "path": ".autopod/evidence/fact-page/screenshot.png"
+                }
+              }
+            ]
+          }
+        ]
+      },
       "taskReview": {
         "status": "pass",
         "reasoning": "good",
@@ -797,28 +822,30 @@ import AutopodUI
   let response = try JSONDecoder().decode(SessionResponse.self, from: sessionJson)
   let pod = PodMapper.map(response, baseURL: baseURL)
 
-  // proofOfWorkScreenshots = smoke only (2 pages), in page order
+  // proofOfWorkScreenshots = smoke + fact screenshots, in validation order.
   let pow = pod.validationChecks?.proofOfWorkScreenshots
-  #expect(pow?.count == 2)
+  #expect(pow?.count == 3)
   #expect(pow?.first?.source == .smoke)
   #expect(pow?.first?.label == "/about")  // first page in JSON
-  #expect(pow?.last?.label == "/root")
+  #expect(pow?[1].label == "/root")
+  #expect(pow?.last?.source == .fact)
 
   // Review screenshots
   let reviewShots = pod.validationChecks?.taskReviewScreenshots
   #expect(reviewShots?.count == 1)
   #expect(reviewShots?.first?.source == .review)
 
-  // Combined canonical ordering (mirrors ValidationTab.screenshotSet: smoke -> review).
+  // Combined canonical ordering (mirrors ValidationTab.screenshotSet: smoke -> fact -> review).
   // This is the array the lightbox receives for arrow-key navigation.
   let combined: [ScreenshotRef] =
     (pod.validationChecks?.proofOfWorkScreenshots ?? []) +
     (pod.validationChecks?.taskReviewScreenshots ?? [])
-  #expect(combined.count == 3)
-  #expect(combined.map(\.source) == [.smoke, .smoke, .review])
+  #expect(combined.count == 4)
+  #expect(combined.map(\.source) == [.smoke, .smoke, .fact, .review])
   #expect(combined[0].label == "/about")
   #expect(combined[1].label == "/root")
-  #expect(combined[2].label == "0")
+  #expect(combined[2].label == ".autopod/evidence/fact-page/screenshot.png")
+  #expect(combined[3].label == "0")
 }
 
 // MARK: - hasWebUi mapping tests (brief 02)

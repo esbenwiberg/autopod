@@ -95,6 +95,44 @@ describe('serializeValidationResult', () => {
       path: '0',
     });
   });
+
+  it('rewrites fact screenshot attachments and labels them with attachment context', () => {
+    const v: ValidationResult = {
+      ...baseValidation(),
+      factValidation: {
+        status: 'pass',
+        results: [
+          {
+            factId: 'fact-page',
+            proves: ['page'],
+            kind: 'browser-test',
+            artifactPath: 'src/page.test.ts',
+            command: 'node fact.mjs',
+            passed: true,
+            reasoning: 'Fact passed.',
+            attachments: [
+              {
+                kind: 'screenshot',
+                path: '.autopod/evidence/fact-page/screenshot.png',
+                label: 'Rendered page',
+                screenshot: ref({ source: 'fact', filename: 'fact-page-0-screenshot.png' }),
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const out = serializeValidationResult(v) as {
+      factValidation: {
+        results: Array<{ attachments?: Array<{ screenshot?: { url: string; source: string } }> }>;
+      };
+    };
+    expect(out.factValidation.results[0]?.attachments?.[0]?.screenshot).toEqual({
+      url: '/pods/pod-12345/screenshots/fact/fact-page-0-screenshot.png',
+      source: 'fact',
+      path: 'Rendered page',
+    });
+  });
 });
 
 describe('serializePodForWire', () => {

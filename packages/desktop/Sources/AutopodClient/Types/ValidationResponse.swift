@@ -26,7 +26,7 @@ public struct ValidationFindingResponse: Codable, Sendable {
 /// Field names match the daemon's wire shape exactly — no remapping.
 public struct ScreenshotRefResponse: Codable, Sendable, Hashable {
   public let url: String     // "/pods/:podId/screenshots/:source/:filename"
-  public let source: String  // "smoke" | "review"
+  public let source: String  // "smoke" | "fact" | "review"
   public let path: String    // page path | review index
 }
 
@@ -186,6 +186,7 @@ public struct FactEvidenceAttachmentResponse: Codable, Sendable, Hashable {
   public let kind: String
   public let path: String
   public let label: String?
+  public let screenshot: ScreenshotRefResponse?
 }
 
 // MARK: - Task Review
