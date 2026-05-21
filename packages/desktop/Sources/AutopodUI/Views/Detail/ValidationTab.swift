@@ -1067,7 +1067,11 @@ public struct ValidationTab: View {
         CollapsibleSection(title: "Scenarios", icon: "list.bullet.rectangle", initiallyExpanded: true) {
           VStack(alignment: .leading, spacing: 8) {
             ForEach(contract.scenarios, id: \.id) { scenario in
-              scenarioCard(scenario)
+              scenarioCard(
+                scenario,
+                facts: contract.requiredFacts.filter { $0.proves.contains(scenario.id) },
+                evidenceByFact: evidenceByFact
+              )
             }
           }
         }
@@ -1104,8 +1108,12 @@ public struct ValidationTab: View {
   }
 
   @ViewBuilder
-  private func scenarioCard(_ scenario: ContractScenarioResponse) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
+  private func scenarioCard(
+    _ scenario: ContractScenarioResponse,
+    facts: [RequiredFactResponse],
+    evidenceByFact: [String: FactCheckDetail]
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
       HStack(spacing: 8) {
         Image(systemName: "list.bullet.rectangle")
           .font(.system(size: 12))
@@ -1124,21 +1132,33 @@ public struct ValidationTab: View {
           .background(Color.blue.opacity(0.12), in: Capsule())
       }
 
-      ViewThatFits(in: .horizontal) {
-        HStack(alignment: .top, spacing: 10) {
-          scenarioColumn("Given", scenario.given)
-          scenarioColumn("When", scenario.when)
-          scenarioColumn("Then", scenario.then)
-        }
+      VStack(alignment: .leading, spacing: 6) {
+        scenarioStepRow(label: "G", title: "Given", lines: scenario.given)
+        scenarioStepRow(label: "W", title: "When", lines: scenario.when)
+        scenarioStepRow(label: "T", title: "Then", lines: scenario.then)
+      }
 
-        VStack(alignment: .leading, spacing: 10) {
-          scenarioColumn("Given", scenario.given)
-          scenarioColumn("When", scenario.when)
-          scenarioColumn("Then", scenario.then)
+      if !facts.isEmpty {
+        ViewThatFits(in: .horizontal) {
+          HStack(alignment: .center, spacing: 6) {
+            scenarioProofLabel
+            ForEach(facts, id: \.id) { fact in
+              scenarioFactChip(fact, evidence: evidenceByFact[fact.id])
+            }
+          }
+
+          VStack(alignment: .leading, spacing: 6) {
+            scenarioProofLabel
+            HStack(spacing: 6) {
+              ForEach(facts, id: \.id) { fact in
+                scenarioFactChip(fact, evidence: evidenceByFact[fact.id])
+              }
+            }
+          }
         }
       }
     }
-    .padding(12)
+    .padding(10)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(Color(nsColor: .controlBackgroundColor))
     .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -1146,18 +1166,21 @@ public struct ValidationTab: View {
   }
 
   @ViewBuilder
-  private func scenarioColumn(_ label: String, _ lines: [String]) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Text(label.uppercased())
+  private func scenarioStepRow(label: String, title: String, lines: [String]) -> some View {
+    HStack(alignment: .top, spacing: 8) {
+      Text(label)
+        .font(.system(size: 9, weight: .bold, design: .rounded))
+        .foregroundStyle(.blue)
+        .frame(width: 18, height: 18)
+        .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
+      Text(title.uppercased())
         .font(.system(size: 9, weight: .semibold))
-        .foregroundStyle(.secondary)
-        .tracking(0.4)
-      ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-        HStack(alignment: .top, spacing: 6) {
-          Circle()
-            .fill(Color.secondary.opacity(0.45))
-            .frame(width: 4, height: 4)
-            .padding(.top, 6)
+        .foregroundStyle(.tertiary)
+        .tracking(0.35)
+        .frame(width: 38, alignment: .leading)
+        .padding(.top, 3)
+      VStack(alignment: .leading, spacing: 3) {
+        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
           Text(line)
             .font(.caption)
             .foregroundStyle(.primary)
@@ -1165,11 +1188,32 @@ public struct ValidationTab: View {
             .textSelection(.enabled)
         }
       }
+      .padding(.top, 2)
     }
-    .padding(10)
-    .frame(maxWidth: .infinity, alignment: .topLeading)
-    .background(Color(nsColor: .windowBackgroundColor).opacity(0.55))
-    .clipShape(RoundedRectangle(cornerRadius: 6))
+  }
+
+  private var scenarioProofLabel: some View {
+    Label("proven by", systemImage: "checkmark.seal")
+      .font(.system(size: 10, weight: .semibold))
+      .foregroundStyle(.secondary)
+      .labelStyle(.titleAndIcon)
+  }
+
+  private func scenarioFactChip(_ fact: RequiredFactResponse, evidence: FactCheckDetail?) -> some View {
+    let color: Color = evidence == nil ? .secondary : (evidence?.passed == true ? .green : .red)
+    let icon = evidence == nil ? "clock" : (evidence?.passed == true ? "checkmark.circle.fill" : "xmark.circle.fill")
+    return HStack(spacing: 4) {
+      Image(systemName: icon)
+        .font(.system(size: 9, weight: .semibold))
+      Text(fact.id)
+        .font(.system(.caption2, design: .monospaced).weight(.semibold))
+        .lineLimit(1)
+        .truncationMode(.middle)
+    }
+    .foregroundStyle(color)
+    .padding(.horizontal, 7)
+    .padding(.vertical, 3)
+    .background(color.opacity(0.10), in: Capsule())
   }
 
   @ViewBuilder
