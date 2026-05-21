@@ -113,6 +113,10 @@ function looksNarrowedCommand(command: string): boolean {
   return /\s(--grep|-g)\s+\S+/.test(command) || /\s--testNamePattern(=|\s+)\S+/.test(command);
 }
 
+function looksLikeMcpToolCommand(command: string): boolean {
+  return /^validate_in_browser(\s|$)/.test(command.trim());
+}
+
 export function validateSpecContract(contract: SpecContract): void {
   assertUnique(
     contract.scenarios.map((s) => s.id),
@@ -146,6 +150,11 @@ export function validateSpecContract(contract: SpecContract): void {
     if (looksGenericCommand(fact.command)) {
       throw new BriefParseError(
         `required_facts "${fact.id}" uses a generic command. Point at a scenario-specific command.`,
+      );
+    }
+    if (looksLikeMcpToolCommand(fact.command)) {
+      throw new BriefParseError(
+        `required_facts "${fact.id}" uses validate_in_browser MCP tool syntax. Use an executable browser-test command instead.`,
       );
     }
   }

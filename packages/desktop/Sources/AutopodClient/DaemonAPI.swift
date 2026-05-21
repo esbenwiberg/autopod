@@ -557,7 +557,7 @@ public actor DaemonAPI {
 
   public func updateFromBase(_ id: String) async throws -> UpdateFromBaseResponse {
     let path = "/pods/\(id)/update-from-base"
-    var components = URLComponents(
+    let components = URLComponents(
       url: baseURL.appendingPathComponent(path),
       resolvingAgainstBaseURL: false
     )!

@@ -271,8 +271,10 @@ Allowed `artifact.change` values: `create`, `update`, `touch`. Use only those
 exact values; never use `edit`, `modify`, or `write`.
 For web-visible behavior, prefer `browser-test` with a durable Playwright or
 equivalent browser test artifact. The worker creates/updates the proof artifact;
-Autopod runs the command and writes attempt-scoped `evidence.yaml`. Never ask the
-worker to author evidence directly.
+Autopod runs the command and writes attempt-scoped `evidence.yaml`. The command
+must be an executable shell command such as `npx playwright test ...` or
+`npm run smoke -- ...`; never use MCP tool syntax such as `validate_in_browser`
+in `required_facts`. Never ask the worker to author evidence directly.
 Browser/report facts may write attachments under
 `.autopod/evidence/<fact-id>/`; Autopod records those paths as screenshots,
 traces, videos, reports, logs, or generic artifacts in `evidence.yaml`.

@@ -48,6 +48,29 @@ human_review: []
     ).toThrow(/kind must be one of/);
   });
 
+  it('rejects validate_in_browser MCP tool syntax in required facts', () => {
+    expect(() =>
+      parseSpecContract(`contract_version: 1
+title: MCP tool command
+depends_on: []
+scenarios:
+  - id: page
+    given: ["state"]
+    when: ["open page"]
+    then: ["page works"]
+required_facts:
+  - id: fact-page
+    proves: [page]
+    kind: browser-test
+    artifact:
+      path: tests/e2e/page.spec.ts
+      change: create
+    command: validate_in_browser /page 'assert[text="Ready"]'
+human_review: []
+`),
+    ).toThrow(/validate_in_browser MCP tool syntax/);
+  });
+
   it('rejects multiple facts that share the same broad command', () => {
     expect(() =>
       parseSpecContract(`contract_version: 1
