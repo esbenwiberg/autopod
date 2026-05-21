@@ -113,15 +113,15 @@ describe('ap mobile pair', () => {
     expect(cap.errors.join('\n')).toContain('AUTOPOD_ALLOW_DEV_AUTH');
   });
 
-  it('builds a URL with the token in the fragment, not the query', async () => {
+  it('builds a route-friendly URL with the token in the fragment, not the request query', async () => {
     fs.writeFileSync(path.join(tmpHome, '.autopod', 'dev-token'), 'deadbeefcafe\n');
     mockTailscaleOutput = JSON.stringify({ Self: { DNSName: 'mymac.tail1234.ts.net.' } });
 
     const cap = await runMobile(['pair']);
     const all = cap.logs.join('\n');
-    expect(all).toContain('https://mymac.tail1234.ts.net/mobile/#token=deadbeefcafe');
-    // Negative check: token must not appear in a query string
-    expect(all).not.toMatch(/\?token=/);
+    expect(all).toContain('https://mymac.tail1234.ts.net/mobile/#/pair?token=deadbeefcafe');
+    // Negative check: token must not appear before the URL fragment.
+    expect(all).not.toMatch(/\/mobile\/\?token=/);
   });
 
   it('respects --host override and skips tailscale lookup', async () => {
@@ -131,7 +131,9 @@ describe('ap mobile pair', () => {
 
     const cap = await runMobile(['pair', '--host', 'override.example.ts.net']);
     expect(cap.exitCode).toBeUndefined();
-    expect(cap.logs.join('\n')).toContain('https://override.example.ts.net/mobile/#token=tok123');
+    expect(cap.logs.join('\n')).toContain(
+      'https://override.example.ts.net/mobile/#/pair?token=tok123',
+    );
   });
 
   it('fails clearly when neither tailscale nor --host yields a hostname', async () => {

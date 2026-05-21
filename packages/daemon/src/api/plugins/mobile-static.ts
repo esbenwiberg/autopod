@@ -27,9 +27,9 @@ function resolveMobileDist(): string | null {
  * (see `auth.ts`). The SPA itself enforces auth client-side using the dev
  * token paired via the `ap mobile pair` QR flow.
  *
- * `wildcard: false` keeps unknown sub-paths returning a clean 404 rather
- * than the SPA shell — deep links work via HashRouter (`/mobile/#/pod/abc`),
- * so a server-side catch-all is not needed.
+ * Deep links work via HashRouter (`/mobile/#/pod/abc`), so a server-side
+ * SPA-shell catch-all is not needed. Unknown asset paths still return a
+ * clean 404 from @fastify/static.
  *
  * Mount is skipped (with a warn log) when the dist dir is missing, so the
  * daemon stays usable when the PWA hasn't been built.
@@ -49,7 +49,6 @@ export async function mobileStaticPlugin(app: FastifyInstance): Promise<void> {
     prefix: '/mobile/',
     index: ['index.html'],
     decorateReply: false,
-    wildcard: false,
   });
 
   app.log.info({ root: mobileDist }, 'Mobile PWA mounted at /mobile/');

@@ -48,6 +48,22 @@ describe('mobileStaticPlugin', () => {
     expect(res.body).toBe('{"name":"Autopod"}');
   });
 
+  it('serves nested built asset files', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'index.html'), '<!doctype html>');
+    fs.mkdirSync(path.join(tmpDir, 'assets'));
+    fs.writeFileSync(path.join(tmpDir, 'assets', 'index-test.js'), 'console.log("ok");');
+    process.env.AUTOPOD_MOBILE_DIST = tmpDir;
+
+    app = Fastify();
+    await mobileStaticPlugin(app);
+    await app.ready();
+
+    const res = await app.inject({ method: 'GET', url: '/mobile/assets/index-test.js' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toMatch(/javascript/);
+    expect(res.body).toBe('console.log("ok");');
+  });
+
   it('returns 404 for unknown paths (HashRouter — no SPA-shell fallback)', async () => {
     fs.writeFileSync(path.join(tmpDir, 'index.html'), '<!doctype html>');
     process.env.AUTOPOD_MOBILE_DIST = tmpDir;

@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { STORAGE_KEY, clearStoredToken, readStoredToken, readTokenFromHash } from './token.js';
+import {
+  clearStoredToken,
+  extractPairingToken,
+  readStoredToken,
+  readTokenFromHash,
+  storeToken,
+} from './token.js';
 
 describe('token storage', () => {
   beforeEach(() => {
@@ -38,8 +44,34 @@ describe('token storage', () => {
   });
 
   it('clearStoredToken removes the persisted value', () => {
-    window.localStorage.setItem(STORAGE_KEY, 'x');
+    storeToken('x');
     clearStoredToken();
     expect(readStoredToken()).toBeNull();
+  });
+
+  it('extracts a token from a full pairing URL', () => {
+    expect(extractPairingToken('https://macbook.tail.ts.net/mobile/#token=abc123')).toBe(
+      'abc123',
+    );
+  });
+
+  it('extracts a token from the hash-router pairing URL', () => {
+    expect(extractPairingToken('https://macbook.tail.ts.net/mobile/#/pair?token=abc123')).toBe(
+      'abc123',
+    );
+  });
+
+  it('accepts a raw pasted token', () => {
+    expect(extractPairingToken('  abc123  ')).toBe('abc123');
+  });
+
+  it('falls back to a token query parameter for manual recovery', () => {
+    expect(extractPairingToken('https://macbook.tail.ts.net/mobile/?token=abc123')).toBe(
+      'abc123',
+    );
+  });
+
+  it('ignores a URL without a pairing token', () => {
+    expect(extractPairingToken('https://macbook.tail.ts.net/mobile/#/scan-again')).toBeNull();
   });
 });

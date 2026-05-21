@@ -8,6 +8,7 @@ import { SkipValidationToggle } from '../components/SkipValidationToggle.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { ValidationSummary } from '../components/ValidationSummary.js';
 import { ApiError, AuthRequiredError, apiFetch } from '../lib/api.js';
+import { progressDetail, progressLabel, taskTitle } from '../lib/pod-display.js';
 import { ACTIVITY_LIMIT, usePodsStore } from '../store/pods.js';
 
 export function PodDetail(): JSX.Element {
@@ -77,26 +78,65 @@ export function PodDetail(): JSX.Element {
         <div className="detail-id">{data.id}</div>
         <StatusChip status={data.status} />
       </header>
-      <p className="detail-task">{data.task}</p>
+      <h1 className="detail-title">{taskTitle(data.task)}</h1>
       <p className="muted detail-meta">
         {data.profileName} · {data.runtime} · {data.model}
       </p>
+
+      <ProgressPlan pod={data} />
 
       {data.pendingEscalation ? (
         <EscalationCard podId={data.id} escalation={data.pendingEscalation} />
       ) : null}
 
+      {data.lastValidationResult ? <ValidationSummary result={data.lastValidationResult} /> : null}
+
       <ActionBar pod={data} />
 
       <SkipValidationToggle pod={data} />
 
-      {data.lastValidationResult ? <ValidationSummary result={data.lastValidationResult} /> : null}
+      <details className="task-details">
+        <summary>Full task</summary>
+        <p>{data.task}</p>
+      </details>
 
       <section className="activity-section">
         <h2>Recent activity</h2>
         <ActivityList events={activity} />
       </section>
     </main>
+  );
+}
+
+function ProgressPlan({ pod }: { pod: Pod }): JSX.Element | null {
+  const progress = progressLabel(pod);
+  const detail = progressDetail(pod);
+  const hasPlan = Boolean(pod.plan);
+  if (!progress && !hasPlan) return null;
+
+  return (
+    <section className="info-panel">
+      {progress ? (
+        <div className="info-block">
+          <div className="info-kicker">Progress</div>
+          <div className="info-title">{progress}</div>
+          {detail ? <div className="info-copy">{detail}</div> : null}
+        </div>
+      ) : null}
+      {pod.plan ? (
+        <div className="info-block">
+          <div className="info-kicker">Plan</div>
+          <div className="info-title">{pod.plan.summary}</div>
+          {pod.plan.steps.length > 0 ? (
+            <ol className="plan-steps">
+              {pod.plan.steps.map((step, index) => (
+                <li key={`${index}-${step}`}>{step.replace(/^\d+\.\s*/, '')}</li>
+              ))}
+            </ol>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
   );
 }
 

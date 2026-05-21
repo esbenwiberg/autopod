@@ -11,7 +11,7 @@ import { usePodsStore } from './store/pods.js';
 
 export function App(): JSX.Element {
   useEffect(() => {
-    // Pair flow lands the phone with `#token=<hex>` in the URL — stash it +
+    // Pair flow lands the phone with a token in the URL fragment — stash it +
     // scrub the fragment so the token doesn't sit in browser history.
     readTokenFromHash();
 

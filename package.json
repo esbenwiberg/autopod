@@ -13,6 +13,7 @@
     "deadcode": "knip",
     "audit": "pnpm audit --audit-level high",
     "secret-scan": "node scripts/secret-scan.mjs",
+    "predev": "node scripts/run-turbo.mjs build --filter @autopod/mobile-web --filter @autopod/cli",
     "dev": "node scripts/run-turbo.mjs dev",
     "clean": "node scripts/run-turbo.mjs clean"
   },

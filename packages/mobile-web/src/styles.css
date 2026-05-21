@@ -98,6 +98,30 @@ code {
   font-family: inherit;
 }
 
+.repair-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 1.25rem;
+}
+
+.repair-form label {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.repair-form textarea {
+  width: 100%;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.7rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9rem;
+  resize: vertical;
+}
+
 .form-actions {
   display: flex;
   gap: 0.5rem;
@@ -244,11 +268,45 @@ code {
 
 .pod-card-task {
   font-size: 0.95rem;
+  font-weight: 600;
   line-height: 1.35;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+
+.pod-card-preview {
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.pod-card-signals {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  margin-top: 0.55rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.signal-ok {
+  color: var(--ok);
+}
+
+.signal-danger {
+  color: var(--danger);
+}
+
+.signal-neutral {
+  color: var(--muted);
 }
 
 .pod-card-meta {
@@ -332,9 +390,81 @@ code {
   margin: 0.4rem 0;
 }
 
+.detail-title {
+  font-size: 1.15rem;
+  line-height: 1.25;
+  margin: 0.4rem 0;
+}
+
 .detail-meta {
   font-size: 0.8rem;
   margin-bottom: 1rem;
+}
+
+.info-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.info-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.75rem 0.9rem;
+}
+
+.info-kicker {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+  text-transform: uppercase;
+}
+
+.info-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.info-copy {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.4;
+  margin-top: 0.35rem;
+}
+
+.plan-steps {
+  margin: 0.6rem 0 0;
+  padding-left: 1.25rem;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.plan-steps li + li {
+  margin-top: 0.3rem;
+}
+
+.task-details {
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+}
+
+.task-details summary {
+  color: var(--fg);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.task-details p {
+  white-space: pre-wrap;
 }
 
 .validation-summary {

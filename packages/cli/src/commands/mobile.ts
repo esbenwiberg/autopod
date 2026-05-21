@@ -81,7 +81,7 @@ export function registerMobileCommands(program: Command): void {
       // Token goes in the URL fragment, not the query string — fragments are
       // never sent to servers, so neither Tailscale's reverse proxy logs nor
       // the daemon's request logger ever see the token in plaintext.
-      const url = `https://${host}/mobile/#token=${token}`;
+      const url = `https://${host}/mobile/#/pair?token=${encodeURIComponent(token)}`;
 
       console.log();
       qrcode.generate(url, { small: true });

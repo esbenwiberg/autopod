@@ -52,7 +52,7 @@ This:
    `tailscale status --json`. Cached to `~/.autopod/config.yaml` on first
    success; pass `--host <name>` to override.
 3. Renders a terminal QR code containing
-   `https://<host>/mobile/#token=<hex>`.
+   `https://<host>/mobile/#/pair?token=<hex>`.
 
 Scan the QR with your phone's camera. iOS Safari / Android Chrome opens the
 URL, the PWA loads, reads the token from the URL fragment, persists it to
