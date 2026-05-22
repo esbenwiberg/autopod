@@ -1,13 +1,19 @@
 import { CONTAINER_HOME_DIR } from '@autopod/shared';
 import type { FoundryCredentials, Profile } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { ProfileStore } from '../profiles/index.js';
 import { getAzureToken } from './azure-token.js';
+import { refreshAndPersistMaxCredentials } from './credential-persistence.js';
 import { refreshOAuthToken } from './credential-refresh.js';
 import type { ProviderEnvResult } from './types.js';
 
 type ContainerFile = ProviderEnvResult['containerFiles'][number];
 
 const CONTAINER_WORK_DIR = '/workspace';
+
+export interface BuildProviderEnvOptions {
+  profileStore?: ProfileStore;
+}
 
 /**
  * Returns the Claude Code config files to inject into every container:
@@ -63,6 +69,7 @@ export async function buildProviderEnv(
   profile: Profile,
   _sessionId: string,
   logger: Logger,
+  options: BuildProviderEnvOptions = {},
 ): Promise<ProviderEnvResult> {
   const provider = profile.modelProvider;
 
@@ -71,7 +78,7 @@ export async function buildProviderEnv(
       return buildAnthropicEnv();
 
     case 'max':
-      return buildMaxEnv(profile, logger);
+      return buildMaxEnv(profile, logger, options.profileStore);
 
     case 'foundry':
       return buildFoundryEnv(profile, logger);
@@ -119,7 +126,11 @@ function buildAnthropicEnv(): ProviderEnvResult {
  * 3. Sets HOME env to a temp dir so Claude Code finds the credentials
  * 4. Does NOT set ANTHROPIC_API_KEY (forces OAuth path)
  */
-async function buildMaxEnv(profile: Profile, logger: Logger): Promise<ProviderEnvResult> {
+async function buildMaxEnv(
+  profile: Profile,
+  logger: Logger,
+  profileStore?: ProfileStore,
+): Promise<ProviderEnvResult> {
   const creds = profile.providerCredentials;
 
   if (!creds || creds.provider !== 'max') {
@@ -128,8 +139,12 @@ async function buildMaxEnv(profile: Profile, logger: Logger): Promise<ProviderEn
     );
   }
 
-  // Pre-flight token refresh
-  const refreshed = await refreshOAuthToken(creds, logger);
+  // Pre-flight token refresh. When the profile store is available, serialize
+  // by credential owner and persist rotations immediately so concurrent pods
+  // do not reuse a stale refresh token.
+  const refreshed = profileStore
+    ? await refreshAndPersistMaxCredentials(profileStore, profile.name, creds, logger)
+    : await refreshOAuthToken(creds, logger);
 
   // Build the credentials file that Claude Code expects at ~/.claude/.credentials.json.
   // All fields must be preserved — claude 2.1.80+ requires scopes/subscriptionType

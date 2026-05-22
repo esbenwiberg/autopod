@@ -3,6 +3,7 @@ import type { MaxCredentials } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
+import { refreshOAuthToken } from './credential-refresh.js';
 
 /** Path where MAX credentials are written inside the container. */
 const CREDENTIALS_PATH = `${CONTAINER_HOME_DIR}/.claude/.credentials.json`;
@@ -15,17 +16,106 @@ const CREDENTIALS_PATH = `${CONTAINER_HOME_DIR}/.claude/.credentials.json`;
  */
 const ownerLocks = new Map<string, Promise<void>>();
 
-function withOwnerLock(owner: string, fn: () => Promise<void>): Promise<void> {
+function withOwnerLock<T>(owner: string, fn: () => Promise<T>): Promise<T> {
   const prev = ownerLocks.get(owner) ?? Promise.resolve();
-  const next = prev.then(fn, fn).catch(() => {
-    /* swallow — per-call errors are already logged by fn */
-  });
+  const run = prev.then(fn, fn);
+  const next = run.then(
+    () => undefined,
+    () => undefined,
+  );
   ownerLocks.set(owner, next);
   // Clean up once done so the map doesn't leak profile names forever.
   next.finally(() => {
     if (ownerLocks.get(owner) === next) ownerLocks.delete(owner);
   });
-  return next;
+  return run;
+}
+
+function sameMaxCredentials(a: MaxCredentials, b: MaxCredentials): boolean {
+  return (
+    a.accessToken === b.accessToken &&
+    a.refreshToken === b.refreshToken &&
+    a.expiresAt === b.expiresAt &&
+    a.clientId === b.clientId &&
+    JSON.stringify(a.scopes ?? null) === JSON.stringify(b.scopes ?? null) &&
+    a.subscriptionType === b.subscriptionType &&
+    a.rateLimitTier === b.rateLimitTier
+  );
+}
+
+function mergeMaxMetadata(
+  credentials: MaxCredentials,
+  currentCreds: MaxCredentials | null | undefined,
+): MaxCredentials {
+  return {
+    provider: 'max',
+    accessToken: credentials.accessToken,
+    refreshToken: credentials.refreshToken,
+    expiresAt: credentials.expiresAt,
+    clientId: credentials.clientId ?? currentCreds?.clientId,
+    scopes: credentials.scopes ?? currentCreds?.scopes,
+    subscriptionType: credentials.subscriptionType ?? currentCreds?.subscriptionType,
+    rateLimitTier: credentials.rateLimitTier ?? currentCreds?.rateLimitTier,
+  };
+}
+
+async function persistMaxCredentialsUnderLock(
+  profileStore: ProfileStore,
+  ownerName: string,
+  profileName: string,
+  credentials: MaxCredentials,
+  logger: Logger,
+): Promise<MaxCredentials> {
+  const ownerProfile = profileStore.getRaw(ownerName);
+  const currentCreds =
+    ownerProfile.providerCredentials?.provider === 'max' ? ownerProfile.providerCredentials : null;
+  const updated = mergeMaxMetadata(credentials, currentCreds);
+
+  if (currentCreds && sameMaxCredentials(updated, currentCreds)) {
+    logger.debug(
+      { profileName, ownerName },
+      'Owner MAX credentials already match refreshed credentials — skipping persist',
+    );
+    return updated;
+  }
+
+  profileStore.update(ownerName, { providerCredentials: updated });
+  logger.info(
+    { profileName, ownerName, expiresAt: updated.expiresAt },
+    'Persisted refreshed MAX credentials to credential owner',
+  );
+  return updated;
+}
+
+/**
+ * Refresh MAX/PRO OAuth credentials under the credential-owner lock and persist
+ * any token rotation before the pod starts. Anthropic rotates refresh tokens;
+ * if two pods sharing one owner refresh concurrently, only the first old
+ * refresh token is valid. Serializing here makes later pods re-read the fresh
+ * owner credentials instead of burning the stale token.
+ */
+export async function refreshAndPersistMaxCredentials(
+  profileStore: ProfileStore,
+  profileName: string,
+  fallbackCreds: MaxCredentials,
+  logger: Logger,
+): Promise<MaxCredentials> {
+  const ownerName = profileStore.resolveCredentialOwner(profileName) ?? profileName;
+
+  return withOwnerLock(ownerName, async () => {
+    const ownerProfile = profileStore.getRaw(ownerName);
+    const currentCreds =
+      ownerProfile.providerCredentials?.provider === 'max'
+        ? ownerProfile.providerCredentials
+        : fallbackCreds;
+
+    const refreshed = await refreshOAuthToken(currentCreds, logger);
+    if (sameMaxCredentials(refreshed, currentCreds)) {
+      return currentCreds;
+    }
+
+    return persistMaxCredentialsUnderLock(profileStore, ownerName, profileName, refreshed, logger);
+  });
 }
 
 /**
@@ -90,9 +180,12 @@ export async function persistRefreshedCredentials(
   await withOwnerLock(ownerName, async () => {
     // Re-read under the lock — another concurrent run may have persisted.
     const ownerProfile = profileStore.getRaw(ownerName);
-    const currentCreds = ownerProfile.providerCredentials;
+    const currentCreds =
+      ownerProfile.providerCredentials?.provider === 'max'
+        ? ownerProfile.providerCredentials
+        : null;
 
-    if (currentCreds?.provider === 'max' && currentCreds.refreshToken === oauth.refreshToken) {
+    if (currentCreds && currentCreds.refreshToken === oauth.refreshToken) {
       logger.debug(
         { profileName, ownerName },
         'Owner refresh token matches container — skipping persist',
@@ -105,17 +198,12 @@ export async function persistRefreshedCredentials(
       accessToken: oauth.accessToken,
       refreshToken: oauth.refreshToken,
       expiresAt: new Date(oauth.expiresAt).toISOString(),
-      clientId: currentCreds?.provider === 'max' ? currentCreds.clientId : undefined,
-      scopes: currentCreds?.provider === 'max' ? currentCreds.scopes : undefined,
-      subscriptionType:
-        currentCreds?.provider === 'max' ? currentCreds.subscriptionType : undefined,
-      rateLimitTier: currentCreds?.provider === 'max' ? currentCreds.rateLimitTier : undefined,
+      clientId: currentCreds?.clientId,
+      scopes: currentCreds?.scopes,
+      subscriptionType: currentCreds?.subscriptionType,
+      rateLimitTier: currentCreds?.rateLimitTier,
     };
 
-    profileStore.update(ownerName, { providerCredentials: updated });
-    logger.info(
-      { profileName, ownerName, expiresAt: updated.expiresAt },
-      'Persisted rotated OAuth credentials to credential owner',
-    );
+    await persistMaxCredentialsUnderLock(profileStore, ownerName, profileName, updated, logger);
   });
 }

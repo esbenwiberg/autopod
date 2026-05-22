@@ -1,9 +1,12 @@
 import type { MaxCredentials, Profile } from '@autopod/shared';
 import pino from 'pino';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
-import { persistRefreshedCredentials } from './credential-persistence.js';
+import {
+  persistRefreshedCredentials,
+  refreshAndPersistMaxCredentials,
+} from './credential-persistence.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -40,6 +43,10 @@ function makeProfileStore(
 }
 
 describe('persistRefreshedCredentials', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('persists newer credentials from container', async () => {
     const containerCreds = JSON.stringify({
       claudeAiOauth: {
@@ -194,5 +201,60 @@ describe('persistRefreshedCredentials', () => {
         }),
       }),
     );
+  });
+
+  it('serializes preflight refreshes and re-reads the credential owner', async () => {
+    let storedCreds: MaxCredentials = {
+      provider: 'max',
+      accessToken: 'old-access',
+      refreshToken: 'old-refresh',
+      expiresAt: '2026-01-01T00:00:00.000Z',
+      clientId: 'client-1',
+      scopes: ['org:create_api_key', 'user:profile'],
+      subscriptionType: 'max',
+    };
+
+    const ps = {
+      resolveCredentialOwner: vi.fn((_name: string) => 'owner-profile'),
+      getRaw: vi.fn((_name: string) => ({
+        name: 'owner-profile',
+        providerCredentials: storedCreds,
+      })),
+      update: vi.fn((_name: string, changes: Record<string, unknown>) => {
+        const next = changes.providerCredentials as MaxCredentials | undefined;
+        if (next) storedCreds = next;
+        return { name: 'owner-profile', providerCredentials: storedCreds } as Partial<Profile>;
+      }),
+      get: vi.fn(),
+      create: vi.fn(),
+      list: vi.fn(),
+      delete: vi.fn(),
+      exists: vi.fn(),
+    } as unknown as ProfileStore;
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { refresh_token?: string };
+      expect(body.refresh_token).toBe('old-refresh');
+      return new Response(
+        JSON.stringify({
+          access_token: 'new-access',
+          refresh_token: 'new-refresh',
+          expires_in: 3600,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+
+    const [first, second] = await Promise.all([
+      refreshAndPersistMaxCredentials(ps, 'child-profile', storedCreds, logger),
+      refreshAndPersistMaxCredentials(ps, 'child-profile', storedCreds, logger),
+    ]);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(ps.resolveCredentialOwner).toHaveBeenCalledWith('child-profile');
+    expect(ps.update).toHaveBeenCalledTimes(1);
+    expect(first.refreshToken).toBe('new-refresh');
+    expect(second.refreshToken).toBe('new-refresh');
+    expect(storedCreds.refreshToken).toBe('new-refresh');
   });
 });

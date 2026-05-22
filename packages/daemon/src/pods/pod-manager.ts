@@ -4957,7 +4957,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Build provider-aware env (API keys, OAuth creds, Foundry config)
         emitStatus('Building provider credentials…');
-        const providerResult = await buildProviderEnv(profile, podId, logger);
+        const providerResult = await buildProviderEnv(profile, podId, logger, { profileStore });
         const secretEnv: Record<string, string> = {
           POD_ID: podId,
           ...providerResult.env,
