@@ -4,8 +4,8 @@ description: >
   Decomposes a large feature into a series-ready spec folder for `ap series create`.
   Runs a continuous interview-plus-research loop with one question per turn,
   scanning the codebase between answers, until every coverage dimension is green.
-  Then writes `specs/<name>/` with `purpose.md`, `design.md`, `briefs/`, and any
-  new ADRs into the repo-level `docs/decisions/`.
+  Then writes a `specs/feature-name/` folder with `purpose.md`, `design.md`,
+  `briefs/`, and any new ADRs into the repo-level `docs/decisions/`.
   Use when the task spans 3+ modules or 4+ hours of work.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit, Agent, AskUserQuestion
 ---
@@ -43,11 +43,12 @@ scan codebase again → ask ONE question → wait → ... → exit test passes �
   question. New answers open new search paths — always follow them.
 - If the codebase already answers a question, don't ask — cite the finding
   and move on.
-- **If a fact or ADR answers a question, don't ask — cite it and move on.**
-  Before forming any question, scan the loaded conventions and ADRs for a match.
-  If found, mark the dimension green and note the source inline
-  (e.g. `📋 fact-003`, `📋 ADR-012`). Only escalate to the user when no
-  fact, ADR, or codebase evidence covers it.
+- **If a fact, memory, convention, or ADR answers a question, don't ask — cite
+  it and move on.** Before forming any question, scan loaded conventions, ADRs,
+  and approved memories for a match. If found, mark the dimension green and note
+  the source inline (e.g. `📋 fact-003`, `📋 memory:/gotchas/x`, `📋 ADR-012`).
+  Only escalate to the user when no memory, fact, ADR, convention, or codebase
+  evidence covers it.
 - Never draft `purpose.md`, `design.md`, briefs, or ADRs during the loop.
   Writing happens only after the exit test passes and the user has greenlit.
 - **The coverage checklist is the only stop sign — not a question count.**
@@ -76,9 +77,15 @@ Before asking anything, scan for 3–5 minutes:
       `docs/adrs/index.md` — match the existing ADR folder convention).
       If no index exists, fall back to reading every ADR directly.
    c. Read `docs/conventions/index.md` if it exists.
-   d. From both indexes, identify which ADRs and conventions are relevant to
-      this feature. Read only those full files — not every entry.
-   Prior decisions are baseline knowledge; conventions are pre-answered questions.
+   d. Search approved memories when memory tools are available. Use terms from
+      the request, likely package names, named files, and ambiguous nouns.
+      Treat memory hits as pre-answered questions; do not block if memory tools
+      are unavailable.
+   e. From indexes and memory hits, identify which ADRs, conventions, and memory
+      entries are relevant to this feature. Read only the relevant full files or
+      entries — not every entry.
+   Prior decisions and approved memories are baseline knowledge; conventions are
+   pre-answered questions.
 6. Are there AGENTS.md sections, READMEs, or pinned docs the executor will
    need? Note them; they go into `design.md` → Reference reading.
 

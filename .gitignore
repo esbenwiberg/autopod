@@ -19,6 +19,7 @@ coverage/
 !.autopod/review/SAMPLE-*.html
 tmp/
 .agentry/
+.playwright-mcp/
 *.onnx
 packages/desktop/.build/
 packages/desktop/.swiftpm/xcode/xcuserdata/

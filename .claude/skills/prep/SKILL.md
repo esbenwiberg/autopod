@@ -49,8 +49,10 @@ scan codebase again → ask ONE question → wait → ... → coverage green →
 - **One question per turn. Full stop.** Never batch two questions.
 - After every answer, search the codebase again before forming the next
   question. New answers open new search paths.
-- If the codebase already answers a question, don't ask — cite the finding
-  (e.g. `📋 packages/daemon/src/pods/state-machine.ts:42`) and move on.
+- If the codebase, approved memory, ADR, or convention already answers a
+  question, don't ask — cite the finding (e.g.
+  `📋 packages/daemon/src/pods/state-machine.ts:42`, `📋 memory:/gotchas/x`,
+  `📋 ADR-012`) and move on.
 - Never draft the brief during the loop. Writing happens only after coverage
   is green and the user has greenlit.
 - **The coverage checklist is the only stop sign — not a question count.**
@@ -67,6 +69,10 @@ Before asking anything, scan for 1–2 minutes:
    etc.) based on the files in scope?
 4. Does the scan suggest 3+ packages? If so, this is a `/plan-feature` task —
    raise it now (see *Upgrade in place*).
+5. Search approved memories via `memory_search`/`memory_list` when those tools
+   are available. Use terms from the request, likely package names, and named
+   files. Treat memory hits as pre-answered context, but do not block if memory
+   tools are unavailable.
 
 Then surface what you found in 3–6 bullets and ask the first question.
 
@@ -212,8 +218,8 @@ just a stale `/prep` artifact.
 
 ### brief.md
 
-Brief frontmatter carries scope only. Do not write `acceptance_criteria`;
-contract behavior lives in `contract.yaml`.
+Brief frontmatter carries scope only. Keep behavioral proof in
+`contract.yaml`.
 
 #### Frontmatter
 
@@ -271,8 +277,10 @@ Allowed `artifact.change` values: `create`, `update`, `touch`. Use only those
 exact values; never use `edit`, `modify`, or `write`.
 For web-visible behavior, prefer `browser-test` with a durable Playwright or
 equivalent browser test artifact. The worker creates/updates the proof artifact;
-Autopod runs the command and writes attempt-scoped `evidence.yaml`. Never ask the
-worker to author evidence directly.
+Autopod runs the command and writes attempt-scoped `evidence.yaml`. The command
+must be an executable shell command such as `npx playwright test ...` or
+`npm run smoke -- ...`; never use MCP tool syntax such as `validate_in_browser`
+in `required_facts`. Never ask the worker to author evidence directly.
 Browser/report facts may write attachments under
 `.autopod/evidence/<fact-id>/`; Autopod records those paths as screenshots,
 traces, videos, reports, logs, or generic artifacts in `evidence.yaml`.

@@ -49,8 +49,10 @@ scan codebase again → ask ONE question → wait → ... → coverage green →
 - **One question per turn. Full stop.** Never batch two questions.
 - After every answer, search the codebase again before forming the next
   question. New answers open new search paths.
-- If the codebase already answers a question, don't ask — cite the finding
-  (e.g. `📋 packages/daemon/src/pods/state-machine.ts:42`) and move on.
+- If the codebase, approved memory, ADR, or convention already answers a
+  question, don't ask — cite the finding (e.g.
+  `📋 packages/daemon/src/pods/state-machine.ts:42`, `📋 memory:/gotchas/x`,
+  `📋 ADR-012`) and move on.
 - Never draft the brief during the loop. Writing happens only after coverage
   is green and the user has greenlit.
 - **The coverage checklist is the only stop sign — not a question count.**
@@ -67,6 +69,10 @@ Before asking anything, scan for 1–2 minutes:
    etc.) based on the files in scope?
 4. Does the scan suggest 3+ packages? If so, this is a `/plan-feature` task —
    raise it now (see *Upgrade in place*).
+5. Search approved memories via `memory_search`/`memory_list` when those tools
+   are available. Use terms from the request, likely package names, and named
+   files. Treat memory hits as pre-answered context, but do not block if memory
+   tools are unavailable.
 
 Then surface what you found in 3–6 bullets and ask the first question.
 
