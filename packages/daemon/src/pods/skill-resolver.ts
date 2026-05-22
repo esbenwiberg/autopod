@@ -1,6 +1,11 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { type InjectedSkill, collectPiiPatternNames, processContent } from '@autopod/shared';
+import {
+  type InjectedSkill,
+  collectPiiPatternNames,
+  extractSkillDescription,
+  processContent,
+} from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 
@@ -64,7 +69,7 @@ export async function listBuiltinSkills(): Promise<BuiltinSkillMeta[]> {
     candidates.map(async ({ name, file }): Promise<BuiltinSkillMeta> => {
       try {
         const content = await fs.readFile(file, 'utf-8');
-        const description = extractFrontmatterField(content, 'description');
+        const description = extractSkillDescription(content);
         return { name, description };
       } catch {
         return { name, description: null };
@@ -75,18 +80,11 @@ export async function listBuiltinSkills(): Promise<BuiltinSkillMeta[]> {
   return results.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function extractFrontmatterField(content: string, field: string): string | null {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match || !match[1]) return null;
-  const block = match[1];
-  // Handle multi-line quoted values (description: "..." or description: >)
-  const inlineMatch = block.match(new RegExp(`^${field}:\\s*["']?(.+?)["']?\\s*$`, 'm'));
-  return inlineMatch?.[1]?.trim() ?? null;
-}
-
 export interface ResolvedSkill {
   /** Skill name — used as the slash command name and filename */
   name: string;
+  /** Human-readable description inferred from skill frontmatter when present */
+  description?: string;
   /** Markdown content of the skill */
   content: string;
 }
@@ -213,7 +211,11 @@ async function resolveLocal(
       podId ? safetyEventsRepo : undefined,
       logger,
     );
-    return { name: skill.name, content: sanitized };
+    return {
+      name: skill.name,
+      description: extractSkillDescription(sanitized) ?? skill.description,
+      content: sanitized,
+    };
   } catch (err) {
     logger.warn(
       { err, skill: skill.name, path: filePath },
@@ -278,7 +280,11 @@ async function resolveGithub(
       podId ? safetyEventsRepo : undefined,
       logger,
     );
-    return { name: skill.name, content: sanitized };
+    return {
+      name: skill.name,
+      description: extractSkillDescription(sanitized) ?? skill.description,
+      content: sanitized,
+    };
   } catch (err) {
     clearTimeout(timeout);
     logger.warn(

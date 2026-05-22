@@ -1,14 +1,23 @@
+import type { Dirent } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import type { InjectedSkill } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
-import { resolveSkills } from './skill-resolver.js';
+import { listBuiltinSkills, resolveSkills } from './skill-resolver.js';
 
 const logger = pino({ level: 'silent' });
 
 vi.mock('node:fs/promises');
 const mockFs = vi.mocked(fs);
+
+function dirent(name: string, type: 'file' | 'directory') {
+  return {
+    name,
+    isFile: () => type === 'file',
+    isDirectory: () => type === 'directory',
+  } as Dirent;
+}
 
 function makeMockRepo(): SafetyEventsRepository {
   return {
@@ -34,7 +43,14 @@ describe('resolveSkills', () => {
 
   describe('local source', () => {
     it('reads skill content from local file', async () => {
-      mockFs.readFile.mockResolvedValue('# Review\nReview the PR carefully.');
+      mockFs.readFile.mockResolvedValue(`---
+description: >
+  Review the PR
+  carefully.
+---
+
+# Review
+Review the PR carefully.`);
 
       const skills: InjectedSkill[] = [
         { name: 'review', source: { type: 'local', path: '/skills/review.md' } },
@@ -44,7 +60,8 @@ describe('resolveSkills', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0]?.name).toBe('review');
-      expect(result[0]?.content).toBe('# Review\nReview the PR carefully.');
+      expect(result[0]?.description).toBe('Review the PR carefully.');
+      expect(result[0]?.content).toContain('# Review\nReview the PR carefully.');
       expect(mockFs.readFile).toHaveBeenCalledWith('/skills/review.md', 'utf-8');
     });
 
@@ -406,5 +423,37 @@ describe('resolveSkills', () => {
       // Skill still injected despite write failure
       expect(result).toHaveLength(1);
     });
+  });
+});
+
+describe('listBuiltinSkills', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('extracts folded descriptions from builtin skill frontmatter', async () => {
+    mockFs.readdir.mockResolvedValue([dirent('code-council', 'directory')]);
+    mockFs.access.mockResolvedValue(undefined);
+    mockFs.readFile.mockResolvedValue(`---
+name: code-council
+description: >
+  Code-grounded for/against debate for decisions.
+  Synthesis names the decisive trade-off.
+---
+
+# /code-council
+`);
+
+    await expect(listBuiltinSkills()).resolves.toEqual([
+      {
+        name: 'code-council',
+        description:
+          'Code-grounded for/against debate for decisions. Synthesis names the decisive trade-off.',
+      },
+    ]);
   });
 });

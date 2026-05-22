@@ -4528,13 +4528,8 @@ private struct SkillRowEditor: View {
                     }
                     .labelsHidden()
                     .frame(width: 180)
-                    .onChange(of: skill.name) { _, newName in
-                        // Auto-fill description from daemon metadata when unset
-                        if skill.description == nil || skill.description?.isEmpty == true,
-                           let entry = builtinSkills.first(where: { $0.name == newName }),
-                           let desc = entry.description {
-                            skill.description = desc
-                        }
+                    .onChange(of: skill.name) { _, _ in
+                        skill.description = nil
                     }
                 } else {
                     TextField("name", text: $skill.name)
@@ -4542,12 +4537,13 @@ private struct SkillRowEditor: View {
                         .font(.system(.caption, design: .monospaced))
                         .frame(width: 140)
                 }
-                TextField("description (optional)", text: Binding(
-                    get: { skill.description ?? "" },
-                    set: { skill.description = $0.isEmpty ? nil : $0 }
-                ))
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.caption, design: .monospaced))
+                if let description = inferredDescription {
+                    Text(description)
+                        .font(.system(.caption))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
                 if let onRemove {
                     Button(action: onRemove) {
                         Image(systemName: "minus.circle.fill")
@@ -4565,6 +4561,9 @@ private struct SkillRowEditor: View {
                 .pickerStyle(.segmented)
                 .frame(width: 200)
                 .labelsHidden()
+                .onChange(of: skill.sourceType) { _, _ in
+                    skill.description = nil
+                }
 
                 switch skill.sourceType {
                 case "builtin":
@@ -4599,6 +4598,11 @@ private struct SkillRowEditor: View {
             }
             .padding(.leading, 4)
         }
+    }
+
+    private var inferredDescription: String? {
+        guard skill.sourceType == "builtin" else { return nil }
+        return builtinSkills.first { $0.name == skill.name }?.description
     }
 }
 

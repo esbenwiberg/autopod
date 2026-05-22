@@ -110,6 +110,7 @@ export type {
   InjectedSkill,
   LocalSkillSource,
   GithubSkillSource,
+  BuiltinSkillSource,
 } from './types/injection.js';
 
 export type {
@@ -340,6 +341,12 @@ export {
   numericPrefix,
   parseBriefs,
 } from './series/parse-briefs.js';
+
+export type { SkillFrontmatter } from './skills/skill-frontmatter.js';
+export {
+  parseSkillFrontmatter,
+  extractSkillDescription,
+} from './skills/skill-frontmatter.js';
 
 // Model pricing helpers
 export * from './pricing/index.js';

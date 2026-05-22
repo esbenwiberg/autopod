@@ -13,13 +13,21 @@ const githubSkillSourceSchema = z.object({
   token: z.string().optional(),
 });
 
+const builtinSkillSourceSchema = z.object({
+  type: z.literal('builtin'),
+});
+
 export const injectedSkillSchema = z.object({
   name: z
     .string()
     .min(1)
     .max(64)
     .regex(/^[a-z0-9_-]+$/, 'Skill names must be lowercase alphanumeric, hyphens, or underscores'),
-  source: z.discriminatedUnion('type', [localSkillSourceSchema, githubSkillSourceSchema]),
+  source: z.discriminatedUnion('type', [
+    localSkillSourceSchema,
+    githubSkillSourceSchema,
+    builtinSkillSourceSchema,
+  ]),
   description: z.string().max(500).optional(),
 });
 

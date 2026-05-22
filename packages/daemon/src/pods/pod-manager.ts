@@ -4445,9 +4445,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Resolve and write skills for all pod types (including workspace)
         const mergedSkills = mergeSkills(daemonConfig.skills ?? [], profile.skills ?? []);
         let resolvedSkillNames: string[] = [];
+        let resolvedSkillInjections: typeof mergedSkills = [];
         if (mergedSkills.length > 0) {
           emitStatus('Resolving skills…');
           const resolvedSkills = await resolveSkills(mergedSkills, logger, podId, safetyEventsRepo);
+          const mergedSkillByName = new Map(mergedSkills.map((skill) => [skill.name, skill]));
           const skillsDir = `${CONTAINER_HOME_DIR}/.claude/skills`;
           for (const skill of resolvedSkills) {
             await containerManager.writeFile(
@@ -4457,6 +4459,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             );
           }
           resolvedSkillNames = resolvedSkills.map((s) => s.name);
+          resolvedSkillInjections = resolvedSkills
+            .map((resolved) => {
+              const original = mergedSkillByName.get(resolved.name);
+              if (!original) return null;
+              return {
+                ...original,
+                description: resolved.description ?? original.description,
+              };
+            })
+            .filter((skill): skill is (typeof mergedSkills)[number] => skill !== null);
           if (resolvedSkills.length > 0) {
             logger.info(
               { podId, count: resolvedSkills.length, names: resolvedSkillNames },
@@ -4903,7 +4915,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           injectedSections: resolvedSections,
           injectedMcpServers: [...proxiedMcpServers, ...workingStdioServers],
           availableActions,
-          injectedSkills: mergedSkills.filter((s) => resolvedSkillNames.includes(s.name)),
+          injectedSkills: resolvedSkillInjections,
           memories: sessionMemories.length > 0 ? sessionMemories : undefined,
         });
 
