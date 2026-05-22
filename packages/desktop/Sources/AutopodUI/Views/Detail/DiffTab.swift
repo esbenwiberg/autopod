@@ -87,6 +87,36 @@ private enum DiffDisplayMode: String, CaseIterable, Identifiable {
   var id: String { rawValue }
 }
 
+struct DiffExpansionState: Equatable {
+  let expandedCommits: Set<String>
+  let expandedCommitFiles: Set<String>
+}
+
+enum DiffExpansionPruner {
+  static func fileKey(commitSha: String, fileId: String) -> String {
+    "\(commitSha):\(fileId)"
+  }
+
+  static func prune(
+    expandedCommits: Set<String>,
+    expandedCommitFiles: Set<String>,
+    validCommitShas: [String],
+    validFileIdsByCommitSha: [String: [String]]
+  ) -> DiffExpansionState {
+    let validCommitSet = Set(validCommitShas)
+    let validFileKeys = Set(
+      validFileIdsByCommitSha.flatMap { commitSha, fileIds in
+        fileIds.map { fileKey(commitSha: commitSha, fileId: $0) }
+      }
+    )
+
+    return DiffExpansionState(
+      expandedCommits: expandedCommits.intersection(validCommitSet),
+      expandedCommitFiles: expandedCommitFiles.intersection(validFileKeys)
+    )
+  }
+}
+
 // MARK: - Diff parser
 
 public enum DiffParser {
@@ -212,6 +242,8 @@ public struct DiffTab: View {
   @State private var previewFiles: [DiffFile] = []
   @State private var uncommittedFiles: [DiffFile] = []
   @State private var parsedCommits: [ParsedCommit] = []
+  @State private var expandedCommits: Set<String> = []
+  @State private var expandedCommitFiles: Set<String> = []
   @State private var isParsing = false
 
   private var allFileModeFiles: [DiffFile] { canonicalFiles + previewFiles }
@@ -349,11 +381,8 @@ public struct DiffTab: View {
   }
 
   private var commitsMode: some View {
-    let hasCommitContent =
-      !parsedCommits.isEmpty || !uncommittedFiles.isEmpty || !previewFiles.isEmpty
-
     return Group {
-      if !hasCommitContent {
+      if parsedCommits.isEmpty {
         emptyState(
           title: diffResponse?.commitGroupingUnavailableReason == nil
             ? "No commits yet"
@@ -363,24 +392,8 @@ public struct DiffTab: View {
       } else {
         ScrollView {
           LazyVStack(alignment: .leading, spacing: 0) {
-            if !uncommittedFiles.isEmpty {
-              diffGroupView(
-                title: "Uncommitted tracked changes",
-                subtitle: "Working tree vs HEAD",
-                files: uncommittedFiles
-              )
-            }
-
             ForEach(parsedCommits) { item in
               commitGroupView(item)
-            }
-
-            if !previewFiles.isEmpty {
-              diffGroupView(
-                title: "Untracked workspace preview",
-                subtitle: "\(previewFiles.count) file\(previewFiles.count == 1 ? "" : "s")",
-                files: previewFiles
-              )
             }
           }
           .padding(8)
@@ -469,32 +482,123 @@ public struct DiffTab: View {
   }
 
   private func commitGroupView(_ item: ParsedCommit) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
-      HStack(spacing: 8) {
-        Text(item.commit.shortSha)
-          .font(.system(.caption, design: .monospaced).weight(.semibold))
-          .foregroundStyle(.cyan)
-        Text(item.commit.subject)
-          .font(.caption.weight(.semibold))
-          .lineLimit(1)
-        Spacer()
-        Text("+\(item.commit.stats.added) -\(item.commit.stats.removed)")
-          .font(.system(.caption2, design: .monospaced))
-          .foregroundStyle(.secondary)
-      }
+    let isExpanded = expandedCommits.contains(item.commit.sha)
+    let body = item.commit.body.trimmingCharacters(in: .whitespacesAndNewlines)
 
-      if !item.commit.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        Text(item.commit.body)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-          .lineLimit(3)
+    return VStack(alignment: .leading, spacing: 0) {
+      Button {
+        withAnimation(.easeOut(duration: 0.15)) {
+          if isExpanded {
+            expandedCommits.remove(item.commit.sha)
+          } else {
+            expandedCommits.insert(item.commit.sha)
+          }
+        }
+      } label: {
+        HStack(spacing: 8) {
+          Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .frame(width: 12)
+          Text(item.commit.shortSha)
+            .font(.system(.caption, design: .monospaced).weight(.semibold))
+            .foregroundStyle(.cyan)
+          Text(item.commit.subject)
+            .font(.caption.weight(.semibold))
+            .lineLimit(1)
+          Spacer()
+          Text(fileCountLabel(item.files.count))
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+          diffStatsLabel(added: item.commit.stats.added, removed: item.commit.stats.removed)
+        }
+        .contentShape(Rectangle())
       }
+      .buttonStyle(.plain)
+      .padding(.horizontal, 10)
+      .padding(.vertical, 9)
+      .background(Color(nsColor: .controlBackgroundColor))
 
-      ForEach(item.files) { file in
-        diffFileView(file)
+      if isExpanded {
+        Divider()
+
+        if !body.isEmpty {
+          Text(body)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(3)
+            .padding(.horizontal, 34)
+            .padding(.vertical, 8)
+          Divider()
+        }
+
+        ForEach(item.files) { file in
+          commitFileRow(commitSha: item.commit.sha, file: file)
+        }
       }
     }
-    .padding(.bottom, 10)
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+    .padding(.bottom, 8)
+  }
+
+  private func commitFileRow(commitSha: String, file: DiffFile) -> some View {
+    let key = DiffExpansionPruner.fileKey(commitSha: commitSha, fileId: file.id)
+    let isExpanded = expandedCommitFiles.contains(key)
+
+    return VStack(alignment: .leading, spacing: 0) {
+      Button {
+        withAnimation(.easeOut(duration: 0.15)) {
+          if isExpanded {
+            expandedCommitFiles.remove(key)
+          } else {
+            expandedCommitFiles.insert(key)
+          }
+        }
+      } label: {
+        HStack(spacing: 7) {
+          Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            .frame(width: 12)
+          Image(systemName: file.status.icon)
+            .foregroundStyle(file.status.color)
+            .font(.system(size: 10))
+          Text(file.path)
+            .font(.system(.caption, design: .monospaced))
+            .lineLimit(1)
+            .help(file.path)
+          Spacer()
+          diffStatsLabel(added: file.linesAdded, removed: file.linesRemoved)
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 7)
+      .background(Color(nsColor: .windowBackgroundColor).opacity(0.65))
+
+      if isExpanded {
+        diffFileView(file, showsHeader: false)
+          .background(Color(nsColor: .windowBackgroundColor))
+      }
+
+      Divider()
+        .padding(.leading, 34)
+    }
+  }
+
+  private func fileCountLabel(_ count: Int) -> String {
+    "\(count) file\(count == 1 ? "" : "s")"
+  }
+
+  private func diffStatsLabel(added: Int, removed: Int) -> some View {
+    HStack(spacing: 6) {
+      Text("+\(added)")
+        .foregroundStyle(.green)
+      Text("-\(removed)")
+        .foregroundStyle(.red)
+    }
+    .font(.system(.caption2, design: .monospaced))
   }
 
   private func diffGroupView(title: String, subtitle: String?, files: [DiffFile]) -> some View {
@@ -517,22 +621,24 @@ public struct DiffTab: View {
     }
   }
 
-  private func diffFileView(_ file: DiffFile) -> some View {
+  private func diffFileView(_ file: DiffFile, showsHeader: Bool = true) -> some View {
     VStack(alignment: .leading, spacing: 0) {
-      HStack(spacing: 6) {
-        Image(systemName: file.status.icon)
-          .foregroundStyle(file.status.color)
-        Text(file.path)
-          .font(.system(.caption, design: .monospaced).weight(.semibold))
-        if file.truncated {
-          Text("truncated")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
+      if showsHeader {
+        HStack(spacing: 6) {
+          Image(systemName: file.status.icon)
+            .foregroundStyle(file.status.color)
+          Text(file.path)
+            .font(.system(.caption, design: .monospaced).weight(.semibold))
+          if file.truncated {
+            Text("truncated")
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+          }
         }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor))
       }
-      .padding(8)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(Color(nsColor: .controlBackgroundColor))
 
       if let note = file.note {
         Text(note)
@@ -603,6 +709,8 @@ public struct DiffTab: View {
       previewFiles = []
       uncommittedFiles = []
       parsedCommits = []
+      expandedCommits = []
+      expandedCommitFiles = []
       selectedFile = nil
       return
     }
@@ -637,6 +745,20 @@ public struct DiffTab: View {
     if let selectedFile, !validIds.contains(selectedFile) {
       self.selectedFile = nil
     }
+
+    let validFileIdsByCommitSha = Dictionary(
+      uniqueKeysWithValues: parsedCommits.map { item in
+        (item.commit.sha, item.files.map(\.id))
+      }
+    )
+    let prunedExpansion = DiffExpansionPruner.prune(
+      expandedCommits: expandedCommits,
+      expandedCommitFiles: expandedCommitFiles,
+      validCommitShas: parsedCommits.map { $0.commit.sha },
+      validFileIdsByCommitSha: validFileIdsByCommitSha
+    )
+    expandedCommits = prunedExpansion.expandedCommits
+    expandedCommitFiles = prunedExpansion.expandedCommitFiles
     isParsing = false
   }
 
