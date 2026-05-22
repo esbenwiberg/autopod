@@ -227,7 +227,7 @@ public struct ValidationTab: View {
   }
 
   private var displayedPhases: [ValidationPhase] {
-    [.build, .test, .lint, .sast, .health, .pages, .facts, .review]
+    [.lint, .sast, .build, .test, .health, .pages, .facts, .review]
   }
 
   /// The phase to show in the detail panel — user pick, then auto-running, else nil.
