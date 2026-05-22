@@ -2766,9 +2766,9 @@ describe('PodManager', () => {
         // Regression: the warm Docker image is built with `git clone --depth 1` of the
         // base branch at image-build time, then runs pre-warm install + build, then
         // strips /workspace/.git. Source files from that older clone stay in /workspace.
-        // The pod-start `cp -a /mnt/worktree/. /workspace/` is additive (never deletes),
-        // so any file dropped from the branch since image-build survives as an untracked
-        // file. Workspace pods then commit those stale files via syncWorkspaceBack +
+        // The pod-start worktree mirror is additive (never deletes), so any file dropped
+        // from the branch since image-build survives as an untracked file. Workspace pods
+        // then commit those stale files via syncWorkspaceBack +
         // `git add -A`, contaminating the branch. `git clean -fd` after `git restore .`
         // is the upstream guard.
         const ctx = createTestContext();
@@ -2796,6 +2796,34 @@ describe('PodManager', () => {
         // are required for subsequent build phases to keep their incremental state.
         expect(cleanCalls[0]?.[1]).not.toContain('-x');
         expect(cleanCalls[0]?.[1]).not.toContain('-fdx');
+      });
+
+      it('populates /workspace without copying host dependency or tooling caches', async () => {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace pod',
+            outputMode: 'workspace',
+          },
+          'user-1',
+        );
+
+        await manager.processPod(pod.id);
+
+        const populateCall = ctx.containerManager.execInContainer.mock.calls.find(([, cmd]) => {
+          if (!Array.isArray(cmd) || cmd[0] !== 'sh' || cmd[1] !== '-c') return false;
+          return String(cmd[2]).includes("cd '/mnt/worktree'");
+        });
+        expect(populateCall).toBeDefined();
+        const script = String(populateCall?.[1][2]);
+        expect(script).toContain("-name '.git'");
+        expect(script).toContain("-name 'node_modules'");
+        expect(script).toContain("-name '.serena'");
+        expect(script).toContain("-name '.roslyn-codelens'");
+        expect(script).toContain('-prune -o');
       });
     });
 
@@ -3724,6 +3752,37 @@ describe('PodManager', () => {
         '/tmp/wt',
         expect.arrayContaining(['.git', 'node_modules']),
       );
+    });
+
+    it('syncs workspace back without mirroring container dependency or tooling caches', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.handleCompletion(pod.id);
+
+      const syncCall = ctx.containerManager.execInContainer.mock.calls.find(([, cmd]) => {
+        if (!Array.isArray(cmd) || cmd[0] !== 'sh' || cmd[1] !== '-c') return false;
+        return String(cmd[2]).includes('STAGING="/mnt/worktree/.autopod-sync-');
+      });
+      expect(syncCall).toBeDefined();
+      const script = String(syncCall?.[1][2]);
+      expect(script).toContain("-name 'node_modules'");
+      expect(script).toContain("-name '.serena'");
+      expect(script).toContain("-name '.roslyn-codelens'");
+      expect(script).toContain("! -path '*/node_modules'");
+      expect(script).toContain("! -path '*/node_modules/*'");
+      expect(script).toContain("! -path '*/.serena'");
+      expect(script).toContain("! -path '*/.roslyn-codelens/*'");
+      expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
     });
 
     it('refreshes the host linked-worktree index after promoting container commits', async () => {

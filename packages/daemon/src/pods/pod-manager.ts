@@ -228,6 +228,45 @@ function shellQuote(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
+const WORKSPACE_MIRROR_EXCLUDES = ['.git', 'node_modules', '.serena', '.roslyn-codelens'];
+
+function workspaceMirrorPruneExpression(): string {
+  const predicates = WORKSPACE_MIRROR_EXCLUDES.map((name) => `-name ${shellQuote(name)}`).join(
+    ' -o ',
+  );
+  return `\\( ${predicates} \\) -prune -o`;
+}
+
+function workspaceMirrorPreservePredicates(): string[] {
+  return WORKSPACE_MIRROR_EXCLUDES.flatMap((name) => [
+    `! -path '*/${name}'`,
+    `! -path '*/${name}/*'`,
+  ]);
+}
+
+function buildWorkspaceMirrorCopyScript(sourceDir: string, targetDirArg: string): string {
+  const copyOne = [
+    'target=$1',
+    'shift',
+    'for rel do',
+    '  dest="$target/${rel#./}"',
+    '  if [ -d "$rel" ] && [ ! -L "$rel" ]; then',
+    '    mkdir -p "$dest"',
+    '  else',
+    '    mkdir -p "$(dirname "$dest")"',
+    '    cp -a "$rel" "$dest"',
+    '  fi',
+    'done',
+  ].join('; ');
+
+  return [
+    `cd ${shellQuote(sourceDir)}`,
+    `find . -mindepth 1 ${workspaceMirrorPruneExpression()} -exec sh -c ${shellQuote(
+      copyOne,
+    )} sh ${targetDirArg} {} +`,
+  ].join(' && ');
+}
+
 /** Normalize a JWT preferred_username into something that looks like an email.
  * Dev mode emits `developer` (no `@`); git accepts it but commits look weird.
  * Real Entra tokens already carry a UPN-shaped email here. */
@@ -2255,7 +2294,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    *  1. Read the bare repo path from /workspace/.git/objects/info/alternates (written by the
    *     gitlink→real-dir conversion at container start).
    *  2. Push new commits from /workspace to the bare so host git sees them after sync.
-   *  3. Sync files back excluding .git — the host worktree's gitlink is preserved.
+   *  3. Sync files back excluding git/dependency/tooling caches — the host worktree's
+   *     gitlink is preserved and platform-native dependency trees stay on their own OS.
    *
    * If the container is already stopped, falls back to Docker's archive API. In that case
    * we extract /workspace (minus .git) then extract /workspace/.git separately and push
@@ -2278,11 +2318,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       'syncWorkspaceBack',
     );
   }
-
-  // Archive fallback runs on the host, so keep dependency/code-intel caches out of
-  // the mirror. They are ignored runtime state and can contain filesystem entries
-  // that macOS refuses to recreate from Docker tar streams.
-  const WORKSPACE_ARCHIVE_EXCLUDES = ['.git', 'node_modules', '.serena', '.roslyn-codelens'];
 
   async function syncWorkspaceBackOnce(
     containerId: string,
@@ -2354,7 +2389,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       }
 
-      // Sync files back, excluding .git so the host gitlink is never overwritten.
+      // Sync files back, excluding git/dependency/tooling caches. The caches are ignored
+      // runtime state and can contain platform-native binaries; mirroring them between a
+      // Linux container and a macOS host makes host-side browser facts load the wrong binary.
       //
       // Important: never clear the host worktree before the replacement is complete.
       // Docker Desktop / VirtioFS stalls can kill an exec halfway through. The old
@@ -2372,16 +2409,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'trap \'rm -rf "$STAGING"\' EXIT INT TERM',
         'rm -rf "$STAGING"',
         'mkdir -p "$STAGING"',
-        'workspace_count=$(find /workspace -mindepth 1 -maxdepth 1 ! -name .git | wc -l | tr -d " ")',
-        'find /workspace -mindepth 1 -maxdepth 1 ! -name .git -exec cp -a {} "$STAGING/" \\;',
-        'staging_count=$(find "$STAGING" -mindepth 1 -maxdepth 1 | wc -l | tr -d " ")',
+        `workspace_count=$(cd /workspace && find . -mindepth 1 ${workspaceMirrorPruneExpression()} -print | wc -l | tr -d " ")`,
+        buildWorkspaceMirrorCopyScript('/workspace', '"$STAGING"'),
+        'staging_count=$(find "$STAGING" -mindepth 1 | wc -l | tr -d " ")',
         'test "$workspace_count" = "$staging_count"',
         'cp -a "$STAGING/." /mnt/worktree/',
         'cd /mnt/worktree',
         [
           'find . -mindepth 1 -depth',
-          "! -path './.git'",
-          "! -path './.git/*'",
+          ...workspaceMirrorPreservePredicates(),
           '! -path "./$STAGING_BASE"',
           '! -path "./$STAGING_BASE/*"',
           '-exec sh -c \'staging=$1; shift; for p do rel=${p#./}; if [ ! -e "$staging/$rel" ] && [ ! -L "$staging/$rel" ]; then rm -rf -- "$p"; fi; done\' sh "$STAGING" {} +',
@@ -2415,7 +2451,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         containerId,
         '/workspace',
         worktreePath,
-        WORKSPACE_ARCHIVE_EXCLUDES,
+        WORKSPACE_MIRROR_EXCLUDES,
       );
 
       // Try to recover commits: extract the container's .git to a temp dir and push to bare.
@@ -2541,7 +2577,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         containerId,
         '/workspace',
         worktreePath,
-        WORKSPACE_ARCHIVE_EXCLUDES,
+        WORKSPACE_MIRROR_EXCLUDES,
       );
       await refreshHostWorktreeIndex(worktreePath, podId);
       logger.info({ containerId, worktreePath }, 'Worktree repopulated from live container');
@@ -4133,6 +4169,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Copy worktree content from bind mount to container's native filesystem.
         // VirtioFS bind mounts break getcwd() on Docker Desktop for Mac — overlayfs does not.
+        // Dependency/tooling caches are intentionally skipped: they contain native binaries
+        // for the filesystem they were created on and must not cross the host/container boundary.
         // Skipped for artifact pods with no worktree.
         if (worktreePath) {
           emitStatus('Populating workspace…');
@@ -4156,7 +4194,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
           const populate = await containerManager.execInContainer(
             containerId,
-            ['cp', '-a', '/mnt/worktree/.', '/workspace/'],
+            ['sh', '-c', buildWorkspaceMirrorCopyScript('/mnt/worktree', "'/workspace'")],
             { timeout: 120_000 },
           );
           if (populate.exitCode !== 0) {
@@ -4243,16 +4281,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // `RUN git clone --depth 1` of the base branch at image-build time, then runs
           // pre-warm install + build, then `rm -rf /workspace/.git`. Source files from
           // that older clone stay in `/workspace/` as plain files. The earlier
-          // `cp -a /mnt/worktree/. /workspace/` is additive — it never deletes — so any
-          // file that the host worktree's branch has dropped (e.g. deleted in a later
-          // PR on main) survives in `/workspace` as an untracked file. `git restore .`
-          // only touches tracked paths, so it doesn't help.
+          // The worktree mirror copy is additive — it never deletes — so any file that the
+          // host worktree's branch has dropped (e.g. deleted in a later PR on main) survives
+          // in `/workspace` as an untracked file. `git restore .` only touches tracked paths,
+          // so it doesn't help.
           //
-          // For workspace pods the leak is severe: on promote/handoff, syncWorkspaceBack
-          // does `cp -a /workspace/* /mnt/worktree/` and the subsequent `git add -A` in
-          // commitPendingChanges sweeps those stale files into a commit on the branch.
-          // For auto pods it shows up as build noise (native build tools discover
-          // sources via filesystem walk) and reviewer scope creep.
+          // For workspace pods the leak is severe: on promote/handoff, syncWorkspaceBack's
+          // mirror copy and the subsequent `git add -A` in commitPendingChanges sweep stale
+          // files into a commit on the branch. For auto pods it shows up as build noise
+          // (native build tools discover sources via filesystem walk) and reviewer scope creep.
           //
           // `-fd` (no `-x`): preserves gitignored caches like node_modules, bin/, obj/,
           // dist/, .next/ so subsequent build phases keep their incremental state.
