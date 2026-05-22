@@ -173,30 +173,53 @@ What else is affected or could break if the fix is wrong.
 
 ```yaml
 contract_version: 1
-title: <short bug-fix title>
+title: "Fix validation timeout reporting"
 depends_on: []
 scenarios:
   - id: reproduces-fixed-behavior
     given:
-      - <precondition>
+      - "a pod validation command times out"
     when:
-      - <action>
+      - "the daemon records the validation result"
     then:
-      - <expected fixed behavior>
+      - "the result preserves the timeout reason and marks validation failed"
 required_facts:
   - id: fact-regression-covered
     proves:
-      - <specific bug cannot regress>
+      - reproduces-fixed-behavior
     kind: unit-test
     artifact:
-      path: packages/.../<test-file>.test.ts
+      path: packages/daemon/src/validation/local-validation-engine.test.ts
       change: update
-    command: npx pnpm --filter <package> test -- <test-file>
+    command: npx pnpm --filter @autopod/daemon test -- local-validation-engine.test.ts
 human_review: []
 ```
 
 Use the same contract semantics as `/prep`: proof data belongs in
 `contract.yaml`; diagnosis and rationale belong in `bug.md`.
+
+Parser-compatible schema rules:
+
+- `contract_version` is the number `1`, not the string `"1"`.
+- `title` is required and non-empty.
+- `scenarios` is required. Each scenario has `id`, plus `given`, `when`,
+  and `then` as non-empty string lists.
+- Every `required_facts[].proves` entry must exactly match a
+  `scenarios[].id`.
+- `required_facts[].artifact` is an object with `path` and `change`; never
+  write `artifact: path/to/file`.
+- Do not use `validates`, `acceptance_criteria`, or prose-only proof fields.
+  Put behavior in `scenarios`, then link facts to it with `proves`.
+- Always include `human_review`; use `human_review: []` when none is needed.
+
+After writing `investigations/<slug>/contract.yaml`, run:
+
+```bash
+ap spec check investigations/<slug>/
+```
+
+Do not finish while this command reports `BRIEF_PARSE_ERROR` or any other
+parse failure. Repair the YAML first.
 
 ## Handoff
 

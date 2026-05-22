@@ -854,6 +854,29 @@ Rules:
 - `human_review` — only for judgement that cannot honestly become an
   executable fact yet.
 
+Parser-compatible schema rules:
+
+- `contract_version` is the number `1`, not the string `"1"`.
+- `title` is required and non-empty in every `contract.yaml`.
+- `scenarios` is required. Each scenario has `id`, plus `given`, `when`,
+  and `then` as non-empty string lists.
+- Every `required_facts[].proves` entry must exactly match a
+  `scenarios[].id`.
+- `required_facts[].artifact` is an object with `path` and `change`; never
+  write `artifact: path/to/file`.
+- Do not use `validates`, `acceptance_criteria`, or prose-only proof fields.
+  Put behavior in `scenarios`, then link facts to it with `proves`.
+- Always include `human_review`; use `human_review: []` when none is needed.
+
+After writing the files, run:
+
+```bash
+ap spec check specs/<feature>/
+```
+
+Do not finish while this command reports `BRIEF_PARSE_ERROR` or any other
+parse failure. Repair the YAML first.
+
 #### Body
 
 Required sections, in this order:
@@ -935,6 +958,7 @@ distinct files and the next pod reads each parent it depends on.
 
 When this skill finishes, the output must be complete enough that:
 
+- `ap spec check specs/<feature>/` passes.
 - `ap series create specs/<feature>/` runs with zero clarifying questions.
 - Each pod agent executes its brief without asking the user anything.
 - A reviewer reading only `purpose.md` plus one brief understands what

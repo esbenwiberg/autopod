@@ -265,6 +265,20 @@ required_facts:
 human_review: []
 ```
 
+Parser-compatible schema rules:
+
+- `contract_version` is the number `1`, not the string `"1"`.
+- `title` is required and non-empty.
+- `scenarios` is required. Each scenario has `id`, plus `given`, `when`,
+  and `then` as non-empty string lists.
+- Every `required_facts[].proves` entry must exactly match a
+  `scenarios[].id`.
+- `required_facts[].artifact` is an object with `path` and `change`; never
+  write `artifact: path/to/file`.
+- Do not use `validates`, `acceptance_criteria`, or prose-only proof fields.
+  Put the behavior in `scenarios`, then link facts to it with `proves`.
+- Always include `human_review`; use `human_review: []` when none is needed.
+
 Allowed `kind` values: `unit-test`, `integration-test`, `contract-test`,
 `browser-test`, `typecheck`, `lint-rule`, `smoke-script`, `custom-command`.
 Allowed `artifact.change` values: `create`, `update`, `touch`. Use only those
@@ -278,6 +292,15 @@ in `required_facts`. Never ask the worker to author evidence directly.
 Browser/report facts may write attachments under
 `.autopod/evidence/<fact-id>/`; Autopod records those paths as screenshots,
 traces, videos, reports, logs, or generic artifacts in `evidence.yaml`.
+
+After writing the files, run:
+
+```bash
+ap spec check specs/<task-slug>/
+```
+
+Do not finish while this command reports `BRIEF_PARSE_ERROR` or any other
+parse failure. Repair the YAML first.
 
 #### Body
 

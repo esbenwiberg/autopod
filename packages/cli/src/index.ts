@@ -10,6 +10,7 @@ import { registerProfileCommands } from './commands/profile.js';
 import { registerResearchCommands } from './commands/research.js';
 import { registerScheduleCommands } from './commands/schedule.js';
 import { registerSeriesCommands } from './commands/series.js';
+import { registerSpecCommands } from './commands/spec.js';
 import { registerValidateCommands } from './commands/validate.js';
 import { registerWatchCommands } from './commands/watch.js';
 import { registerWorkspaceCommands } from './commands/workspace.js';
@@ -51,6 +52,7 @@ registerHistoryCommands(program, getClient);
 registerValidateCommands(program, getClient);
 registerScheduleCommands(program, getClient);
 registerSeriesCommands(program, getClient);
+registerSpecCommands(program);
 registerWatchCommands(program, getClient);
 registerMobileCommands(program);
 
