@@ -60,6 +60,7 @@ import { createScheduledJobManager } from './scheduled-jobs/scheduled-job-manage
 import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-repository.js';
 import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
 import { createModelManager, createRepoScanner, createScanRepository } from './security/index.js';
+import { capLargeStrings } from './util/log-sanitizer.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
@@ -100,34 +101,6 @@ const LOG_REDACT_PATHS = [
   'password',
   'secret',
 ];
-
-// Hard cap on any single string field in a log record. Last-line-of-defense
-// against a runaway leak filling the terminal — a single pasted Lottie JSON
-// in a task description had been wrapping across the entire window. 16 KB is
-// generous enough to preserve diffs, stack traces, and validation output
-// (which already self-cap below this) while still bounding catastrophic
-// sizes. Targeted redactions in runtimes/containers remain the primary fix.
-const LOG_FIELD_MAX_BYTES = 16_384;
-
-function capLargeStrings(obj: unknown, depth = 0): unknown {
-  if (depth > 4) return obj;
-  if (typeof obj === 'string') {
-    return obj.length > LOG_FIELD_MAX_BYTES
-      ? `<truncated: ${obj.length} bytes, max ${LOG_FIELD_MAX_BYTES}>`
-      : obj;
-  }
-  if (Array.isArray(obj)) {
-    return obj.map((v) => capLargeStrings(v, depth + 1));
-  }
-  if (obj && typeof obj === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(obj)) {
-      out[k] = capLargeStrings(v, depth + 1);
-    }
-    return out;
-  }
-  return obj;
-}
 
 const PINO_BASE_OPTIONS = {
   level: LOG_LEVEL,

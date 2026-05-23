@@ -228,23 +228,23 @@ function shellQuote(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
-const WORKSPACE_MIRROR_EXCLUDES = ['.git', 'node_modules', '.serena', '.roslyn-codelens'];
+const WORKSPACE_RUNTIME_CACHE_EXCLUDES = ['node_modules', '.serena', '.roslyn-codelens'];
+const WORKSPACE_SYNC_EXCLUDES = ['.git', ...WORKSPACE_RUNTIME_CACHE_EXCLUDES];
 
-function workspaceMirrorPruneExpression(): string {
-  const predicates = WORKSPACE_MIRROR_EXCLUDES.map((name) => `-name ${shellQuote(name)}`).join(
-    ' -o ',
-  );
+function workspaceMirrorPruneExpression(excludes: string[]): string {
+  const predicates = excludes.map((name) => `-name ${shellQuote(name)}`).join(' -o ');
   return `\\( ${predicates} \\) -prune -o`;
 }
 
-function workspaceMirrorPreservePredicates(): string[] {
-  return WORKSPACE_MIRROR_EXCLUDES.flatMap((name) => [
-    `! -path '*/${name}'`,
-    `! -path '*/${name}/*'`,
-  ]);
+function workspaceMirrorPreservePredicates(excludes: string[]): string[] {
+  return excludes.flatMap((name) => [`! -path '*/${name}'`, `! -path '*/${name}/*'`]);
 }
 
-function buildWorkspaceMirrorCopyScript(sourceDir: string, targetDirArg: string): string {
+function buildWorkspaceMirrorCopyScript(
+  sourceDir: string,
+  targetDirArg: string,
+  excludes: string[],
+): string {
   const copyOne = [
     'target=$1',
     'shift',
@@ -261,7 +261,7 @@ function buildWorkspaceMirrorCopyScript(sourceDir: string, targetDirArg: string)
 
   return [
     `cd ${shellQuote(sourceDir)}`,
-    `find . -mindepth 1 ${workspaceMirrorPruneExpression()} -exec sh -c ${shellQuote(
+    `find . -mindepth 1 ${workspaceMirrorPruneExpression(excludes)} -exec sh -c ${shellQuote(
       copyOne,
     )} sh ${targetDirArg} {} +`,
   ].join(' && ');
@@ -2416,15 +2416,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'trap \'rm -rf "$STAGING"\' EXIT INT TERM',
         'rm -rf "$STAGING"',
         'mkdir -p "$STAGING"',
-        `workspace_count=$(cd /workspace && find . -mindepth 1 ${workspaceMirrorPruneExpression()} -print | wc -l | tr -d " ")`,
-        buildWorkspaceMirrorCopyScript('/workspace', '"$STAGING"'),
+        `workspace_count=$(cd /workspace && find . -mindepth 1 ${workspaceMirrorPruneExpression(
+          WORKSPACE_SYNC_EXCLUDES,
+        )} -print | wc -l | tr -d " ")`,
+        buildWorkspaceMirrorCopyScript('/workspace', '"$STAGING"', WORKSPACE_SYNC_EXCLUDES),
         'staging_count=$(find "$STAGING" -mindepth 1 | wc -l | tr -d " ")',
         'test "$workspace_count" = "$staging_count"',
         'cp -a "$STAGING/." /mnt/worktree/',
         'cd /mnt/worktree',
         [
           'find . -mindepth 1 -depth',
-          ...workspaceMirrorPreservePredicates(),
+          ...workspaceMirrorPreservePredicates(WORKSPACE_SYNC_EXCLUDES),
           '! -path "./$STAGING_BASE"',
           '! -path "./$STAGING_BASE/*"',
           '-exec sh -c \'staging=$1; shift; for p do rel=${p#./}; if [ ! -e "$staging/$rel" ] && [ ! -L "$staging/$rel" ]; then rm -rf -- "$p"; fi; done\' sh "$STAGING" {} +',
@@ -2458,7 +2460,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         containerId,
         '/workspace',
         worktreePath,
-        WORKSPACE_MIRROR_EXCLUDES,
+        WORKSPACE_SYNC_EXCLUDES,
       );
 
       // Try to recover commits: extract the container's .git to a temp dir and push to bare.
@@ -2584,7 +2586,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         containerId,
         '/workspace',
         worktreePath,
-        WORKSPACE_MIRROR_EXCLUDES,
+        WORKSPACE_SYNC_EXCLUDES,
       );
       await refreshHostWorktreeIndex(worktreePath, podId);
       logger.info({ containerId, worktreePath }, 'Worktree repopulated from live container');
@@ -4225,7 +4227,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
           const populate = await containerManager.execInContainer(
             containerId,
-            ['sh', '-c', buildWorkspaceMirrorCopyScript('/mnt/worktree', "'/workspace'")],
+            [
+              'sh',
+              '-c',
+              buildWorkspaceMirrorCopyScript(
+                '/mnt/worktree',
+                "'/workspace'",
+                WORKSPACE_RUNTIME_CACHE_EXCLUDES,
+              ),
+            ],
             { timeout: 120_000 },
           );
           if (populate.exitCode !== 0) {

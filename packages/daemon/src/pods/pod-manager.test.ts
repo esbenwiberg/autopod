@@ -2938,7 +2938,7 @@ describe('PodManager', () => {
         });
         expect(populateCall).toBeDefined();
         const script = String(populateCall?.[1][2]);
-        expect(script).toContain("-name '.git'");
+        expect(script).not.toContain("-name '.git'");
         expect(script).toContain("-name 'node_modules'");
         expect(script).toContain("-name '.serena'");
         expect(script).toContain("-name '.roslyn-codelens'");
@@ -3894,9 +3894,12 @@ describe('PodManager', () => {
       });
       expect(syncCall).toBeDefined();
       const script = String(syncCall?.[1][2]);
+      expect(script).toContain("-name '.git'");
       expect(script).toContain("-name 'node_modules'");
       expect(script).toContain("-name '.serena'");
       expect(script).toContain("-name '.roslyn-codelens'");
+      expect(script).toContain("! -path '*/.git'");
+      expect(script).toContain("! -path '*/.git/*'");
       expect(script).toContain("! -path '*/node_modules'");
       expect(script).toContain("! -path '*/node_modules/*'");
       expect(script).toContain("! -path '*/.serena'");
