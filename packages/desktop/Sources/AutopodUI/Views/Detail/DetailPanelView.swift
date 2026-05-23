@@ -211,6 +211,7 @@ public struct DetailPanelView: View {
         .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
         .sheet(isPresented: $showNudgeInput) { nudgeSheet }
         .sheet(isPresented: $showHandoffSheet) { handoffSheet }
+        .sheet(isPresented: $showSingleSpecHandoffSheet) { singleSpecHandoffSheet }
         .alert("Resume pod", isPresented: $showResumeInput) {
             TextField("Message for the agent…", text: $resumeInputText)
             Button("Resume") {
@@ -478,6 +479,14 @@ public struct DetailPanelView: View {
                                 Task { await actions.promote(pod.id, "pr", nil, true) }
                             }
                         }
+                        Divider()
+                        Button("Hand off → Single spec") {
+                            Task {
+                                _ = await actions.syncWorkspaceBranch(pod.id)
+                                resetSingleSpecHandoff()
+                                showSingleSpecHandoffSheet = true
+                            }
+                        }
                         // Spawn a series from this workspace's briefs. Doesn't change
                         // this pod — just opens the Create Series sheet pre-filled
                         // with the workspace's branch + profile so the new pods stack
@@ -487,7 +496,6 @@ public struct DetailPanelView: View {
                         // Best-effort: open the sheet even if sync fails so the user
                         // can fall back to local-folder mode.
                         if let onLaunchSeriesFromPod {
-                            Divider()
                             Button("Hand off → Series") {
                                 Task {
                                     _ = await actions.syncWorkspaceBranch(pod.id)
@@ -856,6 +864,12 @@ public struct DetailPanelView: View {
     @State private var handoffTarget: String? = nil
     @State private var handoffInstructionsText = ""
     @State private var handoffSkipAgent = false
+    @State private var showSingleSpecHandoffSheet = false
+    @State private var singleSpecPath = ""
+    @State private var singleSpecPreview: ParsedBriefResponse?
+    @State private var singleSpecErrorMessage: String?
+    @State private var isSingleSpecPreviewing = false
+    @State private var isSingleSpecSubmitting = false
     @State private var showForceCompleteSheet = false
     @State private var forceCompleteReasonText = ""
     @State private var showKickSheet = false
@@ -1072,6 +1086,194 @@ public struct DetailPanelView: View {
         }
         .padding(20)
         .frame(minWidth: 480)
+    }
+
+    private var singleSpecWorkerProfile: String {
+        actions.workerProfileForProfile(pod.profileName) ?? pod.profileName
+    }
+
+    private var canLaunchSingleSpec: Bool {
+        !isSingleSpecSubmitting && singleSpecPreview != nil
+    }
+
+    private var singleSpecHandoffSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Hand off → Single spec")
+                .font(.headline)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.branch")
+                        .foregroundStyle(.secondary)
+                    Text("Base branch")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(pod.branch)
+                        .font(.system(.caption, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                HStack(spacing: 6) {
+                    Image(systemName: "person.crop.circle.badge.checkmark")
+                        .foregroundStyle(.secondary)
+                    Text("Worker profile")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(singleSpecWorkerProfile)
+                        .font(.system(.caption, design: .monospaced))
+                        .lineLimit(1)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Spec path on branch")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    TextField("specs/my-feature", text: $singleSpecPath)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.callout, design: .monospaced))
+                        .onChange(of: singleSpecPath) { _, _ in
+                            singleSpecPreview = nil
+                            singleSpecErrorMessage = nil
+                        }
+                    Button(isSingleSpecPreviewing ? "Parsing…" : "Preview") {
+                        Task { await previewSingleSpecHandoff() }
+                    }
+                    .disabled(
+                        isSingleSpecPreviewing
+                        || isSingleSpecSubmitting
+                        || singleSpecPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
+                }
+            }
+
+            if let error = singleSpecErrorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            if let preview = singleSpecPreview {
+                singleSpecPreviewSection(preview)
+            }
+
+            HStack {
+                Button("Cancel") {
+                    resetSingleSpecHandoff()
+                    showSingleSpecHandoffSheet = false
+                }
+                .keyboardShortcut(.escape)
+                Spacer()
+                Button(isSingleSpecSubmitting ? "Launching…" : "Launch pod") {
+                    Task { await submitSingleSpecHandoff() }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canLaunchSingleSpec)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 520)
+    }
+
+    private func singleSpecPreviewSection(_ brief: ParsedBriefResponse) -> some View {
+        let scenarioCount = brief.contract?.scenarios.count ?? 0
+        let factCount = brief.contract?.requiredFacts.count ?? 0
+        let reviewCount = brief.contract?.humanReview.count ?? 0
+        let sidecarCount = brief.requireSidecars?.count ?? 0
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(brief.title)
+                    .font(.system(.callout).weight(.semibold))
+                    .lineLimit(2)
+                Spacer()
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
+            HStack(spacing: 8) {
+                singleSpecPreviewChip("\(scenarioCount) scenarios", color: .blue)
+                singleSpecPreviewChip("\(factCount) facts", color: .green)
+                singleSpecPreviewChip("\(reviewCount) review", color: .purple)
+                if sidecarCount > 0 {
+                    singleSpecPreviewChip("\(sidecarCount) sidecars", color: .orange)
+                }
+            }
+            Text(brief.task)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func singleSpecPreviewChip(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12))
+            .clipShape(Capsule())
+    }
+
+    private func resetSingleSpecHandoff() {
+        singleSpecPath = ""
+        singleSpecPreview = nil
+        singleSpecErrorMessage = nil
+        isSingleSpecPreviewing = false
+        isSingleSpecSubmitting = false
+    }
+
+    private func previewSingleSpecHandoff() async {
+        let path = singleSpecPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return }
+        singleSpecErrorMessage = nil
+        singleSpecPreview = nil
+        isSingleSpecPreviewing = true
+        defer { isSingleSpecPreviewing = false }
+
+        guard let preview = await actions.previewBriefOnBranch(pod.profileName, pod.branch, path) else {
+            singleSpecErrorMessage = actions.lastPreviewError() ?? "Could not parse that spec."
+            return
+        }
+        singleSpecPreview = preview
+    }
+
+    private func submitSingleSpecHandoff() async {
+        guard let brief = singleSpecPreview else { return }
+        isSingleSpecSubmitting = true
+        singleSpecErrorMessage = nil
+        defer { isSingleSpecSubmitting = false }
+
+        let metadata = BriefPodMetadata(
+            contract: brief.contract,
+            briefTitle: brief.title,
+            touches: brief.touches,
+            doesNotTouch: brief.doesNotTouch
+        )
+        let id = await actions.createPod(
+            singleSpecWorkerProfile,
+            brief.task,
+            nil,
+            PodConfigRequest(agentMode: "auto", output: "pr", validate: true, promotable: false),
+            pod.branch,
+            nil,
+            nil,
+            brief.requireSidecars,
+            nil,
+            metadata
+        )
+
+        if let id {
+            resetSingleSpecHandoff()
+            showSingleSpecHandoffSheet = false
+            onSelectPod?(id)
+        } else {
+            singleSpecErrorMessage = "Pod creation failed."
+        }
     }
 
     private var rejectFeedbackSheet: some View {
