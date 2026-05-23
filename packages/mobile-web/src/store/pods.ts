@@ -2,7 +2,7 @@ import type { AgentEvent, Pod, SystemEvent } from '@autopod/shared';
 import { create } from 'zustand';
 import { AuthRequiredError, apiFetch } from '../lib/api.js';
 
-export const ACTIVITY_LIMIT = 20;
+export const ACTIVITY_LIMIT = 100;
 
 interface PodsState {
   pods: Pod[];

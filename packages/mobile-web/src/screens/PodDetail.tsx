@@ -6,7 +6,8 @@ import { ActivityList } from '../components/ActivityList.js';
 import { EscalationCard } from '../components/EscalationCard.js';
 import { SkipValidationToggle } from '../components/SkipValidationToggle.js';
 import { StatusChip } from '../components/StatusChip.js';
-import { ValidationSummary } from '../components/ValidationSummary.js';
+import { TaskMarkdownCards } from '../components/TaskMarkdownCards.js';
+import { type StoredValidation, ValidationSummary } from '../components/ValidationSummary.js';
 import { ApiError, AuthRequiredError, apiFetch } from '../lib/api.js';
 import { progressDetail, progressLabel, taskTitle } from '../lib/pod-display.js';
 import { ACTIVITY_LIMIT, usePodsStore } from '../store/pods.js';
@@ -20,10 +21,10 @@ export function PodDetail(): JSX.Element {
   const untrackActivity = usePodsStore((s) => s.untrackActivity);
 
   const [error, setError] = useState<string | null>(null);
+  const [validationHistory, setValidationHistory] = useState<StoredValidation[]>([]);
 
   // Fetch the pod when it's not already in the store (deep-link case) so a
-  // subsequent navigate-back shows it in the landing list. Also seed the
-  // activity ring buffer.
+  // subsequent navigate-back shows it in the landing list.
   useEffect(() => {
     if (!id) return undefined;
 
@@ -39,17 +40,37 @@ export function PodDetail(): JSX.Element {
         });
     }
 
+    return () => {
+      cancelled = true;
+    };
+  }, [id, pod, upsertPod]);
+
+  // Seed replayable detail data when the selected pod changes.
+  useEffect(() => {
+    if (!id) return undefined;
+
+    let cancelled = false;
+    setValidationHistory([]);
+
     apiFetch<AgentEvent[]>(`/pods/${id}/events?limit=${ACTIVITY_LIMIT}`)
       .then((events) => {
         if (!cancelled) trackActivity(id, events);
       })
       .catch(() => trackActivity(id, []));
 
+    apiFetch<StoredValidation[]>(`/pods/${id}/validations`)
+      .then((history) => {
+        if (!cancelled) setValidationHistory(history);
+      })
+      .catch(() => {
+        if (!cancelled) setValidationHistory([]);
+      });
+
     return () => {
       cancelled = true;
       untrackActivity(id);
     };
-  }, [id, pod, upsertPod, trackActivity, untrackActivity]);
+  }, [id, trackActivity, untrackActivity]);
 
   if (error) {
     return (
@@ -89,16 +110,13 @@ export function PodDetail(): JSX.Element {
         <EscalationCard podId={data.id} escalation={data.pendingEscalation} />
       ) : null}
 
-      {data.lastValidationResult ? <ValidationSummary result={data.lastValidationResult} /> : null}
+      <ValidationSummary result={data.lastValidationResult} history={validationHistory} />
 
       <ActionBar pod={data} />
 
       <SkipValidationToggle pod={data} />
 
-      <details className="task-details">
-        <summary>Full task</summary>
-        <p>{data.task}</p>
-      </details>
+      <TaskMarkdownCards markdown={data.task} />
 
       <section className="activity-section">
         <h2>Recent activity</h2>
@@ -118,7 +136,15 @@ function ProgressPlan({ pod }: { pod: Pod }): JSX.Element | null {
     <section className="info-panel">
       {progress ? (
         <div className="info-block">
-          <div className="info-kicker">Progress</div>
+          <div className="info-header">
+            <div className="info-kicker">Progress</div>
+            <span className="info-count">
+              {pod.progress?.currentPhase ?? 0} of {Math.max(pod.progress?.totalPhases ?? 1, 1)}
+            </span>
+          </div>
+          <div className="progress-track" aria-hidden="true">
+            <div className="progress-fill" style={{ width: progressWidth(pod) }} />
+          </div>
           <div className="info-title">{progress}</div>
           {detail ? <div className="info-copy">{detail}</div> : null}
         </div>
@@ -138,6 +164,12 @@ function ProgressPlan({ pod }: { pod: Pod }): JSX.Element | null {
       ) : null}
     </section>
   );
+}
+
+function progressWidth(pod: Pod): string {
+  const total = Math.max(pod.progress?.totalPhases ?? 1, 1);
+  const current = Math.min(Math.max(pod.progress?.currentPhase ?? 0, 0), total);
+  return `${Math.round((current / total) * 100)}%`;
 }
 
 function BackLink(): JSX.Element {

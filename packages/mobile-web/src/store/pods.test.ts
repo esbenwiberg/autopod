@@ -138,7 +138,7 @@ describe('usePodsStore activity buffer', () => {
 
   it('agent_activity appends to the tracked pod and respects the cap', () => {
     usePodsStore.getState().trackActivity('a', []);
-    for (let i = 0; i < 25; i += 1) {
+    for (let i = 0; i < 105; i += 1) {
       usePodsStore.getState().applyEvent({
         type: 'pod.agent_activity',
         timestamp: `t${i}`,
@@ -147,12 +147,12 @@ describe('usePodsStore activity buffer', () => {
       });
     }
     const buf = usePodsStore.getState().activity.a;
-    expect(buf?.length).toBe(20);
+    expect(buf?.length).toBe(100);
     // Oldest dropped; newest retained
     const first = buf?.[0];
     const last = buf?.at(-1);
     expect(first && 'message' in first ? first.message : '').toBe('m5');
-    expect(last && 'message' in last ? last.message : '').toBe('m24');
+    expect(last && 'message' in last ? last.message : '').toBe('m104');
   });
 
   it('untrackActivity drops the buffer entirely', () => {
