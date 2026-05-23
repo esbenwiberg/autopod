@@ -566,6 +566,7 @@ podManager = createPodManager({
   repoScanner,
   scanRepo,
   screenshotStore,
+  hostScreenshotDir: (podId) => hostBrowserRunner.screenshotDir(podId),
   safetyEventsRepo,
   logger,
 });

@@ -67,6 +67,58 @@ describe('collectScreenshots', () => {
     expect(store.write).toHaveBeenCalledWith('pod-1', 'smoke', '0-root.png', pngBuffer);
   });
 
+  it('reads host Playwright screenshots from the allowed host screenshot directory', async () => {
+    const pngBuffer = Buffer.from('host-png-data');
+    mockedFs.readFile.mockResolvedValue(pngBuffer);
+
+    const pages: PageResult[] = [
+      {
+        path: '/',
+        status: 'pass',
+        screenshotPath: '/tmp/autopod-browser/pod-1/screenshots/root.png',
+        consoleErrors: [],
+        assertions: [],
+        loadTime: 100,
+      },
+    ];
+
+    const store = makeMockStore();
+    const result = await collectScreenshots('/tmp/worktree/abc', pages, store, 'pod-1', {
+      allowedHostScreenshotDir: '/tmp/autopod-browser/pod-1/screenshots',
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.pagePath).toBe('/');
+    expect(result[0]?.ref.source).toBe('smoke');
+    expect(result[0]?.ref.filename).toBe('0-root.png');
+    expect(mockedFs.readFile).toHaveBeenCalledWith(
+      '/tmp/autopod-browser/pod-1/screenshots/root.png',
+    );
+    expect(store.write).toHaveBeenCalledWith('pod-1', 'smoke', '0-root.png', pngBuffer);
+  });
+
+  it('rejects unrelated absolute screenshot paths', async () => {
+    const pages: PageResult[] = [
+      {
+        path: '/',
+        status: 'pass',
+        screenshotPath: '/tmp/other/root.png',
+        consoleErrors: [],
+        assertions: [],
+        loadTime: 100,
+      },
+    ];
+
+    const store = makeMockStore();
+    const result = await collectScreenshots('/tmp/worktree/abc', pages, store, 'pod-1', {
+      allowedHostScreenshotDir: '/tmp/autopod-browser/pod-1/screenshots',
+    });
+
+    expect(result).toHaveLength(0);
+    expect(mockedFs.readFile).not.toHaveBeenCalled();
+    expect(store.write).not.toHaveBeenCalled();
+  });
+
   it('skips pages without screenshotPath', async () => {
     const pages: PageResult[] = [
       {

@@ -11,18 +11,59 @@ export interface CollectedScreenshot {
   ref: ScreenshotRef;
 }
 
+export interface CollectScreenshotsOptions {
+  /**
+   * Host-side Playwright writes screenshots outside the worktree. When set,
+   * absolute screenshot paths under this directory are accepted.
+   */
+  allowedHostScreenshotDir?: string | null;
+}
+
 export interface CollectedFactScreenshot {
   factId: string;
   attachmentPath: string;
   ref: ScreenshotRef;
 }
 
+function isInsideDirectory(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+function resolveSmokeScreenshotPath(
+  worktreePath: string,
+  screenshotPath: string,
+  options: CollectScreenshotsOptions,
+): string | null {
+  const worktreeRoot = path.resolve(worktreePath);
+
+  if (screenshotPath.startsWith('/workspace/')) {
+    const relativePath = screenshotPath.replace(/^\/workspace\//, '');
+    const hostPath = path.resolve(worktreeRoot, relativePath);
+    return isInsideDirectory(hostPath, worktreeRoot) ? hostPath : null;
+  }
+
+  if (!path.isAbsolute(screenshotPath)) {
+    const hostPath = path.resolve(worktreeRoot, screenshotPath);
+    return isInsideDirectory(hostPath, worktreeRoot) ? hostPath : null;
+  }
+
+  const allowedRoot = options.allowedHostScreenshotDir
+    ? path.resolve(options.allowedHostScreenshotDir)
+    : null;
+  if (!allowedRoot) return null;
+
+  const hostPath = path.resolve(screenshotPath);
+  return isInsideDirectory(hostPath, allowedRoot) ? hostPath : null;
+}
+
 /**
- * After page validation, reads screenshot PNGs from the host worktree,
+ * After page validation, reads screenshot PNGs from the host filesystem,
  * writes them to the on-disk screenshot store, and returns refs.
  *
- * The screenshots exist on the host because `/workspace` inside the
- * container is volume-mounted from the worktree directory.
+ * Container screenshots map from `/workspace` to the worktree. Host
+ * Playwright screenshots are accepted only under the allowed host screenshot
+ * directory provided by the caller.
  *
  * The `.autopod/screenshots/` directory is left in place — it is committed
  * to the feature branch so GitHub PR reviewers can see screenshots.
@@ -32,6 +73,7 @@ export async function collectScreenshots(
   pageResults: PageResult[],
   store: ScreenshotStore,
   podId: string,
+  options: CollectScreenshotsOptions = {},
 ): Promise<CollectedScreenshot[]> {
   const collected: CollectedScreenshot[] = [];
 
@@ -39,11 +81,8 @@ export async function collectScreenshots(
     const page = pageResults[idx];
     if (!page?.screenshotPath) continue;
 
-    // Convert container path → host path
-    // Container: /workspace/.autopod/screenshots/root.png
-    // Host:      {worktreePath}/.autopod/screenshots/root.png
-    const relativePath = page.screenshotPath.replace(/^\/workspace\//, '');
-    const hostPath = path.join(worktreePath, relativePath);
+    const hostPath = resolveSmokeScreenshotPath(worktreePath, page.screenshotPath, options);
+    if (!hostPath) continue;
 
     try {
       const buffer = await fsp.readFile(hostPath);

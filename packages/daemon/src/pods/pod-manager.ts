@@ -757,6 +757,8 @@ export interface PodManagerDependencies {
   scanRepo?: import('../security/index.js').ScanRepository;
   /** On-disk screenshot store. Smoke screenshots are written here after validation. */
   screenshotStore?: import('./screenshot-store.js').ScreenshotStore;
+  /** Resolve the host Playwright screenshot directory for a pod. */
+  hostScreenshotDir?: (podId: string) => string;
   /** Safety events repository for writing per-pattern detection rows. */
   safetyEventsRepo?: import('../safety/safety-events-repository.js').SafetyEventsRepository;
   logger: Logger;
@@ -1031,6 +1033,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     repoScanner,
     scanRepo,
     screenshotStore,
+    hostScreenshotDir,
     safetyEventsRepo,
   } = deps;
 
@@ -7483,12 +7486,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               result.smoke.pages,
               screenshotStore,
               pod.id,
+              { allowedHostScreenshotDir: hostScreenshotDir?.(pod.id) },
             );
             for (const ss of screenshots) {
               const page = result.smoke.pages.find((p) => p.path === ss.pagePath);
               if (page) {
                 page.screenshot = ss.ref;
               }
+            }
+            const missingCount = result.smoke.pages.filter(
+              (p) => p.screenshotPath && !p.screenshot,
+            ).length;
+            if (missingCount > 0) {
+              logger.warn(
+                { podId, missingCount, collectedCount: screenshots.length },
+                'Validation page screenshots were reported but not collected',
+              );
             }
             logger.info({ podId, count: screenshots.length }, 'Collected validation screenshots');
           } catch (err) {
