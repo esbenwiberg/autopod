@@ -136,6 +136,14 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
             planned: z.string().describe('What was originally planned for this step'),
             actual: z.string().describe('What was actually done instead'),
             reason: z.string().describe('Why the deviation was necessary'),
+            kind: z
+              .enum(['constraint', 'tradeoff', 'scope', 'bugfix', 'other'])
+              .optional()
+              .describe('Optional classification to help reviewer triage.'),
+            impact: z
+              .string()
+              .optional()
+              .describe('Optional impact summary to help the reviewer focus verification.'),
           }),
         )
         .describe(
@@ -160,6 +168,28 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         .describe(
           'Evidence for each required fact in contract.yaml. The daemon re-runs commands independently; this is the agent self-report.',
         ),
+      factDeviations: z
+        .array(
+          z.object({
+            factId: z.string().describe('Required fact id that is impossible or invalid in current reality'),
+            action: z.enum(['waive', 'replace']).describe('Request to waive or replace the required fact'),
+            reason: z.string().describe('Why this request is needed'),
+            whyImpossible: z.string().describe('Concrete explanation of why the current fact cannot be satisfied'),
+            decision: z
+              .enum(['approved_waive', 'approved_replace', 'rejected'])
+              .optional()
+              .describe('Optional human decision for this request. Omit while awaiting decision.'),
+            replacement: z
+              .object({
+                artifactPath: z.string(),
+                command: z.string(),
+                proves: z.array(z.string()).optional(),
+              })
+              .optional(),
+          }),
+        )
+        .optional()
+        .describe('Optional requests for human approval to waive/replace impossible required facts.'),
     },
     async (input) => {
       const response = await reportTaskSummary(podId, input, bridge);

@@ -103,7 +103,7 @@ export interface FactCheckResult {
   artifactPath: string;
   command: string;
   passed: boolean;
-  status?: 'pass' | 'fail';
+  status?: 'pass' | 'fail' | 'waived' | 'replaced' | 'pending_human';
   exitCode?: number;
   durationMs?: number;
   artifact?: {
@@ -128,7 +128,7 @@ export interface FactEvidenceAttachment {
 }
 
 export interface FactValidationResult {
-  status: 'pass' | 'fail' | 'skip';
+  status: 'pass' | 'fail' | 'skip' | 'pending_human';
   results: FactCheckResult[];
 }
 

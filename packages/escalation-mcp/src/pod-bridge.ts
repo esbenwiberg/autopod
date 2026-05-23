@@ -31,9 +31,28 @@ export interface PodBridge {
   reportTaskSummary(
     podId: string,
     actualSummary: string,
-    deviations: Array<{ step: string; planned: string; actual: string; reason: string }>,
+    deviations: Array<{
+      step: string;
+      planned: string;
+      actual: string;
+      reason: string;
+      kind?: 'constraint' | 'tradeoff' | 'scope' | 'bugfix' | 'other';
+      impact?: string;
+    }>,
     how?: string,
     factEvidence?: FactEvidence[],
+    factDeviations?: Array<{
+      factId: string;
+      action: 'waive' | 'replace';
+      reason: string;
+      whyImpossible: string;
+      decision?: 'approved_waive' | 'approved_replace' | 'rejected';
+      replacement?: {
+        artifactPath: string;
+        command: string;
+        proves?: string[];
+      };
+    }>,
   ): void;
   consumeMessages(podId: string): { hasMessage: boolean; message?: string };
   /** Check if an action requires human approval before execution */

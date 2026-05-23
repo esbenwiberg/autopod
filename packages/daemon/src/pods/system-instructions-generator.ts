@@ -523,6 +523,7 @@ export function generateSystemInstructions(
   lines.push(
     '   - `deviations`: an array of any steps where you deviated from your original plan. ' +
       'For each deviation include the step name, what was planned, what you did instead, and why. ' +
+      'When useful, add `kind` (constraint/tradeoff/scope/bugfix/other) and `impact` so the reviewer can quickly verify your claim. ' +
       'Use an empty array if you followed the plan exactly. ' +
       'Only include meaningful plan deviations — not minor style choices or trivial reorderings.',
   );
@@ -531,6 +532,9 @@ export function generateSystemInstructions(
       '   - `factEvidence`: include one entry per required fact from `contract.yaml`. ' +
         'Record the artifact path, command, and whether your local run passed, failed, or was not run. ' +
         'The daemon still re-runs every command independently; this self-report helps reviewers understand your verification path.',
+    );
+    lines.push(
+      '   - `factDeviations`: if a required fact is impossible under current reality, request human decision with fact id, waive/replace action, reason, and concrete impossibility details. Pending requests block validation as `pending_human`.',
     );
   }
   lines.push(

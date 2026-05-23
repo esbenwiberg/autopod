@@ -292,7 +292,7 @@ export function createLocalValidationEngine(
         // and commands the validator can execute without model interpretation.
         checkAbort();
         let factValidation: FactValidationResult | null;
-        let factsStatus: 'pass' | 'fail' | 'skip';
+        let factsStatus: 'pass' | 'fail' | 'skip' | 'pending_human';
         if (skipPhases.includes('facts')) {
           factValidation = { status: 'skip', results: [] };
           factsStatus = 'skip';
@@ -316,14 +316,16 @@ export function createLocalValidationEngine(
           taskReview = null;
           reviewSkipReason = 'Skipped by profile configuration';
           reviewSkipKind = 'profile-skip';
-        } else if (!tier1Pass || factsStatus === 'fail') {
+        } else if (!tier1Pass || factsStatus === 'fail' || factsStatus === 'pending_human') {
           // Don't burn AI tokens reviewing code that doesn't build, lint, or
           // pass tests/facts — the agent will rewrite it on the next attempt.
           callbacks?.onPhaseStarted?.('review');
           taskReview = null;
           reviewSkipReason =
-            factsStatus === 'fail'
-              ? 'Skipped — required facts failed'
+            factsStatus === 'pending_human'
+              ? 'Skipped — required facts pending human decision'
+              : factsStatus === 'fail'
+                ? 'Skipped — required facts failed'
               : 'Skipped — earlier validation phases failed';
           reviewSkipKind = 'upstream-failed';
         } else {
@@ -722,6 +724,9 @@ async function runFactValidation(
   hostBrowserRunner?: HostBrowserRunner,
 ): Promise<FactValidationResult> {
   const facts = config.contract?.requiredFacts ?? [];
+  const factDeviationMap = new Map(
+    (config.taskSummary?.factDeviations ?? []).map((d) => [d.factId, d] as const),
+  );
   if (facts.length === 0) {
     log?.info('no required facts configured, skipping fact validation');
     return { status: 'skip', results: [] };
@@ -731,6 +736,81 @@ async function runFactValidation(
   const results: FactCheckResult[] = [];
 
   for (const fact of facts) {
+    const requestedDeviation = factDeviationMap.get(fact.id);
+    if (requestedDeviation) {
+      if (requestedDeviation.decision === 'rejected') {
+        // Rejected by human: fall through and enforce original fact deterministically.
+      } else if (requestedDeviation.decision === 'approved_waive') {
+        results.push({
+          factId: fact.id,
+          proves: fact.proves,
+          kind: fact.kind,
+          artifactPath: normalizeContractPath(fact.artifact.path),
+          command: fact.command,
+          passed: true,
+          status: 'waived',
+          reasoning: `Fact deviation approved by human as waive. Reason: ${requestedDeviation.reason}.`,
+        });
+        continue;
+      } else if (
+        requestedDeviation.decision === 'approved_replace' &&
+        requestedDeviation.replacement
+      ) {
+        const replacement = requestedDeviation.replacement;
+        const replacementPath = normalizeContractPath(replacement.artifactPath);
+        const replacementExists = await artifactExistsInContainer(
+          containerManager,
+          config,
+          replacementPath,
+          log,
+        );
+        const replacementChanged = artifactChangeSatisfied(config.diff, replacementPath, 'modified');
+        const replacementCmd = await containerManager.execInContainer(
+          config.containerId,
+          ['sh', '-c', replacement.command],
+          { cwd },
+        );
+        const replacementPass =
+          replacementExists && replacementChanged && replacementCmd.exitCode === 0;
+        results.push({
+          factId: fact.id,
+          proves: replacement.proves ?? fact.proves,
+          kind: fact.kind,
+          artifactPath: replacementPath,
+          command: replacement.command,
+          passed: replacementPass,
+          status: replacementPass ? 'replaced' : 'fail',
+          exitCode: replacementCmd.exitCode,
+          reasoning: replacementPass
+            ? `Fact deviation approved by human as replace. Replacement checks passed for ${replacementPath}.`
+            : `Fact deviation approved as replace, but replacement checks failed for ${replacementPath}.`,
+          stdout: replacementCmd.stdout.slice(0, 20_000),
+          stderr: replacementCmd.stderr.slice(0, 20_000),
+        });
+        continue;
+      }
+
+      const requestedStatus = requestedDeviation.action === 'replace' ? 'replaced' : 'waived';
+      const replacementDetail =
+        requestedDeviation.action === 'replace' && requestedDeviation.replacement
+          ? ` Requested replacement artifact "${requestedDeviation.replacement.artifactPath}" with command "${requestedDeviation.replacement.command}".`
+          : '';
+      results.push({
+        factId: fact.id,
+        proves: fact.proves,
+        kind: fact.kind,
+        artifactPath: normalizeContractPath(fact.artifact.path),
+        command: fact.command,
+        passed: false,
+        status: 'pending_human',
+        reasoning:
+          `Fact deviation request is pending human decision. Requested action: ${requestedStatus}. ` +
+          `Reason: ${requestedDeviation.reason}. Why impossible: ${requestedDeviation.whyImpossible}.` +
+          replacementDetail,
+      });
+      continue;
+    }
+
     const artifactPath = normalizeContractPath(fact.artifact.path);
     const artifactChanged = artifactChangeSatisfied(
       config.diff,
@@ -814,7 +894,11 @@ async function runFactValidation(
     });
   }
 
-  const status = results.every((r) => r.passed) ? ('pass' as const) : ('fail' as const);
+  const status = results.some((r) => r.status === 'pending_human')
+    ? ('pending_human' as const)
+    : results.every((r) => r.passed)
+      ? ('pass' as const)
+      : ('fail' as const);
   log?.info(
     { status, passed: results.filter((r) => r.passed).length, total: results.length },
     'fact validation complete',
@@ -1574,12 +1658,15 @@ Compare the ORIGINAL PLAN (if provided) with the AGENT TASK SUMMARY and the DIFF
    - "justified": the diff confirms the deviation was necessary or beneficial
    - "questionable": the reasoning is unclear or the diff doesn't confirm it
    - "unjustified": the deviation appears to have degraded quality without good reason
+   - If a deviation describes a hard external constraint (missing env/tooling/access), treat it as justified unless the diff clearly contradicts that claim.
 
 2. Look for undisclosed deviations: things in the diff that diverge from the plan but were NOT reported.
    - Only flag meaningful gaps (e.g., a planned step that was entirely skipped, or a wholly different approach taken)
    - Do NOT flag minor implementation details that naturally evolve during development
+   - Do NOT duplicate disclosed deviations as "undisclosed" just because wording differs.
 
 Transparency is rewarded: a disclosed deviation with sound reasoning should not negatively affect the status.
+Use deviations to calibrate trust and follow-up questions, not to punish honest reporting.
 An undisclosed deviation that the diff reveals IS a negative signal.
 
 `

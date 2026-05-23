@@ -9,8 +9,22 @@ export interface ReportTaskSummaryInput {
     planned: string;
     actual: string;
     reason: string;
+    kind?: 'constraint' | 'tradeoff' | 'scope' | 'bugfix' | 'other';
+    impact?: string;
   }>;
   factEvidence?: FactEvidence[];
+  factDeviations?: Array<{
+    factId: string;
+    action: 'waive' | 'replace';
+    reason: string;
+    whyImpossible: string;
+    decision?: 'approved_waive' | 'approved_replace' | 'rejected';
+    replacement?: {
+      artifactPath: string;
+      command: string;
+      proves?: string[];
+    };
+  }>;
 }
 
 export async function reportTaskSummary(
@@ -24,6 +38,7 @@ export async function reportTaskSummary(
     input.deviations,
     input.how,
     input.factEvidence,
+    input.factDeviations,
   );
   const deviationCount = input.deviations.length;
   const deviationNote =
@@ -33,5 +48,8 @@ export async function reportTaskSummary(
   const factNote = input.factEvidence?.length
     ? ` ${input.factEvidence.length} fact evidence item${input.factEvidence.length === 1 ? '' : 's'} recorded.`
     : '';
-  return `Task summary registered. ${deviationNote}${factNote} The reviewer will assess any deviations.`;
+  const factDeviationNote = input.factDeviations?.length
+    ? ` ${input.factDeviations.length} fact deviation request${input.factDeviations.length === 1 ? '' : 's'} recorded.`
+    : '';
+  return `Task summary registered. ${deviationNote}${factNote}${factDeviationNote} The reviewer will assess any deviations.`;
 }
