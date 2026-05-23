@@ -80,6 +80,9 @@ public struct PodActions: Sendable {
   /// or if no preview has been attempted). The sheet uses this to surface the
   /// real daemon error instead of a generic message.
   public var lastPreviewError: @MainActor @Sendable () -> String?
+  /// Most recent error from a create-pod call. Sheets use this to keep submit
+  /// failures inline instead of routing them through the app-wide error alert.
+  public var lastCreatePodError: @MainActor @Sendable () -> String?
   /// Launch a pod series. Returns the seriesId on success.
   public var createSeries: @MainActor @Sendable (CreateSeriesRequest) async -> String?
   /// Spawn a new pod that depends on the given parent pod IDs, optionally
@@ -141,6 +144,7 @@ public struct PodActions: Sendable {
     previewBriefFolder: @escaping @MainActor @Sendable (String) async -> ParsedBriefResponse? = { _ in nil },
     previewBriefOnBranch: @escaping @MainActor @Sendable (String, String, String) async -> ParsedBriefResponse? = { _, _, _ in nil },
     lastPreviewError: @escaping @MainActor @Sendable () -> String? = { nil },
+    lastCreatePodError: @escaping @MainActor @Sendable () -> String? = { nil },
     createSeries: @escaping @MainActor @Sendable (CreateSeriesRequest) async -> String? = { _ in nil },
     spawnDependent: @escaping @MainActor @Sendable (String, String, [String], String?, String?, String?) async -> String? = { _, _, _, _, _, _ in nil },
     syncWorkspaceBranch: @escaping @MainActor @Sendable (String) async -> SyncBranchResponse? = { _ in nil },
@@ -185,6 +189,7 @@ public struct PodActions: Sendable {
     self.previewBriefFolder = previewBriefFolder
     self.previewBriefOnBranch = previewBriefOnBranch
     self.lastPreviewError = lastPreviewError
+    self.lastCreatePodError = lastCreatePodError
     self.createSeries = createSeries
     self.spawnDependent = spawnDependent
     self.syncWorkspaceBranch = syncWorkspaceBranch

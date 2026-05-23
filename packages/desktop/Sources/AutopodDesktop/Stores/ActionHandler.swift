@@ -13,6 +13,9 @@ public final class ActionHandler {
   /// Error from the most recent preview call, or nil on success. Separate
   /// from lastError so the series sheet doesn't pick up unrelated failures.
   public private(set) var lastPreviewError: String?
+  /// Error from the most recent create-pod call. Kept separate from lastError
+  /// so creation sheets can show submit failures inline.
+  public private(set) var lastCreatePodError: String?
 
   private let api: DaemonAPI
   private let podStore: PodStore
@@ -98,6 +101,7 @@ public final class ActionHandler {
         await self?.previewBriefOnBranch(profileName: profile, branch: branch, path: path) ?? nil
       },
       lastPreviewError: { [weak self] in self?.lastPreviewError },
+      lastCreatePodError: { [weak self] in self?.lastCreatePodError },
       createSeries: { [weak self] request in
         await self?.createSeries(request) ?? nil
       },
@@ -353,6 +357,7 @@ public final class ActionHandler {
     briefMetadata: BriefPodMetadata? = nil
   ) async -> String? {
     pendingAction = "create"
+    lastCreatePodError = nil
     let req = CreateSessionRequest(
       profileName: profileName,
       task: task,
@@ -372,10 +377,11 @@ public final class ActionHandler {
       let response = try await api.createPod(req)
       let pod = PodMapper.map(response)
       podStore.upsertSession(pod)
+      lastCreatePodError = nil
       pendingAction = nil
       return response.id
     } catch {
-      lastError = error.localizedDescription
+      lastCreatePodError = error.localizedDescription
       pendingAction = nil
       return nil
     }
@@ -444,6 +450,9 @@ public final class ActionHandler {
       ),
       baseBranch: source.branch
     )
+    if result == nil {
+      lastError = lastCreatePodError
+    }
     pendingAction = nil
     return result
   }

@@ -102,6 +102,28 @@ human_review: []
     expect(briefs[0]?.contract?.requiredFacts[0]?.id).toBe('fact-behavior');
   });
 
+  it('rejects contract fields that are too long for pod creation', () => {
+    const content = 'Build the thing';
+    const contractContent = `contract_version: 1
+title: Contract title
+depends_on: []
+scenarios:
+  - id: behavior
+    given: ["existing state"]
+    when: ["the action runs"]
+    then: ["the result is visible"]
+required_facts: []
+human_review:
+  - id: review-behavior
+    covers: [behavior]
+    criterion: ${'a'.repeat(501)}
+    reason: Check manually
+`;
+    expect(() => parseBriefs([{ filename: '01-task.md', content, contractContent }])).toThrow(
+      'human_review[0].criterion must contain at most 500 character(s)',
+    );
+  });
+
   it('extracts require_sidecars from frontmatter (snake_case)', () => {
     const content =
       '---\ntitle: Wire Dagger pipeline\nrequire_sidecars: [dagger]\n---\nBuild the pipeline';

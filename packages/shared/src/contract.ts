@@ -28,30 +28,42 @@ function asObject(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function asString(value: unknown, label: string): string {
+function asString(value: unknown, label: string, options: { maxLength?: number } = {}): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new BriefParseError(`${label} must be a non-empty string`);
   }
-  return value.trim();
+  const trimmed = value.trim();
+  if (options.maxLength !== undefined && trimmed.length > options.maxLength) {
+    throw new BriefParseError(`${label} must contain at most ${options.maxLength} character(s)`);
+  }
+  return trimmed;
 }
 
-function asStringArray(value: unknown, label: string): string[] {
+function asStringArray(
+  value: unknown,
+  label: string,
+  options: { maxLength?: number } = {},
+): string[] {
   if (!Array.isArray(value)) throw new BriefParseError(`${label} must be a list`);
-  const strings = value.map((item, i) => asString(item, `${label}[${i}]`));
+  const strings = value.map((item, i) => asString(item, `${label}[${i}]`, options));
   if (strings.length === 0) throw new BriefParseError(`${label} must not be empty`);
   return strings;
 }
 
-function optionalStringArray(value: unknown, label: string): string[] {
+function optionalStringArray(
+  value: unknown,
+  label: string,
+  options: { maxLength?: number } = {},
+): string[] {
   if (value == null) return [];
   if (!Array.isArray(value)) throw new BriefParseError(`${label} must be a list`);
-  return value.map((item, i) => asString(item, `${label}[${i}]`));
+  return value.map((item, i) => asString(item, `${label}[${i}]`, options));
 }
 
 function parseScenario(value: unknown, index: number): ContractScenario {
   const obj = asObject(value, `scenarios[${index}]`);
   return {
-    id: asString(obj.id, `scenarios[${index}].id`),
+    id: asString(obj.id, `scenarios[${index}].id`, { maxLength: 128 }),
     given: asStringArray(obj.given, `scenarios[${index}].given`),
     when: asStringArray(obj.when, `scenarios[${index}].when`),
     // biome-ignore lint/suspicious/noThenProperty: contract scenarios intentionally use Given/When/Then.
@@ -75,24 +87,28 @@ function parseRequiredFact(value: unknown, index: number): RequiredFact {
     );
   }
   return {
-    id: asString(obj.id, `required_facts[${index}].id`),
-    proves: asStringArray(obj.proves, `required_facts[${index}].proves`),
+    id: asString(obj.id, `required_facts[${index}].id`, { maxLength: 128 }),
+    proves: asStringArray(obj.proves, `required_facts[${index}].proves`, { maxLength: 128 }),
     kind: kind as FactKind,
     artifact: {
-      path: asString(artifact.path, `required_facts[${index}].artifact.path`),
+      path: asString(artifact.path, `required_facts[${index}].artifact.path`, {
+        maxLength: 500,
+      }),
       change: change as FactArtifactChange,
     },
-    command: asString(obj.command, `required_facts[${index}].command`),
+    command: asString(obj.command, `required_facts[${index}].command`, { maxLength: 1000 }),
   };
 }
 
 function parseHumanReview(value: unknown, index: number): HumanReviewItem {
   const obj = asObject(value, `human_review[${index}]`);
   return {
-    id: asString(obj.id, `human_review[${index}].id`),
-    covers: asStringArray(obj.covers, `human_review[${index}].covers`),
-    criterion: asString(obj.criterion, `human_review[${index}].criterion`),
-    reason: asString(obj.reason, `human_review[${index}].reason`),
+    id: asString(obj.id, `human_review[${index}].id`, { maxLength: 128 }),
+    covers: asStringArray(obj.covers, `human_review[${index}].covers`, { maxLength: 128 }),
+    criterion: asString(obj.criterion, `human_review[${index}].criterion`, {
+      maxLength: 500,
+    }),
+    reason: asString(obj.reason, `human_review[${index}].reason`, { maxLength: 500 }),
   };
 }
 
@@ -199,8 +215,8 @@ export function parseSpecContract(yamlText: string): SpecContract {
   if (version !== 1) throw new BriefParseError('contract_version must be 1');
   const contract: SpecContract = {
     contractVersion: 1,
-    title: asString(obj.title, 'title'),
-    dependsOn: optionalStringArray(obj.depends_on, 'depends_on'),
+    title: asString(obj.title, 'title', { maxLength: 200 }),
+    dependsOn: optionalStringArray(obj.depends_on, 'depends_on', { maxLength: 128 }),
     scenarios: Array.isArray(obj.scenarios)
       ? obj.scenarios.map(parseScenario)
       : (() => {

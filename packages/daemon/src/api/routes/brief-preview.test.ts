@@ -77,6 +77,31 @@ describe('single brief preview routes', () => {
     }
   });
 
+  it('rejects local briefs whose contract is too long for pod creation', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'autopod-brief-'));
+    try {
+      writeFileSync(join(dir, 'brief.md'), 'Build the brief picker.');
+      writeFileSync(
+        join(dir, 'contract.yaml'),
+        contractYaml.replace('Preview copy is clear', 'a'.repeat(501)),
+      );
+      const app = createApp();
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/pods/brief/preview',
+        payload: { folderPath: dir },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toContain(
+        'human_review[0].criterion must contain at most 500 character(s)',
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('rejects local folders with multiple contract briefs', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'autopod-briefs-'));
     try {

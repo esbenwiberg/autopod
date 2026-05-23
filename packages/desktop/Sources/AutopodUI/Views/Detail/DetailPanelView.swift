@@ -481,26 +481,16 @@ public struct DetailPanelView: View {
                         }
                         Divider()
                         Button("Hand off → Single spec") {
-                            Task {
-                                _ = await actions.syncWorkspaceBranch(pod.id)
-                                resetSingleSpecHandoff()
-                                showSingleSpecHandoffSheet = true
-                            }
+                            openSingleSpecHandoffSheet()
                         }
                         // Spawn a series from this workspace's briefs. Doesn't change
                         // this pod — just opens the Create Series sheet pre-filled
                         // with the workspace's branch + profile so the new pods stack
-                        // on top of the user's in-flight work. We commit+push first
-                        // so "Path on branch" can read briefs the user just authored
-                        // (workspace pods don't auto-push until container exit).
-                        // Best-effort: open the sheet even if sync fails so the user
-                        // can fall back to local-folder mode.
+                        // on top of the user's in-flight work. The sheet syncs the
+                        // branch after it appears so the user gets immediate feedback.
                         if let onLaunchSeriesFromPod {
                             Button("Hand off → Series") {
-                                Task {
-                                    _ = await actions.syncWorkspaceBranch(pod.id)
-                                    onLaunchSeriesFromPod(pod)
-                                }
+                                onLaunchSeriesFromPod(pod)
                             }
                         }
                     } label: {
@@ -868,8 +858,11 @@ public struct DetailPanelView: View {
     @State private var singleSpecPath = ""
     @State private var singleSpecPreview: ParsedBriefResponse?
     @State private var singleSpecErrorMessage: String?
+    @State private var singleSpecSyncWarning: String?
     @State private var isSingleSpecPreviewing = false
+    @State private var isSingleSpecSyncing = false
     @State private var isSingleSpecSubmitting = false
+    @State private var singleSpecSyncGeneration = 0
     @State private var showForceCompleteSheet = false
     @State private var forceCompleteReasonText = ""
     @State private var showKickSheet = false
@@ -1093,7 +1086,7 @@ public struct DetailPanelView: View {
     }
 
     private var canLaunchSingleSpec: Bool {
-        !isSingleSpecSubmitting && singleSpecPreview != nil
+        !isSingleSpecSyncing && !isSingleSpecSubmitting && singleSpecPreview != nil
     }
 
     private var singleSpecHandoffSheet: some View {
@@ -1124,6 +1117,25 @@ public struct DetailPanelView: View {
                 }
             }
 
+            if isSingleSpecSyncing {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Syncing workspace branch...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if let warning = singleSpecSyncWarning {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(warning)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             VStack(alignment: .leading, spacing: 6) {
                 Text("Spec path on branch")
                     .font(.caption)
@@ -1141,6 +1153,7 @@ public struct DetailPanelView: View {
                     }
                     .disabled(
                         isSingleSpecPreviewing
+                        || isSingleSpecSyncing
                         || isSingleSpecSubmitting
                         || singleSpecPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     )
@@ -1220,16 +1233,41 @@ public struct DetailPanelView: View {
     }
 
     private func resetSingleSpecHandoff() {
+        singleSpecSyncGeneration += 1
         singleSpecPath = ""
         singleSpecPreview = nil
         singleSpecErrorMessage = nil
+        singleSpecSyncWarning = nil
         isSingleSpecPreviewing = false
+        isSingleSpecSyncing = false
         isSingleSpecSubmitting = false
+    }
+
+    private func openSingleSpecHandoffSheet() {
+        resetSingleSpecHandoff()
+        showSingleSpecHandoffSheet = true
+        let generation = singleSpecSyncGeneration + 1
+        singleSpecSyncGeneration = generation
+        Task {
+            await syncSingleSpecHandoffBranch(generation: generation)
+        }
+    }
+
+    private func syncSingleSpecHandoffBranch(generation: Int) async {
+        guard singleSpecSyncGeneration == generation else { return }
+        singleSpecSyncWarning = nil
+        isSingleSpecSyncing = true
+        let response = await actions.syncWorkspaceBranch(pod.id)
+        guard singleSpecSyncGeneration == generation else { return }
+        isSingleSpecSyncing = false
+        if response == nil {
+            singleSpecSyncWarning = "Could not sync the workspace branch. You can still preview, but branch-path specs may be stale."
+        }
     }
 
     private func previewSingleSpecHandoff() async {
         let path = singleSpecPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !path.isEmpty else { return }
+        guard !path.isEmpty, !isSingleSpecSyncing else { return }
         singleSpecErrorMessage = nil
         singleSpecPreview = nil
         isSingleSpecPreviewing = true
@@ -1272,7 +1310,7 @@ public struct DetailPanelView: View {
             showSingleSpecHandoffSheet = false
             onSelectPod?(id)
         } else {
-            singleSpecErrorMessage = "Pod creation failed."
+            singleSpecErrorMessage = actions.lastCreatePodError() ?? "Pod creation failed."
         }
     }
 

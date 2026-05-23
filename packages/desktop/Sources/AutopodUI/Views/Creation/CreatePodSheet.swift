@@ -680,7 +680,7 @@ public struct CreateSessionSheet: View {
         if id != nil {
             isPresented = false
         } else {
-            errorMessage = "Pod creation failed."
+            errorMessage = actions.lastCreatePodError() ?? "Pod creation failed."
         }
     }
 

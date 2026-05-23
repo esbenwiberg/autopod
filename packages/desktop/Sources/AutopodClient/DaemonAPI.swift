@@ -589,17 +589,17 @@ public actor DaemonAPI {
          result.action == "conflict" {
         return result
       }
-      let msg = String(data: data, encoding: .utf8) ?? "Invalid state"
+      let msg = decodeErrorMessage(data) ?? "Invalid state"
       throw DaemonError.serverError(409, msg)
     case 400:
-      let msg = String(data: data, encoding: .utf8) ?? "Bad request"
+      let msg = decodeErrorMessage(data) ?? "Bad request"
       throw DaemonError.badRequest(msg)
     case 401:
       throw DaemonError.unauthorized(decodeErrorMessage(data))
     case 404:
       throw DaemonError.notFound(path)
     default:
-      let msg = String(data: data, encoding: .utf8) ?? "Unknown error"
+      let msg = decodeErrorMessage(data) ?? "Unknown error"
       throw DaemonError.serverError(http.statusCode, msg)
     }
   }
@@ -698,10 +698,10 @@ public actor DaemonAPI {
     case 404:
       throw DaemonError.notFound(path)
     case 400:
-      let msg = String(data: data, encoding: .utf8) ?? "Bad request"
+      let msg = decodeErrorMessage(data) ?? "Bad request"
       throw DaemonError.badRequest(msg)
     default:
-      let msg = String(data: data, encoding: .utf8) ?? "Unknown error"
+      let msg = decodeErrorMessage(data) ?? "Unknown error"
       throw DaemonError.serverError(http.statusCode, msg)
     }
   }
@@ -710,11 +710,19 @@ public actor DaemonAPI {
   /// `{"error": "...", "message": "..."}`. Falls back to the raw body string
   /// if it isn't JSON, or nil if there's nothing usable.
   private func decodeErrorMessage(_ data: Data) -> String? {
-    struct ErrorBody: Decodable { let message: String? }
+    struct ErrorBody: Decodable {
+      let error: String?
+      let message: String?
+    }
     if let body = try? decoder.decode(ErrorBody.self, from: data),
        let message = body.message,
        !message.isEmpty {
       return message
+    }
+    if let body = try? decoder.decode(ErrorBody.self, from: data),
+       let error = body.error,
+       !error.isEmpty {
+      return error
     }
     if let text = String(data: data, encoding: .utf8)?
       .trimmingCharacters(in: .whitespacesAndNewlines),

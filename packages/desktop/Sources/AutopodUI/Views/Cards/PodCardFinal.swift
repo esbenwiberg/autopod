@@ -110,18 +110,7 @@ public struct SessionCardFinal: View {
             }
             if let onLaunchSeriesFromPod, pod.isWorkspace {
                 Button {
-                    // For a still-running workspace, commit+push briefs first so
-                    // the Create Series sheet's "Path on branch" mode can read
-                    // them. For a complete workspace the branch is already
-                    // pushed, but the call is cheap and idempotent — daemon
-                    // returns committed=false/pushed=false when there's nothing
-                    // to do. Best-effort: open the sheet either way.
-                    Task {
-                        if !pod.isTerminal {
-                            _ = await actions.syncWorkspaceBranch(pod.id)
-                        }
-                        onLaunchSeriesFromPod(pod)
-                    }
+                    onLaunchSeriesFromPod(pod)
                 } label: {
                     Label("Launch series from here", systemImage: "rectangle.3.group.fill")
                 }
@@ -181,7 +170,7 @@ public struct SessionCardFinal: View {
                 let workerProfile = actions.workerProfileForProfile(pod.profileName) ?? pod.profileName
                 launchWorkerTask = ""
                 Task {
-                    _ = await actions.createPod(
+                    let id = await actions.createPod(
                         workerProfile,
                         task,
                         nil,
@@ -193,6 +182,9 @@ public struct SessionCardFinal: View {
                         nil,
                         nil
                     )
+                    if id == nil {
+                        launchWorkerError = actions.lastCreatePodError() ?? "Pod creation failed."
+                    }
                 }
             }
             .disabled(launchWorkerTask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -201,6 +193,17 @@ public struct SessionCardFinal: View {
             }
         } message: {
             Text("Describe the task for the worker. It will branch from \(pod.branch).")
+        }
+        .alert(
+            "Launch Worker Failed",
+            isPresented: Binding(
+                get: { launchWorkerError != nil },
+                set: { if !$0 { launchWorkerError = nil } }
+            )
+        ) {
+            Button("OK") { launchWorkerError = nil }
+        } message: {
+            Text(launchWorkerError ?? "Pod creation failed.")
         }
     }
 
@@ -946,6 +949,7 @@ public struct SessionCardFinal: View {
     @State private var showDeleteConfirmation = false
     @State private var showLaunchWorker = false
     @State private var launchWorkerTask = ""
+    @State private var launchWorkerError: String?
 
     private var isDeletableNow: Bool {
         switch pod.status {

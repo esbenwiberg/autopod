@@ -14,6 +14,10 @@ public struct CreateSeriesSheet: View {
     public let initialBaseBranch: String?
     /// Pre-select a profile (e.g. the initiating pod's profile).
     public let initialProfile: String?
+    /// Workspace pod to sync after the sheet appears. Used when launching from
+    /// a still-running interactive pod so branch-path previews can read the
+    /// latest briefs without blocking sheet presentation.
+    public let initialSyncPodId: String?
     public var onSeriesCreated: ((String) -> Void)?
 
     public init(
@@ -22,6 +26,7 @@ public struct CreateSeriesSheet: View {
         profileNames: [String],
         initialBaseBranch: String? = nil,
         initialProfile: String? = nil,
+        initialSyncPodId: String? = nil,
         onSeriesCreated: ((String) -> Void)? = nil
     ) {
         self._isPresented = isPresented
@@ -29,6 +34,7 @@ public struct CreateSeriesSheet: View {
         self.profileNames = profileNames
         self.initialBaseBranch = initialBaseBranch
         self.initialProfile = initialProfile
+        self.initialSyncPodId = initialSyncPodId
         self.onSeriesCreated = onSeriesCreated
     }
 
@@ -54,6 +60,9 @@ public struct CreateSeriesSheet: View {
     @State private var prMode: String = "single"
     @State private var autoApprove: Bool = false
     @State private var disableAskHuman: Bool = false
+    @State private var isInitialSyncing = false
+    @State private var initialSyncWarning: String?
+    @State private var initialSyncAttemptedPodId: String?
     @State private var isPreviewing = false
     @State private var isSubmitting = false
     @State private var errorMessage: String?
@@ -68,6 +77,7 @@ public struct CreateSeriesSheet: View {
                     sourcePicker
                     profilePicker
                     baseBranchField
+                    initialSyncStatus
                     briefSourceFields
                     if let preview {
                         previewSection(preview)
@@ -120,10 +130,14 @@ public struct CreateSeriesSheet: View {
                 if baseBranch.isEmpty { baseBranch = initial }
             }
         }
+        .task(id: initialSyncPodId) {
+            await runInitialBranchSyncIfNeeded()
+        }
     }
 
     private var submitDisabled: Bool {
         isSubmitting
+            || isInitialSyncing
             || preview == nil
             || selectedProfile.isEmpty
             || seriesName.trimmingCharacters(in: .whitespaces).isEmpty
@@ -176,7 +190,7 @@ public struct CreateSeriesSheet: View {
                 Button(isPreviewing ? "Parsing…" : "Preview series") {
                     Task { await runPreview() }
                 }
-                .disabled(isPreviewing || isSubmitting)
+                .disabled(isInitialSyncing || isPreviewing || isSubmitting)
             }
         }
     }
@@ -199,7 +213,7 @@ public struct CreateSeriesSheet: View {
                 Button(isPreviewing ? "Parsing…" : "Preview series") {
                     Task { await runPreview() }
                 }
-                .disabled(isPreviewing || isSubmitting)
+                .disabled(isInitialSyncing || isPreviewing || isSubmitting)
             } else if baseBranch.isEmpty {
                 Text("Set Base branch above to read briefs from.")
                     .font(.caption2)
@@ -220,7 +234,43 @@ public struct CreateSeriesSheet: View {
         }
     }
 
+    @ViewBuilder
+    private var initialSyncStatus: some View {
+        if isInitialSyncing {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Syncing workspace branch...")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else if let warning = initialSyncWarning {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(warning)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func runInitialBranchSyncIfNeeded() async {
+        guard let podId = initialSyncPodId else { return }
+        guard initialSyncAttemptedPodId != podId else { return }
+        initialSyncAttemptedPodId = podId
+        initialSyncWarning = nil
+        isInitialSyncing = true
+        let response = await actions.syncWorkspaceBranch(podId)
+        isInitialSyncing = false
+        if response == nil {
+            initialSyncWarning = "Could not sync the workspace branch. You can still preview, but branch-path specs may be stale."
+        }
+    }
+
     private func runPreview() async {
+        guard !isInitialSyncing else { return }
         errorMessage = nil
         isPreviewing = true
         defer { isPreviewing = false }

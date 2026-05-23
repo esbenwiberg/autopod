@@ -550,6 +550,7 @@ public struct MainView: View {
                 profileNames: profileNames,
                 initialBaseBranch: initiator.branch,
                 initialProfile: initiator.profileName,
+                initialSyncPodId: initiator.isTerminal ? nil : initiator.id,
                 onSeriesCreated: { seriesId in
                     seriesFromPod = nil
                     sidebarSelection = .series(seriesId)
