@@ -676,6 +676,10 @@ function resolvePrBaseBranch(pod: Pod, profile: Profile): string {
   return pod.branch === 'main' ? candidate : 'main';
 }
 
+function isSinglePrSeriesPod(pod: Pick<Pod, 'prMode' | 'seriesId'>): boolean {
+  return pod.prMode === 'single' && Boolean(pod.seriesId);
+}
+
 /** Merge new overrides into existing ones, deduplicating by findingId (latest wins). */
 function mergeOverrides(
   existing: ValidationOverride[],
@@ -3202,6 +3206,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Missing parent — treat as not ready rather than crashing.
           return false;
         }
+        if (isSinglePrSeriesPod(dep)) {
+          return parent.status === 'complete';
+        }
         // Shared branch (single-mode siblings): the parent holds the Git worktree
         // lock on the branch until it reaches 'complete' — worktree is cleaned up
         // on completion, not on validation. Starting the child early races into
@@ -3236,22 +3243,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       // Determine base branch for the dependent pod:
-      // - Single-branch (shared branch): keep pointing at real base (e.g. main) so diff
-      //   stats and the final PR target are correct.
+      // - Single-PR series, even if an older row has the wrong child branch:
+      //   keep pointing at the real base so the final PR targets main/default.
+      // - Single-branch (shared branch): same real-base rule.
       // - Stacked with waitForMerge: parent branch is deleted post-merge; use parent's
       //   baseBranch (main) so the dependent starts from the freshly-merged main.
       // - Stacked without waitForMerge: stack directly on parent's branch (classic stacking).
       const firstParentId = parentIds[0];
-      const isSharedBranch = dep.branch === completedPod.branch;
+      const firstParent = firstParentId
+        ? firstParentId === completedPod.id
+          ? completedPod
+          : podRepo.getOrThrow(firstParentId)
+        : completedPod;
+      const isSharedBranch = dep.branch === firstParent.branch;
       let baseBranch: string;
-      if (isSharedBranch || dep.waitForMerge) {
-        baseBranch = completedPod.baseBranch ?? 'main';
+      if (isSinglePrSeriesPod(dep) || isSharedBranch || dep.waitForMerge) {
+        baseBranch = firstParent.baseBranch ?? 'main';
       } else {
-        baseBranch = firstParentId
-          ? firstParentId === completedPod.id
-            ? completedPod.branch
-            : podRepo.getOrThrow(firstParentId).branch
-          : completedPod.branch;
+        baseBranch = firstParent.branch;
       }
 
       if (cascadeFailed) {
@@ -3285,7 +3294,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const runtime = request.runtime ?? profile.defaultRuntime ?? 'claude';
       const executionTarget = request.executionTarget ?? profile.executionTarget ?? 'local';
       const skipValidation = request.skipValidation ?? false;
-      const effectiveBaseBranch = request.baseBranch ?? profile.defaultBranch ?? 'main';
+      const normalizedDependsOnPodIds =
+        request.dependsOnPodIds && request.dependsOnPodIds.length > 0
+          ? request.dependsOnPodIds
+          : request.dependsOnPodId
+            ? [request.dependsOnPodId]
+            : null;
+      const singlePrSeriesParent =
+        request.prMode === 'single' && request.seriesId && normalizedDependsOnPodIds?.[0]
+          ? podRepo.getOrThrow(normalizedDependsOnPodIds[0])
+          : null;
+      if (
+        singlePrSeriesParent &&
+        request.branch !== undefined &&
+        request.branch !== singlePrSeriesParent.branch
+      ) {
+        throw new AutopodError(
+          `Single-PR series dependent must use parent branch '${singlePrSeriesParent.branch}' (got '${request.branch}')`,
+          'INVALID_CONFIGURATION',
+          400,
+        );
+      }
+      const effectiveBaseBranch =
+        request.baseBranch ?? singlePrSeriesParent?.baseBranch ?? profile.defaultBranch ?? 'main';
 
       // Resolve the effective PodOptions once, so both branch derivation and
       // DB insertion use the exact same values.
@@ -3399,6 +3430,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         let branch: string;
         if (request.branch) {
           branch = request.branch;
+        } else if (singlePrSeriesParent) {
+          branch = singlePrSeriesParent.branch;
         } else if (resolvedPod.output === 'artifact') {
           branch = `research/${id}`;
         } else {
@@ -3454,12 +3487,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 : (profile.tokenBudget ?? null),
             referenceRepos: derivedReferenceRepos.length > 0 ? derivedReferenceRepos : null,
             scheduledJobId: request.scheduledJobId ?? null,
-            dependsOnPodIds:
-              request.dependsOnPodIds && request.dependsOnPodIds.length > 0
-                ? request.dependsOnPodIds
-                : request.dependsOnPodId
-                  ? [request.dependsOnPodId]
-                  : null,
+            dependsOnPodIds: normalizedDependsOnPodIds,
             dependsOnPodId: request.dependsOnPodId ?? null,
             seriesId: request.seriesId ?? null,
             seriesName: request.seriesName ?? null,
@@ -8825,6 +8853,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const allParentsDone = parentIds.every((pid) => {
           try {
             const parent = podRepo.getOrThrow(pid);
+            if (isSinglePrSeriesPod(dep)) {
+              return parent.status === 'complete';
+            }
             // Shared branch: parent must reach 'complete' before its worktree
             // releases the branch lock. See maybeTriggerDependents for rationale.
             if (parent.branch === dep.branch) {
@@ -8844,12 +8875,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (!firstParentId) continue;
         try {
           const firstParent = podRepo.getOrThrow(firstParentId);
+          const baseBranch =
+            isSinglePrSeriesPod(dep) || dep.waitForMerge || dep.branch === firstParent.branch
+              ? (firstParent.baseBranch ?? 'main')
+              : firstParent.branch;
           podRepo.update(dep.id, {
-            baseBranch: firstParent.branch,
+            baseBranch,
             dependencyStartedAt: new Date().toISOString(),
           });
           enqueueSession(dep.id);
-          logger.info({ podId: dep.id, firstParentId }, 'Series: rehydrated stuck dependent pod');
+          logger.info(
+            { podId: dep.id, firstParentId, baseBranch },
+            'Series: rehydrated stuck dependent pod',
+          );
         } catch {
           logger.warn({ podId: dep.id }, 'rehydrate: failed to enqueue dependent');
         }

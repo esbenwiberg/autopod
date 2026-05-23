@@ -1181,6 +1181,125 @@ describe('PodManager', () => {
       expect(ctx.enqueuedSessions).toContain(child.id);
     });
 
+    it('does not start single-PR dependents on force-approved validated parents', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const parent = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Parent task',
+          branch: 'feature/series-root',
+          baseBranch: 'release/2026-05',
+          seriesId: 'series-single',
+          prMode: 'single',
+          options: { agentMode: 'auto', output: 'branch' },
+        },
+        'user-1',
+      );
+      const child = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Child task',
+          dependsOnPodIds: [parent.id],
+          seriesId: 'series-single',
+          prMode: 'single',
+          options: { agentMode: 'auto', output: 'pr' },
+        },
+        'user-1',
+      );
+
+      // Simulate legacy/corrupted rows created before single-mode branch sharing
+      // was enforced at creation time.
+      ctx.db.prepare('UPDATE pods SET branch = ? WHERE id = ?').run('feature/child', child.id);
+      ctx.podRepo.update(parent.id, { status: 'failed' });
+      ctx.enqueuedSessions.length = 0;
+
+      await manager.forceApprove(parent.id, 'waive infrastructure-only validation issue');
+
+      expect(ctx.enqueuedSessions).not.toContain(child.id);
+      expect(manager.getSession(child.id).status).toBe('queued');
+
+      await manager.approveSession(parent.id);
+
+      expect(ctx.enqueuedSessions).toContain(child.id);
+      expect(manager.getSession(child.id).baseBranch).toBe('release/2026-05');
+    });
+
+    it('rehydrate waits for complete and preserves real base for single-PR dependents', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const parent = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Parent task',
+          branch: 'feature/series-root',
+          baseBranch: 'release/2026-05',
+          seriesId: 'series-single',
+          prMode: 'single',
+          options: { agentMode: 'auto', output: 'branch' },
+        },
+        'user-1',
+      );
+      const child = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Child task',
+          dependsOnPodIds: [parent.id],
+          seriesId: 'series-single',
+          prMode: 'single',
+          options: { agentMode: 'auto', output: 'pr' },
+        },
+        'user-1',
+      );
+
+      ctx.db.prepare('UPDATE pods SET branch = ? WHERE id = ?').run('feature/child', child.id);
+      ctx.podRepo.update(parent.id, { status: 'validated' });
+      ctx.enqueuedSessions.length = 0;
+
+      manager.rehydrateDependentSessions();
+      expect(ctx.enqueuedSessions).not.toContain(child.id);
+
+      ctx.podRepo.update(parent.id, { status: 'complete' });
+      manager.rehydrateDependentSessions();
+
+      expect(ctx.enqueuedSessions).toContain(child.id);
+      expect(manager.getSession(child.id).baseBranch).toBe('release/2026-05');
+    });
+
+    it('inherits the parent branch and base for new single-PR dependents', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const parent = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Parent task',
+          branch: 'feature/series-root',
+          baseBranch: 'release/2026-05',
+          seriesId: 'series-single',
+          prMode: 'single',
+          options: { agentMode: 'auto', output: 'branch' },
+        },
+        'user-1',
+      );
+      const child = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Child task',
+          dependsOnPodIds: [parent.id],
+          seriesId: 'series-single',
+          prMode: 'single',
+          options: { agentMode: 'auto', output: 'pr' },
+        },
+        'user-1',
+      );
+
+      expect(child.branch).toBe('feature/series-root');
+      expect(child.baseBranch).toBe('release/2026-05');
+    });
+
     // Regression: the no-changes fast-path used to trust the cached pod.filesChanged
     // (which goes stale after force-approve / human-fix) and skip both the branch
     // push and container→host sync-back. Three pods (fast-crocodile, envious-platypus,
