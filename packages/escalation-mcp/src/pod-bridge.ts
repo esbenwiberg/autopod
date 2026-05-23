@@ -17,6 +17,8 @@ export interface PodBridge {
   getMaxAiCalls(podId: string): number;
   getAutoPauseThreshold(podId: string): number;
   getHumanResponseTimeout(podId: string): number;
+  getHumanResponseOnTimeout(podId: string): 'continue' | 'ask_ai';
+  logEscalationAnswer(podId: string, who: 'human' | 'ai', answer: string): void;
   getReviewerModel(podId: string): string;
   callReviewerModel(podId: string, question: string, context?: string): Promise<string>;
   incrementEscalationCount(podId: string): void;

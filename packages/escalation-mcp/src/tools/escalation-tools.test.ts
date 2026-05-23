@@ -20,6 +20,8 @@ function makeBridge(overrides: Partial<PodBridge> = {}): PodBridge {
     getMaxAiCalls: vi.fn().mockReturnValue(5),
     getAutoPauseThreshold: vi.fn().mockReturnValue(3),
     getHumanResponseTimeout: vi.fn().mockReturnValue(5), // 5 seconds
+    getHumanResponseOnTimeout: vi.fn().mockReturnValue('continue'),
+    logEscalationAnswer: vi.fn(),
     getReviewerModel: vi.fn().mockReturnValue('claude-sonnet-4-6'),
     callReviewerModel: vi.fn().mockResolvedValue('The AI says: proceed'),
     incrementEscalationCount: vi.fn(),
@@ -196,6 +198,19 @@ describe('askHuman', () => {
     const result = await promise;
     expect(result).toContain('No response received');
     expect(result).toContain('best judgement');
+  });
+
+  it('falls back to ask_ai on timeout when configured on the profile', async () => {
+    const bridge = makeBridge({
+      getHumanResponseTimeout: vi.fn().mockReturnValue(1),
+      getHumanResponseOnTimeout: vi.fn().mockReturnValue('ask_ai'),
+      callReviewerModel: vi.fn().mockResolvedValue('Fallback AI answer'),
+    });
+    const promise = askHuman('sess-1', { question: 'Slow?' }, bridge, pendingRequests);
+    vi.advanceTimersByTime(1_500);
+    const result = await promise;
+    expect(result).toContain('Auto-routed to AI');
+    expect(result).toContain('Fallback AI answer');
   });
 
   it('returns a cancellation message when the request is rejected', async () => {

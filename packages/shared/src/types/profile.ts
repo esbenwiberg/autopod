@@ -350,6 +350,7 @@ export interface CodeIntelligenceConfig {
 
 export interface EscalationConfig {
   askHuman: boolean;
+  askHumanOnTimeout?: 'continue' | 'ask_ai';
   askAi: {
     enabled: boolean;
     model: string;

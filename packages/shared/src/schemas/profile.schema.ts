@@ -211,6 +211,7 @@ export const mergeStrategySchema = z.record(mergeableFieldSchema, mergeModeSchem
 
 export const escalationConfigSchema = z.object({
   askHuman: z.boolean().default(true),
+  askHumanOnTimeout: z.enum(['continue', 'ask_ai']).default('continue'),
   askAi: z
     .object({
       enabled: z.boolean().default(false),
