@@ -245,9 +245,28 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     reportTaskSummary(
       podId: string,
       actualSummary: string,
-      deviations: Array<{ step: string; planned: string; actual: string; reason: string }>,
+      deviations: Array<{
+        step: string;
+        planned: string;
+        actual: string;
+        reason: string;
+        kind?: 'constraint' | 'tradeoff' | 'scope' | 'bugfix' | 'other';
+        impact?: string;
+      }>,
       how?: string,
       factEvidence?: FactEvidence[],
+      factDeviations?: Array<{
+        factId: string;
+        action: 'waive' | 'replace';
+        reason: string;
+        whyImpossible: string;
+        decision?: 'approved_waive' | 'approved_replace' | 'rejected';
+        replacement?: {
+          artifactPath: string;
+          command: string;
+          proves?: string[];
+        };
+      }>,
     ): void {
       podManager.touchHeartbeat(podId);
       // Lock taskSummary on first write. Validation failures loop the same
@@ -262,6 +281,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           podId,
           deviationCount: deviations.length,
           factEvidenceCount: factEvidence?.length ?? 0,
+          factDeviationCount: factDeviations?.length ?? 0,
           actualSummary: actualSummary.slice(0, 100),
           preservedExistingSummary: summaryAlreadySet,
         },
@@ -271,9 +291,9 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       );
       const updates: Parameters<typeof podRepo.update>[1] = {};
       if (!summaryAlreadySet) {
-        updates.taskSummary = { actualSummary, how, deviations, factEvidence };
+        updates.taskSummary = { actualSummary, how, deviations, factEvidence, factDeviations };
       } else if (factEvidence != null && existing.taskSummary) {
-        updates.taskSummary = { ...existing.taskSummary, factEvidence };
+        updates.taskSummary = { ...existing.taskSummary, factEvidence, factDeviations };
       }
       if (Object.keys(updates).length > 0) {
         podRepo.update(podId, updates);
@@ -288,6 +308,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           how,
           deviations,
           factEvidence,
+          factDeviations,
           timestamp: new Date().toISOString(),
         },
       });

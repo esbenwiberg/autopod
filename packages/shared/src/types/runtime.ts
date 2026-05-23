@@ -136,6 +136,8 @@ export interface AgentTaskSummaryEvent {
     planned: string;
     actual: string;
     reason: string;
+    kind?: 'constraint' | 'tradeoff' | 'scope' | 'bugfix' | 'other';
+    impact?: string;
   }>;
   /** Agent-reported evidence for required executable facts. */
   factEvidence?: FactEvidence[];
