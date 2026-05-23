@@ -42,10 +42,26 @@ export async function askHuman(
 
   try {
     const response = await pendingRequests.waitForResponse(escalationId, timeoutMs);
+    bridge.resolveEscalation(escalationId, {
+      response,
+      respondedBy: 'human',
+      timestamp: new Date().toISOString(),
+    });
+    bridge.logEscalationAnswer(podId, 'human', response);
     return response;
   } catch (err) {
     // Timeout or cancellation — return a message rather than throwing INTERNAL_ERROR
     const isTimeout = err instanceof Error && err.message.includes('timed out');
+    if (isTimeout && bridge.getHumanResponseOnTimeout(podId) === 'ask_ai') {
+      const aiResponse = await bridge.callReviewerModel(podId, input.question, input.context);
+      bridge.resolveEscalation(escalationId, {
+        response: aiResponse,
+        respondedBy: 'ai',
+        timestamp: new Date().toISOString(),
+      });
+      bridge.logEscalationAnswer(podId, 'ai', aiResponse);
+      return `[Auto-routed to AI after ask_human timeout]\n\n${aiResponse}`;
+    }
     return isTimeout
       ? '[No response received within the timeout period. Please check in with the human separately and continue with your best judgement.]'
       : `[Escalation cancelled: ${err instanceof Error ? err.message : String(err)}]`;

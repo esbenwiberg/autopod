@@ -123,6 +123,16 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       return profile.escalation?.humanResponseTimeout ?? 3600;
     },
 
+    getHumanResponseOnTimeout(podId: string): 'continue' | 'ask_ai' {
+      const pod = podManager.getSession(podId);
+      const profile = profileStore.get(pod.profileName);
+      return profile.escalation?.askHumanOnTimeout ?? 'continue';
+    },
+
+    logEscalationAnswer(podId: string, who: 'human' | 'ai', answer: string): void {
+      logger.info({ pod: podId, who, answer }, 'Escalation answer received');
+    },
+
     getReviewerModel(podId: string): string {
       const pod = podManager.getSession(podId);
       const profile = profileStore.get(pod.profileName);
