@@ -211,6 +211,18 @@ Parser-compatible schema rules:
 - Do not use `validates`, `acceptance_criteria`, or prose-only proof fields.
   Put behavior in `scenarios`, then link facts to it with `proves`.
 - Always include `human_review`; use `human_review: []` when none is needed.
+- When `human_review` is non-empty, each item uses `covers`, `criterion`, and
+  `reason`. Do not use `proves` under `human_review`; `proves` belongs only to
+  `required_facts`.
+
+```yaml
+human_review:
+  - id: review-main-behavior
+    covers:
+      - main-behavior
+    criterion: "The judgment-only behavior is acceptable in the running app."
+    reason: "No reliable executable check exists for this judgement yet."
+```
 
 After writing `investigations/<slug>/contract.yaml`, run:
 
