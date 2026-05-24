@@ -1,0 +1,41 @@
+contract_version: 1
+title: "Build memory workbench and Analytics card"
+depends_on:
+  - 07-desktop-client-store
+scenarios:
+  - id: memory-workbench-surfaces-evidence
+    given:
+      - "MemoryStore has pending candidates, active memories, selected detail evidence, usage history, stale/harmful evidence, and impact data"
+    when:
+      - "the operator opens the Memory screen"
+    then:
+      - "pending candidates and active memories are separated"
+      - "selecting an item shows content, source evidence, usage history, and impact"
+      - "stale or harmful evidence appears as a warning without auto-disabling the memory"
+  - id: analytics-memory-card-routes
+    given:
+      - "Memory analytics data is available"
+    when:
+      - "the operator opens Analytics and selects the Memory card"
+    then:
+      - "the card shows a lightweight memory-loop health signal"
+      - "the right pane shows usage counts and repeated-pain deltas"
+      - "candidate approval/edit controls remain only in the Memory workbench"
+required_facts:
+  - id: fact-memory-workbench-ui-state
+    proves:
+      - memory-workbench-surfaces-evidence
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodUITests/MemoryWorkbenchTests.swift
+      change: create
+    command: cd packages/desktop && swift test --filter MemoryWorkbenchTests
+  - id: fact-memory-analytics-wiring
+    proves:
+      - analytics-memory-card-routes
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodClientTests/AnalyticsWiringTests.swift
+      change: update
+    command: cd packages/desktop && swift test --filter AnalyticsWiringTests
+human_review: []

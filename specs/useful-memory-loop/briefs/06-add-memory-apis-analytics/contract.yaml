@@ -1,0 +1,48 @@
+contract_version: 1
+title: "Add memory review and analytics APIs"
+depends_on:
+  - 05-require-usage-reporting
+scenarios:
+  - id: candidate-review-api
+    given:
+      - "pending create and update memory candidates exist"
+    when:
+      - "the desktop calls the memory review API"
+    then:
+      - "the daemon lists candidates with source evidence"
+      - "approve/edit/reject actions update candidate and memory state correctly"
+  - id: memory-usage-evidence-api
+    given:
+      - "memory usage rows exist for selected, injected, read, searched, applied, harmful_stale, and not_reported outcomes"
+    when:
+      - "the desktop requests memory detail evidence"
+    then:
+      - "the daemon returns usage history and source evidence for the selected memory"
+      - "stale or harmful evidence is visible but does not auto-disable the memory"
+  - id: memory-analytics-api
+    given:
+      - "a trailing window contains pods with and without selected memories"
+    when:
+      - "the desktop requests /pods/analytics/memory"
+    then:
+      - "the response includes usage counts"
+      - "the response includes repeated-pain deltas for quality, validation, fix attempts, escalation, and cost where data exists"
+required_facts:
+  - id: fact-memory-review-routes
+    proves:
+      - candidate-review-api
+      - memory-usage-evidence-api
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/api/routes/memory.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- memory routes
+  - id: fact-memory-effectiveness-analytics
+    proves:
+      - memory-analytics-api
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/memory-effectiveness-aggregator.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- memory-effectiveness
+human_review: []

@@ -1,0 +1,51 @@
+contract_version: 1
+title: "Add daemon memory extraction recorder"
+depends_on:
+  - 02-add-memory-repositories
+scenarios:
+  - id: outcome-events-create-at-most-one-candidate
+    given:
+      - "a future agent-driven pod reaches complete, killed, failed, or review_required"
+    when:
+      - "the memory candidate recorder receives the outcome event"
+    then:
+      - "only eligible agent pods are considered"
+      - "one extraction attempt is recorded per pod outcome"
+      - "at most one durable profile candidate is created"
+  - id: lesson-potential-controls-llm
+    given:
+      - "pod outcome signals are ordinary, high-pain, or high-success"
+    when:
+      - "lesson potential is computed"
+    then:
+      - "ordinary green pods are usually skipped"
+      - "high-signal outcomes call the reviewer model"
+      - "fallback reasons are recorded when the reviewer model cannot run"
+  - id: sanitized-update-or-create
+    given:
+      - "the reviewer model returns candidate JSON from pod-derived evidence"
+    when:
+      - "the extraction helper records the result"
+    then:
+      - "candidate content and evidence are sanitized"
+      - "overlap with an existing memory becomes an update candidate"
+      - "new durable candidates are profile-scoped"
+required_facts:
+  - id: fact-memory-candidate-recorder
+    proves:
+      - outcome-events-create-at-most-one-candidate
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/memory-candidate-recorder.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- memory-candidate-recorder
+  - id: fact-memory-extraction-helper
+    proves:
+      - lesson-potential-controls-llm
+      - sanitized-update-or-create
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/memory-extraction.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- memory-extraction
+human_review: []

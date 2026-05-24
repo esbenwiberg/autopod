@@ -1,0 +1,49 @@
+contract_version: 1
+title: "Require memory usage reporting"
+depends_on:
+  - 04-select-inject-memories
+scenarios:
+  - id: plan-requires-intended-memory-use
+    given:
+      - "a pod has selected or injected memories"
+    when:
+      - "the agent calls report_plan without intended memory use"
+    then:
+      - "the tool call rejects with a retryable validation error"
+      - "a valid retry records plan_reported usage evidence"
+  - id: summary-requires-final-memory-outcomes
+    given:
+      - "a pod has selected or injected memories"
+    when:
+      - "the agent calls report_task_summary"
+    then:
+      - "the tool requires applied, not_applicable, or harmful_stale outcomes for selected memories"
+      - "valid outcomes are persisted as summary_reported usage evidence"
+  - id: lifecycle-fails-soft-on-omission
+    given:
+      - "a pod with selected memories ends without final memory usage reporting"
+    when:
+      - "the daemon finalizes the pod outcome"
+    then:
+      - "the pod lifecycle is not failed solely for missing memory reporting"
+      - "not_reported usage evidence is recorded"
+required_facts:
+  - id: fact-mcp-memory-reporting-schema
+    proves:
+      - plan-requires-intended-memory-use
+      - summary-requires-final-memory-outcomes
+    kind: contract-test
+    artifact:
+      path: packages/escalation-mcp/src/server.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/escalation-mcp test -- memory-reporting
+  - id: fact-daemon-memory-usage-evidence
+    proves:
+      - lifecycle-fails-soft-on-omission
+      - summary-requires-final-memory-outcomes
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-bridge-memory.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-bridge memory usage
+human_review: []

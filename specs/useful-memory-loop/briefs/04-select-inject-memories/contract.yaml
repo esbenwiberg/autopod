@@ -1,0 +1,52 @@
+contract_version: 1
+title: "Select and inject relevant memories"
+depends_on:
+  - 02-add-memory-repositories
+scenarios:
+  - id: top-five-relevant-selection
+    given:
+      - "a future agent-driven pod has approved global, profile, and pod memories available"
+    when:
+      - "the daemon selects memory before generating system instructions"
+    then:
+      - "deterministic prefiltering narrows candidates"
+      - "the reviewer model ranks relevant memories when available"
+      - "at most five memories are selected"
+      - "selected and injected usage rows are recorded"
+  - id: relevant-memory-briefing
+    given:
+      - "the selector returns relevant memories with reviewer relevance reasons"
+    when:
+      - "system instructions are generated"
+    then:
+      - "the old Available Memory index is absent"
+      - "the Relevant Memory section includes memory content and why it matters now"
+      - "memory_search remains available for non-selected memories"
+  - id: selector-fails-soft
+    given:
+      - "the reviewer model cannot rank memories"
+    when:
+      - "an agent-driven pod is provisioned"
+    then:
+      - "the pod still starts"
+      - "the fallback reason is recorded"
+      - "memory unavailability is observable"
+required_facts:
+  - id: fact-memory-selector
+    proves:
+      - top-five-relevant-selection
+      - selector-fails-soft
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/memory-selector.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- memory-selector
+  - id: fact-relevant-memory-instructions
+    proves:
+      - relevant-memory-briefing
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/system-instructions-generator.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- system-instructions-generator memory
+human_review: []

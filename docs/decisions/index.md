@@ -30,3 +30,4 @@
 | `ADR-024` | ADR-024: AC schema v2 — outcome + optional hint, drop pass/fail in favour of polarity enum | Accepted | The `AcDefinition` shape in `@autopod/shared` was |
 | `ADR-025` | ADR-025: Single fix pod per PR — recycled across all feedback rounds | Accepted | Fix pods today are spawned per actionable PR failure: each round of |
 | `ADR-026` | ADR-026: Parser-side `costUsd` emission for runtimes without native cost | Accepted | ADR-015 introduced `packages/shared/src/pricing/model-pricing.json` and the `computeCost(model, in, out)` / `effectiveCo |
+| `ADR-027` | ADR-027: Daemon-curated reviewer-model memory loop | Proposed | Autopod's memory system has oscillated between two bad states. When agents were encouraged to suggest memories directly, |

@@ -1,0 +1,39 @@
+contract_version: 1
+title: "Mirror memory APIs in desktop client"
+depends_on:
+  - 06-add-memory-apis-analytics
+scenarios:
+  - id: swift-decodes-memory-contracts
+    given:
+      - "the daemon returns legacy memories, extended memories, candidates, usage history, and memory analytics JSON"
+    when:
+      - "the desktop client decodes the responses"
+    then:
+      - "legacy memories remain decodable"
+      - "new candidate, evidence, usage, and analytics fields are available to the UI"
+  - id: memory-store-loads-workbench-state
+    given:
+      - "the daemon API exposes candidates, active memories, detail evidence, and analytics"
+    when:
+      - "MemoryStore loads memory state and receives candidate events"
+    then:
+      - "pending candidates, active memories, selected details, usage history, and analytics are stored separately"
+      - "candidate events update the store without dropping existing memory entries"
+required_facts:
+  - id: fact-memory-response-decode
+    proves:
+      - swift-decodes-memory-contracts
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodClientTests/MemoryResponseTests.swift
+      change: create
+    command: cd packages/desktop && swift test --filter MemoryResponseTests
+  - id: fact-memory-store-state
+    proves:
+      - memory-store-loads-workbench-state
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodClientTests/MemoryStoreTests.swift
+      change: create
+    command: cd packages/desktop && swift test --filter MemoryStoreTests
+human_review: []

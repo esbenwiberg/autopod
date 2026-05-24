@@ -1,0 +1,23 @@
+contract_version: 1
+title: "Add memory contracts and migration"
+depends_on: []
+scenarios:
+  - id: memory-learning-schema-loads
+    given:
+      - "a database with existing legacy memory rows"
+    when:
+      - "all daemon migrations are applied through the new memory learning migration"
+    then:
+      - "legacy memory rows remain readable"
+      - "candidate and usage tables exist with indexes needed by later briefs"
+      - "shared exported memory/reporting/analytics types compile"
+required_facts:
+  - id: fact-memory-learning-schema
+    proves:
+      - memory-learning-schema-loads
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/db/migrate.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- migrate memory-learning
+human_review: []
