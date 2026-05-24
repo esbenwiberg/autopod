@@ -34,6 +34,8 @@ import {
   createEventBus,
   createEventRepository,
   createFixFeedbackRepository,
+  createMemoryCandidateRepository,
+  createMemoryCandidateRecorder,
   createMemoryRepository,
   createNudgeRepository,
   createPendingOverrideRepository,
@@ -175,6 +177,7 @@ const fixFeedbackRepo = createFixFeedbackRepository(db);
 const validationRepo = createValidationRepository(db);
 const progressEventRepo = createProgressEventRepository(db);
 const memoryRepo = createMemoryRepository(db);
+const memoryCandidateRepo = createMemoryCandidateRepository(db);
 const pendingOverrideRepo = createPendingOverrideRepository(db);
 const qualityScoreRepo = createQualityScoreRepository(db);
 const scanRepo = createScanRepository(db);
@@ -624,6 +627,21 @@ const qualityScoreRecorder = createQualityScoreRecorder({
 });
 qualityScoreRecorder.start();
 
+// Memory candidate recorder: background LLM extraction of durable lessons from
+// agent pod outcomes. Fail-soft — never affects pod lifecycle.
+const memoryCandidateRecorder = createMemoryCandidateRecorder({
+  eventBus,
+  podRepo,
+  profileStore,
+  candidateRepo: memoryCandidateRepo,
+  memoryRepo,
+  eventRepo,
+  escalationRepo,
+  validationRepo,
+  logger,
+});
+memoryCandidateRecorder.start();
+
 // Issue watcher (polls GitHub Issues / ADO Work Items for labeled issues)
 import { createIssueWatcherRepository } from './issue-watcher/issue-watcher-repository.js';
 import { createIssueWatcherService } from './issue-watcher/issue-watcher-service.js';
@@ -806,9 +824,10 @@ async function shutdown(signal: string) {
   // Stop accepting new requests
   await app.close();
 
-  // Stop notifications, quality recorder, issue watcher, and screenshot retention
+  // Stop notifications, quality recorder, memory recorder, issue watcher, and screenshot retention
   notificationService.stop();
   qualityScoreRecorder.stop();
+  memoryCandidateRecorder.stop();
   issueWatcherService.stop();
   screenshotRetention.stop();
 

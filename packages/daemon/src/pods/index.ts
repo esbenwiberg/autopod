@@ -83,5 +83,10 @@ export {
   createQualityScoreRecorder,
   type QualityScoreRecorder,
 } from './quality-score-recorder.js';
+export {
+  createMemoryCandidateRecorder,
+  type MemoryCandidateRecorder,
+  type MemoryCandidateRecorderDeps,
+} from './memory-candidate-recorder.js';
 export { computeQualitySignals } from './quality-signals.js';
 export { computeScore } from './quality-score.js';

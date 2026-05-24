@@ -15,6 +15,8 @@ export interface MemoryCandidateRepository {
     candidate: Omit<MemoryCandidate, 'status' | 'createdAt' | 'updatedAt'>,
   ): MemoryCandidate;
   get(id: string): MemoryCandidate | null;
+  /** Returns true if any candidate (any status) was created by this pod. Used for idempotency. */
+  existsForPod(podId: string): boolean;
   listPending(scopeId: string): MemoryCandidate[];
   list(scopeId: string, status?: MemoryCandidateStatus): MemoryCandidate[];
   /** Approve a pending candidate. Creates or updates a MemoryEntry. */
@@ -99,6 +101,13 @@ export function createMemoryCandidateRepository(
         | Record<string, unknown>
         | undefined;
       return row ? rowToCandidate(row) : null;
+    },
+
+    existsForPod(podId: string): boolean {
+      const row = db
+        .prepare('SELECT 1 FROM memory_candidates WHERE created_by_pod_id = ? LIMIT 1')
+        .get(podId);
+      return row !== undefined;
     },
 
     listPending(scopeId: string): MemoryCandidate[] {
