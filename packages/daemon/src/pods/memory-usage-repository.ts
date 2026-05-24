@@ -38,10 +38,13 @@ export function createMemoryUsageRepository(db: Database.Database): MemoryUsageR
         relevanceReason: event.relevanceReason ?? null,
         now,
       });
-      const row = db
-        .prepare('SELECT * FROM memory_usage_events WHERE id = ?')
-        .get(event.id) as Record<string, unknown>;
-      return rowToUsageEvent(row);
+      return {
+        ...event,
+        outcome: event.outcome ?? null,
+        reason: event.reason ?? null,
+        relevanceReason: event.relevanceReason ?? null,
+        createdAt: now,
+      };
     },
 
     listByMemory(memoryId: string): MemoryUsageEvent[] {
