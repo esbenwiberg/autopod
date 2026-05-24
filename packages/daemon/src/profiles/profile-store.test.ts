@@ -76,6 +76,7 @@ describe('ProfileStore', () => {
         advisor: { enabled: false },
         autoPauseAfter: 3,
         humanResponseTimeout: 3600,
+        askHumanOnTimeout: 'continue',
       });
     });
 
@@ -501,6 +502,7 @@ describe('ProfileStore', () => {
         advisor: { enabled: false },
         autoPauseAfter: 5,
         humanResponseTimeout: 7200,
+        askHumanOnTimeout: 'continue' as const,
       };
       store.create({ ...validInput, escalation });
       const profile = store.get('my-app');
