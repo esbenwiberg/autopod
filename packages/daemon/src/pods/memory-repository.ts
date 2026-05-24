@@ -28,7 +28,7 @@ function sha256(content: string): string {
   return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
-function parseJson<T>(value: unknown, fallback: T): T {
+export function parseJsonColumn<T>(value: unknown, fallback: T): T {
   if (typeof value !== 'string') return fallback;
   try {
     return JSON.parse(value) as T;
@@ -47,11 +47,11 @@ function rowToMemoryEntry(row: Record<string, unknown>): MemoryEntry {
     contentSha256: row.content_sha256 as string,
     rationale: (row.rationale as string) ?? null,
     kind: (row.kind as MemoryKind) ?? null,
-    tags: parseJson<string[]>(row.tags, []),
+    tags: parseJsonColumn<string[]>(row.tags, []),
     appliesWhen: (row.applies_when as string) ?? null,
     avoidWhen: (row.avoid_when as string) ?? null,
     confidence: (row.confidence as number) ?? null,
-    sourceEvidence: parseJson<MemorySourceEvidence[]>(row.source_evidence, []),
+    sourceEvidence: parseJsonColumn<MemorySourceEvidence[]>(row.source_evidence, []),
     impactSummary: (row.impact_summary as string) ?? null,
     version: row.version as number,
     approved: Boolean(row.approved),
@@ -129,7 +129,13 @@ export function createMemoryRepository(db: Database.Database): MemoryRepository 
         createdByPodId: entry.createdByPodId,
         now,
       });
-      return this.getOrThrow(entry.id);
+      return {
+        ...entry,
+        contentSha256,
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      };
     },
 
     approve(id: string): void {

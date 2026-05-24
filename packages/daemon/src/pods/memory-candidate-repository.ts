@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import type {
   MemoryCandidate,
   MemoryCandidateAction,
@@ -6,8 +5,10 @@ import type {
   MemoryKind,
   MemorySourceEvidence,
 } from '@autopod/shared';
+import { generateId } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { MemoryRepository } from './memory-repository.js';
+import { parseJsonColumn } from './memory-repository.js';
 
 export interface MemoryCandidateRepository {
   insert(
@@ -22,15 +23,6 @@ export interface MemoryCandidateRepository {
   reject(id: string): MemoryCandidate;
 }
 
-function parseJson<T>(value: unknown, fallback: T): T {
-  if (typeof value !== 'string') return fallback;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return fallback;
-  }
-}
-
 function rowToCandidate(row: Record<string, unknown>): MemoryCandidate {
   return {
     id: row.id as string,
@@ -42,11 +34,11 @@ function rowToCandidate(row: Record<string, unknown>): MemoryCandidate {
     content: row.content as string,
     rationale: row.rationale as string,
     kind: row.kind as MemoryKind,
-    tags: parseJson<string[]>(row.tags, []),
+    tags: parseJsonColumn<string[]>(row.tags, []),
     appliesWhen: (row.applies_when as string) ?? null,
     avoidWhen: (row.avoid_when as string) ?? null,
     confidence: row.confidence as number,
-    sourceEvidence: parseJson<MemorySourceEvidence[]>(row.source_evidence, []),
+    sourceEvidence: parseJsonColumn<MemorySourceEvidence[]>(row.source_evidence, []),
     impactSummary: row.impact_summary as string,
     status: row.status as MemoryCandidateStatus,
     createdByPodId: row.created_by_pod_id as string,
@@ -99,7 +91,7 @@ export function createMemoryCandidateRepository(
         fallbackReason: candidate.fallbackReason ?? null,
         now,
       });
-      return getOrThrow(db, candidate.id);
+      return { ...candidate, status: 'pending', createdAt: now, updatedAt: now };
     },
 
     get(id: string): MemoryCandidate | null {
@@ -153,11 +145,10 @@ export function createMemoryCandidateRepository(
           impactSummary: candidate.impactSummary,
         });
       } else {
-        // 'create' action — insert a new approved profile-scoped memory entry.
         // createdByPodId is null because the memory is created by the human reviewer;
         // the candidate itself retains the originating pod ID for provenance.
         memoryRepo.insert({
-          id: crypto.randomUUID(),
+          id: generateId(8),
           scope: 'profile',
           scopeId: candidate.scopeId,
           path: candidate.path,
@@ -179,7 +170,7 @@ export function createMemoryCandidateRepository(
         'UPDATE memory_candidates SET status = @status, updated_at = @now WHERE id = @id',
       ).run({ id, status: 'approved', now });
 
-      return getOrThrow(db, id);
+      return { ...candidate, status: 'approved', updatedAt: now };
     },
 
     reject(id: string): MemoryCandidate {
@@ -191,7 +182,7 @@ export function createMemoryCandidateRepository(
       db.prepare(
         'UPDATE memory_candidates SET status = @status, updated_at = @now WHERE id = @id',
       ).run({ id, status: 'rejected', now });
-      return getOrThrow(db, id);
+      return { ...candidate, status: 'rejected', updatedAt: now };
     },
   };
 }
