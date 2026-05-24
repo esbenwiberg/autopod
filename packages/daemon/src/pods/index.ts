@@ -63,6 +63,14 @@ export {
   type MemoryRepository,
 } from './memory-repository.js';
 export {
+  createMemoryCandidateRepository,
+  type MemoryCandidateRepository,
+} from './memory-candidate-repository.js';
+export {
+  createMemoryUsageRepository,
+  type MemoryUsageRepository,
+} from './memory-usage-repository.js';
+export {
   createPendingOverrideRepository,
   type PendingOverrideRepository,
 } from './pending-override-repository.js';

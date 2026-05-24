@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { MemoryEntry, MemoryScope } from '@autopod/shared';
+import type { MemoryEntry, MemoryKind, MemoryScope, MemorySourceEvidence } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
 export interface MemoryRepository {
@@ -12,12 +12,29 @@ export interface MemoryRepository {
   approve(id: string): void;
   reject(id: string): void;
   update(id: string, content: string): void;
+  updateMetadata(
+    id: string,
+    content: string,
+    metadata: Pick<
+      MemoryEntry,
+      'kind' | 'tags' | 'appliesWhen' | 'avoidWhen' | 'confidence' | 'sourceEvidence' | 'impactSummary'
+    >,
+  ): void;
   delete(id: string): void;
   search(query: string, scope: MemoryScope, scopeId: string | null): MemoryEntry[];
 }
 
 function sha256(content: string): string {
   return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
+}
+
+function parseJson<T>(value: unknown, fallback: T): T {
+  if (typeof value !== 'string') return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
 }
 
 function rowToMemoryEntry(row: Record<string, unknown>): MemoryEntry {
@@ -29,6 +46,13 @@ function rowToMemoryEntry(row: Record<string, unknown>): MemoryEntry {
     content: row.content as string,
     contentSha256: row.content_sha256 as string,
     rationale: (row.rationale as string) ?? null,
+    kind: (row.kind as MemoryKind) ?? null,
+    tags: parseJson<string[]>(row.tags, []),
+    appliesWhen: (row.applies_when as string) ?? null,
+    avoidWhen: (row.avoid_when as string) ?? null,
+    confidence: (row.confidence as number) ?? null,
+    sourceEvidence: parseJson<MemorySourceEvidence[]>(row.source_evidence, []),
+    impactSummary: (row.impact_summary as string) ?? null,
     version: row.version as number,
     approved: Boolean(row.approved),
     createdByPodId: (row.created_by_pod_id as string) ?? null,
@@ -79,8 +103,13 @@ export function createMemoryRepository(db: Database.Database): MemoryRepository 
       const contentSha256 = sha256(entry.content);
       db.prepare(
         `INSERT INTO memory_entries
-         (id, scope, scope_id, path, content, content_sha256, rationale, version, approved, created_by_pod_id, created_at, updated_at)
-         VALUES (@id, @scope, @scopeId, @path, @content, @contentSha256, @rationale, 1, @approved, @createdByPodId, @now, @now)`,
+         (id, scope, scope_id, path, content, content_sha256, rationale,
+          kind, tags, applies_when, avoid_when, confidence, source_evidence, impact_summary,
+          version, approved, created_by_pod_id, created_at, updated_at)
+         VALUES
+         (@id, @scope, @scopeId, @path, @content, @contentSha256, @rationale,
+          @kind, @tags, @appliesWhen, @avoidWhen, @confidence, @sourceEvidence, @impactSummary,
+          1, @approved, @createdByPodId, @now, @now)`,
       ).run({
         id: entry.id,
         scope: entry.scope,
@@ -89,6 +118,13 @@ export function createMemoryRepository(db: Database.Database): MemoryRepository 
         content: entry.content,
         contentSha256,
         rationale: entry.rationale ?? null,
+        kind: entry.kind ?? null,
+        tags: JSON.stringify(entry.tags ?? []),
+        appliesWhen: entry.appliesWhen ?? null,
+        avoidWhen: entry.avoidWhen ?? null,
+        confidence: entry.confidence ?? null,
+        sourceEvidence: JSON.stringify(entry.sourceEvidence ?? []),
+        impactSummary: entry.impactSummary ?? null,
         approved: entry.approved ? 1 : 0,
         createdByPodId: entry.createdByPodId,
         now,
@@ -114,6 +150,51 @@ export function createMemoryRepository(db: Database.Database): MemoryRepository 
       db.prepare(
         'UPDATE memory_entries SET content = @content, content_sha256 = @contentSha256, version = version + 1, updated_at = @now WHERE id = @id',
       ).run({ id, content, contentSha256, now });
+    },
+
+    updateMetadata(
+      id: string,
+      content: string,
+      metadata: Pick<
+        MemoryEntry,
+        | 'kind'
+        | 'tags'
+        | 'appliesWhen'
+        | 'avoidWhen'
+        | 'confidence'
+        | 'sourceEvidence'
+        | 'impactSummary'
+      >,
+    ): void {
+      const now = new Date().toISOString();
+      const contentSha256 = sha256(content);
+      db.prepare(
+        `UPDATE memory_entries SET
+           content = @content,
+           content_sha256 = @contentSha256,
+           kind = @kind,
+           tags = @tags,
+           applies_when = @appliesWhen,
+           avoid_when = @avoidWhen,
+           confidence = @confidence,
+           source_evidence = @sourceEvidence,
+           impact_summary = @impactSummary,
+           version = version + 1,
+           updated_at = @now
+         WHERE id = @id`,
+      ).run({
+        id,
+        content,
+        contentSha256,
+        kind: metadata.kind ?? null,
+        tags: JSON.stringify(metadata.tags ?? []),
+        appliesWhen: metadata.appliesWhen ?? null,
+        avoidWhen: metadata.avoidWhen ?? null,
+        confidence: metadata.confidence ?? null,
+        sourceEvidence: JSON.stringify(metadata.sourceEvidence ?? []),
+        impactSummary: metadata.impactSummary ?? null,
+        now,
+      });
     },
 
     delete(id: string): void {
