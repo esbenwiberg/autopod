@@ -28,16 +28,13 @@ private func makeBox(
     #expect(data.displayCap < 43200)
     #expect(data.displayCap < 7200)
 
-    // Core percentiles are all below displayCap — they must not be clamped.
     for row in data.rows where row.source.sampleCount > 0 {
+        // Core percentiles are below the cap — must not be clamped.
         #expect(row.displayP25 == row.source.p25)
         #expect(row.displayP50 == row.source.p50)
         #expect(row.displayP75 == row.source.p75)
         #expect(row.displayP90 == row.source.p90)
-    }
-
-    // Both max values are above displayCap — each row must be marked clipped.
-    for row in data.rows where row.source.sampleCount > 0 {
+        // Max is above the cap — must be clamped and flagged.
         #expect(row.isMaxClipped == true)
         #expect(row.displayMax == data.displayCap)
     }
