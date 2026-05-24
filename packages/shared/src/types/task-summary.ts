@@ -14,6 +14,13 @@ export interface DeviationItem {
   impact?: string;
 }
 
+/** Per-memory outcome reported in report_task_summary. */
+export interface MemoryOutcomeItem {
+  memoryId: string;
+  outcome: 'applied' | 'not_applicable' | 'harmful_stale';
+  reason: string;
+}
+
 /** Agent-reported task summary submitted via report_task_summary before finishing. */
 export interface TaskSummary {
   /** High-level description of what was actually accomplished */
@@ -26,6 +33,8 @@ export interface TaskSummary {
   factEvidence?: FactEvidence[];
   /** Optional requests to waive/replace required facts that are impossible under current reality. */
   factDeviations?: FactDeviationRequest[];
+  /** Final outcome for each memory that was selected/injected for this pod. */
+  memoryOutcomes?: MemoryOutcomeItem[];
 }
 
 export interface FactDeviationRequest {

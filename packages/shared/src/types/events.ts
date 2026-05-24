@@ -1,5 +1,5 @@
 import type { EscalationRequest, EscalationResponse } from './escalation.js';
-import type { MemoryEntry } from './memory.js';
+import type { MemoryCandidate, MemoryEntry } from './memory.js';
 import type { PodStatus, PodSummary } from './pod.js';
 import type { AgentEvent } from './runtime.js';
 import type {
@@ -36,6 +36,8 @@ export type SystemEvent =
   | EscalationResolvedEvent
   | PodCompletedEvent
   | MemorySuggestionCreatedEvent
+  | MemoryCandidateCreatedEvent
+  | MemoryCandidateUpdatedEvent
   | ValidationOverrideQueuedEvent
   | TokenBudgetWarningEvent
   | TokenBudgetExceededEvent
@@ -142,6 +144,20 @@ export interface MemorySuggestionCreatedEvent {
   timestamp: string;
   podId: string;
   memoryEntry: MemoryEntry;
+}
+
+export interface MemoryCandidateCreatedEvent {
+  type: 'memory.candidate_created';
+  timestamp: string;
+  podId: string;
+  candidate: MemoryCandidate;
+}
+
+export interface MemoryCandidateUpdatedEvent {
+  type: 'memory.candidate_updated';
+  timestamp: string;
+  podId: string;
+  candidate: MemoryCandidate;
 }
 
 export interface ValidationOverrideQueuedEvent {

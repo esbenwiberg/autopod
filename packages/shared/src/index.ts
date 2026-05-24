@@ -159,7 +159,12 @@ export type {
   ScreenshotSource,
 } from './types/validation.js';
 
-export type { DeviationItem, TaskSummary, DeviationsAssessment } from './types/task-summary.js';
+export type {
+  DeviationItem,
+  TaskSummary,
+  DeviationsAssessment,
+  MemoryOutcomeItem,
+} from './types/task-summary.js';
 
 export type {
   EscalationType,
@@ -187,6 +192,8 @@ export type {
   EscalationResolvedEvent,
   PodCompletedEvent,
   MemorySuggestionCreatedEvent,
+  MemoryCandidateCreatedEvent,
+  MemoryCandidateUpdatedEvent,
   ValidationOverrideQueuedEvent,
   TokenBudgetWarningEvent,
   TokenBudgetExceededEvent,
@@ -227,7 +234,18 @@ export type {
 
 export type { HistoryQuery, HistoryExportStats } from './types/history.js';
 
-export type { MemoryScope, MemoryEntry } from './types/memory.js';
+export type {
+  MemoryScope,
+  MemoryKind,
+  MemorySourceEvidence,
+  MemoryEntry,
+  MemoryCandidateStatus,
+  MemoryCandidateAction,
+  MemoryCandidate,
+  MemoryUsageKind,
+  MemoryUsageOutcome,
+  MemoryUsageEvent,
+} from './types/memory.js';
 
 // Errors (runtime values, not just types)
 export {
@@ -380,4 +398,5 @@ export type {
   UnknownModelSample,
   ModelsSummary,
   ModelsAnalyticsResponse,
+  MemoryAnalyticsResponse,
 } from './types/analytics.js';
