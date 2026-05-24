@@ -420,6 +420,61 @@ private struct ThroughputQueueDepthSectionView: View {
     }
 }
 
+// MARK: - Time-in-status display helper
+
+/// Per-row rendering data produced by `prepareTimeInStatusDisplay`.
+struct TimeInStatusDisplayRow {
+    let source: TimeInStatusBox
+    let displayP25: Double
+    let displayP50: Double
+    let displayP75: Double
+    let displayP90: Double
+    let displayMax: Double
+    /// True when `source.max` was clamped to the display cap.
+    let isMaxClipped: Bool
+}
+
+/// Result of `prepareTimeInStatusDisplay`: capped rows plus the resolved cap value.
+struct TimeInStatusDisplayData {
+    let rows: [TimeInStatusDisplayRow]
+    let displayCap: Double
+}
+
+/// Computes a rendering-only x-axis cap from the core (p25–p90) distribution so that
+/// hour-long outlier max values do not collapse the visible minute-scale box/whisker.
+/// Does not mutate `TimeInStatusBox` values.
+func prepareTimeInStatusDisplay(_ boxes: [TimeInStatusBox]) -> TimeInStatusDisplayData {
+    let nonEmpty = boxes.filter { $0.sampleCount > 0 }
+
+    guard !nonEmpty.isEmpty else {
+        let rows = boxes.map {
+            TimeInStatusDisplayRow(
+                source: $0, displayP25: 0, displayP50: 0,
+                displayP75: 0, displayP90: 0, displayMax: 0, isMaxClipped: false
+            )
+        }
+        return TimeInStatusDisplayData(rows: rows, displayCap: 1)
+    }
+
+    let coreUpper = nonEmpty.flatMap { [$0.p25, $0.p50, $0.p75, $0.p90] }.max() ?? 0
+    let fullUpper = nonEmpty.map(\.max).max() ?? 0
+    let outlierThreshold = max(max(coreUpper * 1.25, coreUpper + 60), 1.0)
+    let displayCap = fullUpper <= outlierThreshold ? max(fullUpper, 1) : outlierThreshold
+
+    let rows = boxes.map { box in
+        TimeInStatusDisplayRow(
+            source: box,
+            displayP25: min(box.p25, displayCap),
+            displayP50: min(box.p50, displayCap),
+            displayP75: min(box.p75, displayCap),
+            displayP90: min(box.p90, displayCap),
+            displayMax: min(box.max, displayCap),
+            isMaxClipped: box.sampleCount > 0 && box.max > displayCap
+        )
+    }
+    return TimeInStatusDisplayData(rows: rows, displayCap: displayCap)
+}
+
 // MARK: - Section 3: Time-in-status box plot
 
 private struct ThroughputTimeInStatusSectionView: View {
@@ -428,6 +483,10 @@ private struct ThroughputTimeInStatusSectionView: View {
 
     private var allEmpty: Bool {
         timeInStatus.allSatisfy { $0.sampleCount == 0 }
+    }
+
+    private var displayData: TimeInStatusDisplayData {
+        prepareTimeInStatusDisplay(timeInStatus)
     }
 
     var body: some View {
@@ -441,20 +500,20 @@ private struct ThroughputTimeInStatusSectionView: View {
                     .foregroundStyle(.secondary)
             } else {
                 Chart {
-                    ForEach(timeInStatus, id: \.status) { box in
-                        let label = box.status.rawValue
-                        if box.sampleCount > 0 {
+                    ForEach(displayData.rows, id: \.source.status) { row in
+                        let label = row.source.status.rawValue
+                        if row.source.sampleCount > 0 {
                             // Box: p25 → p75
                             BarMark(
-                                xStart: .value("P25", box.p25),
-                                xEnd: .value("P75", box.p75),
+                                xStart: .value("P25", row.displayP25),
+                                xEnd: .value("P75", row.displayP75),
                                 y: .value("Status", label)
                             )
                             .foregroundStyle(Color.accentColor.opacity(0.5))
 
                             // Median line
                             RuleMark(
-                                x: .value("P50", box.p50),
+                                x: .value("P50", row.displayP50),
                                 yStart: .value("Status", label),
                                 yEnd: .value("Status", label)
                             )
@@ -463,23 +522,31 @@ private struct ThroughputTimeInStatusSectionView: View {
 
                             // Whisker: p75 → p90
                             RuleMark(
-                                xStart: .value("P75", box.p75),
-                                xEnd: .value("P90", box.p90),
+                                xStart: .value("P75", row.displayP75),
+                                xEnd: .value("P90", row.displayP90),
                                 y: .value("Status", label)
                             )
                             .foregroundStyle(Color.accentColor.opacity(0.6))
                             .lineStyle(StrokeStyle(lineWidth: 1.5))
 
-                            // Max marker
+                            // Max marker — clamped to displayCap for outliers
                             PointMark(
-                                x: .value("Max", box.max),
+                                x: .value("Max", row.displayMax),
                                 y: .value("Status", label)
                             )
                             .foregroundStyle(Color.accentColor.opacity(0.7))
                             .symbolSize(30)
+                            .annotation(position: .trailing) {
+                                if row.isMaxClipped, let formatted = formatMttmSeconds(row.source.max) {
+                                    Text("max \(formatted)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     }
                 }
+                .chartXScale(domain: 0...displayData.displayCap)
                 .chartXAxis {
                     AxisMarks { value in
                         AxisGridLine()
@@ -492,12 +559,12 @@ private struct ThroughputTimeInStatusSectionView: View {
                 }
                 .frame(height: CGFloat(timeInStatus.count) * 48 + 20)
 
-                // Per-row sample counts
+                // Per-row summaries
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(timeInStatus, id: \.status) { box in
-                        let label = box.status.rawValue
+                    ForEach(displayData.rows, id: \.source.status) { row in
+                        let box = row.source
                         HStack(spacing: 6) {
-                            Text(label)
+                            Text(box.status.rawValue)
                                 .font(.system(.caption2, design: .monospaced))
                                 .foregroundStyle(.secondary)
                             Text("n=\(box.sampleCount)")
@@ -507,8 +574,11 @@ private struct ThroughputTimeInStatusSectionView: View {
                                 Text("—")
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
-                            } else if let mttm = formatMttmSeconds(box.p50) {
-                                Text("median \(mttm)")
+                            } else {
+                                let median = formatMttmSeconds(box.p50) ?? "0s"
+                                let p90str = formatMttmSeconds(box.p90) ?? "0s"
+                                let maxStr = formatMttmSeconds(box.max) ?? "0s"
+                                Text("median \(median) · p90 \(p90str) · max \(maxStr)")
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
