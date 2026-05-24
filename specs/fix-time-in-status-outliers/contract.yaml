@@ -1,0 +1,59 @@
+contract_version: 1
+title: "Fix Time in Status outlier rendering"
+depends_on: []
+scenarios:
+  - id: core-distribution-stays-readable
+    given:
+      - "the Throughput time-in-status response has p25-p90 values in minutes"
+      - "one or more status rows have max values in hours"
+    when:
+      - "the desktop prepares the Time in Status chart for rendering"
+    then:
+      - "the x-axis cap is derived from the p25-p90 core distribution"
+      - "the p25-p50-p75 box and p90 whisker remain inside the visible range"
+      - "raw TimeInStatusBox values are not mutated"
+  - id: max-outliers-remain-visible
+    given:
+      - "a status row has max greater than the display cap"
+    when:
+      - "the chart renders that row"
+    then:
+      - "the max marker is pinned to the capped edge"
+      - "the row is marked as having a clipped max"
+      - "the operator can still see the real max duration as a compact label"
+  - id: ordinary-max-values-are-not-clipped
+    given:
+      - "all non-empty status rows have max values within the outlier threshold"
+    when:
+      - "the desktop prepares the Time in Status chart for rendering"
+    then:
+      - "the display cap includes the largest real max"
+      - "no row is marked as clipped"
+  - id: empty-statuses-stay-empty
+    given:
+      - "one or more status rows have sampleCount equal to zero"
+    when:
+      - "the desktop prepares the Time in Status chart for rendering"
+    then:
+      - "zero-sample rows do not influence the display cap"
+      - "zero-sample rows continue to render as empty rows"
+      - "an all-empty payload still uses the existing section-level empty state"
+required_facts:
+  - id: fact-time-in-status-display-helper
+    proves:
+      - core-distribution-stays-readable
+      - max-outliers-remain-visible
+      - ordinary-max-values-are-not-clipped
+      - empty-statuses-stay-empty
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift
+      change: create
+    command: cd packages/desktop && swift test --filter ThroughputTimeInStatusDisplayTests
+human_review:
+  - id: review-time-in-status-chart
+    covers:
+      - core-distribution-stays-readable
+      - max-outliers-remain-visible
+    criterion: "With an outlier-heavy fixture, the Time in Status chart visibly separates the minute-scale box/whisker marks and shows clipped max labels without overlapping row labels."
+    reason: "The pure helper test proves the scale and clamping contract; native Swift Charts visual readability still needs a quick human look."
