@@ -187,6 +187,10 @@ export async function extractCandidate(opts: {
 
   let rawResponse: string;
   try {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('reviewer_model_timeout')), API_TIMEOUT_MS);
+    });
     const result = await Promise.race<Anthropic.Message>([
       anthropicClient.messages.create({
         model: reviewerModel,
@@ -194,12 +198,13 @@ export async function extractCandidate(opts: {
         system: REVIEWER_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMessage }],
       }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('reviewer_model_timeout')), API_TIMEOUT_MS),
-      ),
+      timeoutPromise,
     ]);
-    const textBlock = result.content.find((b) => b.type === 'text');
-    rawResponse = (textBlock as { type: 'text'; text: string } | undefined)?.text ?? '';
+    clearTimeout(timeoutId);
+    const textBlock = result.content.find(
+      (b): b is { type: 'text'; text: string } => b.type === 'text',
+    );
+    rawResponse = textBlock?.text ?? '';
   } catch (err) {
     const reason = `reviewer_model_failed: ${err instanceof Error ? err.message : String(err)}`;
     logger.warn({ podId: pod.id, reason }, 'Reviewer model call failed for memory extraction');

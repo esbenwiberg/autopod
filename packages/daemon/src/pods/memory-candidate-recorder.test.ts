@@ -147,7 +147,7 @@ describe('MemoryCandidateRecorder', () => {
 
     vi.mocked(createProfileAnthropicClient).mockResolvedValue({
       ok: true,
-      client: makeMockAnthropicClient() as ReturnType<typeof makeMockAnthropicClient> as never,
+      client: makeMockAnthropicClient() as unknown as import('@anthropic-ai/sdk').default,
       model: 'claude-haiku-4-5-20251001',
     });
   });
@@ -387,7 +387,7 @@ describe('MemoryCandidateRecorder', () => {
   it('records no candidate when reviewer model returns create:false', async () => {
     vi.mocked(createProfileAnthropicClient).mockResolvedValue({
       ok: true,
-      client: makeMockAnthropicClient(JSON.stringify({ create: false })) as never,
+      client: makeMockAnthropicClient(JSON.stringify({ create: false })) as unknown as import('@anthropic-ai/sdk').default,
       model: 'claude-haiku-4-5-20251001',
     });
 

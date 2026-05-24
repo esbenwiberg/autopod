@@ -3,8 +3,9 @@ import type {
   AgentTaskSummaryEvent,
   EscalationType,
   PodCompletedEvent,
-  PodStatusChangedEvent,
   PodStatus,
+  PodStatusChangedEvent,
+  Profile,
   QualitySignals,
   SystemEvent,
 } from '@autopod/shared';
@@ -80,7 +81,7 @@ export function createMemoryCandidateRecorder(
     // Only extract for future agent-driven pods.
     if (pod.options.agentMode !== 'auto') return;
 
-    let profile: import('@autopod/shared').Profile;
+    let profile: Profile;
     try {
       profile = profileStore.get(pod.profileName);
     } catch {
@@ -105,10 +106,7 @@ export function createMemoryCandidateRecorder(
     // Build evidence from stored events and escalations.
     const evidence = buildEvidence(podId, { eventRepo, escalationRepo, validationRepo });
 
-    // Collect approved profile-scoped memories for update-vs-create detection.
-    const existingMemories = memoryRepo
-      .list('profile', pod.profileName, true)
-      .filter((m) => m.approved);
+    const existingMemories = memoryRepo.list('profile', pod.profileName, true);
 
     const reviewerModelId =
       profile.reviewerModel ?? profile.defaultModel ?? pod.model ?? 'claude-haiku-4-5';
