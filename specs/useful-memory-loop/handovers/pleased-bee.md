@@ -14,8 +14,10 @@
 
 - `MemoryCandidateRepository` interface with `insert`, `get`, `listPending`, `list`, `approve`, `reject`.
 - **`approve('create')`** — calls `memoryRepo.insert` to create a new approved `profile`-scoped memory entry (with `createdByPodId: null` since it's the human reviewer creating it; the candidate retains the originating pod ID for provenance). Marks candidate `approved`. Returns updated candidate without re-reading.
-- **`approve('update')`** — calls `memoryRepo.updateMetadata` on the target memory, incrementing its `version`. No duplicate memory entry is created. Returns updated candidate without re-reading.
+- **`approve('update')`** — verifies the target memory still exists (throws if `target_memory_id` was nulled by FK `ON DELETE SET NULL`, or if `getOrThrow` finds no row), then calls `memoryRepo.updateMetadata` on the target memory, incrementing its `version`. No duplicate memory entry is created. Returns updated candidate without re-reading.
 - **`reject`** — marks candidate `rejected` and retains the row for audit history. Returns updated candidate without re-reading.
+- **Atomic** — memory write + candidate status flip happen inside a single `db.transaction(...)`; a crash or thrown error rolls both back so the candidate stays `pending`.
+- **Scope is read from DB** (`rowToCandidate` reads `row.scope`, defaulting to `'profile'` only if NULL). The previous version hardcoded `'profile'`, creating a silent read-write asymmetry — fixed.
 - Uses `generateId(8)` (from `@autopod/shared`) for new memory IDs, consistent with existing memory route.
 - **Does NOT auto-approve** — all candidates start as `pending`.
 
@@ -27,7 +29,7 @@
 
 ### `packages/daemon/src/pods/memory-repository.test.ts` (new)
 
-22 tests covering:
+26 tests covering:
 - Legacy-row mapping (NULL columns → safe defaults)
 - Metadata persistence (all seven new fields round-trip)
 - `updateMetadata` version increment
@@ -42,6 +44,9 @@
 - Candidate `list` with status filter
 - Usage event record, `listByMemory`, `listByPod`
 - CASCADE deletion of usage events when memory is deleted
+- Scope round-trip from DB (defends the hardcode regression)
+- `approve` atomicity — candidate stays pending if `memoryRepo.insert` or `updateMetadata` throws
+- `approve('update')` throws when the target memory was deleted before approval (no silent fallthrough to create)
 
 ### `packages/daemon/src/pods/index.ts` (updated)
 
@@ -74,5 +79,6 @@ Exports `createMemoryCandidateRepository`, `MemoryCandidateRepository`, `createM
 
 ## Landmines
 
-- The `approve` method makes two database writes in sequence (one to `memoryRepo`, one to `memory_candidates`). If the first write succeeds but the second fails (crash), the candidate stays `pending` while the memory entry already exists. SQLite transactions can prevent this — brief 06 may want to wrap in `db.transaction()` if atomic consistency is required.
+- `memory_candidates.target_memory_id` has `ON DELETE SET NULL`. If a memory referenced by an update candidate is deleted, the candidate's `targetMemoryId` becomes null. `approve` now refuses to proceed in this case (throws `"no longer exists"`); brief 06 routes should surface that as a 409/410 so the operator knows the target is gone rather than retrying the approval.
 - `listPending` does NOT filter by `scope` (only `scope_id`) — the existing schema only supports `profile` scope for candidates, but if the scope column is extended, `listPending` may need a `scope` filter.
+- The `approve` transaction wraps both the memory write and the candidate status flip. If brief 06 ever calls `approve` from inside another `db.transaction(...)`, better-sqlite3 will nest as a savepoint — that's fine, but the outer transaction still owns commit/rollback semantics.

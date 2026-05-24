@@ -415,6 +415,127 @@ describe('MemoryCandidateRepository', () => {
     });
   });
 
+  describe('scope round-trip', () => {
+    it('reads the scope column from the database (not hardcoded)', () => {
+      const cand = makeCreateCandidate();
+      candRepo.insert(cand);
+
+      // Mutate scope at the SQL layer; the row mapper must reflect this.
+      // (Defends against a previous bug where rowToCandidate hardcoded 'profile'.)
+      db.prepare("UPDATE memory_candidates SET scope = 'global' WHERE id = ?").run(cand.id);
+
+      const fetched = candRepo.get(cand.id);
+      expect(fetched!.scope).toBe('global');
+    });
+  });
+
+  describe('approve atomicity', () => {
+    it('rolls back candidate status when memory write fails', () => {
+      const cand = makeCreateCandidate();
+      candRepo.insert(cand);
+
+      // Stub memoryRepo whose insert throws — the candidate status must NOT flip to approved.
+      const failingMemRepo = {
+        ...memRepo,
+        insert: () => {
+          throw new Error('simulated memory write failure');
+        },
+      };
+
+      expect(() => candRepo.approve(cand.id, failingMemRepo)).toThrow(/simulated/);
+
+      const fetched = candRepo.get(cand.id);
+      expect(fetched!.status).toBe('pending');
+      expect(memRepo.list('profile', 'test-profile')).toHaveLength(0);
+    });
+
+    it('rolls back when updateMetadata fails on an update candidate', () => {
+      const memId = makeMemoryId();
+      memRepo.insert({
+        id: memId,
+        scope: 'profile',
+        scopeId: 'test-profile',
+        path: '/x.md',
+        content: 'v1',
+        rationale: null,
+        kind: null,
+        tags: [],
+        appliesWhen: null,
+        avoidWhen: null,
+        confidence: null,
+        sourceEvidence: [],
+        impactSummary: null,
+        approved: true,
+        createdByPodId: null,
+      });
+
+      const cand = makeCreateCandidate({
+        id: randomUUID(),
+        action: 'update',
+        targetMemoryId: memId,
+        content: 'v2',
+      });
+      candRepo.insert(cand);
+
+      const failingMemRepo = {
+        ...memRepo,
+        updateMetadata: () => {
+          throw new Error('simulated update failure');
+        },
+      };
+
+      expect(() => candRepo.approve(cand.id, failingMemRepo)).toThrow(/simulated/);
+
+      expect(candRepo.get(cand.id)!.status).toBe('pending');
+      // Target memory untouched
+      expect(memRepo.getOrThrow(memId).version).toBe(1);
+      expect(memRepo.getOrThrow(memId).content).toBe('v1');
+    });
+  });
+
+  describe('approve — update action with missing target', () => {
+    it('throws when the target memory was deleted before approval', () => {
+      const memId = makeMemoryId();
+      memRepo.insert({
+        id: memId,
+        scope: 'profile',
+        scopeId: 'test-profile',
+        path: '/will-be-deleted.md',
+        content: 'doomed',
+        rationale: null,
+        kind: null,
+        tags: [],
+        appliesWhen: null,
+        avoidWhen: null,
+        confidence: null,
+        sourceEvidence: [],
+        impactSummary: null,
+        approved: true,
+        createdByPodId: null,
+      });
+
+      const cand = makeCreateCandidate({
+        id: randomUUID(),
+        action: 'update',
+        targetMemoryId: memId,
+        content: 'replacement',
+      });
+      candRepo.insert(cand);
+
+      // Delete the target memory before approval
+      memRepo.delete(memId);
+
+      // FK ON DELETE SET NULL nulls target_memory_id when the memory is deleted;
+      // approve must refuse rather than silently converting the update into a create.
+      expect(() => candRepo.approve(cand.id, memRepo)).toThrow(/no longer exists/);
+
+      // Candidate stays pending — no silent approval against a missing target
+      expect(candRepo.get(cand.id)!.status).toBe('pending');
+      // No new memory entry was created by the would-be fallthrough
+      expect(memRepo.list('profile', 'test-profile')).toHaveLength(0);
+    });
+  });
+
   describe('list with status filter', () => {
     it('filters by status', () => {
       const c1 = makeCreateCandidate({ id: randomUUID() });

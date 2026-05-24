@@ -28,7 +28,7 @@ function rowToCandidate(row: Record<string, unknown>): MemoryCandidate {
     id: row.id as string,
     action: row.action as MemoryCandidateAction,
     targetMemoryId: (row.target_memory_id as string) ?? null,
-    scope: 'profile',
+    scope: (row.scope as 'profile') ?? 'profile',
     scopeId: row.scope_id as string,
     path: row.path as string,
     content: row.content as string,
@@ -134,41 +134,56 @@ export function createMemoryCandidateRepository(
 
       const now = new Date().toISOString();
 
-      if (candidate.action === 'update' && candidate.targetMemoryId) {
-        memoryRepo.updateMetadata(candidate.targetMemoryId, candidate.content, {
-          kind: candidate.kind,
-          tags: candidate.tags,
-          appliesWhen: candidate.appliesWhen,
-          avoidWhen: candidate.avoidWhen,
-          confidence: candidate.confidence,
-          sourceEvidence: candidate.sourceEvidence,
-          impactSummary: candidate.impactSummary,
-        });
-      } else {
-        // createdByPodId is null because the memory is created by the human reviewer;
-        // the candidate itself retains the originating pod ID for provenance.
-        memoryRepo.insert({
-          id: generateId(8),
-          scope: 'profile',
-          scopeId: candidate.scopeId,
-          path: candidate.path,
-          content: candidate.content,
-          rationale: candidate.rationale,
-          kind: candidate.kind,
-          tags: candidate.tags,
-          appliesWhen: candidate.appliesWhen,
-          avoidWhen: candidate.avoidWhen,
-          confidence: candidate.confidence,
-          sourceEvidence: candidate.sourceEvidence,
-          impactSummary: candidate.impactSummary,
-          approved: true,
-          createdByPodId: null,
-        });
-      }
+      // Atomic: memory write + candidate status update share one transaction so a
+      // crash between them can't leave an approved memory with a still-pending
+      // candidate (or vice versa).
+      const tx = db.transaction(() => {
+        if (candidate.action === 'update') {
+          // target_memory_id has ON DELETE SET NULL, so a deleted target shows up
+          // here as a null id. Either case (null id, or id present but row gone)
+          // must throw — an operator approved an UPDATE, not a silent CREATE.
+          if (!candidate.targetMemoryId) {
+            throw new Error(
+              `Candidate ${id} is an update but its target memory no longer exists`,
+            );
+          }
+          memoryRepo.getOrThrow(candidate.targetMemoryId);
+          memoryRepo.updateMetadata(candidate.targetMemoryId, candidate.content, {
+            kind: candidate.kind,
+            tags: candidate.tags,
+            appliesWhen: candidate.appliesWhen,
+            avoidWhen: candidate.avoidWhen,
+            confidence: candidate.confidence,
+            sourceEvidence: candidate.sourceEvidence,
+            impactSummary: candidate.impactSummary,
+          });
+        } else {
+          // createdByPodId is null because the memory is created by the human reviewer;
+          // the candidate itself retains the originating pod ID for provenance.
+          memoryRepo.insert({
+            id: generateId(8),
+            scope: 'profile',
+            scopeId: candidate.scopeId,
+            path: candidate.path,
+            content: candidate.content,
+            rationale: candidate.rationale,
+            kind: candidate.kind,
+            tags: candidate.tags,
+            appliesWhen: candidate.appliesWhen,
+            avoidWhen: candidate.avoidWhen,
+            confidence: candidate.confidence,
+            sourceEvidence: candidate.sourceEvidence,
+            impactSummary: candidate.impactSummary,
+            approved: true,
+            createdByPodId: null,
+          });
+        }
 
-      db.prepare(
-        'UPDATE memory_candidates SET status = @status, updated_at = @now WHERE id = @id',
-      ).run({ id, status: 'approved', now });
+        db.prepare(
+          'UPDATE memory_candidates SET status = @status, updated_at = @now WHERE id = @id',
+        ).run({ id, status: 'approved', now });
+      });
+      tx();
 
       return { ...candidate, status: 'approved', updatedAt: now };
     },
