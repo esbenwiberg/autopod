@@ -71,8 +71,10 @@ export interface RequestCredentialPayload {
 }
 
 export interface EscalationResponse {
-  respondedAt: string;
+  respondedAt?: string;
   respondedBy: 'human' | 'ai';
   response: string;
   model?: string;
+  /** Legacy alias for respondedAt; some call sites still emit this name. */
+  timestamp?: string;
 }
