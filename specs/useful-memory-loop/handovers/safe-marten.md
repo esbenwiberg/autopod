@@ -19,6 +19,7 @@
 ## Deviations
 
 - **`packages/shared/src/types/escalation.ts`** — Added optional `timestamp?: string` and made `respondedAt?` optional on `EscalationResponse`. A pre-existing latent bug in `packages/escalation-mcp/src/tools/ask-human.ts` (passes `timestamp` instead of `respondedAt`) only surfaced in DTS once my shared-types changes invalidated the build cache. Touching escalation-mcp is reserved for brief 05, so the type was relaxed at the contract level instead. Additive — no daemon TS reads either field today.
+- **`packages/daemon/src/profiles/profile-store.test.ts`** and **`packages/daemon/src/pods/quality-score-repository.test.ts`** — Pre-existing test failures on main blocking the validator gate. Profile-store missed `askHumanOnTimeout: 'continue'` (a Zod default added later); quality-score's `baseScore()` helper hardcoded `completedAt: 2026-04-23`, now outside the 30-day analytics window. Patched as a disjoint maintenance commit so brief 01's contracts diff stays clean.
 
 ## Key things downstream pods must know
 
