@@ -18,7 +18,7 @@
 
 ## Deviations
 
-None. Followed the design spec contracts exactly.
+- **`packages/shared/src/types/escalation.ts`** — Added optional `timestamp?: string` and made `respondedAt?` optional on `EscalationResponse`. A pre-existing latent bug in `packages/escalation-mcp/src/tools/ask-human.ts` (passes `timestamp` instead of `respondedAt`) only surfaced in DTS once my shared-types changes invalidated the build cache. Touching escalation-mcp is reserved for brief 05, so the type was relaxed at the contract level instead. Additive — no daemon TS reads either field today.
 
 ## Key things downstream pods must know
 
