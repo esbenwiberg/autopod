@@ -5391,6 +5391,45 @@ describe('PodManager', () => {
       });
     });
 
+    it('does not report rework success when the validation retry runtime fails', async () => {
+      const ctx = createTestContext({ overall: 'fail' });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Retry failure task' },
+        'user-1',
+      );
+
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      (ctx.runtime.resume as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async function* (): AsyncIterable<AgentEvent> {
+          yield {
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            message: 'Codex process exited with code 137',
+            fatal: true,
+          };
+        },
+      );
+
+      await manager.triggerValidation(pod.id);
+
+      const messages = ctx.eventRepo
+        .getForSession(pod.id)
+        .flatMap((stored) =>
+          stored.payload.type === 'pod.agent_activity' && stored.payload.event.type === 'status'
+            ? [stored.payload.event.message]
+            : [],
+        );
+      expect(messages).not.toContain('Agent finished applying fixes');
+      expect(manager.getSession(pod.id).status).toBe('failed');
+    });
+
     it('multiple complete events in one attempt accumulate into the same bucket', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);

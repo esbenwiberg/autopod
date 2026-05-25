@@ -750,7 +750,7 @@ struct OverviewTab: View {
     // MARK: - Metrics
 
     private var metricsCard: some View {
-        let hasCostData = pod.inputTokens > 0 || pod.costUsd > 0
+        let hasCostData = pod.inputTokens > 0 || pod.outputTokens > 0 || pod.costUsd > 0
             || pod.status == .running || pod.status == .paused
         let toolCallCount = events.filter { $0.type == .toolUse }.count
 
@@ -802,7 +802,7 @@ struct OverviewTab: View {
                               label: "Cost",
                               color: costKnown ? .primary : .secondary)
                 } else {
-                    Text("No cost data yet")
+                    Text("No token data yet")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .padding(.top, 2)

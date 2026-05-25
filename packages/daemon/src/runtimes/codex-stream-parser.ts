@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
-import { canonicalModelKey, computeCost } from '@autopod/shared';
+import { canonicalModelKey, computeCostWithCache } from '@autopod/shared';
 import type { AgentEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
 
@@ -13,7 +13,7 @@ import type { Logger } from 'pino';
  * `codex exec --json` is an `Event { id, msg }` with `msg.type` discriminating
  * the variant.
  *
- * Token usage arrives in `token_count` events ahead of `turn_complete`; the
+ * Token usage arrives in `token_count` events ahead of completion events; the
  * parser carries the most recent snapshot and flushes it as part of the final
  * `complete` AgentEvent so pod-manager's accumulator (`pod-manager.ts:~2898`)
  * picks up `totalInputTokens` / `totalOutputTokens` the same way it does for
@@ -105,6 +105,58 @@ function contentToString(content: unknown): string | undefined {
     })
     .filter(Boolean);
   return parts.length > 0 ? parts.join('\n') : undefined;
+}
+
+function completionResult(msg: { [key: string]: unknown }): string {
+  if (typeof msg.last_agent_message === 'string' && msg.last_agent_message.length > 0) {
+    return msg.last_agent_message;
+  }
+  return msg.type === 'task_complete' ? 'Codex task complete' : 'Codex turn complete';
+}
+
+function completionCostUsd(
+  usage: CodexTokenUsage | undefined,
+  latestModel: string | null,
+  podId: string,
+  logger: Logger,
+): number | undefined {
+  if (latestModel === null) return undefined;
+  const key = canonicalModelKey(latestModel);
+  if (key === null) {
+    logger.warn({
+      component: 'codex-stream-parser',
+      podId,
+      msg: `No pricing entry for model: ${latestModel}`,
+    });
+    return 0;
+  }
+  return computeCostWithCache(
+    key,
+    usage?.input_tokens ?? 0,
+    usage?.output_tokens ?? 0,
+    usage?.cached_input_tokens ?? 0,
+  );
+}
+
+function completeEventFromState(
+  msg: { [key: string]: unknown },
+  env: CodexEnvelope,
+  latestUsage: CodexTokenUsage | undefined,
+  latestModel: string | null,
+  podId: string,
+  logger: Logger,
+): AgentEvent {
+  const inputTokens = latestUsage?.input_tokens;
+  const outputTokens = latestUsage?.output_tokens;
+  const costUsd = completionCostUsd(latestUsage, latestModel, podId, logger);
+  return {
+    type: 'complete',
+    timestamp: tsOf(env),
+    result: completionResult(msg),
+    ...(inputTokens !== undefined && { totalInputTokens: inputTokens }),
+    ...(outputTokens !== undefined && { totalOutputTokens: outputTokens }),
+    ...(costUsd !== undefined && { costUsd }),
+  };
 }
 
 function mapFunctionCall(msg: { [key: string]: unknown }, ts: string): AgentEvent | null {
@@ -332,6 +384,7 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
     // half-formed output.
     case 'token_count':
     case 'turn_complete':
+    case 'task_complete':
     case 'patch_apply_end': // yields one file_change per file — handled in parse()
     case 'event_msg':
     case 'response_item':
@@ -373,8 +426,8 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
  * Parse `codex exec --json` JSONL into `AgentEvent` stream.
  *
  * Carries `token_count` snapshots forward and folds them into the
- * `turn_complete` → `AgentCompleteEvent` so token telemetry persists via the
- * same pod-manager accumulator that handles Claude usage.
+ * `turn_complete` / `task_complete` → `AgentCompleteEvent` so token telemetry
+ * persists via the same pod-manager accumulator that handles Claude usage.
  *
  * Malformed lines are warned-and-skipped — never fatal.
  */
@@ -431,37 +484,8 @@ async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIte
       continue;
     }
 
-    if (msg.type === 'turn_complete') {
-      const result =
-        typeof msg.last_agent_message === 'string' && msg.last_agent_message.length > 0
-          ? msg.last_agent_message
-          : 'Codex turn complete';
-      const ts = tsOf(env);
-      const inputTokens = latestUsage?.input_tokens;
-      const outputTokens = latestUsage?.output_tokens;
-      let costUsd: number | undefined;
-      if (latestModel !== null) {
-        const key = canonicalModelKey(latestModel);
-        if (key === null) {
-          logger.warn({
-            component: 'codex-stream-parser',
-            podId,
-            msg: `No pricing entry for model: ${latestModel}`,
-          });
-          costUsd = 0;
-        } else {
-          costUsd = computeCost(key, inputTokens ?? 0, outputTokens ?? 0);
-        }
-      }
-      const completeEvent: AgentEvent = {
-        type: 'complete',
-        timestamp: ts,
-        result,
-        ...(inputTokens !== undefined && { totalInputTokens: inputTokens }),
-        ...(outputTokens !== undefined && { totalOutputTokens: outputTokens }),
-        ...(costUsd !== undefined && { costUsd }),
-      };
-      yield completeEvent;
+    if (msg.type === 'turn_complete' || msg.type === 'task_complete') {
+      yield completeEventFromState(msg, env, latestUsage, latestModel, podId, logger);
       latestUsage = undefined;
       continue;
     }

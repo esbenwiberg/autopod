@@ -47,6 +47,14 @@ public struct SessionQualityCard: View {
                 StatTile(icon: "hand.raised", label: "Interrupts",
                          value: interrupts.value, health: interrupts.health, hint: interrupts.hint,
                          description: "Human-required escalations: ask_human, report_blocker, request_credential, action_approval, or validation_override. Counts +1 if the pod was killed early. 0 = green, ≤2 = yellow, >2 = red.")
+                let inputTokens = signals.inputTokensTile
+                StatTile(icon: "arrow.up.circle", label: "Tokens In",
+                         value: inputTokens.value, health: inputTokens.health, hint: inputTokens.hint,
+                         description: "Input tokens consumed by this pod across agent runs.")
+                let outputTokens = signals.outputTokensTile
+                StatTile(icon: "arrow.down.circle", label: "Tokens Out",
+                         value: outputTokens.value, health: outputTokens.health, hint: outputTokens.hint,
+                         description: "Output tokens consumed by this pod across agent runs.")
                 let cost = signals.costTile
                 StatTile(icon: "dollarsign.circle", label: "Cost",
                          value: cost.value, health: cost.health, hint: cost.hint,

@@ -292,13 +292,16 @@ describe('CodexStreamParser', () => {
       expect(e).toMatchObject({ type: 'error', fatal: true });
     });
 
-    it('returns null for stateful events (token_count, turn_complete)', () => {
+    it('returns null for stateful events (token_count, turn_complete, task_complete)', () => {
       // These are folded together in parse() — single-event mapping skips.
       expect(
         CodexStreamParser.mapEvent({ id: 's', msg: { type: 'token_count' } }, 'pod-1'),
       ).toBeNull();
       expect(
         CodexStreamParser.mapEvent({ id: 's', msg: { type: 'turn_complete' } }, 'pod-1'),
+      ).toBeNull();
+      expect(
+        CodexStreamParser.mapEvent({ id: 's', msg: { type: 'task_complete' } }, 'pod-1'),
       ).toBeNull();
     });
 
@@ -559,6 +562,67 @@ describe('CodexStreamParser', () => {
       // Use the actual helper so the test doesn't drift if pricing changes.
       const { computeCost: cc } = await import('@autopod/shared');
       const expected = cc('gpt-5', inputTokens, outputTokens);
+      expect(complete?.costUsd).toBeCloseTo(expected, 10);
+    });
+
+    it('emits complete and computes cached-input Codex cost from task_complete', async () => {
+      const inputTokens = 1_000_000;
+      const cachedInputTokens = 600_000;
+      const outputTokens = 250_000;
+      const stream = createMockStream([
+        JSON.stringify({
+          timestamp: '2026-05-25T14:21:57.001Z',
+          type: 'turn_context',
+          payload: { model: 'gpt-5.3-codex' },
+        }),
+        JSON.stringify({
+          timestamp: '2026-05-25T14:25:17.117Z',
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              total_token_usage: {
+                input_tokens: inputTokens,
+                cached_input_tokens: cachedInputTokens,
+                output_tokens: outputTokens,
+                reasoning_output_tokens: 1_000,
+                total_tokens: inputTokens + outputTokens,
+              },
+            },
+          },
+        }),
+        JSON.stringify({
+          timestamp: '2026-05-25T14:25:17.130Z',
+          type: 'event_msg',
+          payload: {
+            type: 'task_complete',
+            turn_id: 'turn-1',
+            last_agent_message: 'Fixed it',
+          },
+        }),
+      ]);
+
+      const events: AgentEvent[] = [];
+      for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
+        events.push(event);
+      }
+
+      const complete = events.find((e) => e.type === 'complete') as
+        | { costUsd?: number }
+        | undefined;
+      expect(complete).toMatchObject({
+        type: 'complete',
+        result: 'Fixed it',
+        totalInputTokens: inputTokens,
+        totalOutputTokens: outputTokens,
+      });
+      const { computeCostWithCache } = await import('@autopod/shared');
+      const expected = computeCostWithCache(
+        'gpt-5.3-codex',
+        inputTokens,
+        outputTokens,
+        cachedInputTokens,
+      );
       expect(complete?.costUsd).toBeCloseTo(expected, 10);
     });
 

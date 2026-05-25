@@ -2,6 +2,7 @@ import pricingData from './model-pricing.json' with { type: 'json' };
 
 export interface ModelPrice {
   inputPer1M: number;
+  cachedInputPer1M?: number;
   outputPer1M: number;
 }
 
@@ -39,11 +40,26 @@ export function computeCost(
   inputTokens: number,
   outputTokens: number,
 ): number {
+  return computeCostWithCache(model, inputTokens, outputTokens, 0);
+}
+
+export function computeCostWithCache(
+  model: string | null,
+  inputTokens: number,
+  outputTokens: number,
+  cachedInputTokens: number,
+): number {
   if (!model) return 0;
   const price = MODEL_PRICING[model];
   if (!price) return 0;
+  const cachedInput = price.cachedInputPer1M
+    ? Math.min(Math.max(cachedInputTokens, 0), inputTokens)
+    : 0;
+  const uncachedInput = Math.max(inputTokens - cachedInput, 0);
   return (
-    (inputTokens / 1_000_000) * price.inputPer1M + (outputTokens / 1_000_000) * price.outputPer1M
+    (uncachedInput / 1_000_000) * price.inputPer1M +
+    (cachedInput / 1_000_000) * (price.cachedInputPer1M ?? price.inputPer1M) +
+    (outputTokens / 1_000_000) * price.outputPer1M
   );
 }
 

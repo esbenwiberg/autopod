@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { MODEL_PRICING, canonicalModelKey, computeCost, effectiveCostUsd } from './index.js';
+import {
+  MODEL_PRICING,
+  canonicalModelKey,
+  computeCost,
+  computeCostWithCache,
+  effectiveCostUsd,
+} from './index.js';
 
 describe('MODEL_PRICING', () => {
   it('contains full claude model IDs', () => {
@@ -12,6 +18,10 @@ describe('MODEL_PRICING', () => {
   it('contains gpt model IDs', () => {
     expect(MODEL_PRICING['gpt-5']).toBeDefined();
     expect(MODEL_PRICING['gpt-5-mini']).toBeDefined();
+    expect(MODEL_PRICING['gpt-5.3-codex']).toBeDefined();
+    expect(MODEL_PRICING['gpt-5.2-codex']).toBeDefined();
+    expect(MODEL_PRICING['gpt-5.1-codex']).toBeDefined();
+    expect(MODEL_PRICING['gpt-5-codex']).toBeDefined();
   });
 
   it('contains short aliases', () => {
@@ -40,6 +50,14 @@ describe('computeCost', () => {
 
   it('returns 0 for unknown model', () => {
     expect(computeCost('unknown-model', 100, 100)).toBe(0);
+  });
+});
+
+describe('computeCostWithCache', () => {
+  it('computes Codex cost with cached input discount', () => {
+    expect(computeCostWithCache('gpt-5.3-codex', 1_000_000, 500_000, 250_000)).toBe(
+      0.75 * 1.75 + 0.25 * 0.175 + 0.5 * 14.0,
+    );
   });
 });
 

@@ -845,6 +845,8 @@ export interface PodCreator {
   name?: string | null;
 }
 
+export type AgentRunOutcome = 'completed' | 'failed' | 'paused' | 'stopped';
+
 export interface PodManager {
   createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod;
   processPod(podId: string): Promise<void>;
@@ -852,7 +854,7 @@ export interface PodManager {
     podId: string,
     events: AsyncIterable<AgentEvent>,
     attempt?: number,
-  ): Promise<void>;
+  ): Promise<AgentRunOutcome>;
   handleCompletion(podId: string): Promise<void>;
   sendMessage(podId: string, message: string): Promise<void>;
   notifyEscalation(podId: string, escalation: EscalationRequest): void;
@@ -5680,7 +5682,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
         }
 
-        await this.consumeAgentEvents(podId, events, startingAttempt);
+        const outcome = await this.consumeAgentEvents(podId, events, startingAttempt);
 
         // Persist rotated OAuth credentials if provider requires it (MAX/PRO token rotation)
         if (providerResult.requiresPostExecPersistence) {
@@ -5700,7 +5702,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
-        await this.handleCompletion(podId);
+        if (outcome === 'completed') {
+          await this.handleCompletion(podId);
+        }
       } catch (err) {
         logger.error({ err, podId }, 'Pod processing error');
         // Best-effort: recover rotated MAX/PRO tokens before the failure path
@@ -5751,7 +5755,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podId: string,
       events: AsyncIterable<AgentEvent>,
       attempt = 0,
-    ): Promise<void> {
+    ): Promise<AgentRunOutcome> {
+      let outcome: AgentRunOutcome = 'completed';
       startCommitPolling(podId);
       try {
         for await (const event of events) {
@@ -5821,6 +5826,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             else if (sessionPod.runtime === 'codex') sessionUpdate.codexSessionId = event.sessionId;
             if (Object.keys(sessionUpdate).length > 0) podRepo.update(podId, sessionUpdate);
           } else if (event.type === 'complete') {
+            outcome = 'completed';
             // Accumulate token counts and cost cumulatively across all runs in this pod
             const currentSession = podRepo.getOrThrow(podId);
             const newInputTokens = currentSession.inputTokens + (event.totalInputTokens ?? 0);
@@ -5860,6 +5866,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   lastCorrectionMessage: blockerSummary,
                 });
               }
+              outcome = 'failed';
               break;
             }
 
@@ -5910,6 +5917,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   if (s.status === 'running') {
                     transition(s, 'failed', { completedAt: new Date().toISOString() });
                   }
+                  outcome = 'failed';
                 } else {
                   // Soft policy: pause and await user approval
                   const s = podRepo.getOrThrow(podId);
@@ -5920,6 +5928,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                       'Pod paused: token budget exceeded',
                     );
                   }
+                  outcome = 'paused';
                 }
                 break;
               }
@@ -5935,6 +5944,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               emitActivityStatus(podId, `Agent failed: ${event.message}`);
               transition(pod, 'failed', { completedAt: new Date().toISOString() });
             }
+            outcome = 'failed';
             break;
           } else if (event.type === 'tool_use' || event.type === 'file_change') {
             touchHeartbeat(podId);
@@ -5944,6 +5954,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         stopCommitPolling(podId);
         lastEventWriteAt.delete(podId);
       }
+      return outcome;
     },
 
     async handleCompletion(podId: string): Promise<void> {
@@ -6445,8 +6456,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const runtime = runtimeRegistry.get(pod.runtime);
             if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
             const events = runtime.resume(podId, correctionMessage, pod.containerId, resumeEnv);
-            await this.consumeAgentEvents(podId, events, pod.validationAttempts);
-            await this.handleCompletion(podId);
+            const outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
+            if (outcome === 'completed') {
+              await this.handleCompletion(podId);
+            }
           } catch (err) {
             logger.error({ err, podId }, 'Failed to resume agent after override guidance');
             const s = podRepo.getOrThrow(podId);
@@ -6486,8 +6499,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const runtime = runtimeRegistry.get(pod.runtime);
         if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
         const events = runtime.resume(podId, message, pod.containerId, resumeEnv);
-        await this.consumeAgentEvents(podId, events, pod.validationAttempts);
-        await this.handleCompletion(podId);
+        const outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
+        if (outcome === 'completed') {
+          await this.handleCompletion(podId);
+        }
       } catch (err) {
         logger.error({ err, podId }, 'Failed to resume agent after message');
         const s = podRepo.getOrThrow(podId);
@@ -6990,8 +7005,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const resumeEnv = await getResumeEnv(pod);
         const runtime = runtimeRegistry.get(pod.runtime);
         const events = runtime.resume(podId, rejectionMessage, pod.containerId, resumeEnv);
-        await this.consumeAgentEvents(podId, events, deriveAgentAttempt(pod.phaseTokenUsage));
-        await this.handleCompletion(podId);
+        const outcome = await this.consumeAgentEvents(
+          podId,
+          events,
+          deriveAgentAttempt(pod.phaseTokenUsage),
+        );
+        if (outcome === 'completed') {
+          await this.handleCompletion(podId);
+        }
       } catch (err) {
         // Roll back to failed — don't leave the pod stuck in 'running' with no agent
         logger.error({ err, podId }, 'Failed to resume agent after rejection');
@@ -8424,7 +8445,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const runtime = runtimeRegistry.get(s2.runtime);
           if (!s2.containerId) throw new Error(`Pod ${podId} has no container`);
           const events = runtime.resume(podId, correctionMessage, s2.containerId, resumeEnv);
-          await this.consumeAgentEvents(podId, events, attempt);
+          const outcome = await this.consumeAgentEvents(podId, events, attempt);
+          if (outcome !== 'completed') {
+            logger.info(
+              { podId, attempt, maxAttempts: s2.maxValidationAttempts, outcome },
+              'Validation retry agent run did not complete',
+            );
+            return;
+          }
           emitActivityStatus(podId, 'Agent finished applying fixes');
           await this.handleCompletion(podId);
 

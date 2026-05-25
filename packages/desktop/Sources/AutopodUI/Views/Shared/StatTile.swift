@@ -106,6 +106,12 @@ public struct StatTile: View {
 
 // MARK: - PodQualitySignals → tile inputs
 
+private func formatTokenCount(_ count: Int) -> String {
+    if count >= 1_000_000 { return String(format: "%.1fM", Double(count) / 1_000_000) }
+    if count >= 1_000 { return "\(count / 1_000)K" }
+    return "\(count)"
+}
+
 public extension PodQualitySignals {
     var readEditTile: (value: String, health: StatHealth, hint: String) {
         let hint = "\(readCount) Read calls vs \(editCount) Edit/Write/MultiEdit calls. Higher is better."
@@ -136,6 +142,16 @@ public extension PodQualitySignals {
         let value = String(format: "$%.2f", tokens.costUsd)
         let hint = "\(tokens.input) input + \(tokens.output) output tokens."
         return (value, .neutral, hint)
+    }
+
+    var inputTokensTile: (value: String, health: StatHealth, hint: String) {
+        let hint = "\(tokens.input) input tokens consumed by this pod."
+        return (formatTokenCount(tokens.input), .neutral, hint)
+    }
+
+    var outputTokensTile: (value: String, health: StatHealth, hint: String) {
+        let hint = "\(tokens.output) output tokens consumed by this pod."
+        return (formatTokenCount(tokens.output), .neutral, hint)
     }
 
     var churnTile: (value: String, health: StatHealth, hint: String) {
@@ -194,6 +210,10 @@ public extension PodQualitySignals {
                  value: "2", health: .warn, hint: "Some")
         StatTile(icon: "hand.raised", label: "Interrupts",
                  value: "5", health: .bad, hint: "Many")
+        StatTile(icon: "arrow.up.circle", label: "Tokens In",
+                 value: "1.2M", health: .neutral, hint: "Input tokens")
+        StatTile(icon: "arrow.down.circle", label: "Tokens Out",
+                 value: "54K", health: .neutral, hint: "Output tokens")
         StatTile(icon: "dollarsign.circle", label: "Cost",
                  value: "$7.62", health: .neutral, hint: "Cost neutral")
         StatTile(icon: "checkmark.seal", label: "Smoke Tests",
