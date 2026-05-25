@@ -875,6 +875,13 @@ async function runFactValidation(
         : `artifact ${artifactPath} does not satisfy ${fact.artifact.change} requirement`,
       commandPassed ? null : `command exited ${commandResult.exitCode}`,
     ].filter((reason): reason is string => reason !== null);
+    const unavailableReason = detectUnavailableFactCommand(commandResult);
+    const factStatus = passed ? 'pass' : unavailableReason ? 'pending_human' : 'fail';
+    const reasoning = passed
+      ? `Fact ${fact.id} passed: ${artifactPath} exists, satisfies ${fact.artifact.change}, and command exited 0.`
+      : unavailableReason
+        ? `Fact ${fact.id} needs human decision: ${unavailableReason}`
+        : `Fact ${fact.id} failed: ${failedReasons.join('; ')}.${commandError ? ` ${commandError}` : ''}`;
 
     results.push({
       factId: fact.id,
@@ -883,7 +890,7 @@ async function runFactValidation(
       artifactPath,
       command: fact.command,
       passed,
-      status: passed ? 'pass' : 'fail',
+      status: factStatus,
       exitCode: commandResult.exitCode,
       durationMs,
       artifact: {
@@ -894,9 +901,7 @@ async function runFactValidation(
         ...(artifactHash ? { hash: artifactHash } : {}),
       },
       attachments,
-      reasoning: passed
-        ? `Fact ${fact.id} passed: ${artifactPath} exists, satisfies ${fact.artifact.change}, and command exited 0.`
-        : `Fact ${fact.id} failed: ${failedReasons.join('; ')}.${commandError ? ` ${commandError}` : ''}`,
+      reasoning,
       stdout: commandResult.stdout.slice(0, 20_000),
       stderr: commandResult.stderr.slice(0, 20_000),
     });
@@ -912,6 +917,30 @@ async function runFactValidation(
     'fact validation complete',
   );
   return { status, results };
+}
+
+function detectUnavailableFactCommand(result: {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}): string | null {
+  if (result.exitCode !== 127) return null;
+
+  const combined = `${result.stderr}\n${result.stdout}`;
+  const shMatch = combined.match(/(?:^|\n)sh:\s*\d+:\s*([^\s:]+):\s*not found\b/i);
+  const bashMatch = combined.match(
+    /(?:^|\n)(?:bash|zsh):(?:\s*line\s*\d+:)?\s*([^\s:]+):\s*command not found\b/i,
+  );
+  const genericMatch = combined.match(/(?:^|\n)([A-Za-z0-9_.+/-]+):\s+(?:command\s+)?not found\b/i);
+  const missingCommand = shMatch?.[1] ?? bashMatch?.[1] ?? genericMatch?.[1];
+
+  if (!missingCommand) return null;
+
+  return [
+    `required fact command \`${missingCommand}\` is unavailable in the validation container`,
+    '(exit 127). This is an environment/spec issue, not a code failure;',
+    'install the toolchain, change the profile/template, or approve a waive/replace decision.',
+  ].join(' ');
 }
 
 async function runBrowserFactOnHost(

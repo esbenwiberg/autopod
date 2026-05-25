@@ -7933,7 +7933,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (hasPendingFactDecision(effectiveResult)) {
           emitActivityStatus(
             podId,
-            'Required fact deviation pending human decision — moving to review required',
+            'Required fact pending human decision — moving to review required',
           );
           transition(s2, 'review_required');
 

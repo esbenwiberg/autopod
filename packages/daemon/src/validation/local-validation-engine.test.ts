@@ -982,6 +982,82 @@ human_review: []
     expect(completed).toContainEqual({ phase: 'facts', status: 'pending_human' });
   });
 
+  it('blocks validation as pending_human when a required fact command is unavailable', async () => {
+    const execInContainer = vi.fn(
+      async (
+        _containerId: string,
+        command: string[],
+      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+        const shell = command[2] ?? '';
+        if (shell.includes('git reset --hard HEAD')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('test -e')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('sha256sum')) {
+          return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('.autopod/evidence')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('swift test')) {
+          return { stdout: '', stderr: 'sh: 1: swift: not found\n', exitCode: 127 };
+        }
+        throw new Error(`stub: execInContainer unexpectedly called: ${JSON.stringify(command)}`);
+      },
+    );
+    const cm = { ...stubContainerManager(), execInContainer } as unknown as ContainerManager;
+    const engine = createLocalValidationEngine(cm);
+    const completed: Array<{ phase: string; status: string }> = [];
+
+    const result = await engine.validate(
+      baseConfig({
+        diff: `diff --git a/packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift b/packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift
+--- a/packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift
++++ b/packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift
+@@ -1 +1 @@
+-old
++new`,
+        contract: parseSpecContract(`contract_version: 1
+title: Swift-only fact
+depends_on: []
+scenarios:
+  - id: swift-helper-readable
+    given: ["a Swift helper changed"]
+    when: ["required facts run"]
+    then: ["the helper remains readable"]
+required_facts:
+  - id: fact-swift-only
+    proves: [swift-helper-readable]
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift
+      change: update
+    command: swift test --filter ThroughputTimeInStatusDisplayTests
+human_review: []
+`),
+      }),
+      undefined,
+      undefined,
+      { onPhaseCompleted: (phase, status) => completed.push({ phase, status }) },
+    );
+
+    expect(result.factValidation?.status).toBe('pending_human');
+    expect(result.factValidation?.results[0]).toMatchObject({
+      factId: 'fact-swift-only',
+      passed: false,
+      status: 'pending_human',
+      exitCode: 127,
+    });
+    expect(result.factValidation?.results[0]?.reasoning).toContain(
+      'required fact command `swift` is unavailable',
+    );
+    expect(result.reviewSkipReason).toBe('Skipped — required facts pending human decision');
+    expect(result.overall).toBe('fail');
+    expect(completed).toContainEqual({ phase: 'facts', status: 'pending_human' });
+  });
+
   it('passes waived fact deviations after human approval', async () => {
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
