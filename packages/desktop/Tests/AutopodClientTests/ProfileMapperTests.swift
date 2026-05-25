@@ -4,24 +4,25 @@ import Testing
 @testable import AutopodDesktop
 import AutopodUI
 
-@Test func profileResponseDecodesAdvisoryBrowserQaNil() throws {
-  let profile = try decodeProfile(advisoryBrowserQaFragment: "")
+@Test func profileMapperMapsNilAdvisoryBrowserQa() throws {
+  let profile = try decodeMapperProfile(advisoryBrowserQaFragment: "")
 
-  #expect(profile.pod?.advisoryBrowserQaEnabled == nil)
   #expect(ProfileMapper.map(profile).pod.advisoryBrowserQaEnabled == nil)
 }
 
-@Test func profileResponseDecodesAdvisoryBrowserQaTrue() throws {
-  let profile = try decodeProfile(advisoryBrowserQaFragment: #","advisoryBrowserQaEnabled": true"#)
+@Test func profileMapperMapsTrueAdvisoryBrowserQa() throws {
+  let profile = try decodeMapperProfile(
+    advisoryBrowserQaFragment: #","advisoryBrowserQaEnabled": true"#
+  )
 
-  #expect(profile.pod?.advisoryBrowserQaEnabled == true)
   #expect(ProfileMapper.map(profile).pod.advisoryBrowserQaEnabled == true)
 }
 
-@Test func profileResponseDecodesAdvisoryBrowserQaFalse() throws {
-  let profile = try decodeProfile(advisoryBrowserQaFragment: #","advisoryBrowserQaEnabled": false"#)
+@Test func profileMapperMapsFalseAdvisoryBrowserQa() throws {
+  let profile = try decodeMapperProfile(
+    advisoryBrowserQaFragment: #","advisoryBrowserQaEnabled": false"#
+  )
 
-  #expect(profile.pod?.advisoryBrowserQaEnabled == false)
   #expect(ProfileMapper.map(profile).pod.advisoryBrowserQaEnabled == false)
 }
 
@@ -58,7 +59,7 @@ import AutopodUI
   #expect(pod?["advisoryBrowserQaEnabled"] as? Bool == false)
 }
 
-private func decodeProfile(advisoryBrowserQaFragment: String) throws -> ProfileResponse {
+private func decodeMapperProfile(advisoryBrowserQaFragment: String) throws -> ProfileResponse {
   let json = """
   {
     "name": "app",
