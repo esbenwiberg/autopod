@@ -183,6 +183,30 @@ import Testing
       "diff": "diff --git a/foo.ts b/foo.ts\\n...",
       "requirementsCheck": [{ "criterion": "Login works", "met": true, "note": null }]
     },
+    "advisoryBrowserQa": {
+      "status": "error",
+      "reasoning": "Exploratory browser QA found polish issues.",
+      "model": "gpt-5",
+      "durationMs": 2500,
+      "observations": [{
+        "id": "advisory-1",
+        "scenarioId": "scenario-login",
+        "status": "fail",
+        "summary": "Login form overflows on mobile",
+        "details": "The submit button is clipped at 390px width.",
+        "screenshots": [{
+          "url": "/pods/test-1/screenshots/advisory/advisory-0.png",
+          "source": "advisory",
+          "path": "advisory-0"
+        }],
+        "suggestedFacts": ["Add a responsive login viewport fact."]
+      }],
+      "screenshots": [{
+        "url": "/pods/test-1/screenshots/advisory/advisory-0.png",
+        "source": "advisory",
+        "path": "advisory-0"
+      }]
+    },
     "overall": "pass",
     "duration": 180
   }
@@ -193,6 +217,27 @@ import Testing
   #expect(result.smoke.pages.count == 1)
   #expect(result.test?.status == "pass")
   #expect(result.taskReview?.requirementsCheck?.first?.met == true)
+  #expect(result.advisoryBrowserQa?.status == "error")
+  #expect(result.advisoryBrowserQa?.observations.first?.suggestedFacts?.count == 1)
+  #expect(result.advisoryBrowserQa?.screenshots.first?.source == "advisory")
+}
+
+@Test func advisoryBrowserQaResponseDecodesSkippedStatus() throws {
+  let json = """
+  {
+    "status": "skipped",
+    "reasoning": "No web UI was available for advisory browser QA.",
+    "model": null,
+    "durationMs": 5,
+    "observations": [],
+    "screenshots": []
+  }
+  """.data(using: .utf8)!
+
+  let result = try JSONDecoder().decode(AdvisoryBrowserQaResponse.self, from: json)
+  #expect(result.status == "skipped")
+  #expect(result.reasoning == "No web UI was available for advisory browser QA.")
+  #expect(result.observations.isEmpty)
 }
 
 private func decodeProfileWithAdvisoryBrowserQa(

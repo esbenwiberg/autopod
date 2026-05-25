@@ -33,7 +33,14 @@ public enum PodMapper {
     baseURL: URL?
   ) -> ScreenshotRef? {
     guard let dto, let baseURL else { return nil }
-    guard let source = ScreenshotRef.Source(rawValue: dto.source) else { return nil }
+    let source: ScreenshotRef.Source
+    switch dto.source {
+    case "smoke": source = .smoke
+    case "fact": source = .fact
+    case "review": source = .review
+    case "advisory": source = .advisory
+    default: return nil
+    }
     guard let url = URL(string: dto.url, relativeTo: baseURL)?.absoluteURL else { return nil }
     return ScreenshotRef(url: url, source: source, label: dto.path)
   }
@@ -169,6 +176,26 @@ public enum PodMapper {
         let refs = ss.compactMap { mapScreenshotRef($0, baseURL: baseURL) }
         return refs.isEmpty ? nil : refs
       }()
+      let advisoryQa: AdvisoryQaDetail? = v.advisoryBrowserQa.map { advisory in
+        AdvisoryQaDetail(
+          status: advisory.status,
+          reasoning: advisory.reasoning,
+          model: advisory.model,
+          durationMs: advisory.durationMs,
+          observations: advisory.observations.map { observation in
+            AdvisoryQaObservationDetail(
+              id: observation.id,
+              scenarioId: observation.scenarioId,
+              status: observation.status,
+              summary: observation.summary,
+              details: observation.details,
+              screenshots: observation.screenshots.compactMap { mapScreenshotRef($0, baseURL: baseURL) },
+              suggestedFacts: observation.suggestedFacts
+            )
+          },
+          screenshots: advisory.screenshots.compactMap { mapScreenshotRef($0, baseURL: baseURL) }
+        )
+      }
       let proofOfWorkScreenshots: [ScreenshotRef]? = {
         let smokeShots = v.smoke.pages.compactMap { p in
           mapScreenshotRef(p.screenshot, baseURL: baseURL)
@@ -208,6 +235,7 @@ public enum PodMapper {
         factChecks: factChecks,
         requirementsCheck: requirementsCheck,
         taskReviewScreenshots: taskReviewScreenshots,
+        advisoryQa: advisoryQa,
         proofOfWorkScreenshots: proofOfWorkScreenshots,
         correctionMessage: response.lastCorrectionMessage
       )

@@ -96,7 +96,7 @@ public struct DiffStats: Sendable {
 // MARK: - Screenshot reference (UI model)
 
 /// A screenshot captured during pod validation, resolved to an absolute URL.
-/// Set ordering for lightbox navigation: `smoke → fact → review`, filename-sorted within bucket.
+/// Set ordering for lightbox navigation: `smoke → fact → review → advisory`.
 public struct ScreenshotRef: Hashable, Sendable, Identifiable {
     public var id: String { url.absoluteString }
     public let url: URL
@@ -104,7 +104,7 @@ public struct ScreenshotRef: Hashable, Sendable, Identifiable {
     public let label: String  // page path | review index
 
     public enum Source: String, Sendable {
-        case smoke, fact, review
+        case smoke, fact, review, advisory
     }
 
     public init(url: URL, source: Source, label: String) {
@@ -192,6 +192,40 @@ public struct RequirementCheckDetail: Sendable {
     }
 }
 
+public struct AdvisoryQaObservationDetail: Sendable {
+    public let id: String
+    public let scenarioId: String?
+    public let status: String
+    public let summary: String
+    public let details: String?
+    public let screenshots: [ScreenshotRef]
+    public let suggestedFacts: [String]?
+    public init(
+        id: String, scenarioId: String?, status: String, summary: String, details: String?,
+        screenshots: [ScreenshotRef], suggestedFacts: [String]?
+    ) {
+        self.id = id; self.scenarioId = scenarioId; self.status = status
+        self.summary = summary; self.details = details
+        self.screenshots = screenshots; self.suggestedFacts = suggestedFacts
+    }
+}
+
+public struct AdvisoryQaDetail: Sendable {
+    public let status: String
+    public let reasoning: String
+    public let model: String?
+    public let durationMs: Int?
+    public let observations: [AdvisoryQaObservationDetail]
+    public let screenshots: [ScreenshotRef]
+    public init(
+        status: String, reasoning: String, model: String?, durationMs: Int?,
+        observations: [AdvisoryQaObservationDetail], screenshots: [ScreenshotRef]
+    ) {
+        self.status = status; self.reasoning = reasoning; self.model = model
+        self.durationMs = durationMs; self.observations = observations; self.screenshots = screenshots
+    }
+}
+
 // MARK: - Validation checks
 
 public struct ValidationChecks: Sendable {
@@ -217,6 +251,7 @@ public struct ValidationChecks: Sendable {
     public let factChecks: [FactCheckDetail]?
     public let requirementsCheck: [RequirementCheckDetail]?
     public let taskReviewScreenshots: [ScreenshotRef]?
+    public let advisoryQa: AdvisoryQaDetail?
     /// Smoke-page screenshots surfaced on the Summary tab as proof-of-work (independent of pass/fail).
     public let proofOfWorkScreenshots: [ScreenshotRef]?
     /// The formatted markdown feedback that was sent back to the agent after a failed validation attempt.
@@ -236,6 +271,7 @@ public struct ValidationChecks: Sendable {
         factChecks: [FactCheckDetail]? = nil,
         requirementsCheck: [RequirementCheckDetail]? = nil,
         taskReviewScreenshots: [ScreenshotRef]? = nil,
+        advisoryQa: AdvisoryQaDetail? = nil,
         proofOfWorkScreenshots: [ScreenshotRef]? = nil,
         correctionMessage: String? = nil
     ) {
@@ -252,9 +288,12 @@ public struct ValidationChecks: Sendable {
         self.factValidation = factValidation; self.factChecks = factChecks
         self.requirementsCheck = requirementsCheck
         self.taskReviewScreenshots = taskReviewScreenshots
+        self.advisoryQa = advisoryQa
         self.proofOfWorkScreenshots = proofOfWorkScreenshots
         self.correctionMessage = correctionMessage
     }
+
+    public var validationPhaseCount: Int { 8 }
 
     public var allPassed: Bool {
         smoke && (tests ?? true) && (lint ?? true) && (sast ?? true)
