@@ -34,9 +34,10 @@ import {
   createEventBus,
   createEventRepository,
   createFixFeedbackRepository,
-  createMemoryCandidateRepository,
   createMemoryCandidateRecorder,
+  createMemoryCandidateRepository,
   createMemoryRepository,
+  createMemoryUsageRepository,
   createNudgeRepository,
   createPendingOverrideRepository,
   createPodManager,
@@ -178,6 +179,7 @@ const validationRepo = createValidationRepository(db);
 const progressEventRepo = createProgressEventRepository(db);
 const memoryRepo = createMemoryRepository(db);
 const memoryCandidateRepo = createMemoryCandidateRepository(db);
+const memoryUsageRepo = createMemoryUsageRepository(db);
 const pendingOverrideRepo = createPendingOverrideRepository(db);
 const qualityScoreRepo = createQualityScoreRepository(db);
 const scanRepo = createScanRepository(db);
@@ -537,6 +539,7 @@ podManager = createPodManager({
   pendingRequestsByPod,
   sessionTokenIssuer,
   memoryRepo,
+  memoryUsageRepo,
   pendingOverrideRepo,
   getSecret: (ref: string) => process.env[ref],
   repoScanner,

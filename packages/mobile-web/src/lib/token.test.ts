@@ -50,9 +50,7 @@ describe('token storage', () => {
   });
 
   it('extracts a token from a full pairing URL', () => {
-    expect(extractPairingToken('https://macbook.tail.ts.net/mobile/#token=abc123')).toBe(
-      'abc123',
-    );
+    expect(extractPairingToken('https://macbook.tail.ts.net/mobile/#token=abc123')).toBe('abc123');
   });
 
   it('extracts a token from the hash-router pairing URL', () => {
@@ -66,9 +64,7 @@ describe('token storage', () => {
   });
 
   it('falls back to a token query parameter for manual recovery', () => {
-    expect(extractPairingToken('https://macbook.tail.ts.net/mobile/?token=abc123')).toBe(
-      'abc123',
-    );
+    expect(extractPairingToken('https://macbook.tail.ts.net/mobile/?token=abc123')).toBe('abc123');
   });
 
   it('ignores a URL without a pairing token', () => {

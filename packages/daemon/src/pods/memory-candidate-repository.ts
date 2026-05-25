@@ -11,9 +11,7 @@ import type { MemoryRepository } from './memory-repository.js';
 import { parseJsonColumn } from './memory-repository.js';
 
 export interface MemoryCandidateRepository {
-  insert(
-    candidate: Omit<MemoryCandidate, 'status' | 'createdAt' | 'updatedAt'>,
-  ): MemoryCandidate;
+  insert(candidate: Omit<MemoryCandidate, 'status' | 'createdAt' | 'updatedAt'>): MemoryCandidate;
   get(id: string): MemoryCandidate | null;
   /** Returns true if any candidate (any status) was created by this pod. Used for idempotency. */
   existsForPod(podId: string): boolean;
@@ -58,11 +56,11 @@ function getOrThrow(db: Database.Database, id: string): MemoryCandidate {
   return rowToCandidate(row);
 }
 
-export function createMemoryCandidateRepository(
-  db: Database.Database,
-): MemoryCandidateRepository {
+export function createMemoryCandidateRepository(db: Database.Database): MemoryCandidateRepository {
   return {
-    insert(candidate: Omit<MemoryCandidate, 'status' | 'createdAt' | 'updatedAt'>): MemoryCandidate {
+    insert(
+      candidate: Omit<MemoryCandidate, 'status' | 'createdAt' | 'updatedAt'>,
+    ): MemoryCandidate {
       const now = new Date().toISOString();
       db.prepare(
         `INSERT INTO memory_candidates
@@ -152,9 +150,7 @@ export function createMemoryCandidateRepository(
           // here as a null id. Either case (null id, or id present but row gone)
           // must throw — an operator approved an UPDATE, not a silent CREATE.
           if (!candidate.targetMemoryId) {
-            throw new Error(
-              `Candidate ${id} is an update but its target memory no longer exists`,
-            );
+            throw new Error(`Candidate ${id} is an update but its target memory no longer exists`);
           }
           memoryRepo.getOrThrow(candidate.targetMemoryId);
           memoryRepo.updateMetadata(candidate.targetMemoryId, candidate.content, {

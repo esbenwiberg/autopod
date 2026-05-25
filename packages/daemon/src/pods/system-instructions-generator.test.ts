@@ -1,9 +1,6 @@
 import type { MemoryEntry, Pod, Profile } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import {
-  generateSystemInstructions,
-  sortMemoriesForIndex,
-} from './system-instructions-generator.js';
+import { generateSystemInstructions } from './system-instructions-generator.js';
 
 function makeProfile(overrides?: Partial<Profile>): Profile {
   return {
@@ -747,7 +744,7 @@ describe('generateSystemInstructions', () => {
     });
   });
 
-  describe('memory index', () => {
+  describe('relevant memory', () => {
     function makeMemory(overrides: Partial<MemoryEntry>): MemoryEntry {
       return {
         id: 'mem1',
@@ -756,6 +753,14 @@ describe('generateSystemInstructions', () => {
         path: '/conventions/test.md',
         content: 'Full content that should not appear in the index.',
         contentSha256: 'abc123',
+        rationale: null,
+        kind: null,
+        tags: [],
+        appliesWhen: null,
+        avoidWhen: null,
+        confidence: null,
+        sourceEvidence: [],
+        impactSummary: null,
         version: 1,
         approved: true,
         createdByPodId: null,
@@ -772,139 +777,101 @@ describe('generateSystemInstructions', () => {
         'http://localhost:8080/mcp/x',
       );
       expect(md).not.toContain('## Available Memory');
+      expect(md).not.toContain('## Relevant Memory');
     });
 
-    it('omits memory section when memories is empty array', () => {
+    it('omits memory section when relevantMemories is empty array', () => {
       const md = generateSystemInstructions(
         makeProfile(),
         makeSession(),
         'http://localhost:8080/mcp/x',
-        { memories: [] },
+        { relevantMemories: [] },
       );
-      expect(md).not.toContain('## Available Memory');
+      expect(md).not.toContain('## Relevant Memory');
     });
 
-    it('renders index with path, scope, and id — not full content', () => {
+    it('renders selected memory content and reviewer rationale', () => {
       const md = generateSystemInstructions(
         makeProfile(),
         makeSession(),
         'http://localhost:8080/mcp/x',
         {
-          memories: [
-            makeMemory({
-              id: 'mem-abc',
-              scope: 'global',
-              path: '/conventions/commits.md',
-              content: 'This is the full content of the commits convention.',
-            }),
-            makeMemory({
-              id: 'mem-def',
-              scope: 'profile',
-              scopeId: 'test-profile',
-              path: '/patterns/auth-flow.md',
-              content: 'Detailed auth flow documentation here.',
-            }),
+          relevantMemories: [
+            {
+              memory: makeMemory({
+                id: 'mem-abc',
+                scope: 'global',
+                path: '/conventions/commits.md',
+                content: 'This is the full content of the commits convention.',
+              }),
+              relevanceReason: 'The task changes commit generation.',
+            },
+            {
+              memory: makeMemory({
+                id: 'mem-def',
+                scope: 'profile',
+                scopeId: 'test-profile',
+                path: '/patterns/auth-flow.md',
+                content: 'Detailed auth flow documentation here.',
+              }),
+              relevanceReason: 'The requested auth work touches this flow.',
+            },
           ],
         },
       );
 
-      expect(md).toContain('## Available Memory');
-      expect(md).toContain('- /conventions/commits.md (global, id: mem-abc)');
-      expect(md).toContain('- /patterns/auth-flow.md (profile, id: mem-def)');
-      expect(md).toContain('memory_read');
-      expect(md).toContain('memory_search');
-      // Full content should NOT appear
-      expect(md).not.toContain('This is the full content of the commits convention.');
-      expect(md).not.toContain('Detailed auth flow documentation here.');
+      expect(md).toContain('## Relevant Memory');
+      expect(md).not.toContain('## Available Memory');
+      expect(md).toContain('### /conventions/commits.md');
+      expect(md).toContain('- ID: mem-abc');
+      expect(md).toContain('- Why this matters now: The task changes commit generation.');
+      expect(md).toContain('This is the full content of the commits convention.');
+      expect(md).toContain('Detailed auth flow documentation here.');
     });
 
-    it('shows omitted count when memories exceed MAX_MEMORY_INDEX_ENTRIES', () => {
-      const memories: MemoryEntry[] = Array.from({ length: 105 }, (_, i) =>
-        makeMemory({
+    it('renders at most the already selected memories and no old omitted-count index', () => {
+      const relevantMemories = Array.from({ length: 5 }, (_, i) => ({
+        memory: makeMemory({
           id: `mem-${i}`,
           path: `/entry-${i}.md`,
-          updatedAt: `2026-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+          content: `Memory content ${i}`,
         }),
-      );
+        relevanceReason: `Reason ${i}`,
+      }));
 
       const md = generateSystemInstructions(
         makeProfile(),
         makeSession(),
         'http://localhost:8080/mcp/x',
-        { memories },
+        { relevantMemories },
       );
 
-      expect(md).toContain('## Available Memory');
-      expect(md).toContain('5 more available');
-      expect(md).toContain('memory_search');
-      // Should not contain all 105 entries
+      expect(md).toContain('## Relevant Memory');
+      expect(md).not.toContain('more available');
       const entryLines = md.split('\n').filter((l) => l.startsWith('- /entry-'));
-      expect(entryLines).toHaveLength(100);
+      expect(entryLines).toHaveLength(0);
+      const headings = md.split('\n').filter((l) => l.startsWith('### /entry-'));
+      expect(headings).toHaveLength(5);
     });
 
-    it('does not show omitted note when memories fit within limit', () => {
+    it('surfaces reviewer ranking fallback reasons', () => {
       const md = generateSystemInstructions(
         makeProfile(),
         makeSession(),
         'http://localhost:8080/mcp/x',
         {
-          memories: [makeMemory({ id: 'mem1', path: '/one.md' })],
+          relevantMemories: [
+            {
+              memory: makeMemory({ id: 'mem1', path: '/one.md', content: 'Remember this.' }),
+              relevanceReason: 'Reviewer ranking unavailable; deterministic fallback selected it.',
+            },
+          ],
+          memoryUnavailableReason: 'reviewer_model_failed: timeout',
         },
       );
 
-      expect(md).toContain('## Available Memory');
-      expect(md).not.toContain('more available');
-    });
-  });
-
-  describe('sortMemoriesForIndex', () => {
-    function makeMemory(overrides: Partial<MemoryEntry>): MemoryEntry {
-      return {
-        id: 'mem1',
-        scope: 'global',
-        scopeId: null,
-        path: '/test.md',
-        content: '',
-        contentSha256: '',
-        version: 1,
-        approved: true,
-        createdByPodId: null,
-        createdAt: '2026-01-01T00:00:00Z',
-        updatedAt: '2026-01-01T00:00:00Z',
-        ...overrides,
-      };
-    }
-
-    it('orders pod before profile before global', () => {
-      const memories = [
-        makeMemory({ id: 'g', scope: 'global', updatedAt: '2026-03-01T00:00:00Z' }),
-        makeMemory({ id: 'p', scope: 'profile', updatedAt: '2026-01-01T00:00:00Z' }),
-        makeMemory({ id: 's', scope: 'pod', updatedAt: '2026-01-01T00:00:00Z' }),
-      ];
-
-      const sorted = sortMemoriesForIndex(memories);
-      expect(sorted.map((m) => m.id)).toEqual(['s', 'p', 'g']);
-    });
-
-    it('sorts by updatedAt descending within same scope', () => {
-      const memories = [
-        makeMemory({ id: 'old', scope: 'profile', updatedAt: '2026-01-01T00:00:00Z' }),
-        makeMemory({ id: 'new', scope: 'profile', updatedAt: '2026-06-01T00:00:00Z' }),
-        makeMemory({ id: 'mid', scope: 'profile', updatedAt: '2026-03-01T00:00:00Z' }),
-      ];
-
-      const sorted = sortMemoriesForIndex(memories);
-      expect(sorted.map((m) => m.id)).toEqual(['new', 'mid', 'old']);
-    });
-
-    it('does not mutate the original array', () => {
-      const memories = [
-        makeMemory({ id: 'g', scope: 'global' }),
-        makeMemory({ id: 's', scope: 'pod' }),
-      ];
-
-      sortMemoriesForIndex(memories);
-      expect(memories[0].id).toBe('g');
+      expect(md).toContain('## Relevant Memory');
+      expect(md).toContain('Reviewer ranking was unavailable (reviewer_model_failed: timeout)');
     });
   });
 });

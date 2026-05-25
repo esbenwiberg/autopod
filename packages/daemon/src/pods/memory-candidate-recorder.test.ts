@@ -1,3 +1,4 @@
+import type Anthropic from '@anthropic-ai/sdk';
 import type { AgentActivityEvent, AgentTaskSummaryEvent, Profile } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -5,8 +6,8 @@ import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { createEscalationRepository } from './escalation-repository.js';
 import { createEventBus } from './event-bus.js';
 import { createEventRepository } from './event-repository.js';
-import { createMemoryCandidateRepository } from './memory-candidate-repository.js';
 import { createMemoryCandidateRecorder } from './memory-candidate-recorder.js';
+import { createMemoryCandidateRepository } from './memory-candidate-repository.js';
 import { createMemoryRepository } from './memory-repository.js';
 import type { NewPod } from './pod-repository.js';
 import { createPodRepository } from './pod-repository.js';
@@ -147,7 +148,7 @@ describe('MemoryCandidateRecorder', () => {
 
     vi.mocked(createProfileAnthropicClient).mockResolvedValue({
       ok: true,
-      client: makeMockAnthropicClient() as unknown as import('@anthropic-ai/sdk').default,
+      client: makeMockAnthropicClient() as unknown as Anthropic,
       model: 'claude-haiku-4-5-20251001',
     });
   });
@@ -387,7 +388,7 @@ describe('MemoryCandidateRecorder', () => {
   it('records no candidate when reviewer model returns create:false', async () => {
     vi.mocked(createProfileAnthropicClient).mockResolvedValue({
       ok: true,
-      client: makeMockAnthropicClient(JSON.stringify({ create: false })) as unknown as import('@anthropic-ai/sdk').default,
+      client: makeMockAnthropicClient(JSON.stringify({ create: false })) as unknown as Anthropic,
       model: 'claude-haiku-4-5-20251001',
     });
 

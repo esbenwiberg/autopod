@@ -17,7 +17,13 @@ export interface MemoryRepository {
     content: string,
     metadata: Pick<
       MemoryEntry,
-      'kind' | 'tags' | 'appliesWhen' | 'avoidWhen' | 'confidence' | 'sourceEvidence' | 'impactSummary'
+      | 'kind'
+      | 'tags'
+      | 'appliesWhen'
+      | 'avoidWhen'
+      | 'confidence'
+      | 'sourceEvidence'
+      | 'impactSummary'
     >,
   ): void;
   delete(id: string): void;

@@ -49,18 +49,14 @@ export function createMemoryUsageRepository(db: Database.Database): MemoryUsageR
 
     listByMemory(memoryId: string): MemoryUsageEvent[] {
       const rows = db
-        .prepare(
-          'SELECT * FROM memory_usage_events WHERE memory_id = ? ORDER BY created_at ASC',
-        )
+        .prepare('SELECT * FROM memory_usage_events WHERE memory_id = ? ORDER BY created_at ASC')
         .all(memoryId) as Record<string, unknown>[];
       return rows.map(rowToUsageEvent);
     },
 
     listByPod(podId: string): MemoryUsageEvent[] {
       const rows = db
-        .prepare(
-          'SELECT * FROM memory_usage_events WHERE pod_id = ? ORDER BY created_at ASC',
-        )
+        .prepare('SELECT * FROM memory_usage_events WHERE pod_id = ? ORDER BY created_at ASC')
         .all(podId) as Record<string, unknown>[];
       return rows.map(rowToUsageEvent);
     },

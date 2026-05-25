@@ -10,17 +10,21 @@ import type {
   SystemEvent,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { ProfileStore } from '../profiles/index.js';
+import { createProfileAnthropicClient } from '../providers/llm-client.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
 import type { MemoryCandidateRepository } from './memory-candidate-repository.js';
-import { computeLessonPotential, extractCandidate, LESSON_POTENTIAL_THRESHOLD } from './memory-extraction.js';
+import {
+  LESSON_POTENTIAL_THRESHOLD,
+  computeLessonPotential,
+  extractCandidate,
+} from './memory-extraction.js';
 import type { MemoryRepository } from './memory-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import { computeQualitySignals } from './quality-signals.js';
 import type { ValidationRepository } from './validation-repository.js';
-import type { ProfileStore } from '../profiles/index.js';
-import { createProfileAnthropicClient } from '../providers/llm-client.js';
 
 export interface MemoryCandidateRecorder {
   start(): void;
@@ -85,7 +89,10 @@ export function createMemoryCandidateRecorder(
     try {
       profile = profileStore.get(pod.profileName);
     } catch {
-      logger.warn({ podId, profileName: pod.profileName }, 'Profile not found, skipping extraction');
+      logger.warn(
+        { podId, profileName: pod.profileName },
+        'Profile not found, skipping extraction',
+      );
       return;
     }
 
@@ -142,7 +149,10 @@ export function createMemoryCandidateRecorder(
         'Memory candidate created',
       );
     } else {
-      logger.debug({ podId, kind: result.kind, reason: result.reason }, 'No memory candidate created');
+      logger.debug(
+        { podId, kind: result.kind, reason: result.reason },
+        'No memory candidate created',
+      );
     }
   }
 

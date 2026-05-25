@@ -1,5 +1,5 @@
-import type { MemoryEntry, Pod, QualitySignals } from '@autopod/shared';
 import type Anthropic from '@anthropic-ai/sdk';
+import type { MemoryEntry, Pod, QualitySignals } from '@autopod/shared';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -207,7 +207,8 @@ function makeAnthropicClient(responseText: string): Anthropic {
 const VALID_JSON = JSON.stringify({
   create: true,
   path: '/gotchas/migration-order.md',
-  content: 'Always run migrations before seeding. Running seed first causes FK constraint failures.',
+  content:
+    'Always run migrations before seeding. Running seed first causes FK constraint failures.',
   rationale: 'Future pods hitting migration order will waste hours debugging FK errors.',
   kind: 'gotcha',
   tags: ['migrations', 'database'],
@@ -302,7 +303,7 @@ describe('extractCandidate', () => {
   });
 
   it('strips markdown fence from LLM response', async () => {
-    const fenced = '```json\n' + VALID_JSON + '\n```';
+    const fenced = `\`\`\`json\n${VALID_JSON}\n\`\`\``;
     const client = makeAnthropicClient(fenced);
     const result = await extractCandidate({
       pod: makePod(),

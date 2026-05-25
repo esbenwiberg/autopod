@@ -2,11 +2,10 @@ import type {
   ActionDefinition,
   InjectedMcpServer,
   InjectedSkill,
-  MemoryEntry,
   Pod,
   Profile,
 } from '@autopod/shared';
-import { MAX_MEMORY_INDEX_ENTRIES } from '@autopod/shared';
+import type { RelevantMemory } from './memory-selector.js';
 import type { ResolvedSection } from './section-resolver.js';
 
 export interface SystemInstructionsOptions {
@@ -18,8 +17,10 @@ export interface SystemInstructionsOptions {
   availableActions?: ActionDefinition[];
   /** Skills (slash commands) injected into this pod */
   injectedSkills?: InjectedSkill[];
-  /** Approved memory entries (global + profile + pod) */
-  memories?: MemoryEntry[];
+  /** Selected approved memory entries, with reviewer-model rationale */
+  relevantMemories?: RelevantMemory[];
+  /** Non-null when reviewer ranking failed and deterministic fallback was used */
+  memoryUnavailableReason?: string | null;
 }
 
 export function generateSystemInstructions(
@@ -408,28 +409,26 @@ export function generateSystemInstructions(
     lines.push('');
   }
 
-  if (options?.memories?.length) {
-    // Inject a lightweight index instead of full content to avoid context bloat.
-    // Agents use `memory_read` to pull full content for entries relevant to their task.
-    const sorted = sortMemoriesForIndex(options.memories);
-    const shown = sorted.slice(0, MAX_MEMORY_INDEX_ENTRIES);
-    const omitted = sorted.length - shown.length;
-
-    lines.push('## Available Memory');
+  if (options?.relevantMemories?.length || options?.memoryUnavailableReason) {
+    lines.push('## Relevant Memory');
     lines.push('');
-    lines.push(
-      'The following knowledge entries are available. ' +
-        'Review the list and use `memory_read` with the entry ID to retrieve full content for entries relevant to your task. ' +
-        'Use `memory_search` to find entries by keyword. ' +
-        'New suggestions are rare and gated by a high bar — see the "Optional postscript" section in the Workflow.',
-    );
-    lines.push('');
-    for (const m of shown) {
-      lines.push(`- ${m.path} (${m.scope}, id: ${m.id})`);
-    }
-    if (omitted > 0) {
+    if (options.memoryUnavailableReason) {
+      lines.push(
+        `Reviewer ranking was unavailable (${options.memoryUnavailableReason}); deterministic keyword fallback was used.`,
+      );
       lines.push('');
-      lines.push(`(${omitted} more available — use \`memory_search\` to find others)`);
+    }
+    lines.push('');
+    for (const { memory, relevanceReason } of options.relevantMemories ?? []) {
+      lines.push(`### ${memory.path}`);
+      lines.push(`- Scope: ${memory.scope}${memory.scopeId ? ` (${memory.scopeId})` : ''}`);
+      lines.push(`- ID: ${memory.id}`);
+      lines.push(`- Why this matters now: ${relevanceReason}`);
+      lines.push('');
+      lines.push('<!-- BEGIN MEMORY CONTENT -->');
+      lines.push(memory.content);
+      lines.push('<!-- END MEMORY CONTENT -->');
+      lines.push('');
     }
     lines.push('');
   }
@@ -987,17 +986,4 @@ function generateCodeNavigationRules(
     '**Never substitute grep/find/cat for a code-intel lookup.** Only fall back if a tool explicitly returns empty results or errors.',
   );
   lines.push('');
-}
-
-/**
- * Sort memories for the index: pod first, then profile, then global.
- * Within each scope, most recently updated entries come first.
- */
-export function sortMemoriesForIndex(memories: MemoryEntry[]): MemoryEntry[] {
-  const scopeOrder: Record<string, number> = { pod: 0, profile: 1, global: 2 };
-  return [...memories].sort((a, b) => {
-    const scopeDiff = (scopeOrder[a.scope] ?? 2) - (scopeOrder[b.scope] ?? 2);
-    if (scopeDiff !== 0) return scopeDiff;
-    return b.updatedAt.localeCompare(a.updatedAt);
-  });
 }

@@ -71,6 +71,13 @@ export {
   type MemoryUsageRepository,
 } from './memory-usage-repository.js';
 export {
+  MAX_RELEVANT_MEMORY_ENTRIES,
+  prefilterMemories,
+  selectRelevantMemories,
+  type MemorySelectionResult,
+  type RelevantMemory,
+} from './memory-selector.js';
+export {
   createPendingOverrideRepository,
   type PendingOverrideRepository,
 } from './pending-override-repository.js';

@@ -309,18 +309,19 @@ describe('runMigrations — memory-learning-schema (migration 105)', () => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run('mem-legacy', 'profile', 'my-profile', '/notes/old.md', 'old note', 'sha256abc', 1, 1);
 
-    const row = db
-      .prepare('SELECT * FROM memory_entries WHERE id = ?')
-      .get('mem-legacy') as Record<string, unknown>;
+    const row = db.prepare('SELECT * FROM memory_entries WHERE id = ?').get('mem-legacy') as Record<
+      string,
+      unknown
+    >;
 
-    expect(row['id']).toBe('mem-legacy');
-    expect(row['kind']).toBeNull();
-    expect(row['tags']).toBe('[]');
-    expect(row['applies_when']).toBeNull();
-    expect(row['avoid_when']).toBeNull();
-    expect(row['confidence']).toBeNull();
-    expect(row['source_evidence']).toBe('[]');
-    expect(row['impact_summary']).toBeNull();
+    expect(row.id).toBe('mem-legacy');
+    expect(row.kind).toBeNull();
+    expect(row.tags).toBe('[]');
+    expect(row.applies_when).toBeNull();
+    expect(row.avoid_when).toBeNull();
+    expect(row.confidence).toBeNull();
+    expect(row.source_evidence).toBe('[]');
+    expect(row.impact_summary).toBeNull();
   });
 
   it('memory_candidates table exists with correct columns', () => {
@@ -330,17 +331,32 @@ describe('runMigrations — memory-learning-schema (migration 105)', () => {
       .map((r) => (r as { name: string }).name);
 
     for (const col of [
-      'id', 'action', 'target_memory_id', 'scope', 'scope_id', 'path', 'content',
-      'rationale', 'kind', 'tags', 'applies_when', 'avoid_when', 'confidence',
-      'source_evidence', 'impact_summary', 'status', 'created_by_pod_id',
-      'fallback_reason', 'created_at', 'updated_at',
+      'id',
+      'action',
+      'target_memory_id',
+      'scope',
+      'scope_id',
+      'path',
+      'content',
+      'rationale',
+      'kind',
+      'tags',
+      'applies_when',
+      'avoid_when',
+      'confidence',
+      'source_evidence',
+      'impact_summary',
+      'status',
+      'created_by_pod_id',
+      'fallback_reason',
+      'created_at',
+      'updated_at',
     ]) {
       expect(cols, `expected column: ${col}`).toContain(col);
     }
 
-    const count = (
-      db.prepare('SELECT COUNT(*) as n FROM memory_candidates').get() as { n: number }
-    ).n;
+    const count = (db.prepare('SELECT COUNT(*) as n FROM memory_candidates').get() as { n: number })
+      .n;
     expect(count).toBe(0);
   });
 
@@ -351,7 +367,14 @@ describe('runMigrations — memory-learning-schema (migration 105)', () => {
       .map((r) => (r as { name: string }).name);
 
     for (const col of [
-      'id', 'memory_id', 'pod_id', 'kind', 'outcome', 'reason', 'relevance_reason', 'created_at',
+      'id',
+      'memory_id',
+      'pod_id',
+      'kind',
+      'outcome',
+      'reason',
+      'relevance_reason',
+      'created_at',
     ]) {
       expect(cols, `expected column: ${col}`).toContain(col);
     }

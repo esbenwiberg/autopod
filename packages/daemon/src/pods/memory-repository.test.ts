@@ -65,7 +65,13 @@ describe('MemoryRepository', () => {
     it('inserts and reads all new metadata fields', () => {
       const id = makeMemoryId();
       const evidence = [
-        { podId: 'pod-1', signal: 'test_failure', excerpt: 'some excerpt', severity: 'high' as const, createdAt: '2026-01-01T00:00:00.000Z' },
+        {
+          podId: 'pod-1',
+          signal: 'test_failure',
+          excerpt: 'some excerpt',
+          severity: 'high' as const,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
       ];
       memRepo.insert({
         id,
@@ -173,12 +179,44 @@ describe('MemoryRepository', () => {
     it('list returns approved-only when flag is set', () => {
       const id1 = makeMemoryId();
       const id2 = makeMemoryId();
-      memRepo.insert({ id: id1, scope: 'profile', scopeId: 'p', path: '/a.md', content: 'a', rationale: null, kind: null, tags: [], appliesWhen: null, avoidWhen: null, confidence: null, sourceEvidence: [], impactSummary: null, approved: true, createdByPodId: null });
-      memRepo.insert({ id: id2, scope: 'profile', scopeId: 'p', path: '/b.md', content: 'b', rationale: null, kind: null, tags: [], appliesWhen: null, avoidWhen: null, confidence: null, sourceEvidence: [], impactSummary: null, approved: false, createdByPodId: null });
+      memRepo.insert({
+        id: id1,
+        scope: 'profile',
+        scopeId: 'p',
+        path: '/a.md',
+        content: 'a',
+        rationale: null,
+        kind: null,
+        tags: [],
+        appliesWhen: null,
+        avoidWhen: null,
+        confidence: null,
+        sourceEvidence: [],
+        impactSummary: null,
+        approved: true,
+        createdByPodId: null,
+      });
+      memRepo.insert({
+        id: id2,
+        scope: 'profile',
+        scopeId: 'p',
+        path: '/b.md',
+        content: 'b',
+        rationale: null,
+        kind: null,
+        tags: [],
+        appliesWhen: null,
+        avoidWhen: null,
+        confidence: null,
+        sourceEvidence: [],
+        impactSummary: null,
+        approved: false,
+        createdByPodId: null,
+      });
 
       const approved = memRepo.list('profile', 'p', true);
       expect(approved).toHaveLength(1);
-      expect(approved[0]!.id).toBe(id1);
+      expect(approved[0]?.id).toBe(id1);
 
       const all = memRepo.list('profile', 'p', false);
       expect(all).toHaveLength(2);
@@ -187,12 +225,44 @@ describe('MemoryRepository', () => {
     it('search matches path and content keywords', () => {
       const id1 = makeMemoryId();
       const id2 = makeMemoryId();
-      memRepo.insert({ id: id1, scope: 'profile', scopeId: 'p', path: '/migrations/guide.md', content: 'always run migrations', rationale: null, kind: null, tags: [], appliesWhen: null, avoidWhen: null, confidence: null, sourceEvidence: [], impactSummary: null, approved: true, createdByPodId: null });
-      memRepo.insert({ id: id2, scope: 'profile', scopeId: 'p', path: '/style.md', content: 'use 2-space indent', rationale: null, kind: null, tags: [], appliesWhen: null, avoidWhen: null, confidence: null, sourceEvidence: [], impactSummary: null, approved: true, createdByPodId: null });
+      memRepo.insert({
+        id: id1,
+        scope: 'profile',
+        scopeId: 'p',
+        path: '/migrations/guide.md',
+        content: 'always run migrations',
+        rationale: null,
+        kind: null,
+        tags: [],
+        appliesWhen: null,
+        avoidWhen: null,
+        confidence: null,
+        sourceEvidence: [],
+        impactSummary: null,
+        approved: true,
+        createdByPodId: null,
+      });
+      memRepo.insert({
+        id: id2,
+        scope: 'profile',
+        scopeId: 'p',
+        path: '/style.md',
+        content: 'use 2-space indent',
+        rationale: null,
+        kind: null,
+        tags: [],
+        appliesWhen: null,
+        avoidWhen: null,
+        confidence: null,
+        sourceEvidence: [],
+        impactSummary: null,
+        approved: true,
+        createdByPodId: null,
+      });
 
       const results = memRepo.search('migration', 'profile', 'p');
       expect(results).toHaveLength(1);
-      expect(results[0]!.id).toBe(id1);
+      expect(results[0]?.id).toBe(id1);
     });
   });
 });
@@ -224,7 +294,12 @@ describe('MemoryCandidateRepository', () => {
       avoidWhen: null,
       confidence: 0.85,
       sourceEvidence: [
-        { podId: 'pod-src', signal: 'validation_failure', excerpt: 'migration failed', createdAt: '2026-01-01T00:00:00.000Z' },
+        {
+          podId: 'pod-src',
+          signal: 'validation_failure',
+          excerpt: 'migration failed',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
       ],
       impactSummary: 'Saves 15 min per deployment',
       createdByPodId: 'pod-src',
@@ -240,11 +315,11 @@ describe('MemoryCandidateRepository', () => {
       expect(inserted.status).toBe('pending');
       expect(inserted.action).toBe('create');
       expect(inserted.tags).toEqual(['migrations']);
-      expect(inserted.sourceEvidence[0]!.signal).toBe('validation_failure');
+      expect(inserted.sourceEvidence[0]?.signal).toBe('validation_failure');
 
       const fetched = candRepo.get(cand.id);
       expect(fetched).not.toBeNull();
-      expect(fetched!.id).toBe(cand.id);
+      expect(fetched?.id).toBe(cand.id);
     });
 
     it('returns null for unknown id', () => {
@@ -278,12 +353,12 @@ describe('MemoryCandidateRepository', () => {
       // Verify a new memory entry was created
       const memories = memRepo.list('profile', 'test-profile', true);
       expect(memories).toHaveLength(1);
-      expect(memories[0]!.path).toBe(cand.path);
-      expect(memories[0]!.kind).toBe('gotcha');
-      expect(memories[0]!.tags).toEqual(['migrations']);
-      expect(memories[0]!.confidence).toBeCloseTo(0.85);
-      expect(memories[0]!.approved).toBe(true);
-      expect(memories[0]!.version).toBe(1);
+      expect(memories[0]?.path).toBe(cand.path);
+      expect(memories[0]?.kind).toBe('gotcha');
+      expect(memories[0]?.tags).toEqual(['migrations']);
+      expect(memories[0]?.confidence).toBeCloseTo(0.85);
+      expect(memories[0]?.approved).toBe(true);
+      expect(memories[0]?.version).toBe(1);
     });
 
     it('does not create a duplicate when approved twice', () => {
@@ -401,7 +476,7 @@ describe('MemoryCandidateRepository', () => {
       // Candidate still exists in DB
       const fetched = candRepo.get(cand.id);
       expect(fetched).not.toBeNull();
-      expect(fetched!.status).toBe('rejected');
+      expect(fetched?.status).toBe('rejected');
 
       // No memory entry was created
       expect(memRepo.list('profile', 'test-profile')).toHaveLength(0);
@@ -425,7 +500,7 @@ describe('MemoryCandidateRepository', () => {
       db.prepare("UPDATE memory_candidates SET scope = 'global' WHERE id = ?").run(cand.id);
 
       const fetched = candRepo.get(cand.id);
-      expect(fetched!.scope).toBe('global');
+      expect(fetched?.scope).toBe('global');
     });
   });
 
@@ -445,7 +520,7 @@ describe('MemoryCandidateRepository', () => {
       expect(() => candRepo.approve(cand.id, failingMemRepo)).toThrow(/simulated/);
 
       const fetched = candRepo.get(cand.id);
-      expect(fetched!.status).toBe('pending');
+      expect(fetched?.status).toBe('pending');
       expect(memRepo.list('profile', 'test-profile')).toHaveLength(0);
     });
 
@@ -486,7 +561,7 @@ describe('MemoryCandidateRepository', () => {
 
       expect(() => candRepo.approve(cand.id, failingMemRepo)).toThrow(/simulated/);
 
-      expect(candRepo.get(cand.id)!.status).toBe('pending');
+      expect(candRepo.get(cand.id)?.status).toBe('pending');
       // Target memory untouched
       expect(memRepo.getOrThrow(memId).version).toBe(1);
       expect(memRepo.getOrThrow(memId).content).toBe('v1');
@@ -530,7 +605,7 @@ describe('MemoryCandidateRepository', () => {
       expect(() => candRepo.approve(cand.id, memRepo)).toThrow(/no longer exists/);
 
       // Candidate stays pending — no silent approval against a missing target
-      expect(candRepo.get(cand.id)!.status).toBe('pending');
+      expect(candRepo.get(cand.id)?.status).toBe('pending');
       // No new memory entry was created by the would-be fallthrough
       expect(memRepo.list('profile', 'test-profile')).toHaveLength(0);
     });
@@ -609,9 +684,25 @@ describe('MemoryUsageRepository', () => {
 
     it('records all valid kind values', () => {
       const memId = insertMemory();
-      const kinds = ['selected', 'injected', 'read', 'searched', 'plan_reported', 'summary_reported', 'not_reported'] as const;
+      const kinds = [
+        'selected',
+        'injected',
+        'read',
+        'searched',
+        'plan_reported',
+        'summary_reported',
+        'not_reported',
+      ] as const;
       for (const kind of kinds) {
-        usageRepo.record({ id: randomUUID(), memoryId: memId, podId: 'pod-x', kind, outcome: null, reason: null, relevanceReason: null });
+        usageRepo.record({
+          id: randomUUID(),
+          memoryId: memId,
+          podId: 'pod-x',
+          kind,
+          outcome: null,
+          reason: null,
+          relevanceReason: null,
+        });
       }
       const events = usageRepo.listByMemory(memId);
       expect(events).toHaveLength(kinds.length);
@@ -623,9 +714,33 @@ describe('MemoryUsageRepository', () => {
     it('returns events for the specified memory only', () => {
       const mem1 = insertMemory();
       const mem2 = insertMemory();
-      usageRepo.record({ id: randomUUID(), memoryId: mem1, podId: 'pod-a', kind: 'selected', outcome: null, reason: null, relevanceReason: null });
-      usageRepo.record({ id: randomUUID(), memoryId: mem1, podId: 'pod-a', kind: 'injected', outcome: null, reason: null, relevanceReason: null });
-      usageRepo.record({ id: randomUUID(), memoryId: mem2, podId: 'pod-a', kind: 'read', outcome: null, reason: null, relevanceReason: null });
+      usageRepo.record({
+        id: randomUUID(),
+        memoryId: mem1,
+        podId: 'pod-a',
+        kind: 'selected',
+        outcome: null,
+        reason: null,
+        relevanceReason: null,
+      });
+      usageRepo.record({
+        id: randomUUID(),
+        memoryId: mem1,
+        podId: 'pod-a',
+        kind: 'injected',
+        outcome: null,
+        reason: null,
+        relevanceReason: null,
+      });
+      usageRepo.record({
+        id: randomUUID(),
+        memoryId: mem2,
+        podId: 'pod-a',
+        kind: 'read',
+        outcome: null,
+        reason: null,
+        relevanceReason: null,
+      });
 
       expect(usageRepo.listByMemory(mem1)).toHaveLength(2);
       expect(usageRepo.listByMemory(mem2)).toHaveLength(1);
@@ -636,21 +751,53 @@ describe('MemoryUsageRepository', () => {
     it('returns all events for a pod across memories', () => {
       const mem1 = insertMemory();
       const mem2 = insertMemory('profile-b');
-      usageRepo.record({ id: randomUUID(), memoryId: mem1, podId: 'pod-z', kind: 'selected', outcome: null, reason: null, relevanceReason: null });
-      usageRepo.record({ id: randomUUID(), memoryId: mem2, podId: 'pod-z', kind: 'plan_reported', outcome: 'intended', reason: 'mentioned in plan', relevanceReason: null });
-      usageRepo.record({ id: randomUUID(), memoryId: mem1, podId: 'pod-other', kind: 'searched', outcome: null, reason: null, relevanceReason: null });
+      usageRepo.record({
+        id: randomUUID(),
+        memoryId: mem1,
+        podId: 'pod-z',
+        kind: 'selected',
+        outcome: null,
+        reason: null,
+        relevanceReason: null,
+      });
+      usageRepo.record({
+        id: randomUUID(),
+        memoryId: mem2,
+        podId: 'pod-z',
+        kind: 'plan_reported',
+        outcome: 'intended',
+        reason: 'mentioned in plan',
+        relevanceReason: null,
+      });
+      usageRepo.record({
+        id: randomUUID(),
+        memoryId: mem1,
+        podId: 'pod-other',
+        kind: 'searched',
+        outcome: null,
+        reason: null,
+        relevanceReason: null,
+      });
 
       const events = usageRepo.listByPod('pod-z');
       expect(events).toHaveLength(2);
-      expect(events[1]!.outcome).toBe('intended');
-      expect(events[1]!.reason).toBe('mentioned in plan');
+      expect(events[1]?.outcome).toBe('intended');
+      expect(events[1]?.reason).toBe('mentioned in plan');
     });
   });
 
   describe('cascade deletion', () => {
     it('deletes usage events when the memory entry is deleted', () => {
       const memId = insertMemory();
-      usageRepo.record({ id: randomUUID(), memoryId: memId, podId: 'pod-del', kind: 'selected', outcome: null, reason: null, relevanceReason: null });
+      usageRepo.record({
+        id: randomUUID(),
+        memoryId: memId,
+        podId: 'pod-del',
+        kind: 'selected',
+        outcome: null,
+        reason: null,
+        relevanceReason: null,
+      });
       expect(usageRepo.listByMemory(memId)).toHaveLength(1);
 
       memRepo.delete(memId);

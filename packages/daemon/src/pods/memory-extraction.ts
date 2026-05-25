@@ -1,6 +1,13 @@
-import type { MemoryCandidate, MemoryEntry, MemoryKind, MemorySourceEvidence, Pod, QualitySignals } from '@autopod/shared';
-import { generateId, processContent } from '@autopod/shared';
 import type Anthropic from '@anthropic-ai/sdk';
+import type {
+  MemoryCandidate,
+  MemoryEntry,
+  MemoryKind,
+  MemorySourceEvidence,
+  Pod,
+  QualitySignals,
+} from '@autopod/shared';
+import { generateId, processContent } from '@autopod/shared';
 import type { Logger } from 'pino';
 
 export const LESSON_POTENTIAL_THRESHOLD = 0.2;
@@ -181,7 +188,8 @@ export async function extractCandidate(opts: {
   if (sanitizedHow) userParts.push(`How it was done: ${sanitizedHow}`);
   if (sanitizedBlockers.length > 0) userParts.push(`Blockers: ${sanitizedBlockers.join(' | ')}`);
   if (sanitizedValidation) userParts.push(`Validation errors: ${sanitizedValidation}`);
-  if (existingPaths) userParts.push(`Existing memory paths (update if overlapping):\n${existingPaths}`);
+  if (existingPaths)
+    userParts.push(`Existing memory paths (update if overlapping):\n${existingPaths}`);
 
   const userMessage = userParts.join('\n');
 
@@ -228,7 +236,13 @@ export async function extractCandidate(opts: {
     return { kind: 'no_candidate', reason: 'reviewer_decided_no_lesson' };
   }
 
-  if (!parsed.path || !parsed.content || !parsed.rationale || !parsed.kind || !parsed.impactSummary) {
+  if (
+    !parsed.path ||
+    !parsed.content ||
+    !parsed.rationale ||
+    !parsed.kind ||
+    !parsed.impactSummary
+  ) {
     return { kind: 'skipped', reason: 'output_invalid: missing required fields' };
   }
 
@@ -254,12 +268,13 @@ export async function extractCandidate(opts: {
   }
 
   const now = new Date().toISOString();
-  const severity: MemorySourceEvidence['severity'] =
-    lessonSignals.some((s) => s.startsWith('validation_failed') || s.startsWith('pr_fix'))
-      ? 'high'
-      : lessonSignals.length > 2
-        ? 'medium'
-        : 'low';
+  const severity: MemorySourceEvidence['severity'] = lessonSignals.some(
+    (s) => s.startsWith('validation_failed') || s.startsWith('pr_fix'),
+  )
+    ? 'high'
+    : lessonSignals.length > 2
+      ? 'medium'
+      : 'low';
 
   const sourceEvidence: MemorySourceEvidence[] = [
     {
