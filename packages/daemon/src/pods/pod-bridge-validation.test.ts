@@ -9,10 +9,20 @@ vi.mock('../validation/pre-submit-review.js', async () => {
   );
   return { ...actual, runPreSubmitReview: vi.fn() };
 });
+vi.mock('../validation/review-codex-runner.js', () => ({
+  runCodexReview: vi.fn(),
+}));
+vi.mock('../providers/llm-client.js', () => ({
+  createProfileAnthropicClient: vi.fn(),
+}));
 
+import { createProfileAnthropicClient } from '../providers/llm-client.js';
 import { runPreSubmitReview } from '../validation/pre-submit-review.js';
+import { runCodexReview } from '../validation/review-codex-runner.js';
 
 const mockRunPreSubmitReview = vi.mocked(runPreSubmitReview);
+const mockRunCodexReview = vi.mocked(runCodexReview);
+const mockCreateProfileAnthropicClient = vi.mocked(createProfileAnthropicClient);
 
 type Deps = SessionBridgeDependencies;
 
@@ -248,6 +258,123 @@ describe('PodBridge.runValidationPhase', () => {
     });
 
     await expect(bridge.runValidationPhase('sess-z', 'build')).rejects.toThrow(/no container/);
+  });
+});
+
+describe('PodBridge.callReviewerModel', () => {
+  beforeEach(() => {
+    mockRunCodexReview.mockReset();
+    mockCreateProfileAnthropicClient.mockReset();
+  });
+
+  it('reports the profile reviewerModel instead of the ask_ai model', () => {
+    const { bridge, podId } = buildBridge({
+      profileOverrides: {
+        modelProvider: 'openai',
+        defaultRuntime: 'codex',
+        defaultModel: 'sonnet',
+        reviewerModel: 'gpt-5',
+        providerCredentials: { provider: 'openai' },
+        escalation: {
+          askHuman: true,
+          askAi: { enabled: true, model: 'claude-haiku-4-5', maxCalls: 5 },
+          advisor: { enabled: false },
+          autoPauseAfter: 3,
+          humanResponseTimeout: 3600,
+        },
+      },
+    });
+
+    expect(bridge.getReviewerModel(podId)).toBe('gpt-5');
+  });
+
+  it('runs browser QA advisory through Codex for OpenAI profiles', async () => {
+    mockRunCodexReview.mockResolvedValueOnce({ stdout: 'generated playwright script' });
+    const { bridge, podId } = buildBridge({
+      profileOverrides: {
+        modelProvider: 'openai',
+        defaultRuntime: 'codex',
+        reviewerModel: 'gpt-5',
+        providerCredentials: { provider: 'openai', authMode: 'chatgpt', authJson: '{}' },
+      },
+    });
+
+    const result = await bridge.callReviewerModel(podId, 'Generate a browser QA script', 'ctx');
+
+    expect(result).toBe('generated playwright script');
+    expect(mockRunCodexReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        podId,
+        containerId: 'container-abc',
+        model: 'gpt-5',
+        prompt: expect.stringContaining('Question:\nGenerate a browser QA script'),
+        timeout: 60_000,
+      }),
+    );
+    expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
+  });
+
+  it('uses the profile reviewerModel for Anthropic-compatible providers', async () => {
+    const createMessage = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: 'advisor answer' }],
+    });
+    mockCreateProfileAnthropicClient.mockResolvedValueOnce({
+      ok: true,
+      client: { messages: { create: createMessage } },
+      model: 'claude-sonnet-4-6',
+    } as never);
+    const { bridge, podId } = buildBridge({
+      profileOverrides: {
+        modelProvider: 'max',
+        reviewerModel: 'sonnet',
+        defaultModel: 'opus',
+        providerCredentials: {
+          provider: 'max',
+          accessToken: 'access',
+          refreshToken: 'refresh',
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+        escalation: {
+          askHuman: true,
+          askAi: { enabled: true, model: 'haiku', maxCalls: 5 },
+          advisor: { enabled: false },
+          autoPauseAfter: 3,
+          humanResponseTimeout: 3600,
+        },
+      },
+    });
+
+    const result = await bridge.callReviewerModel(podId, 'Review this', 'ctx');
+
+    expect(result).toBe('advisor answer');
+    expect(mockCreateProfileAnthropicClient).toHaveBeenCalledWith(
+      expect.objectContaining({ modelProvider: 'max' }),
+      'sonnet',
+      expect.anything(),
+    );
+    expect(createMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'claude-sonnet-4-6',
+        messages: [expect.objectContaining({ role: 'user' })],
+      }),
+    );
+    expect(mockRunCodexReview).not.toHaveBeenCalled();
+  });
+
+  it('returns a clear failure for unsupported reviewer providers', async () => {
+    const { bridge, podId } = buildBridge({
+      profileOverrides: {
+        modelProvider: 'copilot',
+        reviewerModel: 'gpt-4o',
+        providerCredentials: { provider: 'copilot', token: 'token' },
+      },
+    });
+
+    const result = await bridge.callReviewerModel(podId, 'Generate a browser QA script');
+
+    expect(result).toContain('Reviewer provider copilot is not supported');
+    expect(mockRunCodexReview).not.toHaveBeenCalled();
+    expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
   });
 });
 
