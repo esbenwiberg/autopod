@@ -179,7 +179,7 @@ export interface Profile {
    * the parent profile or consumer default. Advisory browser QA is evidence,
    * not blocking proof.
    */
-  advisoryBrowserQaEnabled?: boolean | null;
+  advisoryBrowserQaEnabled: boolean | null;
   /** Whether the issue/work-item watcher is enabled for this profile */
   issueWatcherEnabled: boolean | null;
   /** Label prefix to watch for. Default 'autopod'. Triggers on exact match or '<prefix>:<target-profile>' */

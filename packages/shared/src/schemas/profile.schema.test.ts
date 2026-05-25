@@ -35,6 +35,14 @@ describe('profile schema advisory browser QA', () => {
     expect(parsed.advisoryBrowserQaEnabled).toBeNull();
   });
 
+  it('materializes missing base-profile advisory browser QA as null', () => {
+    const parsed = createProfileSchema.parse({
+      name: 'base',
+    });
+
+    expect(parsed.advisoryBrowserQaEnabled).toBeNull();
+  });
+
   it('does not clobber inherited advisory browser QA on unrelated updates', () => {
     const parsed = updateProfileSchema.parse({
       customInstructions: 'tweak review guidance',

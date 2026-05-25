@@ -341,11 +341,12 @@ const createProfileBaseSchema = z.object({
   maxBudgetExtensions: z.number().int().min(0).nullable().default(null),
   // hasWebUi / issueWatcherEnabled: null = inherit from parent (or fall back
   // to the consumer's built-in default — `?? true` for hasWebUi, falsy for
-  // issueWatcherEnabled). Do NOT use `.default(...)` here — Zod materializes
-  // the default for every PATCH that doesn't include the field, silently
-  // re-overriding the column on every save and clobbering inheritance.
+  // issueWatcherEnabled). These remain optional for legacy PATCH behavior.
+  // advisoryBrowserQaEnabled materializes to null on create so full Profile
+  // objects preserve the tri-state invariant; updateProfileSchema.partial()
+  // still omits it on unrelated PATCH input.
   hasWebUi: z.boolean().nullable().optional(),
-  advisoryBrowserQaEnabled: z.boolean().nullable().optional(),
+  advisoryBrowserQaEnabled: z.boolean().nullable().default(null),
   issueWatcherEnabled: z.boolean().nullable().optional(),
   issueWatcherLabelPrefix: z
     .string()
