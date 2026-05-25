@@ -1557,18 +1557,10 @@ public struct ValidationTab: View {
     return advisory.durationMs.map(formatDuration)
   }
 
-  private func advisoryStatusColor(_ status: String) -> Color {
-    switch advisoryDisplayStatus(status) {
-    case "error": return .orange
-    case "skipped": return .secondary
-    default: return .secondary
-    }
-  }
-
   @ViewBuilder
   private func advisoryQaDetail(_ advisory: AdvisoryQaDetail) -> some View {
     let displayStatus = advisoryDisplayStatus(advisory.status)
-    let color = advisoryStatusColor(advisory.status)
+    let color = Color.secondary
     let screenshots = advisoryScreenshotSet(advisory)
 
     VStack(alignment: .leading, spacing: 12) {
@@ -1631,7 +1623,6 @@ public struct ValidationTab: View {
 
   private func advisoryIcon(_ displayStatus: String) -> String {
     switch displayStatus {
-    case "error": return "exclamationmark.triangle"
     case "skipped": return "minus.circle"
     default: return "info.circle"
     }
@@ -1639,7 +1630,7 @@ public struct ValidationTab: View {
 
   @ViewBuilder
   private func advisoryObservationRow(_ observation: AdvisoryQaObservationDetail) -> some View {
-    let color = advisoryObservationColor(observation.status)
+    let color = Color.secondary
     VStack(alignment: .leading, spacing: 7) {
       HStack(alignment: .top, spacing: 6) {
         Image(systemName: advisoryObservationIcon(observation.status))
@@ -1698,16 +1689,7 @@ public struct ValidationTab: View {
   private func advisoryObservationIcon(_ status: String) -> String {
     switch status {
     case "pass": return "checkmark.circle"
-    case "fail": return "exclamationmark.triangle"
     default: return "questionmark.circle"
-    }
-  }
-
-  private func advisoryObservationColor(_ status: String) -> Color {
-    switch status {
-    case "pass": return .secondary
-    case "fail": return .orange
-    default: return .secondary
     }
   }
 
@@ -2260,17 +2242,13 @@ private struct AdvisoryQaChip: View {
 
   private var icon: String {
     switch status {
-    case "error": return "exclamationmark.triangle"
     case "skipped": return "minus.circle"
     default: return "info.circle"
     }
   }
 
   private var color: Color {
-    switch status {
-    case "error": return .orange
-    default: return .secondary
-    }
+    .secondary
   }
 }
 
