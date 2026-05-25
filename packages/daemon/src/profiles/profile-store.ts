@@ -169,6 +169,7 @@ export function rowToProfile(
     tokenBudgetPolicy: nullableStr(row.token_budget_policy) as 'soft' | 'hard' | null,
     maxBudgetExtensions: nullableNum(row.max_budget_extensions),
     hasWebUi: nullableBool(row.has_web_ui),
+    advisoryBrowserQaEnabled: nullableBool(row.advisory_browser_qa_enabled),
     issueWatcherEnabled: nullableBool(row.issue_watcher_enabled),
     issueWatcherLabelPrefix: nullableStr(row.issue_watcher_label_prefix),
     pimActivations: row.pim_activations
@@ -312,6 +313,7 @@ export function createProfileStore(
           preflight_conflict_policy,
           token_budget, token_budget_warn_at, token_budget_policy, max_budget_extensions,
           has_web_ui,
+          advisory_browser_qa_enabled,
           issue_watcher_enabled, issue_watcher_label_prefix,
           pim_activations,
           merge_strategy,
@@ -334,6 +336,7 @@ export function createProfileStore(
           @preflightConflictPolicy,
           @tokenBudget, @tokenBudgetWarnAt, @tokenBudgetPolicy, @maxBudgetExtensions,
           @hasWebUi,
+          @advisoryBrowserQaEnabled,
           @issueWatcherEnabled, @issueWatcherLabelPrefix,
           @pimActivations,
           @mergeStrategy,
@@ -402,6 +405,12 @@ export function createProfileStore(
           parsed.hasWebUi === null || parsed.hasWebUi === undefined
             ? null
             : parsed.hasWebUi
+              ? 1
+              : 0,
+        advisoryBrowserQaEnabled:
+          parsed.advisoryBrowserQaEnabled === null || parsed.advisoryBrowserQaEnabled === undefined
+            ? null
+            : parsed.advisoryBrowserQaEnabled
               ? 1
               : 0,
         issueWatcherEnabled:
@@ -731,6 +740,11 @@ export function createProfileStore(
       if (parsed.hasWebUi !== undefined) {
         setClauses.push('has_web_ui = @hasWebUi');
         fieldMap.hasWebUi = parsed.hasWebUi === null ? null : parsed.hasWebUi ? 1 : 0;
+      }
+      if (parsed.advisoryBrowserQaEnabled !== undefined) {
+        setClauses.push('advisory_browser_qa_enabled = @advisoryBrowserQaEnabled');
+        fieldMap.advisoryBrowserQaEnabled =
+          parsed.advisoryBrowserQaEnabled === null ? null : parsed.advisoryBrowserQaEnabled ? 1 : 0;
       }
       if (parsed.issueWatcherEnabled !== undefined) {
         setClauses.push('issue_watcher_enabled = @issueWatcherEnabled');

@@ -3328,8 +3328,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       // Resolve the effective PodOptions once, so both branch derivation and
       // DB insertion use the exact same values.
+      const profilePodDefaults =
+        profile.pod ?? (profile.outputMode ? podOptionsFromOutputMode(profile.outputMode) : null);
       const resolvedPod = resolvePodOptions(
-        profile.pod ?? (profile.outputMode ? podOptionsFromOutputMode(profile.outputMode) : null),
+        {
+          ...(profilePodDefaults ?? {}),
+          advisoryBrowserQaEnabled:
+            profilePodDefaults?.advisoryBrowserQaEnabled ??
+            profile.advisoryBrowserQaEnabled ??
+            false,
+        },
         request.options ??
           (request.outputMode ? podOptionsFromOutputMode(request.outputMode) : undefined),
       );
@@ -7462,6 +7470,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           startCommitSha: pod.startCommitSha ?? undefined,
           overrides: currentOverrides.length > 0 ? currentOverrides : undefined,
           hasWebUi: profile.hasWebUi ?? true,
+          advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
           reviewerApiKey: process.env.ANTHROPIC_API_KEY,
           extraExecEnv: buildValidationExecEnv(
             profile.privateRegistries,
@@ -8256,6 +8265,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               worktreePath: pod.worktreePath ?? undefined,
               startCommitSha: pod.startCommitSha ?? undefined,
               hasWebUi: profile.hasWebUi ?? true,
+              advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
               preSubmitReview: pod.preSubmitReview ?? undefined,
               skipPhases: profile.skipValidationPhases ?? undefined,
             },

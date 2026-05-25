@@ -55,6 +55,7 @@ public struct Profile: Identifiable, Sendable {
     public var containerMemoryGb: Double?
     public var branchPrefix: String
     public var hasWebUi: Bool
+    public var advisoryBrowserQaEnabled: Bool?
 
     // Token budget
     public var tokenBudget: Int?
@@ -207,6 +208,7 @@ public struct Profile: Identifiable, Sendable {
         modelProvider: ModelProvider = .anthropic, prProvider: PRProvider = .github,
         customInstructions: String? = nil, containerMemoryGb: Double? = nil,
         branchPrefix: String = "autopod/", hasWebUi: Bool = true,
+        advisoryBrowserQaEnabled: Bool? = nil,
         tokenBudget: Int? = nil, tokenBudgetPolicy: TokenBudgetPolicy = .soft,
         tokenBudgetWarnAt: Double = 0.8, maxBudgetExtensions: Int? = nil,
         issueWatcherEnabled: Bool = false, issueWatcherLabelPrefix: String = "autopod",
@@ -269,6 +271,7 @@ public struct Profile: Identifiable, Sendable {
         self.prProvider = prProvider; self.customInstructions = customInstructions
         self.containerMemoryGb = containerMemoryGb
         self.branchPrefix = branchPrefix; self.hasWebUi = hasWebUi
+        self.advisoryBrowserQaEnabled = advisoryBrowserQaEnabled
         self.tokenBudget = tokenBudget; self.tokenBudgetPolicy = tokenBudgetPolicy
         self.tokenBudgetWarnAt = tokenBudgetWarnAt; self.maxBudgetExtensions = maxBudgetExtensions
         self.issueWatcherEnabled = issueWatcherEnabled

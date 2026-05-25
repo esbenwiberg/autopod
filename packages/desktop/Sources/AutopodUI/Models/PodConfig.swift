@@ -51,6 +51,7 @@ public struct PodConfig: Sendable, Equatable {
     public var output: OutputTarget
     /// Run full build/smoke/review before completing.
     public var validate: Bool
+    public var advisoryBrowserQaEnabled: Bool?
     /// Allow promoting this pod to a different mode later.
     public var promotable: Bool
 
@@ -58,11 +59,13 @@ public struct PodConfig: Sendable, Equatable {
         agentMode: AgentMode = .auto,
         output: OutputTarget = .pr,
         validate: Bool = true,
+        advisoryBrowserQaEnabled: Bool? = nil,
         promotable: Bool = false
     ) {
         self.agentMode = agentMode
         self.output = output
         self.validate = validate
+        self.advisoryBrowserQaEnabled = advisoryBrowserQaEnabled
         self.promotable = promotable
     }
 

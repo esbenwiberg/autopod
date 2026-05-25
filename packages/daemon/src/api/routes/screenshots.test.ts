@@ -104,6 +104,21 @@ describe('screenshotRoutes', () => {
       expect(res.statusCode).toBe(200);
       expect(res.headers['content-type']).toBe('image/png');
     });
+
+    it('serves advisory source bucket', async () => {
+      const podId = 'pod-abc123';
+      await screenshotStore.write(podId, 'advisory', 'observation.png', SMALL_PNG);
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/pods/${podId}/screenshots/advisory/observation.png`,
+        headers: { authorization: 'Bearer any-token' },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toBe('image/png');
+      expect(res.rawPayload).toEqual(SMALL_PNG);
+    });
   });
 
   describe('404 on missing file', () => {
@@ -130,6 +145,7 @@ describe('screenshotRoutes', () => {
       const body = JSON.parse(res.body) as { error: string };
       expect(body.error).toContain('smoke');
       expect(body.error).toContain('fact');
+      expect(body.error).toContain('advisory');
     });
   });
 

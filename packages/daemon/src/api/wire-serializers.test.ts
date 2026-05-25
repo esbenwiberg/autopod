@@ -133,6 +133,44 @@ describe('serializeValidationResult', () => {
       path: 'Rendered page',
     });
   });
+
+  it('rewrites advisory browser QA screenshots', () => {
+    const advisoryRef = ref({ source: 'advisory', filename: 'obs.png' });
+    const v: ValidationResult = {
+      ...baseValidation(),
+      advisoryBrowserQa: {
+        status: 'uncertain',
+        reasoning: 'Advisory pass recorded.',
+        observations: [
+          {
+            id: 'obs-1',
+            status: 'uncertain',
+            summary: 'Visual check',
+            screenshots: [advisoryRef],
+          },
+        ],
+        screenshots: [advisoryRef],
+      },
+    };
+
+    const out = serializeValidationResult(v) as {
+      advisoryBrowserQa: {
+        observations: Array<{ screenshots: Array<{ url: string; source: string; path: string }> }>;
+        screenshots: Array<{ url: string; source: string; path: string }>;
+      };
+    };
+
+    expect(out.advisoryBrowserQa.screenshots[0]).toEqual({
+      url: '/pods/pod-12345/screenshots/advisory/obs.png',
+      source: 'advisory',
+      path: '0',
+    });
+    expect(out.advisoryBrowserQa.observations[0]?.screenshots[0]).toEqual({
+      url: '/pods/pod-12345/screenshots/advisory/obs.png',
+      source: 'advisory',
+      path: 'obs-1:0',
+    });
+  });
 });
 
 describe('serializePodForWire', () => {
