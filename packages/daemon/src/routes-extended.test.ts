@@ -269,6 +269,18 @@ describe('Extended Route Tests', () => {
     });
   });
 
+  async function waitForPodValidated(podId: string): Promise<void> {
+    await vi.waitFor(
+      () => {
+        const row = db
+          .prepare('SELECT status, container_id AS containerId FROM pods WHERE id = ?')
+          .get(podId) as { status: string; containerId: string | null } | undefined;
+        expect(row).toMatchObject({ status: 'validated', containerId: 'container-123' });
+      },
+      { timeout: 1000 },
+    );
+  }
+
   afterEach(async () => {
     await app.close();
     db.close();
@@ -355,9 +367,8 @@ describe('Extended Route Tests', () => {
       });
       const podId = createRes.json().id;
 
-      // Wait for pod to reach a terminal state before forcing to paused,
-      // which avoids the background queue racing and overwriting our state.
-      await new Promise((r) => setTimeout(r, 100));
+      // Wait for background processing to settle before forcing a route-specific state.
+      await waitForPodValidated(podId);
       db.prepare('UPDATE pods SET status = ? WHERE id = ?').run('paused', podId);
 
       const res = await app.inject({
@@ -414,8 +425,8 @@ describe('Extended Route Tests', () => {
       });
       const podId = createRes.json().id;
 
-      // Wait for background processing to settle before forcing to running state
-      await new Promise((r) => setTimeout(r, 100));
+      // Wait for background processing to settle before forcing a route-specific state.
+      await waitForPodValidated(podId);
       db.prepare('UPDATE pods SET status = ? WHERE id = ?').run('running', podId);
 
       const res = await app.inject({

@@ -1,5 +1,5 @@
-import type { ContainerManager, ExecOptions, ExecResult } from '../interfaces/container-manager.js';
 import { describe, expect, it } from 'vitest';
+import type { ContainerManager, ExecOptions, ExecResult } from '../interfaces/container-manager.js';
 import { runCodexReview } from './review-codex-runner.js';
 
 interface CapturedExec {
@@ -7,7 +7,9 @@ interface CapturedExec {
   options?: ExecOptions;
 }
 
-function createHarness(result: ExecResult = { stdout: '{"status":"pass"}', stderr: '', exitCode: 0 }) {
+function createHarness(
+  result: ExecResult = { stdout: '{"status":"pass"}', stderr: '', exitCode: 0 },
+) {
   const writes: Array<{ containerId: string; path: string; content: string | Buffer }> = [];
   const execs: CapturedExec[] = [];
   const manager: Pick<ContainerManager, 'writeFile' | 'execInContainer'> = {

@@ -72,7 +72,6 @@ describe('ProfileStore', () => {
       expect(profile.smokePages).toEqual([]);
       expect(profile.escalation).toEqual({
         askHuman: true,
-        askHumanOnTimeout: 'continue',
         askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
         advisor: { enabled: false },
         autoPauseAfter: 3,
@@ -532,7 +531,6 @@ describe('ProfileStore', () => {
     it('should preserve escalation config through create/get', () => {
       const escalation = {
         askHuman: false,
-        askHumanOnTimeout: 'continue' as const,
         askAi: { enabled: true, model: 'opus', maxCalls: 10 },
         advisor: { enabled: false },
         autoPauseAfter: 5,

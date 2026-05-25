@@ -106,8 +106,9 @@ describe('state-machine', () => {
   });
 
   describe('canReceiveMessage', () => {
-    it('returns true only for awaiting_input', () => {
+    it('returns true for input-awaiting and paused pods', () => {
       expect(canReceiveMessage('awaiting_input')).toBe(true);
+      expect(canReceiveMessage('paused')).toBe(true);
     });
 
     it('returns false for all other states', () => {
