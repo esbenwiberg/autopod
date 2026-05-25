@@ -45,7 +45,7 @@ RUN groupadd --gid 1000 autopod && \
 RUN npm install -g pnpm@9
 
 # Agent CLIs
-RUN npm install -g @anthropic-ai/claude-code @github/copilot
+RUN npm install -g @anthropic-ai/claude-code @openai/codex @github/copilot
 
 # Pre-install Playwright + Chromium so the agent can self-validate via the
 # validate_in_browser MCP tool. `playwright install --with-deps` pulls the full

@@ -1161,8 +1161,9 @@ public struct ProfileEditorView: View {
                 if newValue == .openai {
                     profile.defaultRuntime = .codex
                     if ["opus", "sonnet", "haiku"].contains(profile.defaultModel)
-                        || profile.defaultModel.hasPrefix("claude-") {
-                        profile.defaultModel = "gpt-5-codex"
+                        || profile.defaultModel.hasPrefix("claude-")
+                        || profile.defaultModel == "gpt-5-codex" {
+                        profile.defaultModel = "auto"
                     }
                 }
             }

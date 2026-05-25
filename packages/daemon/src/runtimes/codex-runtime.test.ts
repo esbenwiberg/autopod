@@ -88,6 +88,22 @@ describe('CodexRuntime', () => {
       });
       expect(args).toEqual(['exec', 'Fix the bug', '--model', 'o3-mini', '--full-auto', '--json']);
     });
+
+    it('omits --model for the auto sentinel so Codex chooses the account default', () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private method in test
+      const args = (runtime as any).buildSpawnArgs({
+        podId: 'abc123',
+        task: 'Fix the bug',
+        model: 'auto',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      });
+      expect(args).toEqual(['exec', 'Fix the bug', '--full-auto', '--json']);
+    });
   });
 
   describe('spawn', () => {

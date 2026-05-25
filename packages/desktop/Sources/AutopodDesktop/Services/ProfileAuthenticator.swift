@@ -171,7 +171,7 @@ public final class ProfileAuthenticator: Sendable {
 
     _ = try await api.patchProfile(profileName, fields: [
       "defaultRuntime": "codex",
-      "defaultModel": "gpt-5-codex",
+      "defaultModel": "auto",
       "modelProvider": "openai",
       "providerCredentials": [
         "provider": "openai",

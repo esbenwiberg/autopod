@@ -61,6 +61,20 @@ describe('resolvePodModel', () => {
     ).toBe(CODEX_DEFAULT_MODEL);
   });
 
+  it('uses the Codex default for ChatGPT auth with the old platform Codex default', () => {
+    expect(
+      resolvePodModel(
+        profile({
+          modelProvider: 'openai',
+          defaultModel: 'gpt-5-codex',
+          providerCredentials: { provider: 'openai', authMode: 'chatgpt', authJson: '{}' },
+        }),
+        undefined,
+        'codex',
+      ),
+    ).toBe(CODEX_DEFAULT_MODEL);
+  });
+
   it('keeps explicit GPT models for OpenAI profiles', () => {
     expect(resolvePodModel(profile({ modelProvider: 'openai' }), 'gpt-5', 'codex')).toBe('gpt-5');
   });

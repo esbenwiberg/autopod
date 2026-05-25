@@ -56,6 +56,11 @@ describe('DockerNetworkManager', () => {
       expect(DEFAULT_ALLOWED_HOSTS).toContain('globalcdn.nuget.org');
     });
 
+    it('includes OpenAI API and ChatGPT Codex hosts', () => {
+      expect(DEFAULT_ALLOWED_HOSTS).toContain('api.openai.com');
+      expect(DEFAULT_ALLOWED_HOSTS).toContain('chatgpt.com');
+    });
+
     it('includes wildcard CDN domains for HAProxy SNI suffix match', () => {
       expect(DEFAULT_ALLOWED_HOSTS).toContain('*.blob.core.windows.net');
       expect(DEFAULT_ALLOWED_HOSTS).toContain('*.vo.msecnd.net');

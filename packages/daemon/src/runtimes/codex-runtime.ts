@@ -253,7 +253,12 @@ export class CodexRuntime implements Runtime {
   }
 
   private buildSpawnArgs(config: SpawnConfig): string[] {
-    return ['exec', config.task, '--model', config.model, '--full-auto', '--json'];
+    const args = ['exec', config.task];
+    if (config.model !== 'auto') {
+      args.push('--model', config.model);
+    }
+    args.push('--full-auto', '--json');
+    return args;
   }
 
   /**

@@ -1,7 +1,7 @@
 import type { Profile, RuntimeType } from '@autopod/shared';
 import type { Logger } from 'pino';
 
-export const CODEX_DEFAULT_MODEL = 'gpt-5-codex';
+export const CODEX_DEFAULT_MODEL = 'auto';
 
 const CLAUDE_MODEL_ALIASES = new Set(['opus', 'sonnet', 'haiku']);
 
@@ -11,6 +11,11 @@ function usesOpenAiSurface(profile: Profile): boolean {
 
   const creds = profile.providerCredentials;
   return creds?.provider === 'foundry' && (creds.apiSurface ?? 'anthropic') === 'openai';
+}
+
+function usesChatGptAuth(profile: Profile): boolean {
+  const creds = profile.providerCredentials;
+  return creds?.provider === 'openai' && creds.authMode === 'chatgpt';
 }
 
 function isClaudeModel(model: string): boolean {
@@ -44,10 +49,14 @@ export function resolvePodModel(
   const model =
     requestedModel ?? profile.defaultModel ?? (runtime === 'codex' ? CODEX_DEFAULT_MODEL : 'opus');
 
-  if (runtime === 'codex' && usesOpenAiSurface(profile) && isClaudeModel(model)) {
+  if (
+    runtime === 'codex' &&
+    usesOpenAiSurface(profile) &&
+    (isClaudeModel(model) || (usesChatGptAuth(profile) && model === 'gpt-5-codex'))
+  ) {
     logger?.warn(
       { profile: profile.name, modelProvider: profile.modelProvider, requestedModel: model },
-      'Overriding Claude model to Codex default for OpenAI-compatible model provider',
+      'Overriding incompatible model to Codex default for OpenAI-compatible model provider',
     );
     return CODEX_DEFAULT_MODEL;
   }
