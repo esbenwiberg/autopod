@@ -129,6 +129,7 @@ import {
   ensureNuGetCredentialProvider,
   validateRegistryFiles,
 } from './registry-injector.js';
+import { resolvePodRuntime } from './runtime-resolver.js';
 import { resolveSections } from './section-resolver.js';
 import { resolveSkills } from './skill-resolver.js';
 import {
@@ -3293,7 +3294,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const profile = profileStore.get(request.profileName);
       assertNoExpiredPat(profile);
       const model = request.model ?? profile.defaultModel ?? 'opus';
-      const runtime = request.runtime ?? profile.defaultRuntime ?? 'claude';
+      const runtime = resolvePodRuntime(profile, request.runtime, logger);
       const executionTarget = request.executionTarget ?? profile.executionTarget ?? 'local';
       const skipValidation = request.skipValidation ?? false;
       const normalizedDependsOnPodIds =
