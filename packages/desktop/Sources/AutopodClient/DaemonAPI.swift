@@ -314,6 +314,11 @@ public actor DaemonAPI {
     try await request("GET", "/pods/analytics/models", query: ["days": "\(days)"])
   }
 
+  /// GET /pods/analytics/memory — evidence-only memory effectiveness card.
+  public func getMemoryAnalytics(days: Int = 30) async throws -> MemoryAnalyticsResponse {
+    try await request("GET", "/pods/analytics/memory", query: ["days": "\(days)"])
+  }
+
   /// POST /audit-chain/verify — runs a fleet-wide audit-chain integrity check.
   /// Records the result in `audit_chain_verifications` and returns a summary.
   public func verifyAuditChain() async throws -> AuditChainVerifyResponse {
@@ -519,6 +524,66 @@ public actor DaemonAPI {
     let _: EmptyResponse = try await request("DELETE", "/memory/\(id)")
   }
 
+  public func listMemoryCandidates(
+    scopeId: String,
+    status: MemoryCandidateStatus? = .pending
+  ) async throws -> [MemoryCandidate] {
+    var query = ["scopeId": scopeId]
+    if let status { query["status"] = status.queryValue }
+    return try await request("GET", "/memory/candidates", query: query)
+  }
+
+  public func listAllMemoryCandidates(scopeId: String) async throws -> [MemoryCandidate] {
+    try await request("GET", "/memory/candidates", query: ["scopeId": scopeId, "status": "all"])
+  }
+
+  public func getMemoryCandidateSourceEvidence(_ id: String) async throws -> MemorySourceEvidenceResponse {
+    try await request("GET", "/memory/candidates/\(id)/source-evidence")
+  }
+
+  public func approveMemoryCandidate(_ id: String) async throws -> MemoryCandidate {
+    try await request(
+      "PATCH",
+      "/memory/candidates/\(id)",
+      body: try encode(MemoryCandidatePatchBody(action: "approve"))
+    )
+  }
+
+  public func rejectMemoryCandidate(_ id: String) async throws -> MemoryCandidate {
+    try await request(
+      "PATCH",
+      "/memory/candidates/\(id)",
+      body: try encode(MemoryCandidatePatchBody(action: "reject"))
+    )
+  }
+
+  public func updateMemoryCandidate(
+    _ id: String,
+    updates: MemoryCandidateUpdate
+  ) async throws -> MemoryCandidate {
+    try await request(
+      "PATCH",
+      "/memory/candidates/\(id)",
+      body: try encode(MemoryCandidatePatchBody(action: "update", updates: updates))
+    )
+  }
+
+  public func getMemoryUsage(_ id: String) async throws -> MemoryUsageResponse {
+    try await request("GET", "/memory/\(id)/usage")
+  }
+
+  public func getMemorySourceEvidence(_ id: String) async throws -> MemorySourceEvidenceResponse {
+    try await request("GET", "/memory/\(id)/source-evidence")
+  }
+
+  public func getMemoryStaleEvidence(_ id: String) async throws -> MemoryUsageEvidenceResponse {
+    try await request("GET", "/memory/\(id)/stale-evidence")
+  }
+
+  public func getMemoryHarmfulEvidence(_ id: String) async throws -> MemoryUsageEvidenceResponse {
+    try await request("GET", "/memory/\(id)/harmful-evidence")
+  }
+
   // MARK: - Scheduled Jobs
 
   public func listScheduledJobs() async throws -> [ScheduledJob] {
@@ -557,13 +622,7 @@ public actor DaemonAPI {
 
   public func updateFromBase(_ id: String) async throws -> UpdateFromBaseResponse {
     let path = "/pods/\(id)/update-from-base"
-    let components = URLComponents(
-      url: baseURL.appendingPathComponent(path),
-      resolvingAgainstBaseURL: false
-    )!
-    guard let url = components.url else {
-      throw DaemonError.networkError("Invalid URL: \(path)")
-    }
+    let url = try makeRequestURL(path, query: [:])
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -646,13 +705,7 @@ public actor DaemonAPI {
     query: [String: String] = [:],
     body: Data? = nil
   ) async throws -> T {
-    var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
-    if !query.isEmpty {
-      components.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
-    }
-    guard let url = components.url else {
-      throw DaemonError.networkError("Invalid URL: \(path)")
-    }
+    let url = try makeRequestURL(path, query: query)
 
     var req = URLRequest(url: url)
     req.httpMethod = method
@@ -706,6 +759,20 @@ public actor DaemonAPI {
     }
   }
 
+  nonisolated func makeRequestURL(_ path: String, query: [String: String] = [:]) throws -> URL {
+    var components = URLComponents(
+      url: baseURL.appendingPathComponent(path),
+      resolvingAgainstBaseURL: false
+    )!
+    if !query.isEmpty {
+      components.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
+    }
+    guard let url = components.url else {
+      throw DaemonError.networkError("Invalid URL: \(path)")
+    }
+    return url
+  }
+
   /// Extract a human-readable message from a daemon error body shaped as
   /// `{"error": "...", "message": "..."}`. Falls back to the raw body string
   /// if it isn't JSON, or nil if there's nothing usable.
@@ -756,6 +823,34 @@ struct HealthResponse: Codable {
 
 struct VersionResponse: Codable {
   let version: String
+}
+
+private struct MemoryCandidatePatchBody: Encodable {
+  let action: String
+  let path: String?
+  let content: String?
+  let rationale: String?
+  let kind: MemoryKind?
+  let tags: [String]?
+  let appliesWhen: String?
+  let avoidWhen: String?
+  let confidence: Double?
+  let sourceEvidence: [MemorySourceEvidence]?
+  let impactSummary: String?
+
+  init(action: String, updates: MemoryCandidateUpdate? = nil) {
+    self.action = action
+    self.path = updates?.path
+    self.content = updates?.content
+    self.rationale = updates?.rationale
+    self.kind = updates?.kind
+    self.tags = updates?.tags
+    self.appliesWhen = updates?.appliesWhen
+    self.avoidWhen = updates?.avoidWhen
+    self.confidence = updates?.confidence
+    self.sourceEvidence = updates?.sourceEvidence
+    self.impactSummary = updates?.impactSummary
+  }
 }
 
 struct MessageBody: Codable {
