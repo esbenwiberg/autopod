@@ -1,5 +1,7 @@
 import type {
+  ModelProvider,
   PreSubmitReviewSnapshot,
+  ProviderCredentials,
   SpecContract,
   TaskSummary,
   ValidationOverride,
@@ -23,6 +25,10 @@ export interface ValidationEngineConfig {
   task: string;
   diff: string;
   reviewerModel?: string;
+  /** Model provider that owns the reviewer model/auth. Defaults to Anthropic for legacy profiles. */
+  reviewerProvider?: ModelProvider | null;
+  /** Provider credentials from the resolved profile, used to select provider protocol/surface. */
+  reviewerProviderCredentials?: ProviderCredentials | null;
   /** Anthropic API key for Tier 2 tool-use review. Defaults to ANTHROPIC_API_KEY env var. */
   reviewerApiKey?: string;
   testCommand?: string | null;

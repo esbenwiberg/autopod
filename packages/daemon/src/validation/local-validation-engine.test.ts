@@ -710,6 +710,64 @@ describe('validate() — facts + review gate', () => {
     };
   }
 
+  function codexReviewContainerManager(options?: {
+    reviewStdout?: string;
+    reviewError?: Error;
+    commands?: string[];
+    prompts?: string[];
+  }): ContainerManager {
+    const fail = (name: string) =>
+      vi.fn(() => Promise.reject(new Error(`stub: ${name} unexpectedly called`)));
+    const execInContainer = vi.fn(
+      async (
+        _containerId: string,
+        command: string[],
+      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+        const shell = command[2] ?? '';
+        options?.commands?.push(shell);
+        if (
+          command[0] === 'sh' &&
+          command[1] === '-c' &&
+          typeof shell === 'string' &&
+          shell.includes('git reset --hard HEAD')
+        ) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (typeof shell === 'string' && shell.includes('codex exec')) {
+          if (options?.reviewError) throw options.reviewError;
+          return {
+            stdout:
+              options?.reviewStdout ??
+              JSON.stringify({
+                status: 'pass',
+                reasoning: 'Codex reviewer passed',
+                issues: [],
+              }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        throw new Error(`stub: execInContainer unexpectedly called: ${JSON.stringify(command)}`);
+      },
+    );
+    return {
+      spawn: fail('spawn'),
+      kill: fail('kill'),
+      refreshFirewall: fail('refreshFirewall'),
+      stop: fail('stop'),
+      start: fail('start'),
+      writeFile: vi.fn(async (_containerId: string, _path: string, content: string | Buffer) => {
+        options?.prompts?.push(String(content));
+      }),
+      readFile: fail('readFile'),
+      readFileBinary: fail('readFileBinary'),
+      extractDirectoryFromContainer: fail('extractDirectoryFromContainer'),
+      getStatus: fail('getStatus'),
+      execInContainer,
+      execStreaming: fail('execStreaming'),
+    } as unknown as ContainerManager;
+  }
+
   it('skips Facts + Review with upstream-failed reason when build fails', async () => {
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
@@ -787,6 +845,68 @@ describe('validate() — facts + review gate', () => {
     expect(result.reviewSkipKind).toBe('no-changes');
     expect(result.reviewSkipReason).toBe('No code changes detected');
     expect(result.overall).toBe('pass');
+  });
+
+  it('runs Review through Codex for OpenAI reviewer profiles', async () => {
+    const commands: string[] = [];
+    const prompts: string[] = [];
+    const cm = codexReviewContainerManager({ commands, prompts });
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(
+      baseConfig({
+        reviewerProvider: 'openai',
+        reviewerModel: 'gpt-5',
+        diff: `diff --git a/src/app.ts b/src/app.ts
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old
++new
+`,
+      }),
+    );
+
+    expect(result.overall).toBe('pass');
+    expect(result.taskReview).toMatchObject({
+      status: 'pass',
+      model: 'gpt-5',
+      reasoning: 'Codex reviewer passed',
+    });
+    expect(commands.some((cmd) => cmd.includes('codex exec'))).toBe(true);
+    expect(commands.some((cmd) => cmd.includes("--model 'gpt-5'"))).toBe(true);
+    expect(prompts[0]).toContain('## DIFF');
+  });
+
+  it('blocks validation when Codex review times out', async () => {
+    const cm = codexReviewContainerManager({
+      reviewError: new Error('Command timed out after 300000ms'),
+    });
+    const engine = createLocalValidationEngine(cm);
+    const completed: Array<{ phase: string; status: string }> = [];
+
+    const result = await engine.validate(
+      baseConfig({
+        reviewerProvider: 'openai',
+        reviewerModel: 'gpt-5',
+        diff: `diff --git a/src/app.ts b/src/app.ts
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old
++new
+`,
+      }),
+      undefined,
+      undefined,
+      { onPhaseCompleted: (phase, status) => completed.push({ phase, status }) },
+    );
+
+    expect(result.taskReview).toBeNull();
+    expect(result.reviewSkipKind).toBe('review-timeout');
+    expect(result.reviewSkipReason).toMatch(/Review timed out:/);
+    expect(result.overall).toBe('fail');
+    expect(completed).toContainEqual({ phase: 'review', status: 'fail' });
   });
 
   it('marks profile-skip on Facts when skipPhases includes facts', async () => {

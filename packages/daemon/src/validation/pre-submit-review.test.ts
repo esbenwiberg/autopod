@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ContainerManager } from '../interfaces/container-manager.js';
 
 vi.mock('../runtimes/run-claude-cli.js', () => ({
   runClaudeCli: vi.fn(),
@@ -56,6 +57,41 @@ describe('runPreSubmitReview', () => {
     expect(result.issues).toEqual([]);
     expect(result.diffHash).toBeTruthy();
     expect(mockRunClaudeCli).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs the reviewer through Codex for OpenAI providers', async () => {
+    const commands: string[] = [];
+    const containerManager = {
+      writeFile: vi.fn(),
+      execInContainer: vi.fn(async (_containerId: string, command: string[]) => {
+        commands.push(command[2] ?? '');
+        return {
+          stdout: JSON.stringify({
+            status: 'pass',
+            reasoning: 'Codex says clean.',
+            issues: [],
+          }),
+          stderr: '',
+          exitCode: 0,
+        };
+      }),
+    } as unknown as ContainerManager;
+
+    const result = await runPreSubmitReview({
+      task: 'Add dark mode toggle',
+      diff: 'diff --git a/app.tsx b/app.tsx\n+const [theme, setTheme] = useState("light")',
+      reviewerModel: 'gpt-5',
+      reviewerProvider: 'openai',
+      podId: 'pod-1',
+      containerId: 'container-1',
+      containerManager,
+    });
+
+    expect(result.status).toBe('pass');
+    expect(result.model).toBe('gpt-5');
+    expect(commands.some((cmd) => cmd.includes('codex exec'))).toBe(true);
+    expect(commands.some((cmd) => cmd.includes("--model 'gpt-5'"))).toBe(true);
+    expect(mockRunClaudeCli).not.toHaveBeenCalled();
   });
 
   it('surfaces medium+ issues on a fail', async () => {

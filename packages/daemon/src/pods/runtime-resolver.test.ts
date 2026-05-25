@@ -1,6 +1,12 @@
 import type { Profile } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import { CODEX_DEFAULT_MODEL, resolvePodModel, resolvePodRuntime } from './runtime-resolver.js';
+import {
+  CODEX_DEFAULT_MODEL,
+  resolvePodModel,
+  resolvePodRuntime,
+  resolveReviewerModel,
+  resolveReviewerProvider,
+} from './runtime-resolver.js';
 
 function profile(overrides: Partial<Profile> = {}): Profile {
   return {
@@ -77,5 +83,35 @@ describe('resolvePodModel', () => {
 
   it('keeps explicit GPT models for OpenAI profiles', () => {
     expect(resolvePodModel(profile({ modelProvider: 'openai' }), 'gpt-5', 'codex')).toBe('gpt-5');
+  });
+});
+
+describe('resolveReviewerProvider', () => {
+  it('uses the profile model provider for review auth', () => {
+    expect(resolveReviewerProvider(profile({ modelProvider: 'openai' }))).toBe('openai');
+  });
+
+  it('defaults legacy profiles to anthropic', () => {
+    expect(resolveReviewerProvider(profile({ modelProvider: null }))).toBe('anthropic');
+  });
+});
+
+describe('resolveReviewerModel', () => {
+  it('uses reviewerModel when configured', () => {
+    expect(resolveReviewerModel(profile({ reviewerModel: 'claude-sonnet-4-6' }))).toBe(
+      'claude-sonnet-4-6',
+    );
+  });
+
+  it('uses a Codex-compatible default for OpenAI profiles with stale Claude aliases', () => {
+    expect(
+      resolveReviewerModel(profile({ modelProvider: 'openai', reviewerModel: 'sonnet' })),
+    ).toBe(CODEX_DEFAULT_MODEL);
+  });
+
+  it('defaults Claude-compatible review to sonnet when no model is configured', () => {
+    expect(resolveReviewerModel(profile({ defaultModel: null, reviewerModel: null }))).toBe(
+      'sonnet',
+    );
   });
 });

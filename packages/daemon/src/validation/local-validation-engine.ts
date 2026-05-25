@@ -14,15 +14,18 @@ import type {
 } from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
-import type { ValidationPhaseCallbacks } from '../interfaces/validation-engine.js';
-
 import type { ContainerManager } from '../interfaces/container-manager.js';
-import type { ValidationEngine, ValidationEngineConfig } from '../interfaces/validation-engine.js';
+import type {
+  ValidationEngine,
+  ValidationEngineConfig,
+  ValidationPhaseCallbacks,
+} from '../interfaces/validation-engine.js';
 import { buildSupervisorCommand } from '../pods/preview-supervisor.js';
 import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 import { runAgenticReview } from './review-agentic-runner.js';
+import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
 import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
 import { applyDiffFilterToParsed } from './review-finding-filter.js';
 import { runToolUseReview } from './review-tool-runner.js';
@@ -346,20 +349,23 @@ export function createLocalValidationEngine(
             }
           }
 
-          const reviewRun = await runTaskReview(config, log, reviewContext);
+          const reviewRun = await runTaskReview(containerManager, config, log, reviewContext);
           taskReview = reviewRun.result;
           reviewSkipReason = reviewRun.skipReason;
           if (taskReview === null && reviewRun.skipReason) {
-            reviewSkipKind = reviewRun.skipReason.startsWith('Review failed:')
-              ? 'review-failed'
-              : reviewRun.skipReason.startsWith('Review timed out')
-                ? 'review-timeout'
-                : 'no-changes';
+            reviewSkipKind = classifyReviewSkipKind(reviewRun.skipReason);
           }
         }
         // Map 'uncertain' to 'pass' for the chip status — the detail view shows the full result.
+        // Missing review output from a timeout/infra failure is a failed Review phase, not a skip.
         const reviewStatus: 'pass' | 'fail' | 'skip' =
-          taskReview === null ? 'skip' : taskReview.status === 'fail' ? 'fail' : 'pass';
+          taskReview === null
+            ? reviewSkipKind === 'review-failed' || reviewSkipKind === 'review-timeout'
+              ? 'fail'
+              : 'skip'
+            : taskReview.status === 'fail'
+              ? 'fail'
+              : 'pass';
         callbacks?.onPhaseCompleted?.('review', reviewStatus, taskReview);
 
         // ── Phase 9: Overall result ───────────────────────────────────
@@ -373,12 +379,11 @@ export function createLocalValidationEngine(
         const factsFailed =
           factValidation !== null &&
           (factValidation.status === 'fail' || factValidation.status === 'pending_human');
-        // Timeouts and infra errors during review are not code quality failures.
-        // Only treat review as a blocker when it returns an actual opinion (pass/fail).
-        // `Review timed out:` is set by runTaskReview when it catches a
-        // ClaudeCliError with kind='timeout'; everything else flagged as
-        // `Review failed:` is treated as a blocker.
-        const isReviewBlocker = reviewSkipKind === 'review-failed';
+        // Review is a validation gate. Explicit profile skips and no-change
+        // short-circuits are non-blocking, but timeout/infra failures are not
+        // allowed to merge unchecked.
+        const isReviewBlocker =
+          reviewSkipKind === 'review-failed' || reviewSkipKind === 'review-timeout';
         const overall =
           tier1Pass &&
           !factsFailed &&
@@ -1840,6 +1845,7 @@ export function enforceRequirementsStatus(
 }
 
 async function runTaskReview(
+  containerManager: ContainerManager,
   config: ValidationEngineConfig,
   log?: Logger,
   reviewContext?: ReviewContext,
@@ -1864,11 +1870,18 @@ async function runTaskReview(
   const prompt = buildReviewPrompt(config, reviewContext);
   const reviewTimeout = config.reviewTimeout ?? 300_000;
   const reviewDepth = config.reviewDepth ?? 'auto';
+  const reviewRunner = resolveReviewRunner(config);
+  if (reviewRunner === 'unsupported') {
+    return {
+      result: null,
+      skipReason: `Review failed: provider ${config.reviewerProvider} is not supported by the validation reviewer`,
+    };
+  }
 
   // Tier 1 (single-shot) is useless when the diff is truncated — the model
   // can't see all changed files and will either fabricate findings or skip.
   // Skip straight to Tier 2 (tool-use) where it can read files on demand.
-  if (diffIsTruncated && !config.worktreePath) {
+  if (reviewRunner === 'claude' && diffIsTruncated && !config.worktreePath) {
     return {
       result: null,
       skipReason: 'Diff is truncated and no worktree available for tool-use review',
@@ -1878,7 +1891,7 @@ async function runTaskReview(
   try {
     let tier1Parsed: ReturnType<typeof parseReviewJson> = null;
 
-    if (!diffIsTruncated) {
+    if (!diffIsTruncated || reviewRunner === 'codex') {
       // Reuse the agent's pre-submit verdict when it applies to the same diff
       // bytes and was a clean pass. Saves ~30s–5min of Tier 1 work on diffs
       // the reviewer model already opined on.
@@ -1891,11 +1904,22 @@ async function runTaskReview(
         );
       } else {
         // ── Tier 1: Single-shot review with enriched context ──────────────
-        const { stdout } = await runClaudeCli({
-          model: config.reviewerModel,
-          input: prompt,
-          timeout: reviewTimeout,
-        });
+        const { stdout } =
+          reviewRunner === 'codex'
+            ? await runCodexReview({
+                podId: config.podId,
+                attempt: config.attempt,
+                containerId: config.containerId,
+                containerManager,
+                model: config.reviewerModel,
+                prompt,
+                timeout: reviewTimeout,
+              })
+            : await runClaudeCli({
+                model: config.reviewerModel,
+                input: prompt,
+                timeout: reviewTimeout,
+              });
 
         tier1Parsed = applyDiffFilterToParsed(
           enforceRequirementsStatus(parseReviewJson(stdout.trim())),
@@ -1925,9 +1949,12 @@ async function runTaskReview(
     // Truncated diffs always escalate (tier1Parsed is null) so this branch is unreachable for them.
     // 'deep' forces Tier 2+ regardless of Tier 1 status.
     const shouldEscalate =
-      diffIsTruncated ||
-      (reviewDepth === 'deep' && !!config.worktreePath) ||
-      (tier1Parsed?.status === 'uncertain' && reviewDepth !== 'standard' && !!config.worktreePath);
+      reviewRunner === 'claude' &&
+      (diffIsTruncated ||
+        (reviewDepth === 'deep' && !!config.worktreePath) ||
+        (tier1Parsed?.status === 'uncertain' &&
+          reviewDepth !== 'standard' &&
+          !!config.worktreePath));
 
     if (!shouldEscalate && tier1Parsed) {
       return {
@@ -2090,13 +2117,13 @@ async function runTaskReview(
       };
     }
   } catch (err) {
-    if (err instanceof ClaudeCliError) {
+    if (err instanceof ClaudeCliError || err instanceof CodexReviewError) {
       log?.warn(
         {
           kind: err.kind,
           exitCode: err.exitCode,
-          signal: err.signal,
-          durationMs: err.durationMs,
+          signal: err instanceof ClaudeCliError ? err.signal : null,
+          durationMs: err instanceof ClaudeCliError ? err.durationMs : null,
           stderrPreview: err.stderr.slice(0, 500),
         },
         'task review failed, continuing without review',
@@ -2110,6 +2137,25 @@ async function runTaskReview(
     log?.warn({ err }, 'task review failed, continuing without review');
     return { result: null, skipReason: `Review failed: ${message}` };
   }
+}
+
+function classifyReviewSkipKind(reason: string): ValidationResult['reviewSkipKind'] {
+  if (reason.startsWith('No code changes detected')) return 'no-changes';
+  if (reason.startsWith('Review timed out')) return 'review-timeout';
+  return 'review-failed';
+}
+
+function resolveReviewRunner(config: ValidationEngineConfig): 'claude' | 'codex' | 'unsupported' {
+  if (config.reviewerProvider === 'openai') return 'codex';
+  if (
+    config.reviewerProvider === 'foundry' &&
+    config.reviewerProviderCredentials?.provider === 'foundry' &&
+    (config.reviewerProviderCredentials.apiSurface ?? 'anthropic') === 'openai'
+  ) {
+    return 'codex';
+  }
+  if (config.reviewerProvider === 'copilot') return 'unsupported';
+  return 'claude';
 }
 
 /**

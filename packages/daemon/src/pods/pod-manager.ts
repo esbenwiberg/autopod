@@ -129,7 +129,12 @@ import {
   ensureNuGetCredentialProvider,
   validateRegistryFiles,
 } from './registry-injector.js';
-import { resolvePodModel, resolvePodRuntime } from './runtime-resolver.js';
+import {
+  resolvePodModel,
+  resolvePodRuntime,
+  resolveReviewerModel,
+  resolveReviewerProvider,
+} from './runtime-resolver.js';
 import { resolveSections } from './section-resolver.js';
 import { resolveSkills } from './skill-resolver.js';
 import {
@@ -7552,7 +7557,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           lintTimeout: (profile.lintTimeout ?? 120) * 1_000,
           sastCommand: profile.sastCommand ?? undefined,
           sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
-          reviewerModel: profile.reviewerModel || profile.defaultModel || 'sonnet',
+          reviewerModel: resolveReviewerModel(profile, logger),
+          reviewerProvider: resolveReviewerProvider(profile),
+          reviewerProviderCredentials: profile.providerCredentials,
           contract: pod.contract ?? undefined,
           codeReviewSkill,
           commitLog: commitLog || undefined,
@@ -8370,7 +8377,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               lintTimeout: (profile.lintTimeout ?? 120) * 1_000,
               sastCommand: profile.sastCommand ?? undefined,
               sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
-              reviewerModel: profile.reviewerModel || profile.defaultModel || 'sonnet',
+              reviewerModel: resolveReviewerModel(profile, logger),
+              reviewerProvider: resolveReviewerProvider(profile),
+              reviewerProviderCredentials: profile.providerCredentials,
               contract: pod.contract ?? undefined,
               codeReviewSkill,
               commitLog: commitLog || undefined,

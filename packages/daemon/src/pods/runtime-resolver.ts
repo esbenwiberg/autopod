@@ -1,4 +1,4 @@
-import type { Profile, RuntimeType } from '@autopod/shared';
+import type { ModelProvider, Profile, RuntimeType } from '@autopod/shared';
 import type { Logger } from 'pino';
 
 export const CODEX_DEFAULT_MODEL = 'auto';
@@ -62,4 +62,19 @@ export function resolvePodModel(
   }
 
   return model;
+}
+
+export function resolveReviewerProvider(profile: Profile): ModelProvider {
+  return profile.modelProvider ?? 'anthropic';
+}
+
+export function resolveReviewerModel(profile: Profile, logger?: Logger): string {
+  const reviewerRuntime = resolvePodRuntime(profile, profile.defaultRuntime ?? undefined, logger);
+  const requestedModel = profile.reviewerModel || profile.defaultModel || undefined;
+
+  if (requestedModel) {
+    return resolvePodModel(profile, requestedModel, reviewerRuntime, logger);
+  }
+
+  return reviewerRuntime === 'codex' ? CODEX_DEFAULT_MODEL : 'sonnet';
 }

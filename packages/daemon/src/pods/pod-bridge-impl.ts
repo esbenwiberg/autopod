@@ -39,6 +39,7 @@ import type { ContainerManagerFactory, PodManager } from './pod-manager.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
 import { buildValidationExecEnv } from './registry-injector.js';
+import { resolveReviewerModel, resolveReviewerProvider } from './runtime-resolver.js';
 
 export interface SessionBridgeDependencies {
   podManager: PodManager;
@@ -665,7 +666,8 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       podManager.touchHeartbeat(podId);
       const pod = podManager.getSession(podId);
       const profile = profileStore.get(pod.profileName);
-      const reviewerModel = profile.reviewerModel || profile.defaultModel || 'sonnet';
+      const reviewerModel = resolveReviewerModel(profile, logger);
+      const reviewerProvider = resolveReviewerProvider(profile);
       const defaultBranch = profile.defaultBranch ?? 'main';
 
       // Read the diff from inside the live container when possible — the
@@ -776,6 +778,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           task: pod.task ?? '',
           diff,
           reviewerModel,
+          reviewerProvider,
+          reviewerProviderCredentials: profile.providerCredentials,
+          podId,
+          containerId: pod.containerId,
+          containerManager,
           plannedSummary: input.plannedSummary,
           plannedDeviations: input.plannedDeviations,
         },
