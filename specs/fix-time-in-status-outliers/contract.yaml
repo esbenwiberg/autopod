@@ -38,22 +38,13 @@ scenarios:
       - "zero-sample rows do not influence the display cap"
       - "zero-sample rows continue to render as empty rows"
       - "an all-empty payload still uses the existing section-level empty state"
-required_facts:
-  - id: fact-time-in-status-display-helper
-    proves:
-      - core-distribution-stays-readable
-      - max-outliers-remain-visible
-      - ordinary-max-values-are-not-clipped
-      - empty-statuses-stay-empty
-    kind: unit-test
-    artifact:
-      path: packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift
-      change: create
-    command: cd packages/desktop && swift test --filter ThroughputTimeInStatusDisplayTests
+required_facts: []
 human_review:
   - id: review-time-in-status-chart
     covers:
       - core-distribution-stays-readable
       - max-outliers-remain-visible
-    criterion: "With an outlier-heavy fixture, the Time in Status chart visibly separates the minute-scale box/whisker marks and shows clipped max labels without overlapping row labels."
-    reason: "The pure helper test proves the scale and clamping contract; native Swift Charts visual readability still needs a quick human look."
+      - ordinary-max-values-are-not-clipped
+      - empty-statuses-stay-empty
+    criterion: "Review the Time in Status display helper and chart wiring: core p25-p90 values stay readable, max outliers are capped and labeled, ordinary max values are not clipped, and zero-sample rows stay empty."
+    reason: "Autopod-self required facts run in a Linux pod, while desktop Swift tests require a macOS/Xcode-capable environment."
