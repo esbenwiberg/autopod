@@ -226,10 +226,11 @@ public struct AppRootView: View {
         Task { await memoryStore.create(scope: scope, scopeId: scopeId, path: path, content: content) }
       },
       onLoadMemories: {
-        await memoryStore.loadMemories()
-        if let profile = profileStore.profiles.first?.name {
-          await memoryStore.loadPendingCandidates(scopeId: profile)
+        if profileStore.profiles.isEmpty {
+          await profileStore.loadProfiles()
         }
+        await memoryStore.loadMemories()
+        await memoryStore.loadPendingCandidates(scopeIds: profileStore.profileNames)
         await memoryStore.loadAnalytics()
       }
     )

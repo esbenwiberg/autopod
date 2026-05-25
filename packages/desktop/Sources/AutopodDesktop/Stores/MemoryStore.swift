@@ -67,17 +67,30 @@ public final class MemoryStore {
     }
 
     public func loadWorkbench(profileName: String, analyticsDays: Int = 30) async {
-        await loadActiveMemories(scopeId: profileName)
-        await loadPendingCandidates(scopeId: profileName)
+        await loadWorkbench(profileNames: [profileName], analyticsDays: analyticsDays)
+    }
+
+    public func loadWorkbench(profileNames: [String], analyticsDays: Int = 30) async {
+        await loadMemories()
+        await loadPendingCandidates(scopeIds: profileNames)
         await loadAnalytics(days: analyticsDays)
     }
 
     public func loadPendingCandidates(scopeId: String) async {
+        await loadPendingCandidates(scopeIds: [scopeId])
+    }
+
+    public func loadPendingCandidates(scopeIds: [String]) async {
         guard let api else { return }
+        let uniqueScopeIds = Array(Set(scopeIds)).sorted()
         isLoading = true
         error = nil
         do {
-            pendingCandidates = try await api.listMemoryCandidates(scopeId: scopeId, status: .pending)
+            var fetched: [MemoryCandidate] = []
+            for scopeId in uniqueScopeIds {
+                fetched += try await api.listMemoryCandidates(scopeId: scopeId, status: .pending)
+            }
+            pendingCandidates = Self.sortedCandidatesByUpdatedAt(mergeCandidates(fetched))
         } catch {
             print("[MemoryStore] Failed to load memory candidates: \(error)")
             self.error = error.localizedDescription
@@ -376,5 +389,21 @@ public final class MemoryStore {
             }
         }
         return merged
+    }
+
+    private func mergeCandidates(_ candidates: [MemoryCandidate]) -> [MemoryCandidate] {
+        var merged: [MemoryCandidate] = []
+        for candidate in candidates {
+            if let idx = merged.firstIndex(where: { $0.id == candidate.id }) {
+                merged[idx] = candidate
+            } else {
+                merged.append(candidate)
+            }
+        }
+        return merged
+    }
+
+    private static func sortedCandidatesByUpdatedAt(_ candidates: [MemoryCandidate]) -> [MemoryCandidate] {
+        candidates.sorted { $0.updatedAt > $1.updatedAt }
     }
 }
