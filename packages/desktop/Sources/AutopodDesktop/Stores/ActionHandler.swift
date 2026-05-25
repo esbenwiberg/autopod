@@ -446,6 +446,7 @@ public final class ActionHandler {
         agentMode: source.pod.agentMode.rawValue,
         output: source.pod.output.rawValue,
         validate: source.pod.validate,
+        advisoryBrowserQaEnabled: source.pod.advisoryBrowserQaEnabled,
         promotable: source.pod.promotable
       ),
       baseBranch: source.branch

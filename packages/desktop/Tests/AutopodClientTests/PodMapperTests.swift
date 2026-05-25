@@ -38,7 +38,13 @@ import AutopodUI
     "progress": { "phase": "implementation", "description": "Writing routes", "currentPhase": 3, "totalPhases": 5 },
     "claudeSessionId": null,
     "outputMode": "pr",
-    "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
+    "options": {
+      "agentMode": "auto",
+      "output": "pr",
+      "validate": true,
+      "advisoryBrowserQaEnabled": true,
+      "promotable": false
+    },
     "baseBranch": null,
     "recoveryWorktreePath": null,
     "lastHeartbeatAt": null,
@@ -67,6 +73,7 @@ import AutopodUI
   #expect(pod.costUsd == 0.42)
   #expect(pod.commitCount == 2)
   #expect(pod.isWorkspace == false)
+  #expect(pod.pod.advisoryBrowserQaEnabled == true)
 
   #expect(pod.runningAt == PodMapper.parseDate("2026-04-01T09:00:35Z"))
 }

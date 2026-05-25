@@ -52,7 +52,13 @@ public enum PodMapper {
       if let p = response.pod {
         let agent = AgentMode(rawValue: p.agentMode) ?? .auto
         let output = OutputTarget(rawValue: p.output) ?? .pr
-        return PodConfig(agentMode: agent, output: output, validate: p.validate, promotable: p.promotable)
+        return PodConfig(
+          agentMode: agent,
+          output: output,
+          validate: p.validate,
+          advisoryBrowserQaEnabled: p.advisoryBrowserQaEnabled,
+          promotable: p.promotable
+        )
       }
       print("[PodMapper] WARNING: pod \(response.id) response missing `options` — daemon/client version skew?")
       return PodConfig()
