@@ -3,6 +3,7 @@ import path from 'node:path';
 import type {
   AgentEvent,
   PodCreatedEvent,
+  Profile,
   Runtime,
   RuntimeType,
   StackTemplate,
@@ -95,6 +96,9 @@ interface TestProfileOverrides {
   adoPat?: string;
   adoPatExpiresAt?: string;
   prProvider?: 'github' | 'ado';
+  defaultModel?: string;
+  defaultRuntime?: RuntimeType;
+  modelProvider?: Profile['modelProvider'];
 }
 
 function insertTestProfile(db: Database.Database, overrides: TestProfileOverrides | string = {}) {
@@ -108,13 +112,15 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       health_path, health_timeout, validation_pages, max_validation_attempts,
       default_model, default_runtime, escalation_config,
       private_registries, registry_pat, registry_pat_expires_at, branch_prefix,
-      pr_provider, github_pat, github_pat_expires_at, ado_pat, ado_pat_expires_at
+      pr_provider, github_pat, github_pat_expires_at, ado_pat, ado_pat_expires_at,
+      model_provider
     ) VALUES (
       @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
       @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
       @defaultModel, @defaultRuntime, @escalationConfig,
       @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix,
-      @prProvider, @githubPat, @githubPatExpiresAt, @adoPat, @adoPatExpiresAt
+      @prProvider, @githubPat, @githubPatExpiresAt, @adoPat, @adoPatExpiresAt,
+      @modelProvider
     )
   `).run({
     name,
@@ -127,8 +133,8 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     healthTimeout: 120,
     validationPages: '[]',
     maxValidationAttempts: 3,
-    defaultModel: 'opus',
-    defaultRuntime: 'claude',
+    defaultModel: opts.defaultModel ?? 'opus',
+    defaultRuntime: opts.defaultRuntime ?? 'claude',
     escalationConfig: JSON.stringify({
       askHuman: true,
       askAi: { enabled: true, model: 'sonnet', maxCalls: 5 },
@@ -145,6 +151,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     githubPatExpiresAt: opts.githubPatExpiresAt ?? null,
     adoPat: opts.adoPat ?? null,
     adoPatExpiresAt: opts.adoPatExpiresAt ?? null,
+    modelProvider: opts.modelProvider ?? 'anthropic',
   });
 }
 
@@ -305,7 +312,7 @@ function createTestContext(
         networkPolicy: null,
         actionPolicy: null,
         outputMode: 'pr' as const,
-        modelProvider: (row.model_provider as 'anthropic' | 'max' | 'foundry') ?? 'anthropic',
+        modelProvider: (row.model_provider as Profile['modelProvider']) ?? 'anthropic',
         providerCredentials: row.provider_credentials
           ? JSON.parse(row.provider_credentials as string)
           : null,
@@ -5646,6 +5653,83 @@ describe('wake recovery — wake-correction postscript', () => {
     const spawnCall = vi.mocked(runtime.spawn).mock.calls[0];
     const task = spawnCall?.[0]?.task;
     expect(task).not.toContain('interrupted by a host sleep');
+  });
+});
+
+describe('worker startup diagnostics', () => {
+  function statusMessages(ctx: TestContext, podId: string): string[] {
+    return ctx.eventRepo
+      .getForSession(podId, { type: 'pod.agent_activity' })
+      .map((event) => {
+        const payload = event.payload as { event?: { message?: unknown } };
+        return payload.event?.message;
+      })
+      .filter((message): message is string => typeof message === 'string');
+  }
+
+  it('logs provider, runtime, and model before spawning the worker', async () => {
+    const runtime = createMockRuntime();
+    runtime.type = 'codex';
+    const ctx = createTestContext(undefined, {
+      defaultModel: 'auto',
+      defaultRuntime: 'codex',
+      modelProvider: 'openai',
+    });
+    ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+    vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+      async (_containerId, command) => {
+        if (command.join(' ').includes('command -v codex')) {
+          return { stdout: '/usr/local/bin/codex\n', stderr: '', exitCode: 0 };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    );
+
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget', runtime: 'codex', skipValidation: true },
+      'user-1',
+    );
+
+    await manager.processPod(pod.id);
+
+    expect(statusMessages(ctx, pod.id)).toContain(
+      'Starting worker: provider=openai, runtime=codex, model=auto',
+    );
+    expect(runtime.spawn).toHaveBeenCalled();
+  });
+
+  it('fails before spawn when the runtime CLI is missing from the image', async () => {
+    const runtime = createMockRuntime();
+    runtime.type = 'codex';
+    const ctx = createTestContext(undefined, {
+      defaultModel: 'auto',
+      defaultRuntime: 'codex',
+      modelProvider: 'openai',
+    });
+    ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+    vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+      async (_containerId, command) => {
+        if (command.join(' ').includes('command -v codex')) {
+          return { stdout: '', stderr: 'codex: not found', exitCode: 1 };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    );
+
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget', runtime: 'codex', skipValidation: true },
+      'user-1',
+    );
+
+    await manager.processPod(pod.id);
+
+    expect(manager.getSession(pod.id).status).toBe('failed');
+    expect(runtime.spawn).not.toHaveBeenCalled();
+    expect(statusMessages(ctx, pod.id)).toContain(
+      'Agent CLI missing: codex is not installed in this image. Rebuild the codex base/warm image. codex: not found',
+    );
   });
 });
 

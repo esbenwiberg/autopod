@@ -136,10 +136,14 @@ export class CodexRuntime implements Runtime {
         fatal: false,
       };
     } else if (exitResult.code !== 0) {
+      const message =
+        exitResult.code === 127
+          ? 'Codex CLI not found in container image (exit 127)'
+          : `Codex process exited with code ${exitResult.code}`;
       yield {
         type: 'error',
         timestamp: new Date().toISOString(),
-        message: `Codex process exited with code ${exitResult.code}`,
+        message,
         fatal: true,
       };
     }

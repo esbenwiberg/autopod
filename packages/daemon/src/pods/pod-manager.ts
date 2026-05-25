@@ -129,6 +129,7 @@ import {
   ensureNuGetCredentialProvider,
   validateRegistryFiles,
 } from './registry-injector.js';
+import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
 import {
   resolvePodModel,
   resolvePodRuntime,
@@ -718,6 +719,34 @@ function mergeOverrides(
   for (const o of existing) map.set(o.findingId, o);
   for (const o of incoming) map.set(o.findingId, o);
   return [...map.values()];
+}
+
+const AGENT_CLI_BY_RUNTIME: Record<Pod['runtime'], string> = {
+  claude: 'claude',
+  codex: 'codex',
+  copilot: 'copilot',
+};
+
+async function verifyAgentCli(
+  containerManager: ContainerManager,
+  containerId: string,
+  runtime: Pod['runtime'],
+): Promise<string> {
+  const cli = AGENT_CLI_BY_RUNTIME[runtime];
+  const result = await containerManager.execInContainer(
+    containerId,
+    ['sh', '-lc', `command -v ${cli}`],
+    { timeout: 10_000 },
+  );
+
+  if (result.exitCode !== 0) {
+    const detail = (result.stderr || result.stdout).trim();
+    throw new Error(
+      `Agent CLI missing: ${cli} is not installed in this image. Rebuild the ${runtime} base/warm image.${detail ? ` ${detail}` : ''}`,
+    );
+  }
+
+  return result.stdout.trim();
 }
 
 export interface ContainerManagerFactory {
@@ -4046,11 +4075,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         let firewallScript: string | undefined;
         let initialMergedMcpServers: import('@autopod/shared').InjectedMcpServer[] | undefined;
         let daemonGatewayIp: string | undefined;
-        if (networkManager && pod.executionTarget === 'local' && profile.networkPolicy?.enabled) {
+        const runtimeNetworkPolicy = addRuntimeNetworkDefaults(
+          profile.networkPolicy,
+          profile,
+          pod.runtime,
+        );
+        if (networkManager && pod.executionTarget === 'local' && runtimeNetworkPolicy?.enabled) {
           initialMergedMcpServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
           daemonGatewayIp = await networkManager.getGatewayIp(podId);
           const netConfig = await networkManager.buildNetworkConfig(
-            profile.networkPolicy,
+            runtimeNetworkPolicy,
             initialMergedMcpServers,
             daemonGatewayIp,
             profile.privateRegistries,
@@ -4161,10 +4195,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           networkManager &&
           initialMergedMcpServers &&
           daemonGatewayIp &&
-          profile.networkPolicy?.enabled
+          runtimeNetworkPolicy?.enabled
         ) {
           const finalConfig = await networkManager.buildNetworkConfig(
-            profile.networkPolicy,
+            runtimeNetworkPolicy,
             initialMergedMcpServers,
             daemonGatewayIp,
             profile.privateRegistries,
@@ -5264,6 +5298,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         // Start the agent — recovery mode uses resume for Claude, fresh spawn for others
+        emitStatus(
+          `Starting worker: provider=${profile.modelProvider ?? 'anthropic'}, runtime=${pod.runtime}, model=${pod.model}`,
+        );
+        try {
+          const cliPath = await verifyAgentCli(containerManager, containerId, pod.runtime);
+          logger.info({ podId, runtime: pod.runtime, cliPath }, 'Agent CLI preflight passed');
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          emitStatus(message);
+          throw err;
+        }
+
         emitStatus('Spawning agent…');
         const runtime = runtimeRegistry.get(pod.runtime);
         let events: AsyncIterable<AgentEvent>;
@@ -9457,8 +9503,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           try {
             const gatewayIp = await networkManager.getGatewayIp(pod.id);
             const sidecarIps = await collectSidecarIps(pod);
-            const netConfig = await networkManager.buildNetworkConfig(
+            const runtimeNetworkPolicy = addRuntimeNetworkDefaults(
               profile.networkPolicy,
+              profile,
+              pod.runtime,
+            );
+            const netConfig = await networkManager.buildNetworkConfig(
+              runtimeNetworkPolicy,
               mergedServers,
               gatewayIp,
               profile.privateRegistries,

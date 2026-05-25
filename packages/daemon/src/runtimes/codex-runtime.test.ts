@@ -239,6 +239,36 @@ describe('CodexRuntime', () => {
       expect((errorEvent as any).fatal).toBe(true);
     });
 
+    it('maps exit code 127 to a missing Codex CLI error', async () => {
+      const handle = createMockHandle({ exitCode: 127 });
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      setTimeout(() => {
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(127);
+      }, 10);
+
+      const events = [];
+      for await (const event of runtime.spawn({
+        podId: 'missing-codex',
+        task: 'Fail',
+        model: 'o3-mini',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      })) {
+        events.push(event);
+      }
+
+      const errorEvent = events.find((e) => e.type === 'error');
+      expect(errorEvent).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: accessing runtime event fields in test
+      expect((errorEvent as any).message).toContain('Codex CLI not found');
+      // biome-ignore lint/suspicious/noExplicitAny: accessing runtime event fields in test
+      expect((errorEvent as any).fatal).toBe(true);
+    });
+
     it('terminates within grace window when stdout never closes after turn_complete', async () => {
       // Wedged-container parity with claude-runtime: emit the parser's
       // `complete` event then deliberately leave stdout open and exit code

@@ -5,7 +5,7 @@ export const CODEX_DEFAULT_MODEL = 'auto';
 
 const CLAUDE_MODEL_ALIASES = new Set(['opus', 'sonnet', 'haiku']);
 
-function usesOpenAiSurface(profile: Profile): boolean {
+export function usesOpenAiSurface(profile: Profile): boolean {
   if (profile.modelProvider === 'openai') return true;
   if (profile.modelProvider !== 'foundry') return false;
 
