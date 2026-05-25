@@ -92,7 +92,7 @@ public enum ValidationPhase: String, Sendable, CaseIterable {
 /// Carries the per-phase result data from a pod.validation_phase_completed event.
 /// Exactly one result field is populated, matching the phase.
 public struct ValidationPhaseResult: Sendable {
-  public let phaseStatus: String  // "pass" | "fail" | "skip"
+  public let phaseStatus: String  // "pass" | "fail" | "skip" | "pending_human"
   public let buildResult: BuildResultResponse?
   public let testResult: TestResultResponse?
   public let lintResult: LintResultResponse?

@@ -22,6 +22,8 @@ public struct MainView: View {
     /// Triggers a historical event fetch for a pod whose events haven't been
     /// loaded yet (e.g. when the user opens the slide-in panel for a sibling).
     public var loadEventsForPod: ((String) -> Void)?
+    /// Returns the historical REST load state for a pod's cached events.
+    public var relatedEventLoadStateForPod: ((String) -> RelatedEventLoadState)?
     public var isLoadingLogs: Bool
     public var logsLoadError: String?
     public var limitedLogCount: Int?
@@ -92,6 +94,7 @@ public struct MainView: View {
         selectedSessionEvents: [AgentEvent] = [],
         eventsForPod: ((String) -> [AgentEvent])? = nil,
         loadEventsForPod: ((String) -> Void)? = nil,
+        relatedEventLoadStateForPod: ((String) -> RelatedEventLoadState)? = nil,
         isLoadingLogs: Bool = false,
         logsLoadError: String? = nil,
         limitedLogCount: Int? = nil,
@@ -153,6 +156,7 @@ public struct MainView: View {
         self.selectedSessionEvents = selectedSessionEvents
         self.eventsForPod = eventsForPod
         self.loadEventsForPod = loadEventsForPod
+        self.relatedEventLoadStateForPod = relatedEventLoadStateForPod
         self.isLoadingLogs = isLoadingLogs
         self.logsLoadError = logsLoadError
         self.limitedLogCount = limitedLogCount
@@ -494,6 +498,7 @@ public struct MainView: View {
                     onSelectPod: { selectedSessionId = $0 },
                     eventsForPod: eventsForPod,
                     loadEventsForPod: loadEventsForPod,
+                    relatedEventLoadStateForPod: relatedEventLoadStateForPod,
                     diffResponse: sessionDiffs[pod.id],
                     terminalState: terminalState,
                     terminalDataPipe: terminalDataPipe,

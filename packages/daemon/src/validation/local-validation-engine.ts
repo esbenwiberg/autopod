@@ -326,7 +326,7 @@ export function createLocalValidationEngine(
               ? 'Skipped — required facts pending human decision'
               : factsStatus === 'fail'
                 ? 'Skipped — required facts failed'
-              : 'Skipped — earlier validation phases failed';
+                : 'Skipped — earlier validation phases failed';
           reviewSkipKind = 'upstream-failed';
         } else {
           callbacks?.onPhaseStarted?.('review');
@@ -370,7 +370,9 @@ export function createLocalValidationEngine(
             ? ('pass' as const)
             : ('fail' as const);
 
-        const factsFailed = factValidation !== null && factValidation.status === 'fail';
+        const factsFailed =
+          factValidation !== null &&
+          (factValidation.status === 'fail' || factValidation.status === 'pending_human');
         // Timeouts and infra errors during review are not code quality failures.
         // Only treat review as a blocker when it returns an actual opinion (pass/fail).
         // `Review timed out:` is set by runTaskReview when it catches a
@@ -764,7 +766,11 @@ async function runFactValidation(
           replacementPath,
           log,
         );
-        const replacementChanged = artifactChangeSatisfied(config.diff, replacementPath, 'modified');
+        const replacementChanged = artifactChangeSatisfied(
+          config.diff,
+          replacementPath,
+          'modified',
+        );
         const replacementCmd = await containerManager.execInContainer(
           config.containerId,
           ['sh', '-c', replacement.command],
@@ -803,10 +809,7 @@ async function runFactValidation(
         command: fact.command,
         passed: false,
         status: 'pending_human',
-        reasoning:
-          `Fact deviation request is pending human decision. Requested action: ${requestedStatus}. ` +
-          `Reason: ${requestedDeviation.reason}. Why impossible: ${requestedDeviation.whyImpossible}.` +
-          replacementDetail,
+        reasoning: `Fact deviation request is pending human decision. Requested action: ${requestedStatus}. Reason: ${requestedDeviation.reason}. Why impossible: ${requestedDeviation.whyImpossible}.${replacementDetail}`,
       });
       continue;
     }

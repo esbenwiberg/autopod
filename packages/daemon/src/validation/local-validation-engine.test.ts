@@ -807,6 +807,109 @@ describe('validate() — facts + review gate', () => {
     expect(result.taskReview).toBeNull();
     expect(result.reviewSkipKind).toBe('profile-skip');
   });
+
+  it('blocks validation as pending_human when a fact deviation awaits a decision', async () => {
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+    const completed: Array<{ phase: string; status: string }> = [];
+
+    const result = await engine.validate(
+      baseConfig({
+        contract: parseSpecContract(`contract_version: 1
+title: Swift-only fact
+depends_on: []
+scenarios:
+  - id: swift-helper-readable
+    given: ["a Swift helper changed"]
+    when: ["required facts run"]
+    then: ["the helper remains readable"]
+required_facts:
+  - id: fact-swift-only
+    proves: [swift-helper-readable]
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift
+      change: update
+    command: swift test --filter ThroughputTimeInStatusDisplayTests
+human_review: []
+`),
+        taskSummary: {
+          actualSummary: 'Updated the Swift helper.',
+          deviations: [],
+          factDeviations: [
+            {
+              factId: 'fact-swift-only',
+              action: 'waive',
+              reason: 'The artifact changed, but this verifier image has no Swift toolchain.',
+              whyImpossible: 'The command exits 127 with "swift: not found".',
+            },
+          ],
+        },
+      }),
+      undefined,
+      undefined,
+      { onPhaseCompleted: (phase, status) => completed.push({ phase, status }) },
+    );
+
+    expect(result.factValidation?.status).toBe('pending_human');
+    expect(result.factValidation?.results[0]).toMatchObject({
+      factId: 'fact-swift-only',
+      passed: false,
+      status: 'pending_human',
+    });
+    expect(result.reviewSkipReason).toBe('Skipped — required facts pending human decision');
+    expect(result.overall).toBe('fail');
+    expect(completed).toContainEqual({ phase: 'facts', status: 'pending_human' });
+  });
+
+  it('passes waived fact deviations after human approval', async () => {
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(
+      baseConfig({
+        contract: parseSpecContract(`contract_version: 1
+title: Swift-only fact
+depends_on: []
+scenarios:
+  - id: swift-helper-readable
+    given: ["a Swift helper changed"]
+    when: ["required facts run"]
+    then: ["the helper remains readable"]
+required_facts:
+  - id: fact-swift-only
+    proves: [swift-helper-readable]
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift
+      change: update
+    command: swift test --filter ThroughputTimeInStatusDisplayTests
+human_review: []
+`),
+        taskSummary: {
+          actualSummary: 'Updated the Swift helper.',
+          deviations: [],
+          factDeviations: [
+            {
+              factId: 'fact-swift-only',
+              action: 'waive',
+              decision: 'approved_waive',
+              reason: 'The artifact changed, but this verifier image has no Swift toolchain.',
+              whyImpossible: 'The command exits 127 with "swift: not found".',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.factValidation?.status).toBe('pass');
+    expect(result.factValidation?.results[0]).toMatchObject({
+      factId: 'fact-swift-only',
+      passed: true,
+      status: 'waived',
+    });
+    expect(result.overall).toBe('pass');
+  });
 });
 
 // ── Pre-validation worktree reset (regression for `sporting-coral`) ─────────────

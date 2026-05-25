@@ -59,6 +59,8 @@ describe('DockerNetworkManager', () => {
     it('includes OpenAI API and ChatGPT Codex hosts', () => {
       expect(DEFAULT_ALLOWED_HOSTS).toContain('api.openai.com');
       expect(DEFAULT_ALLOWED_HOSTS).toContain('chatgpt.com');
+      expect(DEFAULT_ALLOWED_HOSTS).toContain('*.chatgpt.com');
+      expect(DEFAULT_ALLOWED_HOSTS).toContain('files.openai.com');
     });
 
     it('includes wildcard CDN domains for HAProxy SNI suffix match', () => {

@@ -203,6 +203,29 @@ function failedFactIds(result: ValidationResult | null): string[] {
   );
 }
 
+const REWORK_IN_PROGRESS_PREFIX = '[REWORK IN PROGRESS]';
+
+function summarizeAgentCompletionBlocker(result: string): string | null {
+  const normalized = result.toLowerCase();
+  if (normalized.includes('bwrap: no permissions to create a new namespace')) {
+    return 'Agent could not run shell commands: bwrap cannot create a namespace.';
+  }
+  if (normalized.includes('blocked by the execution environment')) {
+    return 'Agent reported it was blocked by the execution environment.';
+  }
+  if (normalized.includes("can't inspect files") && normalized.includes('edit code')) {
+    return 'Agent reported it could not inspect or edit files.';
+  }
+  return null;
+}
+
+function hasPendingFactDecision(result: ValidationResult | null): boolean {
+  return (
+    result?.factValidation?.status === 'pending_human' ||
+    result?.factValidation?.results.some((fact) => fact.status === 'pending_human') === true
+  );
+}
+
 function buildValidationWaiver(result: ValidationResult | null, reason?: string): ValidationWaiver {
   return {
     waivedAt: new Date().toISOString(),
@@ -258,7 +281,7 @@ function buildWorkspaceMirrorCopyScript(
     '    cp -a "$rel" "$dest"',
     '  fi',
     'done',
-  ].join('; ');
+  ].join('\n');
 
   return [
     `cd ${shellQuote(sourceDir)}`,
@@ -2924,7 +2947,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       },
       onPhaseCompleted: (
         phase: ValidationPhase,
-        status: 'pass' | 'fail' | 'skip',
+        status: 'pass' | 'fail' | 'skip' | 'pending_human',
         phaseResult: unknown,
       ) => {
         const base = {
@@ -3044,6 +3067,46 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
   }
 
+  async function ensurePrBaseBranchOnOrigin(
+    pod: Pod,
+    profile: Profile,
+    baseBranch: string,
+    callerLabel: string,
+  ): Promise<void> {
+    if (!pod.worktreePath) return;
+    const defaultBranch = profile.defaultBranch ?? 'main';
+    if (baseBranch === pod.branch || baseBranch === defaultBranch) return;
+
+    const ensureRemoteBranch = worktreeManager.ensureRemoteBranch?.bind(worktreeManager);
+    if (!ensureRemoteBranch) {
+      logger.warn(
+        { podId: pod.id, baseBranch, callerLabel },
+        'Worktree manager cannot ensure PR base branch exists on origin',
+      );
+      return;
+    }
+
+    try {
+      const result = await ensureRemoteBranch({
+        worktreePath: pod.worktreePath,
+        branch: baseBranch,
+        sourceRef: `refs/heads/${baseBranch}`,
+        pat: selectGitPat(profile),
+      });
+      if (result.created) {
+        emitActivityStatus(pod.id, `Base branch published: ${baseBranch}`);
+      }
+    } catch (err) {
+      // Best effort: if the branch already exists but the check/push failed for a
+      // transient reason, PR creation can still succeed. If it truly is absent,
+      // the PR provider will return the authoritative error below.
+      logger.warn(
+        { err, podId: pod.id, baseBranch, callerLabel },
+        'Failed to ensure PR base branch exists on origin',
+      );
+    }
+  }
+
   /**
    * Shared push-then-open-PR flow used by both `retryCreatePr` (post-complete) and
    * `resumePod` (post-failure). Caller is responsible for the status preconditions
@@ -3102,6 +3165,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
 
     try {
+      await ensurePrBaseBranchOnOrigin(pod, profile, baseBranch, callerLabel);
       const result = await prManager.createPr({
         worktreePath: pod.worktreePath,
         repoUrl: profile.repoUrl ?? undefined,
@@ -5241,7 +5305,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
 
           // Clear rework reason now that it's been consumed (one-shot)
-          podRepo.update(podId, { reworkReason: null });
+          podRepo.update(podId, {
+            reworkReason: null,
+            lastCorrectionMessage: `${REWORK_IN_PROGRESS_PREFIX} ${pod.reworkReason}`,
+          });
         } else if (isRecovery && pod.runtime === 'claude' && pod.claudeSessionId) {
           // Crash recovery: attempt Claude --resume with persisted pod ID
           emitStatus('Resuming Claude pod…');
@@ -5504,6 +5571,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
             if (Object.keys(tokenUpdates).length > 0) {
               podRepo.update(podId, tokenUpdates);
+            }
+
+            const blockerSummary = summarizeAgentCompletionBlocker(event.result);
+            if (blockerSummary) {
+              const s = podRepo.getOrThrow(podId);
+              if (s.status === 'running') {
+                emitActivityStatus(podId, `Agent reported blocker: ${blockerSummary}`);
+                transition(s, 'failed', {
+                  completedAt: new Date().toISOString(),
+                  lastCorrectionMessage: blockerSummary,
+                });
+              }
+              break;
             }
 
             // Token budget enforcement — only when token data is available
@@ -5802,6 +5882,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const isForkSession =
         Boolean(refreshed.linkedPodId) ||
         (refreshed.baseBranch != null && refreshed.baseBranch !== profile2.defaultBranch);
+      const noChangesAfterRework =
+        noChanges && refreshed.lastCorrectionMessage?.startsWith(REWORK_IN_PROGRESS_PREFIX);
+      if (noChangesAfterRework && !refreshed.skipValidation && !isForkSession) {
+        const message = 'Rework produced no file changes.';
+        logger.info({ podId }, 'Failing pod because rework produced no file changes');
+        emitActivityStatus(podId, `${message} Marking pod failed.`);
+        transition(refreshed, 'failed', {
+          completedAt: new Date().toISOString(),
+          lastCorrectionMessage: message,
+        });
+        return;
+      }
       if (refreshed.skipValidation || (noChanges && !isForkSession)) {
         if (noChanges) {
           logger.info({ podId }, 'Skipping validation — no files changed');
@@ -5931,6 +6023,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 emitActivityStatus(podId, 'Creating PR…');
                 const refreshed = podRepo.getOrThrow(podId);
                 const baseBranch = resolvePrBaseBranch(refreshed, profile);
+                await ensurePrBaseBranchOnOrigin(refreshed, profile, baseBranch, 'host_push_retry');
                 const createResult = await prManager.createPr({
                   // biome-ignore lint/style/noNonNullAssertion: validated above
                   worktreePath: refreshed.worktreePath!,
@@ -6420,12 +6513,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             profile: retryProfile,
             podModel: pod.model,
           });
+          const baseBranch = resolvePrBaseBranch(pod, retryProfile);
+          await ensurePrBaseBranchOnOrigin(pod, retryProfile, baseBranch, 'approval_retry');
           const createResult = await prManager.createPr({
             // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null in approval retry — pods reach approved only after successful validation which requires a worktree
             worktreePath: pod.worktreePath!,
             repoUrl: retryProfile.repoUrl ?? undefined,
             branch: pod.branch,
-            baseBranch: resolvePrBaseBranch(pod, retryProfile),
+            baseBranch,
             podId,
             task: pod.task,
             profileName: pod.profileName,
@@ -6581,6 +6676,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podRepo.update(podId, {
         validationAttempts: 0,
         lastValidationResult: null,
+        lastCorrectionMessage: [
+          REWORK_IN_PROGRESS_PREFIX,
+          reason ? `human rejection: ${reason}` : 'human rejection',
+        ].join(' '),
       });
 
       // Build rejection feedback message for the agent
@@ -6606,6 +6705,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           { podId, containerId: pod.containerId },
           'Container restarted for rejection retry',
         );
+        if (pod.executionTarget === 'local') {
+          await this.refreshNetworkPolicy(pod.profileName);
+        }
 
         // Resume agent with rejection feedback
         const resumeEnv = await getResumeEnv(pod);
@@ -7775,6 +7877,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           return;
         }
 
+        if (hasPendingFactDecision(effectiveResult)) {
+          emitActivityStatus(
+            podId,
+            'Required fact deviation pending human decision — moving to review required',
+          );
+          transition(s2, 'review_required');
+
+          if (s2.containerId) {
+            try {
+              const cm = containerManagerFactory.get(s2.executionTarget);
+              await cm.stop(s2.containerId);
+              logger.info({ podId }, 'Container stopped while awaiting fact deviation decision');
+            } catch (stopErr) {
+              logger.warn({ err: stopErr, podId }, 'Failed to stop container post-validation');
+            }
+          }
+          return;
+        }
+
         if (effectiveResult.overall === 'pass') {
           emitActivityStatus(podId, `Validation passed (attempt ${attempt})`);
           const passDefaultBranch = profile.defaultBranch ?? 'main';
@@ -7886,12 +8007,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 emitActivityStatus(podId, 'Creating PR…');
                 const s3 = podRepo.getOrThrow(podId);
                 warnIfSinglePrSeriesMissingSeriesMeta(s2, logger);
+                const baseBranch = resolvePrBaseBranch(s2, profile);
+                await ensurePrBaseBranchOnOrigin(s2, profile, baseBranch, 'validation_pass');
                 const createResult = await prManager.createPr({
                   // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null here — PR creation only occurs for non-artifact pods which always have a worktree
                   worktreePath: s2.worktreePath!,
                   repoUrl: profile.repoUrl ?? undefined,
                   branch: s2.branch,
-                  baseBranch: resolvePrBaseBranch(s2, profile),
+                  baseBranch,
                   podId,
                   task: s2.task,
                   profileName: s2.profileName,
@@ -8387,12 +8510,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 emitActivityStatus(podId, 'Creating PR…');
                 const s3 = podRepo.getOrThrow(podId);
                 warnIfSinglePrSeriesMissingSeriesMeta(s2, logger);
+                const baseBranch = resolvePrBaseBranch(s2, profile);
+                await ensurePrBaseBranchOnOrigin(s2, profile, baseBranch, 'revalidation_pass');
                 const createResult = await prManager.createPr({
                   // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null here — PR creation only occurs for non-artifact pods which always have a worktree
                   worktreePath: s2.worktreePath!,
                   repoUrl: profile.repoUrl ?? undefined,
                   branch: s2.branch,
-                  baseBranch: resolvePrBaseBranch(s2, profile),
+                  baseBranch,
                   podId,
                   task: s2.task,
                   profileName: s2.profileName,

@@ -12,6 +12,7 @@ import {
 
 /** Path inside the container where Codex reads its config (including MCP servers). */
 const MCP_CONFIG_PATH = `${CONTAINER_HOME_DIR}/.codex/config.toml`;
+const EXTERNAL_SANDBOX_ARGS = ['--dangerously-bypass-approvals-and-sandbox'] as const;
 
 const TOML_BARE_KEY = /^[A-Za-z0-9_-]+$/;
 
@@ -160,8 +161,8 @@ export class CodexRuntime implements Runtime {
       this.codexSessionIds.get(podId) ?? this.podRepo.getOrThrow(podId).codexSessionId;
 
     const args = sessionId
-      ? ['exec', 'resume', sessionId, message, '--json']
-      : ['exec', message, '--full-auto', '--json'];
+      ? ['exec', 'resume', sessionId, message, ...EXTERNAL_SANDBOX_ARGS, '--json']
+      : ['exec', message, ...EXTERNAL_SANDBOX_ARGS, '--json'];
 
     // Redact the message from logs: index 3 with a session ID, index 1 without.
     const messageIndex = sessionId ? 3 : 1;
@@ -257,7 +258,7 @@ export class CodexRuntime implements Runtime {
     if (config.model !== 'auto') {
       args.push('--model', config.model);
     }
-    args.push('--full-auto', '--json');
+    args.push(...EXTERNAL_SANDBOX_ARGS, '--json');
     return args;
   }
 

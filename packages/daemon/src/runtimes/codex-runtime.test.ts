@@ -86,7 +86,14 @@ describe('CodexRuntime', () => {
         containerId: 'container-123',
         env: {},
       });
-      expect(args).toEqual(['exec', 'Fix the bug', '--model', 'o3-mini', '--full-auto', '--json']);
+      expect(args).toEqual([
+        'exec',
+        'Fix the bug',
+        '--model',
+        'o3-mini',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '--json',
+      ]);
     });
 
     it('omits --model for the auto sentinel so Codex chooses the account default', () => {
@@ -102,7 +109,12 @@ describe('CodexRuntime', () => {
         containerId: 'container-123',
         env: {},
       });
-      expect(args).toEqual(['exec', 'Fix the bug', '--full-auto', '--json']);
+      expect(args).toEqual([
+        'exec',
+        'Fix the bug',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '--json',
+      ]);
     });
   });
 
@@ -148,7 +160,7 @@ describe('CodexRuntime', () => {
           'Do the thing',
           '--model',
           'o3-mini',
-          '--full-auto',
+          '--dangerously-bypass-approvals-and-sandbox',
           '--json',
         ],
         expect.objectContaining({ cwd: '/workspace' }),
@@ -413,7 +425,7 @@ describe('CodexRuntime', () => {
           'codex',
           'exec',
           'Fix the validation errors',
-          '--full-auto',
+          '--dangerously-bypass-approvals-and-sandbox',
           '--json',
         ],
         expect.any(Object),
@@ -446,6 +458,7 @@ describe('CodexRuntime', () => {
           'resume',
           'session-from-db-xyz',
           'continue the task',
+          '--dangerously-bypass-approvals-and-sandbox',
           '--json',
         ],
         expect.any(Object),
@@ -477,6 +490,7 @@ describe('CodexRuntime', () => {
           'resume',
           'in-memory-session-id',
           'continue',
+          '--dangerously-bypass-approvals-and-sandbox',
           '--json',
         ],
         expect.any(Object),

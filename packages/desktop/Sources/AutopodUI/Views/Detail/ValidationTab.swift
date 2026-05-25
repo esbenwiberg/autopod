@@ -300,6 +300,9 @@ public struct ValidationTab: View {
       }
       return .skipped
     case .facts:
+      if c.factChecks?.contains(where: { $0.status == "pending_human" }) == true {
+        return .pendingHuman
+      }
       return switch c.factValidation { case true: .passed; case false: .failed; default: .skipped }
     case .review:
       return switch c.review { case true: .passed; case false: .failed; default: .skipped }
@@ -734,6 +737,9 @@ public struct ValidationTab: View {
     if let failed = displayedPhases.first(where: { phaseStatus($0) == .failed }) {
       return "\(failed.displayName) needs attention"
     }
+    if let pending = displayedPhases.first(where: { phaseStatus($0) == .pendingHuman }) {
+      return "\(pending.displayName) needs human decision"
+    }
     if displayedPhases.contains(where: { phaseStatus($0) == .running }) {
       return "Validation is running"
     }
@@ -757,6 +763,9 @@ public struct ValidationTab: View {
     if let failed = displayedPhases.first(where: { phaseStatus($0) == .failed }) {
       return [failed.displayName + " failed.", contractSummary].compactMap { $0 }.joined(separator: " ")
     }
+    if let pending = displayedPhases.first(where: { phaseStatus($0) == .pendingHuman }) {
+      return [pending.displayName + " is pending human decision.", contractSummary].compactMap { $0 }.joined(separator: " ")
+    }
     if let active = progress?.activePhase {
       return [active.displayName + " is currently running.", contractSummary].compactMap { $0 }.joined(separator: " ")
     }
@@ -766,6 +775,7 @@ public struct ValidationTab: View {
   private var validationSummaryIcon: String {
     if pod.validationWaiver != nil { return "checkmark.seal.fill" }
     if displayedPhases.contains(where: { phaseStatus($0) == .failed }) { return "xmark.seal.fill" }
+    if displayedPhases.contains(where: { phaseStatus($0) == .pendingHuman }) { return "questionmark.circle.fill" }
     if displayedPhases.contains(where: { phaseStatus($0) == .running }) { return "arrow.triangle.2.circlepath" }
     if displayedChecks?.allPassed == true { return "checkmark.seal.fill" }
     return "checkmark.seal"
@@ -774,6 +784,7 @@ public struct ValidationTab: View {
   private var validationSummaryColor: Color {
     if pod.validationWaiver != nil { return .orange }
     if displayedPhases.contains(where: { phaseStatus($0) == .failed }) { return .red }
+    if displayedPhases.contains(where: { phaseStatus($0) == .pendingHuman }) { return .orange }
     if displayedPhases.contains(where: { phaseStatus($0) == .running }) { return .blue }
     if displayedChecks?.allPassed == true { return .green }
     return .secondary
@@ -1205,36 +1216,58 @@ public struct ValidationTab: View {
       .labelStyle(.titleAndIcon)
   }
 
+  private func factStatusParts(evidence: FactCheckDetail?) -> (label: String, color: Color, icon: String) {
+    guard let evidence else {
+      return ("awaiting evidence", .secondary, "clock")
+    }
+
+    switch evidence.status {
+    case "pending_human":
+      return ("pending human", .orange, "questionmark.circle.fill")
+    case "waived":
+      return ("waived", .green, "checkmark.seal.fill")
+    case "replaced":
+      return ("replaced", .green, "arrow.triangle.2.circlepath")
+    case "pass":
+      return ("passed", .green, "checkmark.circle.fill")
+    case "fail":
+      return ("failed", .red, "xmark.circle.fill")
+    default:
+      return evidence.passed
+        ? ("passed", .green, "checkmark.circle.fill")
+        : ("failed", .red, "xmark.circle.fill")
+    }
+  }
+
   private func scenarioFactChip(_ fact: RequiredFactResponse, evidence: FactCheckDetail?) -> some View {
-    let color: Color = evidence == nil ? .secondary : (evidence?.passed == true ? .green : .red)
-    let icon = evidence == nil ? "clock" : (evidence?.passed == true ? "checkmark.circle.fill" : "xmark.circle.fill")
+    let status = factStatusParts(evidence: evidence)
     return HStack(spacing: 4) {
-      Image(systemName: icon)
+      Image(systemName: status.icon)
         .font(.system(size: 9, weight: .semibold))
       Text(fact.id)
         .font(.system(.caption2, design: .monospaced).weight(.semibold))
         .lineLimit(1)
         .truncationMode(.middle)
     }
-    .foregroundStyle(color)
+    .foregroundStyle(status.color)
     .padding(.horizontal, 7)
     .padding(.vertical, 3)
-    .background(color.opacity(0.10), in: Capsule())
+    .background(status.color.opacity(0.10), in: Capsule())
   }
 
   @ViewBuilder
   private func requiredFactCard(_ fact: RequiredFactResponse, evidence: FactCheckDetail?) -> some View {
-    let evidenceColor: Color = evidence == nil ? .secondary : (evidence?.passed == true ? .green : .red)
+    let status = factStatusParts(evidence: evidence)
     HStack(alignment: .top, spacing: 0) {
       Rectangle()
-        .fill(evidenceColor.opacity(evidence == nil ? 0.35 : 0.75))
+        .fill(status.color.opacity(evidence == nil ? 0.35 : 0.75))
         .frame(width: 3)
 
       VStack(alignment: .leading, spacing: 10) {
         HStack(alignment: .top, spacing: 8) {
-          Image(systemName: evidence == nil ? "clock" : (evidence?.passed == true ? "checkmark.circle.fill" : "xmark.circle.fill"))
+          Image(systemName: status.icon)
             .font(.system(size: 14, weight: .medium))
-            .foregroundStyle(evidenceColor)
+            .foregroundStyle(status.color)
             .padding(.top, 1)
           VStack(alignment: .leading, spacing: 3) {
             Text(fact.id)
@@ -1285,7 +1318,7 @@ public struct ValidationTab: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(Color(nsColor: .controlBackgroundColor))
     .clipShape(RoundedRectangle(cornerRadius: 8))
-    .overlay(RoundedRectangle(cornerRadius: 8).stroke(evidenceColor.opacity(0.15), lineWidth: 1))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(status.color.opacity(0.15), lineWidth: 1))
   }
 
   private func contractMetaRow(label: String, value: String, monospaced: Bool = false) -> some View {
@@ -1307,28 +1340,27 @@ public struct ValidationTab: View {
   }
 
   private func factStatusBadge(evidence: FactCheckDetail?) -> some View {
-    let label = evidence == nil ? "awaiting evidence" : (evidence?.passed == true ? "passed" : "failed")
-    let color: Color = evidence == nil ? .secondary : (evidence?.passed == true ? .green : .red)
-    return Text(label)
+    let status = factStatusParts(evidence: evidence)
+    return Text(status.label)
       .font(.system(.caption2, design: .monospaced).weight(.semibold))
       .padding(.horizontal, 7)
       .padding(.vertical, 3)
-      .background(color.opacity(0.12), in: Capsule())
-      .foregroundStyle(color)
+      .background(status.color.opacity(0.12), in: Capsule())
+      .foregroundStyle(status.color)
   }
 
   @ViewBuilder
   private func factEvidenceCard(_ check: FactCheckDetail) -> some View {
-    let statusColor: Color = check.passed ? .green : .red
+    let status = factStatusParts(evidence: check)
     HStack(alignment: .top, spacing: 0) {
       Rectangle()
-        .fill(statusColor.opacity(0.7))
+        .fill(status.color.opacity(0.7))
         .frame(width: 3)
       VStack(alignment: .leading, spacing: 8) {
         HStack(alignment: .top, spacing: 8) {
-          Image(systemName: check.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+          Image(systemName: status.icon)
             .font(.system(size: 13))
-            .foregroundStyle(statusColor)
+            .foregroundStyle(status.color)
             .padding(.top, 1)
           VStack(alignment: .leading, spacing: 2) {
             Text(check.factId)
@@ -1349,7 +1381,7 @@ public struct ValidationTab: View {
     }
     .background(Color(nsColor: .controlBackgroundColor))
     .clipShape(RoundedRectangle(cornerRadius: 8))
-    .overlay(RoundedRectangle(cornerRadius: 8).stroke(statusColor.opacity(0.15), lineWidth: 1))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(status.color.opacity(0.15), lineWidth: 1))
   }
 
   @ViewBuilder
@@ -1813,6 +1845,7 @@ public struct ValidationTab: View {
         case .passed:    Text(passLabel).font(.callout).foregroundStyle(.green)
         case .failed:    Text(failLabel).font(.callout).foregroundStyle(.red)
         case .skipped:   Text(skipLabel).font(.callout).foregroundStyle(.secondary)
+        case .pendingHuman: Text("Pending human decision").font(.callout).foregroundStyle(.orange)
         case .running:   Text("Running…").font(.callout).foregroundStyle(.secondary)
         case .notStarted: Text("Not started").font(.callout).foregroundStyle(.secondary)
         }

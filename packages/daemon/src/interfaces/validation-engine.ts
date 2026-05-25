@@ -99,7 +99,7 @@ export interface ValidationPhaseCallbacks {
   onPhaseStarted?: (phase: ValidationPhase) => void;
   onPhaseCompleted?: (
     phase: ValidationPhase,
-    status: 'pass' | 'fail' | 'skip',
+    status: 'pass' | 'fail' | 'skip' | 'pending_human',
     result: unknown,
   ) => void;
 }

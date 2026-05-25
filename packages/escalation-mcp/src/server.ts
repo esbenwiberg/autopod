@@ -171,10 +171,16 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       factDeviations: z
         .array(
           z.object({
-            factId: z.string().describe('Required fact id that is impossible or invalid in current reality'),
-            action: z.enum(['waive', 'replace']).describe('Request to waive or replace the required fact'),
+            factId: z
+              .string()
+              .describe('Required fact id that is impossible or invalid in current reality'),
+            action: z
+              .enum(['waive', 'replace'])
+              .describe('Request to waive or replace the required fact'),
             reason: z.string().describe('Why this request is needed'),
-            whyImpossible: z.string().describe('Concrete explanation of why the current fact cannot be satisfied'),
+            whyImpossible: z
+              .string()
+              .describe('Concrete explanation of why the current fact cannot be satisfied'),
             decision: z
               .enum(['approved_waive', 'approved_replace', 'rejected'])
               .optional()
@@ -189,7 +195,9 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
           }),
         )
         .optional()
-        .describe('Optional requests for human approval to waive/replace impossible required facts.'),
+        .describe(
+          'Optional requests for human approval to waive/replace impossible required facts.',
+        ),
     },
     async (input) => {
       const response = await reportTaskSummary(podId, input, bridge);

@@ -28,8 +28,10 @@ export function networkNameForPod(podId: string): string {
 export const DEFAULT_ALLOWED_HOSTS = [
   'api.anthropic.com',
   'api.openai.com',
-  // Codex CLI with ChatGPT/Pro auth talks to chatgpt.com/backend-api.
+  // Codex CLI with ChatGPT/Pro auth talks to chatgpt.com plus supporting subdomains.
   'chatgpt.com',
+  '*.chatgpt.com',
+  'files.openai.com',
   'registry.npmjs.org',
   'pypi.org',
   // NuGet (.NET package registry + CDN)

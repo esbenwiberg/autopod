@@ -188,6 +188,7 @@ function createMockWorktreeManager(): WorktreeManager {
     commitPendingChanges: vi.fn(async () => false),
     commitPendingChangesWithGeneratedMessage: vi.fn(async () => false),
     pushBranch: vi.fn(async () => {}),
+    ensureRemoteBranch: vi.fn(async ({ branch }) => ({ branch, created: false })),
     pullBranch: vi.fn(async () => ({ newCommits: false })),
     rebaseOntoBase: vi.fn(async () => ({ alreadyUpToDate: false, rebased: true, conflicts: [] })),
     getCommitLog: vi.fn(async () => 'abc1234 feat: implement feature\ndef5678 fix: edge case'),
@@ -1122,6 +1123,45 @@ describe('PodManager', () => {
       );
     });
 
+    it('publishes a non-default PR base branch before approval retry creates the PR', async () => {
+      const ctx = createTestContext(undefined, {
+        prProvider: 'ado',
+        adoPat: 'ado_test_pat_xyz',
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Do stuff on a workspace base',
+          branch: 'feature/child',
+          baseBranch: 'feature/workspace-base',
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'validated',
+        worktreePath: '/tmp/wt',
+        filesChanged: 1,
+        prUrl: null,
+      });
+
+      await manager.approveSession(pod.id);
+
+      expect(ctx.worktreeManager.ensureRemoteBranch).toHaveBeenCalledWith({
+        worktreePath: '/tmp/wt',
+        branch: 'feature/workspace-base',
+        sourceRef: 'refs/heads/feature/workspace-base',
+        pat: 'ado_test_pat_xyz',
+      });
+      expect(ctx.prManager.createPr).toHaveBeenCalledWith(
+        expect.objectContaining({
+          branch: 'feature/child',
+          baseBranch: 'feature/workspace-base',
+        }),
+      );
+    });
+
     it('enqueues dependent series pod after manual approval', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
@@ -1616,6 +1656,34 @@ describe('PodManager', () => {
       expect(processed.status).toBe('validated');
       expect(processed.containerId).toBe('container-123');
       expect(processed.worktreePath).toBe('/tmp/worktree/abc');
+    });
+
+    it('fails when the agent reports an execution-environment blocker on completion', async () => {
+      const ctx = createTestContext();
+      (ctx.runtime.spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async function* (): AsyncIterable<AgentEvent> {
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result:
+              'I am blocked by the execution environment: ' +
+              'bwrap: No permissions to create a new namespace.',
+          };
+        },
+      );
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      const processed = manager.getSession(pod.id);
+      expect(processed.status).toBe('failed');
+      expect(processed.lastCorrectionMessage).toContain('bwrap cannot create a namespace');
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
     });
 
     it('calls containerManager.spawn and worktreeManager.create', async () => {
@@ -2229,6 +2297,34 @@ describe('PodManager', () => {
         expect(updated.reworkReason).toBeNull();
       });
 
+      it('fails a rework run that exits without file changes', async () => {
+        const ctx = createTestContext(undefined, {});
+        setupExecFileMock({ gitLog: 'abc1234 Previous broken work' });
+        (ctx.worktreeManager.getDiffStats as ReturnType<typeof vi.fn>).mockResolvedValue({
+          filesChanged: 0,
+          linesAdded: 0,
+          linesRemoved: 0,
+        });
+
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fix the bug' },
+          'user-1',
+        );
+
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          reworkReason: 'Your previous attempt failed. Review what went wrong and try again.',
+        });
+
+        await manager.processPod(pod.id);
+
+        const updated = manager.getSession(pod.id);
+        expect(updated.status).toBe('failed');
+        expect(updated.lastCorrectionMessage).toBe('Rework produced no file changes.');
+        expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      });
+
       it('falls back to fresh spawn when Claude resume reports session-not-found mid-stream', async () => {
         const runtime = createMockRuntime();
         (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
@@ -2622,6 +2718,47 @@ describe('PodManager', () => {
       expect(result.status).toBe('review_required');
     });
 
+    it('moves pending fact deviations to review_required without retrying the agent', async () => {
+      const ctx = createTestContext({
+        overall: 'fail',
+        factValidation: {
+          status: 'pending_human',
+          results: [
+            {
+              factId: 'fact-swift-only',
+              proves: ['swift-helper-readable'],
+              kind: 'unit-test',
+              artifactPath:
+                'packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift',
+              command: 'swift test --filter ThroughputTimeInStatusDisplayTests',
+              passed: false,
+              status: 'pending_human',
+              reasoning:
+                'Fact deviation request is pending human decision. Requested action: waived.',
+            },
+          ],
+        },
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      const result = manager.getSession(pod.id);
+      expect(result.status).toBe('review_required');
+      expect(result.validationAttempts).toBe(1);
+    });
+
     it('retries with correction feedback until max attempts exhausted', async () => {
       // With always-failing validation, the retry loop exhausts all attempts
       const ctx = createTestContext({ overall: 'fail' });
@@ -2984,6 +3121,10 @@ describe('PodManager', () => {
         expect(script).toContain("-name '.serena'");
         expect(script).toContain("-name '.roslyn-codelens'");
         expect(script).toContain('-prune -o');
+        expect(script).toContain('target=$1\nshift\nfor rel do\n');
+        expect(script).not.toContain('for rel do;');
+        expect(script).not.toContain('then;');
+        expect(script).not.toContain('else;');
       });
     });
 
@@ -3945,6 +4086,10 @@ describe('PodManager', () => {
       expect(script).toContain("! -path '*/node_modules/*'");
       expect(script).toContain("! -path '*/.serena'");
       expect(script).toContain("! -path '*/.roslyn-codelens/*'");
+      expect(script).toContain('target=$1\nshift\nfor rel do\n');
+      expect(script).not.toContain('for rel do;');
+      expect(script).not.toContain('then;');
+      expect(script).not.toContain('else;');
       expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
     });
 

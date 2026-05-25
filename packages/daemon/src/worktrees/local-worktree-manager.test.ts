@@ -1035,6 +1035,77 @@ describe('LocalWorktreeManager', () => {
     });
   });
 
+  describe('ensureRemoteBranch', () => {
+    it('skips pushing when the branch already exists on origin', async () => {
+      const calls: string[][] = [];
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          calls.push(args);
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('rev-parse --git-common-dir')) {
+            cb(null, { stdout: '/tmp/test-cache/org_repo.git\n', stderr: '' });
+          } else if (cmd.includes('remote get-url origin')) {
+            cb(null, { stdout: 'https://dev.azure.com/org/project/_git/repo\n', stderr: '' });
+          } else {
+            cb(null, { stdout: 'abc123\trefs/heads/feature/base\n', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      const result = await manager.ensureRemoteBranch({
+        worktreePath: '/tmp/worktree/sess',
+        branch: 'feature/base',
+        pat: 'ado-pat',
+      });
+
+      expect(result).toEqual({ branch: 'feature/base', created: false });
+      expect(calls.some((args) => args[0] === 'push')).toBe(false);
+    });
+
+    it('pushes the local branch ref when origin is missing the branch', async () => {
+      const calls: string[][] = [];
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          calls.push(args);
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('rev-parse --git-common-dir')) {
+            cb(null, { stdout: '/tmp/test-cache/org_repo.git\n', stderr: '' });
+          } else if (cmd.includes('remote get-url origin')) {
+            cb(null, { stdout: 'https://dev.azure.com/org/project/_git/repo\n', stderr: '' });
+          } else if (cmd.includes('ls-remote')) {
+            cb(Object.assign(new Error('no matching refs'), { code: 2 }), {
+              stdout: '',
+              stderr: '',
+            });
+          } else if (cmd.includes('rev-parse --verify refs/heads/feature/base')) {
+            cb(null, { stdout: 'abc123\n', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      const result = await manager.ensureRemoteBranch({
+        worktreePath: '/tmp/worktree/sess',
+        branch: 'feature/base',
+        sourceRef: 'refs/heads/feature/base',
+        pat: 'ado-pat',
+      });
+
+      const pushCall = calls.find((args) => args[0] === 'push');
+      expect(result).toEqual({ branch: 'feature/base', created: true });
+      expect(pushCall).toEqual([
+        'push',
+        'https://x-access-token:ado-pat@dev.azure.com/org/project/_git/repo',
+        'refs/heads/feature/base:refs/heads/feature/base',
+      ]);
+    });
+  });
+
   describe('pullBranch', () => {
     it('uses an explicit profile PAT instead of relying only on the in-memory cache', async () => {
       const calls: string[][] = [];

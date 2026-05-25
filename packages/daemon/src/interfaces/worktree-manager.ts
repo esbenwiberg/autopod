@@ -36,6 +36,25 @@ export interface MergeBranchConfig {
   podModel?: string;
 }
 
+export interface EnsureRemoteBranchConfig {
+  worktreePath: string;
+  /** Branch name that must exist on origin, e.g. `feature/workspace-base`. */
+  branch: string;
+  /**
+   * Local ref to publish if origin is missing `branch`.
+   * Defaults to `refs/heads/<branch>`.
+   */
+  sourceRef?: string;
+  /** PAT to use for the remote check/push when the in-memory cache may be cold. */
+  pat?: string;
+}
+
+export interface EnsureRemoteBranchResult {
+  branch: string;
+  /** True when the method created the remote branch from `sourceRef`. */
+  created: boolean;
+}
+
 /** Options shared by both auto-commit entry points on `WorktreeManager`. */
 export interface CommitPendingChangesOptions {
   /**
@@ -57,6 +76,15 @@ export interface DiffStats {
   filesChanged: number;
   linesAdded: number;
   linesRemoved: number;
+}
+
+export interface BranchDiffConfig {
+  repoUrl: string;
+  branch: string;
+  baseBranch: string;
+  pat?: string;
+  startCommitSha?: string | null;
+  maxLength?: number;
 }
 
 export interface RebaseOntoBaseConfig {
@@ -125,6 +153,11 @@ export interface WorktreeManager {
     maxLength?: number,
     sinceCommit?: string,
   ): Promise<string>;
+  /**
+   * Read a committed branch diff directly from the repo cache. Used after a
+   * pod completes and its local worktree/container may have been cleaned up.
+   */
+  getBranchDiff?(config: BranchDiffConfig): Promise<string>;
   /** Stage and commit specific paths (e.g. screenshot artifacts). No-op if nothing to commit. */
   commitFiles(worktreePath: string, paths: string[], message: string): Promise<void>;
   /** Stage all changes and commit. Returns true if a commit was created, false if working tree was clean. */
@@ -153,6 +186,11 @@ export interface WorktreeManager {
     expectedBranch: string,
     options?: { force?: boolean; pat?: string },
   ): Promise<void>;
+  /**
+   * Ensure origin has `branch`, publishing an existing local ref when it does not.
+   * Unlike `pushBranch`, this does not require the worktree HEAD to be on that branch.
+   */
+  ensureRemoteBranch(config: EnsureRemoteBranchConfig): Promise<EnsureRemoteBranchResult>;
   /** Pull latest changes from origin for the current branch. */
   pullBranch(worktreePath: string, pat?: string): Promise<{ newCommits: boolean }>;
   /**

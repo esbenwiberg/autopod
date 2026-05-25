@@ -188,6 +188,55 @@ describe('diff route', () => {
     expect(body.files[0]?.path).toBe('src/foo.ts');
   });
 
+  it('falls back to the pushed branch diff after the local worktree is gone', async () => {
+    const branchDiff =
+      'diff --git a/src/memory.ts b/src/memory.ts\n' +
+      '--- a/src/memory.ts\n' +
+      '+++ b/src/memory.ts\n' +
+      '@@ -1 +1,2 @@\n' +
+      ' export const existing = true;\n' +
+      '+export const selected = true;\n';
+    const wm = {
+      getDiff: vi.fn().mockResolvedValue(''),
+      getBranchDiff: vi.fn().mockResolvedValue(branchDiff),
+    } as unknown as WorktreeManager;
+    const profileStore = {
+      get: vi.fn().mockReturnValue({
+        repoUrl: 'https://github.com/acme/project.git',
+        defaultBranch: 'main',
+        prProvider: 'github',
+        githubPat: 'ghp_test',
+        adoPat: null,
+      }),
+    } as unknown as ProfileStore;
+
+    diffRoutes(
+      app,
+      makePodManager({
+        containerId: null,
+        worktreePath: null,
+        branch: 'autopod/safe-marten',
+      }),
+      makeContainerFactory({} as ContainerManager),
+      profileStore,
+      wm,
+    );
+    await app.ready();
+
+    const res = await app.inject({ method: 'GET', url: '/pods/pod-1/diff' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { files: { path: string }[]; stats: { changed: number } };
+    expect(body.files.map((f) => f.path)).toEqual(['src/memory.ts']);
+    expect(body.stats).toEqual({ added: 1, removed: 0, changed: 1 });
+    expect(wm.getBranchDiff).toHaveBeenCalledWith({
+      repoUrl: 'https://github.com/acme/project.git',
+      branch: 'autopod/safe-marten',
+      baseBranch: 'main',
+      pat: 'ghp_test',
+      startCommitSha: 'start-sha',
+    });
+  });
+
   it('returns empty files + zero stats when there is nothing to diff', async () => {
     diffRoutes(
       app,

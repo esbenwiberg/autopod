@@ -292,8 +292,12 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       const updates: Parameters<typeof podRepo.update>[1] = {};
       if (!summaryAlreadySet) {
         updates.taskSummary = { actualSummary, how, deviations, factEvidence, factDeviations };
-      } else if (factEvidence != null && existing.taskSummary) {
-        updates.taskSummary = { ...existing.taskSummary, factEvidence, factDeviations };
+      } else if (existing.taskSummary && (factEvidence != null || factDeviations != null)) {
+        updates.taskSummary = {
+          ...existing.taskSummary,
+          ...(factEvidence != null ? { factEvidence } : {}),
+          ...(factDeviations != null ? { factDeviations } : {}),
+        };
       }
       if (Object.keys(updates).length > 0) {
         podRepo.update(podId, updates);

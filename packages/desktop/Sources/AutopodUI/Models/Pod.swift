@@ -265,7 +265,7 @@ public struct ValidationChecks: Sendable {
 // MARK: - Live validation progress (streams as phases complete)
 
 public enum PhaseStatus: Sendable, Equatable {
-    case notStarted, running, passed, failed, skipped
+    case notStarted, running, passed, failed, skipped, pendingHuman
 
     public var icon: String {
         switch self {
@@ -274,6 +274,7 @@ public enum PhaseStatus: Sendable, Equatable {
         case .passed:     return "checkmark.circle.fill"
         case .failed:     return "xmark.circle.fill"
         case .skipped:    return "minus.circle"
+        case .pendingHuman: return "questionmark.circle.fill"
         }
     }
 
@@ -284,6 +285,7 @@ public enum PhaseStatus: Sendable, Equatable {
         case .passed:     return .green
         case .failed:     return .red
         case .skipped:    return .secondary
+        case .pendingHuman: return .orange
         }
     }
 
@@ -392,6 +394,7 @@ public struct ValidationProgress: Sendable {
     ) {
         let ps: PhaseStatus = result.phaseStatus == "pass" ? .passed
             : result.phaseStatus == "fail" ? .failed
+            : result.phaseStatus == "pending_human" ? .pendingHuman
             : .skipped
         switch phase {
         case .build:

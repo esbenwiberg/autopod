@@ -1,0 +1,27 @@
+contract_version: 1
+title: "Add advisory browser QA contracts"
+depends_on: []
+scenarios:
+  - id: advisory-contracts-parse
+    given:
+      - "shared profile, pod option, validation, and evidence contracts exist"
+    when:
+      - "Autopod parses profile settings and renders evidence for a validation result"
+    then:
+      - "advisory browser QA settings and observations are represented without changing validation overall"
+required_facts:
+  - id: fact-profile-advisory-schema
+    proves: [advisory-contracts-parse]
+    kind: unit-test
+    artifact:
+      path: packages/shared/src/schemas/profile.schema.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/shared test -- profile.schema.test.ts
+  - id: fact-advisory-evidence-yaml
+    proves: [advisory-contracts-parse]
+    kind: unit-test
+    artifact:
+      path: packages/shared/src/evidence.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/shared test -- evidence.test.ts
+human_review: []
