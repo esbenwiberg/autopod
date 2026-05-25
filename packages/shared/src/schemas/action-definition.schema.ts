@@ -169,6 +169,7 @@ export const podOptionsSchema = z.object({
   agentMode: agentModeSchema,
   output: outputTargetSchema,
   validate: z.boolean().optional(),
+  advisoryBrowserQaEnabled: z.boolean().optional(),
   promotable: z.boolean().optional(),
 });
 
@@ -176,5 +177,6 @@ export const partialPodOptionsSchema = z.object({
   agentMode: agentModeSchema.optional(),
   output: outputTargetSchema.optional(),
   validate: z.boolean().optional(),
+  advisoryBrowserQaEnabled: z.boolean().optional(),
   promotable: z.boolean().optional(),
 });

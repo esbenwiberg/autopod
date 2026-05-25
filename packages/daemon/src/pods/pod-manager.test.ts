@@ -420,6 +420,34 @@ describe('PodManager', () => {
       expect(pod.baseBranch).toBe('main');
     });
 
+    it('accepts a per-pod advisory browser QA option', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Check advisory QA option',
+          options: { agentMode: 'auto', output: 'pr', advisoryBrowserQaEnabled: true },
+        },
+        'user-1',
+      );
+
+      expect(pod.options.advisoryBrowserQaEnabled).toBe(true);
+    });
+
+    it('defaults advisory browser QA off when neither profile nor pod opts in', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Check advisory QA default' },
+        'user-1',
+      );
+
+      expect(pod.options.advisoryBrowserQaEnabled).toBe(false);
+    });
+
     it('pins omitted baseBranch to the profile default at creation time', () => {
       const ctx = createTestContext(undefined, { defaultBranch: 'release/2.3.10' });
       const manager = createPodManager(ctx.deps);
@@ -2574,6 +2602,34 @@ describe('PodManager', () => {
 
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('validated');
+    });
+
+    it('passes the effective advisory browser QA setting to validation', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Add feature',
+          options: { agentMode: 'auto', output: 'pr', advisoryBrowserQaEnabled: true },
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
+        expect.objectContaining({ advisoryBrowserQaEnabled: true }),
+        expect.any(Function),
+        expect.any(AbortSignal),
+        expect.any(Object),
+      );
     });
 
     it('recovers from live container when workspace sync fails before validation', async () => {

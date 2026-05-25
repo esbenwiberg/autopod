@@ -154,6 +154,8 @@ export type {
   PageResult,
   AssertionResult,
   TaskReviewResult,
+  AdvisoryBrowserQaObservation,
+  AdvisoryBrowserQaResult,
   RequirementsCheckItem,
   ValidationFinding,
   ValidationOverride,

@@ -26,8 +26,8 @@ function baseScore(overrides: Partial<PodQualityScore> = {}): PodQualityScore {
     profileName: 'test-profile',
     model: 'claude-opus-4-7',
     finalStatus: 'complete',
-    completedAt: '2026-04-23T12:00:00.000Z',
-    computedAt: '2026-04-23T12:00:01.000Z',
+    completedAt: new Date().toISOString(),
+    computedAt: new Date().toISOString(),
     ...overrides,
   };
 }

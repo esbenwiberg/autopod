@@ -3,6 +3,7 @@ import { mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
+  AdvisoryBrowserQaResult,
   DeviationsAssessment,
   FactCheckResult,
   FactValidationResult,
@@ -22,6 +23,7 @@ import type {
 } from '../interfaces/validation-engine.js';
 import { buildSupervisorCommand } from '../pods/preview-supervisor.js';
 import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
+import { runAdvisoryBrowserQa } from './advisory-browser-qa-runner.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 import { runAgenticReview } from './review-agentic-runner.js';
@@ -113,7 +115,6 @@ export function createLocalValidationEngine(
   screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
 ): ValidationEngine {
   const log = logger?.child({ component: 'local-validation-engine' });
-  void screenshotStore;
 
   return {
     async validate(
@@ -368,7 +369,40 @@ export function createLocalValidationEngine(
               : 'pass';
         callbacks?.onPhaseCompleted?.('review', reviewStatus, taskReview);
 
-        // ── Phase 9: Overall result ───────────────────────────────────
+        // ── Phase 9: Advisory Browser QA ──────────────────────────────
+        // Runs only after blocking checks are green. Its findings are
+        // screenshot-backed evidence for humans and never affect `overall`.
+        checkAbort();
+        let advisoryBrowserQa: AdvisoryBrowserQaResult | null = null;
+        const blockingChecksGreen =
+          tier1Pass &&
+          factsStatus !== 'fail' &&
+          factsStatus !== 'pending_human' &&
+          reviewStatus !== 'fail' &&
+          reviewSkipKind !== 'review-failed';
+        if (shouldRunAdvisoryBrowserQa(config, healthResult, blockingChecksGreen)) {
+          onProgress?.('Running advisory browser QA…');
+          advisoryBrowserQa = await runAdvisoryBrowserQa({
+            podId: config.podId,
+            task: config.task,
+            baseUrl: config.previewUrl,
+            contract: config.contract,
+            reviewerModel: config.reviewerModel,
+            hostBrowserRunner,
+            screenshotStore,
+            logger: log,
+          });
+        } else if (config.advisoryBrowserQaEnabled && hasNoContractChecklist(config)) {
+          advisoryBrowserQa = {
+            status: 'skip',
+            reasoning: 'no-contract-checklist',
+            observations: [],
+            screenshots: [],
+            durationMs: 0,
+          };
+        }
+
+        // ── Phase 10: Overall result ──────────────────────────────────
         const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
         const healthOk = healthResult.status === 'pass' || healthResult.status === 'skip';
         const smokeStatus =
@@ -408,6 +442,7 @@ export function createLocalValidationEngine(
           sast: sastResult,
           factValidation,
           taskReview,
+          advisoryBrowserQa,
           reviewSkipReason,
           reviewSkipKind,
           overall,
@@ -456,6 +491,27 @@ function makeInterruptedResult(
     overall: 'fail',
     duration: Date.now() - startTime,
   };
+}
+
+function hasNoContractChecklist(config: ValidationEngineConfig): boolean {
+  return (
+    (config.contract?.scenarios.length ?? 0) === 0 &&
+    (config.contract?.humanReview.length ?? 0) === 0
+  );
+}
+
+function shouldRunAdvisoryBrowserQa(
+  config: ValidationEngineConfig,
+  healthResult: HealthResult,
+  blockingChecksGreen: boolean,
+): boolean {
+  return (
+    config.advisoryBrowserQaEnabled === true &&
+    config.hasWebUi !== false &&
+    healthResult.status === 'pass' &&
+    blockingChecksGreen &&
+    !hasNoContractChecklist(config)
+  );
 }
 
 /**

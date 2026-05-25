@@ -101,7 +101,13 @@ public enum ProfileMapper {
         if let p = response.pod {
           let agent = AgentMode(rawValue: p.agentMode) ?? .auto
           let output = OutputTarget(rawValue: p.output) ?? .pr
-          return PodConfig(agentMode: agent, output: output, validate: p.validate, promotable: p.promotable)
+          return PodConfig(
+            agentMode: agent,
+            output: output,
+            validate: p.validate,
+            advisoryBrowserQaEnabled: p.advisoryBrowserQaEnabled,
+            promotable: p.promotable
+          )
         }
         return PodConfig.fromLegacy(response.outputMode ?? "pr")
       }(),
@@ -186,12 +192,18 @@ public enum ProfileMapper {
       "testTimeout": profile.testTimeout,
       "prProvider": profile.prProvider.rawValue,
       "outputMode": profile.pod.legacyOutputMode.rawValue,
-      "pod": [
-        "agentMode": profile.pod.agentMode.rawValue,
-        "output": profile.pod.output.rawValue,
-        "validate": profile.pod.validate,
-        "promotable": profile.pod.promotable,
-      ] as [String: Any],
+      "pod": {
+        var pod: [String: Any] = [
+          "agentMode": profile.pod.agentMode.rawValue,
+          "output": profile.pod.output.rawValue,
+          "validate": profile.pod.validate,
+          "promotable": profile.pod.promotable,
+        ]
+        if let advisoryBrowserQaEnabled = profile.pod.advisoryBrowserQaEnabled {
+          pod["advisoryBrowserQaEnabled"] = advisoryBrowserQaEnabled
+        }
+        return pod
+      }(),
       "smokePages": profile.smokePages.map { ["path": $0.path] },
       "privateRegistries": profile.privateRegistries.map {
         var r: [String: Any] = ["type": $0.type.rawValue, "url": $0.url]

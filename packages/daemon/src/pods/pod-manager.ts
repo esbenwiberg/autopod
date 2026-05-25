@@ -7617,6 +7617,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           startCommitSha: pod.startCommitSha ?? undefined,
           overrides: currentOverrides.length > 0 ? currentOverrides : undefined,
           hasWebUi: profile.hasWebUi ?? true,
+          advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
           reviewerApiKey: process.env.ANTHROPIC_API_KEY,
           extraExecEnv: buildValidationExecEnv(
             profile.privateRegistries,
@@ -8434,6 +8435,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               worktreePath: pod.worktreePath ?? undefined,
               startCommitSha: pod.startCommitSha ?? undefined,
               hasWebUi: profile.hasWebUi ?? true,
+              advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
               preSubmitReview: pod.preSubmitReview ?? undefined,
               skipPhases: profile.skipValidationPhases ?? undefined,
             },

@@ -133,6 +133,44 @@ describe('serializeValidationResult', () => {
       path: 'Rendered page',
     });
   });
+
+  it('rewrites advisory browser QA screenshots', () => {
+    const advisoryRef = ref({ source: 'advisory', filename: 'obs.png' });
+    const v: ValidationResult = {
+      ...baseValidation(),
+      advisoryBrowserQa: {
+        status: 'uncertain',
+        reasoning: 'Advisory pass recorded.',
+        observations: [
+          {
+            id: 'obs-1',
+            status: 'uncertain',
+            summary: 'Visual check',
+            screenshots: [advisoryRef],
+          },
+        ],
+        screenshots: [advisoryRef],
+      },
+    };
+
+    const out = serializeValidationResult(v) as {
+      advisoryBrowserQa: {
+        observations: Array<{ screenshots: Array<{ url: string; source: string; path: string }> }>;
+        screenshots: Array<{ url: string; source: string; path: string }>;
+      };
+    };
+
+    expect(out.advisoryBrowserQa.screenshots[0]).toEqual({
+      url: '/pods/pod-12345/screenshots/advisory/obs.png',
+      source: 'advisory',
+      path: '0',
+    });
+    expect(out.advisoryBrowserQa.observations[0]?.screenshots[0]).toEqual({
+      url: '/pods/pod-12345/screenshots/advisory/obs.png',
+      source: 'advisory',
+      path: 'obs-1:0',
+    });
+  });
 });
 
 describe('serializePodForWire', () => {
@@ -169,6 +207,54 @@ describe('serializeSystemEventForWire', () => {
     expect(out.result.smoke.pages[0]?.screenshot?.url).toBe(
       '/pods/pod-12345/screenshots/smoke/root.png',
     );
+  });
+
+  it('rewrites advisory screenshot refs inside pod.validation_completed', () => {
+    const advisoryRef = ref({ source: 'advisory', filename: 'concern.png' });
+    const result: ValidationResult = {
+      ...baseValidation(),
+      advisoryBrowserQa: {
+        status: 'fail',
+        reasoning: 'Visual concern found.',
+        observations: [
+          {
+            id: 'advisory-concern-nonblocking',
+            status: 'fail',
+            summary: 'Loaded data is overlapped by an empty state.',
+            screenshots: [advisoryRef],
+            suggestedFacts: ['Add a browser fact for the loaded dashboard state.'],
+          },
+        ],
+        screenshots: [advisoryRef],
+      },
+    };
+
+    const out = serializeSystemEventForWire({
+      type: 'pod.validation_completed',
+      timestamp: '2026-05-10T00:00:00Z',
+      podId: 'pod-12345',
+      result,
+    }) as {
+      result: {
+        advisoryBrowserQa?: {
+          observations: Array<{
+            screenshots: Array<{ url: string; source: string; path: string }>;
+          }>;
+          screenshots: Array<{ url: string; source: string; path: string }>;
+        } | null;
+      };
+    };
+
+    expect(out.result.advisoryBrowserQa?.screenshots[0]).toEqual({
+      url: '/pods/pod-12345/screenshots/advisory/concern.png',
+      source: 'advisory',
+      path: '0',
+    });
+    expect(out.result.advisoryBrowserQa?.observations[0]?.screenshots[0]).toEqual({
+      url: '/pods/pod-12345/screenshots/advisory/concern.png',
+      source: 'advisory',
+      path: 'advisory-concern-nonblocking:0',
+    });
   });
 
   it('rewrites pageResults inside pod.validation_phase_completed (pages phase)', () => {

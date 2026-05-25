@@ -81,6 +81,11 @@ export interface ValidationEngineConfig {
   /** Whether the project has a web frontend. When false, browser-oriented validation is skipped. */
   hasWebUi?: boolean;
   /**
+   * Enables screenshot-backed advisory browser QA. Advisory only: this must not
+   * affect validation pass/fail and is intentionally separate from skipPhases.
+   */
+  advisoryBrowserQaEnabled?: boolean;
+  /**
    * Per-exec env vars injected into build/test/lint/SAST commands.
    *
    * Used to pass private-feed credentials (e.g. VSS_NUGET_EXTERNAL_FEED_ENDPOINTS for

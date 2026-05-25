@@ -43,6 +43,6 @@ required_facts:
     kind: integration-test
     artifact:
       path: packages/daemon/src/api/routes/screenshots.test.ts
-      change: create
+      change: update
     command: npx pnpm --filter @autopod/daemon test -- screenshots.test.ts
 human_review: []
