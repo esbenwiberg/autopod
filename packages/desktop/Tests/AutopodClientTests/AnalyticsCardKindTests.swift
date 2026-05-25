@@ -7,6 +7,7 @@ import Testing
     #expect(AnalyticsCardKind.cost.rawValue == "cost")
     #expect(AnalyticsCardKind.quality.rawValue == "quality")
     #expect(AnalyticsCardKind.status.rawValue == "status")
+    #expect(AnalyticsCardKind.memory.rawValue == "memory")
 }
 
 @Test func analyticsCardKindHashableRoundTrip() {
@@ -14,8 +15,10 @@ import Testing
     set.insert(.cost)
     set.insert(.quality)
     set.insert(.status)
+    set.insert(.memory)
     #expect(set.contains(.cost))
     #expect(set.contains(.quality))
     #expect(set.contains(.status))
-    #expect(set.count == 3)
+    #expect(set.contains(.memory))
+    #expect(set.count == 4)
 }

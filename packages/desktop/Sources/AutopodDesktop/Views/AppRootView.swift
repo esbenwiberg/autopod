@@ -187,6 +187,10 @@ public struct AppRootView: View {
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.getModelsAnalytics(days: days)
       },
+      loadMemoryAnalytics: { [connectionManager] (days: Int) in
+        guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
+        return try await api.getMemoryAnalytics(days: days)
+      },
       verifyAuditChain: { [connectionManager] in
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.verifyAuditChain()
@@ -199,15 +203,35 @@ public struct AppRootView: View {
       onEditJob: { id, req in Task { try? await scheduledJobStore.updateJob(id, req) } },
       onDeleteJob: { job in Task { try? await scheduledJobStore.deleteJob(job.id) } },
       memoryEntries: memoryStore.entries,
+      activeMemories: memoryStore.activeMemories,
+      pendingMemoryCandidates: memoryStore.pendingCandidates,
+      selectedMemoryUsage: memoryStore.selectedUsage,
+      selectedMemorySourceEvidence: memoryStore.selectedSourceEvidence,
+      selectedMemoryStaleEvidence: memoryStore.selectedStaleEvidence,
+      selectedMemoryHarmfulEvidence: memoryStore.selectedHarmfulEvidence,
+      memoryAnalytics: memoryStore.analytics,
+      isLoadingMemoryDetails: memoryStore.isLoadingDetails,
+      memoryError: memoryStore.error,
       pendingMemoryCount: memoryStore.pendingCount,
       onApproveMemory: { id in Task { await memoryStore.approve(id) } },
       onRejectMemory: { id in Task { await memoryStore.reject(id) } },
       onDeleteMemory: { id in Task { await memoryStore.delete(id) } },
       onEditMemory: { id, content in Task { await memoryStore.update(id, content: content) } },
+      onApproveMemoryCandidate: { id in Task { await memoryStore.approveCandidate(id) } },
+      onRejectMemoryCandidate: { id in Task { await memoryStore.rejectCandidate(id) } },
+      onEditMemoryCandidate: { id, update in Task { await memoryStore.updateCandidate(id, updates: update) } },
+      onSelectMemory: { id in Task { await memoryStore.loadDetails(memoryId: id) } },
+      onSelectMemoryCandidate: { id in Task { await memoryStore.loadCandidateEvidence(id) } },
       onCreateMemory: { scope, scopeId, path, content in
         Task { await memoryStore.create(scope: scope, scopeId: scopeId, path: path, content: content) }
       },
-      onLoadMemories: { await memoryStore.loadMemories() }
+      onLoadMemories: {
+        await memoryStore.loadMemories()
+        if let profile = profileStore.profiles.first?.name {
+          await memoryStore.loadPendingCandidates(scopeId: profile)
+        }
+        await memoryStore.loadAnalytics()
+      }
     )
     .environment(\.daemonAuthToken, connectionManager.activeToken ?? "")
     .environment(\.daemonBaseURL, connectionManager.api?.baseURL)
