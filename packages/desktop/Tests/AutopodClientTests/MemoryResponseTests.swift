@@ -102,6 +102,29 @@ import Testing
     #expect(candidate.status == .unknown("queued_for_review"))
 }
 
+@Test func partialMemoryCandidateDecodesWithConservativeDefaults() throws {
+    let json = """
+    {
+      "id": "cand-partial",
+      "path": "/workflow/release.md",
+      "content": "Tag releases from main.",
+      "sourceEvidence": [{
+        "excerpt": "release tags drifted"
+      }]
+    }
+    """.data(using: .utf8)!
+
+    let candidate = try JSONDecoder().decode(MemoryCandidate.self, from: json)
+
+    #expect(candidate.action == .create)
+    #expect(candidate.scope == .profile)
+    #expect(candidate.scopeId == "")
+    #expect(candidate.kind == .other)
+    #expect(candidate.status == .pending)
+    #expect(candidate.sourceEvidence.first?.signal == "")
+    #expect(candidate.sourceEvidence.first?.excerpt == "release tags drifted")
+}
+
 @Test func memoryUsageHistoryDecodes() throws {
     let json = """
     {

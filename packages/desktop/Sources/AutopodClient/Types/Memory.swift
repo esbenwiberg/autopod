@@ -108,6 +108,19 @@ public struct MemorySourceEvidence: Equatable, Sendable, Codable {
     self.severity = severity
     self.createdAt = createdAt
   }
+
+  private enum CodingKeys: String, CodingKey {
+    case podId, signal, excerpt, severity, createdAt
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    podId = try container.decodeIfPresent(String.self, forKey: .podId)
+    signal = try container.decodeIfPresent(String.self, forKey: .signal) ?? ""
+    excerpt = try container.decodeIfPresent(String.self, forKey: .excerpt) ?? ""
+    severity = try container.decodeIfPresent(MemoryEvidenceSeverity.self, forKey: .severity)
+    createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
+  }
 }
 
 public struct MemoryEntry: Identifiable, Sendable, Codable {
@@ -334,6 +347,36 @@ public struct MemoryCandidate: Identifiable, Equatable, Sendable, Codable {
     self.fallbackReason = fallbackReason
     self.createdAt = createdAt
     self.updatedAt = updatedAt
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case id, action, targetMemoryId, scope, scopeId, path, content, rationale
+    case kind, tags, appliesWhen, avoidWhen, confidence, sourceEvidence, impactSummary
+    case status, createdByPodId, fallbackReason, createdAt, updatedAt
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(String.self, forKey: .id)
+    action = try container.decodeIfPresent(MemoryCandidateAction.self, forKey: .action) ?? .create
+    targetMemoryId = try container.decodeIfPresent(String.self, forKey: .targetMemoryId)
+    scope = try container.decodeIfPresent(MemoryScope.self, forKey: .scope) ?? .profile
+    scopeId = try container.decodeIfPresent(String.self, forKey: .scopeId) ?? ""
+    path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
+    content = try container.decodeIfPresent(String.self, forKey: .content) ?? ""
+    rationale = try container.decodeIfPresent(String.self, forKey: .rationale)
+    kind = try container.decodeIfPresent(MemoryKind.self, forKey: .kind) ?? .other
+    tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+    appliesWhen = try container.decodeIfPresent(String.self, forKey: .appliesWhen)
+    avoidWhen = try container.decodeIfPresent(String.self, forKey: .avoidWhen)
+    confidence = try container.decodeIfPresent(Double.self, forKey: .confidence) ?? 0
+    sourceEvidence = try container.decodeIfPresent([MemorySourceEvidence].self, forKey: .sourceEvidence) ?? []
+    impactSummary = try container.decodeIfPresent(String.self, forKey: .impactSummary) ?? ""
+    status = try container.decodeIfPresent(MemoryCandidateStatus.self, forKey: .status) ?? .pending
+    createdByPodId = try container.decodeIfPresent(String.self, forKey: .createdByPodId)
+    fallbackReason = try container.decodeIfPresent(String.self, forKey: .fallbackReason)
+    createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt) ?? ""
+    updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt) ?? ""
   }
 }
 

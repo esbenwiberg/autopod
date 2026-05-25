@@ -250,6 +250,8 @@ public final class MemoryStore {
         do {
             let candidate = try await api.approveMemoryCandidate(id)
             upsertCandidate(candidate)
+            await loadActiveMemories(scopeId: candidate.scopeId)
+            await loadAnalytics(days: analytics?.days ?? 30)
         } catch {
             print("[MemoryStore] Failed to approve memory candidate \(id): \(error)")
             self.error = error.localizedDescription
@@ -261,6 +263,7 @@ public final class MemoryStore {
         do {
             let candidate = try await api.rejectMemoryCandidate(id)
             upsertCandidate(candidate)
+            await loadAnalytics(days: analytics?.days ?? 30)
         } catch {
             print("[MemoryStore] Failed to reject memory candidate \(id): \(error)")
             self.error = error.localizedDescription
@@ -307,6 +310,9 @@ public final class MemoryStore {
             if selectedCandidate?.id == candidate.id {
                 selectedCandidate = candidate
             }
+            if candidate.status == .approved, candidate.action == .update {
+                applyApprovedUpdateCandidate(candidate)
+            }
             return
         }
         if let idx = pendingCandidates.firstIndex(where: { $0.id == candidate.id }) {
@@ -316,6 +322,48 @@ public final class MemoryStore {
         }
         if selectedCandidate?.id == candidate.id {
             selectedCandidate = candidate
+        }
+    }
+
+    private func applyApprovedUpdateCandidate(_ candidate: MemoryCandidate) {
+        guard let targetMemoryId = candidate.targetMemoryId else { return }
+        updateCachedEntry(targetMemoryId) { entry in
+            MemoryEntry(
+                id: entry.id,
+                scope: entry.scope,
+                scopeId: entry.scopeId,
+                path: entry.path,
+                content: candidate.content,
+                contentSha256: entry.contentSha256,
+                rationale: entry.rationale,
+                kind: candidate.kind,
+                tags: candidate.tags,
+                appliesWhen: candidate.appliesWhen,
+                avoidWhen: candidate.avoidWhen,
+                confidence: candidate.confidence,
+                sourceEvidence: candidate.sourceEvidence,
+                impactSummary: candidate.impactSummary,
+                version: entry.version + 1,
+                approved: entry.approved,
+                createdByPodId: entry.createdByPodId,
+                createdAt: entry.createdAt,
+                updatedAt: candidate.updatedAt
+            )
+        }
+    }
+
+    private func updateCachedEntry(
+        _ id: String,
+        transform: (MemoryEntry) -> MemoryEntry
+    ) {
+        if let idx = entries.firstIndex(where: { $0.id == id }) {
+            entries[idx] = transform(entries[idx])
+        }
+        if let idx = activeMemories.firstIndex(where: { $0.id == id }) {
+            activeMemories[idx] = transform(activeMemories[idx])
+        }
+        if selectedMemory?.id == id, let selectedMemory {
+            self.selectedMemory = transform(selectedMemory)
         }
     }
 

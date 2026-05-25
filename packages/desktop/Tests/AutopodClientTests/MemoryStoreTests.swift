@@ -48,6 +48,64 @@ import Testing
     #expect(store.pendingCount == 0)
 }
 
+@MainActor
+@Test func memoryStoreAppliesApprovedUpdateCandidateEventToCachedMemory() {
+    let store = MemoryStore()
+    let entry = MemoryEntry(
+        id: "mem-1",
+        scope: .profile,
+        scopeId: "ios-app",
+        path: "/gotchas/codegen.md",
+        content: "Old content.",
+        kind: .gotcha,
+        tags: ["old"],
+        version: 1,
+        approved: true,
+        createdByPodId: "pod-0",
+        createdAt: "2026-05-01T00:00:00Z",
+        updatedAt: "2026-05-01T00:00:00Z"
+    )
+    let candidate = MemoryCandidate(
+        id: "cand-1",
+        action: .update,
+        targetMemoryId: "mem-1",
+        scope: .profile,
+        scopeId: "ios-app",
+        path: "/gotchas/codegen.md",
+        content: "Run codegen before building.",
+        rationale: "Avoids generated-file drift.",
+        kind: .workflow,
+        tags: ["codegen"],
+        appliesWhen: "Generated files changed",
+        avoidWhen: nil,
+        confidence: 0.9,
+        sourceEvidence: [
+            MemorySourceEvidence(
+                podId: "pod-1",
+                signal: "validation_failure",
+                excerpt: "Generated file missing",
+                severity: .high,
+                createdAt: "2026-05-03T00:00:00Z"
+            )
+        ],
+        impactSummary: "Avoids validation failures.",
+        status: .approved,
+        createdByPodId: "pod-1",
+        fallbackReason: nil,
+        createdAt: "2026-05-03T00:00:00Z",
+        updatedAt: "2026-05-04T00:00:00Z"
+    )
+
+    store.handleSuggestionCreated(entry)
+    store.handleCandidateCreated(makeCandidate(id: "cand-1"))
+    store.handleCandidateUpdated(candidate)
+
+    #expect(store.pendingCandidates.isEmpty)
+    #expect(store.entries.first?.content == "Run codegen before building.")
+    #expect(store.entries.first?.kind == .workflow)
+    #expect(store.entries.first?.version == 2)
+}
+
 private func makeCandidate(
     id: String,
     content: String = "Remember to run codegen.",
