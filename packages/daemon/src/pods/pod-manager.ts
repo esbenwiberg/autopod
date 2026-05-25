@@ -237,6 +237,13 @@ function hasPendingFactDecision(result: ValidationResult | null): boolean {
   );
 }
 
+class ValidationWorkspaceReconcileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ValidationWorkspaceReconcileError';
+  }
+}
+
 function buildValidationWaiver(result: ValidationResult | null, reason?: string): ValidationWaiver {
   return {
     waivedAt: new Date().toISOString(),
@@ -2392,6 +2399,197 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       cm,
       () => syncWorkspaceBackOnce(containerId, worktreePath, cm, podId),
       'syncWorkspaceBack',
+    );
+  }
+
+  async function readHostWorktreeHead(worktreePath: string): Promise<string | null> {
+    try {
+      const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+        cwd: worktreePath,
+      });
+      return stdout.trim() || null;
+    } catch (err) {
+      logger.warn({ err, worktreePath }, 'Could not read host worktree HEAD');
+      return null;
+    }
+  }
+
+  async function readHostWorktreeStatus(worktreePath: string): Promise<string | null> {
+    try {
+      const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+        cwd: worktreePath,
+      });
+      return stdout;
+    } catch (err) {
+      logger.warn({ err, worktreePath }, 'Could not read host worktree status');
+      return null;
+    }
+  }
+
+  async function readContainerWorktreeHead(
+    containerId: string,
+    cm: ContainerManager,
+  ): Promise<string | null> {
+    try {
+      const result = await cm.execInContainer(
+        containerId,
+        ['git', '-C', '/workspace', 'rev-parse', 'HEAD'],
+        { timeout: 10_000 },
+      );
+      if (result.exitCode !== 0) {
+        logger.warn(
+          { containerId, exitCode: result.exitCode, stderr: result.stderr.slice(0, 500) },
+          'Could not read container workspace HEAD',
+        );
+        return null;
+      }
+      return result.stdout.trim() || null;
+    } catch (err) {
+      logger.warn({ err, containerId }, 'Could not read container workspace HEAD');
+      return null;
+    }
+  }
+
+  async function readContainerWorktreeStatus(
+    containerId: string,
+    cm: ContainerManager,
+  ): Promise<string | null> {
+    try {
+      const result = await cm.execInContainer(
+        containerId,
+        ['git', '-C', '/workspace', 'status', '--porcelain'],
+        { timeout: 10_000 },
+      );
+      if (result.exitCode !== 0) {
+        logger.warn(
+          { containerId, exitCode: result.exitCode, stderr: result.stderr.slice(0, 500) },
+          'Could not read container workspace status',
+        );
+        return null;
+      }
+      return result.stdout;
+    } catch (err) {
+      logger.warn({ err, containerId }, 'Could not read container workspace status');
+      return null;
+    }
+  }
+
+  async function isAncestorInContainer(
+    containerId: string,
+    cm: ContainerManager,
+    ancestor: string,
+    descendant: string,
+  ): Promise<boolean | null> {
+    const result = await cm.execInContainer(
+      containerId,
+      ['git', '-C', '/workspace', 'merge-base', '--is-ancestor', ancestor, descendant],
+      { timeout: 10_000 },
+    );
+    if (result.exitCode === 0) return true;
+    if (result.exitCode === 1) return false;
+    logger.warn(
+      {
+        containerId,
+        ancestor,
+        descendant,
+        exitCode: result.exitCode,
+        stderr: result.stderr.slice(0, 500),
+      },
+      'Could not compare host/container workspace ancestry',
+    );
+    return null;
+  }
+
+  async function resetContainerWorkspaceToHead(
+    containerId: string,
+    cm: ContainerManager,
+    head: string,
+  ): Promise<void> {
+    const reset = await cm.execInContainer(
+      containerId,
+      ['git', '-C', '/workspace', 'reset', '--hard', head],
+      { timeout: 30_000 },
+    );
+    if (reset.exitCode !== 0) {
+      throw new ValidationWorkspaceReconcileError(
+        `Could not reset validation container to host HEAD ${head}: ${reset.stderr.trim() || reset.stdout.trim()}`,
+      );
+    }
+
+    const clean = await cm.execInContainer(
+      containerId,
+      ['git', '-C', '/workspace', 'clean', '-fd'],
+      {
+        timeout: 30_000,
+      },
+    );
+    if (clean.exitCode !== 0) {
+      throw new ValidationWorkspaceReconcileError(
+        `Could not clean validation container after reset to ${head}: ${clean.stderr.trim() || clean.stdout.trim()}`,
+      );
+    }
+  }
+
+  async function prepareWorkspaceForValidation(
+    containerId: string,
+    worktreePath: string,
+    cm: ContainerManager,
+    podId: string,
+  ): Promise<void> {
+    const [hostHead, hostStatus, containerHead, containerStatus] = await Promise.all([
+      readHostWorktreeHead(worktreePath),
+      readHostWorktreeStatus(worktreePath),
+      readContainerWorktreeHead(containerId, cm),
+      readContainerWorktreeStatus(containerId, cm),
+    ]);
+
+    if (!hostHead || !containerHead) {
+      logger.warn(
+        { podId, hostHead, containerHead },
+        'Could not inspect workspace heads before validation — falling back to sync-back',
+      );
+      await syncWorkspaceBack(containerId, worktreePath, cm, podId);
+      return;
+    }
+
+    const hostDirty = hostStatus == null ? null : hostStatus.trim().length > 0;
+    const containerDirty = containerStatus == null ? null : containerStatus.trim().length > 0;
+
+    if (hostHead === containerHead) {
+      if (containerDirty !== false) {
+        await syncWorkspaceBack(containerId, worktreePath, cm, podId);
+      }
+      return;
+    }
+
+    const containerAncestorOfHost = await isAncestorInContainer(
+      containerId,
+      cm,
+      containerHead,
+      hostHead,
+    );
+    if (containerAncestorOfHost === true) {
+      logger.info(
+        { podId, hostHead, containerHead, hostDirty, containerDirty },
+        'Host worktree is ahead of validation container — resetting container to host HEAD',
+      );
+      await resetContainerWorkspaceToHead(containerId, cm, hostHead);
+      return;
+    }
+
+    const hostAncestorOfContainer = await isAncestorInContainer(
+      containerId,
+      cm,
+      hostHead,
+      containerHead,
+    );
+    if (hostAncestorOfContainer === true) {
+      await syncWorkspaceBack(containerId, worktreePath, cm, podId);
+      return;
+    }
+
+    throw new ValidationWorkspaceReconcileError(
+      `Host worktree HEAD ${hostHead} and container workspace HEAD ${containerHead} diverged before validation`,
     );
   }
 
@@ -7557,10 +7755,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (pod.containerId && pod.worktreePath) {
           try {
             const cm = containerManagerFactory.get(pod.executionTarget);
-            await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, podId);
+            await prepareWorkspaceForValidation(pod.containerId, pod.worktreePath, cm, podId);
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to sync workspace before validation');
-            validationSyncOk = await tryRecoverAfterWorkspaceSyncFailure(pod, err, 'validation');
+            validationSyncOk =
+              err instanceof ValidationWorkspaceReconcileError
+                ? false
+                : await tryRecoverAfterWorkspaceSyncFailure(pod, err, 'validation');
           }
         }
         if (!validationSyncOk) {

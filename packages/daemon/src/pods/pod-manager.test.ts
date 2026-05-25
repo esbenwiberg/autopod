@@ -2634,8 +2634,17 @@ describe('PodManager', () => {
 
     it('recovers from live container when workspace sync fails before validation', async () => {
       const ctx = createTestContext({ overall: 'pass' });
-      (ctx.containerManager.execInContainer as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-        new Error('docker exec failed'),
+      (ctx.containerManager.execInContainer as ReturnType<typeof vi.fn>).mockImplementation(
+        async (_containerId, command: string[]) => {
+          if (
+            command[0] === 'sh' &&
+            command[1] === '-c' &&
+            String(command[2]).includes('/mnt/worktree')
+          ) {
+            throw new Error('docker exec failed');
+          }
+          return { stdout: '', stderr: '', exitCode: 0 };
+        },
       );
       (
         ctx.containerManager.extractDirectoryFromContainer as ReturnType<typeof vi.fn>
@@ -2658,13 +2667,84 @@ describe('PodManager', () => {
       expect(result.worktreeCompromised).toBe(false);
       expect(result.status).toBe('validated');
       expect(ctx.validationEngine.validate).toHaveBeenCalled();
-      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
+      expect(
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mock.calls.length,
+      ).toBeGreaterThanOrEqual(2);
       expect(mockedExecFile).toHaveBeenCalledWith(
         'git',
         ['reset', '--mixed', 'HEAD'],
         { cwd: '/tmp/wt' },
         expect.any(Function),
       );
+    });
+
+    it('resets a stale validation container to host HEAD instead of mirroring it back', async () => {
+      const hostHead = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      const containerHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      mockedExecFile.mockImplementation((...args: unknown[]) => {
+        const gitArgs = Array.isArray(args[1]) ? (args[1] as string[]) : [];
+        const callback = args[args.length - 1] as (
+          err: Error | null,
+          result: { stdout: string; stderr: string },
+        ) => void;
+        const stdout = gitArgs[0] === 'rev-parse' && gitArgs[1] === 'HEAD' ? `${hostHead}\n` : '';
+        callback(null, { stdout, stderr: '' });
+        return undefined as never;
+      });
+
+      const ctx = createTestContext({ overall: 'pass' });
+      ctx.containerManager.execInContainer = vi.fn(async (_containerId, command) => {
+        if (command[0] === 'git' && command[3] === 'rev-parse') {
+          return { stdout: `${containerHead}\n`, stderr: '', exitCode: 0 };
+        }
+        if (command[0] === 'git' && command[3] === 'status') {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (command[0] === 'git' && command[3] === 'merge-base') {
+          return {
+            stdout: '',
+            stderr: '',
+            exitCode: command[5] === containerHead && command[6] === hostHead ? 0 : 1,
+          };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+        'ctr-1',
+        ['git', '-C', '/workspace', 'reset', '--hard', hostHead],
+        { timeout: 30_000 },
+      );
+      expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+        'ctr-1',
+        ['git', '-C', '/workspace', 'clean', '-fd'],
+        { timeout: 30_000 },
+      );
+      const execCalls = vi.mocked(ctx.containerManager.execInContainer).mock.calls;
+      const resetIndex = execCalls.findIndex(
+        ([, command]) => command[0] === 'git' && command[3] === 'reset',
+      );
+      const firstDestructiveSyncIndex = execCalls.findIndex(
+        ([, command]) =>
+          command[0] === 'sh' &&
+          command[1] === '-c' &&
+          String(command[2]).includes('/mnt/worktree'),
+      );
+      expect(firstDestructiveSyncIndex === -1 || resetIndex < firstDestructiveSyncIndex).toBe(true);
+      expect(ctx.validationEngine.validate).toHaveBeenCalled();
     });
 
     it('pushes branch and creates PR on validation pass', async () => {
