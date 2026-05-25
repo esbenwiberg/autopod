@@ -3,6 +3,7 @@ import type { SpecContract } from './types/contract.js';
 import type {
   AdvisoryBrowserQaObservation,
   FactCheckResult,
+  ScreenshotRef,
   ValidationResult,
 } from './types/validation.js';
 
@@ -41,6 +42,13 @@ function factToEvidence(fact: FactCheckResult): Record<string, unknown> {
   };
 }
 
+function screenshotToEvidence(screenshot: ScreenshotRef): Record<string, unknown> {
+  return {
+    source: screenshot.source,
+    relative_path: screenshot.relativePath,
+  };
+}
+
 function advisoryObservationToEvidence(
   observation: AdvisoryBrowserQaObservation,
 ): Record<string, unknown> {
@@ -50,7 +58,7 @@ function advisoryObservationToEvidence(
     status: observation.status,
     summary: observation.summary,
     details: observation.details,
-    screenshots: observation.screenshots,
+    screenshots: observation.screenshots.map(screenshotToEvidence),
     suggested_facts: observation.suggestedFacts,
   };
 }
@@ -79,7 +87,7 @@ export function buildEvidenceDocument(input: EvidenceDocumentInput): Record<stri
           reasoning: advisory.reasoning,
           model: advisory.model,
           duration_ms: advisory.durationMs,
-          screenshots: advisory.screenshots,
+          screenshots: advisory.screenshots.map(screenshotToEvidence),
           observations: advisory.observations.map(advisoryObservationToEvidence),
         }
       : null,

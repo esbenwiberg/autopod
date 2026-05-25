@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { planLabel, progressLabel, taskPreview, taskTitle, validationLabel } from './pod-display.js';
+import {
+  planLabel,
+  progressLabel,
+  taskPreview,
+  taskTitle,
+  validationLabel,
+} from './pod-display.js';
 
 describe('pod display helpers', () => {
   it('extracts a concise title from markdown task text', () => {

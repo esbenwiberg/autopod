@@ -130,6 +130,12 @@ describe('evidence document', () => {
         status: 'uncertain',
         model: 'qa-model',
         duration_ms: 2500,
+        screenshots: [
+          {
+            source: 'advisory',
+            relative_path: 'screenshots/pod-123/advisory/finding-created.png',
+          },
+        ],
         observations: [
           {
             id: 'obs-navigation-ambiguous',
@@ -139,7 +145,7 @@ describe('evidence document', () => {
             screenshots: [
               {
                 source: 'advisory',
-                relativePath: 'screenshots/pod-123/advisory/finding-created.png',
+                relative_path: 'screenshots/pod-123/advisory/finding-created.png',
               },
             ],
             suggested_facts: ['Add a browser-test fact proving the audit tab opens by default.'],
@@ -158,5 +164,6 @@ describe('evidence document', () => {
     expect(yaml).toContain('advisory_browser_qa:');
     expect(yaml).toContain('scenario_id: finding-created');
     expect(yaml).toContain('source: advisory');
+    expect(yaml).toContain('relative_path: screenshots/pod-123/advisory/finding-created.png');
   });
 });
