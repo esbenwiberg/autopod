@@ -15,6 +15,8 @@ public final class MemoryStore {
     public private(set) var selectedSourceEvidence: [MemorySourceEvidence] = []
     public private(set) var selectedStaleEvidence: [MemoryUsageEvent] = []
     public private(set) var selectedHarmfulEvidence: [MemoryUsageEvent] = []
+    public private(set) var selectedMemoryDetailId: String?
+    public private(set) var selectedCandidateDetailId: String?
     public private(set) var analytics: MemoryAnalyticsResponse?
     public private(set) var isLoading = false
     public private(set) var isLoadingDetails = false
@@ -22,6 +24,7 @@ public final class MemoryStore {
     public var error: String?
 
     private var api: DaemonAPI?
+    private var detailLoadToken: UUID?
 
     public init() {}
 
@@ -116,39 +119,75 @@ public final class MemoryStore {
 
     public func loadDetails(memoryId: String) async {
         guard let api else { return }
+        selectedMemoryDetailId = memoryId
+        selectedCandidateDetailId = nil
+        selectedUsage = []
+        selectedSourceEvidence = []
+        selectedStaleEvidence = []
+        selectedHarmfulEvidence = []
+        let token = UUID()
+        detailLoadToken = token
         isLoadingDetails = true
+        defer {
+            if detailLoadToken == token {
+                isLoadingDetails = false
+            }
+        }
         error = nil
         selectedMemory = entries.first(where: { $0.id == memoryId })
             ?? activeMemories.first(where: { $0.id == memoryId })
+        selectedCandidate = nil
         do {
             async let usage = api.getMemoryUsage(memoryId)
             async let sourceEvidence = api.getMemorySourceEvidence(memoryId)
             async let staleEvidence = api.getMemoryStaleEvidence(memoryId)
             async let harmfulEvidence = api.getMemoryHarmfulEvidence(memoryId)
-            selectedUsage = try await usage.events
-            selectedSourceEvidence = try await sourceEvidence.evidence
-            selectedStaleEvidence = try await staleEvidence.evidence
-            selectedHarmfulEvidence = try await harmfulEvidence.evidence
+            let loadedUsage = try await usage.events
+            let loadedSourceEvidence = try await sourceEvidence.evidence
+            let loadedStaleEvidence = try await staleEvidence.evidence
+            let loadedHarmfulEvidence = try await harmfulEvidence.evidence
+            guard selectedMemoryDetailId == memoryId, selectedCandidateDetailId == nil else { return }
+            selectedUsage = loadedUsage
+            selectedSourceEvidence = loadedSourceEvidence
+            selectedStaleEvidence = loadedStaleEvidence
+            selectedHarmfulEvidence = loadedHarmfulEvidence
         } catch {
             print("[MemoryStore] Failed to load memory details \(memoryId): \(error)")
-            self.error = error.localizedDescription
+            if detailLoadToken == token {
+                self.error = error.localizedDescription
+            }
         }
-        isLoadingDetails = false
     }
 
     public func loadCandidateEvidence(_ candidateId: String) async {
         guard let api else { return }
+        selectedMemoryDetailId = nil
+        selectedCandidateDetailId = candidateId
+        selectedUsage = []
+        selectedSourceEvidence = []
+        selectedStaleEvidence = []
+        selectedHarmfulEvidence = []
+        let token = UUID()
+        detailLoadToken = token
         isLoadingDetails = true
+        defer {
+            if detailLoadToken == token {
+                isLoadingDetails = false
+            }
+        }
         error = nil
         selectedCandidate = pendingCandidates.first { $0.id == candidateId }
+        selectedMemory = nil
         do {
             let response = try await api.getMemoryCandidateSourceEvidence(candidateId)
+            guard selectedCandidateDetailId == candidateId, selectedMemoryDetailId == nil else { return }
             selectedSourceEvidence = response.evidence
         } catch {
             print("[MemoryStore] Failed to load candidate evidence \(candidateId): \(error)")
-            self.error = error.localizedDescription
+            if detailLoadToken == token {
+                self.error = error.localizedDescription
+            }
         }
-        isLoadingDetails = false
     }
 
     public func loadAnalytics(days: Int = 30) async {

@@ -65,6 +65,32 @@ import Testing
     #expect(MemoryManagementView.hasWarningEvidence(stale: [], harmful: [makeUsage(id: "harm", outcome: .harmfulStale)]) == true)
 }
 
+@Test func memoryWorkbenchRejectsDetailPayloadForDifferentSelection() {
+    #expect(
+        MemoryManagementView.detailPayloadMatches(
+            selection: .memory("mem-2"),
+            selectedMemoryDetailId: "mem-1",
+            selectedCandidateDetailId: nil
+        ) == false
+    )
+    #expect(
+        MemoryManagementView.detailPayloadMatches(
+            selection: .candidate("cand-1"),
+            selectedMemoryDetailId: nil,
+            selectedCandidateDetailId: "cand-1"
+        ) == true
+    )
+}
+
+@Test func memoryWorkbenchFiltersUsageToSelectedMemory() {
+    let selected = makeUsage(id: "u1", memoryId: "mem-1")
+    let stale = makeUsage(id: "u2", memoryId: "mem-2")
+
+    let result = MemoryManagementView.usageForMemory([selected, stale], memoryId: "mem-1")
+
+    #expect(result.map(\.id) == ["u1"])
+}
+
 private func makeMemory(
     id: String,
     scope: MemoryScope = .profile,
@@ -113,12 +139,13 @@ private func makeCandidate(
 
 private func makeUsage(
     id: String,
+    memoryId: String = "mem-1",
     kind: MemoryUsageKind = .selected,
     outcome: MemoryUsageOutcome? = nil
 ) -> MemoryUsageEvent {
     MemoryUsageEvent(
         id: id,
-        memoryId: "mem-1",
+        memoryId: memoryId,
         podId: "pod-1",
         kind: kind,
         outcome: outcome,

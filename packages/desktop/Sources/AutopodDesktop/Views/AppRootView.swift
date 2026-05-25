@@ -209,6 +209,8 @@ public struct AppRootView: View {
       selectedMemorySourceEvidence: memoryStore.selectedSourceEvidence,
       selectedMemoryStaleEvidence: memoryStore.selectedStaleEvidence,
       selectedMemoryHarmfulEvidence: memoryStore.selectedHarmfulEvidence,
+      selectedMemoryDetailId: memoryStore.selectedMemoryDetailId,
+      selectedMemoryCandidateDetailId: memoryStore.selectedCandidateDetailId,
       memoryAnalytics: memoryStore.analytics,
       isLoadingMemoryDetails: memoryStore.isLoadingDetails,
       memoryError: memoryStore.error,

@@ -16,6 +16,8 @@ public struct MemoryManagementView: View {
     public var selectedSourceEvidence: [MemorySourceEvidence]
     public var selectedStaleEvidence: [MemoryUsageEvent]
     public var selectedHarmfulEvidence: [MemoryUsageEvent]
+    public var selectedMemoryDetailId: String?
+    public var selectedCandidateDetailId: String?
     public var analytics: MemoryAnalyticsResponse?
     public var isLoadingDetails: Bool
     public var error: String?
@@ -53,6 +55,8 @@ public struct MemoryManagementView: View {
         selectedSourceEvidence: [MemorySourceEvidence] = [],
         selectedStaleEvidence: [MemoryUsageEvent] = [],
         selectedHarmfulEvidence: [MemoryUsageEvent] = [],
+        selectedMemoryDetailId: String? = nil,
+        selectedCandidateDetailId: String? = nil,
         analytics: MemoryAnalyticsResponse? = nil,
         isLoadingDetails: Bool = false,
         error: String? = nil,
@@ -78,6 +82,8 @@ public struct MemoryManagementView: View {
         self.selectedSourceEvidence = selectedSourceEvidence
         self.selectedStaleEvidence = selectedStaleEvidence
         self.selectedHarmfulEvidence = selectedHarmfulEvidence
+        self.selectedMemoryDetailId = selectedMemoryDetailId
+        self.selectedCandidateDetailId = selectedCandidateDetailId
         self.analytics = analytics
         self.isLoadingDetails = isLoadingDetails
         self.error = error
@@ -454,7 +460,10 @@ public struct MemoryManagementView: View {
             }
             infoPanel(title: "Impact", text: candidate.impactSummary, systemImage: "chart.line.uptrend.xyaxis")
             contentPanel(candidate.content)
-            evidencePanel(title: "Source Evidence", evidence: selectedSourceEvidence.isEmpty ? candidate.sourceEvidence : selectedSourceEvidence)
+            evidencePanel(
+                title: "Source Evidence",
+                evidence: detailSourceEvidence(for: .candidate(candidate.id), fallback: candidate.sourceEvidence)
+            )
             HStack(spacing: 8) {
                 Button {
                     onApproveCandidate(candidate.id)
@@ -493,15 +502,18 @@ public struct MemoryManagementView: View {
                 infoPanel(title: "Rationale", text: rationale, systemImage: "quote.bubble")
             }
             contentPanel(memory.content)
-            if Self.hasWarningEvidence(stale: selectedStaleEvidence, harmful: selectedHarmfulEvidence) {
-                warningPanel(stale: selectedStaleEvidence, harmful: selectedHarmfulEvidence)
+            let staleEvidence = detailStaleEvidence(for: memory.id)
+            let harmfulEvidence = detailHarmfulEvidence(for: memory.id)
+            if Self.hasWarningEvidence(stale: staleEvidence, harmful: harmfulEvidence) {
+                warningPanel(stale: staleEvidence, harmful: harmfulEvidence)
             }
             evidencePanel(
                 title: "Source Evidence",
-                evidence: selectedSourceEvidence.isEmpty ? memory.sourceEvidence : selectedSourceEvidence
+                evidence: detailSourceEvidence(for: .memory(memory.id), fallback: memory.sourceEvidence)
             )
-            impactPanel(memory)
-            usagePanel(selectedUsage)
+            let usage = detailUsage(for: memory.id)
+            impactPanel(memory, usage: usage)
+            usagePanel(usage)
             HStack(spacing: 8) {
                 if onEdit != nil {
                     Button {
@@ -523,6 +535,35 @@ public struct MemoryManagementView: View {
     }
 
     // MARK: - Scan & Fix section
+
+    private func detailSourceEvidence(
+        for selection: MemoryWorkbenchSelection,
+        fallback: [MemorySourceEvidence]
+    ) -> [MemorySourceEvidence] {
+        guard Self.detailPayloadMatches(
+            selection: selection,
+            selectedMemoryDetailId: selectedMemoryDetailId,
+            selectedCandidateDetailId: selectedCandidateDetailId
+        ) else {
+            return fallback
+        }
+        return selectedSourceEvidence.isEmpty ? fallback : selectedSourceEvidence
+    }
+
+    private func detailUsage(for memoryId: String) -> [MemoryUsageEvent] {
+        guard selectedMemoryDetailId == memoryId, selectedCandidateDetailId == nil else { return [] }
+        return Self.usageForMemory(selectedUsage, memoryId: memoryId)
+    }
+
+    private func detailStaleEvidence(for memoryId: String) -> [MemoryUsageEvent] {
+        guard selectedMemoryDetailId == memoryId, selectedCandidateDetailId == nil else { return [] }
+        return Self.usageForMemory(selectedStaleEvidence, memoryId: memoryId)
+    }
+
+    private func detailHarmfulEvidence(for memoryId: String) -> [MemoryUsageEvent] {
+        guard selectedMemoryDetailId == memoryId, selectedCandidateDetailId == nil else { return [] }
+        return Self.usageForMemory(selectedHarmfulEvidence, memoryId: memoryId)
+    }
 
     private var scanSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -906,11 +947,11 @@ public struct MemoryManagementView: View {
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.25), lineWidth: 1))
     }
 
-    private func impactPanel(_ memory: MemoryEntry) -> some View {
+    private func impactPanel(_ memory: MemoryEntry, usage: [MemoryUsageEvent]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Impact", systemImage: "chart.bar")
                 .font(.headline)
-            let counts = Self.usageImpactCounts(selectedUsage)
+            let counts = Self.usageImpactCounts(usage)
             HStack(spacing: 12) {
                 impactMetric("selected", counts.selected)
                 impactMetric("injected", counts.injected)
@@ -1063,13 +1104,35 @@ public struct MemoryManagementView: View {
             }
     }
 
-    static func usageImpactCounts(_ usage: [MemoryUsageEvent]) -> (selected: Int, injected: Int, read: Int, applied: Int) {
+    static func usageImpactCounts(
+        _ usage: [MemoryUsageEvent]
+    ) -> (selected: Int, injected: Int, read: Int, applied: Int) {
         (
             selected: usage.filter { $0.kind == .selected }.count,
             injected: usage.filter { $0.kind == .injected }.count,
             read: usage.filter { $0.kind == .read }.count,
             applied: usage.filter { $0.outcome == .applied }.count
         )
+    }
+
+    static func detailPayloadMatches(
+        selection: MemoryWorkbenchSelection,
+        selectedMemoryDetailId: String?,
+        selectedCandidateDetailId: String?
+    ) -> Bool {
+        switch selection {
+        case .memory(let id):
+            return selectedMemoryDetailId == id && selectedCandidateDetailId == nil
+        case .candidate(let id):
+            return selectedCandidateDetailId == id && selectedMemoryDetailId == nil
+        }
+    }
+
+    static func usageForMemory(
+        _ usage: [MemoryUsageEvent],
+        memoryId: String
+    ) -> [MemoryUsageEvent] {
+        usage.filter { $0.memoryId == memoryId }
     }
 
     static func hasWarningEvidence(stale: [MemoryUsageEvent], harmful: [MemoryUsageEvent]) -> Bool {

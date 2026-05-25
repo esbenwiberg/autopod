@@ -75,6 +75,8 @@ public struct MainView: View {
     public var selectedMemorySourceEvidence: [MemorySourceEvidence]
     public var selectedMemoryStaleEvidence: [MemoryUsageEvent]
     public var selectedMemoryHarmfulEvidence: [MemoryUsageEvent]
+    public var selectedMemoryDetailId: String?
+    public var selectedMemoryCandidateDetailId: String?
     public var memoryAnalytics: MemoryAnalyticsResponse?
     public var isLoadingMemoryDetails: Bool
     public var memoryError: String?
@@ -154,6 +156,8 @@ public struct MainView: View {
         selectedMemorySourceEvidence: [MemorySourceEvidence] = [],
         selectedMemoryStaleEvidence: [MemoryUsageEvent] = [],
         selectedMemoryHarmfulEvidence: [MemoryUsageEvent] = [],
+        selectedMemoryDetailId: String? = nil,
+        selectedMemoryCandidateDetailId: String? = nil,
         memoryAnalytics: MemoryAnalyticsResponse? = nil,
         isLoadingMemoryDetails: Bool = false,
         memoryError: String? = nil,
@@ -230,6 +234,8 @@ public struct MainView: View {
         self.selectedMemorySourceEvidence = selectedMemorySourceEvidence
         self.selectedMemoryStaleEvidence = selectedMemoryStaleEvidence
         self.selectedMemoryHarmfulEvidence = selectedMemoryHarmfulEvidence
+        self.selectedMemoryDetailId = selectedMemoryDetailId
+        self.selectedMemoryCandidateDetailId = selectedMemoryCandidateDetailId
         self.memoryAnalytics = memoryAnalytics
         self.isLoadingMemoryDetails = isLoadingMemoryDetails
         self.memoryError = memoryError
@@ -386,6 +392,8 @@ public struct MainView: View {
                     selectedSourceEvidence: selectedMemorySourceEvidence,
                     selectedStaleEvidence: selectedMemoryStaleEvidence,
                     selectedHarmfulEvidence: selectedMemoryHarmfulEvidence,
+                    selectedMemoryDetailId: selectedMemoryDetailId,
+                    selectedCandidateDetailId: selectedMemoryCandidateDetailId,
                     analytics: memoryAnalytics,
                     isLoadingDetails: isLoadingMemoryDetails,
                     error: memoryError,
