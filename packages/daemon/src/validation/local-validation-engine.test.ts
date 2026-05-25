@@ -10,6 +10,7 @@ import type {
   ValidationEngineConfig,
   ValidationPhaseCallbacks,
 } from '../interfaces/validation-engine.js';
+import { runClaudeCli } from '../runtimes/run-claude-cli.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import {
   artifactChangeSatisfied,
@@ -23,6 +24,18 @@ import {
   startAppStabilityMonitor,
   stripMarkdownFences,
 } from './local-validation-engine.js';
+
+vi.mock('../runtimes/run-claude-cli.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../runtimes/run-claude-cli.js')>();
+  return {
+    ...actual,
+    runClaudeCli: vi.fn(),
+  };
+});
+
+beforeEach(() => {
+  vi.mocked(runClaudeCli).mockReset();
+});
 
 describe('artifactChangeSatisfied', () => {
   const diff = `diff --git a/Client/src/Foo.ts b/Client/src/Foo.ts
@@ -656,7 +669,99 @@ describe('validate() — hasWebUi gating', () => {
     expect(pagesEvent?.status).toBe('skip');
   });
 
-  it('attaches advisory browser QA after blocking checks pass without affecting overall', async () => {
+  it('advisory-concern-nonblocking records concern evidence without affecting overall', async () => {
+    vi.mocked(runClaudeCli).mockResolvedValue({
+      stdout: JSON.stringify({
+        status: 'fail',
+        reasoning: 'Visual concern found.',
+        observations: [
+          {
+            id: 'empty-state-overlap',
+            targetId: 'scenario:dashboard',
+            status: 'fail',
+            summary: 'Loaded data is overlapped by the empty state.',
+            suggestedFacts: ['Add a browser fact for the loaded dashboard state.'],
+          },
+        ],
+      }),
+    });
+
+    const cm = stubContainerManager();
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: true,
+        cached: false,
+        checkedAt: '2026-05-25T00:00:00.000Z',
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      })),
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({
+        stdout: `AUTOPOD_ADVISORY_BROWSER_QA_JSON_START
+[{"targetId":"scenario:dashboard","url":"http://127.0.0.1:9999/","title":"Dashboard","notes":["empty state overlap"],"screenshotPath":"/tmp/advisory-0.png"}]
+AUTOPOD_ADVISORY_BROWSER_QA_JSON_END`,
+        stderr: '',
+        exitCode: 0,
+      })),
+      readScreenshot: vi.fn(async () => Buffer.from('png').toString('base64')),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp'),
+    };
+    const screenshotStore = {
+      write: vi.fn(async (podId: string, source: 'advisory', filename: string) => ({
+        podId,
+        source,
+        filename,
+        relativePath: `screenshots/${podId}/${source}/${filename}`,
+      })),
+    };
+    const engine = createLocalValidationEngine(
+      cm,
+      undefined,
+      hostBrowserRunner,
+      screenshotStore as never,
+    );
+
+    const result = await engine.validate(
+      baseConfig({
+        startCommand: '',
+        smokePages: [],
+        hasWebUi: true,
+        advisoryBrowserQaEnabled: true,
+        reviewerModel: 'claude-review',
+        contract: parseSpecContract(`contract_version: 1
+title: Advisory
+depends_on: []
+scenarios:
+  - id: dashboard
+    given: ["state"]
+    when: ["open dashboard"]
+    then: ["summary is visible"]
+required_facts: []
+human_review:
+  - id: visual
+    covers: [dashboard]
+    criterion: "Dashboard layout is visually coherent."
+    reason: "Needs a browser."
+`),
+      }),
+    );
+
+    expect(result.overall).toBe('pass');
+    expect(result.advisoryBrowserQa?.status).toBe('fail');
+    expect(result.advisoryBrowserQa?.observations[0]).toMatchObject({
+      id: 'empty-state-overlap',
+      scenarioId: 'dashboard',
+      status: 'fail',
+      suggestedFacts: ['Add a browser fact for the loaded dashboard state.'],
+    });
+    expect(result.advisoryBrowserQa?.screenshots[0]?.source).toBe('advisory');
+    expect(hostBrowserRunner.runScript).toHaveBeenCalled();
+  });
+
+  it('advisory-error-nonblocking attaches advisory browser QA errors without affecting overall', async () => {
     const cm = stubContainerManager();
     const hostBrowserRunner: HostBrowserRunner = {
       getAvailability: vi.fn(async () => ({
