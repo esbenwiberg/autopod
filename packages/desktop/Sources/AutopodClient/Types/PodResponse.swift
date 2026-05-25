@@ -234,10 +234,26 @@ public struct DeviationResponse: Codable, Sendable {
   public let reason: String
 }
 
+public struct FactDeviationReplacementResponse: Codable, Sendable, Hashable {
+  public let artifactPath: String
+  public let command: String
+  public let proves: [String]?
+}
+
+public struct FactDeviationRequestResponse: Codable, Sendable, Hashable {
+  public let factId: String
+  public let action: String
+  public let reason: String
+  public let whyImpossible: String
+  public let decision: String?
+  public let replacement: FactDeviationReplacementResponse?
+}
+
 public struct TaskSummaryResponse: Codable, Sendable {
   public let actualSummary: String
   public let deviations: [DeviationResponse]
   public let factEvidence: [FactEvidenceResponse]?
+  public let factDeviations: [FactDeviationRequestResponse]?
 }
 
 // MARK: - Nested types

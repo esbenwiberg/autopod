@@ -290,6 +290,42 @@ describe('formatFeedback', () => {
       expect(output).toContain('validation infrastructure failure');
       expect(output).toContain('Report this blocker');
     });
+
+    it('tells the agent to report factDeviations for unavailable fact commands', () => {
+      const validation = mockValidationResult({});
+      validation.factValidation = {
+        status: 'pending_human',
+        results: [
+          {
+            factId: 'fact-swift-only',
+            proves: ['swift-helper-readable'],
+            kind: 'unit-test',
+            artifactPath: 'packages/desktop/Tests/AutopodClientTests/MemoryResponseTests.swift',
+            command: 'cd packages/desktop && swift test --filter MemoryResponseTests',
+            passed: false,
+            status: 'pending_human',
+            exitCode: 127,
+            reasoning:
+              'Fact fact-swift-only needs human decision: required fact command `swift` is unavailable in the validation container.',
+            stderr: 'sh: 1: swift: not found',
+          },
+        ],
+      };
+      const output = formatFeedback({
+        type: 'validation_failure',
+        result: validation,
+        task: 'Mirror memory APIs in desktop client',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+
+      expect(output).toContain('Required Fact Deviation Requests Needed');
+      expect(output).toContain('Do not report these as ordinary plan deviations');
+      expect(output).toContain('`report_task_summary`');
+      expect(output).toContain('"factId": "fact-swift-only"');
+      expect(output).toContain('"action": "waive"');
+      expect(output).not.toContain('Required Fact Failures');
+    });
   });
 
   describe('human_rejection', () => {

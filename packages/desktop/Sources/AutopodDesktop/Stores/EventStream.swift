@@ -276,6 +276,24 @@ public final class EventStream {
     }
   }
 
+  private func mapFactDeviation(_ dto: FactDeviationRequestResponse) -> FactDeviationItem {
+    let replacement = dto.replacement.map {
+      FactDeviationReplacement(
+        artifactPath: $0.artifactPath,
+        command: $0.command,
+        proves: $0.proves
+      )
+    }
+    return FactDeviationItem(
+      factId: dto.factId,
+      action: dto.action,
+      reason: dto.reason,
+      whyImpossible: dto.whyImpossible,
+      decision: dto.decision,
+      replacement: replacement
+    )
+  }
+
   private func handleAgentActivity(podId: String, event: AgentEventResponse) {
     // Build UI-level AgentEvent
     eventIdCounter += 1
@@ -325,7 +343,8 @@ public final class EventStream {
           summary: TaskSummary(
             actualSummary: actualSummary,
             deviations: deviations,
-            factEvidence: event.factEvidence
+            factEvidence: event.factEvidence,
+            factDeviations: (event.factDeviations ?? []).map(mapFactDeviation)
           )
         )
       }

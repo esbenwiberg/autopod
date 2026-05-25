@@ -144,8 +144,39 @@ function formatValidationFailure(input: ValidationFeedback): string {
   }
 
   // Required fact failures
-  if (result.factValidation && result.factValidation.status === 'fail') {
-    const failed = result.factValidation.results.filter((r) => !r.passed);
+  if (result.factValidation) {
+    const unavailableFacts = result.factValidation.results.filter(isUnavailableRequiredFact);
+    if (unavailableFacts.length > 0) {
+      lines.push('### Required Fact Deviation Requests Needed');
+      lines.push(
+        'These required facts could not run in this validation environment. Do not report these as ordinary plan deviations. Call `report_task_summary` again with `factDeviations` for each fact below, using `action: "waive"` unless you added a replacement proof that can run here.',
+      );
+      lines.push('');
+      for (const check of unavailableFacts) {
+        lines.push(`**${check.factId}** (\`${check.artifactPath}\`):`);
+        lines.push(`- ${check.reasoning}`);
+        lines.push('- Suggested `factDeviations` entry:');
+        lines.push('```json');
+        lines.push(
+          JSON.stringify(
+            {
+              factId: check.factId,
+              action: 'waive',
+              reason: 'The required fact command cannot run in this validation environment.',
+              whyImpossible: check.reasoning,
+            },
+            null,
+            2,
+          ),
+        );
+        lines.push('```');
+      }
+      lines.push('');
+    }
+
+    const failed = result.factValidation.results.filter(
+      (r) => !r.passed && r.status !== 'pending_human',
+    );
     if (failed.length > 0) {
       lines.push('### Required Fact Failures');
       for (const check of failed) {
@@ -221,6 +252,12 @@ function formatValidationFailure(input: ValidationFeedback): string {
   lines.push(task);
 
   return lines.join('\n');
+}
+
+function isUnavailableRequiredFact(
+  check: NonNullable<ValidationResult['factValidation']>['results'][number],
+): boolean {
+  return check.status === 'pending_human' && check.exitCode === 127;
 }
 
 function formatHumanRejection(input: RejectionFeedback): string {

@@ -24,6 +24,24 @@ public enum PodMapper {
         ?? Date()
   }
 
+  private static func mapFactDeviation(_ dto: FactDeviationRequestResponse) -> FactDeviationItem {
+    let replacement = dto.replacement.map {
+      FactDeviationReplacement(
+        artifactPath: $0.artifactPath,
+        command: $0.command,
+        proves: $0.proves
+      )
+    }
+    return FactDeviationItem(
+      factId: dto.factId,
+      action: dto.action,
+      reason: dto.reason,
+      whyImpossible: dto.whyImpossible,
+      decision: dto.decision,
+      replacement: replacement
+    )
+  }
+
   // MARK: - Screenshot ref mapping
 
   /// Maps a `ScreenshotRefResponse` DTO to the UI model `ScreenshotRef`.
@@ -287,7 +305,8 @@ public enum PodMapper {
         deviations: ts.deviations.map {
           DeviationItem(step: $0.step, planned: $0.planned, actual: $0.actual, reason: $0.reason)
         },
-        factEvidence: ts.factEvidence
+        factEvidence: ts.factEvidence,
+        factDeviations: (ts.factDeviations ?? []).map(Self.mapFactDeviation)
       )
     }()
 

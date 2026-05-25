@@ -4,6 +4,32 @@ import Testing
 @testable import AutopodDesktop
 import AutopodUI
 
+@Test func decodesTaskSummaryFactDeviations() throws {
+  let json = """
+  {
+    "actualSummary": "Implemented the desktop memory client.",
+    "deviations": [],
+    "factEvidence": null,
+    "factDeviations": [
+      {
+        "factId": "fact-memory-response-decode",
+        "action": "waive",
+        "reason": "The Linux verifier image has no Swift toolchain.",
+        "whyImpossible": "swift exits 127 in the validation container.",
+        "decision": null,
+        "replacement": null
+      }
+    ]
+  }
+  """.data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(TaskSummaryResponse.self, from: json)
+
+  #expect(response.factDeviations?.count == 1)
+  #expect(response.factDeviations?.first?.factId == "fact-memory-response-decode")
+  #expect(response.factDeviations?.first?.action == "waive")
+}
+
 @Test func mapsRunningSession() throws {
   let json = """
   {

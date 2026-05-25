@@ -2,7 +2,7 @@ import AutopodClient
 import MarkdownUI
 import SwiftUI
 
-/// Work tab — task, plan, task summary, deviations from plan, and quality signals.
+/// Work tab — task, plan, task summary, deviations, and quality signals.
 struct WorkTab: View {
     let pod: Pod
     /// Optional closure for fetching session-quality signals. When nil
@@ -64,6 +64,10 @@ struct WorkTab: View {
         pod.taskSummary == nil ? .task : .summary
     }
 
+    private var deviationCount: Int {
+        pod.taskSummary?.deviationCount ?? 0
+    }
+
     private var sectionRail: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Work")
@@ -85,8 +89,8 @@ struct WorkTab: View {
                         Text(section.label)
                             .font(.subheadline.weight(selectedSection == section ? .semibold : .regular))
                         Spacer(minLength: 0)
-                        if section == .deviations, let count = pod.taskSummary?.deviations.count, count > 0 {
-                            Text("\(count)")
+                        if section == .deviations, deviationCount > 0 {
+                            Text("\(deviationCount)")
                                 .font(.caption2)
                                 .foregroundStyle(.orange)
                         }
@@ -127,8 +131,8 @@ struct WorkTab: View {
                 emptyWorkSection("No task summary reported yet", icon: "doc.text.below.ecg")
             }
         case .deviations:
-            if let summary = pod.taskSummary, !summary.deviations.isEmpty {
-                deviationsCard(summary.deviations)
+            if let summary = pod.taskSummary, summary.deviationCount > 0 {
+                deviationsContent(summary)
             } else {
                 emptyWorkSection("No deviations reported", icon: "checkmark.circle")
             }
@@ -313,11 +317,11 @@ struct WorkTab: View {
                 Text("Summary")
                     .font(.system(.subheadline).weight(.semibold))
                 Spacer()
-                if !summary.deviations.isEmpty {
+                if summary.deviationCount > 0 {
                     HStack(spacing: 3) {
                         Image(systemName: "exclamationmark.triangle")
                             .font(.system(size: 9))
-                        Text("\(summary.deviations.count) deviation\(summary.deviations.count == 1 ? "" : "s")")
+                        Text("\(summary.deviationCount) deviation\(summary.deviationCount == 1 ? "" : "s")")
                             .font(.caption2)
                     }
                     .foregroundStyle(.orange)
@@ -334,13 +338,25 @@ struct WorkTab: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
 
-            if includeDeviations && !summary.deviations.isEmpty {
-                deviationsCard(summary.deviations)
+            if includeDeviations && summary.deviationCount > 0 {
+                deviationsContent(summary)
             }
         }
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func deviationsContent(_ summary: TaskSummary) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if !summary.deviations.isEmpty {
+                deviationsCard(summary.deviations)
+            }
+            if !summary.factDeviations.isEmpty {
+                factDeviationsCard(summary.factDeviations)
+            }
+        }
     }
 
     private func deviationsCard(_ deviations: [DeviationItem]) -> some View {
@@ -361,6 +377,31 @@ struct WorkTab: View {
 
             ForEach(Array(deviations.enumerated()), id: \.offset) { _, deviation in
                 deviationCard(deviation)
+            }
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func factDeviationsCard(_ deviations: [FactDeviationItem]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.seal")
+                    .foregroundStyle(.orange)
+                Text("Required Fact Deviations")
+                    .font(.system(.subheadline).weight(.semibold))
+                Spacer()
+                Text("\(deviations.count)")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.orange.opacity(0.1), in: Capsule())
+            }
+
+            ForEach(Array(deviations.enumerated()), id: \.offset) { _, deviation in
+                factDeviationCard(deviation)
             }
         }
         .padding(14)
@@ -418,6 +459,82 @@ struct WorkTab: View {
                     .foregroundStyle(.tertiary)
                     .italic()
                     .textSelection(.enabled)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+        }
+        .background(Color.orange.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.orange.opacity(0.15), lineWidth: 1))
+    }
+
+    private func factDeviationCard(_ deviation: FactDeviationItem) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            Rectangle()
+                .fill(Color.orange.opacity(0.65))
+                .frame(width: 3)
+                .clipShape(RoundedRectangle(cornerRadius: 1.5))
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(deviation.factId)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                    Text(deviation.action)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.orange.opacity(0.1), in: Capsule())
+                    if let decision = deviation.decision {
+                        Text(decision)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("REASON")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .tracking(0.4)
+                    Text(deviation.reason)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("WHY IMPOSSIBLE")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .tracking(0.4)
+                    Text(deviation.whyImpossible)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+
+                if let replacement = deviation.replacement {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("REPLACEMENT")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .tracking(0.4)
+                        Text(replacement.artifactPath)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Text(replacement.command)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)

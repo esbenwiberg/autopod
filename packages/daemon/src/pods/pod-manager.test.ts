@@ -2822,6 +2822,49 @@ describe('PodManager', () => {
       expect(result.validationAttempts).toBe(1);
     });
 
+    it('retries unavailable fact commands so the agent can report factDeviations', async () => {
+      const ctx = createTestContext({
+        overall: 'fail',
+        factValidation: {
+          status: 'pending_human',
+          results: [
+            {
+              factId: 'fact-swift-only',
+              proves: ['swift-helper-readable'],
+              kind: 'unit-test',
+              artifactPath:
+                'packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift',
+              command: 'swift test --filter ThroughputTimeInStatusDisplayTests',
+              passed: false,
+              status: 'pending_human',
+              exitCode: 127,
+              reasoning:
+                'Fact fact-swift-only needs human decision: required fact command `swift` is unavailable in the validation container.',
+              stderr: 'sh: 1: swift: not found',
+            },
+          ],
+        },
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const resumeCalls = vi.mocked(ctx.runtime.resume).mock.calls;
+      expect(resumeCalls[0]?.[1]).toContain('Required Fact Deviation Requests Needed');
+      expect(resumeCalls[0]?.[1]).toContain('"factId": "fact-swift-only"');
+      expect(resumeCalls[0]?.[1]).toContain('Do not report these as ordinary plan deviations');
+    });
+
     it('retries with correction feedback until max attempts exhausted', async () => {
       // With always-failing validation, the retry loop exhausts all attempts
       const ctx = createTestContext({ overall: 'fail' });

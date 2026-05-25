@@ -229,8 +229,11 @@ function summarizeAgentCompletionBlocker(result: string): string | null {
 
 function hasPendingFactDecision(result: ValidationResult | null): boolean {
   return (
-    result?.factValidation?.status === 'pending_human' ||
-    result?.factValidation?.results.some((fact) => fact.status === 'pending_human') === true
+    result?.factValidation?.results.some(
+      // Exit 127 means the validator discovered a missing command/toolchain.
+      // Let the agent see that feedback so it can file the factDeviation request.
+      (fact) => fact.status === 'pending_human' && fact.exitCode !== 127,
+    ) === true
   );
 }
 

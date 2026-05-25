@@ -542,16 +542,45 @@ public struct DeviationItem: Sendable {
     }
 }
 
+public struct FactDeviationReplacement: Sendable {
+    public let artifactPath: String
+    public let command: String
+    public let proves: [String]?
+    public init(artifactPath: String, command: String, proves: [String]? = nil) {
+        self.artifactPath = artifactPath; self.command = command; self.proves = proves
+    }
+}
+
+public struct FactDeviationItem: Sendable {
+    public let factId: String
+    public let action: String
+    public let reason: String
+    public let whyImpossible: String
+    public let decision: String?
+    public let replacement: FactDeviationReplacement?
+    public init(
+        factId: String, action: String, reason: String, whyImpossible: String,
+        decision: String? = nil, replacement: FactDeviationReplacement? = nil
+    ) {
+        self.factId = factId; self.action = action; self.reason = reason
+        self.whyImpossible = whyImpossible; self.decision = decision; self.replacement = replacement
+    }
+}
+
 public struct TaskSummary: Sendable {
     public let actualSummary: String
     public let deviations: [DeviationItem]
     public let factEvidence: [FactEvidenceResponse]?
+    public let factDeviations: [FactDeviationItem]
+    public var deviationCount: Int { deviations.count + factDeviations.count }
     public init(
         actualSummary: String, deviations: [DeviationItem],
-        factEvidence: [FactEvidenceResponse]? = nil
+        factEvidence: [FactEvidenceResponse]? = nil,
+        factDeviations: [FactDeviationItem] = []
     ) {
         self.actualSummary = actualSummary; self.deviations = deviations
         self.factEvidence = factEvidence
+        self.factDeviations = factDeviations
     }
 }
 
