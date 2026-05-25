@@ -588,6 +588,7 @@ const podBridge = createSessionBridge({
   nudgeRepo,
   profileStore,
   memoryRepo,
+  memoryUsageRepo,
   containerManagerFactory,
   makeActionEngine,
   pendingRequestsByPod,

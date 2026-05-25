@@ -1,10 +1,12 @@
 import type { MemoryUsageEvent, MemoryUsageKind, MemoryUsageOutcome } from '@autopod/shared';
+import { generateId } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
 export interface MemoryUsageRepository {
   record(event: Omit<MemoryUsageEvent, 'createdAt'>): MemoryUsageEvent;
   listByMemory(memoryId: string): MemoryUsageEvent[];
   listByPod(podId: string): MemoryUsageEvent[];
+  recordNotReportedForPod(podId: string): MemoryUsageEvent[];
 }
 
 function rowToUsageEvent(row: Record<string, unknown>): MemoryUsageEvent {
@@ -59,6 +61,35 @@ export function createMemoryUsageRepository(db: Database.Database): MemoryUsageR
         .prepare('SELECT * FROM memory_usage_events WHERE pod_id = ? ORDER BY created_at ASC')
         .all(podId) as Record<string, unknown>[];
       return rows.map(rowToUsageEvent);
+    },
+
+    recordNotReportedForPod(podId: string): MemoryUsageEvent[] {
+      const existing = this.listByPod(podId);
+      const selectedIds = new Set<string>();
+      const reportedIds = new Set<string>();
+      const notReportedIds = new Set<string>();
+      for (const event of existing) {
+        if (event.kind === 'selected' || event.kind === 'injected') selectedIds.add(event.memoryId);
+        if (event.kind === 'summary_reported') reportedIds.add(event.memoryId);
+        if (event.kind === 'not_reported') notReportedIds.add(event.memoryId);
+      }
+
+      const recorded: MemoryUsageEvent[] = [];
+      for (const memoryId of selectedIds) {
+        if (reportedIds.has(memoryId) || notReportedIds.has(memoryId)) continue;
+        recorded.push(
+          this.record({
+            id: generateId(8),
+            memoryId,
+            podId,
+            kind: 'not_reported',
+            outcome: null,
+            reason: 'Pod reached a terminal state without final memory usage reporting.',
+            relevanceReason: null,
+          }),
+        );
+      }
+      return recorded;
     },
   };
 }

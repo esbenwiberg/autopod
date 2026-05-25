@@ -3164,6 +3164,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (to === 'complete' && pod.worktreeCompromised && updates.worktreeCompromised === undefined) {
       updates.worktreeCompromised = false;
     }
+    if (isTerminalState(to)) {
+      recordNotReportedMemoryUsage(pod.id);
+    }
     podRepo.update(pod.id, updates);
     eventBus.emit({
       type: 'pod.status_changed',
@@ -3173,6 +3176,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       newStatus: to,
     });
     return podRepo.getOrThrow(pod.id);
+  }
+
+  function recordNotReportedMemoryUsage(podId: string): void {
+    deps.memoryUsageRepo?.recordNotReportedForPod(podId);
   }
 
   /**
@@ -5473,6 +5480,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 actualSummary: event.actualSummary,
                 how: event.how,
                 deviations: event.deviations,
+                factEvidence: event.factEvidence,
+                memoryOutcomes: event.memoryOutcomes,
               },
             });
           } else if (event.type === 'status' && event.sessionId) {
