@@ -1,0 +1,78 @@
+import Foundation
+import Testing
+@testable import AutopodClient
+@testable import AutopodDesktop
+
+@MainActor
+@Test func memoryStoreHandlesLegacySuggestionEvent() {
+    let store = MemoryStore()
+    let entry = MemoryEntry(
+        id: "mem-1",
+        scope: .profile,
+        scopeId: "ios-app",
+        path: "/gotchas/build.md",
+        content: "Run codegen first.",
+        approved: false,
+        createdBySessionId: "pod-1"
+    )
+
+    store.handleSuggestionCreated(entry)
+
+    #expect(store.entries.count == 1)
+    #expect(store.pendingSuggestions.first?.id == "mem-1")
+    #expect(store.pendingCount == 1)
+    #expect(store.entries.first?.createdBySessionId == "pod-1")
+}
+
+@MainActor
+@Test func memoryStoreHandlesCandidateCreatedAndUpdatesInPlace() {
+    let store = MemoryStore()
+    let original = makeCandidate(id: "cand-1", content: "Old lesson")
+    let updated = makeCandidate(id: "cand-1", content: "Updated lesson")
+
+    store.handleCandidateCreated(original)
+    store.handleCandidateCreated(updated)
+
+    #expect(store.pendingCandidates.count == 1)
+    #expect(store.pendingCandidates.first?.content == "Updated lesson")
+    #expect(store.pendingCount == 1)
+}
+
+@MainActor
+@Test func memoryStoreRemovesNonPendingCandidateEvents() {
+    let store = MemoryStore()
+    store.handleCandidateCreated(makeCandidate(id: "cand-1", status: .pending))
+    store.handleCandidateCreated(makeCandidate(id: "cand-1", status: .approved))
+
+    #expect(store.pendingCandidates.isEmpty)
+    #expect(store.pendingCount == 0)
+}
+
+private func makeCandidate(
+    id: String,
+    content: String = "Remember to run codegen.",
+    status: MemoryCandidateStatus = .pending
+) -> MemoryCandidate {
+    MemoryCandidate(
+        id: id,
+        action: .create,
+        targetMemoryId: nil,
+        scope: .profile,
+        scopeId: "ios-app",
+        path: "/gotchas/codegen.md",
+        content: content,
+        rationale: "Avoids generated-file drift.",
+        kind: .gotcha,
+        tags: ["codegen"],
+        appliesWhen: nil,
+        avoidWhen: nil,
+        confidence: 0.8,
+        sourceEvidence: [],
+        impactSummary: "Avoids validation failures.",
+        status: status,
+        createdByPodId: "pod-1",
+        fallbackReason: nil,
+        createdAt: "2026-05-03T00:00:00Z",
+        updatedAt: "2026-05-03T00:00:00Z"
+    )
+}

@@ -250,7 +250,6 @@ public final class MemoryStore {
         do {
             let candidate = try await api.approveMemoryCandidate(id)
             upsertCandidate(candidate)
-            pendingCandidates.removeAll { $0.id == id && $0.status == .approved }
         } catch {
             print("[MemoryStore] Failed to approve memory candidate \(id): \(error)")
             self.error = error.localizedDescription
@@ -262,7 +261,6 @@ public final class MemoryStore {
         do {
             let candidate = try await api.rejectMemoryCandidate(id)
             upsertCandidate(candidate)
-            pendingCandidates.removeAll { $0.id == id && $0.status == .rejected }
         } catch {
             print("[MemoryStore] Failed to reject memory candidate \(id): \(error)")
             self.error = error.localizedDescription

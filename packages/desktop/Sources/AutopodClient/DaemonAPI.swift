@@ -622,7 +622,7 @@ public actor DaemonAPI {
 
   public func updateFromBase(_ id: String) async throws -> UpdateFromBaseResponse {
     let path = "/pods/\(id)/update-from-base"
-    let url = try makeRequestURL(path, query: [:])
+    let url = try makeRequestURL(path)
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
