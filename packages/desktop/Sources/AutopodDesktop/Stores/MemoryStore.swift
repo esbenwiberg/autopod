@@ -297,6 +297,10 @@ public final class MemoryStore {
         upsertCandidate(candidate)
     }
 
+    public func handleCandidateUpdated(_ candidate: MemoryCandidate) {
+        upsertCandidate(candidate)
+    }
+
     private func upsertCandidate(_ candidate: MemoryCandidate) {
         if candidate.status != .pending {
             pendingCandidates.removeAll { $0.id == candidate.id }

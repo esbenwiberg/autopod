@@ -259,6 +259,9 @@ public final class EventStream {
     case .memoryCandidateCreated(_, let candidate):
       memoryStore?.handleCandidateCreated(candidate)
 
+    case .memoryCandidateUpdated(_, let candidate):
+      memoryStore?.handleCandidateUpdated(candidate)
+
     case .validationOverrideQueued(let podId, _):
       // Refresh pod so pending overrides count updates in the UI
       Task { await podStore.refreshSession(podId) }

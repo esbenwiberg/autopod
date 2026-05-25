@@ -131,6 +131,7 @@ public enum SystemEvent: Sendable {
   case sessionCompleted(podId: String, finalStatus: String, summary: SessionSummaryResponse)
   case memorySuggestionCreated(podId: String, entry: MemoryEntry)
   case memoryCandidateCreated(podId: String, candidate: MemoryCandidate)
+  case memoryCandidateUpdated(podId: String, candidate: MemoryCandidate)
   case validationOverrideQueued(podId: String, override: ValidationOverrideEntry)
   case scheduledJobCatchupRequested(jobId: String, jobName: String, lastRunAt: String?)
   case scheduledJobFired(jobId: String, jobName: String, podId: String)
@@ -190,6 +191,10 @@ public enum SystemEvent: Sendable {
     case "memory.candidate_created":
       guard let id = raw.podId, let candidate = raw.candidate else { return nil }
       return .memoryCandidateCreated(podId: id, candidate: candidate)
+
+    case "memory.candidate_updated":
+      guard let id = raw.podId, let candidate = raw.candidate else { return nil }
+      return .memoryCandidateUpdated(podId: id, candidate: candidate)
 
     case "validation.override_queued":
       guard let id = raw.podId, let ov = raw.override else { return nil }

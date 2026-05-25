@@ -31,7 +31,7 @@ import Testing
     let updated = makeCandidate(id: "cand-1", content: "Updated lesson")
 
     store.handleCandidateCreated(original)
-    store.handleCandidateCreated(updated)
+    store.handleCandidateUpdated(updated)
 
     #expect(store.pendingCandidates.count == 1)
     #expect(store.pendingCandidates.first?.content == "Updated lesson")

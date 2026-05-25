@@ -110,8 +110,8 @@ import Testing
         "id": "usage-1",
         "memoryId": "mem-1",
         "podId": "pod-1",
-        "kind": "summary_reported",
-        "outcome": "harmful_stale",
+        "kind": "plan_reported",
+        "outcome": "intended",
         "reason": "The package changed.",
         "relevanceReason": "Matched package upgrade task.",
         "createdAt": "2026-05-04T00:00:00Z"
@@ -122,8 +122,8 @@ import Testing
     let response = try JSONDecoder().decode(MemoryUsageResponse.self, from: json)
 
     #expect(response.memoryId == "mem-1")
-    #expect(response.events.first?.kind == .summaryReported)
-    #expect(response.events.first?.outcome == .harmfulStale)
+    #expect(response.events.first?.kind == .planReported)
+    #expect(response.events.first?.outcome == .intended)
 }
 
 @Test func memoryAnalyticsDecodes() throws {
@@ -233,5 +233,49 @@ import Testing
         #expect(candidate.id == "cand-1")
     default:
         Issue.record("Expected memoryCandidateCreated event")
+    }
+}
+
+@Test func memoryCandidateUpdatedEventParses() throws {
+    let json = """
+    {
+      "type": "memory.candidate_updated",
+      "timestamp": "2026-05-03T00:00:00Z",
+      "podId": "pod-2",
+      "candidate": {
+        "id": "cand-1",
+        "action": "update",
+        "targetMemoryId": "mem-1",
+        "scope": "profile",
+        "scopeId": "ios-app",
+        "path": "/workflow/release.md",
+        "content": "Tag releases from main.",
+        "rationale": "Release automation expects main.",
+        "kind": "review_feedback",
+        "tags": ["release"],
+        "appliesWhen": null,
+        "avoidWhen": null,
+        "confidence": 0.77,
+        "sourceEvidence": [],
+        "impactSummary": "Keeps release tags consistent.",
+        "status": "pending",
+        "createdByPodId": "pod-2",
+        "fallbackReason": null,
+        "createdAt": "2026-05-03T00:00:00Z",
+        "updatedAt": "2026-05-03T00:00:00Z"
+      }
+    }
+    """.data(using: .utf8)!
+
+    let raw = try JSONDecoder().decode(RawSystemEvent.self, from: json)
+    let event = SystemEvent.parse(raw)
+
+    switch event {
+    case .memoryCandidateUpdated(let podId, let candidate):
+        #expect(podId == "pod-2")
+        #expect(candidate.id == "cand-1")
+        #expect(candidate.kind == .reviewFeedback)
+    default:
+        Issue.record("Expected memoryCandidateUpdated event")
     }
 }

@@ -20,6 +20,8 @@ public enum MemoryKind: Equatable, Sendable, Codable {
   case workflow
   case dependency
   case preference
+  case reviewFeedback
+  case other
   case unknown(String)
 
   public init(from decoder: any Decoder) throws {
@@ -30,6 +32,8 @@ public enum MemoryKind: Equatable, Sendable, Codable {
     case "workflow": self = .workflow
     case "dependency": self = .dependency
     case "preference": self = .preference
+    case "review_feedback": self = .reviewFeedback
+    case "other": self = .other
     default: self = .unknown(value)
     }
   }
@@ -46,6 +50,8 @@ public enum MemoryKind: Equatable, Sendable, Codable {
     case .workflow: "workflow"
     case .dependency: "dependency"
     case .preference: "preference"
+    case .reviewFeedback: "review_feedback"
+    case .other: "other"
     case .unknown(let value): value
     }
   }
@@ -373,6 +379,7 @@ public enum MemoryUsageKind: Equatable, Sendable, Codable {
   case injected
   case read
   case searched
+  case planReported
   case summaryReported
   case notReported
   case unknown(String)
@@ -384,6 +391,7 @@ public enum MemoryUsageKind: Equatable, Sendable, Codable {
     case "injected": self = .injected
     case "read": self = .read
     case "searched": self = .searched
+    case "plan_reported": self = .planReported
     case "summary_reported": self = .summaryReported
     case "not_reported": self = .notReported
     default: self = .unknown(value)
@@ -401,6 +409,7 @@ public enum MemoryUsageKind: Equatable, Sendable, Codable {
     case .injected: "injected"
     case .read: "read"
     case .searched: "searched"
+    case .planReported: "plan_reported"
     case .summaryReported: "summary_reported"
     case .notReported: "not_reported"
     case .unknown(let value): value
@@ -409,6 +418,7 @@ public enum MemoryUsageKind: Equatable, Sendable, Codable {
 }
 
 public enum MemoryUsageOutcome: Equatable, Sendable, Codable {
+  case intended
   case applied
   case notApplicable
   case harmfulStale
@@ -417,6 +427,7 @@ public enum MemoryUsageOutcome: Equatable, Sendable, Codable {
   public init(from decoder: any Decoder) throws {
     let value = try decoder.singleValueContainer().decode(String.self)
     switch value {
+    case "intended": self = .intended
     case "applied": self = .applied
     case "not_applicable": self = .notApplicable
     case "harmful_stale": self = .harmfulStale
@@ -431,6 +442,7 @@ public enum MemoryUsageOutcome: Equatable, Sendable, Codable {
 
   public var rawValue: String {
     switch self {
+    case .intended: "intended"
     case .applied: "applied"
     case .notApplicable: "not_applicable"
     case .harmfulStale: "harmful_stale"
