@@ -2146,6 +2146,47 @@ describe('PodManager', () => {
         expect(updated.worktreePath).toBe('/tmp/worktree/existing');
       });
 
+      it('does not skip recovery spawn when a prior complete was followed by a fatal error', async () => {
+        const ctx = createTestContext();
+        setupExecFileMock({ bareRepoPath: '/tmp/bare/recovered.git' });
+
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Continue feature', skipValidation: true },
+          'user-1',
+        );
+
+        ctx.eventBus.emit({
+          type: 'pod.agent_activity',
+          timestamp: '2026-01-01T00:00:00.000Z',
+          podId: pod.id,
+          event: {
+            type: 'complete',
+            timestamp: '2026-01-01T00:00:00.000Z',
+            result: 'Agent printed complete before the runtime failed',
+          },
+        });
+        ctx.eventBus.emit({
+          type: 'pod.agent_activity',
+          timestamp: '2026-01-01T00:00:01.000Z',
+          podId: pod.id,
+          event: {
+            type: 'error',
+            timestamp: '2026-01-01T00:00:01.000Z',
+            message: 'Codex process exited with code 137',
+            fatal: true,
+          },
+        });
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+        });
+
+        await manager.processPod(pod.id);
+
+        expect(ctx.runtime.spawn).toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      });
+
       it('uses fresh spawn with rework prompt when reworkReason is set', async () => {
         const runtime = createMockRuntime();
         (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();

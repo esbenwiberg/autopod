@@ -1000,17 +1000,22 @@ function deriveAgentAttempt(phaseTokenUsage: PhaseTokenUsage | null): number {
   return 1 + highestRework;
 }
 
-function hasPersistedAgentCompleteEvent(
+function hasLatestPersistedAgentTerminalEventComplete(
   eventRepo: EventRepository | undefined,
   podId: string,
 ): boolean {
   if (!eventRepo) return false;
-  return eventRepo
-    .getForSession(podId)
-    .some(
-      (event) =>
-        event.payload.type === 'pod.agent_activity' && event.payload.event.type === 'complete',
-    );
+  let latestTerminalEvent: 'complete' | 'error' | null = null;
+  for (const event of eventRepo.getForSession(podId)) {
+    if (event.payload.type !== 'pod.agent_activity') continue;
+    const agentEvent = event.payload.event;
+    if (agentEvent.type === 'complete') {
+      latestTerminalEvent = 'complete';
+    } else if (agentEvent.type === 'error' && agentEvent.fatal) {
+      latestTerminalEvent = 'error';
+    }
+  }
+  return latestTerminalEvent === 'complete';
 }
 
 export function createPodManager(deps: PodManagerDependencies): PodManager {
@@ -5175,7 +5180,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           return;
         }
 
-        if (isRecovery && !isRework && hasPersistedAgentCompleteEvent(deps.eventRepo, podId)) {
+        if (
+          isRecovery &&
+          !isRework &&
+          hasLatestPersistedAgentTerminalEventComplete(deps.eventRepo, podId)
+        ) {
           emitStatus('Agent already finished before recovery — resuming completion…');
           logger.info(
             { podId, worktreePath },

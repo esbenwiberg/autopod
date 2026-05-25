@@ -594,5 +594,117 @@ describe('CodexStreamParser', () => {
       expect(complete?.costUsd).toBe(0);
       expect(warnMessages.some((m) => m.includes('unknown-model-xyz'))).toBe(true);
     });
+
+    it('maps Codex CLI 0.133 JSONL envelopes into agent activity', async () => {
+      const stream = createMockStream([
+        JSON.stringify({
+          timestamp: '2026-05-25T08:09:12.624Z',
+          type: 'session_meta',
+          payload: { id: 'sess-123', cwd: '/workspace' },
+        }),
+        JSON.stringify({
+          timestamp: '2026-05-25T08:09:12.632Z',
+          type: 'event_msg',
+          payload: { type: 'task_started', turn_id: 'turn-1' },
+        }),
+        JSON.stringify({
+          timestamp: '2026-05-25T08:09:16.673Z',
+          type: 'turn_context',
+          payload: { model: 'gpt-4o' },
+        }),
+        JSON.stringify({
+          timestamp: '2026-05-25T08:09:25.898Z',
+          type: 'event_msg',
+          payload: { type: 'agent_message', message: 'Inspecting the repo' },
+        }),
+        JSON.stringify({
+          timestamp: '2026-05-25T08:09:25.912Z',
+          type: 'response_item',
+          payload: {
+            type: 'function_call',
+            name: 'exec_command',
+            arguments: JSON.stringify({ cmd: 'rg memory', workdir: '/workspace' }),
+            call_id: 'call-1',
+          },
+        }),
+        JSON.stringify({
+          timestamp: '2026-05-25T08:09:26.051Z',
+          type: 'response_item',
+          payload: { type: 'function_call_output', call_id: 'call-1', output: 'found it' },
+        }),
+        JSON.stringify({
+          timestamp: '2026-05-25T08:09:26.052Z',
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              total_token_usage: {
+                input_tokens: 1000,
+                output_tokens: 50,
+              },
+            },
+          },
+        }),
+        JSON.stringify({
+          timestamp: '2026-05-25T08:11:03.560Z',
+          type: 'event_msg',
+          payload: {
+            type: 'patch_apply_end',
+            changes: {
+              '/workspace/packages/shared/src/types/task-summary.ts': { type: 'modify' },
+            },
+          },
+        }),
+        JSON.stringify({
+          timestamp: '2026-05-25T08:12:00.000Z',
+          type: 'event_msg',
+          payload: {
+            type: 'turn_complete',
+            last_agent_message: 'Done',
+          },
+        }),
+      ]);
+
+      const events: AgentEvent[] = [];
+      for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
+        events.push(event);
+      }
+
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'status',
+            message: 'Codex session ready',
+            sessionId: 'sess-123',
+          }),
+          expect.objectContaining({ type: 'status', message: 'Codex turn started' }),
+          expect.objectContaining({ type: 'status', message: 'Inspecting the repo' }),
+          expect.objectContaining({
+            type: 'tool_use',
+            tool: 'Bash',
+            input: expect.objectContaining({
+              call_id: 'call-1',
+              command: 'rg memory',
+              cwd: '/workspace',
+            }),
+          }),
+          expect.objectContaining({
+            type: 'tool_use',
+            output: 'found it',
+          }),
+          expect.objectContaining({
+            type: 'file_change',
+            path: '/workspace/packages/shared/src/types/task-summary.ts',
+            action: 'modify',
+          }),
+          expect.objectContaining({
+            type: 'complete',
+            result: 'Done',
+            totalInputTokens: 1000,
+            totalOutputTokens: 50,
+          }),
+        ]),
+      );
+    });
   });
 });

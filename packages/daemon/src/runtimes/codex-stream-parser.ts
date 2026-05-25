@@ -23,6 +23,7 @@ import type { Logger } from 'pino';
 interface CodexEnvelope {
   id?: string;
   msg?: { type?: string; [key: string]: unknown };
+  payload?: { type?: string; [key: string]: unknown };
   // Some channels emit flat events without the wrapper; accept both.
   type?: string;
   [key: string]: unknown;
@@ -47,6 +48,9 @@ const MAX_REASONING_LEN = 4000;
 
 function unwrap(env: CodexEnvelope): { type?: string; [key: string]: unknown } | null {
   if (env.msg && typeof env.msg === 'object') return env.msg as { type?: string };
+  if (env.payload && typeof env.payload === 'object' && typeof env.payload.type === 'string') {
+    return env.payload;
+  }
   if (typeof env.type === 'string') return env as { type?: string };
   return null;
 }
@@ -56,6 +60,8 @@ function tsOf(env: CodexEnvelope): string {
   if (typeof top === 'string') return top;
   const inner = env.msg && (env.msg as Record<string, unknown>).timestamp;
   if (typeof inner === 'string') return inner;
+  const payload = env.payload && (env.payload as Record<string, unknown>).timestamp;
+  if (typeof payload === 'string') return payload;
   return new Date().toISOString();
 }
 
@@ -70,6 +76,74 @@ function commandToString(cmd: unknown): string {
   return '';
 }
 
+function parseJsonObject(raw: unknown): Record<string, unknown> | null {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  if (typeof raw !== 'string') return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function contentToString(content: unknown): string | undefined {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return undefined;
+  const parts = content
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (!part || typeof part !== 'object') return '';
+      const record = part as Record<string, unknown>;
+      if (typeof record.text === 'string') return record.text;
+      if (typeof record.content === 'string') return record.content;
+      return '';
+    })
+    .filter(Boolean);
+  return parts.length > 0 ? parts.join('\n') : undefined;
+}
+
+function mapFunctionCall(msg: { [key: string]: unknown }, ts: string): AgentEvent | null {
+  const callId = typeof msg.call_id === 'string' ? msg.call_id : undefined;
+  const name = typeof msg.name === 'string' ? msg.name : 'tool';
+  const args = parseJsonObject(msg.arguments) ?? parseJsonObject(msg.input);
+  const input: Record<string, unknown> = { call_id: callId };
+
+  if (args) {
+    Object.assign(input, args);
+  } else if (typeof msg.input === 'string') {
+    input.input = truncate(msg.input, MAX_OUTPUT_LEN);
+  } else if (typeof msg.arguments === 'string') {
+    input.arguments = truncate(msg.arguments, MAX_OUTPUT_LEN);
+  }
+
+  if (name === 'exec_command') {
+    const command = typeof input.cmd === 'string' ? input.cmd : commandToString(input.command);
+    if (command) input.command = command;
+    if (typeof input.workdir === 'string' && typeof input.cwd !== 'string') {
+      input.cwd = input.workdir;
+    }
+    return { type: 'tool_use', timestamp: ts, tool: 'Bash', input };
+  }
+
+  return { type: 'tool_use', timestamp: ts, tool: name, input };
+}
+
+function mapFunctionOutput(msg: { [key: string]: unknown }, ts: string): AgentEvent {
+  const output = typeof msg.output === 'string' ? msg.output : JSON.stringify(msg.output ?? null);
+  return {
+    type: 'tool_use',
+    timestamp: ts,
+    tool: 'tool',
+    input: { call_id: msg.call_id },
+    output: truncate(output, MAX_OUTPUT_LEN) ?? '',
+  };
+}
+
 /**
  * Map a single Codex event payload (the unwrapped `msg`) to an AgentEvent.
  * Stateless — token accumulation and turn-completion stitching live in
@@ -81,16 +155,30 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
   const ts = tsOf(event);
 
   switch (msg.type) {
+    case 'session_meta': {
+      const payload = msg.payload as Record<string, unknown> | undefined;
+      const base = { type: 'status' as const, timestamp: ts, message: 'Codex session ready' };
+      return typeof payload?.id === 'string' ? { ...base, sessionId: payload.id } : base;
+    }
+
     case 'session_configured': {
       const base = { type: 'status' as const, timestamp: ts, message: 'Codex session ready' };
       return typeof msg.session_id === 'string' ? { ...base, sessionId: msg.session_id } : base;
     }
 
+    case 'task_started':
     case 'turn_started':
       return { type: 'status', timestamp: ts, message: 'Codex turn started' };
 
     case 'agent_message': {
       const message = typeof msg.message === 'string' ? msg.message : '';
+      if (!message) return null;
+      return { type: 'status', timestamp: ts, message };
+    }
+
+    case 'message': {
+      if (msg.role !== 'assistant') return null;
+      const message = contentToString(msg.content);
       if (!message) return null;
       return { type: 'status', timestamp: ts, message };
     }
@@ -182,6 +270,14 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
       };
     }
 
+    case 'function_call':
+    case 'custom_tool_call':
+      return mapFunctionCall(msg, ts);
+
+    case 'function_call_output':
+    case 'custom_tool_call_output':
+      return mapFunctionOutput(msg, ts);
+
     case 'web_search_begin':
       return {
         type: 'tool_use',
@@ -237,6 +333,9 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
     case 'token_count':
     case 'turn_complete':
     case 'patch_apply_end': // yields one file_change per file — handled in parse()
+    case 'event_msg':
+    case 'response_item':
+    case 'turn_context':
       return null;
 
     // High-frequency or interactive variants we deliberately ignore. Listing
@@ -298,6 +397,10 @@ async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIte
         msg: `Failed to parse JSONL line: ${trimmed.slice(0, 200)}`,
       });
       continue;
+    }
+
+    if (env.type === 'turn_context' && typeof env.payload?.model === 'string') {
+      latestModel = env.payload.model;
     }
 
     const msg = unwrap(env);
