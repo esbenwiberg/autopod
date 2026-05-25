@@ -7,7 +7,7 @@ import {
   computePodUntrackedPreview,
 } from '../../pods/pod-diff-fetcher.js';
 import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
-import type { ProfileStore } from '../../profiles/index.js';
+import { type ProfileStore, selectGitPat } from '../../profiles/index.js';
 
 interface DiffFile {
   path: string;
@@ -57,7 +57,8 @@ export function diffRoutes(
     const { podId } = request.params as { podId: string };
     const pod = podManager.getSession(podId);
 
-    const baseBranch = pod.baseBranch ?? getBaseBranch(profileStore, pod.profileName);
+    const profile = getProfile(profileStore, pod.profileName);
+    const baseBranch = pod.baseBranch ?? profile?.defaultBranch ?? 'main';
     const containerManager = pod.containerId
       ? containerManagerFactory.get(pod.executionTarget)
       : undefined;
@@ -72,7 +73,7 @@ export function diffRoutes(
     // Single-ref `git diff <base>` folds committed + uncommitted into one net
     // delta — avoids the double-counting bug where a file committed AND modified
     // in the worktree showed up as two separate `diff --git` blocks.
-    const [canonical, preview, uncommitted, commitGroups] = await Promise.all([
+    const [canonicalResult, preview, uncommitted, commitGroups] = await Promise.all([
       computePodDiff({
         pod: podSlice,
         defaultBranch: baseBranch,
@@ -102,6 +103,20 @@ export function diffRoutes(
         logger: request.log,
       }),
     ]);
+    let canonical = canonicalResult;
+
+    if (!canonical.diff.trim() && profile?.repoUrl && worktreeManager?.getBranchDiff) {
+      const branchDiff = await worktreeManager.getBranchDiff({
+        repoUrl: profile.repoUrl,
+        branch: pod.branch,
+        baseBranch,
+        pat: selectGitPat(profile),
+        startCommitSha: pod.startCommitSha,
+      });
+      if (branchDiff.trim()) {
+        canonical = { diff: branchDiff, source: 'worktree' };
+      }
+    }
 
     const files = parseDiff(canonical.diff);
     const previewFiles = preview.files;
@@ -136,12 +151,11 @@ export function diffRoutes(
 
 // MARK: - Helpers
 
-function getBaseBranch(profileStore: ProfileStore, profileName: string): string {
+function getProfile(profileStore: ProfileStore, profileName: string) {
   try {
-    const profile = profileStore.get(profileName);
-    return profile?.defaultBranch ?? 'main';
+    return profileStore.get(profileName);
   } catch {
-    return 'main';
+    return null;
   }
 }
 

@@ -72,6 +72,7 @@ describe('ProfileStore', () => {
       expect(profile.smokePages).toEqual([]);
       expect(profile.escalation).toEqual({
         askHuman: true,
+        askHumanOnTimeout: 'continue',
         askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
         advisor: { enabled: false },
         autoPauseAfter: 3,
@@ -166,6 +167,7 @@ describe('ProfileStore', () => {
       expect(raw.issueWatcherEnabled).toBeNull();
       expect(raw.issueWatcherLabelPrefix).toBeNull();
       expect(raw.trustedSource).toBeNull();
+      expect(raw.pod).toBeNull();
       // Object/array defaults likewise.
       expect(raw.escalation).toBeNull();
       // Resolved view pulls the parent's values.
@@ -345,6 +347,38 @@ describe('ProfileStore', () => {
     });
   });
 
+  describe('pod advisory browser QA', () => {
+    it('round-trips nil, true, and false through profile pod defaults', () => {
+      store.create({
+        ...validInput,
+        pod: { agentMode: 'auto', output: 'pr', validate: true, promotable: false },
+      });
+      expect(store.get('my-app').pod?.advisoryBrowserQaEnabled).toBeUndefined();
+
+      store.update('my-app', {
+        pod: {
+          agentMode: 'auto',
+          output: 'pr',
+          validate: true,
+          advisoryBrowserQaEnabled: true,
+          promotable: false,
+        },
+      });
+      expect(store.get('my-app').pod?.advisoryBrowserQaEnabled).toBe(true);
+
+      store.update('my-app', {
+        pod: {
+          agentMode: 'auto',
+          output: 'pr',
+          validate: true,
+          advisoryBrowserQaEnabled: false,
+          promotable: false,
+        },
+      });
+      expect(store.get('my-app').pod?.advisoryBrowserQaEnabled).toBe(false);
+    });
+  });
+
   describe('inheritance booleans (hasWebUi / issueWatcherEnabled / trustedSource)', () => {
     // The Zod schema used to default these booleans to concrete values, so any
     // PATCH that omitted the field would silently re-stamp the column with the
@@ -498,6 +532,7 @@ describe('ProfileStore', () => {
     it('should preserve escalation config through create/get', () => {
       const escalation = {
         askHuman: false,
+        askHumanOnTimeout: 'continue' as const,
         askAi: { enabled: true, model: 'opus', maxCalls: 10 },
         advisor: { enabled: false },
         autoPauseAfter: 5,

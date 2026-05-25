@@ -104,9 +104,9 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .buildRun:
             ["build command", "start command", "test command", "health path", "timeout", "npm", "dotnet", "python", "compile"]
         case .agent:
-            ["model", "opus", "sonnet", "runtime", "claude", "codex", "copilot", "custom instructions", "system prompt"]
+            ["model", "opus", "sonnet", "auto", "gpt-5", "runtime", "claude", "codex", "copilot", "custom instructions", "system prompt"]
         case .providers:
-            ["model provider", "anthropic", "max", "foundry", "azure foundry", "copilot", "pr provider", "code platform", "github", "ado", "azure devops", "oauth", "authenticate", "login", "endpoint", "project id", "api key"]
+            ["model provider", "anthropic", "max", "openai", "codex", "foundry", "azure foundry", "copilot", "pr provider", "code platform", "github", "ado", "azure devops", "oauth", "authenticate", "login", "endpoint", "project id", "api key"]
         case .escalation:
             ["escalation", "ask human", "ai consultation", "advisor", "auto pause", "guardrails", "human response timeout", "token budget", "budget", "soft", "hard", "warn at", "extensions", "limit"]
         case .container:
@@ -162,7 +162,7 @@ struct HelpBadge: View {
 // MARK: - Profile editor
 
 /// Callback for profile authentication flows.
-/// Parameters: profile name, provider ("max" or "copilot"), completion callback (error message or nil).
+/// Parameters: profile name, provider ("max", "openai", or "copilot"), completion callback (error message or nil).
 public typealias ProfileAuthHandler = (String, String, @escaping (String?) -> Void) -> Void
 
 /// Profile editor — settings-style layout with sidebar section navigation and inline help.
@@ -301,6 +301,11 @@ public struct ProfileEditorView: View {
         case failed(String)
     }
 
+    private var isAuthenticating: Bool {
+        if case .inProgress = authStatus { return true }
+        return false
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             header
@@ -319,6 +324,10 @@ public struct ProfileEditorView: View {
         }
         .frame(width: 880, height: 720)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { normalizeRuntimeModelSelections() }
+        .onChange(of: profile.defaultRuntime) { _, _ in
+            normalizeRuntimeModelSelections()
+        }
         .task { await loadEditorPayloadIfNeeded() }
     }
 
@@ -442,6 +451,13 @@ public struct ProfileEditorView: View {
         Binding(
             get: { mergeStrategyDraft[field] ?? .merge },
             set: { mergeStrategyDraft[field] = $0 }
+        )
+    }
+
+    private var advisoryBrowserQaModeBinding: Binding<AdvisoryBrowserQaMode> {
+        Binding(
+            get: { AdvisoryBrowserQaMode(value: profile.pod.advisoryBrowserQaEnabled) },
+            set: { profile.pod.advisoryBrowserQaEnabled = $0.value }
         )
     }
 
@@ -808,6 +824,16 @@ public struct ProfileEditorView: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
             }
+            fieldRow("Advisory Browser QA", help: "Evidence-only browser QA during validation. Auto leaves the profile unset so derived profiles can inherit or use the daemon default.") {
+                Picker("", selection: advisoryBrowserQaModeBinding) {
+                    ForEach(AdvisoryBrowserQaMode.allCases, id: \.self) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 210)
+            }
             fieldRow("Promotable", help: "Allow promoting this pod to agent-driven mid-flight (interactive → auto).") {
                 Toggle("Allow promotion", isOn: $profile.pod.promotable)
                     .toggleStyle(.switch)
@@ -934,21 +960,13 @@ public struct ProfileEditorView: View {
     @ViewBuilder
     private var agentFields: some View {
         HStack(spacing: 24) {
-            fieldRow("Default Model", help: "Opus is more capable but slower; Sonnet is faster and cheaper.") {
-                Picker("", selection: $profile.defaultModel) {
-                    Text("Opus").tag("opus")
-                    Text("Sonnet").tag("sonnet")
-                }
-                .labelsHidden()
-                .frame(width: 130)
+            fieldRow("Default Model", help: defaultModelHelp) {
+                runtimeModelPicker(selection: $profile.defaultModel, role: .defaultModel)
+                    .frame(width: 150)
             }
-            fieldRow("Reviewer Model", help: "Model used for required-facts review and task review. Sonnet is sufficient for automated checks.") {
-                Picker("", selection: $profile.reviewerModel) {
-                    Text("Sonnet").tag("sonnet")
-                    Text("Opus").tag("opus")
-                }
-                .labelsHidden()
-                .frame(width: 130)
+            fieldRow("Reviewer Model", help: reviewerModelHelp) {
+                runtimeModelPicker(selection: $profile.reviewerModel, role: .reviewerModel)
+                    .frame(width: 150)
             }
             fieldRow("Runtime", help: "AI runtime engine — Claude Code, OpenAI Codex, or GitHub Copilot.") {
                 Picker("", selection: $profile.defaultRuntime) {
@@ -975,6 +993,63 @@ public struct ProfileEditorView: View {
                     .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
             )
         }
+    }
+
+    private var defaultModelHelp: String {
+        switch profile.defaultRuntime {
+        case .claude:
+            "Claude model for generation pods. Opus is more capable; Sonnet is faster and cheaper."
+        case .codex:
+            "Codex model for generation pods. Auto lets the Codex CLI use the account default."
+        case .copilot:
+            "Copilot model selection is controlled by the Copilot provider credentials."
+        }
+    }
+
+    private var reviewerModelHelp: String {
+        switch profile.defaultRuntime {
+        case .claude:
+            "Claude model used for required-facts review and task review."
+        case .codex:
+            "Codex model used for required-facts review and task review."
+        case .copilot:
+            "Copilot review model follows the provider/runtime configuration."
+        }
+    }
+
+    private func runtimeModelPicker(
+        selection: Binding<String>,
+        role: RuntimeModelRole
+    ) -> some View {
+        Picker("", selection: selection) {
+            ForEach(
+                RuntimeModelOptions.options(
+                    for: profile.defaultRuntime,
+                    role: role,
+                    currentValue: selection.wrappedValue
+                ),
+                id: \.value
+            ) { option in
+                Text(option.label).tag(option.value)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+    }
+
+    private func normalizeRuntimeModelSelections(resetCodexRestrictedModel: Bool = false) {
+        profile.defaultModel = RuntimeModelOptions.normalized(
+            profile.defaultModel,
+            for: profile.defaultRuntime,
+            role: .defaultModel,
+            resetCodexRestrictedModel: resetCodexRestrictedModel
+        )
+        profile.reviewerModel = RuntimeModelOptions.normalized(
+            profile.reviewerModel,
+            for: profile.defaultRuntime,
+            role: .reviewerModel,
+            resetCodexRestrictedModel: resetCodexRestrictedModel
+        )
     }
 
     // MARK: - Escalation
@@ -1147,11 +1222,17 @@ public struct ProfileEditorView: View {
         fieldRow("Model Provider", help: "Authentication backend for AI model API calls.") {
             Picker("", selection: $profile.modelProvider) {
                 ForEach(ModelProvider.allCases, id: \.self) { p in
-                    Text(p.rawValue.capitalized).tag(p)
+                    Text(p.label).tag(p)
                 }
             }
             .labelsHidden()
             .frame(width: 160)
+            .onChange(of: profile.modelProvider) { _, newValue in
+                if newValue == .openai {
+                    profile.defaultRuntime = .codex
+                    normalizeRuntimeModelSelections(resetCodexRestrictedModel: true)
+                }
+            }
         }
 
         // Provider credentials indicator
@@ -1166,6 +1247,16 @@ public struct ProfileEditorView: View {
         }
 
         // Foundry-specific fields
+        if profile.modelProvider == .openai {
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.blue.opacity(0.7))
+                Text("Codex uses either this profile's ChatGPT login or the daemon's OPENAI_API_KEY.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+
         if profile.modelProvider == .foundry {
             HStack(spacing: 16) {
                 fieldRow("Endpoint URL", help: "Azure Foundry deployment endpoint URL.") {
@@ -1188,8 +1279,8 @@ public struct ProfileEditorView: View {
             }
         }
 
-        // OAuth auth buttons for MAX and Copilot
-        if !isNew && (profile.modelProvider == .max || profile.modelProvider == .copilot) {
+        // OAuth/auth buttons for MAX, OpenAI Codex, and Copilot
+        if !isNew && (profile.modelProvider == .max || profile.modelProvider == .openai || profile.modelProvider == .copilot) {
             HStack(spacing: 12) {
                 if profile.modelProvider == .max {
                     Button {
@@ -1200,8 +1291,20 @@ public struct ProfileEditorView: View {
                             Text("Authenticate with Claude MAX")
                         }
                     }
-                    .disabled(onAuthenticate == nil || authStatus == .inProgress("max"))
+                    .disabled(onAuthenticate == nil || isAuthenticating)
                     .help("Opens Claude CLI to complete OAuth login. Credentials are saved to this profile.")
+                }
+                if profile.modelProvider == .openai {
+                    Button {
+                        startAuth(provider: "openai", label: "OpenAI Codex")
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.badge.key")
+                            Text("Authenticate with OpenAI Pro")
+                        }
+                    }
+                    .disabled(onAuthenticate == nil || isAuthenticating)
+                    .help("Opens Codex login. ChatGPT/Pro credentials are saved to this profile.")
                 }
                 if profile.modelProvider == .copilot {
                     Button {
@@ -1212,7 +1315,7 @@ public struct ProfileEditorView: View {
                             Text("Authenticate with Copilot")
                         }
                     }
-                    .disabled(onAuthenticate == nil || authStatus == .inProgress("copilot"))
+                    .disabled(onAuthenticate == nil || isAuthenticating)
                     .help("Opens GitHub Copilot login. Token is saved to this profile.")
                 }
             }
@@ -2332,12 +2435,13 @@ public struct ProfileEditorView: View {
     }
 
     private func providerNeedsAuth(_ provider: String) -> Bool {
-        provider == "max" || provider == "copilot"
+        provider == "max" || provider == "openai" || provider == "copilot"
     }
 
     private func providerAuthLabel(_ provider: String) -> String {
         switch provider {
         case "max":     return "Claude MAX"
+        case "openai":  return "OpenAI Pro"
         case "copilot": return "GitHub Copilot"
         default:        return provider
         }
@@ -2463,6 +2567,8 @@ public struct ProfileEditorView: View {
 
     @ViewBuilder
     private func overrideCard(for field: ProfileOverrideField) -> some View {
+        let parentRuntime = RuntimeType(rawValue: editorPayload?.parent?.defaultRuntime ?? "")
+            ?? profile.defaultRuntime
         switch field.key {
         // MARK: General
         case "repoUrl":
@@ -2567,13 +2673,15 @@ public struct ProfileEditorView: View {
 
         // MARK: Agent
         case "defaultModel":
-            stringCard(field, value: $profile.defaultModel,
-                       parent: editorPayload?.parent?.defaultModel ?? "",
-                       placeholder: "opus")
+            modelCard(field, selection: $profile.defaultModel,
+                      role: .defaultModel,
+                      parent: editorPayload?.parent?.defaultModel ?? "",
+                      parentRuntime: parentRuntime)
         case "reviewerModel":
-            stringCard(field, value: $profile.reviewerModel,
-                       parent: editorPayload?.parent?.reviewerModel ?? "",
-                       placeholder: profile.defaultModel)
+            modelCard(field, selection: $profile.reviewerModel,
+                      role: .reviewerModel,
+                      parent: editorPayload?.parent?.reviewerModel ?? "",
+                      parentRuntime: parentRuntime)
         case "defaultRuntime":
             enumCard(field, selection: $profile.defaultRuntime,
                      options: RuntimeType.allCases.map { ($0, $0.rawValue.capitalized) },
@@ -2589,7 +2697,7 @@ public struct ProfileEditorView: View {
         // MARK: Providers
         case "modelProvider":
             enumCard(field, selection: $profile.modelProvider,
-                     options: ModelProvider.allCases.map { ($0, $0.rawValue.capitalized) },
+                     options: ModelProvider.allCases.map { ($0, $0.label) },
                      parent: editorPayload?.parent?.modelProvider ?? "")
         case "prProvider":
             enumCard(field, selection: $profile.prProvider,
@@ -2899,6 +3007,20 @@ public struct ProfileEditorView: View {
                 Spacer()
             }
             parentLine(parent.map { $0 ? "On" : "Off" } ?? "(inherited)")
+        }
+    }
+
+    private func modelCard(
+        _ field: ProfileOverrideField,
+        selection: Binding<String>,
+        role: RuntimeModelRole,
+        parent: String,
+        parentRuntime: RuntimeType
+    ) -> some View {
+        overrideCardShell(field: field) {
+            runtimeModelPicker(selection: selection, role: role)
+                .frame(width: 240, alignment: .leading)
+            parentLine(RuntimeModelOptions.label(for: parent, runtime: parentRuntime))
         }
     }
 
@@ -3221,11 +3343,26 @@ public struct ProfileEditorView: View {
                         .toggleStyle(.switch).labelsHidden()
                 }
                 GridRow {
+                    Text("Advisory Browser QA").font(.caption2).foregroundStyle(.tertiary)
+                    Picker("", selection: advisoryBrowserQaModeBinding) {
+                        ForEach(AdvisoryBrowserQaMode.allCases, id: \.self) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 210)
+                }
+                GridRow {
                     Text("Promotable").font(.caption2).foregroundStyle(.tertiary)
                     Toggle("", isOn: $profile.pod.promotable)
                         .toggleStyle(.switch).labelsHidden()
                 }
             }
+            parentLine(
+                "Advisory browser QA: "
+                + AdvisoryBrowserQaMode(value: editorPayload?.parent?.pod?.advisoryBrowserQaEnabled).label
+            )
         }
     }
 

@@ -38,7 +38,7 @@ RUN groupadd --gid 1000 autopod && \
 RUN npm install -g pnpm@9
 
 # Agent CLIs
-RUN npm install -g @anthropic-ai/claude-code @github/copilot
+RUN npm install -g @anthropic-ai/claude-code @openai/codex @github/copilot
 
 # Working directory
 WORKDIR /workspace

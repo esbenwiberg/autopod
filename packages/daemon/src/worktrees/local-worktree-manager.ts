@@ -5,9 +5,12 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Logger } from 'pino';
 import type {
+  BranchDiffConfig,
   BranchFolderContents,
   CommitPendingChangesOptions,
   DiffStats,
+  EnsureRemoteBranchConfig,
+  EnsureRemoteBranchResult,
   MergeBranchConfig,
   RebaseOntoBaseConfig,
   RebaseOntoBaseResult,
@@ -674,6 +677,81 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
   }
 
+  async getBranchDiff(config: BranchDiffConfig): Promise<string> {
+    const { repoUrl, branch, baseBranch, pat, maxLength = 200_000 } = config;
+    const cacheKey = this.sanitizeRepoUrl(repoUrl);
+    const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
+    const authUrl = pat ? this.injectPat(repoUrl, pat) : repoUrl;
+    if (pat) this.patCache.set(bareRepoPath, pat);
+
+    await fs.mkdir(this.cacheDir, { recursive: true });
+
+    try {
+      return await this.repoLocks.run(cacheKey, async () => {
+        if (!(await this.isBareRepoValid(bareRepoPath))) {
+          await fs.rm(bareRepoPath, { recursive: true, force: true });
+          this.logger.info({ repoUrl, bareRepoPath }, 'getBranchDiff: cloning bare repo');
+          try {
+            await git(['clone', '--bare', authUrl, bareRepoPath]);
+          } catch (err) {
+            throw sanitizeGitError(err);
+          }
+          await git(['remote', 'set-url', 'origin', repoUrl], { cwd: bareRepoPath });
+        }
+
+        const branchRef = await this.fetchBranchRef({
+          authUrl,
+          bareRepoPath,
+          branch,
+          purpose: 'getBranchDiff',
+        });
+
+        let base = config.startCommitSha?.trim() || undefined;
+        if (base) {
+          try {
+            await git(['rev-parse', '--verify', `${base}^{commit}`], { cwd: bareRepoPath });
+          } catch {
+            this.logger.warn(
+              { branch, startCommitSha: base },
+              'getBranchDiff: startCommitSha not found in repo cache; falling back to merge-base',
+            );
+            base = undefined;
+          }
+        }
+
+        if (!base) {
+          const baseRef = await this.fetchBranchRef({
+            authUrl,
+            bareRepoPath,
+            branch: baseBranch,
+            purpose: 'getBranchDiff',
+          });
+          const { stdout } = await git(['merge-base', branchRef, baseRef], {
+            cwd: bareRepoPath,
+          });
+          base = stdout.trim() || undefined;
+        }
+
+        if (!base) return '';
+
+        const { stdout } = await git(
+          ['diff', '--no-color', base, branchRef, ...DIFF_EXCLUDE_PATHSPECS],
+          {
+            cwd: bareRepoPath,
+            maxBuffer: 10 * 1024 * 1024,
+          },
+        );
+        return truncateDiffAtFileBoundary(stripModeOnlyChanges(stdout), maxLength);
+      });
+    } catch (err) {
+      this.logger.warn(
+        { err: sanitizeGitError(err), repoUrl, branch, baseBranch },
+        'getBranchDiff failed — returning empty diff',
+      );
+      return '';
+    }
+  }
+
   async mergeBranch(config: MergeBranchConfig): Promise<void> {
     const { worktreePath, targetBranch, pat } = config;
 
@@ -1054,6 +1132,40 @@ export class LocalWorktreeManager implements WorktreeManager {
       : ['push', authUrl, `HEAD:refs/heads/${expectedBranch}`];
     try {
       await git(pushArgs, { cwd: worktreePath });
+    } catch (err) {
+      throw classifyGitError(sanitizeGitError(err), 'push');
+    }
+  }
+
+  async ensureRemoteBranch(config: EnsureRemoteBranchConfig): Promise<EnsureRemoteBranchResult> {
+    const { worktreePath, branch, pat } = config;
+    const sourceRef = config.sourceRef ?? `refs/heads/${branch}`;
+    if (!sourceRef.startsWith('refs/heads/')) {
+      throw new Error(`Refusing to publish non-branch ref '${sourceRef}'`);
+    }
+
+    const authUrl = await this.getAuthUrl(worktreePath, pat);
+    this.logger.info({ worktreePath, branch, sourceRef }, 'Ensuring branch exists on origin');
+
+    try {
+      await git(['ls-remote', '--exit-code', '--heads', authUrl, branch], {
+        cwd: worktreePath,
+      });
+      return { branch, created: false };
+    } catch (err) {
+      const code = (err as { code?: unknown }).code;
+      if (code !== 2) {
+        throw classifyGitError(sanitizeGitError(err), 'fetch');
+      }
+    }
+
+    try {
+      await git(['rev-parse', '--verify', sourceRef], { cwd: worktreePath });
+      await git(['push', authUrl, `${sourceRef}:refs/heads/${branch}`], {
+        cwd: worktreePath,
+      });
+      this.logger.info({ worktreePath, branch, sourceRef }, 'Published local branch ref to origin');
+      return { branch, created: true };
     } catch (err) {
       throw classifyGitError(sanitizeGitError(err), 'push');
     }
@@ -1472,6 +1584,40 @@ export class LocalWorktreeManager implements WorktreeManager {
       }
     }
     return undefined;
+  }
+
+  private async fetchBranchRef(params: {
+    authUrl: string;
+    bareRepoPath: string;
+    branch: string;
+    purpose: string;
+  }): Promise<string> {
+    const { authUrl, bareRepoPath, branch, purpose } = params;
+    try {
+      await git(
+        [
+          'fetch',
+          authUrl,
+          `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
+          `+refs/heads/${branch}:refs/heads/${branch}`,
+        ],
+        { cwd: bareRepoPath },
+      );
+      return `refs/remotes/origin/${branch}`;
+    } catch (fetchErr) {
+      this.logger.debug(
+        { err: sanitizeGitError(fetchErr), branch },
+        `${purpose}: remote fetch failed`,
+      );
+      try {
+        await git(['rev-parse', '--verify', `refs/heads/${branch}`], {
+          cwd: bareRepoPath,
+        });
+        return `refs/heads/${branch}`;
+      } catch {
+        throw new Error(`Branch "${branch}" not found on remote or locally`);
+      }
+    }
   }
 
   private async getAuthUrl(worktreePath: string, pat?: string): Promise<string> {

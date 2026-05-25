@@ -45,7 +45,7 @@ export async function askHuman(
     bridge.resolveEscalation(escalationId, {
       response,
       respondedBy: 'human',
-      timestamp: new Date().toISOString(),
+      respondedAt: new Date().toISOString(),
     });
     bridge.logEscalationAnswer(podId, 'human', response);
     return response;
@@ -57,7 +57,7 @@ export async function askHuman(
       bridge.resolveEscalation(escalationId, {
         response: aiResponse,
         respondedBy: 'ai',
-        timestamp: new Date().toISOString(),
+        respondedAt: new Date().toISOString(),
       });
       bridge.logEscalationAnswer(podId, 'ai', aiResponse);
       return `[Auto-routed to AI after ask_human timeout]\n\n${aiResponse}`;

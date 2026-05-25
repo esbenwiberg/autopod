@@ -4,14 +4,28 @@
  * Determines how the daemon authenticates with the AI backend for a session:
  * - `anthropic`: API key from daemon env (default, backwards-compatible)
  * - `max`: Claude consumer subscription (MAX/PRO) via OAuth credentials file
+ * - `openai`: OpenAI API key from daemon env, used by the Codex runtime
  * - `foundry`: Azure Foundry deployment with endpoint + project config
  * - `copilot`: GitHub Copilot CLI via OAuth token (`COPILOT_GITHUB_TOKEN`)
  */
-export type ModelProvider = 'anthropic' | 'max' | 'foundry' | 'copilot';
+export type ModelProvider = 'anthropic' | 'max' | 'openai' | 'foundry' | 'copilot';
 
 /** Anthropic API key provider — uses daemon env `ANTHROPIC_API_KEY`. No per-profile creds. */
 export interface AnthropicCredentials {
   provider: 'anthropic';
+}
+
+/**
+ * OpenAI provider for the Codex runtime.
+ *
+ * When `authJson` is absent, the daemon falls back to `OPENAI_API_KEY` from its env.
+ * When present, it is an opaque Codex `auth.json` captured from `codex login`
+ * (ChatGPT/Pro auth) and injected into `~/.codex/auth.json` in the pod.
+ */
+export interface OpenAiCredentials {
+  provider: 'openai';
+  authMode?: 'chatgpt';
+  authJson?: string;
 }
 
 /**
@@ -96,6 +110,7 @@ export interface CopilotCredentials {
 
 export type ProviderCredentials =
   | AnthropicCredentials
+  | OpenAiCredentials
   | MaxCredentials
   | FoundryCredentials
   | CopilotCredentials;

@@ -86,7 +86,35 @@ describe('CodexRuntime', () => {
         containerId: 'container-123',
         env: {},
       });
-      expect(args).toEqual(['exec', 'Fix the bug', '--model', 'o3-mini', '--full-auto', '--json']);
+      expect(args).toEqual([
+        'exec',
+        'Fix the bug',
+        '--model',
+        'o3-mini',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '--json',
+      ]);
+    });
+
+    it('omits --model for the auto sentinel so Codex chooses the account default', () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private method in test
+      const args = (runtime as any).buildSpawnArgs({
+        podId: 'abc123',
+        task: 'Fix the bug',
+        model: 'auto',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      });
+      expect(args).toEqual([
+        'exec',
+        'Fix the bug',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '--json',
+      ]);
     });
   });
 
@@ -132,7 +160,7 @@ describe('CodexRuntime', () => {
           'Do the thing',
           '--model',
           'o3-mini',
-          '--full-auto',
+          '--dangerously-bypass-approvals-and-sandbox',
           '--json',
         ],
         expect.objectContaining({ cwd: '/workspace' }),
@@ -207,6 +235,36 @@ describe('CodexRuntime', () => {
       expect(errorEvent).toBeDefined();
       // biome-ignore lint/suspicious/noExplicitAny: accessing runtime event fields in test
       expect((errorEvent as any).message).toContain('exited with code 1');
+      // biome-ignore lint/suspicious/noExplicitAny: accessing runtime event fields in test
+      expect((errorEvent as any).fatal).toBe(true);
+    });
+
+    it('maps exit code 127 to a missing Codex CLI error', async () => {
+      const handle = createMockHandle({ exitCode: 127 });
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      setTimeout(() => {
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(127);
+      }, 10);
+
+      const events = [];
+      for await (const event of runtime.spawn({
+        podId: 'missing-codex',
+        task: 'Fail',
+        model: 'o3-mini',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      })) {
+        events.push(event);
+      }
+
+      const errorEvent = events.find((e) => e.type === 'error');
+      expect(errorEvent).toBeDefined();
+      // biome-ignore lint/suspicious/noExplicitAny: accessing runtime event fields in test
+      expect((errorEvent as any).message).toContain('Codex CLI not found');
       // biome-ignore lint/suspicious/noExplicitAny: accessing runtime event fields in test
       expect((errorEvent as any).fatal).toBe(true);
     });
@@ -397,7 +455,7 @@ describe('CodexRuntime', () => {
           'codex',
           'exec',
           'Fix the validation errors',
-          '--full-auto',
+          '--dangerously-bypass-approvals-and-sandbox',
           '--json',
         ],
         expect.any(Object),
@@ -430,6 +488,7 @@ describe('CodexRuntime', () => {
           'resume',
           'session-from-db-xyz',
           'continue the task',
+          '--dangerously-bypass-approvals-and-sandbox',
           '--json',
         ],
         expect.any(Object),
@@ -461,6 +520,7 @@ describe('CodexRuntime', () => {
           'resume',
           'in-memory-session-id',
           'continue',
+          '--dangerously-bypass-approvals-and-sandbox',
           '--json',
         ],
         expect.any(Object),

@@ -4,3 +4,4 @@
 
 | ID | Title | Topics | Summary |
 |----|-------|--------|---------|
+| `convention-001` | Autopod-self required facts must run in the Linux pod | validation, desktop, autopod-self | Required facts for `autopod-self` must use commands executable in the Linux pod image. |

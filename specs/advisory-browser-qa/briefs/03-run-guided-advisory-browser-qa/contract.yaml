@@ -1,0 +1,65 @@
+contract_version: 1
+title: "Run guided advisory browser QA"
+depends_on: [02-persist-advisory-profile-setting]
+scenarios:
+  - id: advisory-skip-no-checklist
+    given:
+      - "advisory browser QA is enabled"
+      - "the contract has no scenarios and no human_review items"
+    when:
+      - "validation reaches the advisory step"
+    then:
+      - "the advisory result is skipped with reason no-contract-checklist"
+  - id: advisory-concern-nonblocking
+    given:
+      - "blocking validation is green"
+      - "guided browser QA records a concern"
+    when:
+      - "the validation result is finalized"
+    then:
+      - "the concern is stored as advisory evidence and overall remains pass"
+  - id: advisory-error-nonblocking
+    given:
+      - "blocking validation is green"
+      - "the advisory browser runner fails due to browser or model tooling"
+    when:
+      - "the validation result is finalized"
+    then:
+      - "the advisory result records error and overall remains pass"
+  - id: advisory-cap-five
+    given:
+      - "a contract contains more than five scenario and human_review targets"
+    when:
+      - "guided advisory browser QA runs"
+    then:
+      - "at most five targets are attempted and the rest are reported as not checked"
+required_facts:
+  - id: fact-advisory-runner-caps-and-skips
+    proves: [advisory-skip-no-checklist, advisory-cap-five]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/advisory-browser-qa-runner.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- advisory-browser-qa-runner.test.ts
+  - id: fact-advisory-concern-nonblocking
+    proves: [advisory-concern-nonblocking]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/local-validation-engine.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- local-validation-engine.test.ts -t advisory-concern-nonblocking
+  - id: fact-advisory-error-nonblocking
+    proves: [advisory-error-nonblocking]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/local-validation-engine.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- local-validation-engine.test.ts -t advisory-error-nonblocking
+  - id: fact-advisory-screenshot-serialized
+    proves: [advisory-concern-nonblocking]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/api/wire-serializers.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- wire-serializers.test.ts
+human_review: []

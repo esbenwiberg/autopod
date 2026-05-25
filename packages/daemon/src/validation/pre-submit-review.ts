@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
-import type { PreSubmitReviewSnapshot } from '@autopod/shared';
+import type { ModelProvider, PreSubmitReviewSnapshot, ProviderCredentials } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { ContainerManager } from '../interfaces/container-manager.js';
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { parseReviewJson } from './local-validation-engine.js';
+import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
 
 export type PreSubmitSkipReason = 'no-diff' | 'no-task' | 'parse-failure' | 'cli-error';
 
@@ -10,6 +12,11 @@ export interface PreSubmitReviewOpts {
   task: string;
   diff: string;
   reviewerModel: string;
+  reviewerProvider?: ModelProvider | null;
+  reviewerProviderCredentials?: ProviderCredentials | null;
+  podId?: string;
+  containerId?: string | null;
+  containerManager?: ContainerManager;
   /** Defaults to 90s — the agent is waiting on this synchronously. */
   timeoutMs?: number;
   /** Optional preview of the agent's planned task summary. */
@@ -77,13 +84,38 @@ export async function runPreSubmitReview(
 
   const prompt = buildPrompt(opts);
   const timeoutMs = opts.timeoutMs ?? 90_000;
+  const reviewerRunner = resolvePreSubmitRunner(opts);
+  if (reviewerRunner === 'unsupported') {
+    return skipped(
+      'cli-error',
+      `Pre-submit reviewer provider ${opts.reviewerProvider} is not supported.`,
+    );
+  }
+  if (reviewerRunner === 'codex' && (!opts.containerId || !opts.containerManager)) {
+    return skipped('cli-error', 'Codex pre-submit reviewer requires a live pod container.');
+  }
 
   try {
-    const { stdout } = await runClaudeCli({
-      model: opts.reviewerModel,
-      input: prompt,
-      timeout: timeoutMs,
-    });
+    let stdout: string;
+    if (reviewerRunner === 'codex') {
+      if (!opts.containerId || !opts.containerManager) {
+        return skipped('cli-error', 'Codex pre-submit reviewer requires a live pod container.');
+      }
+      ({ stdout } = await runCodexReview({
+        podId: opts.podId ?? 'pre-submit',
+        containerId: opts.containerId,
+        containerManager: opts.containerManager,
+        model: opts.reviewerModel,
+        prompt,
+        timeout: timeoutMs,
+      }));
+    } else {
+      ({ stdout } = await runClaudeCli({
+        model: opts.reviewerModel,
+        input: prompt,
+        timeout: timeoutMs,
+      }));
+    }
     const parsed = parseReviewJson(stdout.trim());
     if (!parsed) {
       log?.warn({ rawOutput: stdout.slice(0, 500) }, 'pre-submit review: failed to parse response');
@@ -99,9 +131,23 @@ export async function runPreSubmitReview(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log?.warn({ err: message }, 'pre-submit review: claude CLI failed');
+    const runner = err instanceof CodexReviewError ? 'codex' : 'claude';
+    log?.warn({ err: message, runner }, 'pre-submit review: reviewer CLI failed');
     return skipped('cli-error', `Pre-submit reviewer failed to run: ${message}`);
   }
+}
+
+function resolvePreSubmitRunner(opts: PreSubmitReviewOpts): 'claude' | 'codex' | 'unsupported' {
+  if (opts.reviewerProvider === 'openai') return 'codex';
+  if (
+    opts.reviewerProvider === 'foundry' &&
+    opts.reviewerProviderCredentials?.provider === 'foundry' &&
+    (opts.reviewerProviderCredentials.apiSurface ?? 'anthropic') === 'openai'
+  ) {
+    return 'codex';
+  }
+  if (opts.reviewerProvider === 'copilot') return 'unsupported';
+  return 'claude';
 }
 
 function buildPrompt(opts: PreSubmitReviewOpts): string {

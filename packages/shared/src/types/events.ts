@@ -99,7 +99,7 @@ export interface ValidationPhaseCompletedEvent {
   podId: string;
   phase: ValidationPhase;
   /** Phase outcome — separate from "status" to avoid JSON key collisions with other events */
-  phaseStatus: 'pass' | 'fail' | 'skip';
+  phaseStatus: 'pass' | 'fail' | 'skip' | 'pending_human';
   // Exactly one of these is populated per event, matching the phase:
   buildResult?: BuildResult;
   testResult?: {

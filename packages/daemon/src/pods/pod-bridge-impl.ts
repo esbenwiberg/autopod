@@ -1,3 +1,4 @@
+import type { ContentBlock } from '@anthropic-ai/sdk/resources/messages.js';
 import type {
   PodBridge,
   PreSubmitReviewInput,
@@ -28,12 +29,14 @@ import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
 import { isPrivateIp } from '../api/ssrf-guard.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
+import { createProfileAnthropicClient } from '../providers/llm-client.js';
 import type { HostBrowserRunner } from '../validation/host-browser-runner.js';
 import {
   getPreSubmitCacheDecision,
   hashDiff,
   runPreSubmitReview,
 } from '../validation/pre-submit-review.js';
+import { runCodexReview } from '../validation/review-codex-runner.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { MemoryRepository } from './memory-repository.js';
@@ -44,6 +47,7 @@ import type { ContainerManagerFactory, PodManager } from './pod-manager.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
 import { buildValidationExecEnv } from './registry-injector.js';
+import { resolveReviewerModel, resolveReviewerProvider } from './runtime-resolver.js';
 
 export interface SessionBridgeDependencies {
   podManager: PodManager;
@@ -143,12 +147,14 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     getReviewerModel(podId: string): string {
       const pod = podManager.getSession(podId);
       const profile = profileStore.get(pod.profileName);
-      return profile.escalation?.askAi.model ?? 'sonnet';
+      return resolveReviewerModel(profile, logger);
     },
 
     async callReviewerModel(podId: string, question: string, context?: string): Promise<string> {
-      const model = this.getReviewerModel(podId);
       const pod = podManager.getSession(podId);
+      const profile = profileStore.get(pod.profileName);
+      const model = resolveReviewerModel(profile, logger);
+      const provider = resolveReviewerProvider(profile);
 
       // Enrich the prompt with pod state so the reviewer has full context
       // beyond what the agent manually passes.
@@ -182,20 +188,51 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
       const prompt = `${contextParts.join('\n\n')}\n\nQuestion:\n${question}`;
 
-      logger.info({ podId, model, question: question.slice(0, 100) }, 'Calling reviewer model');
+      logger.info(
+        { podId, model, provider, question: question.slice(0, 100) },
+        'Calling reviewer model',
+      );
 
       try {
-        const { execFile } = await import('node:child_process');
-        const { promisify } = await import('node:util');
-        const execFileAsync = promisify(execFile);
+        if (usesCodexReviewer(profile)) {
+          if (!pod.containerId) {
+            throw new Error('Codex reviewer requires a live pod container');
+          }
+          const cm = containerManagerFactory.get(pod.executionTarget);
+          const { stdout } = await runCodexReview({
+            podId,
+            containerId: pod.containerId,
+            containerManager: cm,
+            model,
+            prompt,
+            timeout: 60_000,
+          });
+          return stdout.trim();
+        }
 
-        const { stdout } = await execFileAsync(
-          'claude',
-          ['-p', prompt, '--model', model, '--output-format', 'text'],
-          { timeout: 60_000 },
-        );
+        if (provider === 'copilot') {
+          throw new Error('Reviewer provider copilot is not supported by browser QA advisory');
+        }
 
-        return stdout.trim();
+        const llm = await createProfileAnthropicClient(profile, model, logger);
+        if (!llm.ok) {
+          throw new Error(`Reviewer provider unavailable: ${llm.reason}`);
+        }
+
+        const response = await llm.client.messages.create({
+          model: llm.model,
+          max_tokens: 4_000,
+          messages: [{ role: 'user', content: prompt }],
+          timeout: 60_000,
+        });
+
+        return response.content
+          .filter(
+            (block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text',
+          )
+          .map((block) => block.text)
+          .join('')
+          .trim();
       } catch (err) {
         logger.error({ err, podId }, 'Reviewer model call failed');
         return `AI review failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -336,15 +373,16 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           factDeviations,
           memoryOutcomes,
         };
-      } else if (factEvidence != null && existing.taskSummary) {
+      } else if (
+        existing.taskSummary &&
+        (factEvidence != null || factDeviations != null || memoryOutcomes != null)
+      ) {
         updates.taskSummary = {
           ...existing.taskSummary,
-          factEvidence,
-          factDeviations,
+          ...(factEvidence != null ? { factEvidence } : {}),
+          ...(factDeviations != null ? { factDeviations } : {}),
           ...(memoryOutcomes != null ? { memoryOutcomes } : {}),
         };
-      } else if (memoryOutcomes != null && existing.taskSummary) {
-        updates.taskSummary = { ...existing.taskSummary, memoryOutcomes };
       }
       if (Object.keys(updates).length > 0) {
         podRepo.update(podId, updates);
@@ -720,7 +758,8 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       podManager.touchHeartbeat(podId);
       const pod = podManager.getSession(podId);
       const profile = profileStore.get(pod.profileName);
-      const reviewerModel = profile.reviewerModel || profile.defaultModel || 'sonnet';
+      const reviewerModel = resolveReviewerModel(profile, logger);
+      const reviewerProvider = resolveReviewerProvider(profile);
       const defaultBranch = profile.defaultBranch ?? 'main';
 
       // Read the diff from inside the live container when possible — the
@@ -831,6 +870,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           task: pod.task ?? '',
           diff,
           reviewerModel,
+          reviewerProvider,
+          reviewerProviderCredentials: profile.providerCredentials,
+          podId,
+          containerId: pod.containerId,
+          containerManager,
           plannedSummary: input.plannedSummary,
           plannedDeviations: input.plannedDeviations,
         },
@@ -1118,6 +1162,14 @@ function recordMemoryUsage(
     reason: options?.reason ?? null,
     relevanceReason: options?.relevanceReason ?? null,
   });
+}
+
+function usesCodexReviewer(profile: Profile): boolean {
+  if (profile.modelProvider === 'openai') return true;
+  if (profile.modelProvider !== 'foundry') return false;
+
+  const creds = profile.providerCredentials;
+  return creds?.provider === 'foundry' && (creds.apiSurface ?? 'anthropic') === 'openai';
 }
 
 const VALIDATE_LOCALLY_OUTPUT_BUDGET = 6_000;

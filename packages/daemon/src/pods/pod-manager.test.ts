@@ -3,6 +3,7 @@ import path from 'node:path';
 import type {
   AgentEvent,
   PodCreatedEvent,
+  Profile,
   Runtime,
   RuntimeType,
   StackTemplate,
@@ -95,6 +96,9 @@ interface TestProfileOverrides {
   adoPat?: string;
   adoPatExpiresAt?: string;
   prProvider?: 'github' | 'ado';
+  defaultModel?: string;
+  defaultRuntime?: RuntimeType;
+  modelProvider?: Profile['modelProvider'];
 }
 
 function insertTestProfile(db: Database.Database, overrides: TestProfileOverrides | string = {}) {
@@ -108,13 +112,15 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       health_path, health_timeout, validation_pages, max_validation_attempts,
       default_model, default_runtime, escalation_config,
       private_registries, registry_pat, registry_pat_expires_at, branch_prefix,
-      pr_provider, github_pat, github_pat_expires_at, ado_pat, ado_pat_expires_at
+      pr_provider, github_pat, github_pat_expires_at, ado_pat, ado_pat_expires_at,
+      model_provider
     ) VALUES (
       @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
       @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
       @defaultModel, @defaultRuntime, @escalationConfig,
       @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix,
-      @prProvider, @githubPat, @githubPatExpiresAt, @adoPat, @adoPatExpiresAt
+      @prProvider, @githubPat, @githubPatExpiresAt, @adoPat, @adoPatExpiresAt,
+      @modelProvider
     )
   `).run({
     name,
@@ -127,8 +133,8 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     healthTimeout: 120,
     validationPages: '[]',
     maxValidationAttempts: 3,
-    defaultModel: 'opus',
-    defaultRuntime: 'claude',
+    defaultModel: opts.defaultModel ?? 'opus',
+    defaultRuntime: opts.defaultRuntime ?? 'claude',
     escalationConfig: JSON.stringify({
       askHuman: true,
       askAi: { enabled: true, model: 'sonnet', maxCalls: 5 },
@@ -145,6 +151,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     githubPatExpiresAt: opts.githubPatExpiresAt ?? null,
     adoPat: opts.adoPat ?? null,
     adoPatExpiresAt: opts.adoPatExpiresAt ?? null,
+    modelProvider: opts.modelProvider ?? 'anthropic',
   });
 }
 
@@ -188,6 +195,7 @@ function createMockWorktreeManager(): WorktreeManager {
     commitPendingChanges: vi.fn(async () => false),
     commitPendingChangesWithGeneratedMessage: vi.fn(async () => false),
     pushBranch: vi.fn(async () => {}),
+    ensureRemoteBranch: vi.fn(async ({ branch }) => ({ branch, created: false })),
     pullBranch: vi.fn(async () => ({ newCommits: false })),
     rebaseOntoBase: vi.fn(async () => ({ alreadyUpToDate: false, rebased: true, conflicts: [] })),
     getCommitLog: vi.fn(async () => 'abc1234 feat: implement feature\ndef5678 fix: edge case'),
@@ -304,7 +312,7 @@ function createTestContext(
         networkPolicy: null,
         actionPolicy: null,
         outputMode: 'pr' as const,
-        modelProvider: (row.model_provider as 'anthropic' | 'max' | 'foundry') ?? 'anthropic',
+        modelProvider: (row.model_provider as Profile['modelProvider']) ?? 'anthropic',
         providerCredentials: row.provider_credentials
           ? JSON.parse(row.provider_credentials as string)
           : null,
@@ -410,6 +418,34 @@ describe('PodManager', () => {
       expect(pod.runtime).toBe('claude');
       expect(pod.branch).toContain('autopod/');
       expect(pod.baseBranch).toBe('main');
+    });
+
+    it('accepts a per-pod advisory browser QA option', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Check advisory QA option',
+          options: { agentMode: 'auto', output: 'pr', advisoryBrowserQaEnabled: true },
+        },
+        'user-1',
+      );
+
+      expect(pod.options.advisoryBrowserQaEnabled).toBe(true);
+    });
+
+    it('defaults advisory browser QA off when neither profile nor pod opts in', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Check advisory QA default' },
+        'user-1',
+      );
+
+      expect(pod.options.advisoryBrowserQaEnabled).toBe(false);
     });
 
     it('pins omitted baseBranch to the profile default at creation time', () => {
@@ -1122,6 +1158,45 @@ describe('PodManager', () => {
       );
     });
 
+    it('publishes a non-default PR base branch before approval retry creates the PR', async () => {
+      const ctx = createTestContext(undefined, {
+        prProvider: 'ado',
+        adoPat: 'ado_test_pat_xyz',
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Do stuff on a workspace base',
+          branch: 'feature/child',
+          baseBranch: 'feature/workspace-base',
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'validated',
+        worktreePath: '/tmp/wt',
+        filesChanged: 1,
+        prUrl: null,
+      });
+
+      await manager.approveSession(pod.id);
+
+      expect(ctx.worktreeManager.ensureRemoteBranch).toHaveBeenCalledWith({
+        worktreePath: '/tmp/wt',
+        branch: 'feature/workspace-base',
+        sourceRef: 'refs/heads/feature/workspace-base',
+        pat: 'ado_test_pat_xyz',
+      });
+      expect(ctx.prManager.createPr).toHaveBeenCalledWith(
+        expect.objectContaining({
+          branch: 'feature/child',
+          baseBranch: 'feature/workspace-base',
+        }),
+      );
+    });
+
     it('enqueues dependent series pod after manual approval', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
@@ -1616,6 +1691,34 @@ describe('PodManager', () => {
       expect(processed.status).toBe('validated');
       expect(processed.containerId).toBe('container-123');
       expect(processed.worktreePath).toBe('/tmp/worktree/abc');
+    });
+
+    it('fails when the agent reports an execution-environment blocker on completion', async () => {
+      const ctx = createTestContext();
+      (ctx.runtime.spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async function* (): AsyncIterable<AgentEvent> {
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result:
+              'I am blocked by the execution environment: ' +
+              'bwrap: No permissions to create a new namespace.',
+          };
+        },
+      );
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      const processed = manager.getSession(pod.id);
+      expect(processed.status).toBe('failed');
+      expect(processed.lastCorrectionMessage).toContain('bwrap cannot create a namespace');
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
     });
 
     it('calls containerManager.spawn and worktreeManager.create', async () => {
@@ -2146,6 +2249,47 @@ describe('PodManager', () => {
         expect(updated.worktreePath).toBe('/tmp/worktree/existing');
       });
 
+      it('does not skip recovery spawn when a prior complete was followed by a fatal error', async () => {
+        const ctx = createTestContext();
+        setupExecFileMock({ bareRepoPath: '/tmp/bare/recovered.git' });
+
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Continue feature', skipValidation: true },
+          'user-1',
+        );
+
+        ctx.eventBus.emit({
+          type: 'pod.agent_activity',
+          timestamp: '2026-01-01T00:00:00.000Z',
+          podId: pod.id,
+          event: {
+            type: 'complete',
+            timestamp: '2026-01-01T00:00:00.000Z',
+            result: 'Agent printed complete before the runtime failed',
+          },
+        });
+        ctx.eventBus.emit({
+          type: 'pod.agent_activity',
+          timestamp: '2026-01-01T00:00:01.000Z',
+          podId: pod.id,
+          event: {
+            type: 'error',
+            timestamp: '2026-01-01T00:00:01.000Z',
+            message: 'Codex process exited with code 137',
+            fatal: true,
+          },
+        });
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+        });
+
+        await manager.processPod(pod.id);
+
+        expect(ctx.runtime.spawn).toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      });
+
       it('uses fresh spawn with rework prompt when reworkReason is set', async () => {
         const runtime = createMockRuntime();
         (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
@@ -2186,6 +2330,34 @@ describe('PodManager', () => {
         // reworkReason should be cleared after consumption
         const updated = manager.getSession(pod.id);
         expect(updated.reworkReason).toBeNull();
+      });
+
+      it('fails a rework run that exits without file changes', async () => {
+        const ctx = createTestContext(undefined, {});
+        setupExecFileMock({ gitLog: 'abc1234 Previous broken work' });
+        (ctx.worktreeManager.getDiffStats as ReturnType<typeof vi.fn>).mockResolvedValue({
+          filesChanged: 0,
+          linesAdded: 0,
+          linesRemoved: 0,
+        });
+
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fix the bug' },
+          'user-1',
+        );
+
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          reworkReason: 'Your previous attempt failed. Review what went wrong and try again.',
+        });
+
+        await manager.processPod(pod.id);
+
+        const updated = manager.getSession(pod.id);
+        expect(updated.status).toBe('failed');
+        expect(updated.lastCorrectionMessage).toBe('Rework produced no file changes.');
+        expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
       });
 
       it('falls back to fresh spawn when Claude resume reports session-not-found mid-stream', async () => {
@@ -2432,6 +2604,34 @@ describe('PodManager', () => {
       expect(result.status).toBe('validated');
     });
 
+    it('passes the effective advisory browser QA setting to validation', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Add feature',
+          options: { agentMode: 'auto', output: 'pr', advisoryBrowserQaEnabled: true },
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
+        expect.objectContaining({ advisoryBrowserQaEnabled: true }),
+        expect.any(Function),
+        expect.any(AbortSignal),
+        expect.any(Object),
+      );
+    });
+
     it('recovers from live container when workspace sync fails before validation', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       (ctx.containerManager.execInContainer as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
@@ -2579,6 +2779,47 @@ describe('PodManager', () => {
 
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('review_required');
+    });
+
+    it('moves pending fact deviations to review_required without retrying the agent', async () => {
+      const ctx = createTestContext({
+        overall: 'fail',
+        factValidation: {
+          status: 'pending_human',
+          results: [
+            {
+              factId: 'fact-swift-only',
+              proves: ['swift-helper-readable'],
+              kind: 'unit-test',
+              artifactPath:
+                'packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift',
+              command: 'swift test --filter ThroughputTimeInStatusDisplayTests',
+              passed: false,
+              status: 'pending_human',
+              reasoning:
+                'Fact deviation request is pending human decision. Requested action: waived.',
+            },
+          ],
+        },
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      const result = manager.getSession(pod.id);
+      expect(result.status).toBe('review_required');
+      expect(result.validationAttempts).toBe(1);
     });
 
     it('retries with correction feedback until max attempts exhausted', async () => {
@@ -2943,6 +3184,10 @@ describe('PodManager', () => {
         expect(script).toContain("-name '.serena'");
         expect(script).toContain("-name '.roslyn-codelens'");
         expect(script).toContain('-prune -o');
+        expect(script).toContain('target=$1\nshift\nfor rel do\n');
+        expect(script).not.toContain('for rel do;');
+        expect(script).not.toContain('then;');
+        expect(script).not.toContain('else;');
       });
     });
 
@@ -3904,6 +4149,10 @@ describe('PodManager', () => {
       expect(script).toContain("! -path '*/node_modules/*'");
       expect(script).toContain("! -path '*/.serena'");
       expect(script).toContain("! -path '*/.roslyn-codelens/*'");
+      expect(script).toContain('target=$1\nshift\nfor rel do\n');
+      expect(script).not.toContain('for rel do;');
+      expect(script).not.toContain('then;');
+      expect(script).not.toContain('else;');
       expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
     });
 
@@ -5460,6 +5709,83 @@ describe('wake recovery — wake-correction postscript', () => {
     const spawnCall = vi.mocked(runtime.spawn).mock.calls[0];
     const task = spawnCall?.[0]?.task;
     expect(task).not.toContain('interrupted by a host sleep');
+  });
+});
+
+describe('worker startup diagnostics', () => {
+  function statusMessages(ctx: TestContext, podId: string): string[] {
+    return ctx.eventRepo
+      .getForSession(podId, { type: 'pod.agent_activity' })
+      .map((event) => {
+        const payload = event.payload as { event?: { message?: unknown } };
+        return payload.event?.message;
+      })
+      .filter((message): message is string => typeof message === 'string');
+  }
+
+  it('logs provider, runtime, and model before spawning the worker', async () => {
+    const runtime = createMockRuntime();
+    runtime.type = 'codex';
+    const ctx = createTestContext(undefined, {
+      defaultModel: 'auto',
+      defaultRuntime: 'codex',
+      modelProvider: 'openai',
+    });
+    ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+    vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+      async (_containerId, command) => {
+        if (command.join(' ').includes('command -v codex')) {
+          return { stdout: '/usr/local/bin/codex\n', stderr: '', exitCode: 0 };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    );
+
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget', runtime: 'codex', skipValidation: true },
+      'user-1',
+    );
+
+    await manager.processPod(pod.id);
+
+    expect(statusMessages(ctx, pod.id)).toContain(
+      'Starting worker: provider=openai, runtime=codex, model=auto',
+    );
+    expect(runtime.spawn).toHaveBeenCalled();
+  });
+
+  it('fails before spawn when the runtime CLI is missing from the image', async () => {
+    const runtime = createMockRuntime();
+    runtime.type = 'codex';
+    const ctx = createTestContext(undefined, {
+      defaultModel: 'auto',
+      defaultRuntime: 'codex',
+      modelProvider: 'openai',
+    });
+    ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+    vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+      async (_containerId, command) => {
+        if (command.join(' ').includes('command -v codex')) {
+          return { stdout: '', stderr: 'codex: not found', exitCode: 1 };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    );
+
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget', runtime: 'codex', skipValidation: true },
+      'user-1',
+    );
+
+    await manager.processPod(pod.id);
+
+    expect(manager.getSession(pod.id).status).toBe('failed');
+    expect(runtime.spawn).not.toHaveBeenCalled();
+    expect(statusMessages(ctx, pod.id)).toContain(
+      'Agent CLI missing: codex is not installed in this image. Rebuild the codex base/warm image. codex: not found',
+    );
   });
 });
 

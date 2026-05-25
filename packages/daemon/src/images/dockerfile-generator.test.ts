@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Profile } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import { generateDockerfile, getBaseImage, getInstallCommand } from './dockerfile-generator.js';
@@ -79,6 +81,23 @@ describe('getBaseImage', () => {
 
   it('falls back to :latest when digest is null', () => {
     expect(getBaseImage('node22', { node22: null })).toBe('autopod-node22:latest');
+  });
+});
+
+describe('base image templates', () => {
+  it('installs every supported agent CLI', () => {
+    const templatesDir = path.resolve(import.meta.dirname, '../../../../templates/base');
+    const dockerfiles = fs
+      .readdirSync(templatesDir)
+      .filter((name) => name.startsWith('Dockerfile.'));
+
+    expect(dockerfiles.length).toBeGreaterThan(0);
+    for (const dockerfile of dockerfiles) {
+      const content = fs.readFileSync(path.join(templatesDir, dockerfile), 'utf-8');
+      expect(content, dockerfile).toContain('@anthropic-ai/claude-code');
+      expect(content, dockerfile).toContain('@openai/codex');
+      expect(content, dockerfile).toContain('@github/copilot');
+    }
   });
 });
 

@@ -1,4 +1,5 @@
 import type {
+  AdvisoryBrowserQaResult,
   FactValidationResult,
   PageResult,
   Pod,
@@ -38,6 +39,20 @@ function serializeTaskReview(review: TaskReviewResult): unknown {
   };
 }
 
+function serializeAdvisoryBrowserQa(advisory: AdvisoryBrowserQaResult | null | undefined): unknown {
+  if (!advisory) return advisory;
+  return {
+    ...advisory,
+    observations: advisory.observations.map((observation) => ({
+      ...observation,
+      screenshots: observation.screenshots.map((ref, i) =>
+        toScreenshotRefDto(ref, `${observation.id}:${i}`),
+      ),
+    })),
+    screenshots: advisory.screenshots.map((ref, i) => toScreenshotRefDto(ref, String(i))),
+  };
+}
+
 function serializeFactValidation(factValidation: FactValidationResult | null | undefined): unknown {
   if (!factValidation) return factValidation;
   return {
@@ -67,6 +82,7 @@ export function serializeValidationResult(result: ValidationResult): unknown {
     smoke: { ...result.smoke, pages: serializePages(result.smoke.pages) },
     factValidation: serializeFactValidation(result.factValidation),
     taskReview: result.taskReview ? serializeTaskReview(result.taskReview) : result.taskReview,
+    advisoryBrowserQa: serializeAdvisoryBrowserQa(result.advisoryBrowserQa),
   };
 }
 

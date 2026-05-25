@@ -6,6 +6,7 @@ const VALID_SOURCES: ReadonlySet<ScreenshotSource> = new Set<ScreenshotSource>([
   'smoke',
   'fact',
   'review',
+  'advisory',
 ]);
 
 function isScreenshotSource(value: string): value is ScreenshotSource {
@@ -33,7 +34,7 @@ export function screenshotRoutes(app: FastifyInstance, screenshotStore: Screensh
 
     if (!isScreenshotSource(source)) {
       reply.status(400);
-      return { error: 'source must be one of: smoke, fact, review' };
+      return { error: 'source must be one of: smoke, fact, review, advisory' };
     }
 
     if (filename.includes('..') || filename.includes('/') || !SAFE_FILENAME_RE.test(filename)) {

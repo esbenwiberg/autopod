@@ -119,6 +119,25 @@ describe('PodBridge.reportTaskSummary — lock-on-first-write', () => {
     expect(pod.taskSummary?.how).toBe('how-original');
   });
 
+  it('preserves fact deviations reported after the task summary is locked', () => {
+    const { bridge, podRepo, podId } = buildBridge();
+    const factDeviations = [
+      {
+        factId: 'fact-swift-only',
+        action: 'waive' as const,
+        reason: 'The artifact was changed, but the verifier image does not include Swift.',
+        whyImpossible: 'swift is not installed in the validation container.',
+      },
+    ];
+
+    bridge.reportTaskSummary(podId, 'original summary', [], 'how-original');
+    bridge.reportTaskSummary(podId, 'fix-cycle summary', [], 'how-fix', undefined, factDeviations);
+
+    const pod = podRepo.getOrThrow(podId);
+    expect(pod.taskSummary?.actualSummary).toBe('original summary');
+    expect(pod.taskSummary?.factDeviations).toEqual(factDeviations);
+  });
+
   it('still emits the task_summary event on a locked re-report', () => {
     const { bridge, podId, emit } = buildBridge();
 

@@ -10,6 +10,7 @@ import type {
   ValidationEngineConfig,
   ValidationPhaseCallbacks,
 } from '../interfaces/validation-engine.js';
+import { runClaudeCli } from '../runtimes/run-claude-cli.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import {
   artifactChangeSatisfied,
@@ -23,6 +24,18 @@ import {
   startAppStabilityMonitor,
   stripMarkdownFences,
 } from './local-validation-engine.js';
+
+vi.mock('../runtimes/run-claude-cli.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../runtimes/run-claude-cli.js')>();
+  return {
+    ...actual,
+    runClaudeCli: vi.fn(),
+  };
+});
+
+beforeEach(() => {
+  vi.mocked(runClaudeCli).mockReset();
+});
 
 describe('artifactChangeSatisfied', () => {
   const diff = `diff --git a/Client/src/Foo.ts b/Client/src/Foo.ts
@@ -655,6 +668,200 @@ describe('validate() — hasWebUi gating', () => {
     const pagesEvent = completed.find((c) => c.phase === 'pages');
     expect(pagesEvent?.status).toBe('skip');
   });
+
+  it('advisory-concern-nonblocking records concern evidence without affecting overall', async () => {
+    vi.mocked(runClaudeCli).mockResolvedValue({
+      stdout: JSON.stringify({
+        status: 'fail',
+        reasoning: 'Visual concern found.',
+        observations: [
+          {
+            id: 'empty-state-overlap',
+            targetId: 'scenario:dashboard',
+            status: 'fail',
+            summary: 'Loaded data is overlapped by the empty state.',
+            suggestedFacts: ['Add a browser fact for the loaded dashboard state.'],
+          },
+        ],
+      }),
+    });
+
+    const cm = stubContainerManager();
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: true,
+        cached: false,
+        checkedAt: '2026-05-25T00:00:00.000Z',
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      })),
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({
+        stdout: `AUTOPOD_ADVISORY_BROWSER_QA_JSON_START
+[{"targetId":"scenario:dashboard","url":"http://127.0.0.1:9999/","title":"Dashboard","notes":["empty state overlap"],"screenshotPath":"/tmp/advisory-0.png"}]
+AUTOPOD_ADVISORY_BROWSER_QA_JSON_END`,
+        stderr: '',
+        exitCode: 0,
+      })),
+      readScreenshot: vi.fn(async () => Buffer.from('png').toString('base64')),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp'),
+    };
+    const screenshotStore = {
+      write: vi.fn(async (podId: string, source: 'advisory', filename: string) => ({
+        podId,
+        source,
+        filename,
+        relativePath: `screenshots/${podId}/${source}/${filename}`,
+      })),
+    };
+    const engine = createLocalValidationEngine(
+      cm,
+      undefined,
+      hostBrowserRunner,
+      screenshotStore as never,
+    );
+
+    const result = await engine.validate(
+      baseConfig({
+        startCommand: '',
+        smokePages: [],
+        hasWebUi: true,
+        advisoryBrowserQaEnabled: true,
+        reviewerModel: 'claude-review',
+        contract: parseSpecContract(`contract_version: 1
+title: Advisory
+depends_on: []
+scenarios:
+  - id: dashboard
+    given: ["state"]
+    when: ["open dashboard"]
+    then: ["summary is visible"]
+required_facts: []
+human_review:
+  - id: visual
+    covers: [dashboard]
+    criterion: "Dashboard layout is visually coherent."
+    reason: "Needs a browser."
+`),
+      }),
+    );
+
+    expect(result.overall).toBe('pass');
+    expect(result.advisoryBrowserQa?.status).toBe('fail');
+    expect(result.advisoryBrowserQa?.observations[0]).toMatchObject({
+      id: 'empty-state-overlap',
+      scenarioId: 'dashboard',
+      status: 'fail',
+      suggestedFacts: ['Add a browser fact for the loaded dashboard state.'],
+    });
+    expect(result.advisoryBrowserQa?.screenshots[0]?.source).toBe('advisory');
+    expect(hostBrowserRunner.runScript).toHaveBeenCalled();
+  });
+
+  it('advisory-error-nonblocking attaches advisory browser QA errors without affecting overall', async () => {
+    const cm = stubContainerManager();
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: true,
+        cached: false,
+        checkedAt: '2026-05-25T00:00:00.000Z',
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      })),
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({
+        stdout: `AUTOPOD_ADVISORY_BROWSER_QA_JSON_START
+[{"targetId":"scenario:dashboard","url":"http://127.0.0.1:9999/","title":"Dashboard","notes":["visible"],"screenshotPath":"/tmp/advisory-0.png"}]
+AUTOPOD_ADVISORY_BROWSER_QA_JSON_END`,
+        stderr: '',
+        exitCode: 0,
+      })),
+      readScreenshot: vi.fn(async () => Buffer.from('png').toString('base64')),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp'),
+    };
+    const screenshotStore = {
+      write: vi.fn(async (podId: string, source: 'advisory', filename: string) => ({
+        podId,
+        source,
+        filename,
+        relativePath: `screenshots/${podId}/${source}/${filename}`,
+      })),
+    };
+    const engine = createLocalValidationEngine(
+      cm,
+      undefined,
+      hostBrowserRunner,
+      screenshotStore as never,
+    );
+
+    const result = await engine.validate(
+      baseConfig({
+        startCommand: '',
+        smokePages: [],
+        hasWebUi: true,
+        advisoryBrowserQaEnabled: true,
+        reviewerModel: undefined,
+        contract: parseSpecContract(`contract_version: 1
+title: Advisory
+depends_on: []
+scenarios:
+  - id: dashboard
+    given: ["state"]
+    when: ["open dashboard"]
+    then: ["summary is visible"]
+required_facts: []
+human_review:
+  - id: visual
+    covers: [dashboard]
+    criterion: "Dashboard layout is visually coherent."
+    reason: "Needs a browser."
+`),
+      }),
+    );
+
+    expect(result.overall).toBe('pass');
+    expect(result.advisoryBrowserQa?.status).toBe('uncertain');
+    expect(result.advisoryBrowserQa?.reasoning).toContain('No reviewer model configured');
+    expect(result.advisoryBrowserQa?.screenshots[0]?.source).toBe('advisory');
+    expect(hostBrowserRunner.runScript).toHaveBeenCalled();
+  });
+
+  it('records no-contract-checklist skip reason for enabled advisory browser QA', async () => {
+    const cm = stubContainerManager();
+    const hostBrowserRunner = {
+      getAvailability: vi.fn(),
+    } as unknown as HostBrowserRunner;
+    const engine = createLocalValidationEngine(cm, undefined, hostBrowserRunner);
+
+    const result = await engine.validate(
+      baseConfig({
+        startCommand: '',
+        smokePages: [],
+        hasWebUi: true,
+        advisoryBrowserQaEnabled: true,
+        contract: parseSpecContract(`contract_version: 1
+title: Empty
+depends_on: []
+scenarios: []
+required_facts: []
+human_review: []
+`),
+      }),
+    );
+
+    expect(result.overall).toBe('pass');
+    expect(result.advisoryBrowserQa).toMatchObject({
+      status: 'skip',
+      reasoning: 'no-contract-checklist',
+    });
+    expect(hostBrowserRunner.getAvailability).not.toHaveBeenCalled();
+  });
 });
 
 describe('validate() — facts + review gate', () => {
@@ -708,6 +915,64 @@ describe('validate() — facts + review gate', () => {
       hasWebUi: false,
       ...overrides,
     };
+  }
+
+  function codexReviewContainerManager(options?: {
+    reviewStdout?: string;
+    reviewError?: Error;
+    commands?: string[];
+    prompts?: string[];
+  }): ContainerManager {
+    const fail = (name: string) =>
+      vi.fn(() => Promise.reject(new Error(`stub: ${name} unexpectedly called`)));
+    const execInContainer = vi.fn(
+      async (
+        _containerId: string,
+        command: string[],
+      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+        const shell = command[2] ?? '';
+        options?.commands?.push(shell);
+        if (
+          command[0] === 'sh' &&
+          command[1] === '-c' &&
+          typeof shell === 'string' &&
+          shell.includes('git reset --hard HEAD')
+        ) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (typeof shell === 'string' && shell.includes('codex exec')) {
+          if (options?.reviewError) throw options.reviewError;
+          return {
+            stdout:
+              options?.reviewStdout ??
+              JSON.stringify({
+                status: 'pass',
+                reasoning: 'Codex reviewer passed',
+                issues: [],
+              }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        throw new Error(`stub: execInContainer unexpectedly called: ${JSON.stringify(command)}`);
+      },
+    );
+    return {
+      spawn: fail('spawn'),
+      kill: fail('kill'),
+      refreshFirewall: fail('refreshFirewall'),
+      stop: fail('stop'),
+      start: fail('start'),
+      writeFile: vi.fn(async (_containerId: string, _path: string, content: string | Buffer) => {
+        options?.prompts?.push(String(content));
+      }),
+      readFile: fail('readFile'),
+      readFileBinary: fail('readFileBinary'),
+      extractDirectoryFromContainer: fail('extractDirectoryFromContainer'),
+      getStatus: fail('getStatus'),
+      execInContainer,
+      execStreaming: fail('execStreaming'),
+    } as unknown as ContainerManager;
   }
 
   it('skips Facts + Review with upstream-failed reason when build fails', async () => {
@@ -789,6 +1054,68 @@ describe('validate() — facts + review gate', () => {
     expect(result.overall).toBe('pass');
   });
 
+  it('runs Review through Codex for OpenAI reviewer profiles', async () => {
+    const commands: string[] = [];
+    const prompts: string[] = [];
+    const cm = codexReviewContainerManager({ commands, prompts });
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(
+      baseConfig({
+        reviewerProvider: 'openai',
+        reviewerModel: 'gpt-5',
+        diff: `diff --git a/src/app.ts b/src/app.ts
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old
++new
+`,
+      }),
+    );
+
+    expect(result.overall).toBe('pass');
+    expect(result.taskReview).toMatchObject({
+      status: 'pass',
+      model: 'gpt-5',
+      reasoning: 'Codex reviewer passed',
+    });
+    expect(commands.some((cmd) => cmd.includes('codex exec'))).toBe(true);
+    expect(commands.some((cmd) => cmd.includes("--model 'gpt-5'"))).toBe(true);
+    expect(prompts[0]).toContain('## DIFF');
+  });
+
+  it('blocks validation when Codex review times out', async () => {
+    const cm = codexReviewContainerManager({
+      reviewError: new Error('Command timed out after 300000ms'),
+    });
+    const engine = createLocalValidationEngine(cm);
+    const completed: Array<{ phase: string; status: string }> = [];
+
+    const result = await engine.validate(
+      baseConfig({
+        reviewerProvider: 'openai',
+        reviewerModel: 'gpt-5',
+        diff: `diff --git a/src/app.ts b/src/app.ts
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old
++new
+`,
+      }),
+      undefined,
+      undefined,
+      { onPhaseCompleted: (phase, status) => completed.push({ phase, status }) },
+    );
+
+    expect(result.taskReview).toBeNull();
+    expect(result.reviewSkipKind).toBe('review-timeout');
+    expect(result.reviewSkipReason).toMatch(/Review timed out:/);
+    expect(result.overall).toBe('fail');
+    expect(completed).toContainEqual({ phase: 'review', status: 'fail' });
+  });
+
   it('marks profile-skip on Facts when skipPhases includes facts', async () => {
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
@@ -806,6 +1133,185 @@ describe('validate() — facts + review gate', () => {
 
     expect(result.taskReview).toBeNull();
     expect(result.reviewSkipKind).toBe('profile-skip');
+  });
+
+  it('blocks validation as pending_human when a fact deviation awaits a decision', async () => {
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+    const completed: Array<{ phase: string; status: string }> = [];
+
+    const result = await engine.validate(
+      baseConfig({
+        contract: parseSpecContract(`contract_version: 1
+title: Swift-only fact
+depends_on: []
+scenarios:
+  - id: swift-helper-readable
+    given: ["a Swift helper changed"]
+    when: ["required facts run"]
+    then: ["the helper remains readable"]
+required_facts:
+  - id: fact-swift-only
+    proves: [swift-helper-readable]
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift
+      change: update
+    command: swift test --filter ThroughputTimeInStatusDisplayTests
+human_review: []
+`),
+        taskSummary: {
+          actualSummary: 'Updated the Swift helper.',
+          deviations: [],
+          factDeviations: [
+            {
+              factId: 'fact-swift-only',
+              action: 'waive',
+              reason: 'The artifact changed, but this verifier image has no Swift toolchain.',
+              whyImpossible: 'The command exits 127 with "swift: not found".',
+            },
+          ],
+        },
+      }),
+      undefined,
+      undefined,
+      { onPhaseCompleted: (phase, status) => completed.push({ phase, status }) },
+    );
+
+    expect(result.factValidation?.status).toBe('pending_human');
+    expect(result.factValidation?.results[0]).toMatchObject({
+      factId: 'fact-swift-only',
+      passed: false,
+      status: 'pending_human',
+    });
+    expect(result.reviewSkipReason).toBe('Skipped — required facts pending human decision');
+    expect(result.overall).toBe('fail');
+    expect(completed).toContainEqual({ phase: 'facts', status: 'pending_human' });
+  });
+
+  it('blocks validation as pending_human when a required fact command is unavailable', async () => {
+    const execInContainer = vi.fn(
+      async (
+        _containerId: string,
+        command: string[],
+      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+        const shell = command[2] ?? '';
+        if (shell.includes('git reset --hard HEAD')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('test -e')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('sha256sum')) {
+          return { stdout: 'abc123\n', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('.autopod/evidence')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('swift test')) {
+          return { stdout: '', stderr: 'sh: 1: swift: not found\n', exitCode: 127 };
+        }
+        throw new Error(`stub: execInContainer unexpectedly called: ${JSON.stringify(command)}`);
+      },
+    );
+    const cm = { ...stubContainerManager(), execInContainer } as unknown as ContainerManager;
+    const engine = createLocalValidationEngine(cm);
+    const completed: Array<{ phase: string; status: string }> = [];
+
+    const result = await engine.validate(
+      baseConfig({
+        diff: `diff --git a/packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift b/packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift
+--- a/packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift
++++ b/packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift
+@@ -1 +1 @@
+-old
++new`,
+        contract: parseSpecContract(`contract_version: 1
+title: Swift-only fact
+depends_on: []
+scenarios:
+  - id: swift-helper-readable
+    given: ["a Swift helper changed"]
+    when: ["required facts run"]
+    then: ["the helper remains readable"]
+required_facts:
+  - id: fact-swift-only
+    proves: [swift-helper-readable]
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift
+      change: update
+    command: swift test --filter ThroughputTimeInStatusDisplayTests
+human_review: []
+`),
+      }),
+      undefined,
+      undefined,
+      { onPhaseCompleted: (phase, status) => completed.push({ phase, status }) },
+    );
+
+    expect(result.factValidation?.status).toBe('pending_human');
+    expect(result.factValidation?.results[0]).toMatchObject({
+      factId: 'fact-swift-only',
+      passed: false,
+      status: 'pending_human',
+      exitCode: 127,
+    });
+    expect(result.factValidation?.results[0]?.reasoning).toContain(
+      'required fact command `swift` is unavailable',
+    );
+    expect(result.reviewSkipReason).toBe('Skipped — required facts pending human decision');
+    expect(result.overall).toBe('fail');
+    expect(completed).toContainEqual({ phase: 'facts', status: 'pending_human' });
+  });
+
+  it('passes waived fact deviations after human approval', async () => {
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(
+      baseConfig({
+        contract: parseSpecContract(`contract_version: 1
+title: Swift-only fact
+depends_on: []
+scenarios:
+  - id: swift-helper-readable
+    given: ["a Swift helper changed"]
+    when: ["required facts run"]
+    then: ["the helper remains readable"]
+required_facts:
+  - id: fact-swift-only
+    proves: [swift-helper-readable]
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift
+      change: update
+    command: swift test --filter ThroughputTimeInStatusDisplayTests
+human_review: []
+`),
+        taskSummary: {
+          actualSummary: 'Updated the Swift helper.',
+          deviations: [],
+          factDeviations: [
+            {
+              factId: 'fact-swift-only',
+              action: 'waive',
+              decision: 'approved_waive',
+              reason: 'The artifact changed, but this verifier image has no Swift toolchain.',
+              whyImpossible: 'The command exits 127 with "swift: not found".',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.factValidation?.status).toBe('pass');
+    expect(result.factValidation?.results[0]).toMatchObject({
+      factId: 'fact-swift-only',
+      passed: true,
+      status: 'waived',
+    });
+    expect(result.overall).toBe('pass');
   });
 });
 

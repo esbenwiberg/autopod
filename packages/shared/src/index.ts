@@ -117,9 +117,11 @@ export type {
   ModelProvider,
   ProviderCredentials,
   AnthropicCredentials,
+  OpenAiCredentials,
   MaxCredentials,
   FoundryCredentials,
   FoundryApiSurface,
+  CopilotCredentials,
 } from './types/model-provider.js';
 
 export type {
@@ -152,6 +154,8 @@ export type {
   PageResult,
   AssertionResult,
   TaskReviewResult,
+  AdvisoryBrowserQaObservation,
+  AdvisoryBrowserQaResult,
   RequirementsCheckItem,
   ValidationFinding,
   ValidationOverride,

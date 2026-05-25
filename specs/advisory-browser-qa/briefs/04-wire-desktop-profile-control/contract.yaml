@@ -1,0 +1,27 @@
+contract_version: 1
+title: "Wire desktop advisory browser QA profile control"
+depends_on: [01-add-advisory-contracts]
+scenarios:
+  - id: desktop-profile-setting-visible
+    given:
+      - "a desktop user edits a base or derived profile"
+    when:
+      - "they view advisory browser QA settings"
+    then:
+      - "they can choose auto/inherit, enabled, or disabled without clobbering inherited defaults"
+required_facts:
+  - id: fact-desktop-profile-decodes-advisory-setting
+    proves: [desktop-profile-setting-visible]
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift
+      change: update
+    command: swift test --package-path packages/desktop --filter AutopodClientTests
+  - id: fact-desktop-profile-patch-emits-setting
+    proves: [desktop-profile-setting-visible]
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodClientTests/ProfileMapperTests.swift
+      change: create
+    command: swift test --package-path packages/desktop --filter ProfileMapperTests
+human_review: []

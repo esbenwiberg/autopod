@@ -64,6 +64,37 @@ const validation: ValidationResult = {
       },
     ],
   },
+  advisoryBrowserQa: {
+    status: 'uncertain',
+    reasoning: 'Visual review found non-blocking concerns; required facts remain authoritative.',
+    model: 'qa-model',
+    durationMs: 2500,
+    screenshots: [
+      {
+        podId: 'pod-123',
+        source: 'advisory',
+        filename: 'finding-created.png',
+        relativePath: 'screenshots/pod-123/advisory/finding-created.png',
+      },
+    ],
+    observations: [
+      {
+        id: 'obs-navigation-ambiguous',
+        scenarioId: 'finding-created',
+        status: 'uncertain',
+        summary: 'The audit state is visible, but the landing tab is ambiguous.',
+        screenshots: [
+          {
+            podId: 'pod-123',
+            source: 'advisory',
+            filename: 'finding-created.png',
+            relativePath: 'screenshots/pod-123/advisory/finding-created.png',
+          },
+        ],
+        suggestedFacts: ['Add a browser-test fact proving the audit tab opens by default.'],
+      },
+    ],
+  },
   taskReview: null,
   overall: 'pass',
   duration: 1234,
@@ -95,6 +126,32 @@ describe('evidence document', () => {
           },
         },
       ],
+      advisory_browser_qa: {
+        status: 'uncertain',
+        model: 'qa-model',
+        duration_ms: 2500,
+        screenshots: [
+          {
+            source: 'advisory',
+            relative_path: 'screenshots/pod-123/advisory/finding-created.png',
+          },
+        ],
+        observations: [
+          {
+            id: 'obs-navigation-ambiguous',
+            scenario_id: 'finding-created',
+            status: 'uncertain',
+            summary: 'The audit state is visible, but the landing tab is ambiguous.',
+            screenshots: [
+              {
+                source: 'advisory',
+                relative_path: 'screenshots/pod-123/advisory/finding-created.png',
+              },
+            ],
+            suggested_facts: ['Add a browser-test fact proving the audit tab opens by default.'],
+          },
+        ],
+      },
     });
   });
 
@@ -104,5 +161,9 @@ describe('evidence document', () => {
     expect(yaml).toContain('id: fact-finding-created');
     expect(yaml).toContain('exit_code: 0');
     expect(yaml).toContain('hash: abc123');
+    expect(yaml).toContain('advisory_browser_qa:');
+    expect(yaml).toContain('scenario_id: finding-created');
+    expect(yaml).toContain('source: advisory');
+    expect(yaml).toContain('relative_path: screenshots/pod-123/advisory/finding-created.png');
   });
 });

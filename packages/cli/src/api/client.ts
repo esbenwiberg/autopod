@@ -304,7 +304,7 @@ export class AutopodClient {
 
   async setProfileCredentials(
     name: string,
-    credentials: { modelProvider: string; providerCredentials: unknown },
+    credentials: { modelProvider: string; providerCredentials: unknown; defaultRuntime?: string },
   ): Promise<Profile> {
     return this.request<Profile>('PATCH', `/profiles/${name}`, credentials);
   }

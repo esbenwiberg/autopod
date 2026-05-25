@@ -41,6 +41,9 @@ without losing the fact that long-tail outliers exist.
 
 ## Constraints
 
+- Required facts for `autopod-self` run inside the Linux `node22-pw` pod image. Do not
+  rely on `swift test` as an Autopod required fact for this desktop work; SwiftUI/AppKit
+  verification is human review or optional local Mac validation until a Mac runner exists.
 - Preserve the existing section-level empty state:
   `"No status-transition history in last N days."`
 - Preserve the existing row order and source data:
@@ -89,11 +92,14 @@ display helper, not the SwiftUI `Chart` runtime:
 - **All empty**: an all-zero payload yields a safe positive cap and no clipped rows, while
   the view continues to use the existing section-level empty state.
 
-Run:
+Optional local Mac verification:
 
 ```bash
-cd packages/desktop && swift test --filter ThroughputTimeInStatusDisplayTests
+swift test --package-path packages/desktop --filter ThroughputTimeInStatusDisplayTests
 ```
+
+This command is not an Autopod required fact. It requires a macOS/Xcode-capable host, and
+SwiftPM may compile other desktop test targets before it reaches the filtered test.
 
 ## Risks / pitfalls
 
@@ -108,6 +114,6 @@ cd packages/desktop && swift test --filter ThroughputTimeInStatusDisplayTests
 
 Before finishing:
 1. Run `/simplify` and address its findings.
-2. Run `cd packages/desktop && swift test --filter ThroughputTimeInStatusDisplayTests`.
-3. Run `swift test` for the desktop package if time permits; otherwise report why only the
-   focused test was run.
+2. If working on a Mac with a healthy desktop SwiftPM test suite, optionally run
+   `swift test --package-path packages/desktop --filter ThroughputTimeInStatusDisplayTests`.
+3. Report whether Swift verification was run locally or deferred to human review.

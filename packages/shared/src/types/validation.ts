@@ -1,7 +1,7 @@
 import type { PageAssertion } from './profile.js';
 import type { DeviationsAssessment } from './task-summary.js';
 
-export type ScreenshotSource = 'smoke' | 'fact' | 'review';
+export type ScreenshotSource = 'smoke' | 'fact' | 'review' | 'advisory';
 
 export interface ScreenshotRef {
   podId: string;
@@ -21,6 +21,11 @@ export interface ValidationResult {
   sast?: SastResult;
   factValidation?: FactValidationResult | null;
   taskReview: TaskReviewResult | null;
+  /**
+   * Screenshot-backed exploratory browser QA. Advisory only: required facts
+   * remain the blocking proof layer and this result must not affect `overall`.
+   */
+  advisoryBrowserQa?: AdvisoryBrowserQaResult | null;
   /** Human-readable reason when taskReview is null (e.g. "No code changes detected") */
   reviewSkipReason?: string;
   /** Machine-readable kind for taskReview skip — paired with reviewSkipReason. */
@@ -151,6 +156,27 @@ export interface TaskReviewResult {
   deviationsAssessment?: DeviationsAssessment;
   /** Token counts from the LLM call(s) that produced this result. Absent for Tier-1 CLI reviews. */
   tokenUsage?: { inputTokens: number; outputTokens: number };
+}
+
+export interface AdvisoryBrowserQaObservation {
+  id: string;
+  /** Scenario this observation relates to, when scenario-backed QA was possible. */
+  scenarioId?: string;
+  status: 'pass' | 'fail' | 'uncertain';
+  summary: string;
+  details?: string;
+  screenshots: ScreenshotRef[];
+  /** Suggestions for required facts when advisory evidence exposes a weak proof boundary. */
+  suggestedFacts?: string[];
+}
+
+export interface AdvisoryBrowserQaResult {
+  status: 'pass' | 'fail' | 'uncertain' | 'skip';
+  reasoning: string;
+  model?: string;
+  durationMs?: number;
+  observations: AdvisoryBrowserQaObservation[];
+  screenshots: ScreenshotRef[];
 }
 
 /** A single failed finding extracted from a ValidationResult for recurring-detection. */

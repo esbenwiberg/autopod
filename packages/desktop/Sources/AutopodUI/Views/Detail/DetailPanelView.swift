@@ -19,6 +19,8 @@ public struct DetailPanelView: View {
     /// Triggers a historical event fetch for a pod whose events haven't been
     /// loaded yet (e.g. when the user opens the panel for a sibling).
     public var loadEventsForPod: ((String) -> Void)?
+    /// Returns the historical REST load state for a pod's cached events.
+    public var relatedEventLoadStateForPod: ((String) -> RelatedEventLoadState)?
     public var diffResponse: DiffApiResponse?
     public var terminalState: String
     public var terminalDataPipe: TerminalDataPipe?
@@ -50,6 +52,7 @@ public struct DetailPanelView: View {
         onSelectPod: ((String) -> Void)? = nil,
         eventsForPod: ((String) -> [AgentEvent])? = nil,
         loadEventsForPod: ((String) -> Void)? = nil,
+        relatedEventLoadStateForPod: ((String) -> RelatedEventLoadState)? = nil,
         diffResponse: DiffApiResponse? = nil,
         terminalState: String = "disconnected",
         terminalDataPipe: TerminalDataPipe? = nil,
@@ -77,6 +80,7 @@ public struct DetailPanelView: View {
         self.onSelectPod = onSelectPod
         self.eventsForPod = eventsForPod
         self.loadEventsForPod = loadEventsForPod
+        self.relatedEventLoadStateForPod = relatedEventLoadStateForPod
         self.diffResponse = diffResponse
         self.terminalState = terminalState
         self.terminalDataPipe = terminalDataPipe
@@ -102,6 +106,7 @@ public struct DetailPanelView: View {
 
     @State private var selectedTab: DetailTab = .overview
     @State private var didCopyName: Bool = false
+    @State private var showRelatedEventsDebug: Bool = false
 
     private var isTerminalAvailable: Bool { pod.pod.agentMode == .interactive }
     private var isEvidenceAvailable: Bool {
@@ -111,6 +116,9 @@ public struct DetailPanelView: View {
         || !(pod.validationChecks?.taskReviewScreenshots?.isEmpty ?? true)
         || pod.artifactsPath != nil
     }
+    private var relatedEventReferences: [RelatedEventReference] {
+        Self.relatedEventReferences(for: pod, seriesPods: seriesPods)
+    }
     @State private var showPromoteMenu: Bool = false
 
     /// Artifact payload beats everything; for series pods the graph is the landing view;
@@ -119,6 +127,71 @@ public struct DetailPanelView: View {
         if pod.pod.output == .artifact { return .evidence }
         if pod.seriesId != nil { return .series }
         return .overview
+    }
+
+    nonisolated static func relatedEventReferences(
+        for pod: Pod,
+        seriesPods: [Pod]
+    ) -> [RelatedEventReference] {
+        var knownPods: [String: Pod] = [pod.id: pod]
+        for seriesPod in seriesPods {
+            knownPods[seriesPod.id] = seriesPod
+        }
+
+        var seen: Set<String> = [pod.id]
+        var references: [RelatedEventReference] = []
+
+        func append(id: String?, relationship: String) {
+            guard let id, !id.isEmpty, seen.insert(id).inserted else { return }
+            references.append(
+                RelatedEventReference(id: id, relationship: relationship, pod: knownPods[id])
+            )
+        }
+
+        if let linked = pod.linkedSessionId {
+            let relationship = pod.isWorkspace
+                ? "linked worker"
+                : pod.hasPrFixContext ? "parent pod" : "linked workspace"
+            append(id: linked, relationship: relationship)
+        }
+
+        append(id: pod.fixPodId, relationship: "current fix pod")
+
+        for seriesPod in seriesPods where seriesPod.id != pod.id {
+            append(id: seriesPod.id, relationship: seriesRelationship(from: pod, to: seriesPod))
+        }
+
+        return references
+    }
+
+    nonisolated private static func seriesRelationship(from pod: Pod, to related: Pod) -> String {
+        if pod.dependsOnPodIds.contains(related.id) {
+            return "series parent"
+        }
+        if related.dependsOnPodIds.contains(pod.id) {
+            return "series child"
+        }
+        return "series sibling"
+    }
+
+    private func relatedEventLoadState(for id: String) -> RelatedEventLoadState {
+        if id == pod.id {
+            if isLoadingLogs { return .loading }
+            if let logsLoadError { return .failed(logsLoadError) }
+            return events.isEmpty ? .notLoaded : .loaded
+        }
+
+        if let state = relatedEventLoadStateForPod?(id) {
+            if state == .notLoaded, let cachedEvents = eventsForPod?(id), !cachedEvents.isEmpty {
+                return .loaded
+            }
+            return state
+        }
+
+        if let cachedEvents = eventsForPod?(id), !cachedEvents.isEmpty {
+            return .loaded
+        }
+        return .notLoaded
     }
 
     public var body: some View {
@@ -212,6 +285,22 @@ public struct DetailPanelView: View {
         .sheet(isPresented: $showNudgeInput) { nudgeSheet }
         .sheet(isPresented: $showHandoffSheet) { handoffSheet }
         .sheet(isPresented: $showSingleSpecHandoffSheet) { singleSpecHandoffSheet }
+        .sheet(isPresented: $showRelatedEventsDebug) {
+            RelatedEventsDebugSheet(
+                currentPodId: pod.id,
+                references: relatedEventReferences,
+                eventsForPod: { id in
+                    id == pod.id ? events : (eventsForPod?(id) ?? [])
+                },
+                loadStateForPod: relatedEventLoadState(for:),
+                loadEventsForPod: loadEventsForPod,
+                onOpenPod: onSelectPod,
+                onOpenLogs: onSelectPod == nil ? nil : { id in
+                    onSelectPod?(id)
+                    DispatchQueue.main.async { requestedTab = .logs }
+                }
+            )
+        }
         .alert("Resume pod", isPresented: $showResumeInput) {
             TextField("Message for the agent…", text: $resumeInputText)
             Button("Resume") {
@@ -814,6 +903,17 @@ public struct DetailPanelView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
+            }
+
+            if !relatedEventReferences.isEmpty {
+                Button {
+                    showRelatedEventsDebug = true
+                } label: {
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Inspect related pod events")
             }
         }
         .confirmationDialog("Delete pod \(pod.id)?", isPresented: $showDeleteConfirmation) {

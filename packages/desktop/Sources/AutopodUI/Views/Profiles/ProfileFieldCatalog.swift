@@ -67,7 +67,7 @@ public enum ProfileOverrideCatalog {
             key: "pod",
             label: "Pod Defaults",
             section: .general,
-            help: "Agent mode, output target, validate, promotable."
+            help: "Agent mode, output target, validation, advisory browser QA, promotable."
         ),
         .init(
             key: "workerProfile",
@@ -161,13 +161,13 @@ public enum ProfileOverrideCatalog {
             key: "defaultModel",
             label: "Default Model",
             section: .agent,
-            help: "AI model name (e.g. `opus`, `sonnet`)."
+            help: "AI model for the selected runtime (e.g. `opus`, `sonnet`, `auto`, `gpt-5`)."
         ),
         .init(
             key: "reviewerModel",
             label: "Reviewer Model",
             section: .agent,
-            help: "Model used for required-facts review and task review. Defaults to Default Model."
+            help: "Model used for required-facts review and task review. Options follow the runtime."
         ),
         .init(
             key: "defaultRuntime",
@@ -187,7 +187,7 @@ public enum ProfileOverrideCatalog {
             key: "modelProvider",
             label: "Model Provider",
             section: .providers,
-            help: "anthropic / max / foundry / copilot. Credentials are tied to this choice."
+            help: "anthropic / max / openai / foundry / copilot. Credentials are tied to this choice."
         ),
         .init(
             key: "prProvider",

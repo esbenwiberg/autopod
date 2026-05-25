@@ -103,6 +103,54 @@ describe('buildProviderEnv', () => {
     });
   });
 
+  describe('openai provider (Codex)', () => {
+    it('writes ChatGPT auth.json when profile has Codex login credentials', async () => {
+      process.env.OPENAI_API_KEY = 'sk-openai-daemon-fallback';
+      const authJson = JSON.stringify({ OPENAI_API_KEY: null, tokens: { id_token: 'redacted' } });
+      const profile = makeProfile({
+        modelProvider: 'openai',
+        defaultRuntime: 'codex',
+        providerCredentials: {
+          provider: 'openai',
+          authMode: 'chatgpt',
+          authJson,
+        },
+      });
+
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
+
+      expect(result.env.OPENAI_API_KEY_FILE).toBeUndefined();
+      expect(result.secretFiles).toHaveLength(0);
+      expect(result.containerFiles).toEqual(
+        expect.arrayContaining([{ path: '/home/autopod/.codex/auth.json', content: authJson }]),
+      );
+    });
+
+    it('writes OPENAI_API_KEY to a secret file when configured', async () => {
+      process.env.OPENAI_API_KEY = 'sk-openai-test123';
+      const profile = makeProfile({ modelProvider: 'openai', defaultRuntime: 'codex' });
+
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
+
+      expect(result.env.OPENAI_API_KEY).toBeUndefined();
+      expect(result.env.OPENAI_API_KEY_FILE).toBe('/run/autopod/openai-api-key');
+      expect(result.env.ANTHROPIC_API_KEY_FILE).toBeUndefined();
+      expect(result.secretFiles).toHaveLength(1);
+      expect(result.secretFiles[0]?.content).toBe('sk-openai-test123');
+      expect(result.requiresPostExecPersistence).toBe(false);
+    });
+
+    it('returns empty secretFiles when OPENAI_API_KEY is unset', async () => {
+      process.env.OPENAI_API_KEY = undefined;
+      const profile = makeProfile({ modelProvider: 'openai', defaultRuntime: 'codex' });
+
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
+
+      expect(result.env.OPENAI_API_KEY_FILE).toBeUndefined();
+      expect(result.secretFiles).toHaveLength(0);
+    });
+  });
+
   describe('max provider', () => {
     it('builds credentials file and sets HOME', async () => {
       const profile = makeProfile({

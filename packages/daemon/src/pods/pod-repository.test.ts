@@ -179,12 +179,16 @@ describe('PodRepository', () => {
       repo.insert(validSession);
       repo.update('sess-001', {
         status: 'running',
+        model: 'gpt-5-codex',
+        runtime: 'codex',
         containerId: 'ctr-abc',
         worktreePath: '/tmp/wt/sess-001',
         startedAt: '2026-01-01T00:00:00.000Z',
       });
       const pod = repo.getOrThrow('sess-001');
       expect(pod.status).toBe('running');
+      expect(pod.model).toBe('gpt-5-codex');
+      expect(pod.runtime).toBe('codex');
       expect(pod.containerId).toBe('ctr-abc');
       expect(pod.worktreePath).toBe('/tmp/wt/sess-001');
       expect(pod.startedAt).toBe('2026-01-01T00:00:00.000Z');

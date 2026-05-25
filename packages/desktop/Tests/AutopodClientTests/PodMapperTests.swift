@@ -38,7 +38,13 @@ import AutopodUI
     "progress": { "phase": "implementation", "description": "Writing routes", "currentPhase": 3, "totalPhases": 5 },
     "claudeSessionId": null,
     "outputMode": "pr",
-    "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
+    "options": {
+      "agentMode": "auto",
+      "output": "pr",
+      "validate": true,
+      "advisoryBrowserQaEnabled": true,
+      "promotable": false
+    },
     "baseBranch": null,
     "recoveryWorktreePath": null,
     "lastHeartbeatAt": null,
@@ -67,6 +73,7 @@ import AutopodUI
   #expect(pod.costUsd == 0.42)
   #expect(pod.commitCount == 2)
   #expect(pod.isWorkspace == false)
+  #expect(pod.pod.advisoryBrowserQaEnabled == true)
 
   #expect(pod.runningAt == PodMapper.parseDate("2026-04-01T09:00:35Z"))
 }
@@ -846,6 +853,160 @@ import AutopodUI
   #expect(combined[1].label == "/root")
   #expect(combined[2].label == ".autopod/evidence/fact-page/screenshot.png")
   #expect(combined[3].label == "0")
+}
+
+@Test func mapperMapsAdvisoryQaWithoutAffectingValidationOutcome() throws {
+  let sessionJson = """
+  {
+    "id": "advisory-test",
+    "profileName": "app",
+    "task": "Test advisory QA",
+    "status": "complete",
+    "model": "opus",
+    "runtime": "claude",
+    "executionTarget": "local",
+    "branch": "feat/advisory",
+    "containerId": null,
+    "worktreePath": null,
+    "validationAttempts": 1,
+    "maxValidationAttempts": 3,
+    "pendingEscalation": null,
+    "escalationCount": 0,
+    "skipValidation": false,
+    "createdAt": "2026-04-01T09:00:00Z",
+    "startedAt": "2026-04-01T09:00:00Z",
+    "completedAt": "2026-04-01T09:10:00Z",
+    "updatedAt": "2026-04-01T09:10:00Z",
+    "userId": "user-1",
+    "filesChanged": 0, "linesAdded": 0, "linesRemoved": 0,
+    "previewUrl": null, "prUrl": null,
+    "plan": null, "progress": null,
+    "claudeSessionId": null, "outputMode": "pr",
+    "options": { "agentMode": "auto", "output": "pr", "validate": true, "promotable": false },
+    "baseBranch": null, "recoveryWorktreePath": null, "lastHeartbeatAt": null,
+    "inputTokens": 0, "outputTokens": 0, "costUsd": 0, "commitCount": 0, "lastCommitAt": null,
+    "lastValidationResult": {
+      "podId": "advisory-test",
+      "attempt": 1,
+      "timestamp": "2026-04-01T09:08:00Z",
+      "overall": "pass",
+      "duration": 10000,
+      "smoke": {
+        "status": "pass",
+        "build": { "status": "pass", "output": "", "duration": 1000 },
+        "health": { "status": "pass", "url": "http://localhost:3001", "responseCode": 200, "duration": 100 },
+        "pages": [
+          {
+            "path": "/",
+            "status": "pass",
+            "consoleErrors": [],
+            "assertions": [],
+            "loadTime": 90,
+            "screenshot": { "url": "/pods/advisory-test/screenshots/smoke/root.png", "source": "smoke", "path": "/" }
+          }
+        ]
+      },
+      "test": { "status": "pass", "duration": 120, "stdout": "", "stderr": "" },
+      "lint": { "status": "pass", "output": "", "duration": 20 },
+      "sast": { "status": "pass", "output": "", "duration": 25 },
+      "factValidation": { "status": "pass", "results": [] },
+      "taskReview": {
+        "status": "pass",
+        "reasoning": "good",
+        "issues": [],
+        "model": "claude",
+        "diff": "",
+        "screenshots": []
+      },
+      "advisoryBrowserQa": {
+        "status": "error",
+        "reasoning": "Advisory QA found a non-blocking browser concern.",
+        "model": "gpt-5",
+        "durationMs": 3000,
+        "observations": [
+          {
+            "id": "advisory-1",
+            "scenarioId": "scenario-home",
+            "status": "fail",
+            "summary": "Hero overflows on mobile",
+            "details": "The heading wraps into the toolbar.",
+            "screenshots": [
+              {
+                "url": "/pods/advisory-test/screenshots/advisory/advisory-0.png",
+                "source": "advisory",
+                "path": "advisory-0"
+              }
+            ],
+            "suggestedFacts": ["Add a mobile viewport fact."]
+          }
+        ],
+        "screenshots": [
+          {
+            "url": "/pods/advisory-test/screenshots/advisory/advisory-0.png",
+            "source": "advisory",
+            "path": "advisory-0"
+          }
+        ]
+      }
+    }
+  }
+  """.data(using: .utf8)!
+
+  let baseURL = URL(string: "http://127.0.0.1:3100")!
+  let response = try JSONDecoder().decode(SessionResponse.self, from: sessionJson)
+  let pod = PodMapper.map(response, baseURL: baseURL)
+  let checks = try #require(pod.validationChecks)
+  let advisory = try #require(checks.advisoryQa)
+
+  #expect(advisory.status == "error")
+  #expect(advisory.observations.first?.summary == "Hero overflows on mobile")
+  #expect(advisory.screenshots.first?.source == .advisory)
+  #expect(
+    advisory.screenshots.first?.url.absoluteString
+      == "http://127.0.0.1:3100/pods/advisory-test/screenshots/advisory/advisory-0.png"
+  )
+  #expect(checks.allPassed == true)
+  #expect(checks.validationPhaseCount == 8)
+}
+
+@Test func validationChecksExcludeAdvisoryQaFromPhaseCounts() {
+  let advisory = AdvisoryQaDetail(
+    status: "error",
+    reasoning: "Non-blocking advisory issue.",
+    model: "gpt-5",
+    durationMs: 1200,
+    observations: [],
+    screenshots: []
+  )
+  let checks = ValidationChecks(
+    smoke: true,
+    tests: true,
+    lint: true,
+    sast: true,
+    review: true,
+    healthCheck: HealthCheckDetail(
+      status: "pass",
+      url: "http://localhost:3000/health",
+      responseCode: 200,
+      duration: 12,
+      responseBody: nil
+    ),
+    pages: [
+      PageDetail(
+        path: "/",
+        status: "pass",
+        consoleErrors: [],
+        assertions: [],
+        loadTime: 25,
+        screenshot: nil
+      )
+    ],
+    factValidation: true,
+    advisoryQa: advisory
+  )
+
+  #expect(checks.allPassed == true)
+  #expect(checks.validationPhaseCount == 8)
 }
 
 // MARK: - hasWebUi mapping tests (brief 02)

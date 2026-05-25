@@ -131,6 +131,13 @@ import {
   ensureNuGetCredentialProvider,
   validateRegistryFiles,
 } from './registry-injector.js';
+import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
+import {
+  resolvePodModel,
+  resolvePodRuntime,
+  resolveReviewerModel,
+  resolveReviewerProvider,
+} from './runtime-resolver.js';
 import { resolveSections } from './section-resolver.js';
 import { resolveSkills } from './skill-resolver.js';
 import {
@@ -204,6 +211,29 @@ function failedFactIds(result: ValidationResult | null): string[] {
   );
 }
 
+const REWORK_IN_PROGRESS_PREFIX = '[REWORK IN PROGRESS]';
+
+function summarizeAgentCompletionBlocker(result: string): string | null {
+  const normalized = result.toLowerCase();
+  if (normalized.includes('bwrap: no permissions to create a new namespace')) {
+    return 'Agent could not run shell commands: bwrap cannot create a namespace.';
+  }
+  if (normalized.includes('blocked by the execution environment')) {
+    return 'Agent reported it was blocked by the execution environment.';
+  }
+  if (normalized.includes("can't inspect files") && normalized.includes('edit code')) {
+    return 'Agent reported it could not inspect or edit files.';
+  }
+  return null;
+}
+
+function hasPendingFactDecision(result: ValidationResult | null): boolean {
+  return (
+    result?.factValidation?.status === 'pending_human' ||
+    result?.factValidation?.results.some((fact) => fact.status === 'pending_human') === true
+  );
+}
+
 function buildValidationWaiver(result: ValidationResult | null, reason?: string): ValidationWaiver {
   return {
     waivedAt: new Date().toISOString(),
@@ -259,7 +289,7 @@ function buildWorkspaceMirrorCopyScript(
     '    cp -a "$rel" "$dest"',
     '  fi',
     'done',
-  ].join('; ');
+  ].join('\n');
 
   return [
     `cd ${shellQuote(sourceDir)}`,
@@ -693,6 +723,34 @@ function mergeOverrides(
   return [...map.values()];
 }
 
+const AGENT_CLI_BY_RUNTIME: Record<Pod['runtime'], string> = {
+  claude: 'claude',
+  codex: 'codex',
+  copilot: 'copilot',
+};
+
+async function verifyAgentCli(
+  containerManager: ContainerManager,
+  containerId: string,
+  runtime: Pod['runtime'],
+): Promise<string> {
+  const cli = AGENT_CLI_BY_RUNTIME[runtime];
+  const result = await containerManager.execInContainer(
+    containerId,
+    ['sh', '-lc', `command -v ${cli}`],
+    { timeout: 10_000 },
+  );
+
+  if (result.exitCode !== 0) {
+    const detail = (result.stderr || result.stdout).trim();
+    throw new Error(
+      `Agent CLI missing: ${cli} is not installed in this image. Rebuild the ${runtime} base/warm image.${detail ? ` ${detail}` : ''}`,
+    );
+  }
+
+  return result.stdout.trim();
+}
+
 export interface ContainerManagerFactory {
   get(target: ExecutionTarget): ContainerManager;
 }
@@ -1002,17 +1060,22 @@ function deriveAgentAttempt(phaseTokenUsage: PhaseTokenUsage | null): number {
   return 1 + highestRework;
 }
 
-function hasPersistedAgentCompleteEvent(
+function hasLatestPersistedAgentTerminalEventComplete(
   eventRepo: EventRepository | undefined,
   podId: string,
 ): boolean {
   if (!eventRepo) return false;
-  return eventRepo
-    .getForSession(podId)
-    .some(
-      (event) =>
-        event.payload.type === 'pod.agent_activity' && event.payload.event.type === 'complete',
-    );
+  let latestTerminalEvent: 'complete' | 'error' | null = null;
+  for (const event of eventRepo.getForSession(podId)) {
+    if (event.payload.type !== 'pod.agent_activity') continue;
+    const agentEvent = event.payload.event;
+    if (agentEvent.type === 'complete') {
+      latestTerminalEvent = 'complete';
+    } else if (agentEvent.type === 'error' && agentEvent.fatal) {
+      latestTerminalEvent = 'error';
+    }
+  }
+  return latestTerminalEvent === 'complete';
 }
 
 export function createPodManager(deps: PodManagerDependencies): PodManager {
@@ -2921,7 +2984,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       },
       onPhaseCompleted: (
         phase: ValidationPhase,
-        status: 'pass' | 'fail' | 'skip',
+        status: 'pass' | 'fail' | 'skip' | 'pending_human',
         phaseResult: unknown,
       ) => {
         const base = {
@@ -3041,6 +3104,46 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
   }
 
+  async function ensurePrBaseBranchOnOrigin(
+    pod: Pod,
+    profile: Profile,
+    baseBranch: string,
+    callerLabel: string,
+  ): Promise<void> {
+    if (!pod.worktreePath) return;
+    const defaultBranch = profile.defaultBranch ?? 'main';
+    if (baseBranch === pod.branch || baseBranch === defaultBranch) return;
+
+    const ensureRemoteBranch = worktreeManager.ensureRemoteBranch?.bind(worktreeManager);
+    if (!ensureRemoteBranch) {
+      logger.warn(
+        { podId: pod.id, baseBranch, callerLabel },
+        'Worktree manager cannot ensure PR base branch exists on origin',
+      );
+      return;
+    }
+
+    try {
+      const result = await ensureRemoteBranch({
+        worktreePath: pod.worktreePath,
+        branch: baseBranch,
+        sourceRef: `refs/heads/${baseBranch}`,
+        pat: selectGitPat(profile),
+      });
+      if (result.created) {
+        emitActivityStatus(pod.id, `Base branch published: ${baseBranch}`);
+      }
+    } catch (err) {
+      // Best effort: if the branch already exists but the check/push failed for a
+      // transient reason, PR creation can still succeed. If it truly is absent,
+      // the PR provider will return the authoritative error below.
+      logger.warn(
+        { err, podId: pod.id, baseBranch, callerLabel },
+        'Failed to ensure PR base branch exists on origin',
+      );
+    }
+  }
+
   /**
    * Shared push-then-open-PR flow used by both `retryCreatePr` (post-complete) and
    * `resumePod` (post-failure). Caller is responsible for the status preconditions
@@ -3099,6 +3202,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
 
     try {
+      await ensurePrBaseBranchOnOrigin(pod, profile, baseBranch, callerLabel);
       const result = await prManager.createPr({
         worktreePath: pod.worktreePath,
         repoUrl: profile.repoUrl ?? undefined,
@@ -3302,8 +3406,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod {
       const profile = profileStore.get(request.profileName);
       assertNoExpiredPat(profile);
-      const model = request.model ?? profile.defaultModel ?? 'opus';
-      const runtime = request.runtime ?? profile.defaultRuntime ?? 'claude';
+      const runtime = resolvePodRuntime(profile, request.runtime, logger);
+      const model = resolvePodModel(profile, request.model, runtime, logger);
       const executionTarget = request.executionTarget ?? profile.executionTarget ?? 'local';
       const skipValidation = request.skipValidation ?? false;
       const normalizedDependsOnPodIds =
@@ -3981,11 +4085,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         let firewallScript: string | undefined;
         let initialMergedMcpServers: import('@autopod/shared').InjectedMcpServer[] | undefined;
         let daemonGatewayIp: string | undefined;
-        if (networkManager && pod.executionTarget === 'local' && profile.networkPolicy?.enabled) {
+        const runtimeNetworkPolicy = addRuntimeNetworkDefaults(
+          profile.networkPolicy,
+          profile,
+          pod.runtime,
+        );
+        if (networkManager && pod.executionTarget === 'local' && runtimeNetworkPolicy?.enabled) {
           initialMergedMcpServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
           daemonGatewayIp = await networkManager.getGatewayIp(podId);
           const netConfig = await networkManager.buildNetworkConfig(
-            profile.networkPolicy,
+            runtimeNetworkPolicy,
             initialMergedMcpServers,
             daemonGatewayIp,
             profile.privateRegistries,
@@ -4096,10 +4205,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           networkManager &&
           initialMergedMcpServers &&
           daemonGatewayIp &&
-          profile.networkPolicy?.enabled
+          runtimeNetworkPolicy?.enabled
         ) {
           const finalConfig = await networkManager.buildNetworkConfig(
-            profile.networkPolicy,
+            runtimeNetworkPolicy,
             initialMergedMcpServers,
             daemonGatewayIp,
             profile.privateRegistries,
@@ -5197,7 +5306,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           return;
         }
 
-        if (isRecovery && !isRework && hasPersistedAgentCompleteEvent(deps.eventRepo, podId)) {
+        if (
+          isRecovery &&
+          !isRework &&
+          hasLatestPersistedAgentTerminalEventComplete(deps.eventRepo, podId)
+        ) {
           emitStatus('Agent already finished before recovery — resuming completion…');
           logger.info(
             { podId, worktreePath },
@@ -5208,6 +5321,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         // Start the agent — recovery mode uses resume for Claude, fresh spawn for others
+        emitStatus(
+          `Starting worker: provider=${profile.modelProvider ?? 'anthropic'}, runtime=${pod.runtime}, model=${pod.model}`,
+        );
+        try {
+          const cliPath = await verifyAgentCli(containerManager, containerId, pod.runtime);
+          logger.info({ podId, runtime: pod.runtime, cliPath }, 'Agent CLI preflight passed');
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          emitStatus(message);
+          throw err;
+        }
+
         emitStatus('Spawning agent…');
         const runtime = runtimeRegistry.get(pod.runtime);
         let events: AsyncIterable<AgentEvent>;
@@ -5254,7 +5379,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
 
           // Clear rework reason now that it's been consumed (one-shot)
-          podRepo.update(podId, { reworkReason: null });
+          podRepo.update(podId, {
+            reworkReason: null,
+            lastCorrectionMessage: `${REWORK_IN_PROGRESS_PREFIX} ${pod.reworkReason}`,
+          });
         } else if (isRecovery && pod.runtime === 'claude' && pod.claudeSessionId) {
           // Crash recovery: attempt Claude --resume with persisted pod ID
           emitStatus('Resuming Claude pod…');
@@ -5519,6 +5647,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
             if (Object.keys(tokenUpdates).length > 0) {
               podRepo.update(podId, tokenUpdates);
+            }
+
+            const blockerSummary = summarizeAgentCompletionBlocker(event.result);
+            if (blockerSummary) {
+              const s = podRepo.getOrThrow(podId);
+              if (s.status === 'running') {
+                emitActivityStatus(podId, `Agent reported blocker: ${blockerSummary}`);
+                transition(s, 'failed', {
+                  completedAt: new Date().toISOString(),
+                  lastCorrectionMessage: blockerSummary,
+                });
+              }
+              break;
             }
 
             // Token budget enforcement — only when token data is available
@@ -5817,6 +5958,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const isForkSession =
         Boolean(refreshed.linkedPodId) ||
         (refreshed.baseBranch != null && refreshed.baseBranch !== profile2.defaultBranch);
+      const noChangesAfterRework =
+        noChanges && refreshed.lastCorrectionMessage?.startsWith(REWORK_IN_PROGRESS_PREFIX);
+      if (noChangesAfterRework && !refreshed.skipValidation && !isForkSession) {
+        const message = 'Rework produced no file changes.';
+        logger.info({ podId }, 'Failing pod because rework produced no file changes');
+        emitActivityStatus(podId, `${message} Marking pod failed.`);
+        transition(refreshed, 'failed', {
+          completedAt: new Date().toISOString(),
+          lastCorrectionMessage: message,
+        });
+        return;
+      }
       if (refreshed.skipValidation || (noChanges && !isForkSession)) {
         if (noChanges) {
           logger.info({ podId }, 'Skipping validation — no files changed');
@@ -5946,6 +6099,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 emitActivityStatus(podId, 'Creating PR…');
                 const refreshed = podRepo.getOrThrow(podId);
                 const baseBranch = resolvePrBaseBranch(refreshed, profile);
+                await ensurePrBaseBranchOnOrigin(refreshed, profile, baseBranch, 'host_push_retry');
                 const createResult = await prManager.createPr({
                   // biome-ignore lint/style/noNonNullAssertion: validated above
                   worktreePath: refreshed.worktreePath!,
@@ -6435,12 +6589,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             profile: retryProfile,
             podModel: pod.model,
           });
+          const baseBranch = resolvePrBaseBranch(pod, retryProfile);
+          await ensurePrBaseBranchOnOrigin(pod, retryProfile, baseBranch, 'approval_retry');
           const createResult = await prManager.createPr({
             // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null in approval retry — pods reach approved only after successful validation which requires a worktree
             worktreePath: pod.worktreePath!,
             repoUrl: retryProfile.repoUrl ?? undefined,
             branch: pod.branch,
-            baseBranch: resolvePrBaseBranch(pod, retryProfile),
+            baseBranch,
             podId,
             task: pod.task,
             profileName: pod.profileName,
@@ -6596,6 +6752,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podRepo.update(podId, {
         validationAttempts: 0,
         lastValidationResult: null,
+        lastCorrectionMessage: [
+          REWORK_IN_PROGRESS_PREFIX,
+          reason ? `human rejection: ${reason}` : 'human rejection',
+        ].join(' '),
       });
 
       // Build rejection feedback message for the agent
@@ -6621,6 +6781,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           { podId, containerId: pod.containerId },
           'Container restarted for rejection retry',
         );
+        if (pod.executionTarget === 'local') {
+          await this.refreshNetworkPolicy(pod.profileName);
+        }
 
         // Resume agent with rejection feedback
         const resumeEnv = await getResumeEnv(pod);
@@ -7248,6 +7411,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
+      const profile = profileStore.get(pod.profileName);
+
       // When force-reworking from a terminal state, re-provision the pod from scratch
       // instead of trying to restart a potentially stale container. Docker Desktop's VirtioFS
       // mounts can break after long idle periods, making the old container unreachable.
@@ -7290,11 +7455,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               : pod.status === 'killed'
                 ? 'Your previous pod was killed. Start the task fresh.'
                 : 'Your previous work needs revision. Review and improve it.';
+        const runtime = resolvePodRuntime(profile, pod.runtime, logger);
+        const model = resolvePodModel(profile, pod.model, runtime, logger);
         podRepo.update(podId, {
+          runtime,
+          model,
           validationAttempts: 0,
           lastValidationResult: null,
           containerId: null,
           claudeSessionId: null,
+          codexSessionId: null,
           recoveryWorktreePath: pod.worktreePath ?? null,
           reworkReason,
           reworkCount: (pod.reworkCount ?? 0) + 1,
@@ -7305,13 +7475,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         enqueueSession(podId);
 
         logger.info(
-          { podId, worktreePath: pod.worktreePath, reworkReason, isInteractive },
+          {
+            podId,
+            worktreePath: pod.worktreePath,
+            reworkReason,
+            isInteractive,
+            previousRuntime: pod.runtime,
+            runtime,
+            previousModel: pod.model,
+            model,
+          },
           'Rework: re-queued with fresh container provisioning',
         );
         return;
       }
-
-      const profile = profileStore.get(pod.profileName);
 
       // Pre-push security scan: inspect the diff for secrets / PII / injection
       // before running validation. block decision throws and the pod's outer
@@ -7451,7 +7628,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           lintTimeout: (profile.lintTimeout ?? 120) * 1_000,
           sastCommand: profile.sastCommand ?? undefined,
           sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
-          reviewerModel: profile.reviewerModel || profile.defaultModel || 'sonnet',
+          reviewerModel: resolveReviewerModel(profile, logger),
+          reviewerProvider: resolveReviewerProvider(profile),
+          reviewerProviderCredentials: profile.providerCredentials,
           contract: pod.contract ?? undefined,
           codeReviewSkill,
           commitLog: commitLog || undefined,
@@ -7463,6 +7642,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           startCommitSha: pod.startCommitSha ?? undefined,
           overrides: currentOverrides.length > 0 ? currentOverrides : undefined,
           hasWebUi: profile.hasWebUi ?? true,
+          advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
           reviewerApiKey: process.env.ANTHROPIC_API_KEY,
           extraExecEnv: buildValidationExecEnv(
             profile.privateRegistries,
@@ -7776,6 +7956,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           return;
         }
 
+        if (hasPendingFactDecision(effectiveResult)) {
+          emitActivityStatus(
+            podId,
+            'Required fact pending human decision — moving to review required',
+          );
+          transition(s2, 'review_required');
+
+          if (s2.containerId) {
+            try {
+              const cm = containerManagerFactory.get(s2.executionTarget);
+              await cm.stop(s2.containerId);
+              logger.info({ podId }, 'Container stopped while awaiting fact deviation decision');
+            } catch (stopErr) {
+              logger.warn({ err: stopErr, podId }, 'Failed to stop container post-validation');
+            }
+          }
+          return;
+        }
+
         if (effectiveResult.overall === 'pass') {
           emitActivityStatus(podId, `Validation passed (attempt ${attempt})`);
           const passDefaultBranch = profile.defaultBranch ?? 'main';
@@ -7887,12 +8086,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 emitActivityStatus(podId, 'Creating PR…');
                 const s3 = podRepo.getOrThrow(podId);
                 warnIfSinglePrSeriesMissingSeriesMeta(s2, logger);
+                const baseBranch = resolvePrBaseBranch(s2, profile);
+                await ensurePrBaseBranchOnOrigin(s2, profile, baseBranch, 'validation_pass');
                 const createResult = await prManager.createPr({
                   // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null here — PR creation only occurs for non-artifact pods which always have a worktree
                   worktreePath: s2.worktreePath!,
                   repoUrl: profile.repoUrl ?? undefined,
                   branch: s2.branch,
-                  baseBranch: resolvePrBaseBranch(s2, profile),
+                  baseBranch,
                   podId,
                   task: s2.task,
                   profileName: s2.profileName,
@@ -8248,7 +8449,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               lintTimeout: (profile.lintTimeout ?? 120) * 1_000,
               sastCommand: profile.sastCommand ?? undefined,
               sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
-              reviewerModel: profile.reviewerModel || profile.defaultModel || 'sonnet',
+              reviewerModel: resolveReviewerModel(profile, logger),
+              reviewerProvider: resolveReviewerProvider(profile),
+              reviewerProviderCredentials: profile.providerCredentials,
               contract: pod.contract ?? undefined,
               codeReviewSkill,
               commitLog: commitLog || undefined,
@@ -8257,6 +8460,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               worktreePath: pod.worktreePath ?? undefined,
               startCommitSha: pod.startCommitSha ?? undefined,
               hasWebUi: profile.hasWebUi ?? true,
+              advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
               preSubmitReview: pod.preSubmitReview ?? undefined,
               skipPhases: profile.skipValidationPhases ?? undefined,
             },
@@ -8388,12 +8592,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 emitActivityStatus(podId, 'Creating PR…');
                 const s3 = podRepo.getOrThrow(podId);
                 warnIfSinglePrSeriesMissingSeriesMeta(s2, logger);
+                const baseBranch = resolvePrBaseBranch(s2, profile);
+                await ensurePrBaseBranchOnOrigin(s2, profile, baseBranch, 'revalidation_pass');
                 const createResult = await prManager.createPr({
                   // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null here — PR creation only occurs for non-artifact pods which always have a worktree
                   worktreePath: s2.worktreePath!,
                   repoUrl: profile.repoUrl ?? undefined,
                   branch: s2.branch,
-                  baseBranch: resolvePrBaseBranch(s2, profile),
+                  baseBranch,
                   podId,
                   task: s2.task,
                   profileName: s2.profileName,
@@ -9324,8 +9530,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           try {
             const gatewayIp = await networkManager.getGatewayIp(pod.id);
             const sidecarIps = await collectSidecarIps(pod);
-            const netConfig = await networkManager.buildNetworkConfig(
+            const runtimeNetworkPolicy = addRuntimeNetworkDefaults(
               profile.networkPolicy,
+              profile,
+              pod.runtime,
+            );
+            const netConfig = await networkManager.buildNetworkConfig(
+              runtimeNetworkPolicy,
               mergedServers,
               gatewayIp,
               profile.privateRegistries,

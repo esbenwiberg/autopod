@@ -534,7 +534,17 @@ public enum ExecutionTarget: String, CaseIterable, Sendable {
 }
 
 public enum ModelProvider: String, CaseIterable, Sendable {
-    case anthropic, max, foundry, copilot
+    case anthropic, max, openai, foundry, copilot
+
+    public var label: String {
+        switch self {
+        case .anthropic: "Anthropic"
+        case .max:       "Max"
+        case .openai:    "OpenAI (Codex)"
+        case .foundry:   "Foundry"
+        case .copilot:   "Copilot"
+        }
+    }
 }
 
 public enum PRProvider: String, CaseIterable, Sendable {

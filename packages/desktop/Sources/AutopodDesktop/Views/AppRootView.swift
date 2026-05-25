@@ -88,6 +88,19 @@ public struct AppRootView: View {
         guard let api = connectionManager.api else { return }
         eventStream?.loadHistoricalEvents(podId: id, api: api)
       },
+      relatedEventLoadStateForPod: { [eventStream] id in
+        guard let state = eventStream?.historicalLoadState[id] else { return .notLoaded }
+        switch state {
+        case .idle:
+          return .notLoaded
+        case .loading:
+          return .loading
+        case .loaded:
+          return .loaded
+        case .failed(let message):
+          return .failed(message)
+        }
+      },
       isLoadingLogs: selectedSessionIsLoadingLogs,
       logsLoadError: selectedSessionLogsError,
       limitedLogCount: selectedSessionLimitedLogCount,
@@ -295,6 +308,8 @@ public struct AppRootView: View {
               switch provider {
               case "max":
                 msg = try await authenticator.authenticateMax(profileName: name)
+              case "openai":
+                msg = try await authenticator.authenticateOpenAI(profileName: name)
               case "copilot":
                 msg = try await authenticator.authenticateCopilot(profileName: name)
               default:

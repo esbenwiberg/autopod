@@ -26,7 +26,7 @@ public struct ValidationFindingResponse: Codable, Sendable {
 /// Field names match the daemon's wire shape exactly — no remapping.
 public struct ScreenshotRefResponse: Codable, Sendable, Hashable {
   public let url: String     // "/pods/:podId/screenshots/:source/:filename"
-  public let source: String  // "smoke" | "fact" | "review"
+  public let source: String  // "smoke" | "fact" | "review" | "advisory"
   public let path: String    // page path | review index
 }
 
@@ -42,6 +42,7 @@ public struct ValidationResponse: Codable, Sendable {
   public let sast: SastResultResponse?
   public let factValidation: FactValidationResponse?
   public let taskReview: TaskReviewResponse?
+  public let advisoryBrowserQa: AdvisoryBrowserQaResponse?
   public let reviewSkipReason: String?
   /// Machine-readable kind paired with reviewSkipReason. Values:
   /// "upstream-failed" | "profile-skip" | "no-changes" | "review-failed" | "review-timeout".
@@ -212,4 +213,25 @@ public struct RequirementsCheckResponse: Codable, Sendable {
     met = try decodeBoolOrInt(c, key: .met)
     note = try c.decodeIfPresent(String.self, forKey: .note)
   }
+}
+
+// MARK: - Advisory Browser QA
+
+public struct AdvisoryBrowserQaResponse: Codable, Sendable {
+  public let status: String  // "complete" | "skipped" | "error" plus legacy "pass" | "fail" | "uncertain" | "skip"
+  public let reasoning: String
+  public let model: String?
+  public let durationMs: Int?
+  public let observations: [AdvisoryBrowserQaObservationResponse]
+  public let screenshots: [ScreenshotRefResponse]
+}
+
+public struct AdvisoryBrowserQaObservationResponse: Codable, Sendable {
+  public let id: String
+  public let scenarioId: String?
+  public let status: String  // "pass" | "fail" | "uncertain"
+  public let summary: String
+  public let details: String?
+  public let screenshots: [ScreenshotRefResponse]
+  public let suggestedFacts: [String]?
 }

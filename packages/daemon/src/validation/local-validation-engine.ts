@@ -3,6 +3,7 @@ import { mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
+  AdvisoryBrowserQaResult,
   DeviationsAssessment,
   FactCheckResult,
   FactValidationResult,
@@ -14,15 +15,19 @@ import type {
 } from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
-import type { ValidationPhaseCallbacks } from '../interfaces/validation-engine.js';
-
 import type { ContainerManager } from '../interfaces/container-manager.js';
-import type { ValidationEngine, ValidationEngineConfig } from '../interfaces/validation-engine.js';
+import type {
+  ValidationEngine,
+  ValidationEngineConfig,
+  ValidationPhaseCallbacks,
+} from '../interfaces/validation-engine.js';
 import { buildSupervisorCommand } from '../pods/preview-supervisor.js';
 import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
+import { runAdvisoryBrowserQa } from './advisory-browser-qa-runner.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 import { runAgenticReview } from './review-agentic-runner.js';
+import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
 import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
 import { applyDiffFilterToParsed } from './review-finding-filter.js';
 import { runToolUseReview } from './review-tool-runner.js';
@@ -110,7 +115,6 @@ export function createLocalValidationEngine(
   screenshotStore?: import('../pods/screenshot-store.js').ScreenshotStore,
 ): ValidationEngine {
   const log = logger?.child({ component: 'local-validation-engine' });
-  void screenshotStore;
 
   return {
     async validate(
@@ -346,23 +350,59 @@ export function createLocalValidationEngine(
             }
           }
 
-          const reviewRun = await runTaskReview(config, log, reviewContext);
+          const reviewRun = await runTaskReview(containerManager, config, log, reviewContext);
           taskReview = reviewRun.result;
           reviewSkipReason = reviewRun.skipReason;
           if (taskReview === null && reviewRun.skipReason) {
-            reviewSkipKind = reviewRun.skipReason.startsWith('Review failed:')
-              ? 'review-failed'
-              : reviewRun.skipReason.startsWith('Review timed out')
-                ? 'review-timeout'
-                : 'no-changes';
+            reviewSkipKind = classifyReviewSkipKind(reviewRun.skipReason);
           }
         }
         // Map 'uncertain' to 'pass' for the chip status — the detail view shows the full result.
+        // Missing review output from a timeout/infra failure is a failed Review phase, not a skip.
         const reviewStatus: 'pass' | 'fail' | 'skip' =
-          taskReview === null ? 'skip' : taskReview.status === 'fail' ? 'fail' : 'pass';
+          taskReview === null
+            ? reviewSkipKind === 'review-failed' || reviewSkipKind === 'review-timeout'
+              ? 'fail'
+              : 'skip'
+            : taskReview.status === 'fail'
+              ? 'fail'
+              : 'pass';
         callbacks?.onPhaseCompleted?.('review', reviewStatus, taskReview);
 
-        // ── Phase 9: Overall result ───────────────────────────────────
+        // ── Phase 9: Advisory Browser QA ──────────────────────────────
+        // Runs only after blocking checks are green. Its findings are
+        // screenshot-backed evidence for humans and never affect `overall`.
+        checkAbort();
+        let advisoryBrowserQa: AdvisoryBrowserQaResult | null = null;
+        const blockingChecksGreen =
+          tier1Pass &&
+          factsStatus !== 'fail' &&
+          factsStatus !== 'pending_human' &&
+          reviewStatus !== 'fail' &&
+          reviewSkipKind !== 'review-failed';
+        if (shouldRunAdvisoryBrowserQa(config, healthResult, blockingChecksGreen)) {
+          onProgress?.('Running advisory browser QA…');
+          advisoryBrowserQa = await runAdvisoryBrowserQa({
+            podId: config.podId,
+            task: config.task,
+            baseUrl: config.previewUrl,
+            contract: config.contract,
+            reviewerModel: config.reviewerModel,
+            hostBrowserRunner,
+            screenshotStore,
+            logger: log,
+          });
+        } else if (config.advisoryBrowserQaEnabled && hasNoContractChecklist(config)) {
+          advisoryBrowserQa = {
+            status: 'skip',
+            reasoning: 'no-contract-checklist',
+            observations: [],
+            screenshots: [],
+            durationMs: 0,
+          };
+        }
+
+        // ── Phase 10: Overall result ──────────────────────────────────
         const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
         const healthOk = healthResult.status === 'pass' || healthResult.status === 'skip';
         const smokeStatus =
@@ -370,13 +410,14 @@ export function createLocalValidationEngine(
             ? ('pass' as const)
             : ('fail' as const);
 
-        const factsFailed = factValidation !== null && factValidation.status === 'fail';
-        // Timeouts and infra errors during review are not code quality failures.
-        // Only treat review as a blocker when it returns an actual opinion (pass/fail).
-        // `Review timed out:` is set by runTaskReview when it catches a
-        // ClaudeCliError with kind='timeout'; everything else flagged as
-        // `Review failed:` is treated as a blocker.
-        const isReviewBlocker = reviewSkipKind === 'review-failed';
+        const factsFailed =
+          factValidation !== null &&
+          (factValidation.status === 'fail' || factValidation.status === 'pending_human');
+        // Review is a validation gate. Explicit profile skips and no-change
+        // short-circuits are non-blocking, but timeout/infra failures are not
+        // allowed to merge unchecked.
+        const isReviewBlocker =
+          reviewSkipKind === 'review-failed' || reviewSkipKind === 'review-timeout';
         const overall =
           tier1Pass &&
           !factsFailed &&
@@ -401,6 +442,7 @@ export function createLocalValidationEngine(
           sast: sastResult,
           factValidation,
           taskReview,
+          advisoryBrowserQa,
           reviewSkipReason,
           reviewSkipKind,
           overall,
@@ -449,6 +491,27 @@ function makeInterruptedResult(
     overall: 'fail',
     duration: Date.now() - startTime,
   };
+}
+
+function hasNoContractChecklist(config: ValidationEngineConfig): boolean {
+  return (
+    (config.contract?.scenarios.length ?? 0) === 0 &&
+    (config.contract?.humanReview.length ?? 0) === 0
+  );
+}
+
+function shouldRunAdvisoryBrowserQa(
+  config: ValidationEngineConfig,
+  healthResult: HealthResult,
+  blockingChecksGreen: boolean,
+): boolean {
+  return (
+    config.advisoryBrowserQaEnabled === true &&
+    config.hasWebUi !== false &&
+    healthResult.status === 'pass' &&
+    blockingChecksGreen &&
+    !hasNoContractChecklist(config)
+  );
 }
 
 /**
@@ -868,6 +931,13 @@ async function runFactValidation(
         : `artifact ${artifactPath} does not satisfy ${fact.artifact.change} requirement`,
       commandPassed ? null : `command exited ${commandResult.exitCode}`,
     ].filter((reason): reason is string => reason !== null);
+    const unavailableReason = detectUnavailableFactCommand(commandResult);
+    const factStatus = passed ? 'pass' : unavailableReason ? 'pending_human' : 'fail';
+    const reasoning = passed
+      ? `Fact ${fact.id} passed: ${artifactPath} exists, satisfies ${fact.artifact.change}, and command exited 0.`
+      : unavailableReason
+        ? `Fact ${fact.id} needs human decision: ${unavailableReason}`
+        : `Fact ${fact.id} failed: ${failedReasons.join('; ')}.${commandError ? ` ${commandError}` : ''}`;
 
     results.push({
       factId: fact.id,
@@ -876,7 +946,7 @@ async function runFactValidation(
       artifactPath,
       command: fact.command,
       passed,
-      status: passed ? 'pass' : 'fail',
+      status: factStatus,
       exitCode: commandResult.exitCode,
       durationMs,
       artifact: {
@@ -887,9 +957,7 @@ async function runFactValidation(
         ...(artifactHash ? { hash: artifactHash } : {}),
       },
       attachments,
-      reasoning: passed
-        ? `Fact ${fact.id} passed: ${artifactPath} exists, satisfies ${fact.artifact.change}, and command exited 0.`
-        : `Fact ${fact.id} failed: ${failedReasons.join('; ')}.${commandError ? ` ${commandError}` : ''}`,
+      reasoning,
       stdout: commandResult.stdout.slice(0, 20_000),
       stderr: commandResult.stderr.slice(0, 20_000),
     });
@@ -905,6 +973,30 @@ async function runFactValidation(
     'fact validation complete',
   );
   return { status, results };
+}
+
+function detectUnavailableFactCommand(result: {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}): string | null {
+  if (result.exitCode !== 127) return null;
+
+  const combined = `${result.stderr}\n${result.stdout}`;
+  const shMatch = combined.match(/(?:^|\n)sh:\s*\d+:\s*([^\s:]+):\s*not found\b/i);
+  const bashMatch = combined.match(
+    /(?:^|\n)(?:bash|zsh):(?:\s*line\s*\d+:)?\s*([^\s:]+):\s*command not found\b/i,
+  );
+  const genericMatch = combined.match(/(?:^|\n)([A-Za-z0-9_.+/-]+):\s+(?:command\s+)?not found\b/i);
+  const missingCommand = shMatch?.[1] ?? bashMatch?.[1] ?? genericMatch?.[1];
+
+  if (!missingCommand) return null;
+
+  return [
+    `required fact command \`${missingCommand}\` is unavailable in the validation container`,
+    '(exit 127). This is an environment/spec issue, not a code failure;',
+    'install the toolchain, change the profile/template, or approve a waive/replace decision.',
+  ].join(' ');
 }
 
 async function runBrowserFactOnHost(
@@ -1838,6 +1930,7 @@ export function enforceRequirementsStatus(
 }
 
 async function runTaskReview(
+  containerManager: ContainerManager,
   config: ValidationEngineConfig,
   log?: Logger,
   reviewContext?: ReviewContext,
@@ -1862,11 +1955,18 @@ async function runTaskReview(
   const prompt = buildReviewPrompt(config, reviewContext);
   const reviewTimeout = config.reviewTimeout ?? 300_000;
   const reviewDepth = config.reviewDepth ?? 'auto';
+  const reviewRunner = resolveReviewRunner(config);
+  if (reviewRunner === 'unsupported') {
+    return {
+      result: null,
+      skipReason: `Review failed: provider ${config.reviewerProvider} is not supported by the validation reviewer`,
+    };
+  }
 
   // Tier 1 (single-shot) is useless when the diff is truncated — the model
   // can't see all changed files and will either fabricate findings or skip.
   // Skip straight to Tier 2 (tool-use) where it can read files on demand.
-  if (diffIsTruncated && !config.worktreePath) {
+  if (reviewRunner === 'claude' && diffIsTruncated && !config.worktreePath) {
     return {
       result: null,
       skipReason: 'Diff is truncated and no worktree available for tool-use review',
@@ -1876,7 +1976,7 @@ async function runTaskReview(
   try {
     let tier1Parsed: ReturnType<typeof parseReviewJson> = null;
 
-    if (!diffIsTruncated) {
+    if (!diffIsTruncated || reviewRunner === 'codex') {
       // Reuse the agent's pre-submit verdict when it applies to the same diff
       // bytes and was a clean pass. Saves ~30s–5min of Tier 1 work on diffs
       // the reviewer model already opined on.
@@ -1889,11 +1989,22 @@ async function runTaskReview(
         );
       } else {
         // ── Tier 1: Single-shot review with enriched context ──────────────
-        const { stdout } = await runClaudeCli({
-          model: config.reviewerModel,
-          input: prompt,
-          timeout: reviewTimeout,
-        });
+        const { stdout } =
+          reviewRunner === 'codex'
+            ? await runCodexReview({
+                podId: config.podId,
+                attempt: config.attempt,
+                containerId: config.containerId,
+                containerManager,
+                model: config.reviewerModel,
+                prompt,
+                timeout: reviewTimeout,
+              })
+            : await runClaudeCli({
+                model: config.reviewerModel,
+                input: prompt,
+                timeout: reviewTimeout,
+              });
 
         tier1Parsed = applyDiffFilterToParsed(
           enforceRequirementsStatus(parseReviewJson(stdout.trim())),
@@ -1923,9 +2034,12 @@ async function runTaskReview(
     // Truncated diffs always escalate (tier1Parsed is null) so this branch is unreachable for them.
     // 'deep' forces Tier 2+ regardless of Tier 1 status.
     const shouldEscalate =
-      diffIsTruncated ||
-      (reviewDepth === 'deep' && !!config.worktreePath) ||
-      (tier1Parsed?.status === 'uncertain' && reviewDepth !== 'standard' && !!config.worktreePath);
+      reviewRunner === 'claude' &&
+      (diffIsTruncated ||
+        (reviewDepth === 'deep' && !!config.worktreePath) ||
+        (tier1Parsed?.status === 'uncertain' &&
+          reviewDepth !== 'standard' &&
+          !!config.worktreePath));
 
     if (!shouldEscalate && tier1Parsed) {
       return {
@@ -2088,13 +2202,13 @@ async function runTaskReview(
       };
     }
   } catch (err) {
-    if (err instanceof ClaudeCliError) {
+    if (err instanceof ClaudeCliError || err instanceof CodexReviewError) {
       log?.warn(
         {
           kind: err.kind,
           exitCode: err.exitCode,
-          signal: err.signal,
-          durationMs: err.durationMs,
+          signal: err instanceof ClaudeCliError ? err.signal : null,
+          durationMs: err instanceof ClaudeCliError ? err.durationMs : null,
           stderrPreview: err.stderr.slice(0, 500),
         },
         'task review failed, continuing without review',
@@ -2108,6 +2222,25 @@ async function runTaskReview(
     log?.warn({ err }, 'task review failed, continuing without review');
     return { result: null, skipReason: `Review failed: ${message}` };
   }
+}
+
+function classifyReviewSkipKind(reason: string): ValidationResult['reviewSkipKind'] {
+  if (reason.startsWith('No code changes detected')) return 'no-changes';
+  if (reason.startsWith('Review timed out')) return 'review-timeout';
+  return 'review-failed';
+}
+
+function resolveReviewRunner(config: ValidationEngineConfig): 'claude' | 'codex' | 'unsupported' {
+  if (config.reviewerProvider === 'openai') return 'codex';
+  if (
+    config.reviewerProvider === 'foundry' &&
+    config.reviewerProviderCredentials?.provider === 'foundry' &&
+    (config.reviewerProviderCredentials.apiSurface ?? 'anthropic') === 'openai'
+  ) {
+    return 'codex';
+  }
+  if (config.reviewerProvider === 'copilot') return 'unsupported';
+  return 'claude';
 }
 
 /**

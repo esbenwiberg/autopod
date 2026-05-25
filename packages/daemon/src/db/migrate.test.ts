@@ -292,9 +292,9 @@ describe('runMigrations — migration 091 (drop screenshot blobs)', () => {
   });
 });
 
-// ── Migration 105 — memory learning schema ───────────────────────────────────
+// ── Migration 107 — memory learning schema ───────────────────────────────────
 
-describe('runMigrations — memory-learning-schema (migration 105)', () => {
+describe('runMigrations — memory-learning-schema (migration 107)', () => {
   let db: Database.Database;
 
   beforeEach(() => {

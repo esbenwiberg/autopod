@@ -102,6 +102,8 @@ export interface PodUpdates {
    * the canonical fix pod is re-enqueued for a new iteration.
    */
   task?: string;
+  model?: string;
+  runtime?: string;
   containerId?: string | null;
   worktreePath?: string | null;
   validationAttempts?: number;
@@ -235,6 +237,10 @@ function readPodFromRow(row: Record<string, unknown>): PodOptions {
       agentMode,
       output,
       validate: row.validate !== undefined ? Boolean(row.validate) : output === 'pr',
+      advisoryBrowserQaEnabled:
+        row.advisory_browser_qa_enabled !== undefined
+          ? Boolean(row.advisory_browser_qa_enabled)
+          : undefined,
       promotable: row.promotable !== undefined ? Boolean(row.promotable) : false,
     };
   }
@@ -411,7 +417,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         INSERT INTO pods (
           id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, creator_email, creator_name, max_validation_attempts, skip_validation, contract,
-          output_mode, agent_mode, output_target, validate, promotable,
+          output_mode, agent_mode, output_target, validate, advisory_browser_qa_enabled, promotable,
           base_branch, linked_pod_id, pim_groups, pr_url,
           token_budget, reference_repos, scheduled_job_id,
           depends_on_pod_id, depends_on_pod_ids, series_id, series_name, series_description,
@@ -420,7 +426,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         ) VALUES (
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @creatorEmail, @creatorName, @maxValidationAttempts, @skipValidation, @contract,
-          @outputMode, @agentMode, @outputTarget, @validate, @promotable,
+          @outputMode, @agentMode, @outputTarget, @validate, @advisoryBrowserQaEnabled, @promotable,
           @baseBranch, @linkedPodId, @pimGroups, @prUrl,
           @tokenBudget, @referenceRepos, @scheduledJobId,
           @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName, @seriesDescription,
@@ -446,6 +452,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         agentMode: podOpts.agentMode,
         outputTarget: podOpts.output,
         validate: podOpts.validate ? 1 : 0,
+        advisoryBrowserQaEnabled: podOpts.advisoryBrowserQaEnabled ? 1 : 0,
         promotable: podOpts.promotable ? 1 : 0,
         baseBranch: pod.baseBranch ?? null,
         linkedPodId: pod.linkedPodId ?? null,
@@ -494,6 +501,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.task !== undefined) {
         setClauses.push('task = @task');
         params.task = changes.task;
+      }
+      if (changes.model !== undefined) {
+        setClauses.push('model = @model');
+        params.model = changes.model;
+      }
+      if (changes.runtime !== undefined) {
+        setClauses.push('runtime = @runtime');
+        params.runtime = changes.runtime;
       }
       if (changes.containerId !== undefined) {
         setClauses.push('container_id = @containerId');
@@ -793,12 +808,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
           'agent_mode = @agentMode',
           'output_target = @outputTarget',
           'validate = @validate',
+          'advisory_browser_qa_enabled = @advisoryBrowserQaEnabled',
           'promotable = @promotable',
           'output_mode = @outputMode',
         );
         params.agentMode = changes.options.agentMode;
         params.outputTarget = changes.options.output;
         params.validate = changes.options.validate ? 1 : 0;
+        params.advisoryBrowserQaEnabled = changes.options.advisoryBrowserQaEnabled ? 1 : 0;
         params.promotable = changes.options.promotable ? 1 : 0;
         params.outputMode = outputModeFromPodOptions(changes.options);
       }

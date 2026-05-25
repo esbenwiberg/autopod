@@ -29,6 +29,7 @@ public struct ValidationTab: View {
   @Environment(\.daemonBaseURL) private var daemonBaseURL
 
   @State private var selectedPhase: ValidationPhase? = nil
+  @State private var selectedAdvisoryQa = false
   @State private var selectedHistoryKey: String = "current"
   @State private var validationHistory: [StoredValidationResponse] = []
   @State private var isLoadingHistory = false
@@ -76,6 +77,10 @@ public struct ValidationTab: View {
 
   private var displayedChecks: ValidationChecks? {
     selectedHistory.map { validationChecks(from: $0.result) } ?? checks
+  }
+
+  private var displayedAdvisoryQa: AdvisoryQaDetail? {
+    displayedChecks?.advisoryQa
   }
 
   private var selectedHistory: StoredValidationResponse? {
@@ -176,6 +181,26 @@ public struct ValidationTab: View {
       let refs = screenshots.compactMap { mapScreenshotRef($0) }
       return refs.isEmpty ? nil : refs
     }()
+    let advisoryQa: AdvisoryQaDetail? = response.advisoryBrowserQa.map { advisory in
+      AdvisoryQaDetail(
+        status: advisory.status,
+        reasoning: advisory.reasoning,
+        model: advisory.model,
+        durationMs: advisory.durationMs,
+        observations: advisory.observations.map { observation in
+          AdvisoryQaObservationDetail(
+            id: observation.id,
+            scenarioId: observation.scenarioId,
+            status: observation.status,
+            summary: observation.summary,
+            details: observation.details,
+            screenshots: observation.screenshots.compactMap { mapScreenshotRef($0) },
+            suggestedFacts: observation.suggestedFacts
+          )
+        },
+        screenshots: advisory.screenshots.compactMap { mapScreenshotRef($0) }
+      )
+    }
     let proofOfWorkScreenshots: [ScreenshotRef]? = {
       let smokeRefs = response.smoke.pages.compactMap { mapScreenshotRef($0.screenshot) }
       let factRefs = (response.factValidation?.results ?? []).flatMap { fact in
@@ -207,13 +232,21 @@ public struct ValidationTab: View {
       factChecks: factChecks,
       requirementsCheck: requirementsCheck,
       taskReviewScreenshots: taskReviewScreenshots,
+      advisoryQa: advisoryQa,
       proofOfWorkScreenshots: proofOfWorkScreenshots
     )
   }
 
   private func mapScreenshotRef(_ dto: ScreenshotRefResponse?) -> ScreenshotRef? {
     guard let dto, let baseURL = daemonBaseURL else { return nil }
-    guard let source = ScreenshotRef.Source(rawValue: dto.source) else { return nil }
+    let source: ScreenshotRef.Source
+    switch dto.source {
+    case "smoke": source = .smoke
+    case "fact": source = .fact
+    case "review": source = .review
+    case "advisory": source = .advisory
+    default: return nil
+    }
     guard let url = URL(string: dto.url, relativeTo: baseURL)?.absoluteURL else { return nil }
     return ScreenshotRef(url: url, source: source, label: dto.path)
   }
@@ -232,18 +265,23 @@ public struct ValidationTab: View {
 
   /// The phase to show in the detail panel — user pick, then auto-running, else nil.
   private var displayPhase: ValidationPhase? {
+    if selectedAdvisoryQa { return nil }
     if let selectedPhase { return selectedPhase }
     return progress?.activePhase
   }
 
-  /// Combined ordered screenshot set for lightbox navigation: smoke -> review.
+  /// Combined ordered screenshot set for lightbox navigation: smoke -> review -> advisory.
   /// Derived from whichever source is live (progress from events, or final checks).
   private var screenshotSet: [ScreenshotRef] {
     let pageShots = (progress?.pageDetails ?? displayedChecks?.pages ?? []).compactMap {
       validationPageScreenshot($0, proofOfWorkScreenshots: displayedChecks?.proofOfWorkScreenshots)
     }
     let reviewShots = progress?.reviewDetail?.screenshots ?? displayedChecks?.taskReviewScreenshots ?? []
-    return pageShots + reviewShots
+    let advisoryShots: [ScreenshotRef] = {
+      guard let advisory = displayedAdvisoryQa else { return [] }
+      return advisoryScreenshotSet(advisory)
+    }()
+    return pageShots + reviewShots + advisoryShots
   }
 
   private func openLightbox(_ index: Int) {
@@ -300,6 +338,9 @@ public struct ValidationTab: View {
       }
       return .skipped
     case .facts:
+      if c.factChecks?.contains(where: { $0.status == "pending_human" }) == true {
+        return .pendingHuman
+      }
       return switch c.factValidation { case true: .passed; case false: .failed; default: .skipped }
     case .review:
       return switch c.review { case true: .passed; case false: .failed; default: .skipped }
@@ -371,9 +412,11 @@ public struct ValidationTab: View {
     }
     .onChange(of: progress?.attempt) { _, _ in
       selectedPhase = nil
+      selectedAdvisoryQa = false
     }
     .onChange(of: selectedHistoryKey) { _, _ in
       selectedPhase = nil
+      selectedAdvisoryQa = false
     }
     .onChange(of: pod.status) { _, _ in
       updateFromBaseMessage = nil
@@ -670,7 +713,18 @@ public struct ValidationTab: View {
             isSelected: displayPhase == phase,
             subLabel: chipSubLabel(phase)
           ) {
+            selectedAdvisoryQa = false
             selectedPhase = selectedPhase == phase ? nil : phase
+          }
+        }
+        if let advisory = displayedAdvisoryQa {
+          AdvisoryQaChip(
+            status: advisoryDisplayStatus(advisory.status),
+            isSelected: selectedAdvisoryQa,
+            subLabel: advisoryChipSubLabel(advisory)
+          ) {
+            selectedPhase = nil
+            selectedAdvisoryQa.toggle()
           }
         }
       }
@@ -734,6 +788,9 @@ public struct ValidationTab: View {
     if let failed = displayedPhases.first(where: { phaseStatus($0) == .failed }) {
       return "\(failed.displayName) needs attention"
     }
+    if let pending = displayedPhases.first(where: { phaseStatus($0) == .pendingHuman }) {
+      return "\(pending.displayName) needs human decision"
+    }
     if displayedPhases.contains(where: { phaseStatus($0) == .running }) {
       return "Validation is running"
     }
@@ -757,6 +814,9 @@ public struct ValidationTab: View {
     if let failed = displayedPhases.first(where: { phaseStatus($0) == .failed }) {
       return [failed.displayName + " failed.", contractSummary].compactMap { $0 }.joined(separator: " ")
     }
+    if let pending = displayedPhases.first(where: { phaseStatus($0) == .pendingHuman }) {
+      return [pending.displayName + " is pending human decision.", contractSummary].compactMap { $0 }.joined(separator: " ")
+    }
     if let active = progress?.activePhase {
       return [active.displayName + " is currently running.", contractSummary].compactMap { $0 }.joined(separator: " ")
     }
@@ -766,6 +826,7 @@ public struct ValidationTab: View {
   private var validationSummaryIcon: String {
     if pod.validationWaiver != nil { return "checkmark.seal.fill" }
     if displayedPhases.contains(where: { phaseStatus($0) == .failed }) { return "xmark.seal.fill" }
+    if displayedPhases.contains(where: { phaseStatus($0) == .pendingHuman }) { return "questionmark.circle.fill" }
     if displayedPhases.contains(where: { phaseStatus($0) == .running }) { return "arrow.triangle.2.circlepath" }
     if displayedChecks?.allPassed == true { return "checkmark.seal.fill" }
     return "checkmark.seal"
@@ -774,6 +835,7 @@ public struct ValidationTab: View {
   private var validationSummaryColor: Color {
     if pod.validationWaiver != nil { return .orange }
     if displayedPhases.contains(where: { phaseStatus($0) == .failed }) { return .red }
+    if displayedPhases.contains(where: { phaseStatus($0) == .pendingHuman }) { return .orange }
     if displayedPhases.contains(where: { phaseStatus($0) == .running }) { return .blue }
     if displayedChecks?.allPassed == true { return .green }
     return .secondary
@@ -796,7 +858,9 @@ public struct ValidationTab: View {
 
   @ViewBuilder
   private var phaseDetailPanel: some View {
-    if let phase = displayPhase {
+    if selectedAdvisoryQa, let advisory = displayedAdvisoryQa {
+      advisoryQaDetail(advisory)
+    } else if let phase = displayPhase {
       switch phase {
       case .build:   buildDetail
       case .test:    testDetail
@@ -1205,36 +1269,58 @@ public struct ValidationTab: View {
       .labelStyle(.titleAndIcon)
   }
 
+  private func factStatusParts(evidence: FactCheckDetail?) -> (label: String, color: Color, icon: String) {
+    guard let evidence else {
+      return ("awaiting evidence", .secondary, "clock")
+    }
+
+    switch evidence.status {
+    case "pending_human":
+      return ("pending human", .orange, "questionmark.circle.fill")
+    case "waived":
+      return ("waived", .green, "checkmark.seal.fill")
+    case "replaced":
+      return ("replaced", .green, "arrow.triangle.2.circlepath")
+    case "pass":
+      return ("passed", .green, "checkmark.circle.fill")
+    case "fail":
+      return ("failed", .red, "xmark.circle.fill")
+    default:
+      return evidence.passed
+        ? ("passed", .green, "checkmark.circle.fill")
+        : ("failed", .red, "xmark.circle.fill")
+    }
+  }
+
   private func scenarioFactChip(_ fact: RequiredFactResponse, evidence: FactCheckDetail?) -> some View {
-    let color: Color = evidence == nil ? .secondary : (evidence?.passed == true ? .green : .red)
-    let icon = evidence == nil ? "clock" : (evidence?.passed == true ? "checkmark.circle.fill" : "xmark.circle.fill")
+    let status = factStatusParts(evidence: evidence)
     return HStack(spacing: 4) {
-      Image(systemName: icon)
+      Image(systemName: status.icon)
         .font(.system(size: 9, weight: .semibold))
       Text(fact.id)
         .font(.system(.caption2, design: .monospaced).weight(.semibold))
         .lineLimit(1)
         .truncationMode(.middle)
     }
-    .foregroundStyle(color)
+    .foregroundStyle(status.color)
     .padding(.horizontal, 7)
     .padding(.vertical, 3)
-    .background(color.opacity(0.10), in: Capsule())
+    .background(status.color.opacity(0.10), in: Capsule())
   }
 
   @ViewBuilder
   private func requiredFactCard(_ fact: RequiredFactResponse, evidence: FactCheckDetail?) -> some View {
-    let evidenceColor: Color = evidence == nil ? .secondary : (evidence?.passed == true ? .green : .red)
+    let status = factStatusParts(evidence: evidence)
     HStack(alignment: .top, spacing: 0) {
       Rectangle()
-        .fill(evidenceColor.opacity(evidence == nil ? 0.35 : 0.75))
+        .fill(status.color.opacity(evidence == nil ? 0.35 : 0.75))
         .frame(width: 3)
 
       VStack(alignment: .leading, spacing: 10) {
         HStack(alignment: .top, spacing: 8) {
-          Image(systemName: evidence == nil ? "clock" : (evidence?.passed == true ? "checkmark.circle.fill" : "xmark.circle.fill"))
+          Image(systemName: status.icon)
             .font(.system(size: 14, weight: .medium))
-            .foregroundStyle(evidenceColor)
+            .foregroundStyle(status.color)
             .padding(.top, 1)
           VStack(alignment: .leading, spacing: 3) {
             Text(fact.id)
@@ -1285,7 +1371,7 @@ public struct ValidationTab: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(Color(nsColor: .controlBackgroundColor))
     .clipShape(RoundedRectangle(cornerRadius: 8))
-    .overlay(RoundedRectangle(cornerRadius: 8).stroke(evidenceColor.opacity(0.15), lineWidth: 1))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(status.color.opacity(0.15), lineWidth: 1))
   }
 
   private func contractMetaRow(label: String, value: String, monospaced: Bool = false) -> some View {
@@ -1307,28 +1393,27 @@ public struct ValidationTab: View {
   }
 
   private func factStatusBadge(evidence: FactCheckDetail?) -> some View {
-    let label = evidence == nil ? "awaiting evidence" : (evidence?.passed == true ? "passed" : "failed")
-    let color: Color = evidence == nil ? .secondary : (evidence?.passed == true ? .green : .red)
-    return Text(label)
+    let status = factStatusParts(evidence: evidence)
+    return Text(status.label)
       .font(.system(.caption2, design: .monospaced).weight(.semibold))
       .padding(.horizontal, 7)
       .padding(.vertical, 3)
-      .background(color.opacity(0.12), in: Capsule())
-      .foregroundStyle(color)
+      .background(status.color.opacity(0.12), in: Capsule())
+      .foregroundStyle(status.color)
   }
 
   @ViewBuilder
   private func factEvidenceCard(_ check: FactCheckDetail) -> some View {
-    let statusColor: Color = check.passed ? .green : .red
+    let status = factStatusParts(evidence: check)
     HStack(alignment: .top, spacing: 0) {
       Rectangle()
-        .fill(statusColor.opacity(0.7))
+        .fill(status.color.opacity(0.7))
         .frame(width: 3)
       VStack(alignment: .leading, spacing: 8) {
         HStack(alignment: .top, spacing: 8) {
-          Image(systemName: check.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+          Image(systemName: status.icon)
             .font(.system(size: 13))
-            .foregroundStyle(statusColor)
+            .foregroundStyle(status.color)
             .padding(.top, 1)
           VStack(alignment: .leading, spacing: 2) {
             Text(check.factId)
@@ -1349,7 +1434,7 @@ public struct ValidationTab: View {
     }
     .background(Color(nsColor: .controlBackgroundColor))
     .clipShape(RoundedRectangle(cornerRadius: 8))
-    .overlay(RoundedRectangle(cornerRadius: 8).stroke(statusColor.opacity(0.15), lineWidth: 1))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(status.color.opacity(0.15), lineWidth: 1))
   }
 
   @ViewBuilder
@@ -1475,6 +1560,168 @@ public struct ValidationTab: View {
       if let verdict = pod.preSubmitReview {
         preSubmitReviewDisclosure(verdict)
       }
+    }
+  }
+
+  private func advisoryScreenshotSet(_ advisory: AdvisoryQaDetail) -> [ScreenshotRef] {
+    var seen: Set<String> = []
+    return (advisory.screenshots + advisory.observations.flatMap(\.screenshots)).filter { ref in
+      seen.insert(ref.id).inserted
+    }
+  }
+
+  private func advisoryDisplayStatus(_ status: String) -> String {
+    switch status {
+    case "complete", "skipped", "error":
+      return status
+    case "skip":
+      return "skipped"
+    case "fail":
+      return "error"
+    default:
+      return "complete"
+    }
+  }
+
+  private func advisoryChipSubLabel(_ advisory: AdvisoryQaDetail) -> String? {
+    let observationCount = advisory.observations.count
+    if observationCount > 0 { return "\(observationCount) notes" }
+    return advisory.durationMs.map(formatDuration)
+  }
+
+  @ViewBuilder
+  private func advisoryQaDetail(_ advisory: AdvisoryQaDetail) -> some View {
+    let displayStatus = advisoryDisplayStatus(advisory.status)
+    let color = Color.secondary
+    let screenshots = advisoryScreenshotSet(advisory)
+
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(spacing: 8) {
+        Image(systemName: advisoryIcon(displayStatus))
+          .font(.system(size: 14))
+          .foregroundStyle(color)
+        VStack(alignment: .leading, spacing: 1) {
+          Text("Advisory QA \(displayStatus)")
+            .font(.callout)
+            .foregroundStyle(color)
+          HStack(spacing: 8) {
+            if let model = advisory.model {
+              Text(model)
+            }
+            if let durationMs = advisory.durationMs {
+              Text(formatDuration(durationMs))
+            }
+          }
+          .font(.caption2)
+          .foregroundStyle(.tertiary)
+        }
+      }
+      .padding(10)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Color(nsColor: .controlBackgroundColor))
+      .clipShape(RoundedRectangle(cornerRadius: 8))
+
+      if !advisory.reasoning.isEmpty {
+        Text(advisory.reasoning)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+          .textSelection(.enabled)
+      }
+
+      if !advisory.observations.isEmpty {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("Observations")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+          ForEach(advisory.observations, id: \.id) { observation in
+            advisoryObservationRow(observation)
+          }
+        }
+      }
+
+      if !screenshots.isEmpty {
+        VStack(alignment: .leading, spacing: 6) {
+          Text("Advisory Screenshots")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+          ForEach(screenshots) { screenshot in
+            ScreenshotThumbnail(ref: screenshot, allRefs: screenshotSet, onOpen: { openLightbox($0) })
+          }
+        }
+      }
+    }
+  }
+
+  private func advisoryIcon(_ displayStatus: String) -> String {
+    switch displayStatus {
+    case "skipped": return "minus.circle"
+    default: return "info.circle"
+    }
+  }
+
+  @ViewBuilder
+  private func advisoryObservationRow(_ observation: AdvisoryQaObservationDetail) -> some View {
+    let color = Color.secondary
+    VStack(alignment: .leading, spacing: 7) {
+      HStack(alignment: .top, spacing: 6) {
+        Image(systemName: advisoryObservationIcon(observation.status))
+          .font(.system(size: 11))
+          .foregroundStyle(color)
+          .padding(.top, 2)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(observation.summary)
+            .font(.caption.weight(.medium))
+            .fixedSize(horizontal: false, vertical: true)
+          if let scenarioId = observation.scenarioId {
+            Text(scenarioId)
+              .font(.system(.caption2, design: .monospaced))
+              .foregroundStyle(.tertiary)
+          }
+        }
+        Spacer(minLength: 4)
+        Text(observation.status)
+          .font(.system(.caption2, design: .monospaced).weight(.semibold))
+          .foregroundStyle(color)
+          .padding(.horizontal, 6)
+          .padding(.vertical, 2)
+          .background(color.opacity(0.10), in: Capsule())
+      }
+      if let details = observation.details, !details.isEmpty {
+        Text(details)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+          .textSelection(.enabled)
+      }
+      if let suggestedFacts = observation.suggestedFacts, !suggestedFacts.isEmpty {
+        VStack(alignment: .leading, spacing: 3) {
+          Text("Suggested facts")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+          ForEach(suggestedFacts, id: \.self) { fact in
+            Text(fact)
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+        }
+      }
+      ForEach(observation.screenshots) { screenshot in
+        ScreenshotThumbnail(ref: screenshot, allRefs: screenshotSet, onOpen: { openLightbox($0) })
+      }
+    }
+    .padding(10)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Color(nsColor: .controlBackgroundColor))
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.14), lineWidth: 1))
+  }
+
+  private func advisoryObservationIcon(_ status: String) -> String {
+    switch status {
+    case "pass": return "checkmark.circle"
+    default: return "questionmark.circle"
     }
   }
 
@@ -1813,6 +2060,7 @@ public struct ValidationTab: View {
         case .passed:    Text(passLabel).font(.callout).foregroundStyle(.green)
         case .failed:    Text(failLabel).font(.callout).foregroundStyle(.red)
         case .skipped:   Text(skipLabel).font(.callout).foregroundStyle(.secondary)
+        case .pendingHuman: Text("Pending human decision").font(.callout).foregroundStyle(.orange)
         case .running:   Text("Running…").font(.callout).foregroundStyle(.secondary)
         case .notStarted: Text("Not started").font(.callout).foregroundStyle(.secondary)
         }
@@ -1982,6 +2230,58 @@ private struct PhaseChip: View {
       .clipShape(RoundedRectangle(cornerRadius: 8))
     }
     .buttonStyle(.plain)
+  }
+}
+
+private struct AdvisoryQaChip: View {
+  let status: String
+  let isSelected: Bool
+  let subLabel: String?
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      VStack(spacing: 5) {
+        Image(systemName: icon)
+          .font(.system(size: 15, weight: .medium))
+          .foregroundStyle(color)
+          .frame(width: 20, height: 20)
+
+        Text("Advisory QA")
+          .font(.caption.weight(.medium))
+          .foregroundStyle(.primary)
+
+        if let subLabel {
+          Text(subLabel)
+            .font(.system(size: 9))
+            .foregroundStyle(.secondary)
+        } else {
+          Text(" ")
+            .font(.system(size: 9))
+        }
+      }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
+      .frame(minWidth: 92)
+      .background(isSelected ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
+      .overlay(
+        RoundedRectangle(cornerRadius: 8)
+          .stroke(isSelected ? Color.accentColor.opacity(0.6) : Color.clear, lineWidth: 1.5)
+      )
+      .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+    .buttonStyle(.plain)
+  }
+
+  private var icon: String {
+    switch status {
+    case "skipped": return "minus.circle"
+    default: return "info.circle"
+    }
+  }
+
+  private var color: Color {
+    .secondary
   }
 }
 

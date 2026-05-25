@@ -1,5 +1,7 @@
 import type {
+  ModelProvider,
   PreSubmitReviewSnapshot,
+  ProviderCredentials,
   SpecContract,
   TaskSummary,
   ValidationOverride,
@@ -23,6 +25,10 @@ export interface ValidationEngineConfig {
   task: string;
   diff: string;
   reviewerModel?: string;
+  /** Model provider that owns the reviewer model/auth. Defaults to Anthropic for legacy profiles. */
+  reviewerProvider?: ModelProvider | null;
+  /** Provider credentials from the resolved profile, used to select provider protocol/surface. */
+  reviewerProviderCredentials?: ProviderCredentials | null;
   /** Anthropic API key for Tier 2 tool-use review. Defaults to ANTHROPIC_API_KEY env var. */
   reviewerApiKey?: string;
   testCommand?: string | null;
@@ -75,6 +81,11 @@ export interface ValidationEngineConfig {
   /** Whether the project has a web frontend. When false, browser-oriented validation is skipped. */
   hasWebUi?: boolean;
   /**
+   * Enables screenshot-backed advisory browser QA. Advisory only: this must not
+   * affect validation pass/fail and is intentionally separate from skipPhases.
+   */
+  advisoryBrowserQaEnabled?: boolean;
+  /**
    * Per-exec env vars injected into build/test/lint/SAST commands.
    *
    * Used to pass private-feed credentials (e.g. VSS_NUGET_EXTERNAL_FEED_ENDPOINTS for
@@ -99,7 +110,7 @@ export interface ValidationPhaseCallbacks {
   onPhaseStarted?: (phase: ValidationPhase) => void;
   onPhaseCompleted?: (
     phase: ValidationPhase,
-    status: 'pass' | 'fail' | 'skip',
+    status: 'pass' | 'fail' | 'skip' | 'pending_human',
     result: unknown,
   ) => void;
 }

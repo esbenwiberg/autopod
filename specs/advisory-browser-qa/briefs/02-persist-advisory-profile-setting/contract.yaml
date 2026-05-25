@@ -1,0 +1,48 @@
+contract_version: 1
+title: "Persist advisory browser QA profile setting"
+depends_on: [01-add-advisory-contracts]
+scenarios:
+  - id: profile-setting-persists
+    given:
+      - "a profile sets advisoryBrowserQaEnabled to null, true, or false"
+    when:
+      - "the daemon stores, resolves, and returns the profile"
+    then:
+      - "the effective profile preserves inheritance and exposes the configured value"
+  - id: pod-override-precedence
+    given:
+      - "a pod option advisoryBrowserQa is set"
+    when:
+      - "validation config is built for the pod"
+    then:
+      - "the pod override wins over the profile default"
+  - id: advisory-screenshot-source
+    given:
+      - "an advisory QA screenshot ref exists"
+    when:
+      - "the daemon serializes or serves the screenshot"
+    then:
+      - "the source is exposed as advisory through the screenshots API"
+required_facts:
+  - id: fact-profile-store-advisory-setting
+    proves: [profile-setting-persists]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/profiles/profile-store.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- profile-store.test.ts
+  - id: fact-validation-config-precedence
+    proves: [pod-override-precedence]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts
+  - id: fact-advisory-screenshot-route
+    proves: [advisory-screenshot-source]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/api/routes/screenshots.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- screenshots.test.ts
+human_review: []

@@ -114,6 +114,77 @@ public final class ProfileAuthenticator: Sendable {
     return "Authenticated with Claude MAX/PRO"
   }
 
+  // MARK: - OpenAI / ChatGPT
+
+  /// Authenticate a profile with OpenAI Codex via `codex login --device-auth`.
+  /// Captures Codex's `auth.json` so pods can run with ChatGPT/Pro auth.
+  public func authenticateOpenAI(profileName: String) async throws -> String {
+    let tag = UUID().uuidString.prefix(8)
+    let codexHome = FileManager.default.temporaryDirectory
+      .appendingPathComponent("autopod-codex-auth-\(tag)")
+    try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+
+    guard let codexPath = Self.findExecutable("codex") else {
+      throw AuthError.cliNotFound("codex")
+    }
+
+    let markerFile = codexHome.appendingPathComponent(".auth-done")
+    let script = """
+    #!/bin/bash
+    export CODEX_HOME="\(codexHome.path)"
+    unset OPENAI_API_KEY CODEX_ACCESS_TOKEN
+    echo ""
+    echo "=== Autopod: OpenAI Codex Authentication ==="
+    echo "Follow the device/browser flow to authenticate with ChatGPT."
+    echo ""
+    "\(codexPath.path)" login --device-auth
+    touch "\(markerFile.path)"
+    echo ""
+    echo "Authentication complete. You can close this window."
+    """
+    let scriptPath = codexHome.appendingPathComponent("auth.sh")
+    try script.write(to: scriptPath, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o755], ofItemAtPath: scriptPath.path
+    )
+
+    Self.openInTerminal(scriptPath)
+
+    let authPath = codexHome.appendingPathComponent("auth.json")
+    let timeout: TimeInterval = 600 // 10 minutes
+    let start = Date()
+    while Date().timeIntervalSince(start) < timeout {
+      try await Task.sleep(for: .seconds(2))
+      if FileManager.default.fileExists(atPath: markerFile.path) { break }
+      if FileManager.default.fileExists(atPath: authPath.path) { break }
+    }
+
+    guard FileManager.default.fileExists(atPath: authPath.path) else {
+      throw AuthError.noCredentials("No Codex auth.json found — login may not have completed.")
+    }
+
+    let authData = try Data(contentsOf: authPath)
+    guard (try JSONSerialization.jsonObject(with: authData)) is [String: Any],
+          let authJson = String(data: authData, encoding: .utf8) else {
+      throw AuthError.noCredentials("Codex auth.json was not valid JSON.")
+    }
+
+    _ = try await api.patchProfile(profileName, fields: [
+      "defaultRuntime": "codex",
+      "defaultModel": "auto",
+      "modelProvider": "openai",
+      "providerCredentials": [
+        "provider": "openai",
+        "authMode": "chatgpt",
+        "authJson": authJson,
+      ] as [String: Any],
+    ])
+
+    try? FileManager.default.removeItem(at: codexHome)
+
+    return "Authenticated with OpenAI Codex"
+  }
+
   // MARK: - GitHub Copilot
 
   /// Authenticate a profile with GitHub Copilot via `copilot login`.
