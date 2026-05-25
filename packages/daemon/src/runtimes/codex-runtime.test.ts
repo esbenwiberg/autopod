@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import type { AgentErrorEvent, AgentEvent, AgentStatusEvent, SpawnConfig } from '@autopod/shared';
 import pino from 'pino';
@@ -384,6 +387,137 @@ describe('CodexRuntime', () => {
       }
 
       expect(runtime.codexSessionIds.get('map-test')).toBe('sess-abc-123');
+    });
+
+    it('replays the latest rollout JSONL when stdout produces no Codex events', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-runtime-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+
+      try {
+        const podId = 'rollout-fallback';
+        const rolloutDir = join(tmpRoot, podId, '2026', '05', '25');
+        await mkdir(rolloutDir, { recursive: true });
+        await writeFile(
+          join(rolloutDir, 'rollout-2026-05-25T20-44-42-019e60e1.jsonl'),
+          [
+            JSON.stringify({
+              timestamp: '2026-05-25T20:44:42.000Z',
+              type: 'session_meta',
+              payload: { id: 'sess-rollout-123', cwd: '/workspace' },
+            }),
+            JSON.stringify({
+              timestamp: '2026-05-25T20:44:43.000Z',
+              type: 'event_msg',
+              payload: { type: 'task_started', turn_id: 'turn-1' },
+            }),
+            JSON.stringify({
+              timestamp: '2026-05-25T20:44:44.000Z',
+              type: 'turn_context',
+              payload: { model: 'gpt-5.5' },
+            }),
+            JSON.stringify({
+              timestamp: '2026-05-25T20:44:45.000Z',
+              type: 'response_item',
+              payload: {
+                type: 'function_call',
+                name: 'exec_command',
+                arguments: JSON.stringify({ cmd: 'git status --short', workdir: '/workspace' }),
+                call_id: 'call-1',
+              },
+            }),
+            JSON.stringify({
+              timestamp: '2026-05-25T20:44:46.000Z',
+              type: 'response_item',
+              payload: {
+                type: 'function_call_output',
+                call_id: 'call-1',
+                output: 'clean',
+              },
+            }),
+            JSON.stringify({
+              timestamp: '2026-05-25T20:44:47.000Z',
+              type: 'event_msg',
+              payload: {
+                type: 'token_count',
+                info: {
+                  total_token_usage: {
+                    input_tokens: 123,
+                    output_tokens: 45,
+                  },
+                },
+              },
+            }),
+            JSON.stringify({
+              timestamp: '2026-05-25T20:44:48.000Z',
+              type: 'event_msg',
+              payload: {
+                type: 'task_complete',
+                last_agent_message: 'Probe complete',
+              },
+            }),
+          ].join('\n'),
+        );
+
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+        setTimeout(() => {
+          // Finish with an empty stdout stream, matching the observed Docker/Codex path.
+          // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+          (handle as any).finish(0);
+        }, 10);
+
+        const events: AgentEvent[] = [];
+        for await (const event of runtime.spawn({
+          podId,
+          task: 'Probe event streaming',
+          model: 'gpt-5.5',
+          workDir: '/workspace',
+          containerId: 'container-123',
+          env: {},
+        })) {
+          events.push(event);
+        }
+
+        expect(runtime.codexSessionIds.get(podId)).toBe('sess-rollout-123');
+        expect(events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              type: 'status',
+              message: 'Codex session ready',
+              sessionId: 'sess-rollout-123',
+            }),
+            expect.objectContaining({
+              type: 'tool_use',
+              tool: 'Bash',
+              input: expect.objectContaining({
+                command: 'git status --short',
+                cwd: '/workspace',
+              }),
+            }),
+            expect.objectContaining({
+              type: 'tool_use',
+              output: 'clean',
+            }),
+            expect.objectContaining({
+              type: 'complete',
+              result: 'Probe complete',
+              totalInputTokens: 123,
+              totalOutputTokens: 45,
+            }),
+          ]),
+        );
+      } finally {
+        if (previousStateDir === undefined) {
+          // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
+          delete process.env.AUTOPOD_CODEX_STATE_DIR;
+        } else {
+          process.env.AUTOPOD_CODEX_STATE_DIR = previousStateDir;
+        }
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
     });
   });
 

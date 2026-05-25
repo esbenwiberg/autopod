@@ -1,8 +1,13 @@
+import { type Dirent, createReadStream } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
+import path from 'node:path';
+import type { Readable } from 'node:stream';
 import { CONTAINER_HOME_DIR } from '@autopod/shared';
 import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import type { PodRepository } from '../pods/pod-repository.js';
+import { codexStateDirForPod } from './codex-state-store.js';
 import { CodexStreamParser } from './codex-stream-parser.js';
 import {
   awaitExitCodeBounded,
@@ -15,6 +20,24 @@ const MCP_CONFIG_PATH = `${CONTAINER_HOME_DIR}/.codex/config.toml`;
 const EXTERNAL_SANDBOX_ARGS = ['--dangerously-bypass-approvals-and-sandbox'] as const;
 
 const TOML_BARE_KEY = /^[A-Za-z0-9_-]+$/;
+const ROLLOUT_FILE_RE = /^rollout-.*\.jsonl$/;
+
+interface ParseStats {
+  events: number;
+  nonStatusEvents: number;
+  sawComplete: boolean;
+}
+
+interface OutputState {
+  events: number;
+  nonStatusEvents: number;
+  sawComplete: boolean;
+}
+
+interface RolloutCandidate {
+  path: string;
+  mtimeMs: number;
+}
 
 function escapeTomlString(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -88,18 +111,8 @@ export class CodexRuntime implements Runtime {
 
     this.handles.set(config.podId, handle);
 
-    const codexSessionIds = this.codexSessionIds;
-    const podId = config.podId;
-    const logger = this.logger;
-
-    const enriched = (async function* captureSessionId(): AsyncIterable<AgentEvent> {
-      for await (const event of CodexStreamParser.parse(handle.stdout, podId, logger)) {
-        if (event.type === 'status' && event.sessionId) {
-          codexSessionIds.set(podId, event.sessionId);
-        }
-        yield event;
-      }
-    })();
+    const outputState: OutputState = { events: 0, nonStatusEvents: 0, sawComplete: false };
+    const enriched = this.parseWithRolloutFallback(handle, config.podId, outputState);
 
     try {
       yield* withPostCompleteGrace(
@@ -146,6 +159,13 @@ export class CodexRuntime implements Runtime {
         timestamp: new Date().toISOString(),
         message,
         fatal: true,
+      };
+    } else if (!outputState.sawComplete || outputState.nonStatusEvents === 0) {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'Codex exited successfully without JSON activity on stdout or rollout JSONL',
+        fatal: false,
       };
     }
   }
@@ -200,14 +220,21 @@ export class CodexRuntime implements Runtime {
 
     try {
       yield* withPostCompleteGrace(
-        withIdleLivenessProbe(CodexStreamParser.parse(handle.stdout, podId, this.logger), {
-          streams: [handle.stdout, handle.stderr],
-          runtimeName: 'codex-runtime',
-          podId,
-          logger: this.logger,
-          containerManager: this.containerManager,
-          containerId,
-        }),
+        withIdleLivenessProbe(
+          this.parseWithRolloutFallback(handle, podId, {
+            events: 0,
+            nonStatusEvents: 0,
+            sawComplete: false,
+          }),
+          {
+            streams: [handle.stdout, handle.stderr],
+            runtimeName: 'codex-runtime',
+            podId,
+            logger: this.logger,
+            containerManager: this.containerManager,
+            containerId,
+          },
+        ),
         {
           streams: [handle.stdout, handle.stderr],
           runtimeName: 'codex-runtime',
@@ -267,6 +294,81 @@ export class CodexRuntime implements Runtime {
     return args;
   }
 
+  private async *parseWithRolloutFallback(
+    handle: StreamingExecResult,
+    podId: string,
+    outputState: OutputState,
+  ): AsyncIterable<AgentEvent> {
+    const seen = new Set<string>();
+    const stdoutStats = yield* this.parseCodexLines(handle.stdout, podId, seen, outputState);
+
+    if (stdoutStats.sawComplete && stdoutStats.nonStatusEvents > 0) return;
+
+    yield* this.replayLatestRollout(podId, seen, stdoutStats, outputState);
+  }
+
+  private async *parseCodexLines(
+    lines: Readable,
+    podId: string,
+    seen: Set<string>,
+    outputState: OutputState,
+  ): AsyncGenerator<AgentEvent, ParseStats, void> {
+    const stats: ParseStats = { events: 0, nonStatusEvents: 0, sawComplete: false };
+
+    for await (const event of CodexStreamParser.parse(lines, podId, this.logger)) {
+      stats.events += 1;
+      if (event.type !== 'status') stats.nonStatusEvents += 1;
+      if (event.type === 'complete') stats.sawComplete = true;
+      if (event.type === 'status' && event.sessionId) {
+        this.codexSessionIds.set(podId, event.sessionId);
+      }
+
+      const key = dedupeKey(event);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      recordOutputEvent(outputState, event);
+      yield event;
+    }
+
+    return stats;
+  }
+
+  private async *replayLatestRollout(
+    podId: string,
+    seen: Set<string>,
+    stdoutStats: ParseStats,
+    outputState: OutputState,
+  ): AsyncGenerator<AgentEvent, ParseStats, void> {
+    const rolloutPath = await findLatestCodexRolloutFile(codexStateDirForPod(podId));
+    if (!rolloutPath) {
+      this.logger.warn(
+        {
+          component: 'codex-runtime',
+          podId,
+          stdoutEvents: stdoutStats.events,
+          stdoutNonStatusEvents: stdoutStats.nonStatusEvents,
+          stdoutSawComplete: stdoutStats.sawComplete,
+        },
+        'Codex stdout stream ended without complete activity and no rollout JSONL was found',
+      );
+      return { events: 0, nonStatusEvents: 0, sawComplete: false };
+    }
+
+    this.logger.warn(
+      {
+        component: 'codex-runtime',
+        podId,
+        rolloutPath,
+        stdoutEvents: stdoutStats.events,
+        stdoutNonStatusEvents: stdoutStats.nonStatusEvents,
+        stdoutSawComplete: stdoutStats.sawComplete,
+      },
+      'Codex stdout stream ended without complete activity — replaying rollout JSONL',
+    );
+
+    return yield* this.parseCodexLines(createReadStream(rolloutPath), podId, seen, outputState);
+  }
+
   /**
    * Write Codex's config.toml inside the container with the requested MCP servers.
    *
@@ -310,5 +412,43 @@ export class CodexRuntime implements Runtime {
       MCP_CONFIG_PATH,
       `${sections.join('\n\n')}\n`,
     );
+  }
+}
+
+function dedupeKey(event: AgentEvent): string {
+  return JSON.stringify(event);
+}
+
+function recordOutputEvent(state: OutputState, event: AgentEvent): void {
+  state.events += 1;
+  if (event.type !== 'status') state.nonStatusEvents += 1;
+  if (event.type === 'complete') state.sawComplete = true;
+}
+
+async function findLatestCodexRolloutFile(rootDir: string): Promise<string | null> {
+  const candidates: RolloutCandidate[] = [];
+  await collectRolloutFiles(rootDir, candidates);
+  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return candidates[0]?.path ?? null;
+}
+
+async function collectRolloutFiles(dir: string, candidates: RolloutCandidate[]): Promise<void> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw err;
+  }
+
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await collectRolloutFiles(entryPath, candidates);
+      continue;
+    }
+    if (!entry.isFile() || !ROLLOUT_FILE_RE.test(entry.name)) continue;
+    const info = await stat(entryPath);
+    candidates.push({ path: entryPath, mtimeMs: info.mtimeMs });
   }
 }
