@@ -161,13 +161,13 @@ public enum ProfileOverrideCatalog {
             key: "defaultModel",
             label: "Default Model",
             section: .agent,
-            help: "AI model name (e.g. `opus`, `sonnet`)."
+            help: "AI model for the selected runtime (e.g. `opus`, `sonnet`, `auto`, `gpt-5`)."
         ),
         .init(
             key: "reviewerModel",
             label: "Reviewer Model",
             section: .agent,
-            help: "Model used for required-facts review and task review. Defaults to Default Model."
+            help: "Model used for required-facts review and task review. Options follow the runtime."
         ),
         .init(
             key: "defaultRuntime",

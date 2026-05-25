@@ -104,7 +104,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .buildRun:
             ["build command", "start command", "test command", "health path", "timeout", "npm", "dotnet", "python", "compile"]
         case .agent:
-            ["model", "opus", "sonnet", "runtime", "claude", "codex", "copilot", "custom instructions", "system prompt"]
+            ["model", "opus", "sonnet", "auto", "gpt-5", "runtime", "claude", "codex", "copilot", "custom instructions", "system prompt"]
         case .providers:
             ["model provider", "anthropic", "max", "openai", "codex", "foundry", "azure foundry", "copilot", "pr provider", "code platform", "github", "ado", "azure devops", "oauth", "authenticate", "login", "endpoint", "project id", "api key"]
         case .escalation:
@@ -324,6 +324,10 @@ public struct ProfileEditorView: View {
         }
         .frame(width: 880, height: 720)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { normalizeRuntimeModelSelections() }
+        .onChange(of: profile.defaultRuntime) { _, _ in
+            normalizeRuntimeModelSelections()
+        }
         .task { await loadEditorPayloadIfNeeded() }
     }
 
@@ -939,21 +943,13 @@ public struct ProfileEditorView: View {
     @ViewBuilder
     private var agentFields: some View {
         HStack(spacing: 24) {
-            fieldRow("Default Model", help: "Opus is more capable but slower; Sonnet is faster and cheaper.") {
-                Picker("", selection: $profile.defaultModel) {
-                    Text("Opus").tag("opus")
-                    Text("Sonnet").tag("sonnet")
-                }
-                .labelsHidden()
-                .frame(width: 130)
+            fieldRow("Default Model", help: defaultModelHelp) {
+                runtimeModelPicker(selection: $profile.defaultModel, role: .defaultModel)
+                    .frame(width: 150)
             }
-            fieldRow("Reviewer Model", help: "Model used for required-facts review and task review. Sonnet is sufficient for automated checks.") {
-                Picker("", selection: $profile.reviewerModel) {
-                    Text("Sonnet").tag("sonnet")
-                    Text("Opus").tag("opus")
-                }
-                .labelsHidden()
-                .frame(width: 130)
+            fieldRow("Reviewer Model", help: reviewerModelHelp) {
+                runtimeModelPicker(selection: $profile.reviewerModel, role: .reviewerModel)
+                    .frame(width: 150)
             }
             fieldRow("Runtime", help: "AI runtime engine — Claude Code, OpenAI Codex, or GitHub Copilot.") {
                 Picker("", selection: $profile.defaultRuntime) {
@@ -980,6 +976,63 @@ public struct ProfileEditorView: View {
                     .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
             )
         }
+    }
+
+    private var defaultModelHelp: String {
+        switch profile.defaultRuntime {
+        case .claude:
+            "Claude model for generation pods. Opus is more capable; Sonnet is faster and cheaper."
+        case .codex:
+            "Codex model for generation pods. Auto lets the Codex CLI use the account default."
+        case .copilot:
+            "Copilot model selection is controlled by the Copilot provider credentials."
+        }
+    }
+
+    private var reviewerModelHelp: String {
+        switch profile.defaultRuntime {
+        case .claude:
+            "Claude model used for required-facts review and task review."
+        case .codex:
+            "Codex model used for required-facts review and task review."
+        case .copilot:
+            "Copilot review model follows the provider/runtime configuration."
+        }
+    }
+
+    private func runtimeModelPicker(
+        selection: Binding<String>,
+        role: RuntimeModelRole
+    ) -> some View {
+        Picker("", selection: selection) {
+            ForEach(
+                RuntimeModelOptions.options(
+                    for: profile.defaultRuntime,
+                    role: role,
+                    currentValue: selection.wrappedValue
+                ),
+                id: \.value
+            ) { option in
+                Text(option.label).tag(option.value)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+    }
+
+    private func normalizeRuntimeModelSelections(resetCodexRestrictedModel: Bool = false) {
+        profile.defaultModel = RuntimeModelOptions.normalized(
+            profile.defaultModel,
+            for: profile.defaultRuntime,
+            role: .defaultModel,
+            resetCodexRestrictedModel: resetCodexRestrictedModel
+        )
+        profile.reviewerModel = RuntimeModelOptions.normalized(
+            profile.reviewerModel,
+            for: profile.defaultRuntime,
+            role: .reviewerModel,
+            resetCodexRestrictedModel: resetCodexRestrictedModel
+        )
     }
 
     // MARK: - Escalation
@@ -1160,11 +1213,7 @@ public struct ProfileEditorView: View {
             .onChange(of: profile.modelProvider) { _, newValue in
                 if newValue == .openai {
                     profile.defaultRuntime = .codex
-                    if ["opus", "sonnet", "haiku"].contains(profile.defaultModel)
-                        || profile.defaultModel.hasPrefix("claude-")
-                        || profile.defaultModel == "gpt-5-codex" {
-                        profile.defaultModel = "auto"
-                    }
+                    normalizeRuntimeModelSelections(resetCodexRestrictedModel: true)
                 }
             }
         }
@@ -2501,6 +2550,8 @@ public struct ProfileEditorView: View {
 
     @ViewBuilder
     private func overrideCard(for field: ProfileOverrideField) -> some View {
+        let parentRuntime = RuntimeType(rawValue: editorPayload?.parent?.defaultRuntime ?? "")
+            ?? profile.defaultRuntime
         switch field.key {
         // MARK: General
         case "repoUrl":
@@ -2605,13 +2656,15 @@ public struct ProfileEditorView: View {
 
         // MARK: Agent
         case "defaultModel":
-            stringCard(field, value: $profile.defaultModel,
-                       parent: editorPayload?.parent?.defaultModel ?? "",
-                       placeholder: "opus")
+            modelCard(field, selection: $profile.defaultModel,
+                      role: .defaultModel,
+                      parent: editorPayload?.parent?.defaultModel ?? "",
+                      parentRuntime: parentRuntime)
         case "reviewerModel":
-            stringCard(field, value: $profile.reviewerModel,
-                       parent: editorPayload?.parent?.reviewerModel ?? "",
-                       placeholder: profile.defaultModel)
+            modelCard(field, selection: $profile.reviewerModel,
+                      role: .reviewerModel,
+                      parent: editorPayload?.parent?.reviewerModel ?? "",
+                      parentRuntime: parentRuntime)
         case "defaultRuntime":
             enumCard(field, selection: $profile.defaultRuntime,
                      options: RuntimeType.allCases.map { ($0, $0.rawValue.capitalized) },
@@ -2937,6 +2990,20 @@ public struct ProfileEditorView: View {
                 Spacer()
             }
             parentLine(parent.map { $0 ? "On" : "Off" } ?? "(inherited)")
+        }
+    }
+
+    private func modelCard(
+        _ field: ProfileOverrideField,
+        selection: Binding<String>,
+        role: RuntimeModelRole,
+        parent: String,
+        parentRuntime: RuntimeType
+    ) -> some View {
+        overrideCardShell(field: field) {
+            runtimeModelPicker(selection: selection, role: role)
+                .frame(width: 240, alignment: .leading)
+            parentLine(RuntimeModelOptions.label(for: parent, runtime: parentRuntime))
         }
     }
 
