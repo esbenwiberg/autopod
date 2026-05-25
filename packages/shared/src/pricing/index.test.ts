@@ -10,12 +10,14 @@ import {
 describe('MODEL_PRICING', () => {
   it('contains full claude model IDs', () => {
     expect(MODEL_PRICING['claude-opus-4-7']).toBeDefined();
+    expect(MODEL_PRICING['claude-opus-4-6']).toBeDefined();
     expect(MODEL_PRICING['claude-sonnet-4-6']).toBeDefined();
     expect(MODEL_PRICING['claude-sonnet-4-5']).toBeDefined();
     expect(MODEL_PRICING['claude-haiku-4-5']).toBeDefined();
   });
 
   it('contains gpt model IDs', () => {
+    expect(MODEL_PRICING['gpt-5.5']).toBeDefined();
     expect(MODEL_PRICING['gpt-5']).toBeDefined();
     expect(MODEL_PRICING['gpt-5-mini']).toBeDefined();
     expect(MODEL_PRICING['gpt-5.3-codex']).toBeDefined();
@@ -33,15 +35,15 @@ describe('MODEL_PRICING', () => {
 
 describe('computeCost', () => {
   it('computes input-only cost for claude-opus-4-7', () => {
-    expect(computeCost('claude-opus-4-7', 1_000_000, 0)).toBe(15.0);
+    expect(computeCost('claude-opus-4-7', 1_000_000, 0)).toBe(5.0);
   });
 
   it('computes output-only cost for claude-opus-4-7', () => {
-    expect(computeCost('claude-opus-4-7', 0, 1_000_000)).toBe(75.0);
+    expect(computeCost('claude-opus-4-7', 0, 1_000_000)).toBe(25.0);
   });
 
   it('computes blended cost for claude-opus-4-7', () => {
-    expect(computeCost('claude-opus-4-7', 500_000, 500_000)).toBe(45.0);
+    expect(computeCost('claude-opus-4-7', 500_000, 500_000)).toBe(15.0);
   });
 
   it('returns 0 for null model', () => {
@@ -57,6 +59,12 @@ describe('computeCostWithCache', () => {
   it('computes Codex cost with cached input discount', () => {
     expect(computeCostWithCache('gpt-5.3-codex', 1_000_000, 500_000, 250_000)).toBe(
       0.75 * 1.75 + 0.25 * 0.175 + 0.5 * 14.0,
+    );
+  });
+
+  it('computes Claude cost with cached input discount', () => {
+    expect(computeCostWithCache('claude-haiku-4-5', 1_000_000, 0, 900_000)).toBe(
+      0.1 * 1.0 + 0.9 * 0.1,
     );
   });
 });

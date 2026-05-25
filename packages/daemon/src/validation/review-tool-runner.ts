@@ -365,9 +365,9 @@ async function toolSearchFiles(
 /** Maps short model names (used in profiles) to full Anthropic model IDs */
 function resolveModelId(model: string): string {
   const aliases: Record<string, string> = {
-    sonnet: 'claude-sonnet-4-20250514',
-    opus: 'claude-opus-4-20250514',
-    haiku: 'claude-haiku-4-5-20251001',
+    sonnet: 'claude-sonnet-4-6',
+    opus: 'claude-opus-4-7',
+    haiku: 'claude-haiku-4-5',
   };
   return aliases[model] ?? model;
 }

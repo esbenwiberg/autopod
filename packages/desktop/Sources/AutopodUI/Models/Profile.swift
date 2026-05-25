@@ -201,7 +201,7 @@ public struct Profile: Identifiable, Sendable {
         healthPath: String = "/", healthTimeout: Int = 120,
         buildTimeout: Int = 300, testTimeout: Int = 600,
         maxValidationAttempts: Int = 3,
-        defaultModel: String = "opus", reviewerModel: String = "sonnet",
+        defaultModel: String = "claude-opus-4-7", reviewerModel: String = "claude-sonnet-4-6",
         defaultRuntime: RuntimeType = .claude,
         executionTarget: ExecutionTarget = .local,
         modelProvider: ModelProvider = .anthropic, prProvider: PRProvider = .github,
@@ -866,7 +866,7 @@ public enum MockProfiles: Sendable {
         startCommand: "pnpm start",
         testCommand: "pnpm test",
         healthPath: "/api/health",
-        defaultModel: "opus",
+        defaultModel: "claude-opus-4-7",
         hasGithubPat: true,
         networkEnabled: true, networkMode: .restricted,
         allowedHosts: ["api.stripe.com", "auth.google.com"],
@@ -902,7 +902,7 @@ public enum MockProfiles: Sendable {
         buildCommand: "npm run build",
         startCommand: "npm start",
         healthPath: "/",
-        defaultModel: "sonnet",
+        defaultModel: "claude-sonnet-4-6",
         smokePages: [SmokePage(path: "/"), SmokePage(path: "/about")]
     )
 
@@ -914,7 +914,7 @@ public enum MockProfiles: Sendable {
         startCommand: "dotnet run",
         testCommand: "dotnet test",
         healthPath: "/health",
-        defaultModel: "opus",
+        defaultModel: "claude-opus-4-7",
         prProvider: .ado,
         hasAdoPat: true, hasRegistryPat: true,
         networkEnabled: true, networkMode: .restricted,

@@ -1,6 +1,7 @@
 import type { Profile } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import {
+  CLAUDE_REVIEWER_MODEL,
   CODEX_DEFAULT_MODEL,
   resolvePodModel,
   resolvePodRuntime,
@@ -111,7 +112,7 @@ describe('resolveReviewerModel', () => {
 
   it('defaults Claude-compatible review to sonnet when no model is configured', () => {
     expect(resolveReviewerModel(profile({ defaultModel: null, reviewerModel: null }))).toBe(
-      'sonnet',
+      CLAUDE_REVIEWER_MODEL,
     );
   });
 });

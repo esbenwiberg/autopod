@@ -2,6 +2,8 @@ import type { ModelProvider, Profile, RuntimeType } from '@autopod/shared';
 import type { Logger } from 'pino';
 
 export const CODEX_DEFAULT_MODEL = 'auto';
+export const CLAUDE_DEFAULT_MODEL = 'claude-opus-4-7';
+export const CLAUDE_REVIEWER_MODEL = 'claude-sonnet-4-6';
 
 const CLAUDE_MODEL_ALIASES = new Set(['opus', 'sonnet', 'haiku']);
 
@@ -47,7 +49,9 @@ export function resolvePodModel(
   logger?: Logger,
 ): string {
   const model =
-    requestedModel ?? profile.defaultModel ?? (runtime === 'codex' ? CODEX_DEFAULT_MODEL : 'opus');
+    requestedModel ??
+    profile.defaultModel ??
+    (runtime === 'codex' ? CODEX_DEFAULT_MODEL : CLAUDE_DEFAULT_MODEL);
 
   if (
     runtime === 'codex' &&
@@ -76,5 +80,5 @@ export function resolveReviewerModel(profile: Profile, logger?: Logger): string 
     return resolvePodModel(profile, requestedModel, reviewerRuntime, logger);
   }
 
-  return reviewerRuntime === 'codex' ? CODEX_DEFAULT_MODEL : 'sonnet';
+  return reviewerRuntime === 'codex' ? CODEX_DEFAULT_MODEL : CLAUDE_REVIEWER_MODEL;
 }

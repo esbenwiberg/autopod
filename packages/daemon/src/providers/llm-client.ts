@@ -11,7 +11,7 @@ const FOUNDRY_TOKEN_SCOPE = 'https://cognitiveservices.azure.com/.default';
 const MAX_OAUTH_BETA = 'oauth-2025-04-20';
 
 const MODEL_ALIASES: Record<string, string> = {
-  opus: 'claude-opus-4-6',
+  opus: 'claude-opus-4-7',
   sonnet: 'claude-sonnet-4-6',
   haiku: 'claude-haiku-4-5',
 };

@@ -113,12 +113,12 @@ describe('ClaudeRuntime', () => {
 
       // Short aliases → full model IDs
       expect(buildArgs('sonnet')).toContain('claude-sonnet-4-6');
-      expect(buildArgs('opus')).toContain('claude-opus-4-6');
+      expect(buildArgs('opus')).toContain('claude-opus-4-7');
       expect(buildArgs('haiku')).toContain('claude-haiku-4-5');
 
       // Full model IDs pass through unchanged
       expect(buildArgs('claude-sonnet-4-5')).toContain('claude-sonnet-4-5');
-      expect(buildArgs('claude-opus-4-6')).toContain('claude-opus-4-6');
+      expect(buildArgs('claude-opus-4-7')).toContain('claude-opus-4-7');
     });
 
     it('includes --session-id flag', () => {

@@ -367,7 +367,7 @@ export class ClaudeRuntime implements Runtime {
 
   private resolveModelId(model: string): string {
     const aliases: Record<string, string> = {
-      opus: 'claude-opus-4-6',
+      opus: 'claude-opus-4-7',
       sonnet: 'claude-sonnet-4-6',
       haiku: 'claude-haiku-4-5',
     };

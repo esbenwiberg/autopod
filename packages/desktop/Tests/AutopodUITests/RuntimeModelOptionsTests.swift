@@ -4,7 +4,7 @@ import Testing
 @Test func codexModelOptionsExposeRepoKnownModels() {
     let options = RuntimeModelOptions.options(for: .codex, role: .defaultModel).map(\.value)
 
-    #expect(options == ["auto", "gpt-5", "gpt-5-mini"])
+    #expect(options == ["auto", "gpt-5.3-codex", "gpt-5.5", "gpt-5", "gpt-5-mini"])
     #expect(!options.contains("opus"))
     #expect(!options.contains("sonnet"))
 }
@@ -13,8 +13,8 @@ import Testing
     let defaultOptions = RuntimeModelOptions.options(for: .claude, role: .defaultModel).map(\.value)
     let reviewerOptions = RuntimeModelOptions.options(for: .claude, role: .reviewerModel).map(\.value)
 
-    #expect(defaultOptions == ["opus", "sonnet"])
-    #expect(reviewerOptions == ["sonnet", "opus"])
+    #expect(defaultOptions == ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"])
+    #expect(reviewerOptions == ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"])
 }
 
 @Test func runtimeModelNormalizationResetsIncompatibleSelections() {
@@ -22,13 +22,24 @@ import Testing
         RuntimeModelOptions.normalized("opus", for: .codex, role: .defaultModel) == "auto"
     )
     #expect(
-        RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .defaultModel) == "opus"
+        RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .defaultModel) == "claude-opus-4-7"
     )
     #expect(
-        RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .reviewerModel) == "sonnet"
+        RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .reviewerModel) == "claude-sonnet-4-6"
     )
     #expect(
         RuntimeModelOptions.normalized("sonnet", for: .copilot, role: .defaultModel) == "auto"
+    )
+}
+
+@Test func runtimeModelNormalizationExpandsClaudeAliases() {
+    #expect(
+        RuntimeModelOptions.normalized("opus", for: .claude, role: .defaultModel)
+            == "claude-opus-4-7"
+    )
+    #expect(
+        RuntimeModelOptions.normalized("sonnet", for: .claude, role: .reviewerModel)
+            == "claude-sonnet-4-6"
     )
 }
 
@@ -39,7 +50,9 @@ import Testing
         currentValue: "gpt-5.2-codex"
     ).map(\.value)
 
-    #expect(options == ["auto", "gpt-5", "gpt-5-mini", "gpt-5.2-codex"])
+    #expect(
+        options == ["auto", "gpt-5.3-codex", "gpt-5.5", "gpt-5", "gpt-5-mini", "gpt-5.2-codex"]
+    )
 }
 
 @Test func openAiProviderNormalizationCanResetRestrictedCodexModel() {
@@ -50,5 +63,24 @@ import Testing
             role: .defaultModel,
             resetCodexRestrictedModel: true
         ) == "auto"
+    )
+}
+
+@Test func modelPricingSummariesCoverPickerModels() {
+    #expect(
+        RuntimeModelOptions.priceSummary(for: "gpt-5.5", runtime: .codex)
+            == "$5 in / $0.50 cached / $30 out per 1M"
+    )
+    #expect(
+        RuntimeModelOptions.priceSummary(for: "claude-opus-4-7", runtime: .claude)
+            == "$5 in / $0.50 cached / $25 out per 1M"
+    )
+    #expect(
+        RuntimeModelOptions.priceSummary(for: "gpt-5.2-codex", runtime: .codex)
+            == "$1.75 in / $0.175 cached / $14 out per 1M"
+    )
+    #expect(
+        RuntimeModelOptions.priceSummary(for: "auto", runtime: .codex)
+            == "Uses the Codex account default; pricing varies"
     )
 }

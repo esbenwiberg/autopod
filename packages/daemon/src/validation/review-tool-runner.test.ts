@@ -90,18 +90,18 @@ describe('review tool runner - git log arg filtering', () => {
 describe('review tool runner - model ID resolution', () => {
   it('maps short aliases to full IDs', () => {
     const aliases: Record<string, string> = {
-      sonnet: 'claude-sonnet-4-20250514',
-      opus: 'claude-opus-4-20250514',
-      haiku: 'claude-haiku-4-5-20251001',
+      sonnet: 'claude-sonnet-4-6',
+      opus: 'claude-opus-4-7',
+      haiku: 'claude-haiku-4-5',
     };
 
-    expect(aliases.sonnet).toBe('claude-sonnet-4-20250514');
-    expect(aliases.opus).toBe('claude-opus-4-20250514');
+    expect(aliases.sonnet).toBe('claude-sonnet-4-6');
+    expect(aliases.opus).toBe('claude-opus-4-7');
   });
 
   it('passes through full model IDs', () => {
     const aliases: Record<string, string> = {
-      sonnet: 'claude-sonnet-4-20250514',
+      sonnet: 'claude-sonnet-4-6',
     };
     const model = 'claude-3-5-sonnet-20241022';
     expect(aliases[model] ?? model).toBe('claude-3-5-sonnet-20241022');

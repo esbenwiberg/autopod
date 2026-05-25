@@ -961,12 +961,12 @@ public struct ProfileEditorView: View {
     private var agentFields: some View {
         HStack(spacing: 24) {
             fieldRow("Default Model", help: defaultModelHelp) {
-                runtimeModelPicker(selection: $profile.defaultModel, role: .defaultModel)
-                    .frame(width: 150)
+                runtimeModelPickerWithPrice(selection: $profile.defaultModel, role: .defaultModel)
+                    .frame(width: 210)
             }
             fieldRow("Reviewer Model", help: reviewerModelHelp) {
-                runtimeModelPicker(selection: $profile.reviewerModel, role: .reviewerModel)
-                    .frame(width: 150)
+                runtimeModelPickerWithPrice(selection: $profile.reviewerModel, role: .reviewerModel)
+                    .frame(width: 210)
             }
             fieldRow("Runtime", help: "AI runtime engine — Claude Code, OpenAI Codex, or GitHub Copilot.") {
                 Picker("", selection: $profile.defaultRuntime) {
@@ -998,9 +998,9 @@ public struct ProfileEditorView: View {
     private var defaultModelHelp: String {
         switch profile.defaultRuntime {
         case .claude:
-            "Claude model for generation pods. Opus is more capable; Sonnet is faster and cheaper."
+            "Claude model for generation pods. Opus 4.7 is more capable; Sonnet 4.6 is faster and cheaper."
         case .codex:
-            "Codex model for generation pods. Auto lets the Codex CLI use the account default."
+            "Codex model for generation pods. GPT-5.3-Codex is coding-optimized; GPT-5.5 is frontier general reasoning."
         case .copilot:
             "Copilot model selection is controlled by the Copilot provider credentials."
         }
@@ -1009,9 +1009,9 @@ public struct ProfileEditorView: View {
     private var reviewerModelHelp: String {
         switch profile.defaultRuntime {
         case .claude:
-            "Claude model used for required-facts review and task review."
+            "Claude model used for required-facts review and task review. Sonnet 4.6 is the lower-cost default."
         case .codex:
-            "Codex model used for required-facts review and task review."
+            "Codex model used for required-facts review and task review. Auto follows the Codex account default."
         case .copilot:
             "Copilot review model follows the provider/runtime configuration."
         }
@@ -1035,6 +1035,20 @@ public struct ProfileEditorView: View {
         }
         .labelsHidden()
         .pickerStyle(.menu)
+    }
+
+    private func runtimeModelPickerWithPrice(
+        selection: Binding<String>,
+        role: RuntimeModelRole
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            runtimeModelPicker(selection: selection, role: role)
+            Text(RuntimeModelOptions.priceSummary(for: selection.wrappedValue, runtime: profile.defaultRuntime))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
     }
 
     private func normalizeRuntimeModelSelections(resetCodexRestrictedModel: Bool = false) {
@@ -3018,7 +3032,7 @@ public struct ProfileEditorView: View {
         parentRuntime: RuntimeType
     ) -> some View {
         overrideCardShell(field: field) {
-            runtimeModelPicker(selection: selection, role: role)
+            runtimeModelPickerWithPrice(selection: selection, role: role)
                 .frame(width: 240, alignment: .leading)
             parentLine(RuntimeModelOptions.label(for: parent, runtime: parentRuntime))
         }
