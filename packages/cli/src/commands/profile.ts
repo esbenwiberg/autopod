@@ -476,6 +476,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       await withSpinner(`Saving credentials for "${name}"...`, () =>
         client.setProfileCredentials(name, {
           defaultRuntime: 'codex',
+          defaultModel: 'gpt-5-codex',
           modelProvider: 'openai',
           providerCredentials: {
             provider: 'openai',

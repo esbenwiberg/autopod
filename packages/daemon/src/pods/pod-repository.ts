@@ -102,6 +102,8 @@ export interface PodUpdates {
    * the canonical fix pod is re-enqueued for a new iteration.
    */
   task?: string;
+  model?: string;
+  runtime?: string;
   containerId?: string | null;
   worktreePath?: string | null;
   validationAttempts?: number;
@@ -494,6 +496,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.task !== undefined) {
         setClauses.push('task = @task');
         params.task = changes.task;
+      }
+      if (changes.model !== undefined) {
+        setClauses.push('model = @model');
+        params.model = changes.model;
+      }
+      if (changes.runtime !== undefined) {
+        setClauses.push('runtime = @runtime');
+        params.runtime = changes.runtime;
       }
       if (changes.containerId !== undefined) {
         setClauses.push('container_id = @containerId');

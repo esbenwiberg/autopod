@@ -129,7 +129,7 @@ import {
   ensureNuGetCredentialProvider,
   validateRegistryFiles,
 } from './registry-injector.js';
-import { resolvePodRuntime } from './runtime-resolver.js';
+import { resolvePodModel, resolvePodRuntime } from './runtime-resolver.js';
 import { resolveSections } from './section-resolver.js';
 import { resolveSkills } from './skill-resolver.js';
 import {
@@ -3293,8 +3293,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod {
       const profile = profileStore.get(request.profileName);
       assertNoExpiredPat(profile);
-      const model = request.model ?? profile.defaultModel ?? 'opus';
       const runtime = resolvePodRuntime(profile, request.runtime, logger);
+      const model = resolvePodModel(profile, request.model, runtime, logger);
       const executionTarget = request.executionTarget ?? profile.executionTarget ?? 'local';
       const skipValidation = request.skipValidation ?? false;
       const normalizedDependsOnPodIds =
@@ -7224,6 +7224,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
+      const profile = profileStore.get(pod.profileName);
+
       // When force-reworking from a terminal state, re-provision the pod from scratch
       // instead of trying to restart a potentially stale container. Docker Desktop's VirtioFS
       // mounts can break after long idle periods, making the old container unreachable.
@@ -7266,11 +7268,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               : pod.status === 'killed'
                 ? 'Your previous pod was killed. Start the task fresh.'
                 : 'Your previous work needs revision. Review and improve it.';
+        const runtime = resolvePodRuntime(profile, pod.runtime, logger);
+        const model = resolvePodModel(profile, pod.model, runtime, logger);
         podRepo.update(podId, {
+          runtime,
+          model,
           validationAttempts: 0,
           lastValidationResult: null,
           containerId: null,
           claudeSessionId: null,
+          codexSessionId: null,
           recoveryWorktreePath: pod.worktreePath ?? null,
           reworkReason,
           reworkCount: (pod.reworkCount ?? 0) + 1,
@@ -7281,13 +7288,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         enqueueSession(podId);
 
         logger.info(
-          { podId, worktreePath: pod.worktreePath, reworkReason, isInteractive },
+          {
+            podId,
+            worktreePath: pod.worktreePath,
+            reworkReason,
+            isInteractive,
+            previousRuntime: pod.runtime,
+            runtime,
+            previousModel: pod.model,
+            model,
+          },
           'Rework: re-queued with fresh container provisioning',
         );
         return;
       }
-
-      const profile = profileStore.get(pod.profileName);
 
       // Pre-push security scan: inspect the diff for secrets / PII / injection
       // before running validation. block decision throws and the pod's outer

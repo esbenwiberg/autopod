@@ -1,11 +1,12 @@
 import type { Profile } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import { resolvePodRuntime } from './runtime-resolver.js';
+import { CODEX_DEFAULT_MODEL, resolvePodModel, resolvePodRuntime } from './runtime-resolver.js';
 
 function profile(overrides: Partial<Profile> = {}): Profile {
   return {
     name: 'test-profile',
     defaultRuntime: 'claude',
+    defaultModel: 'opus',
     modelProvider: 'anthropic',
     providerCredentials: null,
     ...overrides,
@@ -40,5 +41,27 @@ describe('resolvePodRuntime', () => {
         undefined,
       ),
     ).toBe('codex');
+  });
+});
+
+describe('resolvePodModel', () => {
+  it('uses the profile default for Anthropic profiles', () => {
+    expect(resolvePodModel(profile({ defaultModel: 'sonnet' }), undefined, 'claude')).toBe(
+      'sonnet',
+    );
+  });
+
+  it('uses the Codex default for OpenAI profiles with stale Claude aliases', () => {
+    expect(
+      resolvePodModel(
+        profile({ modelProvider: 'openai', defaultModel: 'sonnet' }),
+        undefined,
+        'codex',
+      ),
+    ).toBe(CODEX_DEFAULT_MODEL);
+  });
+
+  it('keeps explicit GPT models for OpenAI profiles', () => {
+    expect(resolvePodModel(profile({ modelProvider: 'openai' }), 'gpt-5', 'codex')).toBe('gpt-5');
   });
 });
