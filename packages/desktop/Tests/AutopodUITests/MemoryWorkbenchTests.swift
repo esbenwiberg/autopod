@@ -45,6 +45,25 @@ import Testing
     #expect(kept == .memory("mem-1"))
 }
 
+@Test func memoryWorkbenchSelectionFallsBackWhenCurrentItemIsNotVisible() {
+    let visibleCandidate = makeCandidate(id: "cand-visible")
+    let visibleMemory = makeMemory(id: "mem-visible")
+
+    let candidateFallback = MemoryManagementView.preferredSelection(
+        current: .memory("mem-hidden"),
+        candidates: [visibleCandidate],
+        memories: [visibleMemory]
+    )
+    let memoryFallback = MemoryManagementView.preferredSelection(
+        current: .candidate("cand-hidden"),
+        candidates: [],
+        memories: [visibleMemory]
+    )
+
+    #expect(candidateFallback == .candidate("cand-visible"))
+    #expect(memoryFallback == .memory("mem-visible"))
+}
+
 @Test func memoryWorkbenchImpactCountsUsageOutcomes() {
     let counts = MemoryManagementView.usageImpactCounts([
         makeUsage(id: "u1", kind: .selected),

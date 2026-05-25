@@ -123,12 +123,12 @@ public struct MemoryManagementView: View {
 
     private var selectedMemory: MemoryEntry? {
         guard case .memory(let id) = selectedItem else { return nil }
-        return approved.first { $0.id == id } ?? entries.first { $0.id == id }
+        return approved.first { $0.id == id }
     }
 
     private var selectedCandidate: MemoryCandidate? {
         guard case .candidate(let id) = selectedItem else { return nil }
-        return candidates.first { $0.id == id } ?? pendingCandidates.first { $0.id == id }
+        return candidates.first { $0.id == id }
     }
 
     public var body: some View {
@@ -145,6 +145,8 @@ public struct MemoryManagementView: View {
         .onAppear { ensureSelection() }
         .onChange(of: entries.map(\.id)) { _, _ in ensureSelection() }
         .onChange(of: pendingCandidates.map(\.id)) { _, _ in ensureSelection() }
+        .onChange(of: selectedScope) { _, _ in ensureSelection() }
+        .onChange(of: searchText) { _, _ in ensureSelection() }
         .onChange(of: selectedItem) { _, newValue in
             switch newValue {
             case .memory(let id):
