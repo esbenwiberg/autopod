@@ -68,7 +68,8 @@ export class CodexRuntime implements Runtime {
     this.mcpServersBySession.set(config.podId, config.mcpServers);
 
     const args = this.buildSpawnArgs(config);
-    const safeSpawnArgs = args.map((a, i) => (i === 1 ? `<task: ${a.length} bytes>` : a));
+    const taskIndex = args.length - 1;
+    const safeSpawnArgs = args.map((a, i) => (i === taskIndex ? `<task: ${a.length} bytes>` : a));
 
     this.logger.info({
       component: 'codex-runtime',
@@ -165,11 +166,11 @@ export class CodexRuntime implements Runtime {
       this.codexSessionIds.get(podId) ?? this.podRepo.getOrThrow(podId).codexSessionId;
 
     const args = sessionId
-      ? ['exec', 'resume', sessionId, message, ...EXTERNAL_SANDBOX_ARGS, '--json']
-      : ['exec', message, ...EXTERNAL_SANDBOX_ARGS, '--json'];
+      ? ['exec', 'resume', sessionId, ...EXTERNAL_SANDBOX_ARGS, '--json', message]
+      : ['exec', ...EXTERNAL_SANDBOX_ARGS, '--json', message];
 
-    // Redact the message from logs: index 3 with a session ID, index 1 without.
-    const messageIndex = sessionId ? 3 : 1;
+    // Redact the message from logs; Codex options must stay before the prompt.
+    const messageIndex = args.length - 1;
     const safeResumeArgs = args.map((a, i) =>
       i === messageIndex ? `<task: ${a.length} bytes>` : a,
     );
@@ -258,11 +259,11 @@ export class CodexRuntime implements Runtime {
   }
 
   private buildSpawnArgs(config: SpawnConfig): string[] {
-    const args = ['exec', config.task];
+    const args = ['exec'];
     if (config.model !== 'auto') {
       args.push('--model', config.model);
     }
-    args.push(...EXTERNAL_SANDBOX_ARGS, '--json');
+    args.push(...EXTERNAL_SANDBOX_ARGS, '--json', config.task);
     return args;
   }
 

@@ -88,11 +88,11 @@ describe('CodexRuntime', () => {
       });
       expect(args).toEqual([
         'exec',
-        'Fix the bug',
         '--model',
         'o3-mini',
         '--dangerously-bypass-approvals-and-sandbox',
         '--json',
+        'Fix the bug',
       ]);
     });
 
@@ -111,9 +111,9 @@ describe('CodexRuntime', () => {
       });
       expect(args).toEqual([
         'exec',
-        'Fix the bug',
         '--dangerously-bypass-approvals-and-sandbox',
         '--json',
+        'Fix the bug',
       ]);
     });
   });
@@ -148,7 +148,7 @@ describe('CodexRuntime', () => {
       }
 
       expect(events).toHaveLength(2);
-      expect(events[0]?.type).toBe('status');
+      expect(events[0]?.type).toBe('reasoning');
       expect(events[1]?.type).toBe('complete');
 
       expect(cm.execStreaming).toHaveBeenCalledWith(
@@ -157,11 +157,11 @@ describe('CodexRuntime', () => {
           '/run/autopod/agent-shim.sh',
           'codex',
           'exec',
-          'Do the thing',
           '--model',
           'o3-mini',
           '--dangerously-bypass-approvals-and-sandbox',
           '--json',
+          'Do the thing',
         ],
         expect.objectContaining({ cwd: '/workspace' }),
       );
@@ -200,7 +200,7 @@ describe('CodexRuntime', () => {
       expect(spawnCall).toBeDefined();
       const logObj = spawnCall?.[0] as Record<string, unknown>;
       const loggedArgs = logObj.args as string[];
-      expect(loggedArgs[1]).toMatch(/^<task: 50000 bytes>$/);
+      expect(loggedArgs.at(-1)).toMatch(/^<task: 50000 bytes>$/);
       expect(JSON.stringify(logObj).includes(bigStr)).toBe(false);
 
       // Real args to execStreaming still contain the full task
@@ -415,7 +415,7 @@ describe('CodexRuntime', () => {
       expect(resumeCall).toBeDefined();
       const logObj = resumeCall?.[0] as Record<string, unknown>;
       const loggedArgs = logObj.args as string[];
-      expect(loggedArgs[1]).toMatch(/^<task: 50000 bytes>$/);
+      expect(loggedArgs.at(-1)).toMatch(/^<task: 50000 bytes>$/);
       expect(JSON.stringify(logObj).includes(bigStr)).toBe(false);
 
       // Real args to execStreaming still contain the full message
@@ -454,9 +454,9 @@ describe('CodexRuntime', () => {
           '/run/autopod/agent-shim.sh',
           'codex',
           'exec',
-          'Fix the validation errors',
           '--dangerously-bypass-approvals-and-sandbox',
           '--json',
+          'Fix the validation errors',
         ],
         expect.any(Object),
       );
@@ -487,9 +487,9 @@ describe('CodexRuntime', () => {
           'exec',
           'resume',
           'session-from-db-xyz',
-          'continue the task',
           '--dangerously-bypass-approvals-and-sandbox',
           '--json',
+          'continue the task',
         ],
         expect.any(Object),
       );
@@ -519,9 +519,9 @@ describe('CodexRuntime', () => {
           'exec',
           'resume',
           'in-memory-session-id',
-          'continue',
           '--dangerously-bypass-approvals-and-sandbox',
           '--json',
+          'continue',
         ],
         expect.any(Object),
       );

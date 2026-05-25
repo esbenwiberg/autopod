@@ -281,6 +281,11 @@ public struct AgentEventResponse: Codable, Sendable {
   public let actualSummary: String?
   public let deviations: [DeviationResponse]?
   public let factEvidence: [FactEvidenceResponse]?
+  public let factDeviations: [FactDeviationRequestResponse]?
+
+  // reasoning
+  public let text: String?
+  public let isRaw: Bool?
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -309,5 +314,11 @@ public struct AgentEventResponse: Codable, Sendable {
     actualSummary = try c.decodeIfPresent(String.self, forKey: .actualSummary)
     deviations = try c.decodeIfPresent([DeviationResponse].self, forKey: .deviations)
     factEvidence = try c.decodeIfPresent([FactEvidenceResponse].self, forKey: .factEvidence)
+    factDeviations = try c.decodeIfPresent(
+      [FactDeviationRequestResponse].self,
+      forKey: .factDeviations
+    )
+    text = try c.decodeIfPresent(String.self, forKey: .text)
+    isRaw = try c.decodeIfPresent(Bool.self, forKey: .isRaw)
   }
 }

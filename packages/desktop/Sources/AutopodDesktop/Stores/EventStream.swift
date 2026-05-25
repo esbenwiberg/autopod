@@ -398,6 +398,7 @@ public final class EventStream {
       case "plan": return response.summary ?? "Plan created"
       case "progress": return response.description ?? "Phase progress"
       case "task_summary": return response.actualSummary ?? "Task summary reported"
+      case "reasoning": return response.text ?? "Reasoning"
       case "error": return response.message ?? "Error"
       case "complete": return "Agent finished"
       default: return response.message ?? response.type

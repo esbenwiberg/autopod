@@ -47,12 +47,16 @@ describe('CodexStreamParser', () => {
       expect(e).toMatchObject({ type: 'status', message: 'Codex turn started' });
     });
 
-    it('maps agent_message to a status event with the message text', () => {
+    it('maps agent_message to a reasoning event with the message text', () => {
       const e = CodexStreamParser.mapEvent(
         { id: 's', msg: { type: 'agent_message', message: 'Looking at the code…' } },
         'pod-1',
       );
-      expect(e).toMatchObject({ type: 'status', message: 'Looking at the code…' });
+      expect(e).toMatchObject({
+        type: 'reasoning',
+        text: 'Looking at the code…',
+        isRaw: false,
+      });
     });
 
     it('drops empty agent_message events', () => {
@@ -61,6 +65,14 @@ describe('CodexStreamParser', () => {
         'pod-1',
       );
       expect(e).toBeNull();
+    });
+
+    it('maps assistant message events to reasoning instead of bootstrap status', () => {
+      const e = CodexStreamParser.mapEvent(
+        { id: 's', msg: { type: 'message', role: 'assistant', content: 'Working through it' } },
+        'pod-1',
+      );
+      expect(e).toMatchObject({ type: 'reasoning', text: 'Working through it', isRaw: false });
     });
 
     it('maps agent_reasoning to a reasoning event', () => {
@@ -329,7 +341,7 @@ describe('CodexStreamParser', () => {
         { type: 'agent_message', message: 'flat shape' } as never,
         'pod-1',
       );
-      expect(e).toMatchObject({ type: 'status', message: 'flat shape' });
+      expect(e).toMatchObject({ type: 'reasoning', text: 'flat shape', isRaw: false });
     });
   });
 
@@ -371,7 +383,7 @@ describe('CodexStreamParser', () => {
         totalOutputTokens: 400,
       });
 
-      // Tool calls and status events still flow through.
+      // Tool calls and lifecycle status events still flow through.
       const toolCalls = events.filter((e) => e.type === 'tool_use');
       expect(toolCalls).toHaveLength(2);
     });
@@ -451,7 +463,7 @@ describe('CodexStreamParser', () => {
         events.push(event);
       }
       expect(events).toHaveLength(2);
-      expect(events[0]?.type).toBe('status');
+      expect(events[0]?.type).toBe('reasoning');
       expect(events[1]?.type).toBe('complete');
     });
 
@@ -678,7 +690,11 @@ describe('CodexStreamParser', () => {
             sessionId: 'sess-123',
           }),
           expect.objectContaining({ type: 'status', message: 'Codex turn started' }),
-          expect.objectContaining({ type: 'status', message: 'Inspecting the repo' }),
+          expect.objectContaining({
+            type: 'reasoning',
+            text: 'Inspecting the repo',
+            isRaw: false,
+          }),
           expect.objectContaining({
             type: 'tool_use',
             tool: 'Bash',

@@ -173,14 +173,14 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
     case 'agent_message': {
       const message = typeof msg.message === 'string' ? msg.message : '';
       if (!message) return null;
-      return { type: 'status', timestamp: ts, message };
+      return { type: 'reasoning', timestamp: ts, text: message, isRaw: false };
     }
 
     case 'message': {
       if (msg.role !== 'assistant') return null;
       const message = contentToString(msg.content);
       if (!message) return null;
-      return { type: 'status', timestamp: ts, message };
+      return { type: 'reasoning', timestamp: ts, text: message, isRaw: false };
     }
 
     case 'agent_reasoning': {
