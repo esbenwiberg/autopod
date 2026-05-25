@@ -67,7 +67,7 @@ public enum ProfileOverrideCatalog {
             key: "pod",
             label: "Pod Defaults",
             section: .general,
-            help: "Agent mode, output target, validate, promotable."
+            help: "Agent mode, output target, validation, advisory browser QA, promotable."
         ),
         .init(
             key: "workerProfile",

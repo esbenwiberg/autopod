@@ -46,11 +46,43 @@ public enum OutputTarget: String, CaseIterable, Sendable {
     }
 }
 
+public enum AdvisoryBrowserQaMode: String, CaseIterable, Sendable {
+    case inherit
+    case enabled
+    case disabled
+
+    public var label: String {
+        switch self {
+        case .inherit:  "Auto"
+        case .enabled:  "Enabled"
+        case .disabled: "Disabled"
+        }
+    }
+
+    public init(value: Bool?) {
+        switch value {
+        case .some(true):  self = .enabled
+        case .some(false): self = .disabled
+        case .none:        self = .inherit
+        }
+    }
+
+    public var value: Bool? {
+        switch self {
+        case .inherit:  nil
+        case .enabled:  true
+        case .disabled: false
+        }
+    }
+}
+
 public struct PodConfig: Sendable, Equatable {
     public var agentMode: AgentMode
     public var output: OutputTarget
     /// Run full build/smoke/review before completing.
     public var validate: Bool
+    /// Optional evidence-only browser QA. Nil means inherit / use the daemon default.
+    public var advisoryBrowserQaEnabled: Bool?
     /// Allow promoting this pod to a different mode later.
     public var promotable: Bool
 
@@ -58,11 +90,13 @@ public struct PodConfig: Sendable, Equatable {
         agentMode: AgentMode = .auto,
         output: OutputTarget = .pr,
         validate: Bool = true,
+        advisoryBrowserQaEnabled: Bool? = nil,
         promotable: Bool = false
     ) {
         self.agentMode = agentMode
         self.output = output
         self.validate = validate
+        self.advisoryBrowserQaEnabled = advisoryBrowserQaEnabled
         self.promotable = promotable
     }
 

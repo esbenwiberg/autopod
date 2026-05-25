@@ -450,6 +450,13 @@ public struct ProfileEditorView: View {
         )
     }
 
+    private var advisoryBrowserQaModeBinding: Binding<AdvisoryBrowserQaMode> {
+        Binding(
+            get: { AdvisoryBrowserQaMode(value: profile.pod.advisoryBrowserQaEnabled) },
+            set: { profile.pod.advisoryBrowserQaEnabled = $0.value }
+        )
+    }
+
     // MARK: - Header
 
     private var header: some View {
@@ -812,6 +819,16 @@ public struct ProfileEditorView: View {
                 Toggle("Run validation", isOn: $profile.pod.validate)
                     .toggleStyle(.switch)
                     .labelsHidden()
+            }
+            fieldRow("Advisory Browser QA", help: "Evidence-only browser QA during validation. Auto leaves the profile unset so derived profiles can inherit or use the daemon default.") {
+                Picker("", selection: advisoryBrowserQaModeBinding) {
+                    ForEach(AdvisoryBrowserQaMode.allCases, id: \.self) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 210)
             }
             fieldRow("Promotable", help: "Allow promoting this pod to agent-driven mid-flight (interactive → auto).") {
                 Toggle("Allow promotion", isOn: $profile.pod.promotable)
@@ -3259,11 +3276,26 @@ public struct ProfileEditorView: View {
                         .toggleStyle(.switch).labelsHidden()
                 }
                 GridRow {
+                    Text("Advisory Browser QA").font(.caption2).foregroundStyle(.tertiary)
+                    Picker("", selection: advisoryBrowserQaModeBinding) {
+                        ForEach(AdvisoryBrowserQaMode.allCases, id: \.self) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 210)
+                }
+                GridRow {
                     Text("Promotable").font(.caption2).foregroundStyle(.tertiary)
                     Toggle("", isOn: $profile.pod.promotable)
                         .toggleStyle(.switch).labelsHidden()
                 }
             }
+            parentLine(
+                "Advisory browser QA: "
+                + AdvisoryBrowserQaMode(value: editorPayload?.parent?.pod?.advisoryBrowserQaEnabled).label
+            )
         }
     }
 

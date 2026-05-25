@@ -77,6 +77,10 @@ function readProfilePodFromRow(row: Record<string, unknown>): PodOptions | null 
     output,
     validate:
       row.validate !== null && row.validate !== undefined ? Boolean(row.validate) : undefined,
+    advisoryBrowserQaEnabled:
+      row.advisory_browser_qa_enabled !== null && row.advisory_browser_qa_enabled !== undefined
+        ? Boolean(row.advisory_browser_qa_enabled)
+        : undefined,
     promotable:
       row.promotable !== null && row.promotable !== undefined ? Boolean(row.promotable) : undefined,
   };
@@ -302,7 +306,7 @@ export function createProfileStore(
           health_path, health_timeout, validation_pages, max_validation_attempts,
           default_model, reviewer_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
-          agent_mode, output_target, validate, promotable,
+          agent_mode, output_target, validate, advisory_browser_qa_enabled, promotable,
           model_provider, provider_credentials, test_command, pr_provider,
           ado_pat, ado_pat_expires_at, github_pat, github_pat_expires_at,
           private_registries, registry_pat, registry_pat_expires_at, branch_prefix, container_memory_gb,
@@ -324,7 +328,7 @@ export function createProfileStore(
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
           @defaultModel, @reviewerModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
-          @agentMode, @outputTarget, @validate, @promotable,
+          @agentMode, @outputTarget, @validate, @advisoryBrowserQaEnabled, @promotable,
           @modelProvider, @providerCredentials, @testCommand, @prProvider,
           @adoPat, @adoPatExpiresAt, @githubPat, @githubPatExpiresAt,
           @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix, @containerMemoryGb,
@@ -371,6 +375,12 @@ export function createProfileStore(
         agentMode: parsed.pod?.agentMode ?? null,
         outputTarget: parsed.pod?.output ?? null,
         validate: parsed.pod?.validate === undefined ? null : parsed.pod.validate ? 1 : 0,
+        advisoryBrowserQaEnabled:
+          parsed.pod?.advisoryBrowserQaEnabled === undefined
+            ? null
+            : parsed.pod.advisoryBrowserQaEnabled
+              ? 1
+              : 0,
         promotable: parsed.pod?.promotable === undefined ? null : parsed.pod.promotable ? 1 : 0,
         modelProvider: parsed.modelProvider,
         providerCredentials: encryptCreds(parsed.providerCredentials),
@@ -598,6 +608,7 @@ export function createProfileStore(
           'agent_mode = @agentMode',
           'output_target = @outputTarget',
           'validate = @validate',
+          'advisory_browser_qa_enabled = @advisoryBrowserQaEnabled',
           'promotable = @promotable',
         );
         fieldMap.agentMode = parsed.pod?.agentMode ?? null;
@@ -606,6 +617,12 @@ export function createProfileStore(
           parsed.pod?.validate === undefined || parsed.pod === null
             ? null
             : parsed.pod.validate
+              ? 1
+              : 0;
+        fieldMap.advisoryBrowserQaEnabled =
+          parsed.pod?.advisoryBrowserQaEnabled === undefined || parsed.pod === null
+            ? null
+            : parsed.pod.advisoryBrowserQaEnabled
               ? 1
               : 0;
         fieldMap.promotable =

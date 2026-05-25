@@ -166,6 +166,7 @@ describe('ProfileStore', () => {
       expect(raw.issueWatcherEnabled).toBeNull();
       expect(raw.issueWatcherLabelPrefix).toBeNull();
       expect(raw.trustedSource).toBeNull();
+      expect(raw.pod).toBeNull();
       // Object/array defaults likewise.
       expect(raw.escalation).toBeNull();
       // Resolved view pulls the parent's values.
@@ -342,6 +343,38 @@ describe('ProfileStore', () => {
       store.update('my-app', { mergePollIntervalSec: 30 });
       const profile = store.get('my-app');
       expect(profile.mergePollIntervalSec).toBe(30);
+    });
+  });
+
+  describe('pod advisory browser QA', () => {
+    it('round-trips nil, true, and false through profile pod defaults', () => {
+      store.create({
+        ...validInput,
+        pod: { agentMode: 'auto', output: 'pr', validate: true, promotable: false },
+      });
+      expect(store.get('my-app').pod?.advisoryBrowserQaEnabled).toBeUndefined();
+
+      store.update('my-app', {
+        pod: {
+          agentMode: 'auto',
+          output: 'pr',
+          validate: true,
+          advisoryBrowserQaEnabled: true,
+          promotable: false,
+        },
+      });
+      expect(store.get('my-app').pod?.advisoryBrowserQaEnabled).toBe(true);
+
+      store.update('my-app', {
+        pod: {
+          agentMode: 'auto',
+          output: 'pr',
+          validate: true,
+          advisoryBrowserQaEnabled: false,
+          promotable: false,
+        },
+      });
+      expect(store.get('my-app').pod?.advisoryBrowserQaEnabled).toBe(false);
     });
   });
 
