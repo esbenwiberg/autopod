@@ -365,7 +365,9 @@ const createProfileBaseSchema = z.object({
   securityScan: securityScanPolicySchema.nullable().default(null),
   codeIntelligence: codeIntelligenceConfigSchema.nullable().default(null),
   skipValidationPhases: z
-    .array(z.enum(['lint', 'sast', 'build', 'test', 'health', 'pages', 'facts', 'review']))
+    .array(
+      z.enum(['lint', 'sast', 'build', 'test', 'health', 'pages', 'facts', 'review', 'advisory']),
+    )
     .nullable()
     .default(null),
   deployment: z

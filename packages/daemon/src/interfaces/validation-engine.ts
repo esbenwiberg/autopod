@@ -82,7 +82,7 @@ export interface ValidationEngineConfig {
   hasWebUi?: boolean;
   /**
    * Enables screenshot-backed advisory browser QA. Advisory only: this must not
-   * affect validation pass/fail and is intentionally separate from skipPhases.
+   * affect validation pass/fail.
    */
   advisoryBrowserQaEnabled?: boolean;
   /**

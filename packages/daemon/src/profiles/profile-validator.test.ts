@@ -121,6 +121,11 @@ describe('ProfileValidator', () => {
     expect(result.valid).toBe(true);
   });
 
+  it('should accept advisory as a skippable validation phase', () => {
+    const result = validateProfile({ ...validInput, skipValidationPhases: ['advisory'] });
+    expect(result.valid).toBe(true);
+  });
+
   it('should reject empty model string', () => {
     const result = validateProfile({ ...validInput, defaultModel: '' });
     expect(result.valid).toBe(false);

@@ -182,10 +182,11 @@ function summarizeValidationPhases(result: ValidationResult): string {
         : 'fail';
   const factsStatus = result.factValidation?.status ?? 'skip';
   const reviewStatus = result.taskReview?.status ?? 'skip';
+  const advisoryStatus = result.advisoryBrowserQa?.status ?? 'skip';
   return (
     `lint: ${lintStatus}, sast: ${sastStatus}, build: ${buildStatus}, ` +
     `tests: ${testStatus}, health: ${healthStatus}, pages: ${pagesStatus}, ` +
-    `facts: ${factsStatus}, review: ${reviewStatus}`
+    `facts: ${factsStatus}, review: ${reviewStatus}, advisory: ${advisoryStatus}`
   );
 }
 
@@ -3221,6 +3222,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           eventBus.emit({ ...base, factResult: phaseResult as FactValidationResult | null });
         } else if (phase === 'review') {
           eventBus.emit({ ...base, reviewResult: phaseResult as TaskReviewResult | null });
+        } else if (phase === 'advisory') {
+          eventBus.emit({
+            ...base,
+            advisoryResult: phaseResult as ValidationResult['advisoryBrowserQa'],
+          });
         }
       },
     };

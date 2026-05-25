@@ -3,6 +3,7 @@ import type { MemoryCandidate, MemoryEntry } from './memory.js';
 import type { PodStatus, PodSummary } from './pod.js';
 import type { AgentEvent } from './runtime.js';
 import type {
+  AdvisoryBrowserQaResult,
   BuildResult,
   FactValidationResult,
   HealthResult,
@@ -22,7 +23,8 @@ export type ValidationPhase =
   | 'health'
   | 'pages'
   | 'facts'
-  | 'review';
+  | 'review'
+  | 'advisory';
 
 export type SystemEvent =
   | PodCreatedEvent
@@ -114,6 +116,7 @@ export interface ValidationPhaseCompletedEvent {
   pageResults?: PageResult[];
   factResult?: FactValidationResult | null;
   reviewResult?: TaskReviewResult | null;
+  advisoryResult?: AdvisoryBrowserQaResult | null;
 }
 
 export interface EscalationCreatedEvent {

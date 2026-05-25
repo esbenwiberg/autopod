@@ -29,7 +29,6 @@ public struct ValidationTab: View {
   @Environment(\.daemonBaseURL) private var daemonBaseURL
 
   @State private var selectedPhase: ValidationPhase? = nil
-  @State private var selectedAdvisoryQa = false
   @State private var selectedHistoryKey: String = "current"
   @State private var validationHistory: [StoredValidationResponse] = []
   @State private var isLoadingHistory = false
@@ -80,7 +79,7 @@ public struct ValidationTab: View {
   }
 
   private var displayedAdvisoryQa: AdvisoryQaDetail? {
-    displayedChecks?.advisoryQa
+    progress?.advisoryDetail ?? displayedChecks?.advisoryQa
   }
 
   private var selectedHistory: StoredValidationResponse? {
@@ -260,12 +259,15 @@ public struct ValidationTab: View {
   }
 
   private var displayedPhases: [ValidationPhase] {
-    [.lint, .sast, .build, .test, .health, .pages, .facts, .review]
+    var phases: [ValidationPhase] = [.lint, .sast, .build, .test, .health, .pages, .facts, .review]
+    if pod.pod.advisoryBrowserQaEnabled == true || displayedAdvisoryQa != nil {
+      phases.append(.advisory)
+    }
+    return phases
   }
 
   /// The phase to show in the detail panel — user pick, then auto-running, else nil.
   private var displayPhase: ValidationPhase? {
-    if selectedAdvisoryQa { return nil }
     if let selectedPhase { return selectedPhase }
     return progress?.activePhase
   }
@@ -344,6 +346,13 @@ public struct ValidationTab: View {
       return switch c.factValidation { case true: .passed; case false: .failed; default: .skipped }
     case .review:
       return switch c.review { case true: .passed; case false: .failed; default: .skipped }
+    case .advisory:
+      guard let advisory = c.advisoryQa else { return .notStarted }
+      switch advisoryDisplayStatus(advisory.status) {
+      case "error": return .failed
+      case "skipped": return .skipped
+      default: return .passed
+      }
     }
   }
 
@@ -362,6 +371,12 @@ public struct ValidationTab: View {
         let count = p.factTotalCount
         if p.facts.status == .running { return "running…" }
         return count > 0 ? "\(count) facts" : nil
+      case .advisory:
+        if p.advisory.status == .running { return "running…" }
+        if let advisory = displayedAdvisoryQa {
+          return advisoryChipSubLabel(advisory)
+        }
+        return nil
       default:
         if let dur = p.state(for: phase).duration {
           return formatDuration(dur)
@@ -376,6 +391,11 @@ public struct ValidationTab: View {
         return c.pages.map { "\($0.count) pages" }
       case .facts:
         return c.factChecks.map { "\($0.count) facts" }
+      case .advisory:
+        if let advisory = c.advisoryQa {
+          return advisoryChipSubLabel(advisory)
+        }
+        return nil
       default:
         return nil
       }
@@ -412,11 +432,9 @@ public struct ValidationTab: View {
     }
     .onChange(of: progress?.attempt) { _, _ in
       selectedPhase = nil
-      selectedAdvisoryQa = false
     }
     .onChange(of: selectedHistoryKey) { _, _ in
       selectedPhase = nil
-      selectedAdvisoryQa = false
     }
     .onChange(of: pod.status) { _, _ in
       updateFromBaseMessage = nil
@@ -713,18 +731,7 @@ public struct ValidationTab: View {
             isSelected: displayPhase == phase,
             subLabel: chipSubLabel(phase)
           ) {
-            selectedAdvisoryQa = false
             selectedPhase = selectedPhase == phase ? nil : phase
-          }
-        }
-        if let advisory = displayedAdvisoryQa {
-          AdvisoryQaChip(
-            status: advisoryDisplayStatus(advisory.status),
-            isSelected: selectedAdvisoryQa,
-            subLabel: advisoryChipSubLabel(advisory)
-          ) {
-            selectedPhase = nil
-            selectedAdvisoryQa.toggle()
           }
         }
       }
@@ -858,9 +865,7 @@ public struct ValidationTab: View {
 
   @ViewBuilder
   private var phaseDetailPanel: some View {
-    if selectedAdvisoryQa, let advisory = displayedAdvisoryQa {
-      advisoryQaDetail(advisory)
-    } else if let phase = displayPhase {
+    if let phase = displayPhase {
       switch phase {
       case .build:   buildDetail
       case .test:    testDetail
@@ -870,6 +875,7 @@ public struct ValidationTab: View {
       case .pages:   pagesDetail
       case .facts:   factsDetail
       case .review:  reviewDetail
+      case .advisory: advisoryDetail
       }
     } else {
       if progress == nil && displayedChecks == nil {
@@ -1590,6 +1596,20 @@ public struct ValidationTab: View {
   }
 
   @ViewBuilder
+  private var advisoryDetail: some View {
+    if let advisory = displayedAdvisoryQa {
+      advisoryQaDetail(advisory)
+    } else {
+      phaseStatusRow(
+        status: phaseStatus(.advisory),
+        passLabel: "Advisory browser QA completed",
+        failLabel: "Advisory browser QA found concerns",
+        skipLabel: "Advisory browser QA skipped"
+      )
+    }
+  }
+
+  @ViewBuilder
   private func advisoryQaDetail(_ advisory: AdvisoryQaDetail) -> some View {
     let displayStatus = advisoryDisplayStatus(advisory.status)
     let color = Color.secondary
@@ -2230,58 +2250,6 @@ private struct PhaseChip: View {
       .clipShape(RoundedRectangle(cornerRadius: 8))
     }
     .buttonStyle(.plain)
-  }
-}
-
-private struct AdvisoryQaChip: View {
-  let status: String
-  let isSelected: Bool
-  let subLabel: String?
-  let action: () -> Void
-
-  var body: some View {
-    Button(action: action) {
-      VStack(spacing: 5) {
-        Image(systemName: icon)
-          .font(.system(size: 15, weight: .medium))
-          .foregroundStyle(color)
-          .frame(width: 20, height: 20)
-
-        Text("Advisory QA")
-          .font(.caption.weight(.medium))
-          .foregroundStyle(.primary)
-
-        if let subLabel {
-          Text(subLabel)
-            .font(.system(size: 9))
-            .foregroundStyle(.secondary)
-        } else {
-          Text(" ")
-            .font(.system(size: 9))
-        }
-      }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 8)
-      .frame(minWidth: 92)
-      .background(isSelected ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
-      .overlay(
-        RoundedRectangle(cornerRadius: 8)
-          .stroke(isSelected ? Color.accentColor.opacity(0.6) : Color.clear, lineWidth: 1.5)
-      )
-      .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-    .buttonStyle(.plain)
-  }
-
-  private var icon: String {
-    switch status {
-    case "skipped": return "minus.circle"
-    default: return "info.circle"
-    }
-  }
-
-  private var color: Color {
-    .secondary
   }
 }
 

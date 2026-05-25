@@ -37,6 +37,7 @@ public struct RawSystemEvent: Codable, Sendable {
   public let pageResults: [PageResultResponse]?
   public let factResult: FactValidationResponse?
   public let reviewResult: TaskReviewResponse?
+  public let advisoryResult: AdvisoryBrowserQaResponse?
 
   // pod.escalation_created
   public let escalation: EscalationResponse?
@@ -73,6 +74,7 @@ public enum ValidationPhase: String, Sendable, CaseIterable {
   case pages
   case facts
   case review
+  case advisory
 
   public var displayName: String {
     switch self {
@@ -84,6 +86,7 @@ public enum ValidationPhase: String, Sendable, CaseIterable {
     case .pages: return "Pages"
     case .facts: return "Facts"
     case .review: return "Review"
+    case .advisory: return "Advisory"
     }
   }
 }
@@ -102,6 +105,7 @@ public struct ValidationPhaseResult: Sendable {
   public let pageResults: [PageResultResponse]?
   public let factResult: FactValidationResponse?
   public let reviewResult: TaskReviewResponse?
+  public let advisoryResult: AdvisoryBrowserQaResponse?
 
   init(from raw: RawSystemEvent) {
     phaseStatus = raw.phaseStatus ?? "skip"
@@ -113,6 +117,7 @@ public struct ValidationPhaseResult: Sendable {
     pageResults = raw.pageResults
     factResult = raw.factResult
     reviewResult = raw.reviewResult
+    advisoryResult = raw.advisoryResult
   }
 }
 

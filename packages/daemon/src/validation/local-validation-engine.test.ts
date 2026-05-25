@@ -723,6 +723,12 @@ AUTOPOD_ADVISORY_BROWSER_QA_JSON_END`,
       hostBrowserRunner,
       screenshotStore as never,
     );
+    const started: string[] = [];
+    const completed: Array<{ phase: string; status: string; result: unknown }> = [];
+    const callbacks: ValidationPhaseCallbacks = {
+      onPhaseStarted: (phase) => started.push(phase),
+      onPhaseCompleted: (phase, status, result) => completed.push({ phase, status, result }),
+    };
 
     const result = await engine.validate(
       baseConfig({
@@ -747,6 +753,9 @@ human_review:
     reason: "Needs a browser."
 `),
       }),
+      undefined,
+      undefined,
+      callbacks,
     );
 
     expect(result.overall).toBe('pass');
@@ -759,6 +768,12 @@ human_review:
     });
     expect(result.advisoryBrowserQa?.screenshots[0]?.source).toBe('advisory');
     expect(hostBrowserRunner.runScript).toHaveBeenCalled();
+    expect(started).toContain('advisory');
+    expect(completed).toContainEqual({
+      phase: 'advisory',
+      status: 'fail',
+      result: result.advisoryBrowserQa,
+    });
   });
 
   it('advisory-error-nonblocking attaches advisory browser QA errors without affecting overall', async () => {
@@ -838,6 +853,10 @@ human_review:
       getAvailability: vi.fn(),
     } as unknown as HostBrowserRunner;
     const engine = createLocalValidationEngine(cm, undefined, hostBrowserRunner);
+    const completed: Array<{ phase: string; status: string; result: unknown }> = [];
+    const callbacks: ValidationPhaseCallbacks = {
+      onPhaseCompleted: (phase, status, result) => completed.push({ phase, status, result }),
+    };
 
     const result = await engine.validate(
       baseConfig({
@@ -853,6 +872,9 @@ required_facts: []
 human_review: []
 `),
       }),
+      undefined,
+      undefined,
+      callbacks,
     );
 
     expect(result.overall).toBe('pass');
@@ -861,6 +883,63 @@ human_review: []
       reasoning: 'no-contract-checklist',
     });
     expect(hostBrowserRunner.getAvailability).not.toHaveBeenCalled();
+    expect(completed).toContainEqual({
+      phase: 'advisory',
+      status: 'skip',
+      result: result.advisoryBrowserQa,
+    });
+  });
+
+  it('skips advisory browser QA when the advisory phase is profile-skipped', async () => {
+    const cm = stubContainerManager();
+    const hostBrowserRunner = {
+      getAvailability: vi.fn(),
+    } as unknown as HostBrowserRunner;
+    const engine = createLocalValidationEngine(cm, undefined, hostBrowserRunner);
+    const completed: Array<{ phase: string; status: string; result: unknown }> = [];
+    const callbacks: ValidationPhaseCallbacks = {
+      onPhaseCompleted: (phase, status, result) => completed.push({ phase, status, result }),
+    };
+
+    const result = await engine.validate(
+      baseConfig({
+        startCommand: '',
+        smokePages: [],
+        hasWebUi: true,
+        advisoryBrowserQaEnabled: true,
+        skipPhases: ['advisory'],
+        contract: parseSpecContract(`contract_version: 1
+title: Advisory
+depends_on: []
+scenarios:
+  - id: dashboard
+    given: ["state"]
+    when: ["open dashboard"]
+    then: ["summary is visible"]
+required_facts: []
+human_review:
+  - id: visual
+    covers: [dashboard]
+    criterion: "Dashboard layout is visually coherent."
+    reason: "Needs a browser."
+`),
+      }),
+      undefined,
+      undefined,
+      callbacks,
+    );
+
+    expect(result.overall).toBe('pass');
+    expect(result.advisoryBrowserQa).toMatchObject({
+      status: 'skip',
+      reasoning: 'profile-skip',
+    });
+    expect(hostBrowserRunner.getAvailability).not.toHaveBeenCalled();
+    expect(completed).toContainEqual({
+      phase: 'advisory',
+      status: 'skip',
+      result: result.advisoryBrowserQa,
+    });
   });
 });
 

@@ -379,7 +379,17 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     }
   }
 
-  const VALID_PHASES = ['lint', 'sast', 'build', 'test', 'health', 'pages', 'facts', 'review'];
+  const VALID_PHASES = [
+    'lint',
+    'sast',
+    'build',
+    'test',
+    'health',
+    'pages',
+    'facts',
+    'review',
+    'advisory',
+  ];
   const skipValidationPhases = input.skipValidationPhases;
   if (skipValidationPhases != null) {
     if (!Array.isArray(skipValidationPhases)) {

@@ -380,7 +380,17 @@ export function createLocalValidationEngine(
           factsStatus !== 'pending_human' &&
           reviewStatus !== 'fail' &&
           reviewSkipKind !== 'review-failed';
-        if (shouldRunAdvisoryBrowserQa(config, healthResult, blockingChecksGreen)) {
+        if (config.advisoryBrowserQaEnabled && skipPhases.includes('advisory')) {
+          advisoryBrowserQa = {
+            status: 'skip',
+            reasoning: 'profile-skip',
+            observations: [],
+            screenshots: [],
+            durationMs: 0,
+          };
+          callbacks?.onPhaseCompleted?.('advisory', 'skip', advisoryBrowserQa);
+        } else if (shouldRunAdvisoryBrowserQa(config, healthResult, blockingChecksGreen)) {
+          callbacks?.onPhaseStarted?.('advisory');
           onProgress?.('Running advisory browser QA…');
           advisoryBrowserQa = await runAdvisoryBrowserQa({
             podId: config.podId,
@@ -392,7 +402,13 @@ export function createLocalValidationEngine(
             screenshotStore,
             logger: log,
           });
+          callbacks?.onPhaseCompleted?.(
+            'advisory',
+            advisoryBrowserQa.status === 'fail' ? 'fail' : 'pass',
+            advisoryBrowserQa,
+          );
         } else if (config.advisoryBrowserQaEnabled && hasNoContractChecklist(config)) {
+          callbacks?.onPhaseStarted?.('advisory');
           advisoryBrowserQa = {
             status: 'skip',
             reasoning: 'no-contract-checklist',
@@ -400,6 +416,7 @@ export function createLocalValidationEngine(
             screenshots: [],
             durationMs: 0,
           };
+          callbacks?.onPhaseCompleted?.('advisory', 'skip', advisoryBrowserQa);
         }
 
         // ── Phase 10: Overall result ──────────────────────────────────

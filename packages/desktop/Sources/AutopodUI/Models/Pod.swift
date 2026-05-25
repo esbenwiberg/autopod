@@ -370,6 +370,7 @@ public struct ValidationProgress: Sendable {
     public var pages: ValidationPhaseState
     public var facts: ValidationPhaseState
     public var review: ValidationPhaseState
+    public var advisory: ValidationPhaseState
 
     // Phase result data (populated on completion, used by detail panel)
     public var buildOutput: String?          // build logs
@@ -380,6 +381,7 @@ public struct ValidationProgress: Sendable {
     public var pageDetails: [PageDetail]?
     public var factChecks: [FactCheckDetail]?
     public var reviewDetail: ReviewPhaseDetail?
+    public var advisoryDetail: AdvisoryQaDetail?
 
     // Counts for chip sub-labels
     public var pageCount: Int
@@ -393,7 +395,7 @@ public struct ValidationProgress: Sendable {
         return ValidationProgress(
             attempt: attempt,
             build: idle, test: idle, lint: idle, sast: idle,
-            health: idle, pages: idle, facts: idle, review: idle,
+            health: idle, pages: idle, facts: idle, review: idle, advisory: idle,
             pageCount: 0, factTotalCount: 0
         )
     }
@@ -408,6 +410,7 @@ public struct ValidationProgress: Sendable {
         case .pages:   return pages
         case .facts:   return facts
         case .review:  return review
+        case .advisory: return advisory
         }
     }
 
@@ -423,6 +426,7 @@ public struct ValidationProgress: Sendable {
         case .pages:   pages   = s
         case .facts:   facts   = s
         case .review:  review  = s
+        case .advisory: advisory = s
         }
     }
 
@@ -499,6 +503,28 @@ public struct ValidationProgress: Sendable {
                         RequirementCheckDetail(criterion: rc.criterion, met: rc.met, note: rc.note)
                     },
                     screenshots: r.screenshots.compactMap { resolveScreenshot($0) }
+                )
+            }
+        case .advisory:
+            advisory = ValidationPhaseState(status: ps)
+            if let advisoryResult = result.advisoryResult {
+                advisoryDetail = AdvisoryQaDetail(
+                    status: advisoryResult.status,
+                    reasoning: advisoryResult.reasoning,
+                    model: advisoryResult.model,
+                    durationMs: advisoryResult.durationMs,
+                    observations: advisoryResult.observations.map { observation in
+                        AdvisoryQaObservationDetail(
+                            id: observation.id,
+                            scenarioId: observation.scenarioId,
+                            status: observation.status,
+                            summary: observation.summary,
+                            details: observation.details,
+                            screenshots: observation.screenshots.compactMap { resolveScreenshot($0) },
+                            suggestedFacts: observation.suggestedFacts
+                        )
+                    },
+                    screenshots: advisoryResult.screenshots.compactMap { resolveScreenshot($0) }
                 )
             }
         }
