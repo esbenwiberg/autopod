@@ -88,6 +88,7 @@ import { assertNoExpiredPat } from '../profiles/pat-expiry.js';
 import {
   buildClaudeConfigFiles,
   buildProviderEnv,
+  createProfileAnthropicClient,
   persistRefreshedCredentials,
 } from '../providers/index.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
@@ -113,6 +114,7 @@ import { formatFeedback } from './feedback-formatter.js';
 import type { FixFeedbackRepository } from './fix-feedback-repository.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
 import { reconcileLocalSessions } from './local-reconciler.js';
+import { selectRelevantMemories } from './memory-selector.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
@@ -795,6 +797,7 @@ export interface PodManagerDependencies {
   actionAuditRepo?: ActionAuditRepository;
   eventRepo?: EventRepository;
   memoryRepo?: import('./memory-repository.js').MemoryRepository;
+  memoryUsageRepo?: import('./memory-usage-repository.js').MemoryUsageRepository;
   pendingOverrideRepo?: import('./pending-override-repository.js').PendingOverrideRepository;
   enqueueSession: (podId: string) => void;
   /**
@@ -3265,6 +3268,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (to === 'complete' && pod.worktreeCompromised && updates.worktreeCompromised === undefined) {
       updates.worktreeCompromised = false;
     }
+    if (isTerminalState(to)) {
+      recordNotReportedMemoryUsage(pod.id);
+    }
     podRepo.update(pod.id, updates);
     eventBus.emit({
       type: 'pod.status_changed',
@@ -3274,6 +3280,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       newStatus: to,
     });
     return podRepo.getOrThrow(pod.id);
+  }
+
+  function recordNotReportedMemoryUsage(podId: string): void {
+    deps.memoryUsageRepo?.recordNotReportedForPod(podId);
   }
 
   /**
@@ -5089,21 +5099,34 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Generate system instructions and deliver based on runtime
         const mcpUrl = `${mcpBaseUrl}/mcp/${podId}`;
 
-        // Load approved memories for this pod
-        const sessionMemories = deps.memoryRepo
-          ? [
-              ...deps.memoryRepo.list('global', null, true),
-              ...deps.memoryRepo.list('profile', pod.profileName, true),
-              ...deps.memoryRepo.list('pod', pod.id, true),
-            ]
-          : [];
+        // Select approved memories before agent start. Reviewer ranking is best-effort:
+        // if it is unavailable, the pod still starts with deterministic fallback context.
+        let memorySelection: Awaited<ReturnType<typeof selectRelevantMemories>> | undefined;
+        if (deps.memoryRepo && pod.options.agentMode === 'auto') {
+          const reviewerModelId =
+            profile.reviewerModel || profile.defaultModel || pod.model || 'claude-haiku-4-5';
+          const clientResult = await createProfileAnthropicClient(profile, reviewerModelId, logger);
+          memorySelection = await selectRelevantMemories({
+            pod,
+            profile,
+            deps: {
+              memoryRepo: deps.memoryRepo,
+              usageRepo: deps.memoryUsageRepo,
+              anthropicClient: clientResult.ok ? clientResult.client : undefined,
+              reviewerModel: clientResult.ok ? clientResult.model : undefined,
+              reviewerUnavailableReason: clientResult.ok ? undefined : clientResult.reason,
+              logger,
+            },
+          });
+        }
 
         const systemInstructions = generateSystemInstructions(profile, pod, mcpUrl, {
           injectedSections: resolvedSections,
           injectedMcpServers: [...proxiedMcpServers, ...workingStdioServers],
           availableActions,
           injectedSkills: resolvedSkillInjections,
-          memories: sessionMemories.length > 0 ? sessionMemories : undefined,
+          relevantMemories: memorySelection?.selected,
+          memoryUnavailableReason: memorySelection?.unavailableReason,
         });
 
         // Write system instructions to a path outside /workspace so the repo's own
@@ -5585,6 +5608,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 actualSummary: event.actualSummary,
                 how: event.how,
                 deviations: event.deviations,
+                factEvidence: event.factEvidence,
+                memoryOutcomes: event.memoryOutcomes,
               },
             });
           } else if (event.type === 'status' && event.sessionId) {

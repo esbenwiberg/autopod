@@ -1,6 +1,7 @@
 export { createEscalationMcpServer, type EscalationMcpDeps } from './server.js';
 export { PendingRequests } from './pending-requests.js';
 export type {
+  MemoryPlanIntentItem,
   PodBridge,
   ValidationPhaseName,
   ValidationPhaseResult,

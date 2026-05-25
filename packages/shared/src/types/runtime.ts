@@ -1,4 +1,5 @@
 import type { FactEvidence } from './contract.js';
+import type { MemoryOutcomeItem } from './task-summary.js';
 
 export type RuntimeType = 'claude' | 'codex' | 'copilot';
 
@@ -141,4 +142,6 @@ export interface AgentTaskSummaryEvent {
   }>;
   /** Agent-reported evidence for required executable facts. */
   factEvidence?: FactEvidence[];
+  /** Final outcome for each memory selected/injected for this pod. */
+  memoryOutcomes?: MemoryOutcomeItem[];
 }

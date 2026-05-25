@@ -25,6 +25,8 @@ public struct AnalyticsView: View {
     public var loadEscalationsAnalytics: ((Int) async throws -> EscalationsAnalyticsResponse)?
     /// Fetches models analytics from the daemon for the Models card.
     public var loadModelsAnalytics: ((Int) async throws -> ModelsAnalyticsResponse)?
+    /// Fetches memory-loop analytics from the daemon for the Memory card.
+    public var loadMemoryAnalytics: ((Int) async throws -> MemoryAnalyticsResponse)?
     @Binding public var selectedCard: AnalyticsCardKind?
 
     @State private var scores: [PodQualityScore] = []
@@ -41,6 +43,7 @@ public struct AnalyticsView: View {
     @State private var throughputLoadError: String?
     @State private var escalationsData: EscalationsAnalyticsResponse?
     @State private var modelsData: ModelsAnalyticsResponse?
+    @State private var memoryData: MemoryAnalyticsResponse?
 
     public init(
         pods: [Pod],
@@ -52,6 +55,7 @@ public struct AnalyticsView: View {
         loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)? = nil,
         loadEscalationsAnalytics: ((Int) async throws -> EscalationsAnalyticsResponse)? = nil,
         loadModelsAnalytics: ((Int) async throws -> ModelsAnalyticsResponse)? = nil,
+        loadMemoryAnalytics: ((Int) async throws -> MemoryAnalyticsResponse)? = nil,
         selectedCard: Binding<AnalyticsCardKind?> = .constant(nil)
     ) {
         self.pods = pods
@@ -63,6 +67,7 @@ public struct AnalyticsView: View {
         self.loadThroughputAnalytics = loadThroughputAnalytics
         self.loadEscalationsAnalytics = loadEscalationsAnalytics
         self.loadModelsAnalytics = loadModelsAnalytics
+        self.loadMemoryAnalytics = loadMemoryAnalytics
         self._selectedCard = selectedCard
     }
 
@@ -249,6 +254,33 @@ public struct AnalyticsView: View {
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
+    private var memoryCardValue: String {
+        guard let m = memoryData else { return "—" }
+        return "\(m.summary.appliedCount)/\(m.summary.injectedCount)"
+    }
+
+    private var memoryCardDelta: AnalyticsCardDelta? {
+        guard let m = memoryData else { return nil }
+        if let quality = m.impact.qualityDelta {
+            return AnalyticsCardDelta(
+                value: String(format: "%+.0fpp quality", quality),
+                direction: quality > 0 ? .up : quality < 0 ? .down : .flat
+            )
+        }
+        if let fix = m.impact.fixAttemptDelta {
+            return AnalyticsCardDelta(
+                value: String(format: "%+.1f fixes", fix),
+                direction: fix < 0 ? .up : fix > 0 ? .down : .flat
+            )
+        }
+        return nil
+    }
+
+    private var memoryCardSubline: String? {
+        guard let m = memoryData else { return nil }
+        return "\(m.summary.selectedCount) selected · \(m.summary.notReportedCount) not reported"
+    }
+
     // MARK: - Body
 
     public var body: some View {
@@ -338,6 +370,14 @@ public struct AnalyticsView: View {
                         isSelected: selectedCard == .models,
                         onClick: { selectedCard = selectedCard == .models ? nil : .models }
                     )
+                    AnalyticsCard(
+                        title: "Memory",
+                        value: memoryCardValue,
+                        delta: memoryCardDelta,
+                        subline: memoryCardSubline,
+                        isSelected: selectedCard == .memory,
+                        onClick: { selectedCard = selectedCard == .memory ? nil : .memory }
+                    )
                 }
             }
             .padding(24)
@@ -415,6 +455,11 @@ public struct AnalyticsView: View {
                     modelsData = try? await loadModelsAnalytics(30)
                 }
             }
+            let memoryTask = Task {
+                if let loadMemoryAnalytics {
+                    memoryData = try? await loadMemoryAnalytics(30)
+                }
+            }
             await scoreTask.value
             await costTask.value
             await reliabilityTask.value
@@ -423,6 +468,7 @@ public struct AnalyticsView: View {
             await throughputTask.value
             await escalationsTask.value
             await modelsTask.value
+            await memoryTask.value
         }
     }
 }

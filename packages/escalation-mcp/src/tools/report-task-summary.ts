@@ -1,4 +1,4 @@
-import type { FactEvidence } from '@autopod/shared';
+import type { FactEvidence, MemoryOutcomeItem } from '@autopod/shared';
 import type { PodBridge } from '../pod-bridge.js';
 
 export interface ReportTaskSummaryInput {
@@ -25,6 +25,7 @@ export interface ReportTaskSummaryInput {
       proves?: string[];
     };
   }>;
+  memoryOutcomes?: MemoryOutcomeItem[];
 }
 
 export async function reportTaskSummary(
@@ -39,6 +40,7 @@ export async function reportTaskSummary(
     input.how,
     input.factEvidence,
     input.factDeviations,
+    input.memoryOutcomes,
   );
   const deviationCount = input.deviations.length;
   const deviationNote =
@@ -51,5 +53,8 @@ export async function reportTaskSummary(
   const factDeviationNote = input.factDeviations?.length
     ? ` ${input.factDeviations.length} fact deviation request${input.factDeviations.length === 1 ? '' : 's'} recorded.`
     : '';
-  return `Task summary registered. ${deviationNote}${factNote}${factDeviationNote} The reviewer will assess any deviations.`;
+  const memoryNote = input.memoryOutcomes?.length
+    ? ` ${input.memoryOutcomes.length} memory outcome${input.memoryOutcomes.length === 1 ? '' : 's'} recorded.`
+    : '';
+  return `Task summary registered. ${deviationNote}${factNote}${factDeviationNote}${memoryNote} The reviewer will assess any deviations.`;
 }

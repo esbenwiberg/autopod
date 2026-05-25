@@ -241,11 +241,12 @@ describe('reportPlan', () => {
       bridge,
     );
 
-    expect(bridge.reportPlan).toHaveBeenCalledWith('sess-1', 'Refactor auth module', [
-      'Extract interface',
-      'Add tests',
-      'Deploy',
-    ]);
+    expect(bridge.reportPlan).toHaveBeenCalledWith(
+      'sess-1',
+      'Refactor auth module',
+      ['Extract interface', 'Add tests', 'Deploy'],
+      undefined,
+    );
   });
 
   it('returns a confirmation message with step count', async () => {

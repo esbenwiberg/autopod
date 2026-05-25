@@ -63,6 +63,21 @@ export {
   type MemoryRepository,
 } from './memory-repository.js';
 export {
+  createMemoryCandidateRepository,
+  type MemoryCandidateRepository,
+} from './memory-candidate-repository.js';
+export {
+  createMemoryUsageRepository,
+  type MemoryUsageRepository,
+} from './memory-usage-repository.js';
+export {
+  MAX_RELEVANT_MEMORY_ENTRIES,
+  prefilterMemories,
+  selectRelevantMemories,
+  type MemorySelectionResult,
+  type RelevantMemory,
+} from './memory-selector.js';
+export {
   createPendingOverrideRepository,
   type PendingOverrideRepository,
 } from './pending-override-repository.js';
@@ -75,5 +90,10 @@ export {
   createQualityScoreRecorder,
   type QualityScoreRecorder,
 } from './quality-score-recorder.js';
+export {
+  createMemoryCandidateRecorder,
+  type MemoryCandidateRecorder,
+  type MemoryCandidateRecorderDeps,
+} from './memory-candidate-recorder.js';
 export { computeQualitySignals } from './quality-signals.js';
 export { computeScore } from './quality-score.js';

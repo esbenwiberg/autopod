@@ -18,6 +18,7 @@ public struct AnalyticsRightPaneView: View {
     public let loadThroughput: ((Int) async throws -> ThroughputAnalyticsResponse)?
     public let loadEscalations: ((Int) async throws -> EscalationsAnalyticsResponse)?
     public let loadModels: ((Int) async throws -> ModelsAnalyticsResponse)?
+    public let loadMemory: ((Int) async throws -> MemoryAnalyticsResponse)?
     public let verifyAuditChain: (() async throws -> AuditChainVerifyResponse)?
     public let onSelectPod: ((String) -> Void)?
     /// Quality-specific pod selection callback. When provided, used instead of
@@ -40,6 +41,7 @@ public struct AnalyticsRightPaneView: View {
         loadThroughput: ((Int) async throws -> ThroughputAnalyticsResponse)? = nil,
         loadEscalations: ((Int) async throws -> EscalationsAnalyticsResponse)? = nil,
         loadModels: ((Int) async throws -> ModelsAnalyticsResponse)? = nil,
+        loadMemory: ((Int) async throws -> MemoryAnalyticsResponse)? = nil,
         verifyAuditChain: (() async throws -> AuditChainVerifyResponse)? = nil,
         onSelectPod: ((String) -> Void)? = nil,
         onQualitySelectPod: ((String) -> Void)? = nil,
@@ -57,6 +59,7 @@ public struct AnalyticsRightPaneView: View {
         self.loadThroughput = loadThroughput
         self.loadEscalations = loadEscalations
         self.loadModels = loadModels
+        self.loadMemory = loadMemory
         self.verifyAuditChain = verifyAuditChain
         self.onSelectPod = onSelectPod
         self.onQualitySelectPod = onQualitySelectPod
@@ -106,6 +109,8 @@ public struct AnalyticsRightPaneView: View {
             )
         case .models:
             ModelsDrillView(load: loadModels)
+        case .memory:
+            MemoryAnalyticsDrillView(load: loadMemory)
         case .none:
             VStack(spacing: 8) {
                 Spacer()
@@ -117,6 +122,21 @@ public struct AnalyticsRightPaneView: View {
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    static func drillRoute(for card: AnalyticsCardKind?) -> String {
+        switch card {
+        case .cost: "cost"
+        case .quality: "quality"
+        case .status: "status"
+        case .reliability: "reliability"
+        case .safety: "safety"
+        case .throughput: "throughput"
+        case .escalations: "escalations"
+        case .models: "models"
+        case .memory: "memory"
+        case .none: "empty"
         }
     }
 }

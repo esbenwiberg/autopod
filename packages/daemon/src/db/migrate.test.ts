@@ -292,6 +292,139 @@ describe('runMigrations — migration 091 (drop screenshot blobs)', () => {
   });
 });
 
+// ── Migration 107 — memory learning schema ───────────────────────────────────
+
+describe('runMigrations — memory-learning-schema (migration 107)', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    runMigrations(db, MIGRATIONS_DIR, logger);
+  });
+
+  it('legacy memory_entries rows survive with defaults for new columns', () => {
+    db.prepare(
+      `INSERT INTO memory_entries
+         (id, scope, scope_id, path, content, content_sha256, version, approved)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run('mem-legacy', 'profile', 'my-profile', '/notes/old.md', 'old note', 'sha256abc', 1, 1);
+
+    const row = db.prepare('SELECT * FROM memory_entries WHERE id = ?').get('mem-legacy') as Record<
+      string,
+      unknown
+    >;
+
+    expect(row.id).toBe('mem-legacy');
+    expect(row.kind).toBeNull();
+    expect(row.tags).toBe('[]');
+    expect(row.applies_when).toBeNull();
+    expect(row.avoid_when).toBeNull();
+    expect(row.confidence).toBeNull();
+    expect(row.source_evidence).toBe('[]');
+    expect(row.impact_summary).toBeNull();
+  });
+
+  it('memory_candidates table exists with correct columns', () => {
+    const cols = db
+      .prepare('PRAGMA table_info(memory_candidates)')
+      .all()
+      .map((r) => (r as { name: string }).name);
+
+    for (const col of [
+      'id',
+      'action',
+      'target_memory_id',
+      'scope',
+      'scope_id',
+      'path',
+      'content',
+      'rationale',
+      'kind',
+      'tags',
+      'applies_when',
+      'avoid_when',
+      'confidence',
+      'source_evidence',
+      'impact_summary',
+      'status',
+      'created_by_pod_id',
+      'fallback_reason',
+      'created_at',
+      'updated_at',
+    ]) {
+      expect(cols, `expected column: ${col}`).toContain(col);
+    }
+
+    const count = (db.prepare('SELECT COUNT(*) as n FROM memory_candidates').get() as { n: number })
+      .n;
+    expect(count).toBe(0);
+  });
+
+  it('memory_usage_events table exists with correct columns', () => {
+    const cols = db
+      .prepare('PRAGMA table_info(memory_usage_events)')
+      .all()
+      .map((r) => (r as { name: string }).name);
+
+    for (const col of [
+      'id',
+      'memory_id',
+      'pod_id',
+      'kind',
+      'outcome',
+      'reason',
+      'relevance_reason',
+      'created_at',
+    ]) {
+      expect(cols, `expected column: ${col}`).toContain(col);
+    }
+
+    const count = (
+      db.prepare('SELECT COUNT(*) as n FROM memory_usage_events').get() as { n: number }
+    ).n;
+    expect(count).toBe(0);
+  });
+
+  it('required indexes exist', () => {
+    const indexes = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
+      .all()
+      .map((r) => (r as { name: string }).name);
+
+    for (const idx of [
+      'idx_memory_candidates_status',
+      'idx_memory_candidates_scope',
+      'idx_memory_candidates_pod',
+      'idx_memory_usage_memory',
+      'idx_memory_usage_pod',
+      'idx_memory_usage_kind',
+    ]) {
+      expect(indexes, `expected index: ${idx}`).toContain(idx);
+    }
+  });
+
+  it('memory_usage_events cascade-deletes when memory_entry is removed', () => {
+    db.prepare(
+      `INSERT INTO memory_entries
+         (id, scope, scope_id, path, content, content_sha256, version, approved)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run('mem-1', 'global', null, '/test.md', 'content', 'sha', 1, 1);
+    db.prepare(
+      `INSERT INTO memory_usage_events (id, memory_id, pod_id, kind)
+       VALUES (?, ?, ?, ?)`,
+    ).run('evt-1', 'mem-1', 'pod-abc', 'selected');
+
+    db.prepare('DELETE FROM memory_entries WHERE id = ?').run('mem-1');
+
+    const remaining = (
+      db.prepare('SELECT COUNT(*) as n FROM memory_usage_events WHERE id = ?').get('evt-1') as {
+        n: number;
+      }
+    ).n;
+    expect(remaining).toBe(0);
+  });
+});
+
 // ── Migration 104 — remove acceptance criteria ──────────────────────────────
 
 const MIGRATION_104_PATH = new URL(

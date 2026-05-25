@@ -14,7 +14,11 @@ import type {
   EscalationResponse,
   FactEvidence,
   MemoryEntry,
+  MemoryOutcomeItem,
   MemoryScope,
+  MemoryUsageEvent,
+  MemoryUsageKind,
+  MemoryUsageOutcome,
   PimActivationConfig,
   Profile,
 } from '@autopod/shared';
@@ -36,6 +40,7 @@ import { runCodexReview } from '../validation/review-codex-runner.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { MemoryRepository } from './memory-repository.js';
+import type { MemoryUsageRepository } from './memory-usage-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import { computePodDiff, summarizeDiff } from './pod-diff-fetcher.js';
 import type { ContainerManagerFactory, PodManager } from './pod-manager.js';
@@ -53,6 +58,7 @@ export interface SessionBridgeDependencies {
   nudgeRepo: NudgeRepository;
   profileStore: ProfileStore;
   memoryRepo?: MemoryRepository;
+  memoryUsageRepo?: MemoryUsageRepository;
   makeActionEngine?: (profile: Profile) => ActionEngine;
   containerManagerFactory: ContainerManagerFactory;
   pendingRequestsByPod: Map<string, PendingRequests>;
@@ -72,6 +78,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     nudgeRepo,
     profileStore,
     memoryRepo,
+    memoryUsageRepo,
     makeActionEngine,
     containerManagerFactory,
     pendingRequestsByPod: _pendingRequestsBySession,
@@ -239,9 +246,27 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       logger.debug({ podId, currentCount: pod.escalationCount }, 'Escalation count incremented');
     },
 
-    reportPlan(podId: string, summary: string, steps: string[]): void {
+    reportPlan(
+      podId: string,
+      summary: string,
+      steps: string[],
+      memoryIntents?: Array<{ memoryId: string; reason: string }>,
+    ): void {
       podManager.touchHeartbeat(podId);
-      logger.info({ podId, summary, stepCount: steps.length }, 'Agent reported plan');
+      const requiredMemoryIds = selectedMemoryIdsForPod(memoryUsageRepo, podId);
+      if (requiredMemoryIds.length > 0 || memoryIntents?.length) {
+        validateMemoryPlanIntents(requiredMemoryIds, memoryIntents);
+      }
+      for (const intent of memoryIntents ?? []) {
+        recordMemoryUsage(memoryUsageRepo, podId, intent.memoryId, 'plan_reported', {
+          outcome: 'intended',
+          reason: intent.reason.trim(),
+        });
+      }
+      logger.info(
+        { podId, summary, stepCount: steps.length, memoryIntentCount: memoryIntents?.length ?? 0 },
+        'Agent reported plan',
+      );
       podRepo.update(podId, { plan: { summary, steps } });
       eventBus.emit({
         type: 'pod.agent_activity',
@@ -304,8 +329,19 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           proves?: string[];
         };
       }>,
+      memoryOutcomes?: MemoryOutcomeItem[],
     ): void {
       podManager.touchHeartbeat(podId);
+      const requiredMemoryIds = selectedMemoryIdsForPod(memoryUsageRepo, podId);
+      if (requiredMemoryIds.length > 0 || memoryOutcomes?.length) {
+        validateMemoryOutcomes(requiredMemoryIds, memoryOutcomes);
+      }
+      for (const outcome of memoryOutcomes ?? []) {
+        recordMemoryUsage(memoryUsageRepo, podId, outcome.memoryId, 'summary_reported', {
+          outcome: outcome.outcome,
+          reason: outcome.reason.trim(),
+        });
+      }
       // Lock taskSummary on first write. Validation failures loop the same
       // pod back through running → validating, and the system prompt tells
       // the agent to call report_task_summary "as your very last step" each
@@ -319,6 +355,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           deviationCount: deviations.length,
           factEvidenceCount: factEvidence?.length ?? 0,
           factDeviationCount: factDeviations?.length ?? 0,
+          memoryOutcomeCount: memoryOutcomes?.length ?? 0,
           actualSummary: actualSummary.slice(0, 100),
           preservedExistingSummary: summaryAlreadySet,
         },
@@ -328,12 +365,23 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       );
       const updates: Parameters<typeof podRepo.update>[1] = {};
       if (!summaryAlreadySet) {
-        updates.taskSummary = { actualSummary, how, deviations, factEvidence, factDeviations };
-      } else if (existing.taskSummary && (factEvidence != null || factDeviations != null)) {
+        updates.taskSummary = {
+          actualSummary,
+          how,
+          deviations,
+          factEvidence,
+          factDeviations,
+          memoryOutcomes,
+        };
+      } else if (
+        existing.taskSummary &&
+        (factEvidence != null || factDeviations != null || memoryOutcomes != null)
+      ) {
         updates.taskSummary = {
           ...existing.taskSummary,
           ...(factEvidence != null ? { factEvidence } : {}),
           ...(factDeviations != null ? { factDeviations } : {}),
+          ...(memoryOutcomes != null ? { memoryOutcomes } : {}),
         };
       }
       if (Object.keys(updates).length > 0) {
@@ -350,6 +398,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           deviations,
           factEvidence,
           factDeviations,
+          memoryOutcomes,
           timestamp: new Date().toISOString(),
         },
       });
@@ -630,6 +679,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       if (!entry.approved && entry.createdByPodId !== podId) {
         throw new Error(`Memory ${id} is pending approval`);
       }
+      recordMemoryUsage(memoryUsageRepo, podId, entry.id, 'read');
       return entry;
     },
 
@@ -637,7 +687,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       if (!memoryRepo) return [];
       const pod = podManager.getSession(podId);
       const scopeId = scope === 'global' ? null : scope === 'profile' ? pod.profileName : podId;
-      return memoryRepo.search(query, scope, scopeId);
+      const results = memoryRepo.search(query, scope, scopeId);
+      for (const entry of results) {
+        recordMemoryUsage(memoryUsageRepo, podId, entry.id, 'searched', {
+          reason: `Matched memory_search query: ${query.slice(0, 200)}`,
+        });
+      }
+      return results;
     },
 
     suggestMemory(
@@ -994,6 +1050,118 @@ function consumeSuggestBudget(podId: string): {
 /** Test-only: reset the per-pod suggestion rate-limit window. */
 export function __resetSuggestBudgetForTests(): void {
   suggestBudget.clear();
+}
+
+function selectedMemoryIdsForPod(
+  usageRepo: MemoryUsageRepository | undefined,
+  podId: string,
+): string[] {
+  if (!usageRepo) return [];
+  const ids = new Set<string>();
+  for (const event of usageRepo.listByPod(podId)) {
+    if (event.kind === 'selected' || event.kind === 'injected') {
+      ids.add(event.memoryId);
+    }
+  }
+  return [...ids].sort();
+}
+
+function validateMemoryPlanIntents(
+  requiredMemoryIds: string[],
+  intents: Array<{ memoryId: string; reason: string }> | undefined,
+): void {
+  validateMemoryReportItems({
+    requiredMemoryIds,
+    items: intents,
+    fieldName: 'memoryIntents',
+    outcomeRequired: false,
+  });
+}
+
+function validateMemoryOutcomes(
+  requiredMemoryIds: string[],
+  outcomes: MemoryOutcomeItem[] | undefined,
+): void {
+  validateMemoryReportItems({
+    requiredMemoryIds,
+    items: outcomes,
+    fieldName: 'memoryOutcomes',
+    outcomeRequired: true,
+  });
+}
+
+function validateMemoryReportItems(args: {
+  requiredMemoryIds: string[];
+  items: Array<{ memoryId: string; reason: string; outcome?: string }> | undefined;
+  fieldName: 'memoryIntents' | 'memoryOutcomes';
+  outcomeRequired: boolean;
+}): void {
+  const { requiredMemoryIds, items, fieldName, outcomeRequired } = args;
+  if (!items) {
+    throw new Error(
+      `${fieldName} is required because selected/injected memories exist. Include one item per memory: ${requiredMemoryIds.join(', ')}.`,
+    );
+  }
+
+  const required = new Set(requiredMemoryIds);
+  const seen = new Set<string>();
+  const invalid: string[] = [];
+  for (const item of items) {
+    if (!required.has(item.memoryId)) {
+      invalid.push(item.memoryId);
+      continue;
+    }
+    if (seen.has(item.memoryId)) {
+      throw new Error(`${fieldName} contains duplicate memoryId: ${item.memoryId}`);
+    }
+    seen.add(item.memoryId);
+    if (!item.reason.trim()) {
+      throw new Error(`${fieldName} reason is required for memoryId: ${item.memoryId}`);
+    }
+    if (
+      outcomeRequired &&
+      item.outcome !== 'applied' &&
+      item.outcome !== 'not_applicable' &&
+      item.outcome !== 'harmful_stale'
+    ) {
+      throw new Error(
+        `${fieldName} outcome for memoryId ${item.memoryId} must be applied, not_applicable, or harmful_stale.`,
+      );
+    }
+  }
+
+  if (invalid.length > 0) {
+    throw new Error(
+      `${fieldName} references memory IDs that were not selected/injected for this pod: ${invalid.join(', ')}.`,
+    );
+  }
+
+  const missing = requiredMemoryIds.filter((id) => !seen.has(id));
+  if (missing.length > 0) {
+    throw new Error(`${fieldName} is missing selected/injected memory IDs: ${missing.join(', ')}.`);
+  }
+}
+
+function recordMemoryUsage(
+  usageRepo: MemoryUsageRepository | undefined,
+  podId: string,
+  memoryId: string,
+  kind: MemoryUsageKind,
+  options?: {
+    outcome?: MemoryUsageOutcome;
+    reason?: string;
+    relevanceReason?: string;
+  },
+): MemoryUsageEvent | undefined {
+  return usageRepo?.record({
+    id: generateId(8),
+    memoryId,
+    podId,
+    kind,
+    outcome: options?.outcome ?? null,
+    reason: options?.reason ?? null,
+    relevanceReason: options?.relevanceReason ?? null,
+  });
 }
 
 function usesCodexReviewer(profile: Profile): boolean {

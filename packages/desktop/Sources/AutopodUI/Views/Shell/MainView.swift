@@ -55,6 +55,7 @@ public struct MainView: View {
     public var loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)?
     public var loadEscalationsAnalytics: ((Int) async throws -> EscalationsAnalyticsResponse)?
     public var loadModelsAnalytics: ((Int) async throws -> ModelsAnalyticsResponse)?
+    public var loadMemoryAnalytics: ((Int) async throws -> MemoryAnalyticsResponse)?
     public var verifyAuditChain: (() async throws -> AuditChainVerifyResponse)?
     /// Per-pod persisted quality scores keyed by pod id. Used to render the
     /// score pill on completed pod cards. Empty when scores haven't loaded yet.
@@ -70,11 +71,27 @@ public struct MainView: View {
 
     // Memory
     public var memoryEntries: [MemoryEntry]
+    public var activeMemories: [MemoryEntry]
+    public var pendingMemoryCandidates: [MemoryCandidate]
+    public var selectedMemoryUsage: [MemoryUsageEvent]
+    public var selectedMemorySourceEvidence: [MemorySourceEvidence]
+    public var selectedMemoryStaleEvidence: [MemoryUsageEvent]
+    public var selectedMemoryHarmfulEvidence: [MemoryUsageEvent]
+    public var selectedMemoryDetailId: String?
+    public var selectedMemoryCandidateDetailId: String?
+    public var memoryAnalytics: MemoryAnalyticsResponse?
+    public var isLoadingMemoryDetails: Bool
+    public var memoryError: String?
     public var pendingMemoryCount: Int
     public var onApproveMemory: (String) -> Void
     public var onRejectMemory: (String) -> Void
     public var onDeleteMemory: (String) -> Void
     public var onEditMemory: ((String, String) -> Void)?
+    public var onApproveMemoryCandidate: (String) -> Void
+    public var onRejectMemoryCandidate: (String) -> Void
+    public var onEditMemoryCandidate: ((String, MemoryCandidateUpdate) -> Void)?
+    public var onSelectMemory: ((String) -> Void)?
+    public var onSelectMemoryCandidate: ((String) -> Void)?
     public var onCreateMemory: ((MemoryScope, String?, String, String) -> Void)?
     public var onLoadMemories: (() async -> Void)?
 
@@ -126,6 +143,7 @@ public struct MainView: View {
         loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)? = nil,
         loadEscalationsAnalytics: ((Int) async throws -> EscalationsAnalyticsResponse)? = nil,
         loadModelsAnalytics: ((Int) async throws -> ModelsAnalyticsResponse)? = nil,
+        loadMemoryAnalytics: ((Int) async throws -> MemoryAnalyticsResponse)? = nil,
         verifyAuditChain: (() async throws -> AuditChainVerifyResponse)? = nil,
         qualityScores: [String: PodQualityScore] = [:],
         onRunCatchup: ((ScheduledJob) -> Void)? = nil,
@@ -135,11 +153,27 @@ public struct MainView: View {
         onEditJob: ((String, UpdateScheduledJobRequest) -> Void)? = nil,
         onDeleteJob: ((ScheduledJob) -> Void)? = nil,
         memoryEntries: [MemoryEntry] = [],
+        activeMemories: [MemoryEntry] = [],
+        pendingMemoryCandidates: [MemoryCandidate] = [],
+        selectedMemoryUsage: [MemoryUsageEvent] = [],
+        selectedMemorySourceEvidence: [MemorySourceEvidence] = [],
+        selectedMemoryStaleEvidence: [MemoryUsageEvent] = [],
+        selectedMemoryHarmfulEvidence: [MemoryUsageEvent] = [],
+        selectedMemoryDetailId: String? = nil,
+        selectedMemoryCandidateDetailId: String? = nil,
+        memoryAnalytics: MemoryAnalyticsResponse? = nil,
+        isLoadingMemoryDetails: Bool = false,
+        memoryError: String? = nil,
         pendingMemoryCount: Int = 0,
         onApproveMemory: @escaping (String) -> Void = { _ in },
         onRejectMemory: @escaping (String) -> Void = { _ in },
         onDeleteMemory: @escaping (String) -> Void = { _ in },
         onEditMemory: ((String, String) -> Void)? = nil,
+        onApproveMemoryCandidate: @escaping (String) -> Void = { _ in },
+        onRejectMemoryCandidate: @escaping (String) -> Void = { _ in },
+        onEditMemoryCandidate: ((String, MemoryCandidateUpdate) -> Void)? = nil,
+        onSelectMemory: ((String) -> Void)? = nil,
+        onSelectMemoryCandidate: ((String) -> Void)? = nil,
         onCreateMemory: ((MemoryScope, String?, String, String) -> Void)? = nil,
         onLoadMemories: (() async -> Void)? = nil
     ) {
@@ -188,6 +222,7 @@ public struct MainView: View {
         self.loadThroughputAnalytics = loadThroughputAnalytics
         self.loadEscalationsAnalytics = loadEscalationsAnalytics
         self.loadModelsAnalytics = loadModelsAnalytics
+        self.loadMemoryAnalytics = loadMemoryAnalytics
         self.verifyAuditChain = verifyAuditChain
         self.qualityScores = qualityScores
         self.onRunCatchup = onRunCatchup
@@ -197,11 +232,27 @@ public struct MainView: View {
         self.onEditJob = onEditJob
         self.onDeleteJob = onDeleteJob
         self.memoryEntries = memoryEntries
+        self.activeMemories = activeMemories
+        self.pendingMemoryCandidates = pendingMemoryCandidates
+        self.selectedMemoryUsage = selectedMemoryUsage
+        self.selectedMemorySourceEvidence = selectedMemorySourceEvidence
+        self.selectedMemoryStaleEvidence = selectedMemoryStaleEvidence
+        self.selectedMemoryHarmfulEvidence = selectedMemoryHarmfulEvidence
+        self.selectedMemoryDetailId = selectedMemoryDetailId
+        self.selectedMemoryCandidateDetailId = selectedMemoryCandidateDetailId
+        self.memoryAnalytics = memoryAnalytics
+        self.isLoadingMemoryDetails = isLoadingMemoryDetails
+        self.memoryError = memoryError
         self.pendingMemoryCount = pendingMemoryCount
         self.onApproveMemory = onApproveMemory
         self.onRejectMemory = onRejectMemory
         self.onDeleteMemory = onDeleteMemory
         self.onEditMemory = onEditMemory
+        self.onApproveMemoryCandidate = onApproveMemoryCandidate
+        self.onRejectMemoryCandidate = onRejectMemoryCandidate
+        self.onEditMemoryCandidate = onEditMemoryCandidate
+        self.onSelectMemory = onSelectMemory
+        self.onSelectMemoryCandidate = onSelectMemoryCandidate
         self.onCreateMemory = onCreateMemory
         self.onLoadMemories = onLoadMemories
     }
@@ -329,6 +380,7 @@ public struct MainView: View {
                     loadThroughputAnalytics: loadThroughputAnalytics,
                     loadEscalationsAnalytics: loadEscalationsAnalytics,
                     loadModelsAnalytics: loadModelsAnalytics,
+                    loadMemoryAnalytics: loadMemoryAnalytics,
                     selectedCard: $selectedAnalyticsCard
                 )
                 .frame(minWidth: 600)
@@ -338,11 +390,27 @@ public struct MainView: View {
             } else if sidebarSelection == .memory {
                 MemoryManagementView(
                     entries: memoryEntries,
+                    activeMemories: activeMemories,
+                    pendingCandidates: pendingMemoryCandidates,
+                    selectedUsage: selectedMemoryUsage,
+                    selectedSourceEvidence: selectedMemorySourceEvidence,
+                    selectedStaleEvidence: selectedMemoryStaleEvidence,
+                    selectedHarmfulEvidence: selectedMemoryHarmfulEvidence,
+                    selectedMemoryDetailId: selectedMemoryDetailId,
+                    selectedCandidateDetailId: selectedMemoryCandidateDetailId,
+                    analytics: memoryAnalytics,
+                    isLoadingDetails: isLoadingMemoryDetails,
+                    error: memoryError,
                     scopeFilter: nil,
                     onApprove: onApproveMemory,
                     onReject: onRejectMemory,
                     onDelete: onDeleteMemory,
                     onEdit: onEditMemory,
+                    onApproveCandidate: onApproveMemoryCandidate,
+                    onRejectCandidate: onRejectMemoryCandidate,
+                    onEditCandidate: onEditMemoryCandidate,
+                    onSelectMemory: onSelectMemory,
+                    onSelectCandidate: onSelectMemoryCandidate,
                     onCreateMemory: onCreateMemory,
                     scopeNameLookup: { scope, id in
                         switch scope {
@@ -358,6 +426,8 @@ public struct MainView: View {
                             return id
                         case .global:
                             return nil
+                        case .unknown:
+                            return id
                         }
                     },
                     profileNames: profileNames,
@@ -421,6 +491,7 @@ public struct MainView: View {
                     loadThroughput: loadThroughputAnalytics,
                     loadEscalations: loadEscalationsAnalytics,
                     loadModels: loadModelsAnalytics,
+                    loadMemory: loadMemoryAnalytics,
                     verifyAuditChain: verifyAuditChain,
                     onSelectPod: { sessionId in
                         let result = Self.analyticsSelectPodResult(sessionId: sessionId)

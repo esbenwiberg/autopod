@@ -405,3 +405,46 @@ export interface ModelsAnalyticsResponse {
   /** Up to 10 raw model strings that didn't resolve. Sorted by podCount DESC, rawModel ASC. */
   unknownModels: UnknownModelSample[];
 }
+
+// ── Memory analytics ──────────────────────────────────────────────────────────
+
+export interface MemoryAnalyticsResponse {
+  /** Trailing window in days that this response covers. */
+  days: number;
+  summary: {
+    selectedCount: number;
+    injectedCount: number;
+    readCount: number;
+    searchedCount: number;
+    appliedCount: number;
+    notApplicableCount: number;
+    harmfulStaleCount: number;
+    notReportedCount: number;
+    candidateCount: number;
+    approvedCandidateCount: number;
+  };
+  /** Impact comparison: pods with injected memory vs pods without. */
+  impact: {
+    cohortSize: number;
+    comparisonCohortSize: number;
+    qualityDelta: number | null;
+    validationFailureDelta: number | null;
+    fixAttemptDelta: number | null;
+    escalationDelta: number | null;
+    costDeltaUsd: number | null;
+    reworkDelta: number | null;
+    firstPassRateDelta: number | null;
+    /** Average completion-duration delta in hours. Negative means faster with memory. */
+    throughputDelta: number | null;
+  };
+  /** Top memories by usage, ordered by selectedCount DESC. */
+  topMemories: Array<{
+    memoryId: string;
+    path: string;
+    selectedCount: number;
+    injectedCount: number;
+    appliedCount: number;
+    harmfulStaleCount: number;
+    impactSummary: string | null;
+  }>;
+}

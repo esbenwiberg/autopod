@@ -18,7 +18,9 @@ import type {
   EscalationRepository,
   EventBus,
   EventRepository,
+  MemoryCandidateRepository,
   MemoryRepository,
+  MemoryUsageRepository,
   PendingOverrideRepository,
   PodManager,
   PodQueue,
@@ -78,6 +80,8 @@ export interface ServerDependencies {
   actionRegistry?: ActionRegistry;
   sessionTokenIssuer?: PodTokenIssuer;
   memoryRepo?: MemoryRepository;
+  memoryCandidateRepo?: MemoryCandidateRepository;
+  memoryUsageRepo?: MemoryUsageRepository;
   pendingOverrideRepo?: PendingOverrideRepository;
   scheduledJobManager?: ScheduledJobManager;
   safetyEventsRepo?: SafetyEventsRepository;
@@ -174,7 +178,11 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
 
   // Memory store routes
   if (deps.memoryRepo) {
-    memoryRoutes(app, { memoryRepo: deps.memoryRepo });
+    memoryRoutes(app, {
+      memoryRepo: deps.memoryRepo,
+      memoryCandidateRepo: deps.memoryCandidateRepo,
+      memoryUsageRepo: deps.memoryUsageRepo,
+    });
   }
 
   // Issue watcher routes

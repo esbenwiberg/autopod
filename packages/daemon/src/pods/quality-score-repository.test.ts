@@ -7,6 +7,7 @@ import {
 } from './quality-score-repository.js';
 
 function baseScore(overrides: Partial<PodQualityScore> = {}): PodQualityScore {
+  const now = new Date().toISOString();
   return {
     podId: 'pod-1',
     score: 85,
@@ -26,8 +27,8 @@ function baseScore(overrides: Partial<PodQualityScore> = {}): PodQualityScore {
     profileName: 'test-profile',
     model: 'claude-opus-4-7',
     finalStatus: 'complete',
-    completedAt: new Date().toISOString(),
-    computedAt: new Date().toISOString(),
+    completedAt: now,
+    computedAt: now,
     ...overrides,
   };
 }

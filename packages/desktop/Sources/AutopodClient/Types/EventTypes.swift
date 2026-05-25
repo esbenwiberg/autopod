@@ -51,6 +51,7 @@ public struct RawSystemEvent: Codable, Sendable {
 
   // memory.suggestion_created
   public let memoryEntry: MemoryEntry?
+  public let candidate: MemoryCandidate?
 
   // validation.override_queued
   public let override: ValidationOverrideEntry?
@@ -129,6 +130,8 @@ public enum SystemEvent: Sendable {
   case escalationResolved(podId: String, escalationId: String)
   case sessionCompleted(podId: String, finalStatus: String, summary: SessionSummaryResponse)
   case memorySuggestionCreated(podId: String, entry: MemoryEntry)
+  case memoryCandidateCreated(podId: String, candidate: MemoryCandidate)
+  case memoryCandidateUpdated(podId: String, candidate: MemoryCandidate)
   case validationOverrideQueued(podId: String, override: ValidationOverrideEntry)
   case scheduledJobCatchupRequested(jobId: String, jobName: String, lastRunAt: String?)
   case scheduledJobFired(jobId: String, jobName: String, podId: String)
@@ -184,6 +187,14 @@ public enum SystemEvent: Sendable {
     case "memory.suggestion_created":
       guard let id = raw.podId, let entry = raw.memoryEntry else { return nil }
       return .memorySuggestionCreated(podId: id, entry: entry)
+
+    case "memory.candidate_created":
+      guard let id = raw.podId, let candidate = raw.candidate else { return nil }
+      return .memoryCandidateCreated(podId: id, candidate: candidate)
+
+    case "memory.candidate_updated":
+      guard let id = raw.podId, let candidate = raw.candidate else { return nil }
+      return .memoryCandidateUpdated(podId: id, candidate: candidate)
 
     case "validation.override_queued":
       guard let id = raw.podId, let ov = raw.override else { return nil }

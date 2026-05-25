@@ -1,4 +1,5 @@
 import Testing
+@testable import AutopodClient
 @testable import AutopodUI
 
 // MARK: - Toggle-off semantics
@@ -29,6 +30,14 @@ import Testing
     #expect(card == nil)
 }
 
+@Test func toggleOffMemoryCard() {
+    var card: AnalyticsCardKind? = nil
+    card = MainView.toggleAnalyticsCard(card, tapping: .memory)
+    #expect(card == .memory)
+    card = MainView.toggleAnalyticsCard(card, tapping: .memory)
+    #expect(card == nil)
+}
+
 // MARK: - Switch-drill semantics (no nil intermediate)
 
 @Test func switchDrillCostToQuality() {
@@ -50,6 +59,20 @@ import Testing
     var card: AnalyticsCardKind? = .status
     card = MainView.toggleAnalyticsCard(card, tapping: .cost)
     #expect(card == .cost)
+}
+
+@Test func switchDrillModelsToMemory() {
+    var card: AnalyticsCardKind? = .models
+    card = MainView.toggleAnalyticsCard(card, tapping: .memory)
+    #expect(card == .memory)
+}
+
+@Test func analyticsRightPaneRoutesMemoryDrill() {
+    #expect(AnalyticsRightPaneView.drillRoute(for: .memory) == "memory")
+}
+
+@Test func unknownMemoryScopePreservesWireValue() {
+    #expect(MemoryScope.unknown("team").label == "team")
 }
 
 // MARK: - filterPods for analytics

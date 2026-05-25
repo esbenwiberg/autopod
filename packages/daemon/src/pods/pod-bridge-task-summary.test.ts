@@ -1,6 +1,8 @@
 import type { PodBridge } from '@autopod/escalation-mcp';
 import { describe, expect, it, vi } from 'vitest';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
+import { createMemoryRepository } from './memory-repository.js';
+import { createMemoryUsageRepository } from './memory-usage-repository.js';
 import { type SessionBridgeDependencies, createSessionBridge } from './pod-bridge-impl.js';
 import { createPodRepository } from './pod-repository.js';
 
@@ -9,12 +11,16 @@ type Deps = SessionBridgeDependencies;
 function buildBridge(): {
   bridge: PodBridge;
   podRepo: ReturnType<typeof createPodRepository>;
+  memoryRepo: ReturnType<typeof createMemoryRepository>;
+  usageRepo: ReturnType<typeof createMemoryUsageRepository>;
   podId: string;
   emit: ReturnType<typeof vi.fn>;
 } {
   const db = createTestDb();
   insertTestProfile(db, { name: 'proj' });
   const podRepo = createPodRepository(db);
+  const memoryRepo = createMemoryRepository(db);
+  const usageRepo = createMemoryUsageRepository(db);
   const podId = 'sess-1';
 
   db.prepare(
@@ -37,12 +43,58 @@ function buildBridge(): {
     escalationRepo: stub,
     nudgeRepo: stub,
     profileStore: stub,
+    memoryRepo,
+    memoryUsageRepo: usageRepo,
     containerManagerFactory: stub,
     pendingRequestsByPod: new Map(),
     logger,
   });
 
-  return { bridge, podRepo, podId, emit };
+  return { bridge, podRepo, memoryRepo, usageRepo, podId, emit };
+}
+
+function insertSelectedMemory(
+  memoryRepo: ReturnType<typeof createMemoryRepository>,
+  usageRepo: ReturnType<typeof createMemoryUsageRepository>,
+  podId: string,
+): string {
+  const memoryId = `mem-${podId}`;
+  memoryRepo.insert({
+    id: memoryId,
+    scope: 'profile',
+    scopeId: 'proj',
+    path: '/memory.md',
+    content: 'memory content',
+    rationale: null,
+    kind: null,
+    tags: [],
+    appliesWhen: null,
+    avoidWhen: null,
+    confidence: null,
+    sourceEvidence: [],
+    impactSummary: null,
+    approved: true,
+    createdByPodId: null,
+  });
+  usageRepo.record({
+    id: `${memoryId}-selected`,
+    memoryId,
+    podId,
+    kind: 'selected',
+    outcome: null,
+    reason: null,
+    relevanceReason: 'selected for test',
+  });
+  usageRepo.record({
+    id: `${memoryId}-injected`,
+    memoryId,
+    podId,
+    kind: 'injected',
+    outcome: null,
+    reason: null,
+    relevanceReason: 'injected for test',
+  });
+  return memoryId;
 }
 
 describe('PodBridge.reportTaskSummary — lock-on-first-write', () => {
@@ -99,5 +151,24 @@ describe('PodBridge.reportTaskSummary — lock-on-first-write', () => {
     // The event reflects what the agent sent, even though the DB is locked —
     // activity log shows the agent did call the tool.
     expect(arg.event?.actualSummary).toBe('second');
+  });
+
+  it('updates memory outcomes on a locked re-report while preserving original summary text', () => {
+    const { bridge, podRepo, memoryRepo, usageRepo, podId } = buildBridge();
+    const memoryId = insertSelectedMemory(memoryRepo, usageRepo, podId);
+
+    bridge.reportTaskSummary(podId, 'original summary', [], 'how-original', undefined, undefined, [
+      { memoryId, outcome: 'applied', reason: 'Used the convention.' },
+    ]);
+    bridge.reportTaskSummary(podId, 'fix-cycle summary', [], 'how-fix', undefined, undefined, [
+      { memoryId, outcome: 'not_applicable', reason: 'Fix cycle did not touch it.' },
+    ]);
+
+    const pod = podRepo.getOrThrow(podId);
+    expect(pod.taskSummary?.actualSummary).toBe('original summary');
+    expect(pod.taskSummary?.how).toBe('how-original');
+    expect(pod.taskSummary?.memoryOutcomes).toEqual([
+      { memoryId, outcome: 'not_applicable', reason: 'Fix cycle did not touch it.' },
+    ]);
   });
 });

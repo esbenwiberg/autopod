@@ -399,7 +399,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .realTimeMonitoring:
             "WebSocket event streaming delivers namespaced system events to all connected clients: pod lifecycle, agent activity, validation phase start/complete, escalations, memory suggestions, budgets, scheduled jobs, issue watcher changes, host wake reconciliation, and firewall denials. Events are persisted for replay, PII-sanitized before broadcast, and delivered with monotonic event IDs for gap detection. Clients subscribe per-pod or globally, with 30-second heartbeat pings and automatic reconnection."
         case .memoryStore:
-            "A three-scoped persistent knowledge store for AI pods. Agents call memory_suggest to propose a memory with a scope (global, profile, pod) and content. Humans review and approve or reject via the desktop or API. Approved memories are injected into each new pod's CLAUDE.md at provisioning time. The SHA-256 content hash deduplicates identical suggestions. Memory search supports keyword and semantic queries across the approved store."
+            "A three-scoped persistent knowledge store for AI pods. Agents call memory_suggest to propose a memory with a scope (global, profile, pod) and content. Humans review and approve or reject via the desktop or API. Approved memories are selected for relevant pods and injected into CLAUDE.md at provisioning time. The SHA-256 content hash deduplicates identical suggestions. Memory search uses keyword matching across the approved store."
         case .seriesWorkflows:
             "Multi-pod DAG workflows defined by brief folders. Each pod has a brief.md for task context and contract.yaml for dependencies, scenarios, required facts, and human review checks. The daemon resolves the dependency graph topologically and spawns pods in order, sharing branch or PR state per the chosen PR mode. Series metadata (purpose.md, design.md) is injected into every pod's AGENTS.md."
         case .scheduledJobs:
@@ -542,7 +542,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
                 "memory_suggest — Proposes a memory for human approval (global/profile/pod scope)",
                 "memory_list — Lists approved memories available to this pod",
                 "memory_read — Retrieves full content of a specific memory",
-                "memory_search — Keyword/semantic search across available memories",
+                "memory_search — Keyword search across available memories",
                 "Dynamic action tools — One MCP tool per ActionDefinition from profile's action policy",
             ]
         case .validationPipeline:
@@ -602,7 +602,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
                 "Injection: system-instructions-generator queries approved memories and injects into CLAUDE.md 'Team Knowledge' section",
                 "memory_list — paginated list of approved memories for this pod's scope chain",
                 "memory_read — full content of a single memory entry",
-                "memory_search — keyword/semantic search across available memories",
+                "memory_search — keyword search across available memories",
                 "REST API: GET /memory, POST /memory, PATCH /memory/:id (approve/reject), DELETE /memory/:id",
                 "Desktop: MemoryManagementView for browsing + approving, suggestion cards in OverviewTab",
                 "SystemEvent: memory.suggestion_created delivered to all connected clients",

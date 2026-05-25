@@ -96,6 +96,17 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
           'A concrete one-line UI tagline for this pod: what it will change or investigate',
         ),
       steps: z.array(z.string()).describe('Numbered steps you plan to take'),
+      memoryIntents: z
+        .array(
+          z.object({
+            memoryId: z.string().describe('ID of a selected/injected memory'),
+            reason: z.string().describe('Short explanation of how you intend to use it'),
+          }),
+        )
+        .optional()
+        .describe(
+          'Required when selected/injected memories exist: one item per memory describing intended use.',
+        ),
     },
     async (input) => {
       const response = await reportPlan(podId, input, bridge);
@@ -198,6 +209,18 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         .describe(
           'Optional requests for human approval to waive/replace impossible required facts.',
         ),
+      memoryOutcomes: z
+        .array(
+          z.object({
+            memoryId: z.string().describe('ID of a selected/injected memory'),
+            outcome: z
+              .enum(['applied', 'not_applicable', 'harmful_stale'])
+              .describe('Final outcome for this memory'),
+            reason: z.string().describe('Short explanation for the outcome'),
+          }),
+        )
+        .optional()
+        .describe('Required when selected/injected memories exist: one final outcome per memory.'),
     },
     async (input) => {
       const response = await reportTaskSummary(podId, input, bridge);

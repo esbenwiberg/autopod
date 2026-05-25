@@ -5,10 +5,16 @@ import type {
   EscalationResponse,
   FactEvidence,
   MemoryEntry,
+  MemoryOutcomeItem,
   MemoryScope,
   ScreenshotRef,
   ScreenshotSource,
 } from '@autopod/shared';
+
+export interface MemoryPlanIntentItem {
+  memoryId: string;
+  reason: string;
+}
 
 export interface PodBridge {
   createEscalation(escalation: EscalationRequest): void;
@@ -22,7 +28,12 @@ export interface PodBridge {
   getReviewerModel(podId: string): string;
   callReviewerModel(podId: string, question: string, context?: string): Promise<string>;
   incrementEscalationCount(podId: string): void;
-  reportPlan(podId: string, summary: string, steps: string[]): void;
+  reportPlan(
+    podId: string,
+    summary: string,
+    steps: string[],
+    memoryIntents?: MemoryPlanIntentItem[],
+  ): void;
   reportProgress(
     podId: string,
     phase: string,
@@ -55,6 +66,7 @@ export interface PodBridge {
         proves?: string[];
       };
     }>,
+    memoryOutcomes?: MemoryOutcomeItem[],
   ): void;
   consumeMessages(podId: string): { hasMessage: boolean; message?: string };
   /** Check if an action requires human approval before execution */
