@@ -1,6 +1,5 @@
 import Foundation
 import AutopodClient
-import AutopodUI
 
 /// Manages memory entries — loading, approving, rejecting, creating, and deleting.
 @Observable

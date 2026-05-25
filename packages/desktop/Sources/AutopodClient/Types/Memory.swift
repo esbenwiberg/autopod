@@ -2,14 +2,46 @@ import Foundation
 
 // MARK: - Memory (mirrors packages/shared/src/types/memory.ts)
 
-public enum MemoryScope: String, CaseIterable, Sendable, Codable {
-  case global, profile, pod
+public enum MemoryScope: Hashable, Sendable, Codable, CaseIterable {
+  case global
+  case profile
+  case pod
+  case unknown(String)
+
+  public static var allCases: [MemoryScope] {
+    [.global, .profile, .pod]
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let value = try decoder.singleValueContainer().decode(String.self)
+    switch value {
+    case "global": self = .global
+    case "profile": self = .profile
+    case "pod": self = .pod
+    default: self = .unknown(value)
+    }
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(rawValue)
+  }
+
+  public var rawValue: String {
+    switch self {
+    case .global: "global"
+    case .profile: "profile"
+    case .pod: "pod"
+    case .unknown(let value): value
+    }
+  }
 
   public var label: String {
     switch self {
     case .global: "Global"
     case .profile: "Profile"
     case .pod: "Pod"
+    case .unknown(let value): value
     }
   }
 }

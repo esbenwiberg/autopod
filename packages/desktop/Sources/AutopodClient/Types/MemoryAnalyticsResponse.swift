@@ -1,13 +1,13 @@
 import Foundation
 
-public struct MemoryAnalyticsResponse: Decodable, Equatable, Sendable {
+public struct MemoryAnalyticsResponse: Codable, Equatable, Sendable {
   public let days: Int
   public let summary: MemoryAnalyticsSummary
   public let impact: MemoryAnalyticsImpact
   public let topMemories: [MemoryAnalyticsTopMemory]
 }
 
-public struct MemoryAnalyticsSummary: Decodable, Equatable, Sendable {
+public struct MemoryAnalyticsSummary: Codable, Equatable, Sendable {
   public let selectedCount: Int
   public let injectedCount: Int
   public let readCount: Int
@@ -20,7 +20,7 @@ public struct MemoryAnalyticsSummary: Decodable, Equatable, Sendable {
   public let approvedCandidateCount: Int
 }
 
-public struct MemoryAnalyticsImpact: Decodable, Equatable, Sendable {
+public struct MemoryAnalyticsImpact: Codable, Equatable, Sendable {
   public let cohortSize: Int
   public let comparisonCohortSize: Int
   public let qualityDelta: Double?
@@ -33,7 +33,7 @@ public struct MemoryAnalyticsImpact: Decodable, Equatable, Sendable {
   public let throughputDelta: Double?
 }
 
-public struct MemoryAnalyticsTopMemory: Decodable, Equatable, Sendable {
+public struct MemoryAnalyticsTopMemory: Codable, Equatable, Sendable {
   public let memoryId: String
   public let path: String
   public let impactSummary: String?
