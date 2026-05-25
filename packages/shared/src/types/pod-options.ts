@@ -36,6 +36,12 @@ export interface PodOptions {
    */
   validate?: boolean;
   /**
+   * Per-pod override for advisory browser QA. Undefined inherits the resolved
+   * profile default. This produces evidence only and does not affect validation
+   * pass/fail.
+   */
+  advisoryBrowserQaEnabled?: boolean;
+  /**
    * Allow this pod to be promoted to a different mode later
    * (e.g. interactive → auto via `ap complete --pr`). Default true.
    */
@@ -95,6 +101,7 @@ export function resolvePodOptions(
     agentMode: override?.agentMode ?? base.agentMode,
     output: override?.output ?? base.output,
     validate: override?.validate ?? base.validate,
+    advisoryBrowserQaEnabled: override?.advisoryBrowserQaEnabled ?? base.advisoryBrowserQaEnabled,
     promotable: override?.promotable ?? base.promotable,
   };
   // Apply axis-implied defaults when validate/promotable weren't explicitly set.

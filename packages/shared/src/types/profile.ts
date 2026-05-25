@@ -173,6 +173,13 @@ export interface Profile {
   maxBudgetExtensions: number | null;
   /** Whether the project has a web frontend. Default true. */
   hasWebUi: boolean | null;
+  /**
+   * Profile default for advisory browser QA. true/false explicitly enables or
+   * disables screenshot-backed advisory observations; null means inherit from
+   * the parent profile or consumer default. Advisory browser QA is evidence,
+   * not blocking proof.
+   */
+  advisoryBrowserQaEnabled?: boolean | null;
   /** Whether the issue/work-item watcher is enabled for this profile */
   issueWatcherEnabled: boolean | null;
   /** Label prefix to watch for. Default 'autopod'. Triggers on exact match or '<prefix>:<target-profile>' */

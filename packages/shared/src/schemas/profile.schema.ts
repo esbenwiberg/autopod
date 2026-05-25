@@ -345,6 +345,7 @@ const createProfileBaseSchema = z.object({
   // the default for every PATCH that doesn't include the field, silently
   // re-overriding the column on every save and clobbering inheritance.
   hasWebUi: z.boolean().nullable().optional(),
+  advisoryBrowserQaEnabled: z.boolean().nullable().optional(),
   issueWatcherEnabled: z.boolean().nullable().optional(),
   issueWatcherLabelPrefix: z
     .string()

@@ -1,6 +1,10 @@
 import { stringify as stringifyYaml } from 'yaml';
 import type { SpecContract } from './types/contract.js';
-import type { FactCheckResult, ValidationResult } from './types/validation.js';
+import type {
+  AdvisoryBrowserQaObservation,
+  FactCheckResult,
+  ValidationResult,
+} from './types/validation.js';
 
 export interface EvidenceDocumentInput {
   podId: string;
@@ -37,8 +41,23 @@ function factToEvidence(fact: FactCheckResult): Record<string, unknown> {
   };
 }
 
+function advisoryObservationToEvidence(
+  observation: AdvisoryBrowserQaObservation,
+): Record<string, unknown> {
+  return {
+    id: observation.id,
+    scenario_id: observation.scenarioId,
+    status: observation.status,
+    summary: observation.summary,
+    details: observation.details,
+    screenshots: observation.screenshots,
+    suggested_facts: observation.suggestedFacts,
+  };
+}
+
 export function buildEvidenceDocument(input: EvidenceDocumentInput): Record<string, unknown> {
   const facts = input.validation.factValidation?.results ?? [];
+  const advisory = input.validation.advisoryBrowserQa;
   return {
     evidence_version: 1,
     pod_id: input.podId,
@@ -54,6 +73,16 @@ export function buildEvidenceDocument(input: EvidenceDocumentInput): Record<stri
         }
       : null,
     facts: facts.map(factToEvidence),
+    advisory_browser_qa: advisory
+      ? {
+          status: advisory.status,
+          reasoning: advisory.reasoning,
+          model: advisory.model,
+          duration_ms: advisory.durationMs,
+          screenshots: advisory.screenshots,
+          observations: advisory.observations.map(advisoryObservationToEvidence),
+        }
+      : null,
   };
 }
 
