@@ -14,10 +14,16 @@ import {
 // Model provider credentials schemas
 // ---------------------------------------------------------------------------
 
-export const modelProviderSchema = z.enum(['anthropic', 'max', 'foundry', 'copilot']);
+export const modelProviderSchema = z.enum(['anthropic', 'max', 'openai', 'foundry', 'copilot']);
 
 const anthropicCredentialsSchema = z.object({
   provider: z.literal('anthropic'),
+});
+
+const openAiCredentialsSchema = z.object({
+  provider: z.literal('openai'),
+  authMode: z.literal('chatgpt').optional(),
+  authJson: z.string().min(1).optional(),
 });
 
 const maxCredentialsSchema = z.object({
@@ -47,6 +53,7 @@ const copilotCredentialsSchema = z.object({
 
 export const providerCredentialsSchema = z.discriminatedUnion('provider', [
   anthropicCredentialsSchema,
+  openAiCredentialsSchema,
   maxCredentialsSchema,
   foundryCredentialsSchema,
   copilotCredentialsSchema,

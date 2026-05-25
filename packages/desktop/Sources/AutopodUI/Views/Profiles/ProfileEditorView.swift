@@ -106,7 +106,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .agent:
             ["model", "opus", "sonnet", "runtime", "claude", "codex", "copilot", "custom instructions", "system prompt"]
         case .providers:
-            ["model provider", "anthropic", "max", "foundry", "azure foundry", "copilot", "pr provider", "code platform", "github", "ado", "azure devops", "oauth", "authenticate", "login", "endpoint", "project id", "api key"]
+            ["model provider", "anthropic", "max", "openai", "codex", "foundry", "azure foundry", "copilot", "pr provider", "code platform", "github", "ado", "azure devops", "oauth", "authenticate", "login", "endpoint", "project id", "api key"]
         case .escalation:
             ["escalation", "ask human", "ai consultation", "advisor", "auto pause", "guardrails", "human response timeout", "token budget", "budget", "soft", "hard", "warn at", "extensions", "limit"]
         case .container:
@@ -162,7 +162,7 @@ struct HelpBadge: View {
 // MARK: - Profile editor
 
 /// Callback for profile authentication flows.
-/// Parameters: profile name, provider ("max" or "copilot"), completion callback (error message or nil).
+/// Parameters: profile name, provider ("max", "openai", or "copilot"), completion callback (error message or nil).
 public typealias ProfileAuthHandler = (String, String, @escaping (String?) -> Void) -> Void
 
 /// Profile editor — settings-style layout with sidebar section navigation and inline help.
@@ -299,6 +299,11 @@ public struct ProfileEditorView: View {
         case loading
         case loaded
         case failed(String)
+    }
+
+    private var isAuthenticating: Bool {
+        if case .inProgress = authStatus { return true }
+        return false
     }
 
     public var body: some View {
@@ -1147,11 +1152,16 @@ public struct ProfileEditorView: View {
         fieldRow("Model Provider", help: "Authentication backend for AI model API calls.") {
             Picker("", selection: $profile.modelProvider) {
                 ForEach(ModelProvider.allCases, id: \.self) { p in
-                    Text(p.rawValue.capitalized).tag(p)
+                    Text(p.label).tag(p)
                 }
             }
             .labelsHidden()
             .frame(width: 160)
+            .onChange(of: profile.modelProvider) { _, newValue in
+                if newValue == .openai {
+                    profile.defaultRuntime = .codex
+                }
+            }
         }
 
         // Provider credentials indicator
@@ -1166,6 +1176,16 @@ public struct ProfileEditorView: View {
         }
 
         // Foundry-specific fields
+        if profile.modelProvider == .openai {
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.blue.opacity(0.7))
+                Text("Codex uses either this profile's ChatGPT login or the daemon's OPENAI_API_KEY.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+
         if profile.modelProvider == .foundry {
             HStack(spacing: 16) {
                 fieldRow("Endpoint URL", help: "Azure Foundry deployment endpoint URL.") {
@@ -1188,8 +1208,8 @@ public struct ProfileEditorView: View {
             }
         }
 
-        // OAuth auth buttons for MAX and Copilot
-        if !isNew && (profile.modelProvider == .max || profile.modelProvider == .copilot) {
+        // OAuth/auth buttons for MAX, OpenAI Codex, and Copilot
+        if !isNew && (profile.modelProvider == .max || profile.modelProvider == .openai || profile.modelProvider == .copilot) {
             HStack(spacing: 12) {
                 if profile.modelProvider == .max {
                     Button {
@@ -1200,8 +1220,20 @@ public struct ProfileEditorView: View {
                             Text("Authenticate with Claude MAX")
                         }
                     }
-                    .disabled(onAuthenticate == nil || authStatus == .inProgress("max"))
+                    .disabled(onAuthenticate == nil || isAuthenticating)
                     .help("Opens Claude CLI to complete OAuth login. Credentials are saved to this profile.")
+                }
+                if profile.modelProvider == .openai {
+                    Button {
+                        startAuth(provider: "openai", label: "OpenAI Codex")
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.badge.key")
+                            Text("Authenticate with OpenAI Pro")
+                        }
+                    }
+                    .disabled(onAuthenticate == nil || isAuthenticating)
+                    .help("Opens Codex login. ChatGPT/Pro credentials are saved to this profile.")
                 }
                 if profile.modelProvider == .copilot {
                     Button {
@@ -1212,7 +1244,7 @@ public struct ProfileEditorView: View {
                             Text("Authenticate with Copilot")
                         }
                     }
-                    .disabled(onAuthenticate == nil || authStatus == .inProgress("copilot"))
+                    .disabled(onAuthenticate == nil || isAuthenticating)
                     .help("Opens GitHub Copilot login. Token is saved to this profile.")
                 }
             }
@@ -2332,12 +2364,13 @@ public struct ProfileEditorView: View {
     }
 
     private func providerNeedsAuth(_ provider: String) -> Bool {
-        provider == "max" || provider == "copilot"
+        provider == "max" || provider == "openai" || provider == "copilot"
     }
 
     private func providerAuthLabel(_ provider: String) -> String {
         switch provider {
         case "max":     return "Claude MAX"
+        case "openai":  return "OpenAI Pro"
         case "copilot": return "GitHub Copilot"
         default:        return provider
         }
@@ -2589,7 +2622,7 @@ public struct ProfileEditorView: View {
         // MARK: Providers
         case "modelProvider":
             enumCard(field, selection: $profile.modelProvider,
-                     options: ModelProvider.allCases.map { ($0, $0.rawValue.capitalized) },
+                     options: ModelProvider.allCases.map { ($0, $0.label) },
                      parent: editorPayload?.parent?.modelProvider ?? "")
         case "prProvider":
             enumCard(field, selection: $profile.prProvider,

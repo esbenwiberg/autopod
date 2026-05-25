@@ -47,7 +47,7 @@ export type ProfileLlmClientResult =
  * same auth path the agent does — no separate `ANTHROPIC_API_KEY` required.
  *
  * Returns `{ ok: false, reason }` when the profile uses a provider that
- * doesn't expose an Anthropic-compatible Messages endpoint (`copilot`,
+ * doesn't expose an Anthropic-compatible Messages endpoint (`openai`, `copilot`,
  * `foundry` openai surface) or when credentials are missing. Callers fall
  * back to template output and propagate the reason to the user.
  */
@@ -127,7 +127,7 @@ export async function createProfileAnthropicClient(
     };
   }
 
-  // copilot — no daemon-callable Anthropic-compatible API
+  // openai/copilot — no daemon-callable Anthropic-compatible API
   logger.warn(
     { profile: profile.name, provider, reason: 'provider_not_callable' },
     'Profile provider is not daemon-callable — LLM helpers fall back to templates',

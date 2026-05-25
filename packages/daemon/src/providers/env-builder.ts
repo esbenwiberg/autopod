@@ -80,6 +80,9 @@ export async function buildProviderEnv(
     case 'max':
       return buildMaxEnv(profile, logger, options.profileStore);
 
+    case 'openai':
+      return buildOpenAiEnv(profile);
+
     case 'foundry':
       return buildFoundryEnv(profile, logger);
 
@@ -108,6 +111,42 @@ function buildAnthropicEnv(): ProviderEnvResult {
     const filePath = `${SECRET_DIR}/anthropic-api-key`;
     secretFiles.push({ path: filePath, content: apiKey });
     env.ANTHROPIC_API_KEY_FILE = filePath;
+  }
+
+  return {
+    env,
+    containerFiles: buildClaudeConfigFiles(),
+    secretFiles,
+    requiresPostExecPersistence: false,
+  };
+}
+
+/**
+ * OpenAI API key provider — used by the Codex runtime.
+ * The key is written to a secret file; exec env only receives the file pointer.
+ */
+function buildOpenAiEnv(profile: Profile): ProviderEnvResult {
+  const creds = profile.providerCredentials;
+  if (creds?.provider === 'openai' && creds.authJson) {
+    return {
+      env: {},
+      containerFiles: [
+        ...buildClaudeConfigFiles(),
+        { path: `${CONTAINER_HOME_DIR}/.codex/auth.json`, content: creds.authJson },
+      ],
+      secretFiles: [],
+      requiresPostExecPersistence: false,
+    };
+  }
+
+  const env: Record<string, string> = {};
+  const secretFiles: ProviderEnvResult['secretFiles'] = [];
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (apiKey) {
+    const filePath = `${SECRET_DIR}/openai-api-key`;
+    secretFiles.push({ path: filePath, content: apiKey });
+    env.OPENAI_API_KEY_FILE = filePath;
   }
 
   return {

@@ -117,9 +117,11 @@ export type {
   ModelProvider,
   ProviderCredentials,
   AnthropicCredentials,
+  OpenAiCredentials,
   MaxCredentials,
   FoundryCredentials,
   FoundryApiSurface,
+  CopilotCredentials,
 } from './types/model-provider.js';
 
 export type {

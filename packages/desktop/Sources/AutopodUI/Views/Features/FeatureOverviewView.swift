@@ -395,7 +395,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .validationPipeline:
             "An eight-gate validation pipeline runs after the agent completes: Lint -> SAST -> Build -> Test -> Health Check -> Pages (Playwright) -> Required Facts -> AI Task Review, followed by an overall decision. Deterministic failures skip expensive AI review and go straight back to the agent as correction feedback. The AI reviewer receives tiered context: the diff, original task, contract, and findings from all prior attempts. When maxValidationAttempts is exhausted, the pod moves to review_required instead of failing. Humans can interrupt in-flight validation, queue per-finding overrides that are merged before the next pass, extend attempt counts, or create a linked workspace for manual fixes."
         case .profileManagement:
-            "Profiles encode everything needed to run a pod: stack template, execution target (local Docker or ACI), model provider (Anthropic, MAX/PRO, Foundry, Copilot), network policy, output mode, branchPrefix, workerProfile, PIM groups, and all injections. Each update auto-increments a version counter. Pods snapshot the full resolved profile at creation for auditability. Inheritance chains (up to 5 levels) with special merge logic for skills, MCP servers, CLAUDE.md sections, smoke pages, and registries. The system-instructions-generator builds a complete CLAUDE.md with approved memories, priority-sorted sections, dynamic content fetches, and PII sanitization."
+            "Profiles encode everything needed to run a pod: stack template, execution target (local Docker or ACI), model provider (Anthropic, MAX/PRO, OpenAI, Foundry, Copilot), network policy, output mode, branchPrefix, workerProfile, PIM groups, and all injections. Each update auto-increments a version counter. Pods snapshot the full resolved profile at creation for auditability. Inheritance chains (up to 5 levels) with special merge logic for skills, MCP servers, CLAUDE.md sections, smoke pages, and registries. The system-instructions-generator builds a complete CLAUDE.md with approved memories, priority-sorted sections, dynamic content fetches, and PII sanitization."
         case .realTimeMonitoring:
             "WebSocket event streaming delivers namespaced system events to all connected clients: pod lifecycle, agent activity, validation phase start/complete, escalations, memory suggestions, budgets, scheduled jobs, issue watcher changes, host wake reconciliation, and firewall denials. Events are persisted for replay, PII-sanitized before broadcast, and delivered with monotonic event IDs for gap detection. Clients subscribe per-pod or globally, with 30-second heartbeat pings and automatic reconnection."
         case .memoryStore:
@@ -512,7 +512,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
                 "Codex: JSONL streaming (--json flag), fresh spawn on resume",
                 "Copilot: plain text lines, copilot-instructions.md config, re-spawn with correction",
                 "10 AgentEvent types: status, reasoning, tool_use, file_change, complete, error, escalation, plan, progress, task_summary",
-                "Provider credentials: Anthropic (API key), MAX (OAuth + refresh), Foundry (Azure endpoint), Copilot (GitHub token)",
+                "Provider credentials: Anthropic (API key), MAX (OAuth + refresh), OpenAI (API key), Foundry (Azure endpoint), Copilot (GitHub token)",
                 "Config files auto-generated: .claude.json (onboarding skip), .credentials.json (OAuth)",
             ]
         case .actionControlPlane:
@@ -568,7 +568,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
             [
                 "11 stack templates: node22, node22-pw, dotnet9, dotnet10, dotnet10-go, python312, python-node, python-node-pg, go124, go124-pw, custom",
                 "3 output modes: pr (full pipeline), artifact (research-output.md), workspace (interactive)",
-                "4 model providers: Anthropic (API key), MAX/PRO (OAuth + token refresh), Foundry (Azure endpoint), Copilot (GitHub token)",
+                "5 model providers: Anthropic (API key), MAX/PRO (OAuth + token refresh), OpenAI (API key), Foundry (Azure endpoint), Copilot (GitHub token)",
                 "Execution targets: local (Docker socket) or aci (Azure Container Instances)",
                 "profile.version: auto-incrementing integer on every profile update",
                 "Profile snapshot: full resolved profile (incl. inherited values) stored with pod at creation",

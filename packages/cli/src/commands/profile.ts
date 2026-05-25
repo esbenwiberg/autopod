@@ -414,6 +414,87 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
   // ────────────────────────────────────────────────────────────────────────────
 
   profile
+    .command('auth-openai <name>')
+    .description('Authenticate a profile with OpenAI Codex via ChatGPT/Pro login')
+    .action(async (name: string) => {
+      const client = getClient();
+
+      try {
+        await client.getProfile(name);
+      } catch (error) {
+        if (error instanceof ProfileNotFoundError) {
+          console.error(chalk.red(`Profile "${name}" not found.`));
+        } else {
+          console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+        }
+        process.exit(1);
+      }
+
+      const token = Math.random().toString(36).slice(2, 10);
+      const codexHome = path.join(os.tmpdir(), `autopod-codex-auth-${token}`);
+      fs.mkdirSync(codexHome, { recursive: true });
+
+      const spawnEnv: Record<string, string> = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (v !== undefined && k !== 'OPENAI_API_KEY' && k !== 'CODEX_ACCESS_TOKEN') {
+          spawnEnv[k] = v;
+        }
+      }
+      spawnEnv.CODEX_HOME = codexHome;
+
+      console.log(chalk.cyan(`\nStarting OpenAI Codex login for profile "${name}"...`));
+      console.log(
+        chalk.dim(
+          'Follow the ChatGPT device/browser flow. Credentials will be saved automatically once complete.\n',
+        ),
+      );
+
+      await new Promise<void>((resolve, reject) => {
+        const proc = cpSpawn('codex', ['login', '--device-auth'], {
+          stdio: 'inherit',
+          env: spawnEnv,
+        });
+        proc.on('error', reject);
+        proc.on('close', () => resolve());
+      });
+
+      const authPath = path.join(codexHome, 'auth.json');
+      if (!fs.existsSync(authPath)) {
+        console.error(chalk.red('\nNo Codex auth.json found — login may not have completed.'));
+        process.exit(1);
+      }
+
+      let authJson: string;
+      try {
+        authJson = fs.readFileSync(authPath, 'utf-8');
+        JSON.parse(authJson);
+      } catch {
+        console.error(chalk.red('\nFailed to parse Codex auth.json.'));
+        process.exit(1);
+      }
+
+      await withSpinner(`Saving credentials for "${name}"...`, () =>
+        client.setProfileCredentials(name, {
+          defaultRuntime: 'codex',
+          modelProvider: 'openai',
+          providerCredentials: {
+            provider: 'openai',
+            authMode: 'chatgpt',
+            authJson,
+          },
+        }),
+      );
+
+      try {
+        fs.rmSync(codexHome, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
+
+      console.log(chalk.green(`\nProfile "${name}" is now authenticated with OpenAI Codex.`));
+    });
+
+  profile
     .command('auth-copilot <name>')
     .description('Authenticate a profile with GitHub Copilot via interactive login')
     .action(async (name: string) => {

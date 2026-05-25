@@ -268,6 +268,8 @@ public struct AppRootView: View {
               switch provider {
               case "max":
                 msg = try await authenticator.authenticateMax(profileName: name)
+              case "openai":
+                msg = try await authenticator.authenticateOpenAI(profileName: name)
               case "copilot":
                 msg = try await authenticator.authenticateCopilot(profileName: name)
               default:
