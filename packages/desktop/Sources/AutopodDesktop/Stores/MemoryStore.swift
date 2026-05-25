@@ -146,7 +146,10 @@ public final class MemoryStore {
             let loadedSourceEvidence = try await sourceEvidence.evidence
             let loadedStaleEvidence = try await staleEvidence.evidence
             let loadedHarmfulEvidence = try await harmfulEvidence.evidence
-            guard selectedMemoryDetailId == memoryId, selectedCandidateDetailId == nil else { return }
+            guard detailLoadToken == token,
+                  selectedMemoryDetailId == memoryId,
+                  selectedCandidateDetailId == nil
+            else { return }
             selectedUsage = loadedUsage
             selectedSourceEvidence = loadedSourceEvidence
             selectedStaleEvidence = loadedStaleEvidence
@@ -180,7 +183,10 @@ public final class MemoryStore {
         selectedMemory = nil
         do {
             let response = try await api.getMemoryCandidateSourceEvidence(candidateId)
-            guard selectedCandidateDetailId == candidateId, selectedMemoryDetailId == nil else { return }
+            guard detailLoadToken == token,
+                  selectedCandidateDetailId == candidateId,
+                  selectedMemoryDetailId == nil
+            else { return }
             selectedSourceEvidence = response.evidence
         } catch {
             print("[MemoryStore] Failed to load candidate evidence \(candidateId): \(error)")
