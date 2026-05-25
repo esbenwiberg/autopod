@@ -189,6 +189,20 @@ function formatValidationFailure(input: ValidationFeedback): string {
     lines.push('');
   }
 
+  if (
+    result.taskReview === null &&
+    (result.reviewSkipKind === 'review-failed' || result.reviewSkipKind === 'review-timeout') &&
+    result.reviewSkipReason
+  ) {
+    lines.push('### Review Execution Failure');
+    lines.push(result.reviewSkipReason);
+    lines.push('');
+    lines.push(
+      'This is a validation infrastructure failure, not an actionable code-review finding. Report this blocker instead of changing unrelated code.',
+    );
+    lines.push('');
+  }
+
   // When Facts + Review were gated out by tier-1 failures, tell the agent why
   // those sections are missing — otherwise it may assume those checks passed.
   if (

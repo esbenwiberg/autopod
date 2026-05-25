@@ -272,6 +272,24 @@ describe('formatFeedback', () => {
       });
       expect(result).not.toContain('skipped because earlier validation phases failed');
     });
+
+    it('surfaces review runner failures when no task review was produced', () => {
+      const validation = mockValidationResult({});
+      validation.reviewSkipKind = 'review-failed';
+      validation.reviewSkipReason =
+        'Review failed: codex review failed (exit=2): sh: 1: Syntax error: ";" unexpected';
+      const output = formatFeedback({
+        type: 'validation_failure',
+        result: validation,
+        task: 'Mirror memory APIs in desktop client',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+      expect(output).toContain('Review Execution Failure');
+      expect(output).toContain('Syntax error');
+      expect(output).toContain('validation infrastructure failure');
+      expect(output).toContain('Report this blocker');
+    });
   });
 
   describe('human_rejection', () => {

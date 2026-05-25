@@ -19,21 +19,11 @@ scenarios:
     then:
       - "pending candidates, active memories, selected details, usage history, and analytics are stored separately"
       - "candidate events update the store without dropping existing memory entries"
-required_facts:
-  - id: fact-memory-response-decode
-    proves:
+required_facts: []
+human_review:
+  - id: review-memory-desktop-client-local-swift
+    covers:
       - swift-decodes-memory-contracts
-    kind: unit-test
-    artifact:
-      path: packages/desktop/Tests/AutopodClientTests/MemoryResponseTests.swift
-      change: create
-    command: cd packages/desktop && swift test --filter MemoryResponseTests
-  - id: fact-memory-store-state
-    proves:
       - memory-store-loads-workbench-state
-    kind: unit-test
-    artifact:
-      path: packages/desktop/Tests/AutopodClientTests/MemoryStoreTests.swift
-      change: create
-    command: cd packages/desktop && swift test --filter MemoryStoreTests
-human_review: []
+    criterion: "On a macOS/Xcode-capable machine, verify desktop response decoding and MemoryStore state handling for legacy and extended memories, candidates, evidence, usage, analytics, and candidate events."
+    reason: "Autopod-self required facts run in a Linux pod, while desktop Swift tests require a macOS/Xcode-capable environment."

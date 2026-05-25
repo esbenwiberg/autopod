@@ -10,24 +10,15 @@ scenarios:
     then:
       - "a neutral Advisory QA chip appears after Review and opens an advisory-only panel"
       - "validation phase counts and pass/fail summary do not include Advisory QA"
-required_facts:
-  - id: fact-desktop-advisory-result-decodes
-    proves: [advisory-tab-neutral]
-    kind: unit-test
-    artifact:
-      path: packages/desktop/Tests/AutopodClientTests/PodMapperTests.swift
-      change: update
-    command: swift test --package-path packages/desktop --filter PodMapperTests
-  - id: fact-advisory-not-in-phase-count
-    proves: [advisory-tab-neutral]
-    kind: unit-test
-    artifact:
-      path: packages/desktop/Tests/AutopodUITests/ValidationAdvisoryQATests.swift
-      change: create
-    command: swift test --package-path packages/desktop --filter ValidationAdvisoryQATests
+required_facts: []
 human_review:
   - id: review-advisory-tab-visual-neutrality
     covers:
       - advisory-tab-neutral
     criterion: "The Advisory QA chip reads as a neutral tab after Review, not as a failed or passing validation gate."
     reason: "The intended visual affordance is a judgment call that unit tests cannot honestly prove."
+  - id: review-advisory-tab-local-swift
+    covers:
+      - advisory-tab-neutral
+    criterion: "On a macOS/Xcode-capable machine, verify advisory result decoding and model-level exclusion from validation phase counts."
+    reason: "Autopod-self required facts run in a Linux pod, while desktop Swift tests require a macOS/Xcode-capable environment."

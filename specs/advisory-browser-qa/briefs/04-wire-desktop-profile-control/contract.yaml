@@ -9,19 +9,10 @@ scenarios:
       - "they view advisory browser QA settings"
     then:
       - "they can choose auto/inherit, enabled, or disabled without clobbering inherited defaults"
-required_facts:
-  - id: fact-desktop-profile-decodes-advisory-setting
-    proves: [desktop-profile-setting-visible]
-    kind: unit-test
-    artifact:
-      path: packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift
-      change: update
-    command: swift test --package-path packages/desktop --filter AutopodClientTests
-  - id: fact-desktop-profile-patch-emits-setting
-    proves: [desktop-profile-setting-visible]
-    kind: unit-test
-    artifact:
-      path: packages/desktop/Tests/AutopodClientTests/ProfileMapperTests.swift
-      change: create
-    command: swift test --package-path packages/desktop --filter ProfileMapperTests
-human_review: []
+required_facts: []
+human_review:
+  - id: review-desktop-profile-control-local-swift
+    covers:
+      - desktop-profile-setting-visible
+    criterion: "On a macOS/Xcode-capable machine, verify desktop profile decode and patch mapping so advisory browser QA can be set to auto/inherit, enabled, or disabled without clobbering inherited defaults."
+    reason: "Autopod-self required facts run in a Linux pod, while desktop Swift tests require a macOS/Xcode-capable environment."

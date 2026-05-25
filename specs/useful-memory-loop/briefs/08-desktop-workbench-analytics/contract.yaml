@@ -21,21 +21,11 @@ scenarios:
       - "the card shows a lightweight memory-loop health signal"
       - "the right pane shows usage counts and repeated-pain deltas"
       - "candidate approval/edit controls remain only in the Memory workbench"
-required_facts:
-  - id: fact-memory-workbench-ui-state
-    proves:
+required_facts: []
+human_review:
+  - id: review-memory-workbench-local-swift
+    covers:
       - memory-workbench-surfaces-evidence
-    kind: unit-test
-    artifact:
-      path: packages/desktop/Tests/AutopodUITests/MemoryWorkbenchTests.swift
-      change: create
-    command: cd packages/desktop && swift test --filter MemoryWorkbenchTests
-  - id: fact-memory-analytics-wiring
-    proves:
       - analytics-memory-card-routes
-    kind: unit-test
-    artifact:
-      path: packages/desktop/Tests/AutopodClientTests/AnalyticsWiringTests.swift
-      change: update
-    command: cd packages/desktop && swift test --filter AnalyticsWiringTests
-human_review: []
+    criterion: "On a macOS/Xcode-capable machine, verify Memory workbench UI state, candidate/detail evidence rendering, Memory Analytics card selection, and right-pane drill routing."
+    reason: "Autopod-self required facts run in a Linux pod, while desktop Swift tests require a macOS/Xcode-capable environment."

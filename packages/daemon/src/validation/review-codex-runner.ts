@@ -68,12 +68,12 @@ export async function runCodexReview(config: CodexReviewConfig): Promise<{ stdou
     codexCommand,
     'status=$?',
     'if [ "$status" -ne 0 ]; then',
-    'echo "codex review failed (exit $status)"',
-    `tail -c 4000 ${shellQuote(logPath)} 2>/dev/null || true`,
-    'exit "$status"',
+    '  echo "codex review failed (exit $status)"',
+    `  tail -c 4000 ${shellQuote(logPath)} 2>/dev/null || true`,
+    '  exit "$status"',
     'fi',
     `cat ${shellQuote(outputPath)}`,
-  ].join('; ');
+  ].join('\n');
 
   try {
     const result = await config.containerManager.execInContainer(
