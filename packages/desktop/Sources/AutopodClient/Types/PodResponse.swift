@@ -7,20 +7,12 @@ public struct PodConfigResponse: Codable, Sendable {
   public var agentMode: String         // "auto" | "interactive"
   public var output: String            // "pr" | "branch" | "artifact" | "none"
   public var validate: Bool
-  public var advisoryBrowserQaEnabled: Bool?
   public var promotable: Bool
 
-  public init(
-    agentMode: String,
-    output: String,
-    validate: Bool,
-    advisoryBrowserQaEnabled: Bool? = nil,
-    promotable: Bool
-  ) {
+  public init(agentMode: String, output: String, validate: Bool, promotable: Bool) {
     self.agentMode = agentMode
     self.output = output
     self.validate = validate
-    self.advisoryBrowserQaEnabled = advisoryBrowserQaEnabled
     self.promotable = promotable
   }
 
@@ -29,12 +21,11 @@ public struct PodConfigResponse: Codable, Sendable {
     agentMode = try c.decode(String.self, forKey: .agentMode)
     output = try c.decode(String.self, forKey: .output)
     validate = try decodeBoolOrInt(c, key: .validate)
-    advisoryBrowserQaEnabled = try c.decodeIfPresent(Bool.self, forKey: .advisoryBrowserQaEnabled)
     promotable = try decodeBoolOrInt(c, key: .promotable)
   }
 
   private enum CodingKeys: String, CodingKey {
-    case agentMode, output, validate, advisoryBrowserQaEnabled, promotable
+    case agentMode, output, validate, promotable
   }
 }
 
@@ -43,20 +34,17 @@ public struct PodConfigRequest: Codable, Sendable {
   public var agentMode: String?
   public var output: String?
   public var validate: Bool?
-  public var advisoryBrowserQaEnabled: Bool?
   public var promotable: Bool?
 
   public init(
     agentMode: String? = nil,
     output: String? = nil,
     validate: Bool? = nil,
-    advisoryBrowserQaEnabled: Bool? = nil,
     promotable: Bool? = nil
   ) {
     self.agentMode = agentMode
     self.output = output
     self.validate = validate
-    self.advisoryBrowserQaEnabled = advisoryBrowserQaEnabled
     self.promotable = promotable
   }
 }

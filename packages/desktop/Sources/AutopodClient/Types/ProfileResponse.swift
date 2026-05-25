@@ -61,7 +61,6 @@ public struct ProfileResponse: Codable, Sendable {
   public var issueWatcherLabelPrefix: String?
   public var branchPrefix: String?
   public var hasWebUi: Bool?
-  public var advisoryBrowserQaEnabled: Bool?
   public var tokenBudget: Int?
   public var tokenBudgetPolicy: String?
   public var tokenBudgetWarnAt: Double?
@@ -146,7 +145,6 @@ public struct ProfileResponse: Codable, Sendable {
     issueWatcherLabelPrefix = try c.decodeIfPresent(String.self, forKey: .issueWatcherLabelPrefix)
     branchPrefix = try c.decodeIfPresent(String.self, forKey: .branchPrefix)
     hasWebUi = try c.decodeIfPresent(Bool.self, forKey: .hasWebUi)
-    advisoryBrowserQaEnabled = try c.decodeIfPresent(Bool.self, forKey: .advisoryBrowserQaEnabled)
     tokenBudget = try c.decodeIfPresent(Int.self, forKey: .tokenBudget)
     tokenBudgetPolicy = try c.decodeIfPresent(String.self, forKey: .tokenBudgetPolicy)
     tokenBudgetWarnAt = try c.decodeIfPresent(Double.self, forKey: .tokenBudgetWarnAt)

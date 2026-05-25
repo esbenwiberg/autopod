@@ -62,9 +62,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         console.log(`${chalk.bold('Model:')}      ${data.defaultModel}`);
         console.log(`${chalk.bold('Runtime:')}    ${data.defaultRuntime}`);
         console.log(`${chalk.bold('Max retries:')} ${data.maxValidationAttempts}`);
-        console.log(
-          `${chalk.bold('Advisory browser QA:')} ${formatTriState(data.advisoryBrowserQaEnabled)}`,
-        );
         if (data.extends) {
           console.log(`${chalk.bold('Extends:')}    ${data.extends}`);
         }
@@ -147,7 +144,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         healthTimeout: 120,
         smokePages: [{ path: '/' }],
         maxValidationAttempts: 3,
-        advisoryBrowserQaEnabled: null,
         defaultModel: 'opus',
         defaultRuntime: 'claude',
         customInstructions: null,
@@ -213,20 +209,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       const parsed = updateProfileSchema.parse(updates) as Partial<Profile>;
       await withSpinner('Updating profile...', () => client.updateProfile(name, parsed));
       console.log(chalk.green(`Profile "${name}" updated.`));
-    });
-
-  profile
-    .command('advisory-browser-qa <name> <mode>')
-    .description('Set advisory browser QA for a profile: enabled, disabled, or inherit')
-    .action(async (name: string, mode: string) => {
-      const value = parseTriState(mode, 'advisory-browser-qa');
-      const client = getClient();
-      await withSpinner('Updating advisory browser QA...', () =>
-        client.updateProfile(name, { advisoryBrowserQaEnabled: value }),
-      );
-      console.log(
-        chalk.green(`Profile "${name}" advisory browser QA set to ${formatTriState(value)}.`),
-      );
     });
 
   profile
@@ -799,34 +781,4 @@ function confirm(question: string): Promise<boolean> {
       resolve(answer.toLowerCase() === 'y');
     });
   });
-}
-
-function parseTriState(value: string, flagName: string): boolean | null {
-  switch (value.toLowerCase()) {
-    case 'enabled':
-    case 'enable':
-    case 'true':
-    case 'on':
-      return true;
-    case 'disabled':
-    case 'disable':
-    case 'false':
-    case 'off':
-      return false;
-    case 'inherit':
-    case 'inherited':
-    case 'null':
-      return null;
-    default:
-      console.error(
-        chalk.red(`Invalid ${flagName} mode: "${value}". Use enabled, disabled, or inherit.`),
-      );
-      process.exit(1);
-  }
-}
-
-function formatTriState(value: boolean | null | undefined): string {
-  if (value === true) return 'enabled';
-  if (value === false) return 'disabled';
-  return 'inherit';
 }

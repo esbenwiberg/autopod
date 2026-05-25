@@ -3328,16 +3328,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       // Resolve the effective PodOptions once, so both branch derivation and
       // DB insertion use the exact same values.
-      const profilePodDefaults =
-        profile.pod ?? (profile.outputMode ? podOptionsFromOutputMode(profile.outputMode) : null);
       const resolvedPod = resolvePodOptions(
-        {
-          ...(profilePodDefaults ?? {}),
-          advisoryBrowserQaEnabled:
-            profilePodDefaults?.advisoryBrowserQaEnabled ??
-            profile.advisoryBrowserQaEnabled ??
-            false,
-        },
+        profile.pod ?? (profile.outputMode ? podOptionsFromOutputMode(profile.outputMode) : null),
         request.options ??
           (request.outputMode ? podOptionsFromOutputMode(request.outputMode) : undefined),
       );

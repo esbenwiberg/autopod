@@ -95,7 +95,6 @@ interface TestProfileOverrides {
   adoPat?: string;
   adoPatExpiresAt?: string;
   prProvider?: 'github' | 'ado';
-  advisoryBrowserQaEnabled?: boolean | null;
 }
 
 function insertTestProfile(db: Database.Database, overrides: TestProfileOverrides | string = {}) {
@@ -109,15 +108,13 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       health_path, health_timeout, validation_pages, max_validation_attempts,
       default_model, default_runtime, escalation_config,
       private_registries, registry_pat, registry_pat_expires_at, branch_prefix,
-      pr_provider, github_pat, github_pat_expires_at, ado_pat, ado_pat_expires_at,
-      advisory_browser_qa_enabled
+      pr_provider, github_pat, github_pat_expires_at, ado_pat, ado_pat_expires_at
     ) VALUES (
       @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
       @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
       @defaultModel, @defaultRuntime, @escalationConfig,
       @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix,
-      @prProvider, @githubPat, @githubPatExpiresAt, @adoPat, @adoPatExpiresAt,
-      @advisoryBrowserQaEnabled
+      @prProvider, @githubPat, @githubPatExpiresAt, @adoPat, @adoPatExpiresAt
     )
   `).run({
     name,
@@ -148,12 +145,6 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     githubPatExpiresAt: opts.githubPatExpiresAt ?? null,
     adoPat: opts.adoPat ?? null,
     adoPatExpiresAt: opts.adoPatExpiresAt ?? null,
-    advisoryBrowserQaEnabled:
-      opts.advisoryBrowserQaEnabled === undefined || opts.advisoryBrowserQaEnabled === null
-        ? null
-        : opts.advisoryBrowserQaEnabled
-          ? 1
-          : 0,
   });
 }
 
@@ -337,10 +328,6 @@ function createTestContext(
         tokenBudgetPolicy: (row.token_budget_policy as 'soft' | 'hard' | null) ?? 'soft',
         maxBudgetExtensions: (row.max_budget_extensions as number | null) ?? null,
         workerProfile: (row.worker_profile as string) ?? null,
-        advisoryBrowserQaEnabled:
-          row.advisory_browser_qa_enabled === null || row.advisory_browser_qa_enabled === undefined
-            ? null
-            : Boolean(row.advisory_browser_qa_enabled),
         preflightConflictPolicy:
           (row.preflight_conflict_policy as 'warn' | 'block' | null | undefined) ?? null,
         createdAt: row.created_at as string,
@@ -425,32 +412,20 @@ describe('PodManager', () => {
       expect(pod.baseBranch).toBe('main');
     });
 
-    it('inherits advisory browser QA from the profile into pod options', () => {
-      const ctx = createTestContext(undefined, { advisoryBrowserQaEnabled: true });
-      const manager = createPodManager(ctx.deps);
-
-      const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Check advisory QA defaults' },
-        'user-1',
-      );
-
-      expect(pod.options.advisoryBrowserQaEnabled).toBe(true);
-    });
-
-    it('lets a per-pod advisory browser QA option override the profile default', () => {
-      const ctx = createTestContext(undefined, { advisoryBrowserQaEnabled: true });
+    it('accepts a per-pod advisory browser QA option', () => {
+      const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
 
       const pod = manager.createSession(
         {
           profileName: 'test-profile',
-          task: 'Check advisory QA override',
-          options: { agentMode: 'auto', output: 'pr', advisoryBrowserQaEnabled: false },
+          task: 'Check advisory QA option',
+          options: { agentMode: 'auto', output: 'pr', advisoryBrowserQaEnabled: true },
         },
         'user-1',
       );
 
-      expect(pod.options.advisoryBrowserQaEnabled).toBe(false);
+      expect(pod.options.advisoryBrowserQaEnabled).toBe(true);
     });
 
     it('defaults advisory browser QA off when neither profile nor pod opts in', () => {
@@ -2527,7 +2502,7 @@ describe('PodManager', () => {
     });
 
     it('passes the effective advisory browser QA setting to validation', async () => {
-      const ctx = createTestContext({ overall: 'pass' }, { advisoryBrowserQaEnabled: false });
+      const ctx = createTestContext({ overall: 'pass' });
       const manager = createPodManager(ctx.deps);
 
       const pod = manager.createSession(

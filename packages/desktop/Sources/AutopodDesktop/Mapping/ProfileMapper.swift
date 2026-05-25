@@ -61,7 +61,6 @@ public enum ProfileMapper {
       containerMemoryGb: response.containerMemoryGb,
       branchPrefix: response.branchPrefix ?? "autopod/",
       hasWebUi: response.hasWebUi ?? true,
-      advisoryBrowserQaEnabled: response.advisoryBrowserQaEnabled,
       tokenBudget: response.tokenBudget,
       tokenBudgetPolicy: TokenBudgetPolicy(rawValue: response.tokenBudgetPolicy ?? "soft") ?? .soft,
       tokenBudgetWarnAt: response.tokenBudgetWarnAt ?? 0.8,
@@ -102,13 +101,7 @@ public enum ProfileMapper {
         if let p = response.pod {
           let agent = AgentMode(rawValue: p.agentMode) ?? .auto
           let output = OutputTarget(rawValue: p.output) ?? .pr
-          return PodConfig(
-            agentMode: agent,
-            output: output,
-            validate: p.validate,
-            advisoryBrowserQaEnabled: p.advisoryBrowserQaEnabled,
-            promotable: p.promotable
-          )
+          return PodConfig(agentMode: agent, output: output, validate: p.validate, promotable: p.promotable)
         }
         return PodConfig.fromLegacy(response.outputMode ?? "pr")
       }(),
@@ -175,16 +168,6 @@ public enum ProfileMapper {
 
   /// Build a dictionary of fields the editor can round-trip safely.
   public static func mapToFields(_ profile: Profile) -> [String: Any] {
-    var podFields: [String: Any] = [
-      "agentMode": profile.pod.agentMode.rawValue,
-      "output": profile.pod.output.rawValue,
-      "validate": profile.pod.validate,
-      "promotable": profile.pod.promotable,
-    ]
-    if let advisoryBrowserQaEnabled = profile.pod.advisoryBrowserQaEnabled {
-      podFields["advisoryBrowserQaEnabled"] = advisoryBrowserQaEnabled
-    }
-
     var d: [String: Any] = [
       "repoUrl": profile.repoUrl,
       "defaultBranch": profile.defaultBranch,
@@ -203,7 +186,12 @@ public enum ProfileMapper {
       "testTimeout": profile.testTimeout,
       "prProvider": profile.prProvider.rawValue,
       "outputMode": profile.pod.legacyOutputMode.rawValue,
-      "pod": podFields,
+      "pod": [
+        "agentMode": profile.pod.agentMode.rawValue,
+        "output": profile.pod.output.rawValue,
+        "validate": profile.pod.validate,
+        "promotable": profile.pod.promotable,
+      ] as [String: Any],
       "smokePages": profile.smokePages.map { ["path": $0.path] },
       "privateRegistries": profile.privateRegistries.map {
         var r: [String: Any] = ["type": $0.type.rawValue, "url": $0.url]
@@ -245,7 +233,6 @@ public enum ProfileMapper {
     // Branch & web UI
     d["branchPrefix"] = profile.branchPrefix
     d["hasWebUi"] = profile.hasWebUi
-    d["advisoryBrowserQaEnabled"] = profile.advisoryBrowserQaEnabled ?? NSNull()
 
     // Token budget
     if let budget = profile.tokenBudget {

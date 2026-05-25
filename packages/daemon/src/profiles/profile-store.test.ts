@@ -345,78 +345,49 @@ describe('ProfileStore', () => {
     });
   });
 
-  describe('inheritance booleans (hasWebUi / advisoryBrowserQaEnabled / issueWatcherEnabled / trustedSource)', () => {
+  describe('inheritance booleans (hasWebUi / issueWatcherEnabled / trustedSource)', () => {
     // The Zod schema used to default these booleans to concrete values, so any
     // PATCH that omitted the field would silently re-stamp the column with the
     // default and clobber inheritance. Removing `.default(...)` fixes the regression.
 
     it('clears the override back to inherit when update() receives null', () => {
-      store.create({
-        ...validInput,
-        name: 'parent',
-        hasWebUi: false,
-        advisoryBrowserQaEnabled: true,
-        trustedSource: true,
-      });
+      store.create({ ...validInput, name: 'parent', hasWebUi: false, trustedSource: true });
       store.create({
         name: 'child',
         extends: 'parent',
         hasWebUi: true,
-        advisoryBrowserQaEnabled: false,
         issueWatcherEnabled: true,
         trustedSource: false,
       });
-      store.update('child', {
-        hasWebUi: null,
-        advisoryBrowserQaEnabled: null,
-        issueWatcherEnabled: null,
-        trustedSource: null,
-      });
+      store.update('child', { hasWebUi: null, issueWatcherEnabled: null, trustedSource: null });
       const raw = store.getRaw('child');
       expect(raw.hasWebUi).toBeNull();
-      expect(raw.advisoryBrowserQaEnabled).toBeNull();
       expect(raw.issueWatcherEnabled).toBeNull();
       expect(raw.trustedSource).toBeNull();
       const resolved = store.get('child');
       expect(resolved.hasWebUi).toBe(false); // inherited from parent
-      expect(resolved.advisoryBrowserQaEnabled).toBe(true); // inherited from parent
       expect(resolved.trustedSource).toBe(true); // inherited from parent
     });
 
     it('does not clobber inherited values on an unrelated PATCH', () => {
-      store.create({
-        ...validInput,
-        name: 'parent',
-        hasWebUi: false,
-        advisoryBrowserQaEnabled: true,
-        trustedSource: true,
-      });
+      store.create({ ...validInput, name: 'parent', hasWebUi: false, trustedSource: true });
       store.create({ name: 'child', extends: 'parent' });
       store.update('child', { customInstructions: 'tweak' });
       const raw = store.getRaw('child');
       expect(raw.hasWebUi).toBeNull();
-      expect(raw.advisoryBrowserQaEnabled).toBeNull();
       expect(raw.issueWatcherEnabled).toBeNull();
       expect(raw.trustedSource).toBeNull();
       const resolved = store.get('child');
       expect(resolved.hasWebUi).toBe(false);
-      expect(resolved.advisoryBrowserQaEnabled).toBe(true);
       expect(resolved.trustedSource).toBe(true);
     });
 
     it('preserves an explicit override when the user re-toggles the field', () => {
-      store.create({
-        ...validInput,
-        name: 'parent',
-        hasWebUi: true,
-        advisoryBrowserQaEnabled: false,
-        trustedSource: false,
-      });
+      store.create({ ...validInput, name: 'parent', hasWebUi: true, trustedSource: false });
       store.create({
         name: 'child',
         extends: 'parent',
         hasWebUi: false,
-        advisoryBrowserQaEnabled: true,
         issueWatcherEnabled: true,
         trustedSource: true,
       });
@@ -424,17 +395,8 @@ describe('ProfileStore', () => {
       store.update('child', { customInstructions: 'tweak' });
       const raw = store.getRaw('child');
       expect(raw.hasWebUi).toBe(false);
-      expect(raw.advisoryBrowserQaEnabled).toBe(true);
       expect(raw.issueWatcherEnabled).toBe(true);
       expect(raw.trustedSource).toBe(true);
-    });
-
-    it('persists advisoryBrowserQaEnabled on create and update', () => {
-      store.create({ ...validInput, advisoryBrowserQaEnabled: true });
-      expect(store.get('my-app').advisoryBrowserQaEnabled).toBe(true);
-
-      store.update('my-app', { advisoryBrowserQaEnabled: false });
-      expect(store.get('my-app').advisoryBrowserQaEnabled).toBe(false);
     });
   });
 

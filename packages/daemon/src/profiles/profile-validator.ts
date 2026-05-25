@@ -209,15 +209,6 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     errors.push('hasWebUi must be a boolean');
   }
 
-  // advisoryBrowserQaEnabled
-  if (
-    input.advisoryBrowserQaEnabled !== undefined &&
-    input.advisoryBrowserQaEnabled !== null &&
-    typeof input.advisoryBrowserQaEnabled !== 'boolean'
-  ) {
-    errors.push('advisoryBrowserQaEnabled must be a boolean or null');
-  }
-
   // Lint command
   const lintCommand = input.lintCommand;
   if (lintCommand !== null && lintCommand !== undefined && typeof lintCommand !== 'string') {

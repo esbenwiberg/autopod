@@ -315,10 +315,6 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
         maxBudgetExtensions: (row.max_budget_extensions as number | null) ?? null,
         pod: null,
         hasWebUi: row.has_web_ui !== undefined ? Boolean(row.has_web_ui) : true,
-        advisoryBrowserQaEnabled:
-          row.advisory_browser_qa_enabled === null || row.advisory_browser_qa_enabled === undefined
-            ? null
-            : Boolean(row.advisory_browser_qa_enabled),
         issueWatcherEnabled: !!(row.issue_watcher_enabled as number),
         issueWatcherLabelPrefix: (row.issue_watcher_label_prefix as string) ?? 'autopod',
         pimActivations: row.pim_activations ? JSON.parse(row.pim_activations as string) : null,
