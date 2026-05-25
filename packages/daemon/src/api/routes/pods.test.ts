@@ -20,6 +20,8 @@ import {
   createPodQueue,
   createPodRepository,
 } from '../../pods/index.js';
+import { createMemoryRepository } from '../../pods/memory-repository.js';
+import { createMemoryUsageRepository } from '../../pods/memory-usage-repository.js';
 import { createNudgeRepository } from '../../pods/nudge-repository.js';
 import { createQualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { createProfileStore } from '../../profiles/index.js';
@@ -602,6 +604,189 @@ describe('GET /pods/analytics/quality', () => {
     expect(body.summary.greenCount).toBe(1);
     expect(body.scores).toHaveLength(1);
     expect(body.scores[0].podId).toBe('q1');
+  });
+});
+
+// ── GET /pods/analytics/memory ───────────────────────────────────────────────
+
+describe('GET /pods/analytics/memory', () => {
+  let db: Database.Database;
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    db = createTestDb();
+
+    const profileStore = createProfileStore(db);
+    const eventRepo = createEventRepository(db);
+    const eventBus = createEventBus(eventRepo, logger);
+    const authModule = createMockAuthModule();
+    const podManager = {
+      createSession: vi.fn(),
+      listSessions: vi.fn().mockReturnValue([]),
+      getSessionStats: vi.fn().mockReturnValue({}),
+      getSession: vi.fn(),
+      sendMessage: vi.fn(),
+      getValidationHistory: vi.fn().mockReturnValue([]),
+      triggerValidation: vi.fn(),
+      revalidateSession: vi.fn(),
+      extendAttempts: vi.fn(),
+      extendPrAttempts: vi.fn(),
+      retryCreatePr: vi.fn(),
+      resumePod: vi.fn(),
+      kickPod: vi.fn(),
+      forceComplete: vi.fn(),
+      spawnFixPod: vi.fn(),
+      refreshNetworkPolicy: vi.fn(),
+    } as unknown as ReturnType<typeof createPodManager>;
+    const podBridge = {
+      createEscalation: vi.fn(),
+      resolveEscalation: vi.fn(),
+      getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getMaxAiCalls: vi.fn().mockReturnValue(5),
+      getAutoPauseThreshold: vi.fn().mockReturnValue(3),
+      getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
+      getReviewerModel: vi.fn().mockReturnValue('sonnet'),
+      callReviewerModel: vi.fn().mockResolvedValue('ok'),
+      incrementEscalationCount: vi.fn(),
+      reportPlan: vi.fn(),
+      reportProgress: vi.fn(),
+      consumeMessages: vi.fn().mockReturnValue({ hasMessage: false }),
+      executeAction: vi.fn(),
+      getAvailableActions: vi.fn().mockReturnValue([]),
+      writeFileInContainer: vi.fn(),
+      execInContainer: vi.fn(),
+    };
+
+    app = await createServer({
+      authModule,
+      podManager,
+      profileStore,
+      eventBus,
+      eventRepo,
+      podBridge,
+      pendingRequestsByPod: new Map(),
+      db,
+      logLevel: 'silent',
+      prettyLog: false,
+    });
+
+    db.prepare(
+      `INSERT INTO profiles (name, repo_url, build_command, start_command)
+       VALUES ('test-profile', 'https://github.com/org/repo', 'npm run build', 'npm start')`,
+    ).run();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    db.close();
+  });
+
+  function insertAnalyticsPod(id: string, reworkCount: number, prFixAttempts: number): void {
+    db.prepare(`
+      INSERT INTO pods (
+        id, profile_name, task, status, model, runtime, execution_target, branch,
+        user_id, max_validation_attempts, skip_validation,
+        output_mode, agent_mode, output_target, validate, promotable,
+        completed_at, rework_count, pr_fix_attempts, cost_usd
+      ) VALUES (
+        @id, 'test-profile', 'task', 'complete', 'claude-opus-4-7', 'claude', 'local', @id,
+        'user-1', 3, 0,
+        'pr', 'auto', 'pr', 1, 0,
+        datetime('now'), @reworkCount, @prFixAttempts, @costUsd
+      )
+    `).run({ id, reworkCount, prFixAttempts, costUsd: prFixAttempts + 0.1 });
+  }
+
+  it('rejects invalid days', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/memory?days=0',
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: 'invalid_days' });
+  });
+
+  it('returns an empty analytics cohort', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/memory?days=30',
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      days: 30,
+      summary: { selectedCount: 0, injectedCount: 0, readCount: 0, appliedCount: 0 },
+      impact: { cohortSize: 0, comparisonCohortSize: 0 },
+      topMemories: [],
+    });
+  });
+
+  it('returns positive analytics with selected, injected, read, and applied counts', async () => {
+    const memoryRepo = createMemoryRepository(db);
+    const usageRepo = createMemoryUsageRepository(db);
+    memoryRepo.insert({
+      id: 'mem-analytics',
+      scope: 'profile',
+      scopeId: 'test-profile',
+      path: '/gotchas/build.md',
+      content: 'Run the generator before validation.',
+      rationale: null,
+      kind: 'gotcha',
+      tags: [],
+      appliesWhen: null,
+      avoidWhen: null,
+      confidence: 0.8,
+      sourceEvidence: [],
+      impactSummary: 'Avoids validation failures.',
+      approved: true,
+      createdByPodId: null,
+    });
+    insertAnalyticsPod('with-memory', 0, 0);
+    insertAnalyticsPod('without-memory', 1, 1);
+    db.prepare(
+      `INSERT INTO pod_quality_scores (
+        pod_id, score, read_count, edit_count, read_edit_ratio, edits_without_prior_read,
+        user_interrupts, edit_churn_count, tells_count, pr_fix_attempts, validation_passed,
+        input_tokens, output_tokens, cost_usd, runtime, profile_name, model, final_status,
+        completed_at, computed_at
+      ) VALUES
+        ('with-memory', 90, 1, 1, 1, 0, 0, 0, 0, 0, 1, 100, 50, 0.1,
+         'claude', 'test-profile', 'claude-opus-4-7', 'complete', datetime('now'), datetime('now')),
+        ('without-memory', 70, 1, 1, 1, 0, 0, 0, 0, 1, 0, 100, 50, 1.1,
+         'claude', 'test-profile', 'claude-opus-4-7', 'complete', datetime('now'), datetime('now'))`,
+    ).run();
+    for (const [id, kind, outcome] of [
+      ['usage-selected', 'selected', null],
+      ['usage-injected', 'injected', null],
+      ['usage-read', 'read', null],
+      ['usage-applied', 'summary_reported', 'applied'],
+    ] as const) {
+      usageRepo.record({
+        id,
+        memoryId: 'mem-analytics',
+        podId: 'with-memory',
+        kind,
+        outcome,
+        reason: null,
+        relevanceReason: null,
+      });
+    }
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/memory?days=30',
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      summary: { selectedCount: 1, injectedCount: 1, readCount: 1, appliedCount: 1 },
+      impact: { cohortSize: 1, comparisonCohortSize: 1 },
+      topMemories: [{ memoryId: 'mem-analytics', selectedCount: 1, injectedCount: 1 }],
+    });
   });
 });
 

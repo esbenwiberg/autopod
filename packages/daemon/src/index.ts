@@ -689,6 +689,8 @@ const app = await createServer({
   actionRegistry,
   sessionTokenIssuer,
   memoryRepo,
+  memoryCandidateRepo,
+  memoryUsageRepo,
   pendingOverrideRepo,
   scheduledJobManager,
   safetyEventsRepo,

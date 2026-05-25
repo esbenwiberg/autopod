@@ -17,6 +17,25 @@ export interface MemoryCandidateRepository {
   existsForPod(podId: string): boolean;
   listPending(scopeId: string): MemoryCandidate[];
   list(scopeId: string, status?: MemoryCandidateStatus): MemoryCandidate[];
+  /** Edit a pending candidate before human approval. */
+  update(
+    id: string,
+    updates: Partial<
+      Pick<
+        MemoryCandidate,
+        | 'path'
+        | 'content'
+        | 'rationale'
+        | 'kind'
+        | 'tags'
+        | 'appliesWhen'
+        | 'avoidWhen'
+        | 'confidence'
+        | 'sourceEvidence'
+        | 'impactSummary'
+      >
+    >,
+  ): MemoryCandidate;
   /** Approve a pending candidate. Creates or updates a MemoryEntry. */
   approve(id: string, memoryRepo: MemoryRepository): MemoryCandidate;
   /** Reject a pending candidate. Retains row for audit. */
@@ -131,6 +150,44 @@ export function createMemoryCandidateRepository(db: Database.Database): MemoryCa
         )
         .all(params) as Record<string, unknown>[];
       return rows.map(rowToCandidate);
+    },
+
+    update(id, updates): MemoryCandidate {
+      const candidate = getOrThrow(db, id);
+      if (candidate.status !== 'pending') {
+        throw new Error(`Candidate ${id} is not pending (status: ${candidate.status})`);
+      }
+      const merged = { ...candidate, ...updates };
+      const now = new Date().toISOString();
+      db.prepare(
+        `UPDATE memory_candidates SET
+           path = @path,
+           content = @content,
+           rationale = @rationale,
+           kind = @kind,
+           tags = @tags,
+           applies_when = @appliesWhen,
+           avoid_when = @avoidWhen,
+           confidence = @confidence,
+           source_evidence = @sourceEvidence,
+           impact_summary = @impactSummary,
+           updated_at = @now
+         WHERE id = @id`,
+      ).run({
+        id,
+        path: merged.path,
+        content: merged.content,
+        rationale: merged.rationale,
+        kind: merged.kind,
+        tags: JSON.stringify(merged.tags ?? []),
+        appliesWhen: merged.appliesWhen ?? null,
+        avoidWhen: merged.avoidWhen ?? null,
+        confidence: merged.confidence,
+        sourceEvidence: JSON.stringify(merged.sourceEvidence ?? []),
+        impactSummary: merged.impactSummary,
+        now,
+      });
+      return { ...merged, updatedAt: now };
     },
 
     approve(id: string, memoryRepo: MemoryRepository): MemoryCandidate {

@@ -432,6 +432,10 @@ export interface MemoryAnalyticsResponse {
     fixAttemptDelta: number | null;
     escalationDelta: number | null;
     costDeltaUsd: number | null;
+    reworkDelta: number | null;
+    firstPassRateDelta: number | null;
+    /** Average completion-duration delta in hours. Negative means faster with memory. */
+    throughputDelta: number | null;
   };
   /** Top memories by usage, ordered by selectedCount DESC. */
   topMemories: Array<{

@@ -18,6 +18,7 @@ import {
 } from '../../pods/escalations-aggregator.js';
 import type { EventRepository } from '../../pods/event-repository.js';
 import type { PodManager } from '../../pods/index.js';
+import { computeMemoryEffectivenessAnalytics } from '../../pods/memory-effectiveness-aggregator.js';
 import { computeModelsAnalytics } from '../../pods/models-aggregator.js';
 import type { PendingOverrideRepository } from '../../pods/pending-override-repository.js';
 import type { PodRepository } from '../../pods/pod-repository.js';
@@ -385,6 +386,20 @@ export function podRoutes(
       return { error: 'days must be a positive integer <= 365', code: 'invalid_days' };
     }
     return computeModelsAnalytics(db, days);
+  });
+
+  // GET /pods/analytics/memory — evidence-only memory effectiveness card.
+  app.get('/pods/analytics/memory', async (request, reply) => {
+    if (!db) {
+      reply.status(503);
+      return { error: 'Memory analytics unavailable — db not wired' };
+    }
+    const days = parseDays(request.query as Record<string, unknown>);
+    if (days === null || days > 365) {
+      reply.status(400);
+      return { error: 'days must be a positive integer <= 365', code: 'invalid_days' };
+    }
+    return computeMemoryEffectivenessAnalytics(db, days);
   });
 
   // GET /pods/scores — persisted quality-score leaderboard / history
