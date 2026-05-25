@@ -51,7 +51,6 @@ public enum MemoryKind: Equatable, Sendable, Codable {
   case gotcha
   case workflow
   case dependency
-  case preference
   case reviewFeedback
   case other
   case unknown(String)
@@ -63,7 +62,6 @@ public enum MemoryKind: Equatable, Sendable, Codable {
     case "gotcha": self = .gotcha
     case "workflow": self = .workflow
     case "dependency": self = .dependency
-    case "preference": self = .preference
     case "review_feedback": self = .reviewFeedback
     case "other": self = .other
     default: self = .unknown(value)
@@ -81,7 +79,6 @@ public enum MemoryKind: Equatable, Sendable, Codable {
     case .gotcha: "gotcha"
     case .workflow: "workflow"
     case .dependency: "dependency"
-    case .preference: "preference"
     case .reviewFeedback: "review_feedback"
     case .other: "other"
     case .unknown(let value): value
