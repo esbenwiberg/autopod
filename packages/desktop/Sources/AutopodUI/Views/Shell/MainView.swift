@@ -422,6 +422,8 @@ public struct MainView: View {
                             return id
                         case .global:
                             return nil
+                        case .unknown:
+                            return id
                         }
                     },
                     profileNames: profileNames,

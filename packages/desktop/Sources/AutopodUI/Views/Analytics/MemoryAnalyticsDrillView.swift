@@ -177,7 +177,8 @@ struct MemoryAnalyticsDrillView: View {
     }
 
     private func deltaColor(value: Double?, good: Bool) -> Color {
-        guard value != nil else { return Color.secondary }
+        guard let value else { return Color.secondary }
+        guard value != 0 else { return Color.secondary }
         return good ? Color.green : Color.orange
     }
 

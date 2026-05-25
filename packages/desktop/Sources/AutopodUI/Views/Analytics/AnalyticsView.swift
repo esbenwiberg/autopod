@@ -256,7 +256,7 @@ public struct AnalyticsView: View {
 
     private var memoryCardValue: String {
         guard let m = memoryData else { return "—" }
-        return "\(m.summary.appliedCount)/\(max(m.summary.injectedCount, 1))"
+        return "\(m.summary.appliedCount)/\(m.summary.injectedCount)"
     }
 
     private var memoryCardDelta: AnalyticsCardDelta? {

@@ -1,4 +1,5 @@
 import Testing
+@testable import AutopodClient
 @testable import AutopodUI
 
 // MARK: - Toggle-off semantics
@@ -68,6 +69,10 @@ import Testing
 
 @Test func analyticsRightPaneRoutesMemoryDrill() {
     #expect(AnalyticsRightPaneView.drillRoute(for: .memory) == "memory")
+}
+
+@Test func unknownMemoryScopePreservesWireValue() {
+    #expect(MemoryScope.unknown("team").label == "team")
 }
 
 // MARK: - filterPods for analytics
