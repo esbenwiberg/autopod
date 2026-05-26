@@ -48,6 +48,7 @@ public struct ValidationTab: View {
   @State private var factWaiverPopoverFactId: String? = nil
   @State private var factWaiverReason: String = ""
   @State private var approvingFactWaiverIds: Set<String> = []
+  @State private var expandedFactOutputIds: Set<String> = []
   @State private var overridePopoverFindingId: String? = nil
   @State private var overrideAction: String = "dismiss"
   @State private var overrideReason: String = ""
@@ -1569,8 +1570,31 @@ public struct ValidationTab: View {
       }
     }
     if let output = factCommandOutput(check) {
-      outputBlock(title: "Fact Error Output", text: output, expanded: .constant(false), color: .red)
+      factCommandOutputBlock(check, text: output)
     }
+  }
+
+  @ViewBuilder
+  private func factCommandOutputBlock(_ check: FactCheckDetail, text: String) -> some View {
+    let color = factCommandOutputColor(check)
+    DisclosureGroup(isExpanded: factOutputExpandedBinding(for: check.factId)) {
+      ScrollView([.vertical, .horizontal], showsIndicators: true) {
+        Text(text)
+          .font(.system(.caption2, design: .monospaced))
+          .foregroundStyle(color.opacity(0.9))
+          .textSelection(.enabled)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .frame(maxHeight: 300)
+      .padding(8)
+      .background(Color.black.opacity(0.3))
+      .clipShape(RoundedRectangle(cornerRadius: 6))
+    } label: {
+      Text("Fact Command Output")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+    }
+    .tint(color)
   }
 
   private func factCommandOutput(_ check: FactCheckDetail) -> String? {
@@ -1583,6 +1607,30 @@ public struct ValidationTab: View {
     if !stderr.isEmpty { return stderr }
     if !stdout.isEmpty { return stdout }
     return nil
+  }
+
+  private func factCommandOutputColor(_ check: FactCheckDetail) -> Color {
+    switch check.status {
+    case "fail", "pending_human":
+      return .red
+    case "pass", "waived", "replaced":
+      return .blue
+    default:
+      return check.passed ? .blue : .red
+    }
+  }
+
+  private func factOutputExpandedBinding(for factId: String) -> Binding<Bool> {
+    Binding(
+      get: { expandedFactOutputIds.contains(factId) },
+      set: { expanded in
+        if expanded {
+          expandedFactOutputIds.insert(factId)
+        } else {
+          expandedFactOutputIds.remove(factId)
+        }
+      }
+    )
   }
 
   @ViewBuilder
