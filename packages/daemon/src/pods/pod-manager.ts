@@ -5583,19 +5583,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const runtime = runtimeRegistry.get(pod.runtime);
         let events: AsyncIterable<AgentEvent>;
 
+        // Codex and Copilot need the generated Autopod instructions passed through the
+        // runtime adapter. Claude reads the same file via --append-system-prompt-file.
+        let runtimeInstructions: string | undefined =
+          pod.runtime === 'codex' || pod.runtime === 'copilot' ? systemInstructions : undefined;
+
         // For Copilot, defensively merge the repo's own instructions (if any) with ours.
         // We can't be sure Copilot CLI reads both $COPILOT_HOME/copilot-instructions.md
         // and .github/copilot-instructions.md, so prepend the repo's file to be safe.
-        let copilotInstructions: string | undefined;
         if (pod.runtime === 'copilot') {
-          copilotInstructions = systemInstructions;
           try {
             const repoInstructions = await containerManager.readFile(
               containerId,
               '/workspace/.github/copilot-instructions.md',
             );
             if (repoInstructions.trim()) {
-              copilotInstructions = `${repoInstructions}\n\n---\n\n${systemInstructions}`;
+              runtimeInstructions = `${repoInstructions}\n\n---\n\n${systemInstructions}`;
               logger.info(
                 { podId },
                 'Merged repo copilot-instructions.md with autopod system instructions',
@@ -5619,7 +5622,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             model: pod.model,
             workDir: '/workspace',
             containerId,
-            customInstructions: copilotInstructions,
+            customInstructions: runtimeInstructions,
             env: secretEnv,
             mcpServers,
           });
@@ -5655,7 +5658,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const podModel = pod.model;
           const podRef = pod;
           const mcpServersRef = mcpServers;
-          const customInstructionsRef = copilotInstructions;
+          const customInstructionsRef = runtimeInstructions;
           const secretEnvRef = secretEnv;
           const loggerRef = logger;
           events = (async function* resumeWithFallback() {
@@ -5707,7 +5710,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             model: pod.model,
             workDir: '/workspace',
             containerId,
-            customInstructions: copilotInstructions,
+            customInstructions: runtimeInstructions,
             env: secretEnv,
             mcpServers,
           });
@@ -5719,7 +5722,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             model: pod.model,
             workDir: '/workspace',
             containerId,
-            customInstructions: copilotInstructions,
+            customInstructions: runtimeInstructions,
             env: secretEnv,
             mcpServers,
           });

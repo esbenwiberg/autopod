@@ -6045,6 +6045,9 @@ describe('worker startup diagnostics', () => {
       'Starting worker: provider=openai, runtime=codex, model=auto',
     );
     expect(runtime.spawn).toHaveBeenCalled();
+    const spawnConfig = vi.mocked(runtime.spawn).mock.calls[0]?.[0];
+    expect(spawnConfig?.customInstructions).toContain('report_plan');
+    expect(spawnConfig?.customInstructions).toContain('report_task_summary');
   });
 
   it('fails before spawn when the runtime CLI is missing from the image', async () => {

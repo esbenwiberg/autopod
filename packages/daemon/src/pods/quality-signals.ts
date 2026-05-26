@@ -85,7 +85,7 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
         const p = extractPath(tool.input);
         if (p) readPaths.add(p);
       }
-      if (tool.tool === 'validate_in_browser' && tool.output) {
+      if (toolBaseName(tool.tool) === 'validate_in_browser' && tool.output) {
         browserCalls += 1;
         try {
           const parsed = JSON.parse(tool.output) as {
@@ -182,6 +182,12 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
     score: persisted?.score ?? null,
     model: persisted?.model ?? pod.model,
   };
+}
+
+function toolBaseName(toolName: string): string {
+  if (!toolName.startsWith('mcp__')) return toolName;
+  const separator = toolName.indexOf('__', 'mcp__'.length);
+  return separator === -1 ? toolName : toolName.slice(separator + 2);
 }
 
 function extractPath(input: Record<string, unknown>): string | null {

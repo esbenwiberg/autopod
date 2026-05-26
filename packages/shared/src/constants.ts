@@ -23,7 +23,8 @@ export const CONTAINER_HOME_DIR = '/home/autopod';
 /**
  * Path inside the container where autopod writes its generated system instructions.
  * Deliberately outside `/workspace` so it never overwrites the repo's own CLAUDE.md.
- * Claude CLI reads this via `--append-system-prompt-file`; Copilot via `customInstructions`.
+ * Claude CLI reads this via `--append-system-prompt-file`; Codex/Copilot via
+ * runtime-specific `customInstructions` handling.
  */
 export const AUTOPOD_INSTRUCTIONS_PATH = '/home/autopod/.autopod/system-instructions.md';
 

@@ -91,6 +91,38 @@ function parseJsonObject(raw: unknown): Record<string, unknown> | null {
   }
 }
 
+function mcpToolName(invocation: Record<string, unknown>): string {
+  const rawTool =
+    typeof invocation.tool === 'string'
+      ? invocation.tool
+      : typeof invocation.name === 'string'
+        ? invocation.name
+        : 'mcp_tool';
+  if (rawTool.startsWith('mcp__')) return rawTool;
+
+  const server = typeof invocation.server === 'string' ? invocation.server : '';
+  return server ? `mcp__${server}__${rawTool}` : rawTool;
+}
+
+function mcpInput(
+  msg: { [key: string]: unknown },
+  invocation: Record<string, unknown>,
+): Record<string, unknown> {
+  const input: Record<string, unknown> = { call_id: msg.call_id };
+  if (typeof invocation.server === 'string') input.server = invocation.server;
+
+  const args = parseJsonObject(invocation.arguments ?? msg.arguments);
+  if (args) {
+    Object.assign(input, args);
+  } else if (invocation.arguments !== undefined) {
+    input.arguments = invocation.arguments;
+  } else if (msg.arguments !== undefined) {
+    input.arguments = msg.arguments;
+  }
+
+  return input;
+}
+
 function contentToString(content: unknown): string | undefined {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return undefined;
@@ -283,38 +315,22 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
 
     case 'mcp_tool_call_begin': {
       const inv = (msg.invocation as Record<string, unknown> | undefined) ?? {};
-      const toolName =
-        typeof inv.tool === 'string'
-          ? inv.tool
-          : typeof inv.name === 'string'
-            ? inv.name
-            : 'mcp_tool';
       return {
         type: 'tool_use',
         timestamp: ts,
-        tool: toolName,
-        input: {
-          call_id: msg.call_id,
-          server: inv.server,
-          arguments: inv.arguments,
-        },
+        tool: mcpToolName(inv),
+        input: mcpInput(msg, inv),
       };
     }
 
     case 'mcp_tool_call_end': {
       const inv = (msg.invocation as Record<string, unknown> | undefined) ?? {};
-      const toolName =
-        typeof inv.tool === 'string'
-          ? inv.tool
-          : typeof inv.name === 'string'
-            ? inv.name
-            : 'mcp_tool';
       const result = msg.result;
       return {
         type: 'tool_use',
         timestamp: ts,
-        tool: toolName,
-        input: { call_id: msg.call_id },
+        tool: mcpToolName(inv),
+        input: mcpInput(msg, inv),
         output: truncate(
           typeof result === 'string' ? result : JSON.stringify(result),
           MAX_OUTPUT_LEN,

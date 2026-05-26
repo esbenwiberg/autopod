@@ -102,11 +102,11 @@ function escalation(id: string, type: EscalationType): EscalationRequest {
   };
 }
 
-function validateInBrowserCall(output: string): AgentActivityEvent {
+function validateInBrowserCall(output: string, tool = 'validate_in_browser'): AgentActivityEvent {
   const event: AgentToolUseEvent = {
     type: 'tool_use',
     timestamp: new Date().toISOString(),
-    tool: 'validate_in_browser',
+    tool,
     input: { url: 'http://localhost:3000', checks: ['something'] },
     output,
   };
@@ -420,6 +420,24 @@ describe('computeQualitySignals', () => {
         calls: 1,
         totalChecks: 0,
         passedChecks: 0,
+      });
+    });
+
+    it('recognizes Codex server-qualified MCP validate_in_browser events', () => {
+      podRepo.insert(basePod());
+      eventRepo.insert(
+        validateInBrowserCall(
+          JSON.stringify({ passed: true, results: [{ check: 'a', passed: true }] }),
+          'mcp__escalation__validate_in_browser',
+        ),
+      );
+
+      const signals = computeQualitySignals(POD_ID, deps);
+
+      expect(signals.browserChecks).toEqual({
+        calls: 1,
+        totalChecks: 1,
+        passedChecks: 1,
       });
     });
   });

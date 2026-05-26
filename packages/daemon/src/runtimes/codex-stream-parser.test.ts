@@ -217,7 +217,7 @@ describe('CodexStreamParser', () => {
       expect(((e as any).output as string).length).toBeLessThanOrEqual(2001);
     });
 
-    it('maps mcp_tool_call_begin using the invocation tool name', () => {
+    it('maps mcp_tool_call_begin using the mcp server-qualified tool name', () => {
       const e = CodexStreamParser.mapEvent(
         {
           id: 's',
@@ -231,9 +231,24 @@ describe('CodexStreamParser', () => {
       );
       expect(e).toMatchObject({
         type: 'tool_use',
-        tool: 'ask_human',
-        input: expect.objectContaining({ call_id: 'mcp-1', server: 'autopod' }),
+        tool: 'mcp__autopod__ask_human',
+        input: expect.objectContaining({ call_id: 'mcp-1', server: 'autopod', q: 'go?' }),
       });
+    });
+
+    it('preserves already-qualified mcp tool names', () => {
+      const e = CodexStreamParser.mapEvent(
+        {
+          id: 's',
+          msg: {
+            type: 'mcp_tool_call_begin',
+            call_id: 'mcp-1',
+            invocation: { server: 'serena', tool: 'mcp__serena__find_symbol' },
+          },
+        },
+        'pod-1',
+      );
+      expect(e).toMatchObject({ type: 'tool_use', tool: 'mcp__serena__find_symbol' });
     });
 
     it('maps mcp_tool_call_end with stringified result', () => {
@@ -251,7 +266,7 @@ describe('CodexStreamParser', () => {
       );
       expect(e).toMatchObject({
         type: 'tool_use',
-        tool: 'ask_human',
+        tool: 'mcp__autopod__ask_human',
       });
       // biome-ignore lint/suspicious/noExplicitAny: introspecting event in test
       expect((e as any).output).toContain('yes');

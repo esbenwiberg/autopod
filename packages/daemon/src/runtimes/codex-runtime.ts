@@ -18,6 +18,10 @@ import {
 /** Path inside the container where Codex reads its config (including MCP servers). */
 const MCP_CONFIG_PATH = `${CONTAINER_HOME_DIR}/.codex/config.toml`;
 const EXTERNAL_SANDBOX_ARGS = ['--dangerously-bypass-approvals-and-sandbox'] as const;
+// Codex defaults MCP tool calls to 120s. Autopod tools can legitimately block
+// for human approval or long deploy scripts, so give the client a ceiling just
+// above the daemon's default 1h human-response timeout.
+const CODEX_MCP_TOOL_TIMEOUT_SEC = 3900;
 
 const TOML_BARE_KEY = /^[A-Za-z0-9_-]+$/;
 const ROLLOUT_FILE_RE = /^rollout-.*\.jsonl$/;
@@ -74,6 +78,8 @@ export class CodexRuntime implements Runtime {
   readonly codexSessionIds = new Map<string, string>();
   /** Maps autopod podId → MCP servers so resume() can re-write the config into the new container. */
   private mcpServersBySession = new Map<string, SpawnConfig['mcpServers']>();
+  /** Maps autopod podId → generated Autopod instructions for no-session resume fallback. */
+  private customInstructionsBySession = new Map<string, string>();
   private logger: Logger;
   private containerManager: ContainerManager;
   private podRepo: PodRepository;
@@ -89,6 +95,11 @@ export class CodexRuntime implements Runtime {
     // from disk. Codex reads `~/.codex/config.toml` automatically — no flag required.
     await this.writeMcpConfig(config.containerId, config.mcpServers);
     this.mcpServersBySession.set(config.podId, config.mcpServers);
+    if (config.customInstructions?.trim()) {
+      this.customInstructionsBySession.set(config.podId, config.customInstructions);
+    } else {
+      this.customInstructionsBySession.delete(config.podId);
+    }
 
     const args = this.buildSpawnArgs(config);
     const taskIndex = args.length - 1;
@@ -185,9 +196,12 @@ export class CodexRuntime implements Runtime {
     const sessionId =
       this.codexSessionIds.get(podId) ?? this.podRepo.getOrThrow(podId).codexSessionId;
 
+    const prompt = sessionId
+      ? message
+      : composePrompt(message, this.customInstructionsBySession.get(podId));
     const args = sessionId
-      ? ['exec', 'resume', sessionId, ...EXTERNAL_SANDBOX_ARGS, '--json', message]
-      : ['exec', ...EXTERNAL_SANDBOX_ARGS, '--json', message];
+      ? ['exec', 'resume', sessionId, ...EXTERNAL_SANDBOX_ARGS, '--json', prompt]
+      : ['exec', ...EXTERNAL_SANDBOX_ARGS, '--json', prompt];
 
     // Redact the message from logs; Codex options must stay before the prompt.
     const messageIndex = args.length - 1;
@@ -261,6 +275,7 @@ export class CodexRuntime implements Runtime {
     await handle.kill();
     this.handles.delete(podId);
     this.mcpServersBySession.delete(podId);
+    this.customInstructionsBySession.delete(podId);
   }
 
   async suspend(podId: string): Promise<void> {
@@ -290,7 +305,11 @@ export class CodexRuntime implements Runtime {
     if (config.model !== 'auto') {
       args.push('--model', config.model);
     }
-    args.push(...EXTERNAL_SANDBOX_ARGS, '--json', config.task);
+    args.push(
+      ...EXTERNAL_SANDBOX_ARGS,
+      '--json',
+      composePrompt(config.task, config.customInstructions),
+    );
     return args;
   }
 
@@ -404,6 +423,7 @@ export class CodexRuntime implements Runtime {
           lines.push(`http_headers = ${tomlInlineTable(server.headers)}`);
         }
       }
+      lines.push(`tool_timeout_sec = ${CODEX_MCP_TOOL_TIMEOUT_SEC.toFixed(1)}`);
       sections.push(lines.join('\n'));
     }
 
@@ -413,6 +433,22 @@ export class CodexRuntime implements Runtime {
       `${sections.join('\n\n')}\n`,
     );
   }
+}
+
+function composePrompt(task: string, customInstructions?: string): string {
+  const instructions = customInstructions?.trim();
+  if (!instructions) return task;
+  return [
+    instructions,
+    '',
+    '---',
+    '',
+    '## Current Codex Turn',
+    '',
+    'Follow the Autopod workflow requirements above while handling this current request:',
+    '',
+    task,
+  ].join('\n');
 }
 
 function dedupeKey(event: AgentEvent): string {

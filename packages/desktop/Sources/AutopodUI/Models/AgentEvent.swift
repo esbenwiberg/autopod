@@ -82,6 +82,25 @@ public enum AgentEventType: String, Sendable {
 // MARK: - Event
 
 public struct AgentEvent: Identifiable, Sendable {
+    private static let plainMCPToolNames: Set<String> = [
+        "ask_human", "ask_ai", "report_blocker", "report_plan", "report_progress",
+        "report_task_summary", "check_messages", "request_credential",
+        "validate_in_browser", "validate_locally", "pre_submit_review",
+        "memory_list", "memory_read", "memory_search", "memory_suggest",
+        "trigger_revalidation",
+        "activate_pim_group", "deactivate_pim_group", "list_pim_activations",
+        "activate_pim_role", "deactivate_pim_role",
+        "run_deploy_script",
+        "query_logs", "read_app_insights", "read_container_logs",
+        "read_issue", "search_issues", "read_issue_comments",
+        "read_pr", "read_pr_comments", "read_pr_diff",
+        "read_file", "search_code",
+        "ado_read_pr", "ado_read_pr_threads", "ado_read_pr_changes",
+        "ado_read_file", "ado_search_code",
+        "read_workitem", "search_workitems",
+        "ado_run_test_pipeline", "ado_get_test_run_status",
+    ]
+
     public let id: Int
     public let timestamp: Date
     public let type: AgentEventType
@@ -108,7 +127,8 @@ public struct AgentEvent: Identifiable, Sendable {
     }
 
     public var isMCPToolCall: Bool {
-        type == .toolUse && (toolName?.hasPrefix("mcp__") ?? false)
+        guard type == .toolUse, let toolName else { return false }
+        return toolName.hasPrefix("mcp__") || Self.plainMCPToolNames.contains(toolName)
     }
 
     public var displayIcon: String {

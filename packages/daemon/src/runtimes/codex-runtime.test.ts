@@ -119,6 +119,25 @@ describe('CodexRuntime', () => {
         'Fix the bug',
       ]);
     });
+
+    it('prefixes the Codex prompt with Autopod custom instructions when provided', () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private method in test
+      const args = (runtime as any).buildSpawnArgs({
+        podId: 'abc123',
+        task: 'Fix the bug',
+        model: 'auto',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        customInstructions: '# Autopod Pod\n\nCall report_plan first.',
+        env: {},
+      });
+      expect(args.at(-1)).toContain('# Autopod Pod');
+      expect(args.at(-1)).toContain('## Current Codex Turn');
+      expect(args.at(-1)).toContain('Fix the bug');
+    });
   });
 
   describe('spawn', () => {
@@ -598,6 +617,32 @@ describe('CodexRuntime', () => {
       expect(events[0]?.type).toBe('complete');
     });
 
+    it('prefixes no-session resume prompts with stored Autopod instructions', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo(null));
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private map in test
+      (runtime as any).customInstructionsBySession.set('sess-1', '# Autopod Pod');
+
+      setTimeout(() => {
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(0);
+      }, 10);
+
+      for await (const _ of runtime.resume(
+        'sess-1',
+        'Fix the validation errors',
+        'container-123',
+      )) {
+        /* consume */
+      }
+
+      const execArgs = (cm.execStreaming as ReturnType<typeof vi.fn>).mock
+        .calls[0]?.[1] as string[];
+      expect(execArgs.at(-1)).toContain('# Autopod Pod');
+      expect(execArgs.at(-1)).toContain('Fix the validation errors');
+    });
+
     it('uses exec resume subcommand when pod has codexSessionId in DB', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
@@ -705,7 +750,7 @@ describe('CodexRuntime', () => {
       await runtime.abort('nonexistent');
     });
 
-    it('clears the mcpServersBySession entry for the aborted pod', async () => {
+    it('clears stored MCP servers and custom instructions for the aborted pod', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
@@ -715,11 +760,15 @@ describe('CodexRuntime', () => {
       (runtime as any).mcpServersBySession.set('sess-1', [
         { name: 'escalation', url: 'http://h/mcp' },
       ]);
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
+      (runtime as any).customInstructionsBySession.set('sess-1', '# Autopod Pod');
 
       await runtime.abort('sess-1');
 
       // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
       expect((runtime as any).mcpServersBySession.has('sess-1')).toBe(false);
+      // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
+      expect((runtime as any).customInstructionsBySession.has('sess-1')).toBe(false);
     });
   });
 
@@ -763,6 +812,7 @@ describe('CodexRuntime', () => {
       expect(written).toContain('[mcp_servers.escalation]');
       expect(written).toContain('url = "http://host.docker.internal:3100/mcp/abc"');
       expect(written).toContain('http_headers = { Authorization = "Bearer tok123" }');
+      expect(written).toContain('tool_timeout_sec = 3900.0');
       // HTTP entries must not emit stdio fields.
       expect(written).not.toContain('command =');
     });
@@ -794,6 +844,7 @@ describe('CodexRuntime', () => {
       expect(written).toContain('[mcp_servers.roslyn-codelens]');
       expect(written).toContain('command = "roslyn-codelens-mcp"');
       expect(written).toContain('env = { LOG_LEVEL = "info" }');
+      expect(written).toContain('tool_timeout_sec = 3900.0');
       expect(written).not.toContain('url =');
       expect(written).not.toContain('http_headers =');
     });
