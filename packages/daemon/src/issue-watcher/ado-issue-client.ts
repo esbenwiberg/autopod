@@ -1,5 +1,6 @@
 import type { IssueClient, WatchedIssueCandidate } from './issue-client.js';
 import { stripHtml } from './issue-client.js';
+import { fetchIssueProvider, issueProviderHttpError } from './issue-fetch.js';
 
 const ADO_API_VERSION = '7.1';
 
@@ -50,14 +51,23 @@ export class AdoIssueClient implements IssueClient {
     const wiqlUrl = `${this.orgUrl}/${this.project}/_apis/wit/wiql?api-version=${ADO_API_VERSION}`;
     const query = `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = '${escapeWiql(this.project)}' AND [System.State] <> 'Closed' AND [System.State] <> 'Removed' AND [System.Tags] CONTAINS '${escapeWiql(labelPrefix)}' ORDER BY [System.ChangedDate] DESC`;
 
-    const wiqlResponse = await fetch(wiqlUrl, {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify({ query }),
-    });
+    const wiqlResponse = await fetchIssueProvider(
+      wiqlUrl,
+      {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify({ query }),
+      },
+      { provider: 'ado', operation: 'WIQL' },
+    );
 
     if (!wiqlResponse.ok) {
-      throw new Error(`ADO WIQL failed: ${wiqlResponse.status} ${wiqlResponse.statusText}`);
+      throw issueProviderHttpError(
+        'ado',
+        'WIQL',
+        wiqlResponse,
+        `ADO WIQL failed: ${wiqlResponse.status} ${wiqlResponse.statusText}`,
+      );
     }
 
     const wiqlResult = (await wiqlResponse.json()) as WiqlResponse;
@@ -69,12 +79,19 @@ export class AdoIssueClient implements IssueClient {
       .map((wi) => wi.id)
       .join(',');
     const detailUrl = `${this.orgUrl}/${this.project}/_apis/wit/workitems?ids=${ids}&$expand=all&api-version=${ADO_API_VERSION}`;
-    const detailResponse = await fetch(detailUrl, {
-      headers: this.headers(),
-    });
+    const detailResponse = await fetchIssueProvider(
+      detailUrl,
+      {
+        headers: this.headers(),
+      },
+      { provider: 'ado', operation: 'work item detail fetch' },
+    );
 
     if (!detailResponse.ok) {
-      throw new Error(
+      throw issueProviderHttpError(
+        'ado',
+        'work item detail fetch',
+        detailResponse,
         `ADO work item fetch failed: ${detailResponse.status} ${detailResponse.statusText}`,
       );
     }
@@ -138,21 +155,39 @@ export class AdoIssueClient implements IssueClient {
 
   async addComment(issueId: string, body: string): Promise<void> {
     const url = `${this.orgUrl}/${this.project}/_apis/wit/workitems/${issueId}/comments?api-version=${ADO_API_VERSION}-preview.4`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify({ text: body }),
-    });
+    const response = await fetchIssueProvider(
+      url,
+      {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify({ text: body }),
+      },
+      { provider: 'ado', operation: 'add comment' },
+    );
     if (!response.ok) {
-      throw new Error(`ADO add comment failed: ${response.status} ${response.statusText}`);
+      throw issueProviderHttpError(
+        'ado',
+        'add comment',
+        response,
+        `ADO add comment failed: ${response.status} ${response.statusText}`,
+      );
     }
   }
 
   private async getTags(issueId: string): Promise<string[]> {
     const url = `${this.orgUrl}/${this.project}/_apis/wit/workitems/${issueId}?fields=System.Tags&api-version=${ADO_API_VERSION}`;
-    const response = await fetch(url, { headers: this.headers() });
+    const response = await fetchIssueProvider(
+      url,
+      { headers: this.headers() },
+      { provider: 'ado', operation: 'get work item tags' },
+    );
     if (!response.ok) {
-      throw new Error(`ADO get work item failed: ${response.status} ${response.statusText}`);
+      throw issueProviderHttpError(
+        'ado',
+        'get work item tags',
+        response,
+        `ADO get work item failed: ${response.status} ${response.statusText}`,
+      );
     }
     const wi = (await response.json()) as {
       fields: { 'System.Tags': string | null };
@@ -162,19 +197,28 @@ export class AdoIssueClient implements IssueClient {
 
   private async patchTags(issueId: string, tags: string): Promise<void> {
     const url = `${this.orgUrl}/${this.project}/_apis/wit/workitems/${issueId}?api-version=${ADO_API_VERSION}`;
-    const response = await fetch(url, {
-      method: 'PATCH',
-      headers: this.headers('application/json-patch+json'),
-      body: JSON.stringify([
-        {
-          op: 'replace',
-          path: '/fields/System.Tags',
-          value: tags,
-        },
-      ]),
-    });
+    const response = await fetchIssueProvider(
+      url,
+      {
+        method: 'PATCH',
+        headers: this.headers('application/json-patch+json'),
+        body: JSON.stringify([
+          {
+            op: 'replace',
+            path: '/fields/System.Tags',
+            value: tags,
+          },
+        ]),
+      },
+      { provider: 'ado', operation: 'patch work item tags' },
+    );
     if (!response.ok) {
-      throw new Error(`ADO patch tags failed: ${response.status} ${response.statusText}`);
+      throw issueProviderHttpError(
+        'ado',
+        'patch work item tags',
+        response,
+        `ADO patch tags failed: ${response.status} ${response.statusText}`,
+      );
     }
   }
 }

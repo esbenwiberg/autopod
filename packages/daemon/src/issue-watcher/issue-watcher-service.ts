@@ -17,9 +17,11 @@ import type { ProfileStore } from '../profiles/profile-store.js';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 import type { IssueClient, WatchedIssueCandidate } from './issue-client.js';
 import { createIssueClient } from './issue-client.js';
+import { isIssueProviderAuthError, isTransientIssueProviderError } from './issue-fetch.js';
 import type { IssueWatcherRepository } from './issue-watcher-repository.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 60_000;
+const TRANSIENT_LIST_FAILURE_REPORT_INTERVAL_MS = 10 * 60_000;
 const ISSUE_WATCHER_USER_ID = 'issue-watcher';
 
 export interface IssueWatcherService {
@@ -58,6 +60,89 @@ export function createIssueWatcherService(
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let polling = false;
   let unsubscribe: (() => void) | null = null;
+  const listFailureState = new Map<
+    string,
+    {
+      message: string;
+      transient: boolean;
+      count: number;
+      firstSeenAt: number;
+      lastReportedAt: number;
+    }
+  >();
+
+  function errorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
+  }
+
+  function recordListFailure(
+    profileName: string,
+    err: unknown,
+  ): {
+    message: string;
+    transient: boolean;
+    authFailure: boolean;
+    repeatCount: number;
+    shouldReport: boolean;
+  } {
+    const now = Date.now();
+    const message = errorMessage(err);
+    const transient = isTransientIssueProviderError(err);
+    const authFailure = isIssueProviderAuthError(err);
+    const existing = listFailureState.get(profileName);
+
+    if (!existing || existing.message !== message || existing.transient !== transient) {
+      listFailureState.set(profileName, {
+        message,
+        transient,
+        count: 1,
+        firstSeenAt: now,
+        lastReportedAt: now,
+      });
+      return { message, transient, authFailure, repeatCount: 1, shouldReport: true };
+    }
+
+    existing.count += 1;
+
+    if (
+      !transient ||
+      authFailure ||
+      now - existing.lastReportedAt >= TRANSIENT_LIST_FAILURE_REPORT_INTERVAL_MS
+    ) {
+      existing.lastReportedAt = now;
+      return {
+        message,
+        transient,
+        authFailure,
+        repeatCount: existing.count,
+        shouldReport: true,
+      };
+    }
+
+    return {
+      message,
+      transient,
+      authFailure,
+      repeatCount: existing.count,
+      shouldReport: false,
+    };
+  }
+
+  function clearListFailure(profileName: string): void {
+    const failure = listFailureState.get(profileName);
+    if (!failure) return;
+    listFailureState.delete(profileName);
+    logger.info(
+      {
+        profile: profileName,
+        lastError: failure.message,
+        transient: failure.transient,
+        repeatCount: failure.count,
+        firstSeenAt: new Date(failure.firstSeenAt).toISOString(),
+      },
+      'Issue watcher list recovered',
+    );
+  }
 
   function resolveTargetProfile(
     triggerLabel: string,
@@ -506,15 +591,38 @@ ${input.body}${requirementsSection}
     try {
       candidates = await client.listByLabel(profile.issueWatcherLabelPrefix ?? 'autopod');
     } catch (err) {
-      logger.error({ err, profile: profile.name }, 'Failed to list issues by label');
-      eventBus.emit({
-        type: 'issue_watcher.error',
-        timestamp: new Date().toISOString(),
-        profileName: profile.name,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      const failure = recordListFailure(profile.name, err);
+      if (failure.shouldReport) {
+        const context = {
+          err,
+          profile: profile.name,
+          transient: failure.transient,
+          repeatCount: failure.repeatCount,
+        };
+        if (failure.transient && !failure.authFailure) {
+          logger.warn(context, 'Failed to list issues by label');
+        } else {
+          logger.error(context, 'Failed to list issues by label');
+        }
+        eventBus.emit({
+          type: 'issue_watcher.error',
+          timestamp: new Date().toISOString(),
+          profileName: profile.name,
+          error: failure.message,
+        });
+      } else {
+        logger.debug(
+          {
+            profile: profile.name,
+            error: failure.message,
+            repeatCount: failure.repeatCount,
+          },
+          'Repeated issue watcher list failure suppressed',
+        );
+      }
       return;
     }
+    clearListFailure(profile.name);
 
     for (const candidate of candidates) {
       try {

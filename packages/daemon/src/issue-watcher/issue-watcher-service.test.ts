@@ -9,6 +9,7 @@ import { createEventRepository } from '../pods/event-repository.js';
 import { createSafetyEventsRepository } from '../safety/safety-events-repository.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import type { IssueClient, WatchedIssueCandidate } from './issue-client.js';
+import { issueProviderHttpError } from './issue-fetch.js';
 import { createIssueWatcherRepository } from './issue-watcher-repository.js';
 import { createIssueWatcherService } from './issue-watcher-service.js';
 
@@ -133,7 +134,7 @@ describe('IssueWatcherService', () => {
 
   function createService(
     clientCandidates: WatchedIssueCandidate[] = [],
-    opts: { withSafetyRepo?: boolean } = {},
+    opts: { withSafetyRepo?: boolean; pollIntervalMs?: number } = {},
   ) {
     const client = createMockIssueClient(clientCandidates);
     mockClient = client;
@@ -152,7 +153,7 @@ describe('IssueWatcherService', () => {
       issueWatcherRepo,
       safetyEventsRepo,
       logger,
-      pollIntervalMs: 999_999, // Don't auto-poll in tests
+      pollIntervalMs: opts.pollIntervalMs ?? 999_999, // Don't auto-poll in most tests
       issueClientFactory: () => client,
     });
 
@@ -334,6 +335,49 @@ human_review: []
     service.stop();
 
     expect(mockSessionManager.createSession).not.toHaveBeenCalled();
+  });
+
+  it('suppresses repeated transient list failures between report intervals', async () => {
+    const { service, client } = createService([], { pollIntervalMs: 20 });
+    (client.listByLabel as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('fetch failed'));
+
+    service.start();
+    await new Promise((r) => setTimeout(r, 90));
+    service.stop();
+
+    expect((client.listByLabel as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1);
+    const rows = db
+      .prepare("SELECT payload FROM events WHERE type = 'issue_watcher.error'")
+      .all() as Array<{ payload: string }>;
+    expect(rows).toHaveLength(1);
+    const first = rows[0];
+    if (!first) throw new Error('expected issue watcher error event');
+    expect(JSON.parse(first.payload).error).toBe('fetch failed');
+  });
+
+  it('keeps auth failures visible on every poll', async () => {
+    const authError = issueProviderHttpError(
+      'ado',
+      'WIQL',
+      { status: 401, statusText: 'Unauthorized' } as Response,
+      'ADO WIQL failed: 401 Unauthorized',
+    );
+    const { service, client } = createService([], { pollIntervalMs: 20 });
+    (client.listByLabel as ReturnType<typeof vi.fn>).mockRejectedValue(authError);
+
+    service.start();
+    await new Promise((r) => setTimeout(r, 70));
+    service.stop();
+
+    const callCount = (client.listByLabel as ReturnType<typeof vi.fn>).mock.calls.length;
+    expect(callCount).toBeGreaterThan(1);
+    const rows = db
+      .prepare("SELECT payload FROM events WHERE type = 'issue_watcher.error'")
+      .all() as Array<{ payload: string }>;
+    expect(rows).toHaveLength(callCount);
+    expect(rows.map((r) => JSON.parse(r.payload).error)).toEqual(
+      Array.from({ length: callCount }, () => 'ADO WIQL failed: 401 Unauthorized'),
+    );
   });
 
   it('handles worker pod completion by swapping labels', async () => {

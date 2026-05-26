@@ -1,4 +1,5 @@
 import type { IssueClient, WatchedIssueCandidate } from './issue-client.js';
+import { fetchIssueProvider, issueProviderHttpError } from './issue-fetch.js';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 const GITHUB_API_VERSION = '2022-11-28';
@@ -43,13 +44,19 @@ export class GitHubIssueClient implements IssueClient {
 
   async listByLabel(labelPrefix: string): Promise<WatchedIssueCandidate[]> {
     // Fetch open issues — filter client-side for label prefix match
-    const response = await fetch(
+    const response = await fetchIssueProvider(
       this.url('/issues?state=open&per_page=100&sort=created&direction=asc'),
       { headers: this.headers() },
+      { provider: 'github', operation: 'issue list' },
     );
 
     if (!response.ok) {
-      throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
+      throw issueProviderHttpError(
+        'github',
+        'issue list',
+        response,
+        `GitHub API error: ${response.status} ${response.statusText}`,
+      );
     }
 
     const issues = (await response.json()) as GitHubIssue[];
@@ -78,35 +85,59 @@ export class GitHubIssueClient implements IssueClient {
   }
 
   async addLabel(issueId: string, label: string): Promise<void> {
-    const response = await fetch(this.url(`/issues/${issueId}/labels`), {
-      method: 'POST',
-      headers: { ...this.headers(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ labels: [label] }),
-    });
+    const response = await fetchIssueProvider(
+      this.url(`/issues/${issueId}/labels`),
+      {
+        method: 'POST',
+        headers: { ...this.headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ labels: [label] }),
+      },
+      { provider: 'github', operation: 'add label' },
+    );
     if (!response.ok) {
-      throw new Error(`GitHub add label failed: ${response.status} ${response.statusText}`);
+      throw issueProviderHttpError(
+        'github',
+        'add label',
+        response,
+        `GitHub add label failed: ${response.status} ${response.statusText}`,
+      );
     }
   }
 
   async removeLabel(issueId: string, label: string): Promise<void> {
-    const response = await fetch(
+    const response = await fetchIssueProvider(
       this.url(`/issues/${issueId}/labels/${encodeURIComponent(label)}`),
       { method: 'DELETE', headers: this.headers() },
+      { provider: 'github', operation: 'remove label' },
     );
     // 404 means label wasn't present — not an error
     if (!response.ok && response.status !== 404) {
-      throw new Error(`GitHub remove label failed: ${response.status} ${response.statusText}`);
+      throw issueProviderHttpError(
+        'github',
+        'remove label',
+        response,
+        `GitHub remove label failed: ${response.status} ${response.statusText}`,
+      );
     }
   }
 
   async addComment(issueId: string, body: string): Promise<void> {
-    const response = await fetch(this.url(`/issues/${issueId}/comments`), {
-      method: 'POST',
-      headers: { ...this.headers(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body }),
-    });
+    const response = await fetchIssueProvider(
+      this.url(`/issues/${issueId}/comments`),
+      {
+        method: 'POST',
+        headers: { ...this.headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body }),
+      },
+      { provider: 'github', operation: 'add comment' },
+    );
     if (!response.ok) {
-      throw new Error(`GitHub add comment failed: ${response.status} ${response.statusText}`);
+      throw issueProviderHttpError(
+        'github',
+        'add comment',
+        response,
+        `GitHub add comment failed: ${response.status} ${response.statusText}`,
+      );
     }
   }
 }
