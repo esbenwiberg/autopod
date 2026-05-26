@@ -8625,8 +8625,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, 'Resuming — revalidating with existing worktree');
       }
 
-      logger.info({ podId }, 'New commits found — running revalidation');
-      emitActivityStatus(podId, 'New commits detected — starting revalidation…');
+      logger.info({ podId, newCommits, force }, 'Running revalidation');
+      if (newCommits) {
+        emitActivityStatus(podId, 'New commits detected — starting revalidation…');
+      } else {
+        emitActivityStatus(podId, 'Starting validation-only resume…');
+      }
 
       // Reset validation attempts for the fresh human-driven validation
       podRepo.update(podId, { validationAttempts: 0 });
@@ -8655,7 +8659,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         attempt,
       });
 
-      emitActivityStatus(podId, 'Starting revalidation (human fix)…');
+      emitActivityStatus(
+        podId,
+        newCommits ? 'Starting revalidation (human fix)…' : 'Starting revalidation…',
+      );
 
       try {
         if (!pod.containerId) {

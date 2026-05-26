@@ -24,8 +24,8 @@ function buildBridge(): {
   const podId = 'sess-1';
 
   db.prepare(
-    `INSERT INTO pods (id, profile_name, task, model, branch, user_id)
-     VALUES (@id, 'proj', 't', 'opus', 'main', 'u')`,
+    `INSERT INTO pods (id, profile_name, task, status, model, branch, user_id)
+     VALUES (@id, 'proj', 't', 'running', 'opus', 'main', 'u')`,
   ).run({ id: podId });
 
   const podManager = {
@@ -170,5 +170,21 @@ describe('PodBridge.reportTaskSummary — lock-on-first-write', () => {
     expect(pod.taskSummary?.memoryOutcomes).toEqual([
       { memoryId, outcome: 'not_applicable', reason: 'Fix cycle did not touch it.' },
     ]);
+  });
+
+  it('rejects stale agent progress and summaries after the pod leaves running state', () => {
+    const { bridge, podRepo, podId, emit } = buildBridge();
+
+    podRepo.update(podId, { status: 'validating' });
+
+    expect(() => bridge.reportProgress(podId, 'Wrap-up', 'Late progress', 4, 4)).toThrow(
+      /only accepted while the pod is running/,
+    );
+    expect(() => bridge.reportTaskSummary(podId, 'late summary', [])).toThrow(
+      /only accepted while the pod is running/,
+    );
+
+    expect(podRepo.getOrThrow(podId).taskSummary).toBeNull();
+    expect(emit).not.toHaveBeenCalled();
   });
 });

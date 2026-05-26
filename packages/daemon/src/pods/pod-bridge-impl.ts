@@ -88,6 +88,19 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     screenshotStore,
   } = deps;
 
+  function assertAgentWriteAllowed(podId: string, toolName: string): void {
+    const pod = podRepo.getOrThrow(podId);
+    if (pod.status === 'running') return;
+
+    logger.warn(
+      { podId, status: pod.status, toolName },
+      'Rejected agent MCP state write after pod left running state',
+    );
+    throw new Error(
+      `${toolName} is only accepted while the pod is running (current status: ${pod.status}).`,
+    );
+  }
+
   return {
     createEscalation(escalation: EscalationRequest): void {
       podManager.touchHeartbeat(escalation.podId);
@@ -252,6 +265,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       steps: string[],
       memoryIntents?: Array<{ memoryId: string; reason: string }>,
     ): void {
+      assertAgentWriteAllowed(podId, 'report_plan');
       podManager.touchHeartbeat(podId);
       const requiredMemoryIds = selectedMemoryIdsForPod(memoryUsageRepo, podId);
       if (requiredMemoryIds.length > 0 || memoryIntents?.length) {
@@ -283,6 +297,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       currentPhase: number,
       totalPhases: number,
     ): void {
+      assertAgentWriteAllowed(podId, 'report_progress');
       podManager.touchHeartbeat(podId);
       logger.info({ podId, phase, currentPhase, totalPhases }, 'Agent reported progress');
       podRepo.update(podId, {
@@ -331,6 +346,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       }>,
       memoryOutcomes?: MemoryOutcomeItem[],
     ): void {
+      assertAgentWriteAllowed(podId, 'report_task_summary');
       podManager.touchHeartbeat(podId);
       const requiredMemoryIds = selectedMemoryIdsForPod(memoryUsageRepo, podId);
       if (requiredMemoryIds.length > 0 || memoryOutcomes?.length) {

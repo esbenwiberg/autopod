@@ -4676,6 +4676,38 @@ describe('PodManager', () => {
       );
     });
 
+    it('Path 2: forced revalidation without new commits uses validation-only status text', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, {
+        validationOverall: 'fail',
+      });
+      const events: unknown[] = [];
+      ctx.eventBus.subscribe((e) => events.push(e));
+
+      await manager.revalidateSession(pod.id, { force: true });
+
+      const messages = events.flatMap((e) => {
+        if (typeof e !== 'object' || e === null) return [];
+        const maybeActivity = e as {
+          type?: string;
+          event?: { type?: string; message?: string };
+        };
+        if (
+          maybeActivity.type === 'pod.agent_activity' &&
+          maybeActivity.event?.type === 'status' &&
+          maybeActivity.event.message
+        ) {
+          return [maybeActivity.event.message];
+        }
+        return [];
+      });
+      expect(messages).toContain('Resuming — revalidating with existing worktree');
+      expect(messages).toContain('Starting validation-only resume…');
+      expect(messages).toContain('Starting revalidation…');
+      expect(messages).not.toContain('New commits detected — starting revalidation…');
+      expect(messages).not.toContain('Starting revalidation (human fix)…');
+    });
+
     it('rejects when pod is not in failed status', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
