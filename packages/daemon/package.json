@@ -45,7 +45,7 @@
     "pino": "^9.6.0",
     "slugify": "^1.6.8",
     "tar-stream": "^3.1.7",
-    "zod": "^3.24.1"
+    "zod": "^4.4.3"
   },
   "optionalDependencies": {
     "playwright": "^1.52.0"
