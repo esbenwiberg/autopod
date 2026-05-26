@@ -2360,6 +2360,48 @@ describe('PodManager', () => {
         expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
       });
 
+      it('allows a scheduled rework run to finish cleanly without file changes', async () => {
+        const ctx = createTestContext(undefined, {});
+        setupExecFileMock({ gitLog: 'abc1234 Previous scan run' });
+        (ctx.worktreeManager.getDiffStats as ReturnType<typeof vi.fn>).mockResolvedValue({
+          filesChanged: 0,
+          linesAdded: 0,
+          linesRemoved: 0,
+        });
+        ctx.db
+          .prepare(`
+            INSERT INTO scheduled_jobs (
+              id, name, profile_name, task, cron_expression, next_run_at
+            ) VALUES (
+              'job-clean-scan', 'Daily vuln scan', 'test-profile', 'Run the daily vuln scan',
+              '0 9 * * *', '2030-01-01T00:00:00.000Z'
+            )
+          `)
+          .run();
+
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Daily vuln scan',
+            scheduledJobId: 'job-clean-scan',
+          },
+          'scheduler',
+        );
+
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          reworkReason: 'Your previous attempt failed. Review what went wrong and try again.',
+        });
+
+        await manager.processPod(pod.id);
+
+        const updated = manager.getSession(pod.id);
+        expect(updated.status).toBe('validated');
+        expect(updated.lastCorrectionMessage).toBeNull();
+        expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      });
+
       it('falls back to fresh spawn when Claude resume reports session-not-found mid-stream', async () => {
         const runtime = createMockRuntime();
         (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();

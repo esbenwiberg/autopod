@@ -6213,9 +6213,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const isForkSession =
         Boolean(refreshed.linkedPodId) ||
         (refreshed.baseBranch != null && refreshed.baseBranch !== profile2.defaultBranch);
+      const isScheduledSession = refreshed.scheduledJobId !== null;
       const noChangesAfterRework =
         noChanges && refreshed.lastCorrectionMessage?.startsWith(REWORK_IN_PROGRESS_PREFIX);
-      if (noChangesAfterRework && !refreshed.skipValidation && !isForkSession) {
+      if (
+        noChangesAfterRework &&
+        !refreshed.skipValidation &&
+        !isForkSession &&
+        !isScheduledSession
+      ) {
         const message = 'Rework produced no file changes.';
         logger.info({ podId }, 'Failing pod because rework produced no file changes');
         emitActivityStatus(podId, `${message} Marking pod failed.`);
@@ -6232,7 +6238,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
         transition(refreshed, 'validating');
         const s2 = podRepo.getOrThrow(podId);
-        const skippedPod = transition(s2, 'validated');
+        const skippedPod = transition(s2, 'validated', { lastCorrectionMessage: null });
         maybeTriggerDependents(skippedPod);
         return;
       }
