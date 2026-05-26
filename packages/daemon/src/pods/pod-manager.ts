@@ -12,6 +12,7 @@ import type {
   DaemonConfig,
   EscalationRequest,
   ExecutionTarget,
+  FactCheckResult,
   FactValidationResult,
   HealthResult,
   HistoryQuery,
@@ -31,6 +32,7 @@ import type {
   SpawnFixResponse,
   StdioInjectedMcpServer,
   TaskReviewResult,
+  TaskSummary,
   UpdateFromBaseResponse,
   ValidationFinding,
   ValidationOverride,
@@ -868,6 +870,12 @@ export interface PodManager {
   /** Apply queued overrides to the last validation result without re-running validation.
    *  If overrides make the result pass, transitions review_required → validated. */
   applyOverridesInstant(podId: string): Promise<{ advanced: boolean }>;
+  /** Approve a pending required-fact waiver, then re-run validation-only flow. */
+  approveFactWaiver(
+    podId: string,
+    factId: string,
+    reason?: string,
+  ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }>;
   /** Bypass validation and transition the pod directly to validated.
    *  Valid from failed or review_required. The pod then awaits normal approval. */
   forceApprove(podId: string, reason?: string): Promise<void>;
@@ -3171,6 +3179,35 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       'PROTECTED_OPERATIONAL_PATHS_CHANGED',
       422,
     );
+  }
+
+  function taskSummaryWithApprovedFactWaiver(
+    summary: TaskSummary | null,
+    fact: FactCheckResult,
+    reason?: string,
+  ): TaskSummary {
+    const existingSummary = summary ?? {
+      actualSummary: `Human approved required fact waiver for ${fact.factId}.`,
+      deviations: [],
+    };
+    const existingDeviations = existingSummary.factDeviations ?? [];
+    const existing = existingDeviations.find((d) => d.factId === fact.factId);
+    const approvalReason = reason?.trim() || existing?.reason || fact.reasoning;
+    const whyImpossible = existing?.whyImpossible || fact.reasoning;
+
+    return {
+      ...existingSummary,
+      factDeviations: [
+        ...existingDeviations.filter((d) => d.factId !== fact.factId),
+        {
+          factId: fact.factId,
+          action: 'waive',
+          decision: 'approved_waive',
+          reason: approvalReason,
+          whyImpossible,
+        },
+      ],
+    };
   }
 
   /** Per-phase WebSocket events that drive the desktop Validation tab chips.
@@ -9501,6 +9538,48 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       emitActivityStatus(podId, 'Some findings remain — pod still needs review');
       return { advanced: false };
+    },
+
+    async approveFactWaiver(
+      podId: string,
+      factId: string,
+      reason?: string,
+    ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
+      const pod = podRepo.getOrThrow(podId);
+      if (pod.status !== 'failed' && pod.status !== 'review_required') {
+        throw new AutopodError(
+          `Cannot approve fact waiver for pod ${podId} in status ${pod.status} — only failed or review_required pods`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      const fact = pod.lastValidationResult?.factValidation?.results.find(
+        (result) => result.factId === factId,
+      );
+      if (!fact) {
+        throw new AutopodError(
+          `Required fact ${factId} was not found in the latest validation result for pod ${podId}`,
+          'NOT_FOUND',
+          404,
+        );
+      }
+      if (fact.status !== 'pending_human') {
+        throw new AutopodError(
+          `Required fact ${factId} is ${fact.status ?? (fact.passed ? 'pass' : 'fail')}, not pending_human`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+
+      const nextTaskSummary = taskSummaryWithApprovedFactWaiver(pod.taskSummary, fact, reason);
+      podRepo.update(podId, { taskSummary: nextTaskSummary });
+      emitActivityStatus(
+        podId,
+        `Approved waiver for required fact ${factId} — revalidating existing worktree`,
+      );
+
+      return this.revalidateSession(podId, { force: true });
     },
 
     async forceApprove(podId: string, reason?: string): Promise<void> {

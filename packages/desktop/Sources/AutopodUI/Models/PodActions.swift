@@ -43,6 +43,8 @@ public struct PodActions: Sendable {
   public var addValidationOverride: @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void
   /// Bypass validation and push the pod to validated — params: podId, reason?
   public var forceApprove: @MainActor @Sendable (String, String?) async -> Void
+  /// Approve one pending required-fact waiver — params: podId, factId, reason?
+  public var approveFactWaiver: @MainActor @Sendable (String, String, String?) async -> Void
   /// Manually force-spawn a fix pod for a merge_pending/complete pod. Optional message is forwarded
   /// to the fix pod as explicit reviewer instructions alongside auto-detected CI/review failures.
   /// Returns `SpawnFixResponse` so callers can show queue-position feedback.
@@ -133,6 +135,7 @@ public struct PodActions: Sendable {
     setSkipValidation: @escaping @MainActor @Sendable (String, Bool) async -> Void = { _, _ in },
     addValidationOverride: @escaping @MainActor @Sendable (String, String, String, String, String?, String?) async -> Void = { _, _, _, _, _, _ in },
     forceApprove: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
+    approveFactWaiver: @escaping @MainActor @Sendable (String, String, String?) async -> Void = { _, _, _ in },
     spawnFix: @escaping @MainActor @Sendable (String, String?) async -> SpawnFixResponse? = { _, _ in nil },
     retryCreatePr: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     resume: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
@@ -178,6 +181,7 @@ public struct PodActions: Sendable {
     self.setSkipValidation = setSkipValidation
     self.addValidationOverride = addValidationOverride
     self.forceApprove = forceApprove
+    self.approveFactWaiver = approveFactWaiver
     self.spawnFix = spawnFix
     self.retryCreatePr = retryCreatePr
     self.resume = resume

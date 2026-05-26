@@ -143,6 +143,13 @@ public actor DaemonAPI {
     )
   }
 
+  public func approveFactWaiver(podId: String, factId: String, reason: String? = nil) async throws {
+    let _: EmptyResponse = try await request(
+      "POST", "/pods/\(podId)/facts/\(factId)/approve-waiver",
+      body: try encode(FactWaiverBody(reason: reason))
+    )
+  }
+
   public func startPreview(_ id: String) async throws -> String {
     let res: PreviewResponse = try await request("POST", "/pods/\(id)/preview")
     return res.previewUrl
@@ -866,6 +873,10 @@ struct RejectBody: Codable {
 }
 
 struct ForceApproveBody: Codable {
+  let reason: String?
+}
+
+struct FactWaiverBody: Codable {
   let reason: String?
 }
 

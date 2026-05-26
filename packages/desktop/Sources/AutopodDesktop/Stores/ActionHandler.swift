@@ -82,6 +82,9 @@ public final class ActionHandler {
         await self?.addValidationOverride(id, findingId: fid, description: desc, action: action, reason: reason, guidance: guidance)
       },
       forceApprove: { [weak self] id, reason in await self?.forceApprove(id, reason: reason) },
+      approveFactWaiver: { [weak self] id, factId, reason in
+        await self?.approveFactWaiver(id, factId: factId, reason: reason)
+      },
       spawnFix: { [weak self] id, message in await self?.spawnFixSession(id, userMessage: message) ?? nil },
       retryCreatePr: { [weak self] id in await self?.retryCreatePr(id) },
       resume: { [weak self] id in await self?.resume(id) },
@@ -561,6 +564,14 @@ public final class ActionHandler {
   public func forceApprove(_ podId: String, reason: String?) async {
     do {
       try await api.forceApprove(podId, reason: reason)
+    } catch {
+      lastError = error.localizedDescription
+    }
+  }
+
+  public func approveFactWaiver(_ podId: String, factId: String, reason: String?) async {
+    do {
+      try await api.approveFactWaiver(podId: podId, factId: factId, reason: reason)
     } catch {
       lastError = error.localizedDescription
     }

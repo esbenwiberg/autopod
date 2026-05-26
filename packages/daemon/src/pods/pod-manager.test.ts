@@ -2945,6 +2945,94 @@ describe('PodManager', () => {
       expect(resumeCalls[0]?.[1]).toContain('Do not report these as ordinary plan deviations');
     });
 
+    it('approves a pending fact waiver and revalidates with the decision', async () => {
+      const ctx = createTestContext({
+        overall: 'pass',
+        factValidation: {
+          status: 'pass',
+          results: [
+            {
+              factId: 'fact-swift-only',
+              proves: ['swift-helper-readable'],
+              kind: 'unit-test',
+              artifactPath:
+                'packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift',
+              command: 'swift test --filter ThroughputTimeInStatusDisplayTests',
+              passed: true,
+              status: 'waived',
+              reasoning: 'Fact deviation approved by human as waive.',
+            },
+          ],
+        },
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      const pendingReasoning =
+        'Fact fact-swift-only needs human decision: required fact command `swift` is unavailable in the validation container.';
+      ctx.podRepo.update(pod.id, {
+        status: 'review_required',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktree/abc',
+        taskSummary: {
+          actualSummary: 'Updated the Swift helper.',
+          deviations: [],
+        },
+        lastValidationResult: {
+          podId: pod.id,
+          attempt: 1,
+          timestamp: new Date().toISOString(),
+          smoke: {
+            status: 'pass',
+            build: { status: 'pass', output: '', duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 50,
+            },
+            pages: [],
+          },
+          taskReview: null,
+          overall: 'fail',
+          duration: 5000,
+          factValidation: {
+            status: 'pending_human',
+            results: [
+              {
+                factId: 'fact-swift-only',
+                proves: ['swift-helper-readable'],
+                kind: 'unit-test',
+                artifactPath:
+                  'packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift',
+                command: 'swift test --filter ThroughputTimeInStatusDisplayTests',
+                passed: false,
+                status: 'pending_human',
+                reasoning: pendingReasoning,
+              },
+            ],
+          },
+        },
+      });
+
+      await manager.approveFactWaiver(pod.id, 'fact-swift-only', 'Swift is unavailable here');
+
+      const validateConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[0]?.[0];
+      expect(validateConfig?.taskSummary?.factDeviations).toEqual([
+        {
+          factId: 'fact-swift-only',
+          action: 'waive',
+          decision: 'approved_waive',
+          reason: 'Swift is unavailable here',
+          whyImpossible: pendingReasoning,
+        },
+      ]);
+      expect(manager.getSession(pod.id).status).toBe('validated');
+    });
+
     it('retries with correction feedback until max attempts exhausted', async () => {
       // With always-failing validation, the retry loop exhausts all attempts
       const ctx = createTestContext({ overall: 'fail' });

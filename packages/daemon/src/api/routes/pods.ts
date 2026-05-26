@@ -818,6 +818,25 @@ export function podRoutes(
     reply.status(204);
   });
 
+  // POST /pods/:podId/facts/:factId/approve-waiver — approve one pending required fact
+  // and restart validation-only flow so downstream gates still run.
+  app.post('/pods/:podId/facts/:factId/approve-waiver', async (request, reply) => {
+    const { podId, factId } = request.params as { podId: string; factId: string };
+    const body = (request.body ?? {}) as { reason?: string };
+    const reason =
+      typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : undefined;
+    try {
+      const result = await podManager.approveFactWaiver(podId, factId, reason);
+      return { ok: true, ...result };
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message, code: err.code };
+      }
+      throw err;
+    }
+  });
+
   // POST /pods/:podId/validation-overrides — enqueue a finding override
   app.post('/pods/:podId/validation-overrides', async (request, reply) => {
     const { podId } = request.params as { podId: string };

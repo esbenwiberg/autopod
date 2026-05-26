@@ -45,6 +45,9 @@ public struct ValidationTab: View {
   @State private var updateFromBaseMessage: String?
   @State private var showForceApprovePopover = false
   @State private var forceApproveReason: String = ""
+  @State private var factWaiverPopoverFactId: String? = nil
+  @State private var factWaiverReason: String = ""
+  @State private var approvingFactWaiverIds: Set<String> = []
   @State private var overridePopoverFindingId: String? = nil
   @State private var overrideAction: String = "dismiss"
   @State private var overrideReason: String = ""
@@ -1347,6 +1350,9 @@ public struct ValidationTab: View {
             }
           }
           Spacer(minLength: 4)
+          if factCanApproveWaiver(evidence) {
+            factWaiverButton(factId: fact.id, evidence: evidence)
+          }
           factStatusBadge(evidence: evidence)
         }
 
@@ -1408,6 +1414,77 @@ public struct ValidationTab: View {
       .foregroundStyle(status.color)
   }
 
+  private func factCanApproveWaiver(_ evidence: FactCheckDetail?) -> Bool {
+    guard evidence?.status == "pending_human" else { return false }
+    return pod.status == .failed || pod.status == .reviewRequired
+  }
+
+  private func factWaiverButton(factId: String, evidence: FactCheckDetail?) -> some View {
+    let isApproving = approvingFactWaiverIds.contains(factId)
+    return Button {
+      factWaiverReason = ""
+      factWaiverPopoverFactId = factId
+    } label: {
+      if isApproving {
+        HStack(spacing: 4) {
+          ProgressView().controlSize(.mini)
+          Text("Approving…").lineLimit(1)
+        }
+      } else {
+        Label("Approve Waiver", systemImage: "checkmark.seal.fill").lineLimit(1)
+      }
+    }
+    .buttonStyle(.bordered)
+    .controlSize(.mini)
+    .tint(.green)
+    .disabled(isApproving)
+    .popover(isPresented: Binding(
+      get: { factWaiverPopoverFactId == factId },
+      set: { if !$0 { factWaiverPopoverFactId = nil } }
+    )) {
+      factWaiverPopover(factId: factId, evidence: evidence)
+    }
+  }
+
+  @ViewBuilder
+  private func factWaiverPopover(factId: String, evidence: FactCheckDetail?) -> some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Approve Fact Waiver").font(.headline)
+      Text("Mark this required fact as waived and re-run validation so later gates can continue.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+      if let evidence {
+        Text(evidence.reasoning)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      TextField("Reason (optional)", text: $factWaiverReason).textFieldStyle(.roundedBorder)
+      HStack {
+        Button("Cancel") { factWaiverPopoverFactId = nil }
+          .buttonStyle(.plain).foregroundStyle(.secondary)
+        Spacer()
+        Button("Approve Waiver") {
+          let fid = factId
+          let reason = factWaiverReason.isEmpty ? nil : factWaiverReason
+          factWaiverPopoverFactId = nil
+          factWaiverReason = ""
+          approvingFactWaiverIds.insert(fid)
+          Task {
+            await actions.approveFactWaiver(pod.id, fid, reason)
+            approvingFactWaiverIds.remove(fid)
+          }
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+        .tint(.green)
+      }
+    }
+    .padding(16)
+    .frame(width: 320)
+  }
+
   @ViewBuilder
   private func factEvidenceCard(_ check: FactCheckDetail) -> some View {
     let status = factStatusParts(evidence: check)
@@ -1432,6 +1509,9 @@ public struct ValidationTab: View {
               .foregroundStyle(.secondary)
           }
           Spacer(minLength: 4)
+          if factCanApproveWaiver(check) {
+            factWaiverButton(factId: check.factId, evidence: check)
+          }
           factBadge("evidence")
         }
         factEvidenceBody(check)
