@@ -182,9 +182,10 @@ function formatValidationFailure(input: ValidationFeedback): string {
       for (const check of failed) {
         lines.push(`**${check.factId}** (\`${check.artifactPath}\`):`);
         lines.push(`- ${check.reasoning}`);
-        if (check.stderr) {
+        const commandOutput = formatFactCommandOutput(check.stdout, check.stderr, 5_000);
+        if (commandOutput) {
           lines.push('```');
-          lines.push(check.stderr.slice(0, 5_000));
+          lines.push(commandOutput);
           lines.push('```');
         }
       }
@@ -258,6 +259,21 @@ function isUnavailableRequiredFact(
   check: NonNullable<ValidationResult['factValidation']>['results'][number],
 ): boolean {
   return check.status === 'pending_human' && check.exitCode === 127;
+}
+
+function formatFactCommandOutput(
+  stdout: string | undefined,
+  stderr: string | undefined,
+  limit: number,
+): string {
+  const trimmedStdout = stdout?.trim();
+  const trimmedStderr = stderr?.trim();
+
+  if (trimmedStdout && trimmedStderr) {
+    return [`stderr:\n${trimmedStderr}`, `stdout:\n${trimmedStdout}`].join('\n\n').slice(0, limit);
+  }
+
+  return (trimmedStderr || trimmedStdout || '').slice(0, limit);
 }
 
 function formatHumanRejection(input: RejectionFeedback): string {

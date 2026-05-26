@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readdir } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
@@ -814,6 +814,7 @@ async function runFactValidation(
 
   const cwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
   const results: FactCheckResult[] = [];
+  let hostBrowserFactDependenciesPrepared = false;
 
   for (const fact of facts) {
     const requestedDeviation = factDeviationMap.get(fact.id);
@@ -912,18 +913,31 @@ async function runFactValidation(
     let commandError: string | undefined;
     const commandStart = Date.now();
     try {
-      commandResult =
-        fact.kind === 'browser-test'
-          ? await runBrowserFactOnHost(fact.command, fact.id, config, hostBrowserRunner, log)
-          : await containerManager.execInContainer(config.containerId, ['sh', '-c', fact.command], {
-              cwd,
-              timeout: config.testTimeout ?? 600_000,
-              env: {
-                ...(config.extraExecEnv ?? {}),
-                AUTOPOD_FACT_EVIDENCE_DIR: `/workspace/.autopod/evidence/${fact.id}`,
-                AUTOPOD_FACT_SCREENSHOT_PATH: `/workspace/.autopod/evidence/${fact.id}/screenshot.png`,
-              },
-            });
+      if (fact.kind === 'browser-test') {
+        commandResult = await runBrowserFactOnHost(
+          fact.command,
+          fact.id,
+          config,
+          hostBrowserRunner,
+          log,
+          !hostBrowserFactDependenciesPrepared,
+        );
+        hostBrowserFactDependenciesPrepared = true;
+      } else {
+        commandResult = await containerManager.execInContainer(
+          config.containerId,
+          ['sh', '-c', fact.command],
+          {
+            cwd,
+            timeout: config.testTimeout ?? 600_000,
+            env: {
+              ...(config.extraExecEnv ?? {}),
+              AUTOPOD_FACT_EVIDENCE_DIR: `/workspace/.autopod/evidence/${fact.id}`,
+              AUTOPOD_FACT_SCREENSHOT_PATH: `/workspace/.autopod/evidence/${fact.id}/screenshot.png`,
+            },
+          },
+        );
+      }
     } catch (err) {
       const partial = (err as { partialOutput?: string })?.partialOutput;
       commandError = err instanceof Error ? err.message : String(err);
@@ -950,11 +964,15 @@ async function runFactValidation(
     ].filter((reason): reason is string => reason !== null);
     const unavailableReason = detectUnavailableFactCommand(commandResult);
     const factStatus = passed ? 'pass' : unavailableReason ? 'pending_human' : 'fail';
+    const executionNote =
+      !passed && fact.kind === 'browser-test' && config.worktreePath
+        ? ` Browser-test fact executed on daemon host worktree (${config.worktreePath}), not inside the agent container.`
+        : '';
     const reasoning = passed
       ? `Fact ${fact.id} passed: ${artifactPath} exists, satisfies ${fact.artifact.change}, and command exited 0.`
       : unavailableReason
         ? `Fact ${fact.id} needs human decision: ${unavailableReason}`
-        : `Fact ${fact.id} failed: ${failedReasons.join('; ')}.${commandError ? ` ${commandError}` : ''}`;
+        : `Fact ${fact.id} failed: ${failedReasons.join('; ')}.${executionNote}${commandError ? ` ${commandError}` : ''}`;
 
     results.push({
       factId: fact.id,
@@ -1022,6 +1040,7 @@ async function runBrowserFactOnHost(
   config: ValidationEngineConfig,
   hostBrowserRunner: HostBrowserRunner | undefined,
   log?: Logger,
+  prepareDependencies = true,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   if (!hostBrowserRunner) {
     throw new Error(
@@ -1061,6 +1080,14 @@ async function runBrowserFactOnHost(
   };
   log?.info({ command, worktreePath: config.worktreePath }, 'running browser-test fact on host');
   try {
+    if (prepareDependencies) {
+      await ensureHostBrowserFactDependencies(
+        config.worktreePath,
+        command,
+        config.testTimeout ?? 600_000,
+        log,
+      );
+    }
     const result = await execFileAsync('sh', ['-c', command], {
       cwd: config.worktreePath,
       env,
@@ -1086,6 +1113,112 @@ async function runBrowserFactOnHost(
       exitCode,
     };
   }
+}
+
+async function ensureHostBrowserFactDependencies(
+  worktreePath: string,
+  command: string,
+  timeout: number,
+  log?: Logger,
+): Promise<void> {
+  if (!looksLikePackageManagedBrowserFact(command)) return;
+
+  const packageJsonPath = path.join(worktreePath, 'package.json');
+  if (!(await pathExists(packageJsonPath))) return;
+
+  const nodeModulesPath = path.join(worktreePath, 'node_modules');
+  if (await pathExists(nodeModulesPath)) return;
+
+  const installCommand = await resolveHostDependencyInstallCommand(worktreePath);
+  const shouldInstallChromium =
+    command.includes('playwright') || (await packageJsonMentionsPlaywright(packageJsonPath));
+  const fullCommand = shouldInstallChromium
+    ? `${installCommand} && npx playwright install chromium`
+    : installCommand;
+
+  log?.info(
+    { worktreePath, command: fullCommand },
+    'installing host dependencies before browser-test fact execution',
+  );
+
+  try {
+    await execFileAsync('sh', ['-c', fullCommand], {
+      cwd: worktreePath,
+      env: process.env,
+      timeout,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+  } catch (err) {
+    const execErr = err as NodeJS.ErrnoException & {
+      stdout?: string;
+      stderr?: string;
+      code?: number | string;
+    };
+    const stdout = execErr.stdout ?? '';
+    const stderr = execErr.stderr ?? '';
+    const exitCode = typeof execErr.code === 'number' ? execErr.code : 1;
+    const detail = formatCommandDiagnostic(stdout, stderr, 4_000);
+    const enhanced = new Error(
+      [
+        `Host browser-test dependency install failed (exit ${exitCode}) before running required fact command.`,
+        `Install command: ${fullCommand}`,
+        detail ? `\n${detail}` : null,
+      ]
+        .filter((part): part is string => part !== null)
+        .join('\n'),
+    ) as Error & { stdout?: string; stderr?: string; code?: number };
+    enhanced.stdout = stdout;
+    enhanced.stderr = stderr || enhanced.message;
+    enhanced.code = exitCode;
+    throw enhanced;
+  }
+}
+
+function looksLikePackageManagedBrowserFact(command: string): boolean {
+  return /\b(npm|npx|pnpm|yarn|playwright)\b/.test(command);
+}
+
+async function resolveHostDependencyInstallCommand(worktreePath: string): Promise<string> {
+  if (
+    (await pathExists(path.join(worktreePath, 'package-lock.json'))) ||
+    (await pathExists(path.join(worktreePath, 'npm-shrinkwrap.json')))
+  ) {
+    return 'npm ci';
+  }
+  if (await pathExists(path.join(worktreePath, 'pnpm-lock.yaml'))) {
+    return 'npx pnpm install --frozen-lockfile';
+  }
+  if (await pathExists(path.join(worktreePath, 'yarn.lock'))) {
+    return 'corepack yarn install --immutable';
+  }
+  return 'npm install --package-lock=false';
+}
+
+async function packageJsonMentionsPlaywright(packageJsonPath: string): Promise<boolean> {
+  try {
+    const text = await readFile(packageJsonPath, 'utf8');
+    return /"(@playwright\/test|playwright)"/.test(text);
+  } catch {
+    return false;
+  }
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function formatCommandDiagnostic(stdout: string, stderr: string, limit: number): string {
+  const trimmedStdout = stdout.trim();
+  const trimmedStderr = stderr.trim();
+  if (trimmedStdout && trimmedStderr) {
+    return [`stderr:\n${trimmedStderr}`, `stdout:\n${trimmedStdout}`].join('\n\n').slice(0, limit);
+  }
+  return (trimmedStderr || trimmedStdout).slice(0, limit);
 }
 
 async function artifactExistsInContainer(

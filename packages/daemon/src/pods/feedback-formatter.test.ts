@@ -326,6 +326,73 @@ describe('formatFeedback', () => {
       expect(output).toContain('"action": "waive"');
       expect(output).not.toContain('Required Fact Failures');
     });
+
+    it('surfaces stdout for failed required facts when stderr is empty', () => {
+      const validation = mockValidationResult({});
+      validation.factValidation = {
+        status: 'fail',
+        results: [
+          {
+            factId: 'fact-playwright-assertion',
+            proves: ['layout'],
+            kind: 'browser-test',
+            artifactPath: 'tests/smoke-fixture/layout.spec.ts',
+            command: 'npm run smoke -- tests/smoke-fixture/layout.spec.ts',
+            passed: false,
+            status: 'fail',
+            exitCode: 2,
+            reasoning: 'Fact fact-playwright-assertion failed: command exited 2.',
+            stdout: 'Error: expect(locator).toHaveCSS() failed\nExpected: left\nReceived: right',
+            stderr: '',
+          },
+        ],
+      };
+
+      const output = formatFeedback({
+        type: 'validation_failure',
+        result: validation,
+        task: 'Fix layout',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+
+      expect(output).toContain('Required Fact Failures');
+      expect(output).toContain('expect(locator).toHaveCSS() failed');
+      expect(output).toContain('Received: right');
+    });
+
+    it('labels both stderr and stdout for failed required facts', () => {
+      const validation = mockValidationResult({});
+      validation.factValidation = {
+        status: 'fail',
+        results: [
+          {
+            factId: 'fact-playwright-with-npm-warning',
+            proves: ['layout'],
+            kind: 'browser-test',
+            artifactPath: 'tests/smoke-fixture/layout.spec.ts',
+            command: 'npm run smoke -- tests/smoke-fixture/layout.spec.ts',
+            passed: false,
+            status: 'fail',
+            exitCode: 2,
+            reasoning: 'Fact fact-playwright-with-npm-warning failed: command exited 2.',
+            stdout: 'Error: button left edge was 24px but expected 12px',
+            stderr: 'npm warn Unknown env config "recursive"',
+          },
+        ],
+      };
+
+      const output = formatFeedback({
+        type: 'validation_failure',
+        result: validation,
+        task: 'Fix layout',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+
+      expect(output).toContain('stderr:\nnpm warn Unknown env config "recursive"');
+      expect(output).toContain('stdout:\nError: button left edge was 24px but expected 12px');
+    });
   });
 
   describe('human_rejection', () => {

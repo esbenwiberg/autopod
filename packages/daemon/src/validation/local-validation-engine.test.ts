@@ -72,8 +72,10 @@ describe('required fact execution', () => {
   async function validateBrowserFact(options: {
     hostBrowserRunner?: HostBrowserRunner;
     command?: string;
+    setupWorktree?: (worktreePath: string) => Promise<void>;
   }) {
     const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-fact-host-'));
+    await options.setupWorktree?.(worktreePath);
     const execCommands: string[] = [];
     const containerManager = {
       execInContainer: vi.fn(async (_containerId: string, command: string[]) => {
@@ -172,6 +174,49 @@ human_review: []
     expect(hostBrowserRunner.getAvailability).toHaveBeenCalled();
     expect(hostBrowserRunner.isAvailable).not.toHaveBeenCalled();
     expect(execCommands).not.toContain('printf host-fact');
+  });
+
+  it('installs missing host package dependencies before browser-test fact commands', async () => {
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: true,
+        cached: false,
+        checkedAt: '2026-05-20T00:00:00.000Z',
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      })),
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+      readScreenshot: vi.fn(async () => ''),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp/autopod/screenshots'),
+    };
+
+    const { result } = await validateBrowserFact({
+      hostBrowserRunner,
+      command: 'npm run --silent fact',
+      setupWorktree: async (worktreePath) => {
+        await fs.mkdir(path.join(worktreePath, 'dep'), { recursive: true });
+        await fs.writeFile(
+          path.join(worktreePath, 'dep', 'package.json'),
+          JSON.stringify({ name: 'local-fact-dep', version: '1.0.0' }),
+        );
+        await fs.writeFile(
+          path.join(worktreePath, 'package.json'),
+          JSON.stringify({
+            name: 'fact-host',
+            version: '1.0.0',
+            scripts: { fact: 'test -d node_modules/local-fact-dep && printf host-fact' },
+            dependencies: { 'local-fact-dep': 'file:./dep' },
+          }),
+        );
+      },
+    });
+
+    expect(result.factValidation?.status).toBe('pass');
+    expect(result.factValidation?.results[0]?.stdout).toBe('host-fact');
   });
 
   it('collects browser-test fact attachments written on the host', async () => {

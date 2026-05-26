@@ -1568,9 +1568,21 @@ public struct ValidationTab: View {
           .textSelection(.enabled)
       }
     }
-    if let stderr = check.stderr, !stderr.isEmpty {
-      outputBlock(title: "Fact Error Output", text: stderr, expanded: .constant(false), color: .red)
+    if let output = factCommandOutput(check) {
+      outputBlock(title: "Fact Error Output", text: output, expanded: .constant(false), color: .red)
     }
+  }
+
+  private func factCommandOutput(_ check: FactCheckDetail) -> String? {
+    let stdout = check.stdout?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let stderr = check.stderr?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+    if !stdout.isEmpty && !stderr.isEmpty {
+      return "stderr:\n\(stderr)\n\nstdout:\n\(stdout)"
+    }
+    if !stderr.isEmpty { return stderr }
+    if !stdout.isEmpty { return stdout }
+    return nil
   }
 
   @ViewBuilder
