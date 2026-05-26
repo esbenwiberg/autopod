@@ -251,6 +251,32 @@ describe('CodexStreamParser', () => {
       expect(e).toMatchObject({ type: 'tool_use', tool: 'mcp__serena__find_symbol' });
     });
 
+    it('maps response_item function calls with an MCP namespace to qualified MCP tools', () => {
+      const e = CodexStreamParser.mapEvent(
+        {
+          timestamp: '2026-05-26T15:31:36.800Z',
+          type: 'response_item',
+          payload: {
+            type: 'function_call',
+            name: 'report_plan',
+            namespace: 'mcp__escalation__',
+            arguments: JSON.stringify({ summary: 'Deploy', steps: ['Run script'] }),
+            call_id: 'call-mcp',
+          },
+        },
+        'pod-1',
+      );
+      expect(e).toMatchObject({
+        type: 'tool_use',
+        tool: 'mcp__escalation__report_plan',
+        input: expect.objectContaining({
+          call_id: 'call-mcp',
+          summary: 'Deploy',
+          steps: ['Run script'],
+        }),
+      });
+    });
+
     it('maps mcp_tool_call_end with stringified result', () => {
       const e = CodexStreamParser.mapEvent(
         {

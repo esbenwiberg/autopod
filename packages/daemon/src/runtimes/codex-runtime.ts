@@ -22,6 +22,7 @@ const EXTERNAL_SANDBOX_ARGS = ['--dangerously-bypass-approvals-and-sandbox'] as 
 // for human approval or long deploy scripts, so give the client a ceiling just
 // above the daemon's default 1h human-response timeout.
 const CODEX_MCP_TOOL_TIMEOUT_SEC = 3900;
+const DEFAULT_ROLLOUT_POLL_MS = 1_000;
 
 const TOML_BARE_KEY = /^[A-Za-z0-9_-]+$/;
 const ROLLOUT_FILE_RE = /^rollout-.*\.jsonl$/;
@@ -41,6 +42,7 @@ interface OutputState {
 interface RolloutCandidate {
   path: string;
   mtimeMs: number;
+  size: number;
 }
 
 function escapeTomlString(s: string): string {
@@ -319,7 +321,61 @@ export class CodexRuntime implements Runtime {
     outputState: OutputState,
   ): AsyncIterable<AgentEvent> {
     const seen = new Set<string>();
-    const stdoutStats = yield* this.parseCodexLines(handle.stdout, podId, seen, outputState);
+    const abortLiveRollout = new AbortController();
+    const stdoutIterator = this.parseCodexLines(handle.stdout, podId, seen, outputState)[
+      Symbol.asyncIterator
+    ]();
+    const rolloutIterator = this.pollLatestRollout(podId, abortLiveRollout.signal)[
+      Symbol.asyncIterator
+    ]();
+
+    let stdoutStats: ParseStats = { events: 0, nonStatusEvents: 0, sawComplete: false };
+    let stdoutDone = false;
+    let stdoutNext = nextFrom('stdout', stdoutIterator);
+    let rolloutNext = nextFrom('rollout', rolloutIterator);
+
+    try {
+      while (!stdoutDone) {
+        const next = await Promise.race([stdoutNext, rolloutNext]);
+        if (next.source === 'stdout') {
+          if (next.result.done) {
+            const readyRollout = await settledOrNull(rolloutNext);
+            if (readyRollout && !readyRollout.result.done) {
+              const event = readyRollout.result.value;
+              const key = dedupeKey(event);
+              if (!seen.has(key)) {
+                seen.add(key);
+                recordOutputEvent(outputState, event);
+                yield event;
+              }
+              rolloutNext = nextFrom('rollout', rolloutIterator);
+              continue;
+            }
+            stdoutDone = true;
+            stdoutStats = next.result.value;
+          } else {
+            yield next.result.value;
+            stdoutNext = nextFrom('stdout', stdoutIterator);
+          }
+        } else if (next.result.done) {
+          rolloutNext = neverSettles<'rollout'>();
+        } else {
+          const event = next.result.value;
+          const key = dedupeKey(event);
+          if (seen.has(key)) {
+            rolloutNext = nextFrom('rollout', rolloutIterator);
+            continue;
+          }
+          seen.add(key);
+          recordOutputEvent(outputState, event);
+          yield event;
+          rolloutNext = nextFrom('rollout', rolloutIterator);
+        }
+      }
+    } finally {
+      abortLiveRollout.abort();
+      await rolloutIterator.return?.();
+    }
 
     if (stdoutStats.sawComplete && stdoutStats.nonStatusEvents > 0) return;
 
@@ -332,6 +388,24 @@ export class CodexRuntime implements Runtime {
     seen: Set<string>,
     outputState: OutputState,
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
+    const iterator = this.parseCodexLinesRaw(lines, podId)[Symbol.asyncIterator]();
+    for (;;) {
+      const next = await iterator.next();
+      if (next.done) return next.value;
+
+      const event = next.value;
+      const key = dedupeKey(event);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      recordOutputEvent(outputState, event);
+      yield event;
+    }
+  }
+
+  private async *parseCodexLinesRaw(
+    lines: Readable,
+    podId: string,
+  ): AsyncGenerator<AgentEvent, ParseStats, void> {
     const stats: ParseStats = { events: 0, nonStatusEvents: 0, sawComplete: false };
 
     for await (const event of CodexStreamParser.parse(lines, podId, this.logger)) {
@@ -342,10 +416,6 @@ export class CodexRuntime implements Runtime {
         this.codexSessionIds.set(podId, event.sessionId);
       }
 
-      const key = dedupeKey(event);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      recordOutputEvent(outputState, event);
       yield event;
     }
 
@@ -386,6 +456,33 @@ export class CodexRuntime implements Runtime {
     );
 
     return yield* this.parseCodexLines(createReadStream(rolloutPath), podId, seen, outputState);
+  }
+
+  private async *pollLatestRollout(
+    podId: string,
+    signal: AbortSignal,
+  ): AsyncGenerator<AgentEvent, void, void> {
+    let lastSignature: string | null = null;
+
+    while (!signal.aborted) {
+      try {
+        const rollout = await findLatestCodexRollout(codexStateDirForPod(podId));
+        if (rollout) {
+          const signature = `${rollout.path}:${rollout.mtimeMs}:${rollout.size}`;
+          if (signature !== lastSignature) {
+            lastSignature = signature;
+            yield* this.parseCodexLinesRaw(createReadStream(rollout.path), podId);
+          }
+        }
+      } catch (err) {
+        this.logger.warn(
+          { component: 'codex-runtime', podId, err },
+          'Failed to poll Codex rollout JSONL',
+        );
+      }
+
+      await sleep(rolloutPollIntervalMs(), signal);
+    }
   }
 
   /**
@@ -461,11 +558,58 @@ function recordOutputEvent(state: OutputState, event: AgentEvent): void {
   if (event.type === 'complete') state.sawComplete = true;
 }
 
+function nextFrom<Source extends 'stdout' | 'rollout'>(
+  source: Source,
+  iterator: AsyncIterator<AgentEvent, Source extends 'stdout' ? ParseStats : void>,
+): Promise<{
+  source: Source;
+  result: IteratorResult<AgentEvent, Source extends 'stdout' ? ParseStats : void>;
+}> {
+  return iterator.next().then((result) => ({ source, result }));
+}
+
+function neverSettles<Source extends 'stdout' | 'rollout'>(): Promise<{
+  source: Source;
+  result: IteratorResult<AgentEvent, Source extends 'stdout' ? ParseStats : void>;
+}> {
+  return new Promise(() => {});
+}
+
+function settledOrNull<T>(promise: Promise<T>): Promise<T | null> {
+  return Promise.race([promise, Promise.resolve(null)]);
+}
+
+function rolloutPollIntervalMs(): number {
+  const configured = Number.parseInt(
+    process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS ?? `${DEFAULT_ROLLOUT_POLL_MS}`,
+    10,
+  );
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_ROLLOUT_POLL_MS;
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timeout = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    }
+    signal?.addEventListener('abort', done, { once: true });
+  });
+}
+
 async function findLatestCodexRolloutFile(rootDir: string): Promise<string | null> {
+  const latest = await findLatestCodexRollout(rootDir);
+  return latest?.path ?? null;
+}
+
+async function findLatestCodexRollout(rootDir: string): Promise<RolloutCandidate | null> {
   const candidates: RolloutCandidate[] = [];
   await collectRolloutFiles(rootDir, candidates);
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return candidates[0]?.path ?? null;
+  return candidates[0] ?? null;
 }
 
 async function collectRolloutFiles(dir: string, candidates: RolloutCandidate[]): Promise<void> {
@@ -485,6 +629,6 @@ async function collectRolloutFiles(dir: string, candidates: RolloutCandidate[]):
     }
     if (!entry.isFile() || !ROLLOUT_FILE_RE.test(entry.name)) continue;
     const info = await stat(entryPath);
-    candidates.push({ path: entryPath, mtimeMs: info.mtimeMs });
+    candidates.push({ path: entryPath, mtimeMs: info.mtimeMs, size: info.size });
   }
 }

@@ -104,6 +104,12 @@ function mcpToolName(invocation: Record<string, unknown>): string {
   return server ? `mcp__${server}__${rawTool}` : rawTool;
 }
 
+function namespacedToolName(name: string, namespace: unknown): string {
+  if (name.startsWith('mcp__')) return name;
+  if (typeof namespace !== 'string' || !namespace.startsWith('mcp__')) return name;
+  return `${namespace.endsWith('__') ? namespace : `${namespace}__`}${name}`;
+}
+
 function mcpInput(
   msg: { [key: string]: unknown },
   invocation: Record<string, unknown>,
@@ -193,7 +199,8 @@ function completeEventFromState(
 
 function mapFunctionCall(msg: { [key: string]: unknown }, ts: string): AgentEvent | null {
   const callId = typeof msg.call_id === 'string' ? msg.call_id : undefined;
-  const name = typeof msg.name === 'string' ? msg.name : 'tool';
+  const rawName = typeof msg.name === 'string' ? msg.name : 'tool';
+  const name = namespacedToolName(rawName, msg.namespace);
   const args = parseJsonObject(msg.arguments) ?? parseJsonObject(msg.input);
   const input: Record<string, unknown> = { call_id: callId };
 

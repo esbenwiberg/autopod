@@ -70,6 +70,22 @@ function createMockPodRepo(codexSessionId: string | null = null): PodRepository 
   };
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (err: unknown) => {
+        clearTimeout(timeout);
+        reject(err);
+      },
+    );
+  });
+}
+
 describe('CodexRuntime', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -534,6 +550,111 @@ describe('CodexRuntime', () => {
           delete process.env.AUTOPOD_CODEX_STATE_DIR;
         } else {
           process.env.AUTOPOD_CODEX_STATE_DIR = previousStateDir;
+        }
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('yields rollout MCP tool events while stdout is still open', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousPollMs = process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-runtime-live-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = '10';
+
+      try {
+        const podId = 'rollout-live';
+        const rolloutDir = join(tmpRoot, podId, '2026', '05', '26');
+        const rolloutPath = join(rolloutDir, 'rollout-2026-05-26T15-31-16-019e64e9.jsonl');
+        await mkdir(rolloutDir, { recursive: true });
+
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+        const iterator = runtime
+          .spawn({
+            podId,
+            task: 'Deploy',
+            model: 'gpt-5.5',
+            workDir: '/workspace',
+            containerId: 'container-123',
+            env: {},
+          })
+          [Symbol.asyncIterator]();
+
+        const firstEvent = withTimeout(iterator.next(), 1_000);
+        setTimeout(() => {
+          void writeFile(
+            rolloutPath,
+            [
+              JSON.stringify({
+                timestamp: '2026-05-26T15:31:40.000Z',
+                type: 'event_msg',
+                payload: {
+                  type: 'mcp_tool_call_end',
+                  call_id: 'call-deploy',
+                  invocation: {
+                    server: 'escalation',
+                    tool: 'run_deploy_script',
+                    arguments: { script_path: 'infra/azure/acr-deploy.sh' },
+                  },
+                  result: { Ok: { content: [{ type: 'text', text: 'exit 0' }] } },
+                },
+              }),
+              JSON.stringify({
+                timestamp: '2026-05-26T15:31:41.000Z',
+                type: 'event_msg',
+                payload: {
+                  type: 'task_complete',
+                  last_agent_message: 'Deployment complete',
+                },
+              }),
+            ].join('\n'),
+          );
+        }, 20);
+
+        const first = await firstEvent;
+        expect(first.done).toBe(false);
+        expect(first.value).toMatchObject({
+          type: 'tool_use',
+          tool: 'mcp__escalation__run_deploy_script',
+          input: expect.objectContaining({
+            call_id: 'call-deploy',
+            server: 'escalation',
+            script_path: 'infra/azure/acr-deploy.sh',
+          }),
+          output: expect.stringContaining('exit 0'),
+        });
+
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(0);
+        const rest: AgentEvent[] = [];
+        for (;;) {
+          const next = await iterator.next();
+          if (next.done) break;
+          rest.push(next.value);
+        }
+
+        expect(rest).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              type: 'complete',
+              result: 'Deployment complete',
+            }),
+          ]),
+        );
+      } finally {
+        if (previousStateDir === undefined) {
+          // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
+          delete process.env.AUTOPOD_CODEX_STATE_DIR;
+        } else {
+          process.env.AUTOPOD_CODEX_STATE_DIR = previousStateDir;
+        }
+        if (previousPollMs === undefined) {
+          // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
+          delete process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
+        } else {
+          process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = previousPollMs;
         }
         await rm(tmpRoot, { recursive: true, force: true });
       }
