@@ -19,9 +19,9 @@
     "dev": "tsup --watch --no-dts"
   },
   "dependencies": {
-    "nanoid": "^5.0.9",
+    "nanoid": "^5.1.11",
     "unique-names-generator": "^4.7.1",
-    "yaml": "^2.6.1",
+    "yaml": "^2.9.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
