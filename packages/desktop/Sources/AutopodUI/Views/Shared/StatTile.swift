@@ -43,22 +43,26 @@ public struct StatTile: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 7) {
                 Image(systemName: icon)
                     .font(.system(size: 11))
                     .foregroundStyle(iconColor)
+                    .frame(width: 16, height: 16)
                 Text(label)
-                    .font(.caption2)
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer()
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.9)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, minHeight: 28, alignment: .topLeading)
                 Button {
                     showingInfo.toggle()
                 } label: {
                     Image(systemName: "questionmark.circle")
-                        .font(.system(size: 9))
+                        .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
+                        .frame(width: 14, height: 14)
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $showingInfo, arrowEdge: .bottom) {
@@ -72,7 +76,7 @@ public struct StatTile: View {
             }
 
             Text(value)
-                .font(.system(.title3, design: .monospaced).weight(.semibold))
+                .font(.system(size: 20, weight: .semibold, design: .monospaced))
                 .foregroundStyle(valueColor)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -80,7 +84,7 @@ public struct StatTile: View {
             if health != .neutral {
                 Rectangle()
                     .fill(health.color)
-                    .frame(width: 24, height: 2)
+                    .frame(width: 30, height: 2)
                     .clipShape(Capsule())
             } else {
                 // Reserve the same vertical space so neutral tiles align with
@@ -92,6 +96,10 @@ public struct StatTile: View {
         .padding(12)
         .background(Color(nsColor: .windowBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.14), lineWidth: 1)
+        )
         .help(hint)
     }
 

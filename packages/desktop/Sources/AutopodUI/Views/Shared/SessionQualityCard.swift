@@ -13,13 +13,13 @@ public struct SessionQualityCard: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 6) {
                 Circle()
                     .fill(qualityColor(signals.grade))
                     .frame(width: 10, height: 10)
                 Text("Session Quality")
-                    .font(.system(.subheadline).weight(.semibold))
+                    .font(.system(.headline).weight(.semibold))
                     .lineLimit(1)
                 Spacer()
                 if let score = signals.score {
@@ -32,8 +32,9 @@ public struct SessionQualityCard: View {
             }
 
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 110), spacing: 8)],
-                spacing: 8
+                columns: [GridItem(.adaptive(minimum: 156), spacing: 12)],
+                alignment: .leading,
+                spacing: 12
             ) {
                 let readEdit = signals.readEditTile
                 StatTile(icon: "doc.text.magnifyingglass", label: "Read / Edit",
@@ -82,15 +83,28 @@ public struct SessionQualityCard: View {
             }
 
             if let model = signals.model, !model.isEmpty {
-                Text("Model: \(model)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .textSelection(.enabled)
+                HStack(spacing: 5) {
+                    Image(systemName: "cpu")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                    Text("Model:")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                    Text(model)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .textSelection(.enabled)
+                }
             }
         }
-        .padding(14)
+        .padding(16)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.18), lineWidth: 1)
+        )
     }
 
     private func qualityColor(_ grade: String) -> Color {
