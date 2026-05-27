@@ -349,17 +349,23 @@ public struct BriefPodMetadata: Sendable, Hashable {
   public var briefTitle: String?
   public var touches: [String]?
   public var doesNotTouch: [String]?
+  public var startBranch: String?
+  public var specFiles: [SpecFilePayload]?
 
   public init(
     contract: SpecContractResponse? = nil,
     briefTitle: String? = nil,
     touches: [String]? = nil,
-    doesNotTouch: [String]? = nil
+    doesNotTouch: [String]? = nil,
+    startBranch: String? = nil,
+    specFiles: [SpecFilePayload]? = nil
   ) {
     self.contract = contract
     self.briefTitle = briefTitle
     self.touches = touches
     self.doesNotTouch = doesNotTouch
+    self.startBranch = startBranch
+    self.specFiles = specFiles
   }
 }
 
@@ -379,7 +385,9 @@ public struct CreateSessionRequest: Codable, Sendable {
   public var doesNotTouch: [String]?
   public var outputMode: String?
   public var pod: PodConfigRequest?
+  public var startBranch: String?
   public var baseBranch: String?
+  public var specFiles: [SpecFilePayload]?
   public var branchPrefix: String?
   public var linkedSessionId: String?
   public var pimGroups: [PimGroupRequest]?
@@ -407,7 +415,9 @@ public struct CreateSessionRequest: Codable, Sendable {
     doesNotTouch: [String]? = nil,
     outputMode: String? = nil,
     pod: PodConfigRequest? = nil,
+    startBranch: String? = nil,
     baseBranch: String? = nil,
+    specFiles: [SpecFilePayload]? = nil,
     branchPrefix: String? = nil,
     linkedSessionId: String? = nil,
     pimGroups: [PimGroupRequest]? = nil,
@@ -430,7 +440,9 @@ public struct CreateSessionRequest: Codable, Sendable {
     self.doesNotTouch = doesNotTouch
     self.outputMode = outputMode
     self.pod = pod
+    self.startBranch = startBranch
     self.baseBranch = baseBranch
+    self.specFiles = specFiles
     self.branchPrefix = branchPrefix
     self.linkedSessionId = linkedSessionId
     self.pimGroups = pimGroups
@@ -447,7 +459,7 @@ public struct CreateSessionRequest: Codable, Sendable {
     case profileName, task, model, runtime, executionTarget, branch
     case skipValidation, contract, briefTitle, touches, doesNotTouch, outputMode
     case pod = "options"
-    case baseBranch, branchPrefix, linkedSessionId, pimGroups
+    case startBranch, baseBranch, specFiles, branchPrefix, linkedSessionId, pimGroups
     case dependsOnPodIds, seriesId, seriesName, requireSidecars
     case referenceRepos
   }
@@ -469,6 +481,16 @@ public struct SeriesResponse: Codable, Sendable {
   public let statusCounts: [String: Int]
 }
 
+public struct SpecFilePayload: Codable, Sendable, Hashable {
+  public let path: String
+  public let content: String
+
+  public init(path: String, content: String) {
+    self.path = path
+    self.content = content
+  }
+}
+
 /// A single parsed brief returned from `POST /pods/series/preview`. Titles are
 /// used as node identifiers in the DAG; `dependsOn` references other brief titles.
 public struct ParsedBriefResponse: Codable, Sendable {
@@ -482,6 +504,8 @@ public struct ParsedBriefResponse: Codable, Sendable {
   /// preview so reviewers can see which pods will spawn privileged sidecars
   /// before submitting. Nil/empty = no sidecars.
   public let requireSidecars: [String]?
+  /// Local spec files returned by folder previews. Nil for branch previews.
+  public let specFiles: [SpecFilePayload]?
 
   public init(
     title: String,
@@ -490,7 +514,8 @@ public struct ParsedBriefResponse: Codable, Sendable {
     contract: SpecContractResponse? = nil,
     touches: [String]? = nil,
     doesNotTouch: [String]? = nil,
-    requireSidecars: [String]? = nil
+    requireSidecars: [String]? = nil,
+    specFiles: [SpecFilePayload]? = nil
   ) {
     self.title = title
     self.task = task
@@ -499,6 +524,7 @@ public struct ParsedBriefResponse: Codable, Sendable {
     self.touches = touches
     self.doesNotTouch = doesNotTouch
     self.requireSidecars = requireSidecars
+    self.specFiles = specFiles
   }
 }
 
@@ -510,13 +536,17 @@ public struct SeriesPreviewResponse: Codable, Sendable {
   public let seriesDescription: String?
   /// Series design (from `design.md`). Rendered in the Series tab.
   public let seriesDesign: String?
+  /// Local spec files returned by folder previews. Nil for branch previews.
+  public let specFiles: [SpecFilePayload]?
 }
 
 public struct CreateSeriesRequest: Codable, Sendable {
   public var seriesName: String
   public var briefs: [ParsedBriefResponse]
   public var profile: String
+  public var startBranch: String?
   public var baseBranch: String?
+  public var specFiles: [SpecFilePayload]?
   public var prMode: String?   // "single" | "stacked" | "none"
   public var autoApprove: Bool?
   public var disableAskHuman: Bool?
@@ -527,7 +557,9 @@ public struct CreateSeriesRequest: Codable, Sendable {
     seriesName: String,
     briefs: [ParsedBriefResponse],
     profile: String,
+    startBranch: String? = nil,
     baseBranch: String? = nil,
+    specFiles: [SpecFilePayload]? = nil,
     prMode: String? = nil,
     autoApprove: Bool? = nil,
     disableAskHuman: Bool? = nil,
@@ -537,7 +569,9 @@ public struct CreateSeriesRequest: Codable, Sendable {
     self.seriesName = seriesName
     self.briefs = briefs
     self.profile = profile
+    self.startBranch = startBranch
     self.baseBranch = baseBranch
+    self.specFiles = specFiles
     self.prMode = prMode
     self.autoApprove = autoApprove
     self.disableAskHuman = disableAskHuman

@@ -2,6 +2,8 @@ export interface WorktreeCreateConfig {
   repoUrl: string;
   branch: string;
   baseBranch: string;
+  /** Optional source/start branch. Defaults to baseBranch. */
+  startBranch?: string;
   /** PAT used for authenticated clone/fetch/push on the daemon host. Never written to git remote config. */
   pat?: string;
   /** ID used to derive the worktree directory path. Defaults to a sanitized form of the branch name. Pass pod ID to ensure uniqueness when multiple pods share the same branch (e.g. single-mode series). */

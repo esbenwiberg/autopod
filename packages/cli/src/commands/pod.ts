@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import type { AgentActivityEvent, Pod, PodStatus, SystemEvent } from '@autopod/shared';
+import type { AgentActivityEvent, Pod, PodStatus, SpecFile, SystemEvent } from '@autopod/shared';
 import { parseBriefs } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
@@ -35,6 +35,34 @@ function collectRepeatable(value: string, previous: string[]): string[] {
   return previous.concat(value);
 }
 
+const pathSeparatorRegex = /[/\\]+/g;
+
+function collectSpecFiles(specRoot: string): SpecFile[] {
+  const root = resolve(specRoot);
+  const outputRoot = `specs/${basename(root) || 'spec'}`;
+  const files: SpecFile[] = [];
+
+  function walk(dir: string): void {
+    for (const entry of readdirSync(dir).sort()) {
+      const full = join(dir, entry);
+      const stat = statSync(full);
+      if (stat.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!stat.isFile()) continue;
+      const rel = full.slice(root.length + 1).split(pathSeparatorRegex).join('/');
+      files.push({
+        path: `${outputRoot}/${rel}`,
+        content: readFileSync(full, 'utf-8'),
+      });
+    }
+  }
+
+  walk(root);
+  return files;
+}
+
 export function registerPodCommands(program: Command, getClient: () => AutopodClient): void {
   // ap run
   program
@@ -44,6 +72,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('-r, --runtime <runtime>', 'Runtime (claude or codex)')
     .option('-b, --branch <branch>', 'Target branch name')
     .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
+    .option('--start-branch <branch>', 'Branch/ref to start from while targeting --base-branch')
     .option('--base-branch <branch>', 'Branch from a specific base (e.g. workspace output)')
     .option('--skip-validation', 'Skip validation phase')
     .option(
@@ -61,6 +90,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           runtime?: string;
           branch?: string;
           branchPrefix?: string;
+          startBranch?: string;
           baseBranch?: string;
           skipValidation?: boolean;
           sidecar: string[];
@@ -75,6 +105,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             runtime: opts.runtime as 'claude' | 'codex' | undefined,
             branch: opts.branch,
             branchPrefix: opts.branchPrefix,
+            startBranch: opts.startBranch,
             baseBranch: opts.baseBranch,
             skipValidation: opts.skipValidation,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
@@ -105,6 +136,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('-r, --runtime <runtime>', 'Runtime (claude or codex)')
     .option('-b, --branch <branch>', 'Target branch name')
     .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
+    .option('--start-branch <branch>', 'Branch/ref to start from while targeting --base-branch')
     .option('--base-branch <branch>', 'Branch from a specific base')
     .option(
       '-s, --sidecar <name>',
@@ -136,6 +168,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           runtime?: string;
           branch?: string;
           branchPrefix?: string;
+          startBranch?: string;
           baseBranch?: string;
           sidecar: string[];
           refRepo: string[];
@@ -193,6 +226,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             runtime: opts.runtime as 'claude' | 'codex' | undefined,
             branch: opts.branch,
             branchPrefix: opts.branchPrefix,
+            startBranch: opts.startBranch,
             baseBranch: opts.baseBranch,
             options: podOptions,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
@@ -623,6 +657,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('-r, --runtime <runtime>', 'runtime (claude | codex)')
     .option('-b, --branch <branch>', 'target branch name')
     .option('--branch-prefix <prefix>', 'override branch prefix (e.g. hotfix/)')
+    .option('--start-branch <branch>', 'branch/ref to start from while targeting --base-branch')
     .option('--base-branch <branch>', 'branch from a specific base')
     .option('--skip-validation', 'skip validation phase')
     .option(
@@ -642,6 +677,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           runtime?: string;
           branch?: string;
           branchPrefix?: string;
+          startBranch?: string;
           baseBranch?: string;
           skipValidation?: boolean;
           sidecar: string[];
@@ -653,6 +689,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
 
         let resolvedTask: string;
         let contract: import('@autopod/shared').SpecContract | undefined;
+        let specFiles: SpecFile[] | undefined;
         if (opts.spec) {
           const specRoot = resolve(opts.spec);
           const briefPath = join(specRoot, 'brief.md');
@@ -672,6 +709,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           }
           resolvedTask = brief.task;
           contract = brief.contract;
+          specFiles = collectSpecFiles(specRoot);
         } else if (opts.file) {
           if (!existsSync(opts.file)) podGroup.error(`file not found: ${opts.file}`);
           resolvedTask = readFileSync(opts.file, 'utf8').trim();
@@ -693,7 +731,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             runtime: opts.runtime as 'claude' | 'codex' | undefined,
             branch: opts.branch,
             branchPrefix: opts.branchPrefix,
+            startBranch: opts.startBranch,
             baseBranch: opts.baseBranch,
+            specFiles,
             skipValidation: opts.skipValidation,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
           }),

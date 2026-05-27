@@ -136,7 +136,7 @@ export function podRoutes(
         name: request.user.name,
       });
       reply.status(201);
-      return pod;
+      return serializePodForWire(pod);
     } catch (err) {
       if (err instanceof AutopodError) {
         reply.status(err.statusCode ?? 400);

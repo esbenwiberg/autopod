@@ -515,6 +515,21 @@ describe('Integration', () => {
       expect(res.json().status).toBe('queued');
     });
 
+    it('POST /pods stores spec files without returning their contents', async () => {
+      const specFiles = [{ path: 'specs/help-modal/brief.md', content: '# Brief\n' }];
+      const res = await app.inject({
+        method: 'POST',
+        url: '/pods',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { profileName: 'test-app', task: 'Add help modal', specFiles },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.specFiles).toBeUndefined();
+      expect(podRepo.getOrThrow(body.id).specFiles).toEqual(specFiles);
+    });
+
     it('POST /pods preserves referenceRepos with sourceProfile (regression: schema must not strip)', async () => {
       const res = await app.inject({
         method: 'POST',
@@ -972,6 +987,27 @@ describe('Integration', () => {
       expect(body.pods[0].dependsOnPodId).toBeNull();
       expect(body.pods[1].dependsOnPodId).toBe(body.pods[0].id);
       expect(body.pods[2].dependsOnPodId).toBe(body.pods[1].id);
+    });
+
+    it('POST /pods/series stores root spec files without returning their contents', async () => {
+      const specFiles = [{ path: 'specs/help-modal/purpose.md', content: '# Purpose\n' }];
+      const res = await app.inject({
+        method: 'POST',
+        url: '/pods/series',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          seriesName: 'help-modal',
+          profile: 'test-app',
+          prMode: 'single',
+          specFiles,
+          briefs: [{ title: '01-modal', task: 'Implement help modal', dependsOn: [] }],
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.pods[0].specFiles).toBeUndefined();
+      expect(podRepo.getOrThrow(body.pods[0].id).specFiles).toEqual(specFiles);
     });
 
     it('POST /pods/series sets output:branch for intermediate pods in single mode', async () => {

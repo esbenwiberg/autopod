@@ -1,6 +1,24 @@
 import { z } from 'zod';
 import { partialPodOptionsSchema } from './action-definition.schema.js';
 
+const branchNameSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[a-zA-Z0-9.\-_/]+$/, 'Branch name contains invalid characters')
+  .refine((s) => !s.includes('..'), 'Branch name cannot contain ".."');
+
+const specFileSchema = z.object({
+  path: z
+    .string()
+    .min(1)
+    .max(500)
+    .regex(/^[^\\\0]+$/, 'Spec file path contains invalid characters')
+    .refine((s) => !s.startsWith('/'), 'Spec file path must be relative')
+    .refine((s) => !s.split('/').includes('..'), 'Spec file path cannot escape the repo'),
+  content: z.string().max(1_000_000),
+});
+
 const contractScenarioFields: Record<string, z.ZodTypeAny> = {
   id: z.string().min(1).max(128),
   given: z.array(z.string().min(1)).min(1),
@@ -53,13 +71,7 @@ export const createPodRequestSchema = z
     model: z.string().min(1).max(32).optional(),
     runtime: z.enum(['claude', 'codex']).optional(),
     executionTarget: z.enum(['local', 'aci']).optional(),
-    branch: z
-      .string()
-      .min(1)
-      .max(128)
-      .regex(/^[a-zA-Z0-9.\-_/]+$/, 'Branch name contains invalid characters')
-      .refine((s) => !s.includes('..'), 'Branch name cannot contain ".."')
-      .optional(),
+    branch: branchNameSchema.optional(),
     branchPrefix: z
       .string()
       .min(1)
@@ -71,13 +83,9 @@ export const createPodRequestSchema = z
     contract: specContractSchema.optional(),
     options: partialPodOptionsSchema.optional(),
     outputMode: z.enum(['pr', 'artifact', 'workspace']).optional(),
-    baseBranch: z
-      .string()
-      .min(1)
-      .max(128)
-      .regex(/^[a-zA-Z0-9.\-_/]+$/, 'Branch name contains invalid characters')
-      .refine((s) => !s.includes('..'), 'Branch name cannot contain ".."')
-      .optional(),
+    startBranch: branchNameSchema.optional(),
+    baseBranch: branchNameSchema.optional(),
+    specFiles: z.array(specFileSchema).max(200).optional(),
     linkedPodId: z.string().min(1).max(64).optional(),
     dependsOnPodId: z.string().min(1).max(64).optional(),
     dependsOnPodIds: z.array(z.string().min(1).max(64)).max(32).optional(),

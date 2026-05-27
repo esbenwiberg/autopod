@@ -12,6 +12,8 @@ public struct CreateSeriesSheet: View {
     /// Pre-fill the base branch (e.g. when launching a series from an
     /// interactive pod's branch so the chain stacks on the user's work).
     public let initialBaseBranch: String?
+    /// Pre-fill the target branch for PRs when the source branch is separate.
+    public let initialTargetBranch: String?
     /// Pre-select a profile (e.g. the initiating pod's profile).
     public let initialProfile: String?
     /// Workspace pod to sync after the sheet appears. Used when launching from
@@ -25,6 +27,7 @@ public struct CreateSeriesSheet: View {
         actions: PodActions,
         profileNames: [String],
         initialBaseBranch: String? = nil,
+        initialTargetBranch: String? = nil,
         initialProfile: String? = nil,
         initialSyncPodId: String? = nil,
         onSeriesCreated: ((String) -> Void)? = nil
@@ -33,6 +36,7 @@ public struct CreateSeriesSheet: View {
         self.actions = actions
         self.profileNames = profileNames
         self.initialBaseBranch = initialBaseBranch
+        self.initialTargetBranch = initialTargetBranch
         self.initialProfile = initialProfile
         self.initialSyncPodId = initialSyncPodId
         self.onSeriesCreated = onSeriesCreated
@@ -56,6 +60,7 @@ public struct CreateSeriesSheet: View {
     @State private var seriesName: String = ""
     @State private var preview: SeriesPreviewResponse?
     @State private var selectedProfile: String = ""
+    @State private var sourceBranch: String = ""
     @State private var baseBranch: String = ""
     @State private var prMode: String = "single"
     @State private var autoApprove: Bool = false
@@ -120,14 +125,14 @@ public struct CreateSeriesSheet: View {
                     ?? profileNames.first
                     ?? ""
             }
-            if baseBranch.isEmpty, let initial = initialBaseBranch {
-                baseBranch = initial
+            if baseBranch.isEmpty, let target = initialTargetBranch {
+                baseBranch = target
             }
             // Launched from an interactive pod: default to "Path on branch"
-            // mode — baseBranch is already the branch to read from + stack on.
+            // mode — initialBaseBranch is the branch to read specs from.
             if let initial = initialBaseBranch, !initial.isEmpty {
                 briefSource = .onBranch
-                if baseBranch.isEmpty { baseBranch = initial }
+                if sourceBranch.isEmpty { sourceBranch = initial }
             }
         }
         .task(id: initialSyncPodId) {
@@ -197,25 +202,31 @@ public struct CreateSeriesSheet: View {
 
     private var onBranchFields: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Reads contract-backed briefs from the Base branch above. Use `specs/<feature>/briefs/` from `/plan-feature`, where each brief folder contains `brief.md` and `contract.yaml`.")
+            Text("Reads contract-backed briefs from the source branch below. PRs target the branch in Target branch above.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("Path on base branch").font(.caption2).foregroundStyle(.secondary)
+                Text("Source branch").font(.caption2).foregroundStyle(.secondary)
+                TextField("docs/spec-my-feature", text: $sourceBranch)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(isSubmitting)
+                    .onChange(of: sourceBranch) { _, _ in preview = nil }
+                Text("Path on source branch").font(.caption2).foregroundStyle(.secondary)
                 TextField("specs/my-feature/briefs", text: $branchPath)
                     .textFieldStyle(.roundedBorder)
                     .disabled(isSubmitting)
+                    .onChange(of: branchPath) { _, _ in preview = nil }
             }
 
-            if !baseBranch.isEmpty && !branchPath.isEmpty && !selectedProfile.isEmpty {
+            if !sourceBranch.isEmpty && !branchPath.isEmpty && !selectedProfile.isEmpty {
                 Button(isPreviewing ? "Parsing…" : "Preview series") {
                     Task { await runPreview() }
                 }
                 .disabled(isInitialSyncing || isPreviewing || isSubmitting)
-            } else if baseBranch.isEmpty {
-                Text("Set Base branch above to read briefs from.")
+            } else if sourceBranch.isEmpty {
+                Text("Set source branch to read briefs from.")
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
@@ -279,13 +290,13 @@ public struct CreateSeriesSheet: View {
             case .localFolder:
                 return await actions.previewSeriesFolder(folderPath)
             case .onBranch:
-                return await actions.previewSeriesOnBranch(selectedProfile, baseBranch, branchPath)
+                return await actions.previewSeriesOnBranch(selectedProfile, sourceBranch, branchPath)
             }
         }()
         guard let response else {
             let fallback = briefSource == .localFolder
                 ? "Could not parse contract-backed briefs from that folder."
-                : "Could not parse contract-backed briefs from \(branchPath) on \(baseBranch). Check the branch has the new layout: one folder per pod, each with brief.md and contract.yaml."
+                : "Could not parse contract-backed briefs from \(branchPath) on \(sourceBranch). Check the branch has the new layout: one folder per pod, each with brief.md and contract.yaml."
             errorMessage = actions.lastPreviewError() ?? fallback
             preview = nil
             return
@@ -486,15 +497,12 @@ public struct CreateSeriesSheet: View {
 
     private var baseBranchField: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(briefSource == .onBranch ? "Base branch" : "Base branch (optional)")
+            Text(briefSource == .onBranch ? "Target branch (optional)" : "Base branch (optional)")
                 .font(.subheadline.weight(.semibold))
             TextField("main", text: $baseBranch)
                 .textFieldStyle(.roundedBorder)
-                .onChange(of: baseBranch) { _, _ in
-                    if briefSource == .onBranch { preview = nil }
-                }
             if briefSource == .onBranch {
-                Text("The series stacks on this branch, and contract-backed briefs are read from the path below on this branch.")
+                Text("The implementation PR targets this branch. Leave empty to use the profile default.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -513,7 +521,9 @@ public struct CreateSeriesSheet: View {
             seriesName: seriesName,
             briefs: preview.briefs,
             profile: selectedProfile,
+            startBranch: briefSource == .onBranch && !sourceBranch.isEmpty ? sourceBranch : nil,
             baseBranch: baseBranch.isEmpty ? nil : baseBranch,
+            specFiles: preview.specFiles,
             prMode: prMode,
             autoApprove: autoApprove ? true : nil,
             disableAskHuman: disableAskHuman ? true : nil,

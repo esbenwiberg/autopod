@@ -1,0 +1,35 @@
+# speclint config for autopod.
+#
+# Drift-gate mode: pair this with `speclint lint --base origin/main` in CI to
+# catch specs whose `required_facts[*].artifact.path` files changed without
+# the spec itself being updated (refs-coupling, Path B).
+
+packages:
+  - default
+
+metadata:
+  sidecar: contract.yaml
+
+rules:
+  # Autopod contracts declare touched files as
+  #   required_facts:
+  #     - artifact:
+  #         path: packages/foo/src/bar.ts
+  # speclint reads the nested shape via dotted path + [*] expansion.
+  refs-resolve:
+    field: required_facts[*].artifact.path
+  refs-coupling:
+    field: required_facts[*].artifact.path
+
+  # Weasel-LLM second-pass: confirms `fast`/`just`/`simply`/`easy`/`modern`
+  # candidates with a small model before promoting from info → warn. Skipped
+  # silently when no transport is available (no API key, no `claude` CLI).
+  no-weasel-words-llm:
+    severity: warn
+
+fail_on: error
+
+llm:
+  enabled: true
+  transport: auto
+  cache: .speclint-cache/llm/

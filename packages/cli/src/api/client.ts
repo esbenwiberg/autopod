@@ -14,6 +14,7 @@ import type {
   Profile,
   ScheduledJob,
   SpecContract,
+  SpecFile,
   UpdateFromBaseResponse,
   UpdateScheduledJobRequest,
   ValidationResult,
@@ -35,7 +36,9 @@ export interface CreateSeriesRequest {
     requireSidecars?: string[];
   }>;
   profile: string;
+  startBranch?: string;
   baseBranch?: string;
+  specFiles?: SpecFile[];
   prMode?: 'single' | 'stacked' | 'none';
   /** Auto-approve each pod once it reaches `validated` — no human gate. */
   autoApprove?: boolean;

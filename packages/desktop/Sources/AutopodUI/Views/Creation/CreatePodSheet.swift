@@ -38,6 +38,7 @@ public struct CreateSessionSheet: View {
     @State private var agentMode: String = "auto"
     @State private var outputTarget: String = "pr"
     @State private var validate: Bool = true
+    @State private var sourceBranch = ""
     @State private var baseBranch = ""
     @State private var branchPrefix = ""
     @State private var pimGroups: [PimGroupRequest] = []
@@ -293,10 +294,9 @@ public struct CreateSessionSheet: View {
                         }
                     }
 
-                    // Base branch (optional). Applies to both modes:
-                    //  - agent: branches off this ref before the agent starts
-                    //  - interactive: workspace pod's worktree branches off this ref
-                    formSection("Base Branch (optional)") {
+                    // Target branch (optional). Branch-hosted specs can start
+                    // from a separate source branch while still opening the PR here.
+                    formSection(taskSource == .onBranch ? "Target Branch (optional)" : "Base Branch (optional)") {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.branch")
                                 .foregroundStyle(.tertiary)
@@ -523,13 +523,17 @@ public struct CreateSessionSheet: View {
 
     private var branchBriefSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            formSection("Path on base branch") {
+            formSection("Spec source") {
+                TextField("source branch (for specs)", text: $sourceBranch)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.callout, design: .monospaced))
+                    .onChange(of: sourceBranch) { _, _ in clearBriefPreview() }
                 TextField("specs/my-feature", text: $briefBranchPath)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.callout, design: .monospaced))
                     .onChange(of: briefBranchPath) { _, _ in clearBriefPreview() }
             }
-            if !baseBranch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if !sourceBranch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 && !briefBranchPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             {
                 Button(isPreviewingBrief ? "Parsing..." : "Preview Brief") {
@@ -537,7 +541,7 @@ public struct CreateSessionSheet: View {
                 }
                 .disabled(isPreviewingBrief || isSubmitting || selectedProfile.isEmpty)
             } else {
-                Text("Set Base Branch and a path to preview.")
+                Text("Set source branch and a path to preview.")
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
@@ -622,7 +626,7 @@ public struct CreateSessionSheet: View {
                 guard !path.isEmpty else { return nil }
                 return await actions.previewBriefFolder(path)
             case .onBranch:
-                let branch = baseBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+                let branch = sourceBranch.trimmingCharacters(in: .whitespacesAndNewlines)
                 let path = briefBranchPath.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !selectedProfile.isEmpty, !branch.isEmpty, !path.isEmpty else { return nil }
                 return await actions.previewBriefOnBranch(selectedProfile, branch, path)
@@ -654,6 +658,7 @@ public struct CreateSessionSheet: View {
         let refs = resolvedReferenceRepos()
         let trimmedPrefix = branchPrefix.trimmingCharacters(in: .whitespaces)
         let trimmedBaseBranch = baseBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSourceBranch = sourceBranch.trimmingCharacters(in: .whitespacesAndNewlines)
         let sourceBrief = taskSource == .manual ? nil : briefPreview
         let requestTask = sourceBrief?.task ?? task
         let metadata = sourceBrief.map {
@@ -661,7 +666,11 @@ public struct CreateSessionSheet: View {
                 contract: $0.contract,
                 briefTitle: $0.title,
                 touches: $0.touches,
-                doesNotTouch: $0.doesNotTouch
+                doesNotTouch: $0.doesNotTouch,
+                startBranch: taskSource == .onBranch && !trimmedSourceBranch.isEmpty
+                    ? trimmedSourceBranch
+                    : nil,
+                specFiles: $0.specFiles
             )
         }
 

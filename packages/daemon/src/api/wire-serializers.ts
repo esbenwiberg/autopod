@@ -91,8 +91,12 @@ export function serializeValidationResult(result: ValidationResult): unknown {
  * `lastValidationResult` — the rest of the Pod has no internal-only paths.
  */
 export function serializePodForWire(pod: Pod): unknown {
-  if (!pod.lastValidationResult) return pod;
-  return { ...pod, lastValidationResult: serializeValidationResult(pod.lastValidationResult) };
+  const wirePod = { ...pod, specFiles: undefined };
+  if (!wirePod.lastValidationResult) return wirePod;
+  return {
+    ...wirePod,
+    lastValidationResult: serializeValidationResult(wirePod.lastValidationResult),
+  };
 }
 
 /**

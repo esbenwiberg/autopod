@@ -31,6 +31,7 @@ import type {
   SastResult,
   SpawnFixResponse,
   StdioInjectedMcpServer,
+  SpecFile,
   TaskReviewResult,
   TaskSummary,
   UpdateFromBaseResponse,
@@ -265,6 +266,63 @@ function formatRebaseConflictReason(baseBranch: string, conflicts: readonly stri
   const preview = conflicts.slice(0, 5).join(', ');
   const ellipsis = conflicts.length > 5 ? '…' : '';
   return `Rebase conflicts on ${baseBranch}: ${preview || '(see logs)'}${ellipsis}`;
+}
+
+function resolveSpecFilePath(worktreePath: string, filePath: string): string {
+  const resolved = path.resolve(worktreePath, filePath);
+  const root = path.resolve(worktreePath);
+  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+    throw new AutopodError(
+      `Spec file path escapes worktree: ${filePath}`,
+      'INVALID_SPEC_FILE_PATH',
+      400,
+    );
+  }
+  return resolved;
+}
+
+async function materializeSpecFiles(
+  worktreePath: string,
+  specFiles: readonly SpecFile[] | null | undefined,
+  worktreeManager: WorktreeManager,
+  logger: Logger,
+): Promise<string | null> {
+  if (!specFiles || specFiles.length === 0) return null;
+
+  const changedPaths: string[] = [];
+  for (const file of specFiles) {
+    const targetPath = resolveSpecFilePath(worktreePath, file.path);
+    let existing: string | null = null;
+    try {
+      existing = await readFile(targetPath, 'utf8');
+    } catch {
+      existing = null;
+    }
+    if (existing === file.content) continue;
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, file.content, 'utf8');
+    changedPaths.push(file.path);
+  }
+
+  if (changedPaths.length > 0) {
+    await worktreeManager.commitFiles(
+      worktreePath,
+      changedPaths,
+      'docs(spec): add pod spec files',
+    );
+    logger.info(
+      { worktreePath, fileCount: changedPaths.length },
+      'Materialized spec files onto pod branch',
+    );
+  }
+
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', worktreePath, 'rev-parse', 'HEAD']);
+    return stdout.trim() || null;
+  } catch (err) {
+    logger.warn({ err, worktreePath }, 'Failed to resolve HEAD after spec materialization');
+    return null;
+  }
 }
 
 /** Single-quote shell escaping. Names can contain spaces and apostrophes (e.g. `O'Brien`),
@@ -3679,6 +3737,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
       const effectiveBaseBranch =
         request.baseBranch ?? singlePrSeriesParent?.baseBranch ?? profile.defaultBranch ?? 'main';
+      const effectiveStartBranch =
+        request.startBranch ?? singlePrSeriesParent?.startBranch ?? effectiveBaseBranch;
 
       // Resolve the effective PodOptions once, so both branch derivation and
       // DB insertion use the exact same values.
@@ -3827,7 +3887,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             contract: request.contract ?? null,
             options: resolvedPod,
             outputMode: effectiveOutputMode,
+            startBranch:
+              effectiveStartBranch !== effectiveBaseBranch ? effectiveStartBranch : null,
             baseBranch: effectiveBaseBranch,
+            specFiles: request.specFiles && request.specFiles.length > 0 ? request.specFiles : null,
             linkedPodId: request.linkedPodId ?? null,
             pimGroups: (() => {
               if (request.pimGroups != null) return request.pimGroups;
@@ -3933,7 +3996,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         enqueueSession(id);
       }
       logger.info(
-        { podId: id, profile: request.profileName, branch: pod.branch, baseBranch: pod.baseBranch },
+        {
+          podId: id,
+          profile: request.profileName,
+          branch: pod.branch,
+          baseBranch: pod.baseBranch,
+          startBranch: pod.startBranch,
+        },
         'Pod created',
       );
       return pod;
@@ -4237,19 +4306,27 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               repoUrl: profile.repoUrl,
               branch: pod.branch,
               baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
+              startBranch: pod.startBranch ?? undefined,
               pat: selectGitPat(profile),
               sessionId: pod.id,
             });
             worktreePath = result.worktreePath;
             bareRepoPath = result.bareRepoPath;
+            const materializedStartSha = await materializeSpecFiles(
+              worktreePath,
+              pod.specFiles,
+              worktreeManager,
+              logger,
+            );
+            const startCommitSha = materializedStartSha ?? result.startCommitSha;
             // Persist startCommitSha now — before the container starts and before
             // any /diff request can land. Without this, the diff route falls back
             // to merge-base(HEAD, baseBranch), which for fix pods on a PR branch
             // surfaces the entire PR's prior sibling commits as the fix pod's
             // "work". captureStartSha (run later from agent-event consumption)
             // early-returns when this is already set, and re-tries when this is empty.
-            if (!pod.startCommitSha && result.startCommitSha) {
-              podRepo.update(podId, { startCommitSha: result.startCommitSha });
+            if (!pod.startCommitSha && startCommitSha) {
+              podRepo.update(podId, { startCommitSha });
               pod = podRepo.getOrThrow(podId);
             }
 

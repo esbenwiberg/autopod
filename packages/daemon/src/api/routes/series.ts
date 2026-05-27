@@ -3,6 +3,7 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import {
   AutopodError,
   type SpecContract,
+  type SpecFile,
   generateId,
   numericPrefix,
   parseBriefs,
@@ -12,6 +13,7 @@ import type { WorktreeManager } from '../../interfaces/worktree-manager.js';
 import type { PodManager } from '../../pods/index.js';
 import { selectGitPat } from '../../profiles/profile-pat.js';
 import type { ProfileStore } from '../../profiles/profile-store.js';
+import { serializePodForWire } from '../wire-serializers.js';
 
 interface ParsedBrief {
   title: string;
@@ -33,7 +35,11 @@ interface CreateSeriesRequest {
   seriesName: string;
   briefs: ParsedBrief[];
   profile: string;
+  /** Optional branch/ref to start root pod branches from. PRs still target baseBranch. */
+  startBranch?: string;
   baseBranch?: string;
+  /** Local spec files to commit onto root pod branches before agents start. */
+  specFiles?: SpecFile[];
   prMode?: 'single' | 'stacked' | 'none';
   /** Auto-approve each pod once it reaches validated — no human gate needed. */
   autoApprove?: boolean;
@@ -91,6 +97,39 @@ function readSpecDoc(specRoot: string, name: string): string {
   } catch {
     return '';
   }
+}
+
+function specFileOutputRoot(specRoot: string): string {
+  const name = basename(resolve(specRoot)) || 'spec';
+  return `specs/${name}`;
+}
+
+const pathSeparatorRegex = /[/\\]+/g;
+
+function readSpecFiles(specRoot: string): SpecFile[] {
+  const root = resolve(specRoot);
+  const outputRoot = specFileOutputRoot(root);
+  const files: SpecFile[] = [];
+
+  function walk(dir: string): void {
+    for (const entry of readdirSync(dir).sort()) {
+      const full = join(dir, entry);
+      const stat = statSync(full);
+      if (stat.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!stat.isFile()) continue;
+      const rel = full.slice(root.length + 1).split(pathSeparatorRegex).join('/');
+      files.push({
+        path: `${outputRoot}/${rel}`,
+        content: readFileSync(full, 'utf-8'),
+      });
+    }
+  }
+
+  walk(root);
+  return files;
 }
 
 function readBriefFiles(briefsDir: string): Array<{
@@ -263,7 +302,9 @@ export function seriesRoutes(
             profileName: body.profile,
             task: brief.task,
             briefTitle: brief.title,
+            startBranch: isRoot ? body.startBranch : undefined,
             baseBranch: isRoot ? (body.baseBranch ?? undefined) : undefined,
+            specFiles: isRoot && body.specFiles?.length ? body.specFiles : undefined,
             dependsOnPodIds: dependsOnPodIds.length > 0 ? dependsOnPodIds : undefined,
             // Single mode: non-root pods reuse the root's branch so all commits
             // land on one branch and the final pod creates a single PR.
@@ -306,7 +347,10 @@ export function seriesRoutes(
       }
     }
 
-    const createdPods = created.map(({ title, pod }) => ({ title, ...pod }));
+    const createdPods = created.map(({ title, pod }) => ({
+      title,
+      ...(serializePodForWire(pod) as Record<string, unknown>),
+    }));
     const statusCounts = createdPods.reduce(
       (acc, p) => {
         acc[p.status] = (acc[p.status] ?? 0) + 1;
@@ -367,6 +411,7 @@ export function seriesRoutes(
 
     const seriesDescription = readSpecDoc(specRoot, 'purpose.md');
     const seriesDesign = readSpecDoc(specRoot, 'design.md');
+    const specFiles = readSpecFiles(specRoot);
 
     // Resolve per-brief context_files relative to the spec root, restricted to
     // paths that don't escape it. Prevents arbitrary file reads outside the
@@ -386,6 +431,7 @@ export function seriesRoutes(
     return {
       seriesName,
       briefs,
+      specFiles,
       seriesDescription: seriesDescription || undefined,
       seriesDesign: seriesDesign || undefined,
     };
@@ -430,10 +476,11 @@ export function seriesRoutes(
     };
 
     try {
-      return parseSingleBrief(readSingleBriefFiles(folderPath), {
+      const brief = parseSingleBrief(readSingleBriefFiles(folderPath), {
         sourceDescription: folderPath,
         loadContextFile,
       });
+      return { ...brief, specFiles: readSpecFiles(folderPath) };
     } catch (err) {
       if (err instanceof AutopodError) {
         reply.status(err.statusCode ?? 400);

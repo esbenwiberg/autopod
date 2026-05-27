@@ -335,6 +335,7 @@ export class LocalWorktreeManager implements WorktreeManager {
 
   async create(config: WorktreeCreateConfig): Promise<WorktreeResult> {
     const { repoUrl, branch, baseBranch, pat } = config;
+    const startBranch = config.startBranch ?? baseBranch;
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
     const authUrl = pat ? this.injectPat(repoUrl, pat) : repoUrl;
@@ -379,42 +380,38 @@ export class LocalWorktreeManager implements WorktreeManager {
       // Explicit refspec per CLAUDE.md — wildcard fetches fail on Azure File Share.
       // Fetch baseBranch from remote. If the branch hasn't been pushed yet (e.g. forking
       // a pod that failed before pushing), fall back to the local ref in the bare repo.
-      let baseBranchRef = `refs/remotes/origin/${baseBranch}`;
-      try {
-        await git(
-          [
-            'fetch',
-            authUrl,
-            `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`,
-            `+refs/heads/${baseBranch}:refs/heads/${baseBranch}`,
-          ],
-          { cwd: bareRepoPath },
+      const baseBranchRef = await this.fetchBranchRef({
+        authUrl,
+        bareRepoPath,
+        branch: baseBranch,
+        purpose: 'create baseBranch',
+      }).catch((err) => {
+        throw new Error(
+          `baseBranch "${baseBranch}" not found on remote or locally in ${bareRepoPath}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
         );
-      } catch (fetchErr) {
-        const sanitized = sanitizeGitError(fetchErr);
-        this.logger.debug({ err: sanitized }, 'Remote fetch for baseBranch failed');
-        // Remote fetch failed — check if the branch exists locally (created by a prior
-        // pod's `git worktree add -B` and still in the bare repo after cleanup).
-        try {
-          await git(['rev-parse', '--verify', `refs/heads/${baseBranch}`], {
-            cwd: bareRepoPath,
-          });
-          baseBranchRef = `refs/heads/${baseBranch}`;
-          this.logger.info(
-            { baseBranch },
-            'baseBranch not on remote — using local ref from bare repo',
-          );
-        } catch {
-          throw new Error(
-            `baseBranch "${baseBranch}" not found on remote or locally in ${bareRepoPath}`,
-          );
-        }
-      }
+      });
+      const startBranchRef =
+        startBranch === baseBranch
+          ? baseBranchRef
+          : await this.fetchBranchRef({
+              authUrl,
+              bareRepoPath,
+              branch: startBranch,
+              purpose: 'create startBranch',
+            }).catch((err) => {
+              throw new Error(
+                `startBranch "${startBranch}" not found on remote or locally in ${bareRepoPath}: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            });
 
       // If the requested branch already exists on the remote, fetch it and use it
       // as the start point so we don't blow away existing work with -B.
-      let startPoint = baseBranchRef;
-      if (branch !== baseBranch) {
+      let startPoint = startBranchRef;
+      if (branch !== startBranch) {
         try {
           await git(['fetch', authUrl, `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
             cwd: bareRepoPath,
@@ -424,7 +421,10 @@ export class LocalWorktreeManager implements WorktreeManager {
           this.logger.info({ branch }, 'Branch exists on remote — resuming from it');
         } catch {
           // Branch doesn't exist on remote yet — normal for new pods
-          this.logger.info({ branch }, 'Branch not found on remote — creating from baseBranch');
+          this.logger.info(
+            { branch, startBranch },
+            'Branch not found on remote — creating from startBranch',
+          );
         }
       }
 

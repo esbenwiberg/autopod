@@ -1390,14 +1390,15 @@ public struct DetailPanelView: View {
             contract: brief.contract,
             briefTitle: brief.title,
             touches: brief.touches,
-            doesNotTouch: brief.doesNotTouch
+            doesNotTouch: brief.doesNotTouch,
+            startBranch: pod.branch
         )
         let id = await actions.createPod(
             singleSpecWorkerProfile,
             brief.task,
             nil,
             PodConfigRequest(agentMode: "auto", output: "pr", validate: true, promotable: false),
-            pod.branch,
+            pod.baseBranch,
             nil,
             nil,
             brief.requireSidecars,

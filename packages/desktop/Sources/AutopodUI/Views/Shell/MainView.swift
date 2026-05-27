@@ -625,6 +625,7 @@ public struct MainView: View {
                 actions: actions,
                 profileNames: profileNames,
                 initialBaseBranch: initiator.branch,
+                initialTargetBranch: initiator.baseBranch,
                 initialProfile: initiator.profileName,
                 initialSyncPodId: initiator.isTerminal ? nil : initiator.id,
                 onSeriesCreated: { seriesId in

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
-import { numericPrefix, parseBriefs } from '@autopod/shared';
+import { numericPrefix, parseBriefs, type SpecFile } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
@@ -48,6 +48,34 @@ function readMaybe(baseDir: string, relPath: string): string {
   }
 }
 
+const pathSeparatorRegex = /[/\\]+/g;
+
+function collectSpecFiles(specRoot: string): SpecFile[] {
+  const root = resolve(specRoot);
+  const outputRoot = `specs/${basename(root) || 'spec'}`;
+  const files: SpecFile[] = [];
+
+  function walk(dir: string): void {
+    for (const entry of readdirSync(dir).sort()) {
+      const full = join(dir, entry);
+      const stat = statSync(full);
+      if (stat.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!stat.isFile()) continue;
+      const rel = full.slice(root.length + 1).split(pathSeparatorRegex).join('/');
+      files.push({
+        path: `${outputRoot}/${rel}`,
+        content: readFileSync(full, 'utf-8'),
+      });
+    }
+  }
+
+  walk(root);
+  return files;
+}
+
 export function registerSeriesCommands(program: Command, getClient: () => AutopodClient): void {
   const series = program.command('series').description('Manage series of pods');
 
@@ -58,6 +86,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
       'Create a series of pods from a spec folder (containing purpose.md, design.md, and briefs/).',
     )
     .requiredOption('-p, --profile <name>', 'Profile to use for all pods')
+    .option('--start-branch <branch>', 'Branch/ref to start root pods from while targeting --base-branch')
     .option('-b, --base-branch <branch>', 'Base branch (default: profile default)')
     .option(
       '--pr-mode <mode>',
@@ -71,6 +100,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
         folder: string,
         opts: {
           profile: string;
+          startBranch?: string;
           baseBranch?: string;
           prMode: string;
           seriesName?: string;
@@ -119,6 +149,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
         // Shared spec docs live at the spec root (parent of briefs/).
         const seriesDescription = readMaybe(specRoot, 'purpose.md');
         const seriesDesign = readMaybe(specRoot, 'design.md');
+        const specFiles = collectSpecFiles(specRoot);
 
         const seriesName = opts.seriesName ?? inferSeriesName(specRoot);
         const prMode = opts.prMode as 'single' | 'stacked' | 'none';
@@ -137,7 +168,9 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
             seriesName,
             briefs,
             profile: opts.profile,
+            startBranch: opts.startBranch,
             baseBranch: opts.baseBranch,
+            specFiles,
             prMode,
             autoApprove: opts.autoApprove ?? false,
             seriesDescription: seriesDescription || undefined,

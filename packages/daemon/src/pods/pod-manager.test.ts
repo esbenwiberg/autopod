@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type {
   AgentEvent,
@@ -471,6 +472,42 @@ describe('PodManager', () => {
 
       expect(pod.model).toBe('sonnet');
       expect(pod.branch).toBe('fix/my-bug');
+    });
+
+    it('stores a separate startBranch while keeping baseBranch as the PR target', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Implement from spec branch',
+          startBranch: 'docs/spec-help-modal',
+          baseBranch: 'main',
+        },
+        'user-1',
+      );
+
+      expect(pod.startBranch).toBe('docs/spec-help-modal');
+      expect(pod.baseBranch).toBe('main');
+    });
+
+    it('persists local spec files for pre-agent branch materialization', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Implement from local spec',
+          specFiles: [{ path: 'specs/help-modal/brief.md', content: '# Brief\n' }],
+        },
+        'user-1',
+      );
+
+      expect(pod.specFiles).toEqual([
+        { path: 'specs/help-modal/brief.md', content: '# Brief\n' },
+      ]);
     });
 
     it('enqueues the pod for processing', () => {
@@ -1691,6 +1728,64 @@ describe('PodManager', () => {
       expect(processed.status).toBe('validated');
       expect(processed.containerId).toBe('container-123');
       expect(processed.worktreePath).toBe('/tmp/worktree/abc');
+    });
+
+    it('starts the worktree from startBranch while keeping baseBranch as PR target', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Add feature from spec branch',
+          startBranch: 'docs/spec-help-modal',
+          baseBranch: 'main',
+          skipValidation: true,
+        },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      expect(ctx.worktreeManager.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          branch: pod.branch,
+          startBranch: 'docs/spec-help-modal',
+          baseBranch: 'main',
+        }),
+      );
+    });
+
+    it('materializes local spec files onto the pod branch before agent work starts', async () => {
+      const ctx = createTestContext();
+      const worktreePath = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-spec-files-'));
+      (ctx.worktreeManager.create as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        worktreePath,
+        bareRepoPath: '/tmp/bare/abc.git',
+        startCommitSha: 'abc1234567890abcdef1234567890abcdef1234',
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Add feature from local spec',
+          specFiles: [{ path: 'specs/help-modal/brief.md', content: '# Brief\n' }],
+          skipValidation: true,
+        },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      expect(fs.readFileSync(path.join(worktreePath, 'specs/help-modal/brief.md'), 'utf8')).toBe(
+        '# Brief\n',
+      );
+      expect(ctx.worktreeManager.commitFiles).toHaveBeenCalledWith(
+        worktreePath,
+        ['specs/help-modal/brief.md'],
+        'docs(spec): add pod spec files',
+      );
     });
 
     it('fails when the agent reports an execution-environment blocker on completion', async () => {

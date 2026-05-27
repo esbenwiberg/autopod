@@ -41,6 +41,13 @@ export interface ReferenceRepo {
   sourceProfile?: string;
 }
 
+export interface SpecFile {
+  /** Repo-relative path where the spec file should exist on the pod branch. */
+  path: string;
+  /** UTF-8 file contents. */
+  content: string;
+}
+
 /**
  * Token counts per processing phase for a pod. Agent phases use open-ended
  * `agent_rework_N` keys (N ≥ 1); `agent_initial` covers the first run.
@@ -156,7 +163,18 @@ export interface Pod {
    * read `options` directly. Kept in sync by the pod repository.
    */
   outputMode: OutputMode;
+  /**
+   * Optional branch/ref used as the worktree start point. When null, the pod
+   * starts from `baseBranch`. This lets spec branches provide durable context
+   * while the resulting PR still targets `baseBranch` (usually `main`).
+   */
+  startBranch: string | null;
   baseBranch: string | null;
+  /**
+   * Local spec files to commit onto the pod branch before the agent starts.
+   * Stripped from API wire responses because contents can be large.
+   */
+  specFiles: SpecFile[] | null;
   recoveryWorktreePath: string | null;
   reworkReason: string | null;
   reworkCount: number;
@@ -395,7 +413,11 @@ export interface CreatePodRequest {
    * `PodOptions` via `podOptionsFromOutputMode()`. Ignored if `options` is set.
    */
   outputMode?: OutputMode;
+  /** Optional checkout/source branch. Defaults to baseBranch/profile default. */
+  startBranch?: string;
   baseBranch?: string;
+  /** Local spec files to materialize onto the pod branch before the agent starts. */
+  specFiles?: SpecFile[];
   linkedPodId?: string;
   /** PIM groups to activate for the duration of this pod */
   pimGroups?: PimGroupConfig[];

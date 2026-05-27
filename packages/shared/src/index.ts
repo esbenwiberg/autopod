@@ -17,6 +17,7 @@ export type {
   CreatePodRequest,
   PodSummary,
   ReferenceRepo,
+  SpecFile,
   PreSubmitReviewSnapshot,
   ValidationWaiver,
   QualityGrade,
