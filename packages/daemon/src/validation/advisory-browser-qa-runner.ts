@@ -18,7 +18,9 @@ import type { HostBrowserRunner } from './host-browser-runner.js';
 export const ADVISORY_BROWSER_QA_TARGET_CAP = 5;
 const ADVISORY_BROWSER_QA_ACTION_CAP = 5;
 const ADVISORY_BROWSER_QA_IMAGE_CAP = 4;
-const ADVISORY_BROWSER_QA_RATE_LIMIT_DELAYS_MS = [2_000, 5_000];
+const ADVISORY_BROWSER_QA_RATE_LIMIT_RETRY_BUDGET_MS = 10 * 60_000;
+const ADVISORY_BROWSER_QA_RATE_LIMIT_BASE_DELAY_MS = 15_000;
+const ADVISORY_BROWSER_QA_RATE_LIMIT_MAX_DELAY_MS = 120_000;
 
 type AdvisoryChecklistTarget =
   | {
@@ -1071,32 +1073,55 @@ async function callAnthropicReviewer(input: {
 }
 
 async function retryRateLimited<T>(operation: () => Promise<T>, log?: Logger): Promise<T> {
-  for (let attempt = 0; attempt <= ADVISORY_BROWSER_QA_RATE_LIMIT_DELAYS_MS.length; attempt++) {
+  const deadline = Date.now() + ADVISORY_BROWSER_QA_RATE_LIMIT_RETRY_BUDGET_MS;
+  let attempt = 0;
+  while (true) {
     try {
       return await operation();
     } catch (err) {
-      const fallbackDelayMs = ADVISORY_BROWSER_QA_RATE_LIMIT_DELAYS_MS[attempt];
-      if (!isRateLimitError(err) || fallbackDelayMs === undefined) throw err;
+      if (!isRateLimitError(err)) throw err;
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw err;
+      const fallbackDelayMs = fallbackRateLimitDelayMs(attempt);
       const delayMs = retryDelayMs(err, fallbackDelayMs);
       log?.warn(
-        { err, attempt: attempt + 1, delayMs },
+        { err, attempt: attempt + 1, delayMs, retryBudgetRemainingMs: remainingMs },
         'advisory browser QA reviewer rate-limited; retrying after backoff',
       );
-      await sleep(delayMs);
+      attempt += 1;
+      await sleep(Math.min(delayMs, remainingMs));
     }
   }
-  throw new Error('unreachable advisory reviewer retry state');
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function fallbackRateLimitDelayMs(attempt: number): number {
+  return Math.min(
+    ADVISORY_BROWSER_QA_RATE_LIMIT_BASE_DELAY_MS * 2 ** attempt,
+    ADVISORY_BROWSER_QA_RATE_LIMIT_MAX_DELAY_MS,
+  );
+}
+
 function retryDelayMs(err: unknown, fallbackMs: number): number {
   const retryAfter = headerValue(err, 'retry-after');
   const retryAfterSeconds = retryAfter ? Number(retryAfter) : Number.NaN;
   if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
-    return Math.max(500, Math.min(15_000, retryAfterSeconds * 1_000));
+    return Math.max(
+      500,
+      Math.min(ADVISORY_BROWSER_QA_RATE_LIMIT_MAX_DELAY_MS, retryAfterSeconds * 1_000),
+    );
+  }
+  if (retryAfter) {
+    const retryAfterDate = Date.parse(retryAfter);
+    if (Number.isFinite(retryAfterDate)) {
+      return Math.max(
+        500,
+        Math.min(ADVISORY_BROWSER_QA_RATE_LIMIT_MAX_DELAY_MS, retryAfterDate - Date.now()),
+      );
+    }
   }
   return fallbackMs;
 }
