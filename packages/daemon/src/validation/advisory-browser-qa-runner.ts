@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { ContentBlock, ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.js';
 import type {
   AdvisoryBrowserQaObservation,
@@ -17,6 +18,7 @@ import type { HostBrowserRunner } from './host-browser-runner.js';
 export const ADVISORY_BROWSER_QA_TARGET_CAP = 5;
 const ADVISORY_BROWSER_QA_ACTION_CAP = 5;
 const ADVISORY_BROWSER_QA_IMAGE_CAP = 4;
+const ADVISORY_BROWSER_QA_RATE_LIMIT_DELAYS_MS = [2_000, 5_000];
 
 type AdvisoryChecklistTarget =
   | {
@@ -744,6 +746,7 @@ async function collectAdvisoryScreenshots(
 ): Promise<CollectedAdvisoryScreenshots> {
   const byTarget = new Map<string, ScreenshotRef[]>();
   const byFrame = new Map<string, { ref?: ScreenshotRef; base64: string }>();
+  const persistedByDigest = new Map<string, ScreenshotRef>();
   let screenshotIndex = 0;
 
   for (const observation of observations) {
@@ -756,14 +759,19 @@ async function collectAdvisoryScreenshots(
         const base64 = await hostBrowserRunner.readScreenshot(frame.screenshotPath);
         let ref: ScreenshotRef | undefined;
         if (opts.persist) {
-          ref = await opts.screenshotStore.write(
-            podId,
-            'advisory',
-            `advisory-${screenshotIndex}.png`,
-            Buffer.from(base64, 'base64'),
-          );
+          const digest = screenshotDigest(base64);
+          ref = persistedByDigest.get(digest);
+          if (!ref) {
+            ref = await opts.screenshotStore.write(
+              podId,
+              'advisory',
+              `advisory-${screenshotIndex}.png`,
+              Buffer.from(base64, 'base64'),
+            );
+            persistedByDigest.set(digest, ref);
+            screenshotIndex += 1;
+          }
           byTarget.set(observation.targetId, [...(byTarget.get(observation.targetId) ?? []), ref]);
-          screenshotIndex += 1;
         }
         byFrame.set(frameKey(observation.targetId, frameIndex), { ref, base64 });
       } catch (err) {
@@ -776,6 +784,10 @@ async function collectAdvisoryScreenshots(
   }
 
   return { byTarget, byFrame };
+}
+
+function screenshotDigest(base64: string): string {
+  return createHash('sha256').update(base64).digest('hex');
 }
 
 function frameKey(targetId: string, frameIndex: number): string {
@@ -1003,27 +1015,74 @@ async function callAnthropicReviewer(input: {
     }
     throw new Error(`Reviewer provider unavailable: ${llm.reason}`);
   }
-  const response = await llm.client.messages.create(
-    {
-      model: llm.model,
-      max_tokens: input.maxTokens,
-      messages: [
+  const response = await retryRateLimited(
+    () =>
+      llm.client.messages.create(
         {
-          role: 'user',
-          content:
-            input.includeImages === false
-              ? [{ type: 'text', text: input.prompt }]
-              : buildAnthropicContent(input.prompt, input.input),
+          model: llm.model,
+          max_tokens: input.maxTokens,
+          messages: [
+            {
+              role: 'user',
+              content:
+                input.includeImages === false
+                  ? [{ type: 'text', text: input.prompt }]
+                  : buildAnthropicContent(input.prompt, input.input),
+            },
+          ],
         },
-      ],
-    },
-    { timeout: 120_000 },
+        { timeout: 120_000 },
+      ),
+    input.logger,
   );
   return response.content
     .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
     .map((block) => block.text)
     .join('')
     .trim();
+}
+
+async function retryRateLimited<T>(operation: () => Promise<T>, log?: Logger): Promise<T> {
+  for (let attempt = 0; attempt <= ADVISORY_BROWSER_QA_RATE_LIMIT_DELAYS_MS.length; attempt++) {
+    try {
+      return await operation();
+    } catch (err) {
+      const fallbackDelayMs = ADVISORY_BROWSER_QA_RATE_LIMIT_DELAYS_MS[attempt];
+      if (!isRateLimitError(err) || fallbackDelayMs === undefined) throw err;
+      const delayMs = retryDelayMs(err, fallbackDelayMs);
+      log?.warn(
+        { err, attempt: attempt + 1, delayMs },
+        'advisory browser QA reviewer rate-limited; retrying after backoff',
+      );
+      await sleep(delayMs);
+    }
+  }
+  throw new Error('unreachable advisory reviewer retry state');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function retryDelayMs(err: unknown, fallbackMs: number): number {
+  const retryAfter = headerValue(err, 'retry-after');
+  const retryAfterSeconds = retryAfter ? Number(retryAfter) : Number.NaN;
+  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
+    return Math.max(500, Math.min(15_000, retryAfterSeconds * 1_000));
+  }
+  return fallbackMs;
+}
+
+function headerValue(err: unknown, name: string): string | undefined {
+  const record = err && typeof err === 'object' ? (err as Record<string, unknown>) : {};
+  const headers = record.headers;
+  if (!headers || typeof headers !== 'object') return undefined;
+  const getter = (headers as { get?: (key: string) => string | null | undefined }).get;
+  if (typeof getter === 'function') return getter.call(headers, name) ?? undefined;
+  const entry = Object.entries(headers as Record<string, unknown>).find(
+    ([key]) => key.toLowerCase() === name.toLowerCase(),
+  );
+  return typeof entry?.[1] === 'string' ? entry[1] : undefined;
 }
 
 function formatReviewerError(err: unknown): string {

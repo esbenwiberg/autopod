@@ -338,7 +338,7 @@ human_review: []
     expect(review).toHaveBeenCalledOnce();
   });
 
-  it('deduplicates repeated screenshot bytes before attaching images to the reviewer', async () => {
+  it('reuses repeated screenshot bytes in storage and reviewer image attachments', async () => {
     const review = vi.fn(async (input) => {
       const frames = input.browserObservations.flatMap((observation) => observation.frames);
       expect(frames[0]?.imageLabel).toBe('Image 1');
@@ -369,18 +369,21 @@ human_review: []
       ]),
     );
 
+    const screenshotStore = createScreenshotStore();
+
     const result = await runAdvisoryBrowserQa({
       podId: 'pod-dedupe',
       task: 'Check repeated dashboard evidence',
       baseUrl: 'http://127.0.0.1:3000',
       contract: parseSpecContract(contractYaml()),
       hostBrowserRunner,
-      screenshotStore: createScreenshotStore(),
+      screenshotStore,
       reviewer: { review },
     });
 
     expect(result.status).toBe('pass');
-    expect(result.screenshots).toHaveLength(2);
+    expect(result.screenshots).toHaveLength(1);
+    expect(screenshotStore.write).toHaveBeenCalledOnce();
   });
 
   it('runs reviewer-planned browser actions and reviews the resulting frames', async () => {
