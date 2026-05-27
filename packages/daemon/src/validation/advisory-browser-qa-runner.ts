@@ -16,7 +16,7 @@ import type { HostBrowserRunner } from './host-browser-runner.js';
 
 export const ADVISORY_BROWSER_QA_TARGET_CAP = 5;
 const ADVISORY_BROWSER_QA_ACTION_CAP = 5;
-const ADVISORY_BROWSER_QA_IMAGE_CAP = 16;
+const ADVISORY_BROWSER_QA_IMAGE_CAP = 4;
 
 type AdvisoryChecklistTarget =
   | {
@@ -271,10 +271,10 @@ export async function runAdvisoryBrowserQa(
       observations,
       screenshots: initialScreenshotCollection,
     });
-    const actionPlan = mergeActionPlans(
-      await safePlanActions(reviewer, initialReviewInput, log),
-      buildHeuristicActionPlan(initialReviewInput),
-    );
+    const heuristicPlan = buildHeuristicActionPlan(initialReviewInput);
+    const plannedActions =
+      heuristicPlan.size > 0 ? [] : await safePlanActions(reviewer, initialReviewInput, log);
+    const actionPlan = mergeActionPlans(plannedActions, heuristicPlan);
     if (actionPlan.size > 0) {
       const actionScript = buildBrowserScript({
         baseUrl: options.baseUrl,
@@ -790,6 +790,7 @@ function buildReviewInput(input: {
   screenshots: CollectedAdvisoryScreenshots;
 }): AdvisoryBrowserQaReviewInput {
   let imageCount = 0;
+  const seenImageBytes = new Set<string>();
   return {
     task: input.task,
     baseUrl: input.baseUrl,
@@ -797,10 +798,12 @@ function buildReviewInput(input: {
     browserObservations: input.observations.map((observation) => {
       const frames = observationFrames(observation).map((frame, frameIndex) => {
         const collected = input.screenshots.byFrame.get(frameKey(observation.targetId, frameIndex));
-        const imageLabel =
-          collected?.base64 && imageCount < ADVISORY_BROWSER_QA_IMAGE_CAP
-            ? `Image ${++imageCount}`
-            : undefined;
+        const shouldAttachImage =
+          collected?.base64 &&
+          !seenImageBytes.has(collected.base64) &&
+          imageCount < ADVISORY_BROWSER_QA_IMAGE_CAP;
+        if (shouldAttachImage) seenImageBytes.add(collected.base64);
+        const imageLabel = shouldAttachImage ? `Image ${++imageCount}` : undefined;
         return {
           label: frame.label,
           url: frame.url,
@@ -907,6 +910,7 @@ function createProviderAwareAdvisoryReviewer(input: {
           input: reviewInput,
           logger: input.logger,
           maxTokens: 2_000,
+          includeImages: false,
         });
         return parseActionPlanJson(stdout);
       } catch (err) {
@@ -940,7 +944,7 @@ function createProviderAwareAdvisoryReviewer(input: {
           prompt,
           input: reviewInput,
           logger: input.logger,
-          maxTokens: 4_000,
+          maxTokens: 2_000,
         });
         const parsed = parseReviewerJson(stdout);
         if (parsed) return parsed;
@@ -950,7 +954,15 @@ function createProviderAwareAdvisoryReviewer(input: {
           observations: [],
         };
       } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
+        if (isRateLimitError(err)) {
+          return {
+            status: 'uncertain',
+            reasoning:
+              'Advisory browser QA captured screenshots, but the reviewer provider rate-limited the visual review. Evidence is available for manual inspection; retry advisory QA later if an AI visual opinion is needed.',
+            observations: [],
+          };
+        }
+        const detail = formatReviewerError(err);
         return {
           status: 'uncertain',
           reasoning: `Advisory browser QA reviewer failed: ${detail}`,
@@ -969,6 +981,7 @@ async function callAnthropicReviewer(input: {
   input: AdvisoryBrowserQaReviewInput;
   logger?: Logger;
   maxTokens: number;
+  includeImages?: boolean;
 }): Promise<string> {
   const llm = await createProviderAnthropicClient(
     {
@@ -994,7 +1007,15 @@ async function callAnthropicReviewer(input: {
     {
       model: llm.model,
       max_tokens: input.maxTokens,
-      messages: [{ role: 'user', content: buildAnthropicContent(input.prompt, input.input) }],
+      messages: [
+        {
+          role: 'user',
+          content:
+            input.includeImages === false
+              ? [{ type: 'text', text: input.prompt }]
+              : buildAnthropicContent(input.prompt, input.input),
+        },
+      ],
     },
     { timeout: 120_000 },
   );
@@ -1003,6 +1024,25 @@ async function callAnthropicReviewer(input: {
     .map((block) => block.text)
     .join('')
     .trim();
+}
+
+function formatReviewerError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+function isRateLimitError(err: unknown): boolean {
+  const record = err && typeof err === 'object' ? (err as Record<string, unknown>) : {};
+  const status = record.status;
+  const type = record.type;
+  const error = record.error;
+  const text = formatReviewerError(err);
+  if (status === 429 || type === 'rate_limit_error') return true;
+  if (error && typeof error === 'object') {
+    const nestedType = (error as Record<string, unknown>).type;
+    if (nestedType === 'rate_limit_error') return true;
+  }
+  return /\b429\b|rate[_ -]?limit/i.test(text);
 }
 
 const noopLogger = {

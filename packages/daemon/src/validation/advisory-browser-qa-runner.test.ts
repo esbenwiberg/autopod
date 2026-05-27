@@ -338,6 +338,51 @@ human_review: []
     expect(review).toHaveBeenCalledOnce();
   });
 
+  it('deduplicates repeated screenshot bytes before attaching images to the reviewer', async () => {
+    const review = vi.fn(async (input) => {
+      const frames = input.browserObservations.flatMap((observation) => observation.frames);
+      expect(frames[0]?.imageLabel).toBe('Image 1');
+      expect(frames[1]?.imageLabel).toBeUndefined();
+      expect(frames.every((frame) => frame.screenshotBase64)).toBe(true);
+      return {
+        status: 'pass' as const,
+        reasoning: 'Repeated page state inspected once',
+        observations: [],
+      };
+    });
+    const hostBrowserRunner = createHostBrowserRunner(
+      browserStdout([
+        {
+          targetId: 'scenario:dashboard',
+          url: 'http://127.0.0.1:3000/',
+          title: 'Dashboard',
+          notes: ['Scenario page'],
+          screenshotPath: '/tmp/advisory/screenshots/scenario.png',
+        },
+        {
+          targetId: 'human_review:visual-state',
+          url: 'http://127.0.0.1:3000/',
+          title: 'Dashboard',
+          notes: ['Same page for human review'],
+          screenshotPath: '/tmp/advisory/screenshots/human-review.png',
+        },
+      ]),
+    );
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-dedupe',
+      task: 'Check repeated dashboard evidence',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(contractYaml()),
+      hostBrowserRunner,
+      screenshotStore: createScreenshotStore(),
+      reviewer: { review },
+    });
+
+    expect(result.status).toBe('pass');
+    expect(result.screenshots).toHaveLength(2);
+  });
+
   it('runs reviewer-planned browser actions and reviews the resulting frames', async () => {
     const hostBrowserRunner = createSequentialHostBrowserRunner([
       {
@@ -408,7 +453,7 @@ human_review: []
     expect(result.screenshots).toHaveLength(2);
   });
 
-  it('uses the help-control heuristic when no reviewer action planner exists', async () => {
+  it('uses the help-control heuristic before asking the reviewer to plan actions', async () => {
     const hostBrowserRunner = createSequentialHostBrowserRunner([
       {
         stdout: browserStdout([
@@ -455,6 +500,13 @@ human_review: []
       },
     ]);
 
+    const planActions = vi.fn(async () => [
+      {
+        targetId: 'scenario:dashboard',
+        actions: [{ type: 'click' as const, controlIndex: 99, reason: 'Wrong control' }],
+      },
+    ]);
+
     await runAdvisoryBrowserQa({
       podId: 'pod-help',
       task: 'Add a how-to-use help modal triggered from a new ? icon button',
@@ -463,6 +515,7 @@ human_review: []
       hostBrowserRunner,
       screenshotStore: createScreenshotStore(),
       reviewer: {
+        planActions,
         review: vi.fn(async () => ({
           status: 'pass',
           reasoning: 'Help opened',
@@ -472,6 +525,7 @@ human_review: []
     });
 
     expect(hostBrowserRunner.runScript).toHaveBeenCalledTimes(2);
+    expect(planActions).not.toHaveBeenCalled();
   });
 
   it('returns uncertain advisory evidence when browser execution errors', async () => {
