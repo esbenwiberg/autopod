@@ -990,12 +990,14 @@ async function callAnthropicReviewer(input: {
     }
     throw new Error(`Reviewer provider unavailable: ${llm.reason}`);
   }
-  const response = await llm.client.messages.create({
-    model: llm.model,
-    max_tokens: input.maxTokens,
-    messages: [{ role: 'user', content: buildAnthropicContent(input.prompt, input.input) }],
-    timeout: 120_000,
-  });
+  const response = await llm.client.messages.create(
+    {
+      model: llm.model,
+      max_tokens: input.maxTokens,
+      messages: [{ role: 'user', content: buildAnthropicContent(input.prompt, input.input) }],
+    },
+    { timeout: 120_000 },
+  );
   return response.content
     .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
     .map((block) => block.text)
