@@ -53,6 +53,50 @@ function createHostBrowserRunner(stdout: string, exitCode = 0): HostBrowserRunne
   };
 }
 
+function createSequentialHostBrowserRunner(
+  runs: Array<{ stdout: string; exitCode?: number }>,
+): HostBrowserRunner {
+  let index = 0;
+  return {
+    getAvailability: vi.fn(async () => ({
+      available: true,
+      cached: false,
+      checkedAt: '2026-05-25T00:00:00.000Z',
+      reason: 'ok',
+      playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+      playwrightCwd: '/repo',
+      chromiumExecutablePath: '/chrome',
+    })),
+    isAvailable: vi.fn(async () => true),
+    runScript: vi.fn(async () => {
+      const run = runs[Math.min(index, runs.length - 1)] ?? { stdout: browserStdout([]) };
+      index += 1;
+      return { stdout: run.stdout, stderr: 'script stderr', exitCode: run.exitCode ?? 0 };
+    }),
+    readScreenshot: vi.fn(async (path) => Buffer.from(`png:${path}`).toString('base64')),
+    cleanup: vi.fn(async () => {}),
+    screenshotDir: vi.fn(() => '/tmp/advisory/screenshots'),
+  };
+}
+
+function browserFrame(
+  label: string,
+  path: string,
+  controls: unknown[] = [],
+  action?: unknown,
+): Record<string, unknown> {
+  return {
+    label,
+    url: 'http://127.0.0.1:3000/',
+    title: 'Dashboard',
+    notes: [`${label} body text`],
+    screenshotPath: path,
+    accessibility: { role: 'WebArea', name: 'Portfolio simulation' },
+    controls,
+    action,
+  };
+}
+
 function createScreenshotStore(): ScreenshotStore {
   return {
     write: vi.fn(async (podId, source, filename) => ({
@@ -228,6 +272,206 @@ human_review: []
     expect(result.observations[0]?.suggestedFacts).toEqual([
       'Add a browser-test proving the loaded dashboard hides empty state.',
     ]);
+  });
+
+  it('passes screenshot bytes, accessibility, and visible controls to the reviewer', async () => {
+    const review = vi.fn(async (input) => {
+      const frame = input.browserObservations[0]?.frames[0];
+      expect(frame?.imageLabel).toBe('Image 1');
+      expect(frame?.screenshotBase64).toBe(
+        Buffer.from('png:/tmp/advisory/screenshots/help-initial.png').toString('base64'),
+      );
+      expect(frame?.accessibility).toMatchObject({ role: 'WebArea' });
+      expect(frame?.controls?.[0]).toMatchObject({ role: 'button', ariaLabel: 'Help' });
+      return {
+        status: 'pass' as const,
+        reasoning: 'Help is visible',
+        observations: [
+          {
+            id: 'help-visible',
+            targetId: 'scenario:dashboard',
+            status: 'pass' as const,
+            summary: 'Help button is visible and accessible.',
+          },
+        ],
+      };
+    });
+    const hostBrowserRunner = createSequentialHostBrowserRunner([
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Reached page'],
+            frames: [
+              browserFrame('initial', '/tmp/advisory/screenshots/help-initial.png', [
+                {
+                  index: 0,
+                  role: 'button',
+                  tag: 'button',
+                  text: '?',
+                  ariaLabel: 'Help',
+                  title: '',
+                  disabled: false,
+                  visible: true,
+                  rect: { x: 10, y: 20, width: 24, height: 24 },
+                },
+              ]),
+            ],
+          },
+        ]),
+      },
+    ]);
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-visual',
+      task: 'Check dashboard visuals',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(contractYaml()),
+      hostBrowserRunner,
+      screenshotStore: createScreenshotStore(),
+      reviewer: { review },
+    });
+
+    expect(result.status).toBe('pass');
+    expect(review).toHaveBeenCalledOnce();
+  });
+
+  it('runs reviewer-planned browser actions and reviews the resulting frames', async () => {
+    const hostBrowserRunner = createSequentialHostBrowserRunner([
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Reached page'],
+            frames: [browserFrame('initial', '/tmp/advisory/screenshots/initial.png')],
+          },
+        ]),
+      },
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Reached page'],
+            frames: [
+              browserFrame('initial', '/tmp/advisory/screenshots/action-initial.png'),
+              browserFrame('after-action-1', '/tmp/advisory/screenshots/action-after.png', [], {
+                status: 'pass',
+                action: { type: 'click', controlIndex: 0, reason: 'Open Help' },
+                summary: 'Clicked control',
+              }),
+            ],
+          },
+        ]),
+      },
+    ]);
+    const planActions = vi.fn(async () => [
+      {
+        targetId: 'scenario:dashboard',
+        actions: [{ type: 'click' as const, controlIndex: 0, reason: 'Open Help' }],
+      },
+    ]);
+    const review = vi.fn(async (input) => {
+      expect(input.browserObservations[0]?.frames).toHaveLength(2);
+      expect(input.browserObservations[0]?.frames[1]?.action).toMatchObject({ status: 'pass' });
+      return {
+        status: 'pass' as const,
+        reasoning: 'Dialog opened',
+        observations: [
+          {
+            id: 'dialog-opened',
+            targetId: 'scenario:dashboard',
+            status: 'pass' as const,
+            summary: 'Post-click frame shows the dialog.',
+          },
+        ],
+      };
+    });
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-actions',
+      task: 'Open the help modal',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(contractYaml()),
+      hostBrowserRunner,
+      screenshotStore: createScreenshotStore(),
+      reviewer: { planActions, review },
+    });
+
+    expect(result.status).toBe('pass');
+    expect(hostBrowserRunner.runScript).toHaveBeenCalledTimes(2);
+    expect(result.screenshots).toHaveLength(2);
+  });
+
+  it('uses the help-control heuristic when no reviewer action planner exists', async () => {
+    const hostBrowserRunner = createSequentialHostBrowserRunner([
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Reached page'],
+            frames: [
+              browserFrame('initial', '/tmp/advisory/screenshots/help-before.png', [
+                {
+                  index: 4,
+                  role: 'button',
+                  tag: 'button',
+                  text: '?',
+                  ariaLabel: 'Help',
+                  title: '',
+                  disabled: false,
+                  visible: true,
+                  rect: { x: 300, y: 20, width: 24, height: 24 },
+                },
+              ]),
+            ],
+          },
+        ]),
+      },
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Reached page'],
+            frames: [
+              browserFrame('initial', '/tmp/advisory/screenshots/help-before-2.png'),
+              browserFrame('after-action-1', '/tmp/advisory/screenshots/help-after.png', [], {
+                status: 'pass',
+                action: { type: 'click', controlIndex: 4, reason: 'Open Help' },
+                summary: 'Clicked control',
+              }),
+            ],
+          },
+        ]),
+      },
+    ]);
+
+    await runAdvisoryBrowserQa({
+      podId: 'pod-help',
+      task: 'Add a how-to-use help modal triggered from a new ? icon button',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(contractYaml()),
+      hostBrowserRunner,
+      screenshotStore: createScreenshotStore(),
+      reviewer: {
+        review: vi.fn(async () => ({
+          status: 'pass',
+          reasoning: 'Help opened',
+          observations: [],
+        })),
+      },
+    });
+
+    expect(hostBrowserRunner.runScript).toHaveBeenCalledTimes(2);
   });
 
   it('returns uncertain advisory evidence when browser execution errors', async () => {

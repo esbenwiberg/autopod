@@ -1,16 +1,22 @@
+import type { ContentBlock, ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.js';
 import type {
   AdvisoryBrowserQaObservation,
   AdvisoryBrowserQaResult,
   HumanReviewItem,
+  ModelProvider,
+  ProviderCredentials,
   ScreenshotRef,
   SpecContract,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
-import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
+import { createProviderAnthropicClient } from '../providers/llm-client.js';
+import { runClaudeCli } from '../runtimes/run-claude-cli.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 
 export const ADVISORY_BROWSER_QA_TARGET_CAP = 5;
+const ADVISORY_BROWSER_QA_ACTION_CAP = 5;
+const ADVISORY_BROWSER_QA_IMAGE_CAP = 16;
 
 type AdvisoryChecklistTarget =
   | {
@@ -32,19 +38,107 @@ interface BrowserObservation {
   title: string;
   notes: string[];
   screenshotPath?: string;
+  frames?: BrowserFrame[];
   error?: string;
+}
+
+interface BrowserFrame {
+  label: string;
+  url: string;
+  title: string;
+  notes: string[];
+  screenshotPath?: string;
+  accessibility?: unknown;
+  controls?: BrowserControl[];
+  action?: BrowserActionResult;
+  error?: string;
+}
+
+interface BrowserControl {
+  index: number;
+  role: string;
+  tag: string;
+  text: string;
+  ariaLabel: string;
+  title: string;
+  disabled: boolean;
+  visible: boolean;
+  rect?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+}
+
+type AdvisoryBrowserAction =
+  | {
+      type: 'click';
+      controlIndex?: number;
+      role?: string;
+      name?: string;
+      text?: string;
+      selector?: string;
+      x?: number;
+      y?: number;
+      reason?: string;
+    }
+  | {
+      type: 'fill';
+      selector?: string;
+      text?: string;
+      value: string;
+      reason?: string;
+    }
+  | {
+      type: 'press';
+      key: string;
+      reason?: string;
+    }
+  | {
+      type: 'wait';
+      ms?: number;
+      reason?: string;
+    }
+  | {
+      type: 'finish';
+      reason?: string;
+    };
+
+interface BrowserActionResult {
+  status: 'pass' | 'fail' | 'skip';
+  action: AdvisoryBrowserAction;
+  summary: string;
+  error?: string;
+}
+
+interface AdvisoryBrowserFrameInput extends Omit<BrowserFrame, 'screenshotPath'> {
+  screenshots: ScreenshotRef[];
+  screenshotBase64?: string;
+  imageLabel?: string;
+}
+
+interface AdvisoryBrowserObservationInput
+  extends Omit<BrowserObservation, 'screenshotPath' | 'frames'> {
+  screenshots: ScreenshotRef[];
+  screenshotBase64?: string;
+  frames: AdvisoryBrowserFrameInput[];
 }
 
 export interface AdvisoryBrowserQaReviewInput {
   task: string;
   baseUrl: string;
   targets: AdvisoryChecklistTarget[];
-  browserObservations: Array<
-    Omit<BrowserObservation, 'screenshotPath'> & { screenshots: ScreenshotRef[] }
-  >;
+  browserObservations: AdvisoryBrowserObservationInput[];
 }
 
 export interface AdvisoryBrowserQaReviewer {
+  planActions?(input: AdvisoryBrowserQaReviewInput): Promise<
+    Array<{
+      targetId: string;
+      actions: AdvisoryBrowserAction[];
+    }>
+  >;
   review(input: AdvisoryBrowserQaReviewInput): Promise<{
     status: 'pass' | 'fail' | 'uncertain';
     reasoning: string;
@@ -65,6 +159,8 @@ export interface AdvisoryBrowserQaRunnerOptions {
   baseUrl: string;
   contract?: SpecContract;
   reviewerModel?: string;
+  reviewerProvider?: ModelProvider | null;
+  reviewerProviderCredentials?: ProviderCredentials | null;
   timeoutMs?: number;
   hostBrowserRunner?: HostBrowserRunner;
   screenshotStore?: ScreenshotStore;
@@ -132,46 +228,94 @@ export async function runAdvisoryBrowserQa(
 
   try {
     const screenshotDir = options.hostBrowserRunner.screenshotDir(options.podId);
-    const script = buildBrowserScript({
+    const initialScript = buildBrowserScript({
       baseUrl: options.baseUrl,
       screenshotDir,
       targets,
     });
-    const run = await options.hostBrowserRunner.runScript(script, {
+    const initialRun = await options.hostBrowserRunner.runScript(initialScript, {
       podId: options.podId,
       timeout: options.timeoutMs ?? 120_000,
     });
-    const observations = parseBrowserObservations(run.stdout);
-    if (run.exitCode !== 0 && observations.length === 0) {
+    let observations = parseBrowserObservations(initialRun.stdout);
+    if (initialRun.exitCode !== 0 && observations.length === 0) {
       return {
         status: 'uncertain',
-        reasoning: `Advisory browser QA script failed: ${run.stderr.slice(0, 1_000)}`,
+        reasoning: `Advisory browser QA script failed: ${initialRun.stderr.slice(0, 1_000)}`,
         durationMs: Date.now() - start,
         observations: [],
         screenshots: [],
       };
     }
 
-    const screenshotByTarget = await collectAdvisoryScreenshots(
+    const reviewer =
+      options.reviewer ??
+      createProviderAwareAdvisoryReviewer({
+        model: options.reviewerModel,
+        provider: options.reviewerProvider,
+        credentials: options.reviewerProviderCredentials,
+        logger: log,
+      });
+
+    const initialScreenshotCollection = await collectAdvisoryScreenshots(
       observations,
       options.hostBrowserRunner,
-      options.screenshotStore,
       options.podId,
+      { persist: false },
       log,
     );
-    const reviewer = options.reviewer ?? createClaudeAdvisoryReviewer(options.reviewerModel);
-    const review = await reviewer.review({
+    const initialReviewInput = buildReviewInput({
       task: options.task,
       baseUrl: options.baseUrl,
       targets,
-      browserObservations: observations.map((observation) => ({
-        targetId: observation.targetId,
-        url: observation.url,
-        title: observation.title,
-        notes: observation.notes,
-        error: observation.error,
-        screenshots: screenshotByTarget.get(observation.targetId) ?? [],
-      })),
+      observations,
+      screenshots: initialScreenshotCollection,
+    });
+    const actionPlan = mergeActionPlans(
+      await safePlanActions(reviewer, initialReviewInput, log),
+      buildHeuristicActionPlan(initialReviewInput),
+    );
+    if (actionPlan.size > 0) {
+      const actionScript = buildBrowserScript({
+        baseUrl: options.baseUrl,
+        screenshotDir,
+        targets,
+        actionsByTarget: Object.fromEntries(actionPlan),
+      });
+      const actionRun = await options.hostBrowserRunner.runScript(actionScript, {
+        podId: options.podId,
+        timeout: options.timeoutMs ?? 120_000,
+      });
+      const actionObservations = parseBrowserObservations(actionRun.stdout);
+      if (actionObservations.length > 0) {
+        observations = actionObservations;
+      } else if (actionRun.exitCode !== 0) {
+        log?.warn(
+          { stderr: actionRun.stderr.slice(0, 1_000) },
+          'advisory browser QA action script failed; reviewing initial observations',
+        );
+      }
+    }
+
+    const screenshotCollection = await collectAdvisoryScreenshots(
+      observations,
+      options.hostBrowserRunner,
+      options.podId,
+      { persist: true, screenshotStore: options.screenshotStore },
+      log,
+    );
+    const reviewInput = buildReviewInput({
+      task: options.task,
+      baseUrl: options.baseUrl,
+      targets,
+      observations,
+      screenshots: screenshotCollection,
+    });
+    const review = await reviewer.review({
+      task: reviewInput.task,
+      baseUrl: reviewInput.baseUrl,
+      targets: reviewInput.targets,
+      browserObservations: reviewInput.browserObservations,
     });
 
     const targetById = new Map(targets.map((target) => [target.id, target]));
@@ -185,14 +329,14 @@ export async function runAdvisoryBrowserQa(
           status: observation.status,
           summary: observation.summary,
           details: observation.details,
-          screenshots: targetId ? (screenshotByTarget.get(targetId) ?? []) : [],
+          screenshots: targetId ? (screenshotCollection.byTarget.get(targetId) ?? []) : [],
           suggestedFacts: observation.suggestedFacts,
         };
       },
     );
     const screenshots = [
       ...new Map(
-        [...screenshotByTarget.values()].flat().map((ref) => [ref.relativePath, ref]),
+        [...screenshotCollection.byTarget.values()].flat().map((ref) => [ref.relativePath, ref]),
       ).values(),
     ];
 
@@ -230,6 +374,7 @@ function buildBrowserScript(input: {
   baseUrl: string;
   screenshotDir: string;
   targets: AdvisoryChecklistTarget[];
+  actionsByTarget?: Record<string, AdvisoryBrowserAction[]>;
 }): string {
   return `
 import { mkdir } from 'node:fs/promises';
@@ -239,39 +384,239 @@ import { chromium } from 'playwright';
 const baseUrl = ${JSON.stringify(input.baseUrl)};
 const screenshotDir = ${JSON.stringify(input.screenshotDir)};
 const targets = ${JSON.stringify(input.targets)};
+const actionsByTarget = ${JSON.stringify(input.actionsByTarget ?? {})};
 
 await mkdir(screenshotDir, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const results = [];
 
+function safeFilePart(value) {
+  return String(value).replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 80) || 'target';
+}
+
+function cleanText(value, max = 300) {
+  return String(value ?? '').replace(/\\s+/g, ' ').trim().slice(0, max);
+}
+
+function getImplicitRole(el, tag) {
+  if (tag === 'button') return 'button';
+  if (tag === 'a') return 'link';
+  if (tag === 'select') return 'combobox';
+  if (tag === 'textarea') return 'textbox';
+  if (tag === 'input') {
+    const type = String(el.getAttribute('type') || 'text').toLowerCase();
+    if (['button', 'submit', 'reset'].includes(type)) return 'button';
+    if (['checkbox', 'radio', 'slider', 'spinbutton'].includes(type)) return type;
+    return 'textbox';
+  }
+  return tag || 'unknown';
+}
+
+async function collectControls(page) {
+  try {
+    return await page.evaluate(() => {
+      const nodes = Array.from(
+        document.querySelectorAll(
+          'button,[role="button"],a[href],input,select,textarea,[aria-label],[title]',
+        ),
+      );
+      return nodes.slice(0, 100).map((el, index) => {
+        const tag = el.tagName.toLowerCase();
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        const visible =
+          rect.width > 0 &&
+          rect.height > 0 &&
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          Number(style.opacity || '1') > 0;
+        const role =
+          el.getAttribute('role') ||
+          (tag === 'button'
+            ? 'button'
+            : tag === 'a'
+              ? 'link'
+              : tag === 'select'
+                ? 'combobox'
+                : tag === 'textarea'
+                  ? 'textbox'
+                  : tag === 'input'
+                    ? 'textbox'
+                    : tag);
+        return {
+          index,
+          role,
+          tag,
+          text: String(el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 300),
+          ariaLabel: String(el.getAttribute('aria-label') || '').slice(0, 300),
+          title: String(el.getAttribute('title') || '').slice(0, 300),
+          disabled:
+            el.hasAttribute('disabled') ||
+            el.getAttribute('aria-disabled') === 'true',
+          visible,
+          rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        };
+      });
+    });
+  } catch (err) {
+    return [
+      {
+        index: 0,
+        role: 'error',
+        tag: 'error',
+        text: err instanceof Error ? err.message : String(err),
+        ariaLabel: '',
+        title: '',
+        disabled: true,
+        visible: false,
+      },
+    ];
+  }
+}
+
+async function collectAccessibility(page) {
+  try {
+    if (page.accessibility && typeof page.accessibility.snapshot === 'function') {
+      return await page.accessibility.snapshot({ interestingOnly: true });
+    }
+    return { unavailable: 'Playwright accessibility snapshot API is unavailable' };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function captureFrame(page, targetId, frameIndex, label, action) {
+  const screenshotPath = join(
+    screenshotDir,
+    safeFilePart(targetId) + '-' + String(frameIndex).padStart(2, '0') + '.png',
+  );
+  const notes = [];
+  let bodyText = '';
+  try {
+    bodyText = await page.locator('body').innerText({ timeout: 5000 });
+  } catch (err) {
+    bodyText = 'Could not read body text: ' + (err instanceof Error ? err.message : String(err));
+  }
+  notes.push(bodyText.slice(0, 3000));
+  const controls = await collectControls(page);
+  const accessibility = await collectAccessibility(page);
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+  return {
+    label,
+    url: page.url(),
+    title: await page.title().catch(() => ''),
+    notes,
+    screenshotPath,
+    accessibility,
+    controls,
+    action,
+  };
+}
+
+async function performAction(page, action, controls) {
+  try {
+    if (!action || action.type === 'finish') {
+      return { status: 'skip', action, summary: action?.reason || 'No action requested' };
+    }
+    if (action.type === 'wait') {
+      await page.waitForTimeout(Math.max(0, Math.min(Number(action.ms || 500), 3000)));
+      return { status: 'pass', action, summary: 'Waited' };
+    }
+    if (action.type === 'press') {
+      await page.keyboard.press(String(action.key || 'Escape'));
+      return { status: 'pass', action, summary: 'Pressed ' + String(action.key || 'Escape') };
+    }
+    if (action.type === 'fill') {
+      if (action.selector) {
+        await page.locator(action.selector).first().fill(String(action.value || ''));
+      } else if (action.text) {
+        await page.getByLabel(new RegExp(String(action.text), 'i')).first().fill(String(action.value || ''));
+      } else {
+        throw new Error('fill action requires selector or text');
+      }
+      return { status: 'pass', action, summary: 'Filled control' };
+    }
+    if (action.type === 'click') {
+      if (Number.isInteger(action.controlIndex)) {
+        const control = controls[Number(action.controlIndex)];
+        if (!control?.rect) throw new Error('controlIndex did not resolve to a visible control');
+        await page.mouse.click(
+          control.rect.x + control.rect.width / 2,
+          control.rect.y + control.rect.height / 2,
+        );
+      } else if (action.selector) {
+        await page.locator(action.selector).first().click();
+      } else if (action.role && action.name) {
+        await page.getByRole(action.role, { name: new RegExp(String(action.name), 'i') }).first().click();
+      } else if (action.text) {
+        await page.getByText(String(action.text), { exact: false }).first().click();
+      } else if (Number.isFinite(action.x) && Number.isFinite(action.y)) {
+        await page.mouse.click(Number(action.x), Number(action.y));
+      } else {
+        throw new Error('click action requires controlIndex, selector, role/name, text, or coordinates');
+      }
+      await page.waitForLoadState('networkidle', { timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(250);
+      return { status: 'pass', action, summary: action.reason || 'Clicked control' };
+    }
+    return { status: 'skip', action, summary: 'Unsupported action type' };
+  } catch (err) {
+    return {
+      status: 'fail',
+      action,
+      summary: 'Action failed',
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 try {
   for (let i = 0; i < targets.length; i++) {
     const target = targets[i];
     const page = await browser.newPage({ locale: 'en-US' });
-    const screenshotPath = join(screenshotDir, 'advisory-' + i + '.png');
     const notes = [];
+    const frames = [];
     try {
       await page.goto(baseUrl, { waitUntil: 'networkidle', timeout: 30000 });
       notes.push('Reached ' + page.url());
-      notes.push((await page.locator('body').innerText({ timeout: 5000 })).slice(0, 2000));
-      await page.screenshot({ path: screenshotPath, fullPage: true });
+      frames.push(await captureFrame(page, target.id, 0, 'initial', undefined));
+      const actions = Array.isArray(actionsByTarget[target.id])
+        ? actionsByTarget[target.id].slice(0, ${ADVISORY_BROWSER_QA_ACTION_CAP})
+        : [];
+      for (let actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+        const previous = frames[frames.length - 1];
+        const actionResult = await performAction(page, actions[actionIndex], previous?.controls || []);
+        frames.push(
+          await captureFrame(
+            page,
+            target.id,
+            actionIndex + 1,
+            'after-action-' + (actionIndex + 1),
+            actionResult,
+          ),
+        );
+        if (actions[actionIndex]?.type === 'finish') break;
+      }
+      const lastFrame = frames[frames.length - 1];
       results.push({
         targetId: target.id,
-        url: page.url(),
-        title: await page.title(),
+        url: lastFrame?.url || page.url(),
+        title: lastFrame?.title || (await page.title()),
         notes,
-        screenshotPath,
+        frames,
+        screenshotPath: frames[0]?.screenshotPath,
       });
     } catch (err) {
       try {
-        await page.screenshot({ path: screenshotPath, fullPage: true });
+        frames.push(await captureFrame(page, target.id, frames.length, 'error', undefined));
       } catch {}
       results.push({
         targetId: target.id,
         url: page.url(),
         title: await page.title().catch(() => ''),
         notes,
-        screenshotPath,
+        frames,
+        screenshotPath: frames[0]?.screenshotPath,
         error: err instanceof Error ? err.message : String(err),
       });
     } finally {
@@ -305,45 +650,272 @@ function parseBrowserObservations(stdout: string): BrowserObservation[] {
         ? item.notes.filter((note): note is string => typeof note === 'string')
         : [],
       screenshotPath: typeof item.screenshotPath === 'string' ? item.screenshotPath : undefined,
+      frames: parseBrowserFrames(item.frames),
       error: typeof item.error === 'string' ? item.error : undefined,
     }))
     .filter((item) => item.targetId);
 }
 
+function parseBrowserFrames(value: unknown): BrowserFrame[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map((item, index) => ({
+      label: typeof item.label === 'string' ? item.label : `frame-${index}`,
+      url: typeof item.url === 'string' ? item.url : '',
+      title: typeof item.title === 'string' ? item.title : '',
+      notes: Array.isArray(item.notes)
+        ? item.notes.filter((note): note is string => typeof note === 'string')
+        : [],
+      screenshotPath: typeof item.screenshotPath === 'string' ? item.screenshotPath : undefined,
+      accessibility: item.accessibility,
+      controls: parseBrowserControls(item.controls),
+      action: parseBrowserActionResult(item.action),
+      error: typeof item.error === 'string' ? item.error : undefined,
+    }));
+}
+
+function parseBrowserControls(value: unknown): BrowserControl[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map((item, index) => ({
+      index: typeof item.index === 'number' ? item.index : index,
+      role: typeof item.role === 'string' ? item.role : '',
+      tag: typeof item.tag === 'string' ? item.tag : '',
+      text: typeof item.text === 'string' ? item.text : '',
+      ariaLabel: typeof item.ariaLabel === 'string' ? item.ariaLabel : '',
+      title: typeof item.title === 'string' ? item.title : '',
+      disabled: item.disabled === true,
+      visible: item.visible !== false,
+      rect: parseRect(item.rect),
+    }));
+}
+
+function parseRect(value: unknown): BrowserControl['rect'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const x = Number(record.x);
+  const y = Number(record.y);
+  const width = Number(record.width);
+  const height = Number(record.height);
+  if (![x, y, width, height].every(Number.isFinite)) return undefined;
+  return { x, y, width, height };
+}
+
+function parseBrowserActionResult(value: unknown): BrowserActionResult | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const status = String(record.status);
+  if (!['pass', 'fail', 'skip'].includes(status)) return undefined;
+  return {
+    status: status as BrowserActionResult['status'],
+    action: sanitizeAction(record.action),
+    summary: typeof record.summary === 'string' ? record.summary : '',
+    error: typeof record.error === 'string' ? record.error : undefined,
+  };
+}
+
+function observationFrames(observation: BrowserObservation): BrowserFrame[] {
+  if (observation.frames && observation.frames.length > 0) return observation.frames;
+  return [
+    {
+      label: 'initial',
+      url: observation.url,
+      title: observation.title,
+      notes: observation.notes,
+      screenshotPath: observation.screenshotPath,
+      error: observation.error,
+    },
+  ];
+}
+
+interface CollectedAdvisoryScreenshots {
+  byTarget: Map<string, ScreenshotRef[]>;
+  byFrame: Map<string, { ref?: ScreenshotRef; base64: string }>;
+}
+
 async function collectAdvisoryScreenshots(
   observations: BrowserObservation[],
   hostBrowserRunner: HostBrowserRunner,
-  screenshotStore: ScreenshotStore,
   podId: string,
+  opts: { persist: false } | { persist: true; screenshotStore: ScreenshotStore },
   log?: Logger,
-): Promise<Map<string, ScreenshotRef[]>> {
-  const refs = new Map<string, ScreenshotRef[]>();
+): Promise<CollectedAdvisoryScreenshots> {
+  const byTarget = new Map<string, ScreenshotRef[]>();
+  const byFrame = new Map<string, { ref?: ScreenshotRef; base64: string }>();
+  let screenshotIndex = 0;
 
-  for (let index = 0; index < observations.length; index++) {
-    const observation = observations[index];
-    if (!observation?.screenshotPath) continue;
+  for (const observation of observations) {
+    const frames = observationFrames(observation);
+    for (let frameIndex = 0; frameIndex < frames.length; frameIndex++) {
+      const frame = frames[frameIndex];
+      if (!frame?.screenshotPath) continue;
 
-    try {
-      const base64 = await hostBrowserRunner.readScreenshot(observation.screenshotPath);
-      const ref = await screenshotStore.write(
-        podId,
-        'advisory',
-        `advisory-${index}.png`,
-        Buffer.from(base64, 'base64'),
-      );
-      refs.set(observation.targetId, [...(refs.get(observation.targetId) ?? []), ref]);
-    } catch (err) {
-      log?.warn({ err, targetId: observation.targetId }, 'failed to collect advisory screenshot');
+      try {
+        const base64 = await hostBrowserRunner.readScreenshot(frame.screenshotPath);
+        let ref: ScreenshotRef | undefined;
+        if (opts.persist) {
+          ref = await opts.screenshotStore.write(
+            podId,
+            'advisory',
+            `advisory-${screenshotIndex}.png`,
+            Buffer.from(base64, 'base64'),
+          );
+          byTarget.set(observation.targetId, [...(byTarget.get(observation.targetId) ?? []), ref]);
+          screenshotIndex += 1;
+        }
+        byFrame.set(frameKey(observation.targetId, frameIndex), { ref, base64 });
+      } catch (err) {
+        log?.warn(
+          { err, targetId: observation.targetId, frame: frame.label },
+          'failed to collect advisory screenshot',
+        );
+      }
     }
   }
 
-  return refs;
+  return { byTarget, byFrame };
 }
 
-function createClaudeAdvisoryReviewer(model: string | undefined): AdvisoryBrowserQaReviewer {
+function frameKey(targetId: string, frameIndex: number): string {
+  return `${targetId}#${frameIndex}`;
+}
+
+function buildReviewInput(input: {
+  task: string;
+  baseUrl: string;
+  targets: AdvisoryChecklistTarget[];
+  observations: BrowserObservation[];
+  screenshots: CollectedAdvisoryScreenshots;
+}): AdvisoryBrowserQaReviewInput {
+  let imageCount = 0;
   return {
-    async review(input) {
-      if (!model) {
+    task: input.task,
+    baseUrl: input.baseUrl,
+    targets: input.targets,
+    browserObservations: input.observations.map((observation) => {
+      const frames = observationFrames(observation).map((frame, frameIndex) => {
+        const collected = input.screenshots.byFrame.get(frameKey(observation.targetId, frameIndex));
+        const imageLabel =
+          collected?.base64 && imageCount < ADVISORY_BROWSER_QA_IMAGE_CAP
+            ? `Image ${++imageCount}`
+            : undefined;
+        return {
+          label: frame.label,
+          url: frame.url,
+          title: frame.title,
+          notes: frame.notes,
+          accessibility: frame.accessibility,
+          controls: frame.controls,
+          action: frame.action,
+          error: frame.error,
+          screenshots: collected?.ref ? [collected.ref] : [],
+          screenshotBase64: collected?.base64,
+          imageLabel,
+        };
+      });
+      return {
+        targetId: observation.targetId,
+        url: observation.url,
+        title: observation.title,
+        notes: observation.notes,
+        error: observation.error,
+        screenshots: input.screenshots.byTarget.get(observation.targetId) ?? [],
+        screenshotBase64: frames.find((frame) => frame.screenshotBase64)?.screenshotBase64,
+        frames,
+      };
+    }),
+  };
+}
+
+async function safePlanActions(
+  reviewer: AdvisoryBrowserQaReviewer,
+  input: AdvisoryBrowserQaReviewInput,
+  log?: Logger,
+): Promise<Array<{ targetId: string; actions: AdvisoryBrowserAction[] }>> {
+  if (!reviewer.planActions) return [];
+  try {
+    return await reviewer.planActions(input);
+  } catch (err) {
+    log?.warn({ err }, 'advisory browser QA action planning failed');
+    return [];
+  }
+}
+
+function mergeActionPlans(
+  planned: Array<{ targetId: string; actions: AdvisoryBrowserAction[] }>,
+  heuristic: Map<string, AdvisoryBrowserAction[]>,
+): Map<string, AdvisoryBrowserAction[]> {
+  const merged = new Map<string, AdvisoryBrowserAction[]>();
+  for (const item of planned) {
+    const actions = item.actions.map(sanitizeAction).slice(0, ADVISORY_BROWSER_QA_ACTION_CAP);
+    if (item.targetId && actions.length > 0) merged.set(item.targetId, actions);
+  }
+  for (const [targetId, actions] of heuristic) {
+    if (!merged.has(targetId))
+      merged.set(targetId, actions.slice(0, ADVISORY_BROWSER_QA_ACTION_CAP));
+  }
+  return merged;
+}
+
+function buildHeuristicActionPlan(
+  input: AdvisoryBrowserQaReviewInput,
+): Map<string, AdvisoryBrowserAction[]> {
+  const actions = new Map<string, AdvisoryBrowserAction[]>();
+  const targetById = new Map(input.targets.map((target) => [target.id, target]));
+  for (const observation of input.browserObservations) {
+    const target = targetById.get(observation.targetId);
+    const text = `${input.task}\n${target?.prompt ?? ''}`.toLowerCase();
+    if (!/(help|how.to.use|modal|dialog|toolbar)/i.test(text)) continue;
+    const initial = observation.frames[0];
+    const helpControl = initial?.controls?.find((control) => {
+      if (!control.visible || control.disabled) return false;
+      const label = `${control.ariaLabel} ${control.title} ${control.text}`.trim();
+      return control.role === 'button' && /(^|\s)(help|\?)(\s|$)/i.test(label);
+    });
+    if (helpControl) {
+      actions.set(observation.targetId, [
+        {
+          type: 'click',
+          controlIndex: helpControl.index,
+          reason: 'Open the visible Help control to verify the modal/dialog scenario.',
+        },
+      ]);
+    }
+  }
+  return actions;
+}
+
+function createProviderAwareAdvisoryReviewer(input: {
+  model: string | undefined;
+  provider?: ModelProvider | null;
+  credentials?: ProviderCredentials | null;
+  logger?: Logger;
+}): AdvisoryBrowserQaReviewer {
+  return {
+    async planActions(reviewInput) {
+      if (!input.model) return [];
+      if (input.provider === 'openai' || input.provider === 'copilot') return [];
+      const prompt = buildActionPlannerPrompt(reviewInput);
+      try {
+        const stdout = await callAnthropicReviewer({
+          model: input.model,
+          provider: input.provider,
+          credentials: input.credentials,
+          prompt,
+          input: reviewInput,
+          logger: input.logger,
+          maxTokens: 2_000,
+        });
+        return parseActionPlanJson(stdout);
+      } catch (err) {
+        input.logger?.warn({ err }, 'advisory browser QA action planner failed');
+        return [];
+      }
+    },
+    async review(reviewInput) {
+      if (!input.model) {
         return {
           status: 'uncertain',
           reasoning: 'No reviewer model configured for advisory browser QA',
@@ -351,12 +923,24 @@ function createClaudeAdvisoryReviewer(model: string | undefined): AdvisoryBrowse
         };
       }
 
-      const prompt = buildReviewerPrompt(input);
+      if (input.provider === 'openai' || input.provider === 'copilot') {
+        return {
+          status: 'uncertain',
+          reasoning: `Reviewer provider ${input.provider} does not yet support screenshot image input for advisory browser QA.`,
+          observations: [],
+        };
+      }
+
+      const prompt = buildReviewerPrompt(reviewInput);
       try {
-        const { stdout } = await runClaudeCli({
-          model,
-          input: prompt,
-          timeout: 120_000,
+        const stdout = await callAnthropicReviewer({
+          model: input.model,
+          provider: input.provider,
+          credentials: input.credentials,
+          prompt,
+          input: reviewInput,
+          logger: input.logger,
+          maxTokens: 4_000,
         });
         const parsed = parseReviewerJson(stdout);
         if (parsed) return parsed;
@@ -366,12 +950,7 @@ function createClaudeAdvisoryReviewer(model: string | undefined): AdvisoryBrowse
           observations: [],
         };
       } catch (err) {
-        const detail =
-          err instanceof ClaudeCliError
-            ? `${err.kind}: ${err.message}`
-            : err instanceof Error
-              ? err.message
-              : String(err);
+        const detail = err instanceof Error ? err.message : String(err);
         return {
           status: 'uncertain',
           reasoning: `Advisory browser QA reviewer failed: ${detail}`,
@@ -382,31 +961,117 @@ function createClaudeAdvisoryReviewer(model: string | undefined): AdvisoryBrowse
   };
 }
 
+async function callAnthropicReviewer(input: {
+  model: string;
+  provider?: ModelProvider | null;
+  credentials?: ProviderCredentials | null;
+  prompt: string;
+  input: AdvisoryBrowserQaReviewInput;
+  logger?: Logger;
+  maxTokens: number;
+}): Promise<string> {
+  const llm = await createProviderAnthropicClient(
+    {
+      provider: input.provider,
+      credentials: input.credentials,
+      model: input.model,
+      profileName: 'advisory-browser-qa',
+    },
+    input.logger ?? noopLogger,
+  );
+  if (!llm.ok) {
+    if (!input.provider || input.provider === 'anthropic') {
+      const { stdout } = await runClaudeCli({
+        model: input.model,
+        input: `${input.prompt}\n\nNote: screenshot images could not be attached because no daemon-callable Anthropic API credentials were available. Use the structured browser observations only.`,
+        timeout: 120_000,
+      });
+      return stdout;
+    }
+    throw new Error(`Reviewer provider unavailable: ${llm.reason}`);
+  }
+  const response = await llm.client.messages.create({
+    model: llm.model,
+    max_tokens: input.maxTokens,
+    messages: [{ role: 'user', content: buildAnthropicContent(input.prompt, input.input) }],
+    timeout: 120_000,
+  });
+  return response.content
+    .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+    .map((block) => block.text)
+    .join('')
+    .trim();
+}
+
+const noopLogger = {
+  warn() {},
+  info() {},
+  debug() {},
+  error() {},
+  child() {
+    return noopLogger;
+  },
+} as unknown as Logger;
+
+function buildAnthropicContent(
+  prompt: string,
+  input: AdvisoryBrowserQaReviewInput,
+): ContentBlockParam[] {
+  const content: ContentBlockParam[] = [{ type: 'text', text: prompt }];
+  let imageCount = 0;
+  for (const observation of input.browserObservations) {
+    for (const frame of observation.frames) {
+      if (!frame.imageLabel || !frame.screenshotBase64) continue;
+      if (imageCount >= ADVISORY_BROWSER_QA_IMAGE_CAP) continue;
+      content.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+          data: frame.screenshotBase64,
+        },
+      });
+      imageCount += 1;
+    }
+  }
+  return content;
+}
+
+function buildActionPlannerPrompt(input: AdvisoryBrowserQaReviewInput): string {
+  return `You are steering a real browser for advisory QA. The browser is open on the target app.
+
+Your job now is only to choose a small, safe action plan that helps verify the checklist. Prefer clicking visible controls by controlIndex from the observed controls. Do not invent selectors.
+
+${describeAdvisoryInput(input)}
+
+Return JSON only:
+{
+  "actions": [
+    {
+      "targetId": "one checklist target id",
+      "actions": [
+        { "type": "click", "controlIndex": 0, "reason": "why this helps" }
+      ]
+    }
+  ]
+}
+
+Allowed action types:
+- click: { "type": "click", "controlIndex": number, "reason": string }
+- click by role/name only if no controlIndex exists
+- press: { "type": "press", "key": "Escape" }
+- wait: { "type": "wait", "ms": 500 }
+- finish: { "type": "finish" }
+
+Use at most ${ADVISORY_BROWSER_QA_ACTION_CAP} actions per target. If no action is needed, return { "actions": [] }.`;
+}
+
 function buildReviewerPrompt(input: AdvisoryBrowserQaReviewInput): string {
   return `You are doing advisory browser QA for a running web app. This is non-blocking evidence only.
 
-Task:
-${input.task}
+You receive screenshot images as content blocks plus structured page observations. Use the images to verify visual/icon-only UI. Use the accessibility and controls metadata to distinguish "visible but inaccessible" from "absent".
 
-Base URL:
-${input.baseUrl}
-
-Checklist targets:
-${input.targets.map((target, index) => `${index + 1}. ${target.id}\n${target.prompt}`).join('\n\n')}
-
-Browser observations:
-${input.browserObservations
-  .map(
-    (observation, index) =>
-      `${index + 1}. ${observation.targetId}
-URL: ${observation.url}
-Title: ${observation.title}
-Error: ${observation.error ?? 'none'}
-Screenshot refs: ${observation.screenshots.map((s) => s.relativePath).join(', ') || 'none'}
-Notes:
-${observation.notes.join('\n').slice(0, 4_000)}`,
-  )
-  .join('\n\n')}
+${describeAdvisoryInput(input)}
 
 Return JSON only:
 {
@@ -425,6 +1090,136 @@ Return JSON only:
 }
 
 Use status "fail" for concerns, but remember this advisory result must not be treated as a validation blocker.`;
+}
+
+function describeAdvisoryInput(input: AdvisoryBrowserQaReviewInput): string {
+  return `Task:
+${input.task}
+
+Base URL:
+${input.baseUrl}
+
+Checklist targets:
+${input.targets.map((target, index) => `${index + 1}. ${target.id}\n${target.prompt}`).join('\n\n')}
+
+Browser observations:
+${input.browserObservations
+  .map((observation, index) => describeObservation(observation, index))
+  .join('\n\n')}`;
+}
+
+function describeObservation(
+  observation: AdvisoryBrowserObservationInput,
+  observationIndex: number,
+): string {
+  const frameText = observation.frames
+    .map((frame, frameIndex) => {
+      const controls = (frame.controls ?? [])
+        .filter((control) => control.visible)
+        .slice(0, 40)
+        .map((control) => ({
+          index: control.index,
+          role: control.role,
+          tag: control.tag,
+          text: control.text,
+          ariaLabel: control.ariaLabel,
+          title: control.title,
+          disabled: control.disabled,
+          rect: control.rect,
+        }));
+      return `  Frame ${frameIndex + 1}: ${frame.label}${frame.imageLabel ? ` (${frame.imageLabel})` : ''}
+  URL: ${frame.url}
+  Title: ${frame.title}
+  Action: ${frame.action ? JSON.stringify(frame.action).slice(0, 800) : 'none'}
+  Error: ${frame.error ?? 'none'}
+  Screenshot refs: ${frame.screenshots.map((s) => s.relativePath).join(', ') || 'none'}
+  Visible controls: ${JSON.stringify(controls).slice(0, 5_000)}
+  Accessibility snapshot: ${stringifyForPrompt(frame.accessibility, 5_000)}
+  Notes:
+  ${frame.notes.join('\n').slice(0, 2_000)}`;
+    })
+    .join('\n');
+  return `${observationIndex + 1}. ${observation.targetId}
+URL: ${observation.url}
+Title: ${observation.title}
+Error: ${observation.error ?? 'none'}
+${frameText}`;
+}
+
+function stringifyForPrompt(value: unknown, max: number): string {
+  if (value === undefined) return 'none';
+  try {
+    return JSON.stringify(value).slice(0, max);
+  } catch {
+    return String(value).slice(0, max);
+  }
+}
+
+function parseActionPlanJson(
+  raw: string,
+): Array<{ targetId: string; actions: AdvisoryBrowserAction[] }> {
+  const cleaned = raw
+    .replace(/^```(?:\w+)?\s*\n?/m, '')
+    .replace(/\n?\s*```\s*$/m, '')
+    .trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) return [];
+  try {
+    const parsed = JSON.parse(match[0]) as unknown;
+    if (!parsed || typeof parsed !== 'object') return [];
+    const actions = (parsed as Record<string, unknown>).actions;
+    if (!Array.isArray(actions)) return [];
+    return actions
+      .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+      .map((item) => ({
+        targetId: typeof item.targetId === 'string' ? item.targetId : '',
+        actions: Array.isArray(item.actions)
+          ? item.actions.map(sanitizeAction).slice(0, ADVISORY_BROWSER_QA_ACTION_CAP)
+          : [],
+      }))
+      .filter((item) => item.targetId && item.actions.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function sanitizeAction(value: unknown): AdvisoryBrowserAction {
+  if (!value || typeof value !== 'object') return { type: 'finish' };
+  const record = value as Record<string, unknown>;
+  const type = String(record.type);
+  const reason = typeof record.reason === 'string' ? record.reason : undefined;
+  if (type === 'click') {
+    return {
+      type: 'click',
+      controlIndex:
+        typeof record.controlIndex === 'number' && Number.isInteger(record.controlIndex)
+          ? record.controlIndex
+          : undefined,
+      role: typeof record.role === 'string' ? record.role : undefined,
+      name: typeof record.name === 'string' ? record.name : undefined,
+      text: typeof record.text === 'string' ? record.text : undefined,
+      selector: typeof record.selector === 'string' ? record.selector : undefined,
+      x: typeof record.x === 'number' && Number.isFinite(record.x) ? record.x : undefined,
+      y: typeof record.y === 'number' && Number.isFinite(record.y) ? record.y : undefined,
+      reason,
+    };
+  }
+  if (type === 'fill') {
+    return {
+      type: 'fill',
+      selector: typeof record.selector === 'string' ? record.selector : undefined,
+      text: typeof record.text === 'string' ? record.text : undefined,
+      value: typeof record.value === 'string' ? record.value : '',
+      reason,
+    };
+  }
+  if (type === 'press') {
+    return { type: 'press', key: typeof record.key === 'string' ? record.key : 'Escape', reason };
+  }
+  if (type === 'wait') {
+    return { type: 'wait', ms: typeof record.ms === 'number' ? record.ms : undefined, reason };
+  }
+  return { type: 'finish', reason };
 }
 
 function parseReviewerJson(

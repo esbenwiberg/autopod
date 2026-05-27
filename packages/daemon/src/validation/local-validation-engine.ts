@@ -398,6 +398,8 @@ export function createLocalValidationEngine(
             baseUrl: config.previewUrl,
             contract: config.contract,
             reviewerModel: config.reviewerModel,
+            reviewerProvider: config.reviewerProvider,
+            reviewerProviderCredentials: config.reviewerProviderCredentials,
             hostBrowserRunner,
             screenshotStore,
             logger: log,

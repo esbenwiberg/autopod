@@ -118,11 +118,11 @@ public final class PodStore {
       let response = try await api.getPod(id)
       var updated = PodMapper.map(response, baseURL: api.baseURL)
       if let index = pods.firstIndex(where: { $0.id == id }) {
-        // Preserve live WebSocket state that REST doesn't carry
-        if updated.status == .validating && pods[index].validationProgress == nil {
-          updated.validationProgress = ValidationProgress.initial(attempt: updated.attempts?.current ?? 1)
-        } else {
-          updated.validationProgress = pods[index].validationProgress
+        // Preserve live WebSocket phase state only while validation is truly active.
+        if updated.status == .validating {
+          updated.validationProgress =
+            pods[index].validationProgress
+            ?? ValidationProgress.initial(attempt: updated.attempts?.current ?? 1)
         }
         pods[index] = updated
       } else {
@@ -256,6 +256,10 @@ public final class PodStore {
 
   public func markValidationPhaseCompleted(_ podId: String, phase: ValidationPhase, result: ValidationPhaseResult) {
     guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
+    if pods[index].validationProgress == nil {
+      let attempt = pods[index].attempts?.current ?? 1
+      pods[index].validationProgress = ValidationProgress.initial(attempt: attempt)
+    }
     let baseURL = api?.baseURL
     pods[index].validationProgress?.markCompleted(phase, result: result) { dto in
       PodMapper.mapScreenshotRef(dto, baseURL: baseURL)

@@ -75,7 +75,7 @@ public struct ValidationTab: View {
   // MARK: - Derived state
 
   private var progress: ValidationProgress? {
-    selectedHistory == nil ? pod.validationProgress : nil
+    selectedHistory == nil && pod.status == .validating ? pod.validationProgress : nil
   }
 
   private var displayedChecks: ValidationChecks? {
@@ -83,7 +83,7 @@ public struct ValidationTab: View {
   }
 
   private var displayedAdvisoryQa: AdvisoryQaDetail? {
-    progress?.advisoryDetail ?? displayedChecks?.advisoryQa
+    displayedChecks?.advisoryQa ?? progress?.advisoryDetail
   }
 
   private var selectedHistory: StoredValidationResponse? {
