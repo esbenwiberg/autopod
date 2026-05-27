@@ -947,7 +947,7 @@ function createProviderAwareAdvisoryReviewer(input: {
         };
       }
 
-      const prompt = buildReviewerPrompt(reviewInput);
+      const prompt = buildReviewerPrompt(reviewInput, { includeImages: true });
       try {
         const stdout = await callAnthropicReviewer({
           model: input.model,
@@ -967,6 +967,34 @@ function createProviderAwareAdvisoryReviewer(input: {
         };
       } catch (err) {
         if (isRateLimitError(err)) {
+          input.logger?.warn(
+            { err },
+            'advisory browser QA image review rate-limited; trying structured-evidence fallback',
+          );
+          try {
+            const fallbackStdout = await callAnthropicReviewer({
+              model: input.model,
+              provider: input.provider,
+              credentials: input.credentials,
+              prompt: buildReviewerPrompt(reviewInput, { includeImages: false }),
+              input: reviewInput,
+              logger: input.logger,
+              maxTokens: 1_500,
+              includeImages: false,
+            });
+            const fallbackParsed = parseReviewerJson(fallbackStdout);
+            if (fallbackParsed) {
+              return {
+                ...fallbackParsed,
+                reasoning: `Image review was rate-limited; reviewed structured browser evidence instead. ${fallbackParsed.reasoning}`,
+              };
+            }
+          } catch (fallbackErr) {
+            input.logger?.warn(
+              { err: fallbackErr },
+              'advisory browser QA structured-evidence fallback failed',
+            );
+          }
           return {
             status: 'uncertain',
             reasoning:
@@ -1167,10 +1195,16 @@ Allowed action types:
 Use at most ${ADVISORY_BROWSER_QA_ACTION_CAP} actions per target. If no action is needed, return { "actions": [] }.`;
 }
 
-function buildReviewerPrompt(input: AdvisoryBrowserQaReviewInput): string {
+function buildReviewerPrompt(
+  input: AdvisoryBrowserQaReviewInput,
+  options: { includeImages: boolean },
+): string {
+  const evidenceInstruction = options.includeImages
+    ? 'You receive screenshot images as content blocks plus structured page observations. Use the images to verify visual/icon-only UI. Use the accessibility and controls metadata to distinguish "visible but inaccessible" from "absent".'
+    : 'You do not receive screenshot images in this fallback review. Use the structured page observations, body text, accessibility snapshots, visible controls, and recorded action results. Use status "uncertain" when visual proof truly requires pixels.';
   return `You are doing advisory browser QA for a running web app. This is non-blocking evidence only.
 
-You receive screenshot images as content blocks plus structured page observations. Use the images to verify visual/icon-only UI. Use the accessibility and controls metadata to distinguish "visible but inaccessible" from "absent".
+${evidenceInstruction}
 
 ${describeAdvisoryInput(input)}
 
