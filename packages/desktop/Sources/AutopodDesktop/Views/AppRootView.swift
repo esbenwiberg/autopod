@@ -38,6 +38,7 @@ public struct AppRootView: View {
 
   @State private var showError = false
   @State private var showSettings = false
+  @State private var settingsProfileToEdit: String?
 
   /// Only read events for the selected pod — avoids observing the entire dictionary
   /// and triggering full view recomputation on every agent event.
@@ -140,6 +141,10 @@ public struct AppRootView: View {
         Task { await podStore.loadDiff(podId) }
       },
       onShowSettings: {
+        showSettings = true
+      },
+      onEditProfile: { name in
+        settingsProfileToEdit = name
         showSettings = true
       },
       loadFiles: { [connectionManager] (id: String) in
@@ -349,6 +354,7 @@ public struct AppRootView: View {
         onDeleteProfile: { [profileStore] name in
           try await profileStore.deleteProfile(name)
         },
+        deepLinkedProfileName: $settingsProfileToEdit,
         isPresented: $showSettings
       )
     }

@@ -5,7 +5,9 @@ import Testing
 
 @Test func validationProgressCompletesAdvisoryFailureFromPhaseEvent() throws {
   var progress = ValidationProgress.initial(attempt: 1)
+  #expect(progress.hasRunningPhase == false)
   progress.markStarted(.advisory)
+  #expect(progress.hasRunningPhase == true)
 
   let raw = try JSONDecoder().decode(
     RawSystemEvent.self,
@@ -32,6 +34,7 @@ import Testing
 
   #expect(progress.advisory.status == .failed)
   #expect(progress.activePhase == nil)
+  #expect(progress.hasRunningPhase == false)
   #expect(progress.advisoryDetail?.status == "fail")
   #expect(progress.advisoryDetail?.durationMs == 41845)
 }

@@ -52,6 +52,7 @@ public struct SettingsView: View {
         (Profile, Set<String>, [String: MergeMode]) async throws -> Void
     )?
     public var onDeleteProfile: ((String) async throws -> Void)?
+    @Binding public var deepLinkedProfileName: String?
     @Binding public var isPresented: Bool
 
     public init(connectionManager: ConnectionManager, profiles: [Profile],
@@ -68,6 +69,7 @@ public struct SettingsView: View {
                     (Profile, Set<String>, [String: MergeMode]) async throws -> Void
                 )? = nil,
                 onDeleteProfile: ((String) async throws -> Void)? = nil,
+                deepLinkedProfileName: Binding<String?> = .constant(nil),
                 isPresented: Binding<Bool>) {
         self.connectionManager = connectionManager
         self.profiles = profiles
@@ -81,6 +83,7 @@ public struct SettingsView: View {
         self.onSaveProfileWithInheritance = onSaveProfileWithInheritance
         self.onCreateProfileWithInheritance = onCreateProfileWithInheritance
         self.onDeleteProfile = onDeleteProfile
+        self._deepLinkedProfileName = deepLinkedProfileName
         self._isPresented = isPresented
     }
 
@@ -115,6 +118,16 @@ public struct SettingsView: View {
         }
         .frame(width: 720, height: 500)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            if deepLinkedProfileName != nil {
+                selectedSection = .profiles
+            }
+        }
+        .onChange(of: deepLinkedProfileName) { _, name in
+            if name != nil {
+                selectedSection = .profiles
+            }
+        }
     }
 
     // MARK: - Sidebar
@@ -256,7 +269,8 @@ public struct SettingsView: View {
                            onLoadEditor: onLoadProfileEditor,
                            onSaveWithInheritance: onSaveProfileWithInheritance,
                            onCreateWithInheritance: onCreateProfileWithInheritance,
-                           onDelete: onDeleteProfile)
+                           onDelete: onDeleteProfile,
+                           profileToOpen: $deepLinkedProfileName)
         }
     }
 

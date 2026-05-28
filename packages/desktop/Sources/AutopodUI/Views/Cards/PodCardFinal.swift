@@ -57,6 +57,10 @@ public struct SessionCardFinal: View {
 
     @State private var isHovered = false
 
+    private var isAdvisoryQaRunning: Bool {
+        pod.validationProgress?.advisory.status == .running
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Accent stripe
@@ -374,7 +378,14 @@ public struct SessionCardFinal: View {
                 .font(.caption)
                 .foregroundStyle(.orange)
         case .validated:
-            if pod.validationWaiver != nil {
+            if isAdvisoryQaRunning {
+                HStack(spacing: 5) {
+                    ProgressView().scaleEffect(0.5)
+                    Text("Advisory QA...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if pod.validationWaiver != nil {
                 Label("Approved with validation waiver", systemImage: "checkmark.seal")
                     .font(.caption)
                     .foregroundStyle(.orange)
@@ -738,7 +749,7 @@ public struct SessionCardFinal: View {
                         Button {
                             Task { await actions.approve(pod.id) }
                         } label: {
-                            Label(pod.validationWaiver == nil ? "Approve" : "Approve Waived", systemImage: "checkmark")
+                            Label(approveLabel, systemImage: "checkmark")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
@@ -935,6 +946,10 @@ public struct SessionCardFinal: View {
         default:
             EmptyView()
         }
+    }
+
+    private var approveLabel: String {
+        return pod.validationWaiver == nil ? "Approve" : "Approve Waived"
     }
 
     @State private var showQueuePopover = false

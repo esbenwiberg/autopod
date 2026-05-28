@@ -13,6 +13,7 @@ import SwiftUI
 /// in the panel calls `onSelectPod`.
 public struct SeriesPipelineView: View {
     public let pods: [Pod]
+    public var qualityScores: [String: PodQualityScore]
     public let selectedPodId: String?
     public let onSelectPod: (String) -> Void
     /// When true, tapping a node opens the slide-in activity panel instead of
@@ -36,6 +37,7 @@ public struct SeriesPipelineView: View {
 
     public init(
         pods: [Pod],
+        qualityScores: [String: PodQualityScore] = [:],
         selectedPodId: String? = nil,
         onSelectPod: @escaping (String) -> Void = { _ in },
         panelEnabled: Bool = false,
@@ -47,6 +49,7 @@ public struct SeriesPipelineView: View {
         showViewModePicker: Bool = true
     ) {
         self.pods = pods
+        self.qualityScores = qualityScores
         self.selectedPodId = selectedPodId
         self.onSelectPod = onSelectPod
         self.panelEnabled = panelEnabled
@@ -60,6 +63,7 @@ public struct SeriesPipelineView: View {
 
     private enum ViewMode: String {
         case dag = "Pipeline"
+        case summary = "Summary"
         case purpose = "Purpose"
         case design = "Design"
     }
@@ -98,6 +102,7 @@ public struct SeriesPipelineView: View {
         HStack {
             Picker("", selection: $viewMode) {
                 Text("Pipeline").tag(ViewMode.dag)
+                Text("Summary").tag(ViewMode.summary)
                 if seriesDescription != nil { Text("Purpose").tag(ViewMode.purpose) }
                 if seriesDesign != nil { Text("Design").tag(ViewMode.design) }
             }
@@ -121,7 +126,7 @@ public struct SeriesPipelineView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            if showViewModePicker && (seriesDescription != nil || seriesDesign != nil) {
+            if showViewModePicker {
                 viewModePicker
                 Divider()
             }
@@ -151,6 +156,8 @@ public struct SeriesPipelineView: View {
                     .onChange(of: panelPodId) { _, newId in
                         if let id = newId { loadEventsForPod?(id) }
                     }
+                case .summary:
+                    SeriesSummaryView(pods: pods, qualityScores: qualityScores)
                 case .purpose:
                     markdownView(seriesDescription ?? "")
                 case .design:
@@ -351,5 +358,391 @@ public struct SeriesPipelineView: View {
         guard remaining > 0 else { return nil }
         let minutes = Int((avgSeconds * Double(remaining)) / 60.0)
         return max(1, minutes)
+    }
+}
+
+private struct SeriesSummaryView: View {
+    let pods: [Pod]
+    let qualityScores: [String: PodQualityScore]
+
+    private struct Row: Identifiable {
+        let pod: Pod
+        let quality: PodQualityScore?
+
+        var id: String { pod.id }
+    }
+
+    private var rows: [Row] {
+        pods
+            .sorted { $0.startedAt < $1.startedAt }
+            .map { Row(pod: $0, quality: qualityScores[$0.id]) }
+    }
+
+    private var totalCost: Double {
+        pods.reduce(0.0) { $0 + $1.costUsd }
+    }
+
+    private var totalInputTokens: Int {
+        pods.reduce(0) { $0 + $1.inputTokens }
+    }
+
+    private var totalOutputTokens: Int {
+        pods.reduce(0) { $0 + $1.outputTokens }
+    }
+
+    private var totalFiles: Int {
+        pods.reduce(0) { $0 + ($1.diffStats?.files ?? 0) }
+    }
+
+    private var totalAdded: Int {
+        pods.reduce(0) { $0 + ($1.diffStats?.added ?? 0) }
+    }
+
+    private var totalRemoved: Int {
+        pods.reduce(0) { $0 + ($1.diffStats?.removed ?? 0) }
+    }
+
+    private var scoredRows: [Row] {
+        rows.filter { $0.quality != nil }
+    }
+
+    private var averageQuality: Double? {
+        guard !scoredRows.isEmpty else { return nil }
+        let total = scoredRows.reduce(0) { $0 + ($1.quality?.score ?? 0) }
+        return Double(total) / Double(scoredRows.count)
+    }
+
+    private var validationKnownCount: Int {
+        rows.filter { validationLabel(for: $0) != "n/a" }.count
+    }
+
+    private var validationPassedCount: Int {
+        rows.filter { validationLabel(for: $0) == "pass" }.count
+    }
+
+    private var validationAttemptCount: Int {
+        pods.reduce(0) { $0 + ($1.attempts?.current ?? 0) }
+    }
+
+    private var failedCost: Double {
+        pods
+            .filter { $0.status == .failed || $0.status == .killed }
+            .reduce(0.0) { $0 + $1.costUsd }
+    }
+
+    private var deliveredCount: Int {
+        pods.filter { deliveredStatuses.contains($0.status) }.count
+    }
+
+    private let deliveredStatuses: Set<PodStatus> = [
+        .validated, .approved, .merging, .mergePending, .complete,
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                metricGrid
+                Divider()
+                podTable
+                if !scoredRows.isEmpty {
+                    Divider()
+                    qualityBreakdown
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var metricGrid: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 150), spacing: 10)],
+            alignment: .leading,
+            spacing: 10
+        ) {
+            metricTile(
+                icon: "dollarsign.circle",
+                label: "Cost",
+                value: String(format: "$%.2f", totalCost),
+                detail: pods.isEmpty ? "0 pods" : String(format: "$%.2f/pod", totalCost / Double(pods.count)),
+                color: totalCost > 50 ? .orange : .green
+            )
+            metricTile(
+                icon: "number",
+                label: "Tokens",
+                value: formatTokenCount(totalInputTokens + totalOutputTokens),
+                detail: "in \(formatTokenCount(totalInputTokens)) / out \(formatTokenCount(totalOutputTokens))",
+                color: .blue
+            )
+            metricTile(
+                icon: "checkmark.seal",
+                label: "Quality",
+                value: averageQuality.map { String(format: "%.0f", $0) } ?? "n/a",
+                detail: "\(scoredRows.count)/\(pods.count) scored",
+                color: qualityColor(averageQuality.map { Int($0.rounded()) })
+            )
+            metricTile(
+                icon: "checklist.checked",
+                label: "Validation",
+                value: validationKnownCount == 0 ? "n/a" : "\(validationPassedCount)/\(validationKnownCount)",
+                detail: "\(validationAttemptCount) attempts",
+                color: validationKnownCount == 0 || validationPassedCount == validationKnownCount ? .green : .orange
+            )
+            metricTile(
+                icon: "doc.on.doc",
+                label: "Diff",
+                value: "\(totalFiles) files",
+                detail: "+\(formatPlainCount(totalAdded)) / -\(formatPlainCount(totalRemoved))",
+                color: .purple
+            )
+            metricTile(
+                icon: "flag.checkered",
+                label: "Delivery",
+                value: "\(deliveredCount)/\(pods.count)",
+                detail: statusSummary,
+                color: deliveredCount == pods.count ? .green : .blue
+            )
+            metricTile(
+                icon: "exclamationmark.triangle",
+                label: "Failed Cost",
+                value: String(format: "$%.2f", failedCost),
+                detail: "\(pods.filter { $0.status == .failed || $0.status == .killed }.count) pods",
+                color: failedCost > 0 ? .red : .secondary
+            )
+        }
+    }
+
+    private var statusSummary: String {
+        let running = pods.filter {
+            !deliveredStatuses.contains($0.status) && ($0.status.isActive || $0.status.needsAttention)
+        }.count
+        let queued = pods.filter { $0.status == .queued || $0.status == .paused }.count
+        let failed = pods.filter { $0.status == .failed || $0.status == .killed }.count
+        return "\(running) running / \(queued) queued / \(failed) failed"
+    }
+
+    private func metricTile(
+        icon: String,
+        label: String,
+        value: String,
+        detail: String,
+        color: Color
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(color)
+                    .frame(width: 16)
+                Text(label)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Text(value)
+                .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(detail)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(color.opacity(0.2), lineWidth: 1)
+        )
+    }
+
+    private var podTable: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Pods")
+                .font(.subheadline.weight(.semibold))
+            ScrollView(.horizontal) {
+                VStack(alignment: .leading, spacing: 0) {
+                    tableHeader
+                    ForEach(rows) { row in
+                        Divider()
+                        tableRow(row)
+                    }
+                }
+                .frame(minWidth: 780, alignment: .leading)
+            }
+        }
+    }
+
+    private var tableHeader: some View {
+        HStack(spacing: 10) {
+            tableText("Pod", width: 220, color: .secondary)
+            tableText("Status", width: 100, color: .secondary)
+            tableText("Cost", width: 78, color: .secondary, align: .trailing)
+            tableText("Tokens", width: 110, color: .secondary, align: .trailing)
+            tableText("Quality", width: 70, color: .secondary, align: .trailing)
+            tableText("Validation", width: 86, color: .secondary)
+            tableText("Diff", width: 110, color: .secondary, align: .trailing)
+        }
+        .font(.caption.weight(.semibold))
+        .padding(.vertical, 4)
+    }
+
+    private func tableRow(_ row: Row) -> some View {
+        let pod = row.pod
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(pod.briefTitle ?? pod.branch)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Text(pod.id)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            .frame(width: 220, alignment: .leading)
+            statusPill(pod.status)
+                .frame(width: 100, alignment: .leading)
+            tableText(String(format: "$%.2f", pod.costUsd), width: 78, align: .trailing)
+            tableText(
+                formatTokenCount(pod.inputTokens + pod.outputTokens),
+                width: 110,
+                color: .secondary,
+                align: .trailing
+            )
+            qualityPill(row.quality)
+                .frame(width: 70, alignment: .trailing)
+            tableText(validationLabel(for: row), width: 86, color: validationColor(for: row))
+            diffText(pod.diffStats)
+                .frame(width: 110, alignment: .trailing)
+        }
+        .padding(.vertical, 7)
+    }
+
+    private func tableText(
+        _ text: String,
+        width: CGFloat,
+        color: Color = .primary,
+        align: Alignment = .leading
+    ) -> some View {
+        Text(text)
+            .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .frame(width: width, alignment: align)
+    }
+
+    private func statusPill(_ status: PodStatus) -> some View {
+        Text(status.label)
+            .font(.system(.caption2).weight(.semibold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(status.color.opacity(0.1))
+            .foregroundStyle(status.color)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    private func qualityPill(_ score: PodQualityScore?) -> some View {
+        let value = score.map { "\($0.score)" } ?? "n/a"
+        let color = qualityColor(score?.score)
+        return HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text(value)
+                .font(.system(.caption, design: .monospaced))
+                .monospacedDigit()
+        }
+        .foregroundStyle(color)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private func diffText(_ diff: DiffStats?) -> some View {
+        HStack(spacing: 4) {
+            Text("+\(formatPlainCount(diff?.added ?? 0))")
+                .foregroundStyle(.green)
+            Text("-\(formatPlainCount(diff?.removed ?? 0))")
+                .foregroundStyle(.red)
+            Text("\(diff?.files ?? 0)f")
+                .foregroundStyle(.tertiary)
+        }
+        .font(.system(.caption, design: .monospaced))
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private var qualityBreakdown: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Quality Signals")
+                .font(.subheadline.weight(.semibold))
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 150), spacing: 10)],
+                alignment: .leading,
+                spacing: 10
+            ) {
+                metricTile(
+                    icon: "eye",
+                    label: "Reads",
+                    value: "\(scoredRows.reduce(0) { $0 + ($1.quality?.readCount ?? 0) })",
+                    detail: "\(scoredRows.reduce(0) { $0 + ($1.quality?.editCount ?? 0) }) edits",
+                    color: .blue
+                )
+                metricTile(
+                    icon: "wand.and.stars",
+                    label: "Blind Edits",
+                    value: "\(scoredRows.reduce(0) { $0 + ($1.quality?.editsWithoutPriorRead ?? 0) })",
+                    detail: "\(scoredRows.reduce(0) { $0 + ($1.quality?.editChurnCount ?? 0) }) churn files",
+                    color: .orange
+                )
+                metricTile(
+                    icon: "person.crop.circle.badge.exclamationmark",
+                    label: "Interrupts",
+                    value: "\(scoredRows.reduce(0) { $0 + ($1.quality?.userInterrupts ?? 0) })",
+                    detail: "\(scoredRows.reduce(0) { $0 + ($1.quality?.prFixAttempts ?? 0) }) PR fixes",
+                    color: .red
+                )
+            }
+        }
+    }
+
+    private func validationLabel(for row: Row) -> String {
+        if row.pod.validationChecks?.allPassed == true { return "pass" }
+        if row.pod.validationChecks != nil { return "fail" }
+        if row.quality?.validationPassed == true { return "pass" }
+        if row.quality?.validationPassed == false { return "fail" }
+        return "n/a"
+    }
+
+    private func validationColor(for row: Row) -> Color {
+        switch validationLabel(for: row) {
+        case "pass": return .green
+        case "fail": return .red
+        default: return .secondary
+        }
+    }
+
+    private func qualityColor(_ score: Int?) -> Color {
+        guard let score else { return .secondary }
+        switch score {
+        case 80...: return .green
+        case 60..<80: return .yellow
+        default: return .red
+        }
+    }
+
+    private func formatTokenCount(_ count: Int) -> String {
+        if count >= 1_000_000 { return String(format: "%.1fM", Double(count) / 1_000_000) }
+        if count >= 1_000 { return String(format: "%.1fK", Double(count) / 1_000) }
+        return "\(count)"
+    }
+
+    private func formatPlainCount(_ count: Int) -> String {
+        if count >= 1_000_000 { return String(format: "%.1fM", Double(count) / 1_000_000) }
+        if count >= 1_000 { return String(format: "%.1fK", Double(count) / 1_000) }
+        return "\(count)"
     }
 }

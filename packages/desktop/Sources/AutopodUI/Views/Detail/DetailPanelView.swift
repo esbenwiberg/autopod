@@ -11,6 +11,8 @@ public struct DetailPanelView: View {
     /// All pods in the currently-selected pod's series, for the Series tab.
     /// Empty when the pod is standalone.
     public var seriesPods: [Pod]
+    /// Persisted quality scores keyed by pod id, used by the Series summary tab.
+    public var qualityScores: [String: PodQualityScore]
     /// Callback invoked when a node is tapped in the Series tab's pipeline view.
     public var onSelectPod: ((String) -> Void)?
     /// Returns the cached event stream for any pod id — used by the Series tab's
@@ -49,6 +51,7 @@ public struct DetailPanelView: View {
     public init(
         pod: Pod, events: [AgentEvent], actions: PodActions = .preview,
         seriesPods: [Pod] = [],
+        qualityScores: [String: PodQualityScore] = [:],
         onSelectPod: ((String) -> Void)? = nil,
         eventsForPod: ((String) -> [AgentEvent])? = nil,
         loadEventsForPod: ((String) -> Void)? = nil,
@@ -77,6 +80,7 @@ public struct DetailPanelView: View {
     ) {
         self.pod = pod; self.events = events; self.actions = actions
         self.seriesPods = seriesPods
+        self.qualityScores = qualityScores
         self.onSelectPod = onSelectPod
         self.eventsForPod = eventsForPod
         self.loadEventsForPod = loadEventsForPod
@@ -235,6 +239,7 @@ public struct DetailPanelView: View {
                 case .series:
                     SeriesPipelineView(
                         pods: seriesPods,
+                        qualityScores: qualityScores,
                         selectedPodId: pod.id,
                         onSelectPod: { onSelectPod?($0) },
                         panelEnabled: true,

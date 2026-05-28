@@ -41,6 +41,7 @@ public struct MainView: View {
     public var onSelectSession: ((String?) -> Void)?
     public var onRefreshDiff: ((String) -> Void)?
     public var onShowSettings: (() -> Void)?
+    public var onEditProfile: ((String) -> Void)?
     public var loadFiles: ((String) async throws -> [SessionFileEntry])?
     public var loadArtifacts: ((String) async throws -> [SessionFileEntry])?
     public var loadContent: ((String, String) async throws -> SessionFileContent)?
@@ -129,6 +130,7 @@ public struct MainView: View {
         onSelectSession: ((String?) -> Void)? = nil,
         onRefreshDiff: ((String) -> Void)? = nil,
         onShowSettings: (() -> Void)? = nil,
+        onEditProfile: ((String) -> Void)? = nil,
         loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
         loadArtifacts: ((String) async throws -> [SessionFileEntry])? = nil,
         loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
@@ -208,6 +210,7 @@ public struct MainView: View {
         self.onSelectSession = onSelectSession
         self.onRefreshDiff = onRefreshDiff
         self.onShowSettings = onShowSettings
+        self.onEditProfile = onEditProfile
         self.loadFiles = loadFiles
         self.loadArtifacts = loadArtifacts
         self.loadContent = loadContent
@@ -566,6 +569,7 @@ public struct MainView: View {
                     events: selectedSessionEvents,
                     actions: wiredActions,
                     seriesPods: pod.seriesId.map { sid in pods.filter { $0.seriesId == sid } } ?? [],
+                    qualityScores: qualityScores,
                     onSelectPod: { selectedSessionId = $0 },
                     eventsForPod: eventsForPod,
                     loadEventsForPod: loadEventsForPod,
@@ -654,21 +658,32 @@ public struct MainView: View {
         }
         .overlay {
             if showCommandPalette {
-                Color.black.opacity(0.2)
-                    .ignoresSafeArea()
-                    .onTapGesture { showCommandPalette = false }
-                    .allowsHitTesting(true)
-                VStack {
+                ZStack(alignment: .top) {
+                    Color.black.opacity(0.2)
+                        .ignoresSafeArea()
+                        .onTapGesture { showCommandPalette = false }
+                        .allowsHitTesting(true)
                     CommandPalette(
                         isPresented: $showCommandPalette,
                         pods: pods,
+                        profiles: profileDetails,
                         actions: actions,
                         onSelectSession: { id in
+                            sidebarSelection = .all
                             selectedSessionId = id
+                        },
+                        onCreatePod: {
+                            showCreateSheet = true
+                        },
+                        onShowProfilePods: { name in
+                            searchText = ""
+                            sidebarSelection = .profile(name)
+                        },
+                        onEditProfile: { name in
+                            onEditProfile?(name)
                         }
                     )
                     .padding(.top, 80)
-                    Spacer()
                 }
             }
         }
@@ -852,6 +867,7 @@ public struct MainView: View {
             DisclosureGroup(isExpanded: $pipelineExpanded) {
                 SeriesPipelineView(
                     pods: seriesPods,
+                    qualityScores: qualityScores,
                     selectedPodId: selectedSessionId,
                     onSelectPod: { selectedSessionId = $0 }
                 )

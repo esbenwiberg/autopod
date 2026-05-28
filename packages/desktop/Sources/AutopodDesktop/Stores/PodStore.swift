@@ -60,6 +60,16 @@ public final class PodStore {
     self.api = api
   }
 
+  private func shouldPreserveValidationProgress(
+    _ progress: ValidationProgress?,
+    for pod: Pod
+  ) -> Bool {
+    guard let progress else { return false }
+    if pod.status == .validating { return true }
+    if progress.hasRunningPhase { return true }
+    return progress.advisoryDetail != nil && pod.validationChecks?.advisoryQa == nil
+  }
+
   // MARK: - Load
 
   public func loadSessions() async {
@@ -81,6 +91,7 @@ public final class PodStore {
       )
       pods = fresh.map { pod in
         guard let progress = savedProgress[pod.id] else { return pod }
+        guard shouldPreserveValidationProgress(progress, for: pod) else { return pod }
         var updated = pod
         updated.validationProgress = progress
         return updated
@@ -118,11 +129,12 @@ public final class PodStore {
       let response = try await api.getPod(id)
       var updated = PodMapper.map(response, baseURL: api.baseURL)
       if let index = pods.firstIndex(where: { $0.id == id }) {
-        // Preserve live WebSocket phase state only while validation is truly active.
-        if updated.status == .validating {
-          updated.validationProgress =
-            pods[index].validationProgress
-            ?? ValidationProgress.initial(attempt: updated.attempts?.current ?? 1)
+        // Preserve WebSocket phase state while validation is active, and while
+        // post-validation advisory QA is still running or not yet reflected by REST.
+        if shouldPreserveValidationProgress(pods[index].validationProgress, for: updated) {
+          updated.validationProgress = pods[index].validationProgress
+        } else if updated.status == .validating {
+          updated.validationProgress = ValidationProgress.initial(attempt: updated.attempts?.current ?? 1)
         }
         pods[index] = updated
       } else {

@@ -74,8 +74,16 @@ public struct ValidationTab: View {
 
   // MARK: - Derived state
 
+  private var liveProgress: ValidationProgress? {
+    selectedHistory == nil ? pod.validationProgress : nil
+  }
+
   private var progress: ValidationProgress? {
-    selectedHistory == nil && pod.status == .validating ? pod.validationProgress : nil
+    guard let liveProgress else { return nil }
+    if pod.status == .validating || liveProgress.hasRunningPhase || liveProgress.advisoryDetail != nil {
+      return liveProgress
+    }
+    return nil
   }
 
   private var displayedChecks: ValidationChecks? {
@@ -83,7 +91,7 @@ public struct ValidationTab: View {
   }
 
   private var displayedAdvisoryQa: AdvisoryQaDetail? {
-    displayedChecks?.advisoryQa ?? progress?.advisoryDetail
+    displayedChecks?.advisoryQa ?? liveProgress?.advisoryDetail
   }
 
   private var selectedHistory: StoredValidationResponse? {
@@ -1718,14 +1726,16 @@ public struct ValidationTab: View {
 
   private func advisoryDisplayStatus(_ status: String) -> String {
     switch status {
-    case "complete", "skipped", "error":
+    case "complete", "skipped", "error", "uncertain":
       return status
     case "skip":
       return "skipped"
     case "fail":
       return "error"
-    default:
+    case "pass":
       return "complete"
+    default:
+      return "uncertain"
     }
   }
 
@@ -1816,6 +1826,7 @@ public struct ValidationTab: View {
   private func advisoryIcon(_ displayStatus: String) -> String {
     switch displayStatus {
     case "skipped": return "minus.circle"
+    case "uncertain": return "questionmark.circle"
     default: return "info.circle"
     }
   }

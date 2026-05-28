@@ -414,6 +414,18 @@ public struct ValidationProgress: Sendable {
         }
     }
 
+    public var hasRunningPhase: Bool {
+        build.status == .running
+        || test.status == .running
+        || lint.status == .running
+        || sast.status == .running
+        || health.status == .running
+        || pages.status == .running
+        || facts.status == .running
+        || review.status == .running
+        || advisory.status == .running
+    }
+
     public mutating func markStarted(_ phase: ValidationPhase) {
         activePhase = phase
         let s = ValidationPhaseState(status: .running)

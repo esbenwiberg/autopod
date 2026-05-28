@@ -36,6 +36,7 @@ public struct ProfileListView: View {
         (Profile, Set<String>, [String: MergeMode]) async throws -> Void
     )?
     public var onDelete: ((String) async throws -> Void)?
+    @Binding private var profileToOpen: String?
     public init(profiles: [Profile], actionCatalog: [ActionCatalogItem] = [],
                 builtinSkills: [BuiltinSkillEntry] = [],
                 onSave: ((Profile) async throws -> Void)? = nil, onCreate: ((Profile) async throws -> Void)? = nil,
@@ -47,7 +48,8 @@ public struct ProfileListView: View {
                 onCreateWithInheritance: (
                     (Profile, Set<String>, [String: MergeMode]) async throws -> Void
                 )? = nil,
-                onDelete: ((String) async throws -> Void)? = nil) {
+                onDelete: ((String) async throws -> Void)? = nil,
+                profileToOpen: Binding<String?> = .constant(nil)) {
         self.profiles = profiles; self.actionCatalog = actionCatalog
         self.builtinSkills = builtinSkills
         self.onSave = onSave; self.onCreate = onCreate
@@ -56,6 +58,7 @@ public struct ProfileListView: View {
         self.onSaveWithInheritance = onSaveWithInheritance
         self.onCreateWithInheritance = onCreateWithInheritance
         self.onDelete = onDelete
+        self._profileToOpen = profileToOpen
     }
 
     @State private var selectedProfile: Profile?
@@ -128,6 +131,9 @@ public struct ProfileListView: View {
                 onCreateWithInheritance: onCreateWithInheritance
             )
         }
+        .onAppear { openDeepLinkedProfileIfNeeded() }
+        .onChange(of: profileToOpen) { _, _ in openDeepLinkedProfileIfNeeded() }
+        .onChange(of: profileNamesSignature) { _, _ in openDeepLinkedProfileIfNeeded() }
     }
 
     // MARK: - Sections
@@ -276,6 +282,10 @@ public struct ProfileListView: View {
         Set(profiles.filter { $0.extendsProfile == nil }.map(\.name))
     }
 
+    private var profileNamesSignature: [String] {
+        profiles.map(\.name).sorted()
+    }
+
     private var displayedRows: [ProfileRow] {
         let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
         func match(_ p: Profile) -> Bool {
@@ -383,6 +393,28 @@ public struct ProfileListView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
             if highlightedName == parentName { highlightedName = nil }
         }
+    }
+
+    private func openDeepLinkedProfileIfNeeded() {
+        guard let name = profileToOpen,
+              let profile = Self.profile(named: name, in: profiles) else { return }
+        searchText = ""
+        segment = .all
+        if let parent = profile.extendsProfile, !parent.isEmpty {
+            expandedBases.insert(parent)
+        }
+        highlightedName = profile.name
+        selectedProfile = profile
+        profileToOpen = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            if highlightedName == profile.name {
+                highlightedName = nil
+            }
+        }
+    }
+
+    static func profile(named name: String, in profiles: [Profile]) -> Profile? {
+        profiles.first { $0.name == name }
     }
 }
 
