@@ -181,9 +181,16 @@ async function buildMaxEnv(
   // Pre-flight token refresh. When the profile store is available, serialize
   // by credential owner and persist rotations immediately so concurrent pods
   // do not reuse a stale refresh token.
-  const refreshed = profileStore
+  const issued = profileStore
     ? await refreshAndPersistMaxCredentials(profileStore, profile.name, creds, logger)
-    : await refreshOAuthToken(creds, logger);
+    : await (async () => {
+        const credentials = await refreshOAuthToken(creds, logger);
+        return {
+          credentials,
+          lineage: { ownerName: profile.name, issuedRefreshToken: credentials.refreshToken },
+        };
+      })();
+  const refreshed = issued.credentials;
 
   // Build the credentials file that Claude Code expects at ~/.claude/.credentials.json.
   // All fields must be preserved — claude 2.1.80+ requires scopes/subscriptionType
@@ -211,6 +218,7 @@ async function buildMaxEnv(
     containerFiles: [{ path: credPath, content: credentialsFile }, ...buildClaudeConfigFiles()],
     secretFiles: [],
     requiresPostExecPersistence: true,
+    maxCredentialLineage: issued.lineage,
   };
 }
 

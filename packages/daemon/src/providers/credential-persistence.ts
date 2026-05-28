@@ -4,6 +4,7 @@ import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { refreshOAuthToken } from './credential-refresh.js';
+import type { MaxCredentialLineage } from './types.js';
 
 /** Path where MAX credentials are written inside the container. */
 const CREDENTIALS_PATH = `${CONTAINER_HOME_DIR}/.claude/.credentials.json`;
@@ -99,7 +100,7 @@ export async function refreshAndPersistMaxCredentials(
   profileName: string,
   fallbackCreds: MaxCredentials,
   logger: Logger,
-): Promise<MaxCredentials> {
+): Promise<{ credentials: MaxCredentials; lineage: MaxCredentialLineage }> {
   const ownerName = profileStore.resolveCredentialOwner(profileName) ?? profileName;
 
   return withOwnerLock(ownerName, async () => {
@@ -111,10 +112,23 @@ export async function refreshAndPersistMaxCredentials(
 
     const refreshed = await refreshOAuthToken(currentCreds, logger);
     if (sameMaxCredentials(refreshed, currentCreds)) {
-      return currentCreds;
+      return {
+        credentials: currentCreds,
+        lineage: { ownerName, issuedRefreshToken: currentCreds.refreshToken },
+      };
     }
 
-    return persistMaxCredentialsUnderLock(profileStore, ownerName, profileName, refreshed, logger);
+    const persisted = await persistMaxCredentialsUnderLock(
+      profileStore,
+      ownerName,
+      profileName,
+      refreshed,
+      logger,
+    );
+    return {
+      credentials: persisted,
+      lineage: { ownerName, issuedRefreshToken: persisted.refreshToken },
+    };
   });
 }
 
@@ -135,6 +149,7 @@ export async function persistRefreshedCredentials(
   profileStore: ProfileStore,
   profileName: string,
   logger: Logger,
+  lineage?: MaxCredentialLineage,
 ): Promise<void> {
   // Read the credentials file from the container
   let rawContent: string;
@@ -191,6 +206,32 @@ export async function persistRefreshedCredentials(
         'Owner refresh token matches container — skipping persist',
       );
       return;
+    }
+
+    if (lineage) {
+      if (!currentCreds) {
+        logger.warn(
+          { profileName, ownerName, lineageOwnerName: lineage.ownerName },
+          'Skipping MAX credential persist because credential owner no longer has MAX credentials',
+        );
+        return;
+      }
+
+      if (
+        ownerName !== lineage.ownerName ||
+        currentCreds.refreshToken !== lineage.issuedRefreshToken
+      ) {
+        logger.warn(
+          {
+            profileName,
+            ownerName,
+            lineageOwnerName: lineage.ownerName,
+            ownerTokenChanged: currentCreds.refreshToken !== lineage.issuedRefreshToken,
+          },
+          'Skipping stale MAX credential persist because credential owner advanced since container issue',
+        );
+        return;
+      }
     }
 
     const updated: MaxCredentials = {

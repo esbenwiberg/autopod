@@ -15,4 +15,11 @@ export interface ProviderEnvResult {
   secretFiles: Array<{ path: string; content: string }>;
   /** If true, caller must read back credentials after exec completes (token rotation). */
   requiresPostExecPersistence: boolean;
+  /** MAX/PRO credential lineage for guarding rotated refresh-token persistence. */
+  maxCredentialLineage?: MaxCredentialLineage;
+}
+
+export interface MaxCredentialLineage {
+  ownerName: string;
+  issuedRefreshToken: string;
 }

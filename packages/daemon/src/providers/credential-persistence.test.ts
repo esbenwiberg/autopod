@@ -203,6 +203,136 @@ describe('persistRefreshedCredentials', () => {
     );
   });
 
+  it('persists rotated credentials when owner still has the issued refresh token', async () => {
+    const containerCreds = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'rotated-access',
+        refreshToken: 'rotated-refresh',
+        expiresAt: new Date('2026-03-20T14:00:00Z').getTime(),
+      },
+    });
+
+    const currentCreds: MaxCredentials = {
+      provider: 'max',
+      accessToken: 'issued-access',
+      refreshToken: 'issued-refresh',
+      expiresAt: '2026-03-20T12:00:00Z',
+      subscriptionType: 'max',
+    };
+
+    const cm = makeContainerManager(containerCreds);
+    const ps = makeProfileStore(currentCreds);
+
+    await persistRefreshedCredentials('ctr-1', cm, ps, 'test-profile', logger, {
+      ownerName: 'test-profile',
+      issuedRefreshToken: 'issued-refresh',
+    });
+
+    expect(ps.update).toHaveBeenCalledWith('test-profile', {
+      providerCredentials: expect.objectContaining({
+        refreshToken: 'rotated-refresh',
+        subscriptionType: 'max',
+      }),
+    });
+  });
+
+  it('skips stale rotated credentials when owner advanced after container issue', async () => {
+    const containerCreds = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'stale-access',
+        refreshToken: 'stale-refresh',
+        expiresAt: new Date('2026-03-20T14:00:00Z').getTime(),
+      },
+    });
+
+    const currentCreds: MaxCredentials = {
+      provider: 'max',
+      accessToken: 'newer-access',
+      refreshToken: 'newer-refresh',
+      expiresAt: '2026-03-20T13:00:00Z',
+    };
+
+    const cm = makeContainerManager(containerCreds);
+    const ps = makeProfileStore(currentCreds);
+
+    await persistRefreshedCredentials('ctr-1', cm, ps, 'test-profile', logger, {
+      ownerName: 'test-profile',
+      issuedRefreshToken: 'issued-refresh',
+    });
+
+    expect(ps.update).not.toHaveBeenCalled();
+  });
+
+  it('prevents an older overlapping pod from overwriting the latest owner refresh token', async () => {
+    let storedCreds: MaxCredentials = {
+      provider: 'max',
+      accessToken: 'issued-access',
+      refreshToken: 'issued-refresh',
+      expiresAt: '2026-03-20T12:00:00Z',
+      clientId: 'client-1',
+    };
+
+    const ps = {
+      resolveCredentialOwner: vi.fn((_name: string) => 'owner-profile'),
+      getRaw: vi.fn((_name: string) => ({
+        name: 'owner-profile',
+        providerCredentials: storedCreds,
+      })),
+      update: vi.fn((_name: string, changes: Record<string, unknown>) => {
+        const next = changes.providerCredentials as MaxCredentials | undefined;
+        if (next) storedCreds = next;
+        return { name: 'owner-profile', providerCredentials: storedCreds } as Partial<Profile>;
+      }),
+      get: vi.fn(),
+      create: vi.fn(),
+      list: vi.fn(),
+      delete: vi.fn(),
+      exists: vi.fn(),
+    } as unknown as ProfileStore;
+
+    const lineage = {
+      ownerName: 'owner-profile',
+      issuedRefreshToken: 'issued-refresh',
+    };
+
+    await persistRefreshedCredentials(
+      'ctr-finished-first',
+      makeContainerManager(
+        JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'first-access',
+            refreshToken: 'first-refresh',
+            expiresAt: new Date('2026-03-20T14:00:00Z').getTime(),
+          },
+        }),
+      ),
+      ps,
+      'child-profile',
+      logger,
+      lineage,
+    );
+
+    await persistRefreshedCredentials(
+      'ctr-finished-later',
+      makeContainerManager(
+        JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'later-access',
+            refreshToken: 'later-refresh',
+            expiresAt: new Date('2026-03-20T15:00:00Z').getTime(),
+          },
+        }),
+      ),
+      ps,
+      'child-profile',
+      logger,
+      lineage,
+    );
+
+    expect(ps.update).toHaveBeenCalledTimes(1);
+    expect(storedCreds.refreshToken).toBe('first-refresh');
+  });
+
   it('serializes preflight refreshes and re-reads the credential owner', async () => {
     let storedCreds: MaxCredentials = {
       provider: 'max',
@@ -253,8 +383,12 @@ describe('persistRefreshedCredentials', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(ps.resolveCredentialOwner).toHaveBeenCalledWith('child-profile');
     expect(ps.update).toHaveBeenCalledTimes(1);
-    expect(first.refreshToken).toBe('new-refresh');
-    expect(second.refreshToken).toBe('new-refresh');
+    expect(first.credentials.refreshToken).toBe('new-refresh');
+    expect(first.lineage).toEqual({
+      ownerName: 'owner-profile',
+      issuedRefreshToken: 'new-refresh',
+    });
+    expect(second.credentials.refreshToken).toBe('new-refresh');
     expect(storedCreds.refreshToken).toBe('new-refresh');
   });
 });
