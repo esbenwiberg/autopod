@@ -1,5 +1,6 @@
 {
-  "$comment": "USD per 1M tokens. Short aliases (opus/sonnet/haiku) exist because profile.defaultModel can be set to a short name — both full IDs and short aliases must resolve. cachedInputPer1M is optional because not every provider reports cached input. When adding new aliases here, also update the $comment so future editors know they exist.",
+  "$comment": "USD per 1M tokens. Short aliases (opus/sonnet/haiku) are legacy-internal pricing shims for historical rows only; new profile and pod writes must use canonical model IDs. cachedInputPer1M is optional because not every provider reports cached input. Do not add new short aliases here unless a migration/analytics compatibility path explicitly requires it.",
+  "claude-opus-4-8": { "inputPer1M": 5.0, "cachedInputPer1M": 0.5, "outputPer1M": 25.0 },
   "claude-opus-4-7": { "inputPer1M": 5.0, "cachedInputPer1M": 0.5, "outputPer1M": 25.0 },
   "claude-opus-4-6": { "inputPer1M": 5.0, "cachedInputPer1M": 0.5, "outputPer1M": 25.0 },
   "claude-sonnet-4-6": { "inputPer1M": 3.0, "cachedInputPer1M": 0.3, "outputPer1M": 15.0 },

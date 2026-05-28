@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import { partialPodOptionsSchema } from './action-definition.schema.js';
+import { withCanonicalModelIdPolicy } from './model.schema.js';
+
+const canonicalModelIdSchema = withCanonicalModelIdPolicy(z.string().min(1).max(32));
 
 const branchNameSchema = z
   .string()
@@ -68,7 +71,7 @@ export const createPodRequestSchema = z
   .object({
     profileName: z.string().min(1).max(64),
     task: z.string().max(50_000),
-    model: z.string().min(1).max(32).optional(),
+    model: canonicalModelIdSchema.optional(),
     runtime: z.enum(['claude', 'codex']).optional(),
     executionTarget: z.enum(['local', 'aci']).optional(),
     branch: branchNameSchema.optional(),
