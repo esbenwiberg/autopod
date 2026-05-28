@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Premortem — Context-Atoms Design</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --surface: #1a1f2a;
+    --surface-2: #232a36;
+    --surface-3: #2d3748;
+    --border: #2d3748;
+    --border-strong: #3f4a5e;
+    --text: #e2e8f0;
+    --text-muted: #94a3b8;
+    --text-dim: #64748b;
+    --accent: #60a5fa;
+    --accent-dim: #3b82f6;
+    --danger: #ef4444;
+    --danger-bg: rgba(239, 68, 68, 0.08);
+    --warning: #f59e0b;
+    --warning-bg: rgba(245, 158, 11, 0.08);
+    --ok: #10b981;
+    --ok-bg: rgba(16, 185, 129, 0.08);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 40px 32px 80px; }
+  header { border-bottom: 1px solid var(--border); padding-bottom: 24px; margin-bottom: 32px; }
+  h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font-size: 20px; margin: 40px 0 16px; letter-spacing: -0.005em; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 24px 0 10px; color: var(--text); }
+  h4 { font-size: 14px; margin: 16px 0 6px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+  .meta { color: var(--text-muted); font-size: 13px; }
+  .meta code { font-family: var(--mono); background: var(--surface); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+  p { margin: 0 0 14px; }
+  code { font-family: var(--mono); font-size: 0.9em; background: var(--surface-2); padding: 1px 5px; border-radius: 3px; }
+  ul { padding-left: 22px; margin: 8px 0 14px; }
+  ul li { margin: 4px 0; }
+  strong { color: #fff; }
+
+  .summary-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin: 16px 0 24px;
+  }
+  .summary-box p:last-child { margin-bottom: 0; }
+
+  .key-findings { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 24px 0 8px; }
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 16px 18px;
+  }
+  .finding.danger { border-left-color: var(--danger); }
+  .finding.warning { border-left-color: var(--warning); }
+  .finding.accent { border-left-color: var(--accent); }
+  .finding .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); font-weight: 600; margin-bottom: 6px; }
+  .finding .title { font-weight: 600; font-size: 15px; margin-bottom: 8px; color: #fff; }
+  .finding.danger .title { color: #fca5a5; }
+  .finding.warning .title { color: #fcd34d; }
+  .finding p { font-size: 13.5px; color: var(--text-muted); margin: 0; }
+
+  .matrix {
+    display: grid;
+    grid-template-columns: 110px repeat(3, 1fr);
+    gap: 4px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 20px 0 8px;
+  }
+  .matrix .cell {
+    background: var(--surface);
+    padding: 12px 14px;
+    font-size: 13px;
+    min-height: 64px;
+  }
+  .matrix .head {
+    background: var(--surface-2);
+    font-weight: 600;
+    text-align: center;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    padding: 8px 0;
+    min-height: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .matrix .row-label { background: var(--surface-2); font-weight: 600; color: var(--text-muted); text-transform: uppercase; font-size: 11px; letter-spacing: 0.08em; display: flex; align-items: center; padding-left: 14px; }
+  .pill {
+    display: inline-block;
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    margin: 2px 2px 0 0;
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+  }
+  .pill.danger { background: var(--danger-bg); border-color: var(--danger); color: #fca5a5; }
+  .pill.warning { background: var(--warning-bg); border-color: var(--warning); color: #fcd34d; }
+  .pill.ok { background: var(--ok-bg); border-color: var(--ok); color: #6ee7b7; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 22px 24px;
+    margin: 18px 0;
+  }
+  .card.danger { border-left: 3px solid var(--danger); }
+  .card.warning { border-left: 3px solid var(--warning); }
+  .card.accent { border-left: 3px solid var(--accent); }
+  .card .num { font-family: var(--mono); font-size: 12px; color: var(--text-dim); margin-bottom: 4px; letter-spacing: 0.1em; }
+  .card h3 { margin-top: 0; font-size: 18px; }
+
+  .narrative { font-size: 14.5px; color: var(--text); }
+  .narrative p:first-of-type::first-letter { font-size: 1.2em; font-weight: 600; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 8px 0 16px; }
+  table th { text-align: left; padding: 10px 12px; background: var(--surface-2); color: var(--text-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); }
+  table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table tr:last-child td { border-bottom: none; }
+  table td:first-child { color: var(--text-muted); font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+
+  .checklist { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; margin: 12px 0 24px; }
+  .checklist h3 { margin-top: 0; }
+  .checklist ul { list-style: none; padding-left: 0; }
+  .checklist li { padding: 4px 0; padding-left: 24px; position: relative; font-size: 14px; }
+  .checklist li::before { content: "☐"; position: absolute; left: 0; color: var(--text-dim); font-size: 15px; top: 3px; }
+
+  .gate-box {
+    background: var(--danger-bg);
+    border: 1px solid var(--danger);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin: 20px 0;
+  }
+  .gate-box .label { font-size: 11px; font-weight: 700; color: var(--danger); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
+  .gate-box strong { color: #fca5a5; }
+
+  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 12.5px; }
+
+  @media (max-width: 780px) {
+    .key-findings { grid-template-columns: 1fr; }
+    .matrix { grid-template-columns: 80px repeat(3, 1fr); font-size: 12px; }
+    .wrap { padding: 24px 16px; }
+  }
+  @media print {
+    body { background: white; color: #111; }
+    .card, .summary-box, .finding, .checklist, .gate-box, .matrix { break-inside: avoid; background: white !important; color: #111 !important; border-color: #ddd !important; }
+    .matrix .cell, .matrix .head, .matrix .row-label { background: #f7f7f7 !important; color: #111 !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Premortem — Context-Atoms Design</h1>
+  <div class="meta">2026-05-28 · Following the <code>/premortem</code> skill · 5 phases · 8 parallel deep-dives</div>
+</header>
+
+<h2>The design under premortem</h2>
+<div class="summary-box">
+  <p>An agent-context-persistence system replacing heavy SDD-style specs with <strong>atomic, anchored, kind-typed memory</strong>. Storage: repo-local markdown files in <code>docs/context/{intent,decisions,constraints}/</code>, one fact per file (30–80 lines), with YAML frontmatter (<code>kind</code>, <code>anchors</code>, <code>tags</code>, <code>links</code>, <code>status</code>). Files live in git, reviewed in PRs.</p>
+  <p>Retrieval: an interview skill produces a structured envelope <code>{files, subsystems, tags, flows}</code>. A pure-function selector runs anchor∩files + tag∩tags + one-hop graph walk + dedupe + order by kind. Agent has escape-hatch <code>context.search</code>/<code>context.walk</code> tools.</p>
+  <p>Lifecycle: post-task <em>distill</em> proposes atoms; PR-touched-anchors checklist gates curation; churn-based staleness. Packaging: standalone CLI + MCP, tool-neutral across repos.</p>
+  <p><strong>Key prior evidence:</strong> The ETH Zurich + LogicStar.ai <em>AGENTS.md</em> study (arXiv 2602.11988) found flat repo-level context files <em>reduced</em> task success in 5/8 settings and added 20%+ cost. The design <strong>bets</strong> that selective, scoped injection behaves fundamentally differently — this is unverified.</p>
+</div>
+
+<h2>Headline findings</h2>
+<div class="key-findings">
+  <div class="finding warning">
+    <div class="label">Most probable failure</div>
+    <div class="title">Slow fade: curation collapse + anchor rot</div>
+    <p>Curation slows after sprint 1; refactors break anchors faster than they're repaired; the PR checkbox becomes ceremonial; the corpus silently rots. Doesn't require any single dramatic failure — only that cumulative curation cost exceeds visible value.</p>
+  </div>
+  <div class="finding danger">
+    <div class="label">Most damaging failure</div>
+    <div class="title">Empirical disproof: atoms prime exploration regardless of selectivity</div>
+    <p>Telemetry shows agents that receive even one atom open 2.3× more files in first 5 tool calls. The AGENTS.md study's finding generalizes — selectivity doesn't save us. If true, the design is a polished version of a known-bad pattern.</p>
+  </div>
+  <div class="finding accent">
+    <div class="label">Central hidden assumption</div>
+    <div class="title">Selective ≠ flat at the mechanism level</div>
+    <p>The whole design rides on one bet: that scoped, kind-ordered injection produces fundamentally different agent behavior than always-on flat injection. If false, no architecture saves it. <strong>Ship the measurement before the mechanism.</strong></p>
+  </div>
+</div>
+
+<h2>Failure landscape</h2>
+<p class="meta">Eight consolidated failure modes from Phase 2, plotted by likelihood × blast radius. Cards below.</p>
+<div class="matrix">
+  <div class="cell head"></div>
+  <div class="cell head">Low damage</div>
+  <div class="cell head">Medium damage</div>
+  <div class="cell head">Design-fatal</div>
+
+  <div class="cell row-label">High probability</div>
+  <div class="cell"></div>
+  <div class="cell"><span class="pill warning">3.2 Curation collapse</span> <span class="pill warning">3.5 Anchor rot</span></div>
+  <div class="cell"><span class="pill danger">3.8 Too-late paradox</span></div>
+
+  <div class="cell row-label">Medium probability</div>
+  <div class="cell"><span class="pill">3.7 Selector calibration</span></div>
+  <div class="cell"><span class="pill">3.3 Wiki-ification</span> <span class="pill">3.6 Envelope weakness</span></div>
+  <div class="cell"><span class="pill danger">3.1 Empirical disproof</span></div>
+
+  <div class="cell row-label">Low probability</div>
+  <div class="cell"></div>
+  <div class="cell"><span class="pill">3.4 Kind collapse</span></div>
+  <div class="cell"></div>
+</div>
+
+<h2>Deep dives</h2>
+
+<!-- 3.1 -->
+<div class="card danger">
+  <div class="num">3.1 — DESIGN-FATAL</div>
+  <h3>Empirical disproof: atoms hurt success even when scoped</h3>
+  <h4>Failure narrative</h4>
+  <div class="narrative">
+    <p><strong>Month 0–2:</strong> Ship v1 + 40 curated atoms. Distill generates ~6 atoms/PR. Dev feedback positive: "agents quote my decisions back to me."</p>
+    <p><strong>Month 3:</strong> First ablation eval (n=50): atoms-on 72% vs atoms-off 74%, token cost +18%. Within noise. Team tunes anchors, halves average injection.</p>
+    <p><strong>Month 4–5:</strong> Library grows to ~180 atoms across 3 repos. Re-run ablation (n=200): atoms-on 68% vs atoms-off 75%, +24% cost, p&lt;0.01. Simple tasks regress hardest (−9pp).</p>
+    <p><strong>Month 6:</strong> Telemetry: agents receiving even one constraint atom open <strong>2.3× more files</strong> in first 5 tool calls. Atoms aren't being <em>used</em> — they're priming exploration. Precision is 81%, but precision isn't the lever. <strong>The act of injection itself widens the agent's search frontier.</strong> ETH Zurich result reproduced under scoped injection. Design's core bet falsified.</p>
+  </div>
+  <h4>Falsified assumptions</h4>
+  <ul>
+    <li>Scoping changes the agent's response to injected context — it doesn't.</li>
+    <li>Precision is the right optimization target — receiving curated context <em>at all</em> triggers broader exploration.</li>
+    <li>Token cost scales with atoms injected — it scales with exploration triggered, ~5× direct cost.</li>
+    <li>Dogfooding catches regressions — devs liked it subjectively while it was hurting agents.</li>
+  </ul>
+  <h4>Early warning signs</h4>
+  <ul>
+    <li>Ablation delta crosses <strong>−2pp on any task category by month 3</strong>.</li>
+    <li>Files-opened-in-first-5-calls ratio (atoms-on / atoms-off) <strong>exceeds 1.5×</strong>.</li>
+    <li>Token cost overhead <strong>&gt;15% on simple tasks</strong> (rename/typo/bugfix).</li>
+    <li>Subjective dev satisfaction rising while measured success flat or declining.</li>
+  </ul>
+  <h4>Mitigations</h4>
+  <ul>
+    <li><strong>Gate launch on ablation eval, not lint.</strong> Require +3pp success delta before any user sees injected atoms.</li>
+    <li><strong>Default OFF for simple task classes.</strong> Inject only for novel/architectural work.</li>
+    <li><strong>Inject by reference, not content</strong> — surface atoms as <code>context.search</code> results the agent must fetch.</li>
+    <li><strong>Ship telemetry before content</strong> — exploration-ratio metric in week 1, atoms behind a flag.</li>
+  </ul>
+</div>
+
+<!-- 3.2 -->
+<div class="card warning">
+  <div class="num">3.2 — HIGH PROBABILITY</div>
+  <h3>Curation collapse: corpus growth stalls, atoms drift from code</h3>
+  <h4>Failure narrative</h4>
+  <div class="narrative">
+    <p>Week 1: one engineer seeds 22 atoms. Week 2–3: teammates add 8 more. The selector feels magical. Week 4: the first "review affected atoms" checkbox; the author skims, ticks it. Week 6: a refactor renames <code>processPod</code> to <code>runPodLoop</code>; the anchor glob still matches the file so the atom isn't flagged — it now describes a function that doesn't exist. Week 10: the seeder goes on parental leave. Week 12: "is this atom still right?" — nobody knows; PR ships anyway.</p>
+    <p>Month 4: an agent confidently cites a superseded SQLite-schema atom and produces a wrong migration. Team blames the AI. Month 5: distill still proposes atoms; PRs reject them as "we'll do it later." Month 6: <code>docs/context/</code> is legacy documentation. The selector still returns results — they're just wrong.</p>
+  </div>
+  <h4>Falsified assumptions</h4>
+  <ul>
+    <li>Engineers will edit markdown at PR time as a new habit — they won't, it competes with shipping.</li>
+    <li>Lint-passing correlates with accurate — staleness is invisible to syntax.</li>
+    <li>Churn-based staleness catches drift — too noisy, gets ignored.</li>
+    <li>Distill <em>proposals</em> become <em>merges</em> — proposing is cheap; review is the bottleneck.</li>
+  </ul>
+  <h4>Early warning signs</h4>
+  <ul>
+    <li>Atom creation rate drops <strong>&gt;60% sprint-over-sprint</strong> after sprint 1.</li>
+    <li>"Review affected atoms" checkbox check-time median <strong>&lt;3 seconds</strong>.</li>
+    <li>Distill-proposed atoms <strong>&lt;20% merge rate</strong> after 2 weeks.</li>
+    <li>Gap rate climbing while corpus size flat — agents routing around stale atoms.</li>
+  </ul>
+  <h4>Mitigations</h4>
+  <ul>
+    <li><strong>AST-symbol staleness</strong> (not just churn) via tree-sitter; surfaces in PR comments, blocks merge until acknowledged.</li>
+    <li><strong>Shift curation into the agent</strong> — agent proposes atom edits in same PR as code edits.</li>
+    <li><strong>Atoms decay to <code>archived</code></strong> automatically if unverified for N weeks; force re-verification.</li>
+    <li><strong>Measure outcome, not output</strong> — dashboard gap-rate and citation-accuracy, not atom count.</li>
+  </ul>
+</div>
+
+<!-- 3.3 -->
+<div class="card">
+  <div class="num">3.3 — MEDIUM</div>
+  <h3>Wiki-ification: atoms become specs in another directory</h3>
+  <h4>Failure narrative</h4>
+  <div class="narrative">
+    <p>Month 1: tight atoms, 20–40 lines. Month 2: first compound atom — decision plus three constraints "because they're conceptually inseparable." Reviewer approves; precedent set. Month 3: atoms grow H2 sections (<code>## Context</code>, <code>## Decision</code>, <code>## Tradeoffs</code>); median length climbs from 32 → 51 lines. Month 4: authors notice <strong>fat atoms retrieve better</strong> than thin ones — the incentive flips. Month 5: new contributors use existing atoms as templates and write at 78 lines. Month 6: selector returns 5 atoms totalling 400 lines of dense mixed prose. Performance degrades exactly like the AGENTS.md monolith the system was built to replace.</p>
+  </div>
+  <h4>Falsified assumptions</h4>
+  <ul>
+    <li>Authoring discipline is durable under social pressure — reviewers won't reject "a bit long but well-written" from a senior contributor.</li>
+    <li>File-size cap is a proxy for content shape — 80 lines of one idea ≠ 80 lines of four ideas.</li>
+    <li>Atomicity is self-reinforcing — fat atoms outcompete thin ones in retrieval, creating a gradient toward bloat.</li>
+  </ul>
+  <h4>Early warning signs</h4>
+  <ul>
+    <li>Median atom length <strong>crosses 50 lines</strong> (vs. target 30–40).</li>
+    <li>Heading count per atom <strong>&gt;1</strong> — multi-fact tell.</li>
+    <li>Mean atoms-per-envelope drops while mean tokens-per-envelope rises.</li>
+  </ul>
+  <h4>Mitigations</h4>
+  <ul>
+    <li><strong>Lint on shape</strong>: reject &gt;1 H2, &gt;N top-level bullets, &gt;1 kind. Cap ~40 lines, not 80.</li>
+    <li><strong>Single-claim check</strong>: require <code>claim:</code> frontmatter field; CI LLM-checks body supports exactly that claim.</li>
+    <li><strong>Retrieval anti-incentive</strong>: selector penalizes atom length, removing the gradient toward bloat.</li>
+    <li>Weekly corpus audit with p50/p90 length and "drift score."</li>
+  </ul>
+</div>
+
+<!-- 3.4 -->
+<div class="card">
+  <div class="num">3.4 — LOW PROBABILITY · MEDIUM DAMAGE</div>
+  <h3>Kind collapse: intent / decision / constraint blur</h3>
+  <h4>Failure narrative</h4>
+  <div class="narrative">
+    <p>Month 1: clean. <code>intent</code> says "Pod tokens exist because…", <code>decision</code> says "We chose HMAC over JWT because…", <code>constraint</code> says "Pod tokens must be &lt;2KB…" Month 3: <code>intent/network-isolation.md</code> contains intent + decision fused; reviewer splits it; the splits feel redundant. Month 6: <code>constraint/migration-numbering.md</code> opens with three paragraphs of <em>why</em> before stating the rule. <code>decision/sqlite-over-postgres.md</code> ends with a constraint. New contributors copy whichever neighbor file they opened first. Kind becomes a coin flip. PR reviews argue about kind assignment for atoms whose content everyone agrees on. The selector orders intent → decision → constraint, but the actual content order is scrambled. Nobody notices because outputs still look plausible.</p>
+  </div>
+  <h4>Falsified assumptions</h4>
+  <ul>
+    <li>"Why exists" / "why chose" / "what must hold" are cleanly separable — every decision has embedded intent, every constraint a rationale.</li>
+    <li>Authors reach for the right kind without a forcing function — they don't.</li>
+    <li>Review catches mis-kinding — reviewers themselves disagree.</li>
+    <li>Selector ordering is robust to ~10% mis-kinding — even 30% silently corrupts the narrative.</li>
+  </ul>
+  <h4>Early warning signs</h4>
+  <ul>
+    <li>Kind-change rate in PR review <strong>&gt;15%</strong>.</li>
+    <li>Inter-rater agreement test (5 engineers, 10 kind-stripped atoms): <strong>&lt;70%</strong> means folk-taxonomy.</li>
+    <li>Keyword leak: "because" in <code>constraint/</code>, "must" in <code>intent/</code>.</li>
+  </ul>
+  <h4>Mitigations</h4>
+  <ul>
+    <li><strong>Collapse to two kinds</strong>: <code>rationale</code> (why, including chosen-because) and <code>constraint</code> (invariants). Intent-vs-decision is blurry; constraint is sharp.</li>
+    <li>Structural templates per kind — mandatory sections enforced by lint.</li>
+    <li>Promote ordering out of kind: add <code>depends_on:</code> field; selector follows declared dependencies, not taxonomy.</li>
+    <li>Inter-rater calibration in CI: periodic LLM re-classification of kind-stripped atoms.</li>
+  </ul>
+</div>
+
+<!-- 3.5 -->
+<div class="card warning">
+  <div class="num">3.5 — HIGH PROBABILITY</div>
+  <h3>Anchor rot: refactors break anchors silently</h3>
+  <h4>Failure narrative</h4>
+  <div class="narrative">
+    <p>Month 1: clean. Month 2: someone splits <code>pod-manager.ts</code> into two files; the atom's anchor breaks; the author has no context, adds a lint-disable to unblock CI. Three sprints later a daemon directory reorg moves 40 files; 60 atoms break at once; nobody owns the backlog. Someone "fixes" it by rewriting specific anchors to <code>packages/daemon/src/pods/**</code> — silences the lint but now every pod touching <code>pods/</code> surfaces 6 atoms, 4 irrelevant. Reviewers see the checklist fire on a typo fix, dismiss it, muscle memory sticks. By month 6 the checklist is decorative.</p>
+  </div>
+  <h4>Falsified assumptions</h4>
+  <ul>
+    <li>Refactor authors update anchors as part of the refactor — they don't.</li>
+    <li>Lint warnings on orphans create enough pressure to fix them — they accumulate; one PR blocked by an unrelated orphan teaches everyone to disable.</li>
+    <li>Glob anchors are a reasonable fallback — they collapse signal-to-noise of the checklist, which was the value.</li>
+    <li>Anchor correctness degrades gradually — it doesn't, directory reorgs invalidate dozens at once.</li>
+  </ul>
+  <h4>Early warning signs</h4>
+  <ul>
+    <li>Orphan rate <strong>&gt;5%</strong> of total atoms, or growing &gt;2pp/month.</li>
+    <li>Lint-disable comments referencing anchor rules in <strong>&gt;1 PR/week</strong>.</li>
+    <li>Ratio of <code>git mv</code> to anchor-updating commits drifts above <strong>10:1</strong>.</li>
+    <li>Glob-anchor share climbs past <strong>30%</strong>.</li>
+  </ul>
+  <h4>Mitigations</h4>
+  <ul>
+    <li><strong>Symbol-based anchors via tree-sitter</strong> (<code>pods/pod-manager.ts#processPod</code>) survive splits and moves.</li>
+    <li><strong>Git hook</strong> detects renames via <code>git log --follow -M</code> and auto-rewrites anchors.</li>
+    <li>Anchor freshness signal (last-verified commit SHA); selector deprioritizes stale.</li>
+    <li>Block lint-disable: orphans become CI errors after 7-day grace.</li>
+  </ul>
+</div>
+
+<!-- 3.6 -->
+<div class="card">
+  <div class="num">3.6 — MEDIUM</div>
+  <h3>Envelope weakness: fuzzy→structured conversion is unreliable</h3>
+  <h4>Failure narrative</h4>
+  <div class="narrative">
+    <p>Week 1–4: envelopes look fine; humans are paying attention. Week 5–12: devs notice envelope confirmation is the slowest step of <code>/prep</code> and start mashing "looks good." The LLM extractor invents <code>flows</code> that don't exist as canonical tags; the validator only checks shape, not membership. <code>subsystems</code> get plausible-but-wrong labels (<code>orchestration</code> vs canonical <code>pod-lifecycle</code>). The taxonomy itself drifts. Week 13–26: selector retrieves atoms tagged <code>orchestration</code> for a <code>pod-lifecycle</code> query and misses everything relevant. Agents learn the injected context is noise and start every task with grep. The push channel becomes decorative.</p>
+  </div>
+  <h4>Falsified assumptions</h4>
+  <ul>
+    <li>A canonical taxonomy stays stable enough that envelopes authored months apart remain comparable.</li>
+    <li>LLM extraction + schema validator catches semantic errors — schema only validates shape, not correctness.</li>
+    <li>Humans meaningfully review LLM-proposed envelopes during interview.</li>
+    <li><code>flows</code> is a learnable category — it's a fuzzy human concept with no ground truth.</li>
+  </ul>
+  <h4>Early warning signs</h4>
+  <ul>
+    <li>Envelope-field correction rate <strong>&lt;15%</strong> after week 4 (rubber-stamping).</li>
+    <li>LLM-extractor F1: <code>subsystems</code> <strong>&lt;0.75</strong>, <code>flows</code> <strong>&lt;0.5</strong>.</li>
+    <li>Tag cardinality growing faster than tag reuse.</li>
+  </ul>
+  <h4>Mitigations</h4>
+  <ul>
+    <li><strong>Closed-vocabulary tags/subsystems</strong> at validation time; new value requires explicit taxonomy-update PR.</li>
+    <li><strong>Drop <code>flows</code></strong> or demote to free-text the selector ignores.</li>
+    <li>Weight retrieval primarily on <code>files</code> + path-derived <code>subsystems</code> (both mechanical); LLM fields are tiebreakers.</li>
+    <li>Continuous per-field F1 monitoring; auto-disable fields whose F1 falls below threshold.</li>
+  </ul>
+</div>
+
+<!-- 3.7 -->
+<div class="card">
+  <div class="num">3.7 — MEDIUM</div>
+  <h3>Selector calibration: one-hop is wrong-sized</h3>
+  <h4>Failure narrative</h4>
+  <div class="narrative">
+    <p>Month 1: one-hop works on the demo. Month 2: a refactor decision supersedes an earlier decision that itself refines a principle — the principle is two hops away and gets silently violated. Fix: "walk supersedes chains transitively." A special case. Month 3: <code>contradicts</code> links fire across the graph; weight them lower. Now there's a weights table. Month 4: per-kind hop budgets appear. The selector grows a config file. Month 5: agents call <code>pull</code> on every task as a safety net — push-primary is dead. Month 6: the "deterministic, debuggable selector" requires reading 400 lines of weighting logic plus a YAML. Three engineers have opinions about the weights. Nobody wants to own it.</p>
+  </div>
+  <h4>Falsified assumptions</h4>
+  <ul>
+    <li>"One hop" is a property of the graph — actually a property of each link-type.</li>
+    <li>Parent intent lives one hop away — chains in real codebases are 3–5 deep.</li>
+    <li>Link semantics stay clean — authors conflate <code>related</code>/<code>implements</code> and <code>contradicts</code>/<code>supersedes</code>.</li>
+    <li>Determinism implies debuggability — determinism without locality buys only reproducibility.</li>
+  </ul>
+  <h4>Early warning signs</h4>
+  <ul>
+    <li><code>pull_context</code> invocation rate <strong>&gt;30%</strong> of pods.</li>
+    <li>Avg atoms-injected-per-pod drifting upward (8 → 18).</li>
+    <li>Selector config gains commits at <strong>&gt;1/week</strong>.</li>
+    <li>"Why was this included?" questions in incidents take <strong>&gt;5 min</strong> to answer.</li>
+  </ul>
+  <h4>Mitigations</h4>
+  <ul>
+    <li><strong>Per-link-type transitive closure</strong>: walk <code>refines</code>/<code>supersedes</code>/<code>implements</code> to fixpoint; <code>related</code>/<code>contradicts</code> zero hops unless tag-matched.</li>
+    <li><strong>Relevance scoring with a token budget</strong>, not hop count. One tunable place.</li>
+    <li>Hybrid push-then-search: structured <code>expand(atom_id, reason)</code>, not free-form pull.</li>
+    <li><strong>Selection traces</strong> as first-class artifact per pod (considered / included / dropped, with reasons).</li>
+  </ul>
+</div>
+
+<!-- 3.8 -->
+<div class="card danger">
+  <div class="num">3.8 — HIGH PROBABILITY · DESIGN-FATAL</div>
+  <h3>Too-late paradox: atoms launder agent guesses into requirements</h3>
+  <h4>Failure narrative</h4>
+  <div class="narrative">
+    <p>Month 1: first pods work greenfield areas, make reasonable-but-arbitrary choices (retry with exponential backoff, 5 attempts), and distill captures these as atoms: "constraint: payment retries use exponential backoff, max 5 attempts." A reviewer, lacking strong opinions on a decision they never made, approves. The atom is canonical.</p>
+    <p>Month 3: a second pod retrieves the atom, treats it as load-bearing intent, builds around it. The retry policy ossifies — not because anyone designed it, but because Claude picked it and nobody pushed back during distill review.</p>
+    <p>Month 6: an architect proposes changing retry behavior for a real business reason. They discover the codebase is shaped around an atom that encodes a decision <strong>no human ever made</strong>. The "intent corpus" is an archaeology of agent improvisation, retroactively legitimized by tired PR reviewers. <strong>The system has laundered guesses into requirements.</strong></p>
+  </div>
+  <h4>Falsified assumptions</h4>
+  <ul>
+    <li>Distill reviewers reject arbitrary agent choices — they can't distinguish "agent chose this" from "this was required" without redoing the analysis.</li>
+    <li>Pre-existing design docs seed the corpus organically — nobody backfills.</li>
+    <li>"Intent" is recoverable from outcomes — you can extract what was done, not why it had to be that way.</li>
+    <li>Greenfield is rare — in a growing codebase it's the majority of high-stakes work.</li>
+    <li>Human approval equals human authorship — under review fatigue, closer to rubber-stamping.</li>
+  </ul>
+  <h4>Early warning signs</h4>
+  <ul>
+    <li>Human-authored : distill-authored ratio <strong>trending to zero</strong> (target &gt;30% human in active areas).</li>
+    <li>Atoms reading like postmortems ("we used X because it worked") instead of directives.</li>
+    <li><code>docs/decisions/</code> and atom corpus <strong>diverging</strong>; no cross-references.</li>
+    <li>New-subsystem pods producing <strong>10+ atoms in first run</strong> — high improvisation, not high learning.</li>
+    <li>Atoms getting "corrected" by later atoms instead of revised.</li>
+  </ul>
+  <h4>Mitigations</h4>
+  <ul>
+    <li><strong>Pre-work atom capture in <code>/prep</code></strong> — interview produces atoms <em>before</em> the pod runs, not just an envelope. Distill refines, doesn't originate.</li>
+    <li><strong>Provenance tagging</strong>: <code>source: human-prep | distill-approved | doc-import</code>. Retrieval can weight or filter by provenance.</li>
+    <li><strong>Seed import</strong> from <code>docs/decisions/</code> and ADRs so greenfield isn't empty.</li>
+    <li><strong>Distill quarantine for first-pod-in-area</strong>: atoms enter a <code>provisional</code> tier; require a second pod or human design review to promote.</li>
+  </ul>
+</div>
+
+<h2>Plan revisions</h2>
+<table>
+<thead><tr><th>Addresses</th><th>Revision</th></tr></thead>
+<tbody>
+<tr><td>3.1</td><td><strong>Gate launch on ablation eval.</strong> Require +3pp success delta on a frozen benchmark before any user sees injected atoms. Commit explicit kill criteria.</td></tr>
+<tr><td>3.1</td><td><strong>Default OFF for simple task classes.</strong> Inject only for novel/architectural work.</td></tr>
+<tr><td>3.1</td><td><strong>Ship telemetry before content.</strong> Push/pull/gap/exploration-ratio dashboards in week 1; atoms behind a flag.</td></tr>
+<tr><td>3.1</td><td>Consider <strong>inject-by-reference</strong> via <code>context.search</code> rather than push.</td></tr>
+<tr><td>3.2</td><td><strong>Shift curation into the agent</strong>: agent proposes atom edits in same PR as code edits.</td></tr>
+<tr><td>3.2</td><td><strong>AST-symbol staleness</strong> via tree-sitter; surfaces in PR comments, blocks merge.</td></tr>
+<tr><td>3.2</td><td>Atoms <strong>decay to <code>archived</code></strong> if unverified for N weeks.</td></tr>
+<tr><td>3.3</td><td><strong>Lint on shape</strong> — &gt;1 H2 rejected, ~40-line cap, mandatory <code>claim:</code> field.</td></tr>
+<tr><td>3.3</td><td><strong>Retrieval anti-incentive</strong> — selector penalizes atom length.</td></tr>
+<tr><td>3.4</td><td><strong>Launch with TWO kinds</strong>: <code>rationale</code> and <code>constraint</code>. Defer <code>intent</code>.</td></tr>
+<tr><td>3.4</td><td>Structural templates per kind; inter-rater calibration in CI.</td></tr>
+<tr><td>3.5</td><td><strong>Symbol-based anchors</strong> via tree-sitter (<code>file.ts#symbol</code>) as primary form.</td></tr>
+<tr><td>3.5</td><td><strong>Git hook</strong> auto-rewrites anchors on rename.</td></tr>
+<tr><td>3.5</td><td>Block lint-disable escape hatch; orphans become CI errors after 7-day grace.</td></tr>
+<tr><td>3.6</td><td><strong>Closed-vocabulary tags/subsystems</strong>; new value requires explicit taxonomy-update PR.</td></tr>
+<tr><td>3.6</td><td><strong>Drop <code>flows</code></strong> from envelope or demote to free-text hint.</td></tr>
+<tr><td>3.6</td><td>Per-field F1 monitoring with auto-disable below threshold.</td></tr>
+<tr><td>3.7</td><td><strong>Per-link-type transitive closure</strong>, not uniform one-hop.</td></tr>
+<tr><td>3.7</td><td><strong>Relevance scoring with token budget</strong>, not hop count.</td></tr>
+<tr><td>3.7</td><td><strong>Selection traces</strong> as first-class artifact.</td></tr>
+<tr><td>3.8</td><td><strong>Pre-work atom capture in <code>/prep</code></strong>.</td></tr>
+<tr><td>3.8</td><td><strong>Provenance tagging</strong> on every atom.</td></tr>
+<tr><td>3.8</td><td><strong>Seed import</strong> from existing ADRs / design docs.</td></tr>
+<tr><td>3.8</td><td><strong>Distill quarantine</strong> for first-pod-in-area atoms.</td></tr>
+</tbody>
+</table>
+
+<h2>Pre-launch checklist</h2>
+
+<div class="gate-box">
+  <div class="label">Single most important pre-launch action</div>
+  <p>Ship the <strong>ablation harness</strong> before atoms reach any real user. If injection doesn't move the success-rate needle on a benchmark you trust, no polish saves the design. <strong>Measurement before mechanism.</strong></p>
+</div>
+
+<div class="checklist">
+  <h3>Before any user sees an atom</h3>
+  <ul>
+    <li>Ablation harness running, producing daily success-rate delta with vs. without atoms (n ≥ 50 frozen benchmark tasks).</li>
+    <li>Kill criteria written down with explicit numbers (suggested: retire if delta &lt; +3pp at day 60, or &lt; 0pp in any week after corpus &gt; 30 atoms).</li>
+    <li>Exploration-ratio metric instrumented; alert threshold 1.5×.</li>
+    <li>Pilot repo selected — <strong>NOT autopod itself</strong>. Too close to home hides ergonomic problems.</li>
+    <li>Default OFF for simple task classes.</li>
+  </ul>
+</div>
+
+<div class="checklist">
+  <h3>Schema and lint</h3>
+  <ul>
+    <li>Launch with TWO kinds: <code>rationale</code> and <code>constraint</code>. Defer <code>intent</code>.</li>
+    <li>Shape lint: reject &gt;1 H2, &gt;N top-level bullets, &gt;1 kind, &gt;40 lines.</li>
+    <li><code>claim:</code> field required; LLM CI check validates body supports it.</li>
+    <li>Symbol-based anchors (tree-sitter) as primary; path-only deprecated for new atoms.</li>
+    <li>Closed-vocabulary <code>tags</code> and <code>subsystems</code>; taxonomy update is an explicit PR.</li>
+    <li><code>source</code> (provenance) field required on every atom.</li>
+  </ul>
+</div>
+
+<div class="checklist">
+  <h3>Workflow</h3>
+  <ul>
+    <li>Pre-work atom capture in <code>/prep</code> producing atoms before the pod runs.</li>
+    <li>Seed import from existing <code>docs/decisions/</code> / ADRs / architecture docs.</li>
+    <li>Agent proposes atom edits in the same PR as code edits.</li>
+    <li>AST-symbol staleness detection via tree-sitter; surfaces in PR comments.</li>
+    <li>First-pod quarantine for atoms authored in virgin areas.</li>
+    <li>Git hook for anchor rewriting on rename.</li>
+  </ul>
+</div>
+
+<div class="checklist">
+  <h3>Selector</h3>
+  <ul>
+    <li>Per-link-type transitive closure, not uniform one-hop.</li>
+    <li>Relevance scoring with token budget, not hop count.</li>
+    <li>Selection traces emitted per pod (atoms considered, included, dropped, with reasons).</li>
+    <li>Retrieval anti-incentive for long atoms (length penalty in scoring).</li>
+  </ul>
+</div>
+
+<div class="checklist">
+  <h3>Telemetry SLOs (define before launch, monitor weekly)</h3>
+  <ul>
+    <li>Gap rate &lt; 10% by day 60.</li>
+    <li>Noise rate &lt; 30% by day 60.</li>
+    <li>Pull-tool invocation rate &lt; 15% (push-primary discipline holding).</li>
+    <li>Median atom length p50 &lt; 30 lines, p90 &lt; 50 lines.</li>
+    <li>Orphan anchor rate &lt; 5%.</li>
+    <li>Human-authored atom share &gt; 30% in active subsystems.</li>
+    <li>Distill-proposed atom merge rate &gt; 40%.</li>
+    <li>Exploration-ratio (atoms-on / atoms-off) &lt; 1.3.</li>
+    <li>Success-rate delta with atoms &gt; +3pp.</li>
+  </ul>
+</div>
+
+<div class="checklist">
+  <h3>Decision gates</h3>
+  <ul>
+    <li>Week 2: telemetry pipeline producing all metrics. If not, halt content rollout.</li>
+    <li>Day 30: ablation delta ≥ 0pp. If negative, halt and diagnose.</li>
+    <li>Day 60: ablation delta ≥ +3pp AND noise/gap SLOs green. If not, redesign or retire.</li>
+    <li>Day 90: if all hold and ≥1 non-autopod consumer is producing atoms, begin standalone CLI extraction. Otherwise defer.</li>
+  </ul>
+</div>
+
+<h2>Closing</h2>
+<p>The premortem surfaces <strong>one design-fatal risk</strong> (empirical disproof of selective injection) and <strong>two slow-fade risks</strong> (curation collapse, too-late paradox) that together account for most likely-failure outcomes. The mitigations cluster into a small set of architectural moves: gate on ablation eval, default off for simple tasks, ship telemetry first, symbol-based anchors, provenance tagging, shape-lint not size-lint, two kinds not three, per-link-type transitive closure, and pre-work capture in <code>/prep</code>.</p>
+<p>The single most important pre-launch action is the ablation eval. <strong>Ship the measurement before the mechanism.</strong></p>
+
+<footer>
+  Generated 2026-05-28 · Companion markdown transcript: <code>docs/premortem/context-atoms.md</code> · 8 parallel deep-dive agents · Method: <code>/premortem</code> skill
+</footer>
+
+</div>
+</body>
+</html>
