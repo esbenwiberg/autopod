@@ -1464,6 +1464,30 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    *  off the preview/container before screenshot-backed advisory QA finishes. */
   const advisoryRuns = new Map<string, Promise<ValidationResult>>();
 
+  // Serialise advisory browser QA across pods so that concurrent validations
+  // don't all hammer the reviewer model's rate limit window at once. Inner
+  // retry handles transient 429s; the semaphore prevents the collision.
+  const ADVISORY_QA_MAX_CONCURRENCY = 1;
+  let advisoryQaActive = 0;
+  const advisoryQaWaiters: Array<() => void> = [];
+
+  function acquireAdvisoryQaSlot(): Promise<void> {
+    if (advisoryQaActive < ADVISORY_QA_MAX_CONCURRENCY) {
+      advisoryQaActive++;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => advisoryQaWaiters.push(resolve));
+  }
+
+  function releaseAdvisoryQaSlot(): void {
+    const next = advisoryQaWaiters.shift();
+    if (next) {
+      next();
+    } else {
+      advisoryQaActive--;
+    }
+  }
+
   function cleanupContainerAfterAdvisorySettles(
     pod: Pod,
     label: string,
@@ -3361,13 +3385,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const run = (async (): Promise<ValidationResult> => {
       let advisoryResult: ValidationResult['advisoryBrowserQa'] | null = null;
       try {
-        advisoryResult = await validationEngine.runAdvisoryBrowserQa(
-          validationConfig,
-          blockingResult,
-          (phase) => emitActivityStatus(podId, phase),
-          undefined,
-          buildPhaseEventCallbacks(podId),
-        );
+        emitActivityStatus(podId, 'Waiting for advisory browser QA slot…');
+        await acquireAdvisoryQaSlot();
+        try {
+          const beforeAdvisory = podRepo.getOrThrow(podId);
+          if (beforeAdvisory.status === 'killed' || beforeAdvisory.status === 'killing') {
+            return blockingResult;
+          }
+          advisoryResult = await validationEngine.runAdvisoryBrowserQa(
+            validationConfig,
+            blockingResult,
+            (phase) => emitActivityStatus(podId, phase),
+            undefined,
+            buildPhaseEventCallbacks(podId),
+          );
+        } finally {
+          releaseAdvisoryQaSlot();
+        }
       } catch (err) {
         logger.warn({ err, podId }, 'Advisory browser QA failed after validation');
         emitActivityStatus(podId, 'Advisory browser QA failed — continuing');

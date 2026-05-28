@@ -22,9 +22,10 @@ const ADVISORY_BROWSER_QA_TOTAL_BUDGET_MS = 8 * 60_000;
 const ADVISORY_BROWSER_QA_PAUSE_BETWEEN_TARGETS_MS = 15_000;
 const ADVISORY_BROWSER_QA_MIN_REVIEW_ATTEMPT_MS = 5_000;
 const ADVISORY_BROWSER_QA_ACTION_PLANNER_BUDGET_MS = 15_000;
-const ADVISORY_BROWSER_QA_RATE_LIMIT_TARGET_BUDGET_MS = 30_000;
+const ADVISORY_BROWSER_QA_RATE_LIMIT_TARGET_BUDGET_MS = 60_000;
 const ADVISORY_BROWSER_QA_RATE_LIMIT_BASE_DELAY_MS = 20_000;
 const ADVISORY_BROWSER_QA_RATE_LIMIT_MAX_DELAY_MS = 120_000;
+const ADVISORY_BROWSER_QA_REVIEW_RETRY_BUDGET_MS = 120_000;
 
 type AdvisoryChecklistTarget =
   | {
@@ -1480,6 +1481,10 @@ function createProviderAwareAdvisoryReviewer(input: {
       }
 
       const prompt = buildReviewerPrompt(reviewInput, { includeImages: true });
+      const reviewDeadlineMs = Math.min(
+        rateLimitDeadlineMs,
+        Date.now() + ADVISORY_BROWSER_QA_REVIEW_RETRY_BUDGET_MS,
+      );
       try {
         const stdout = await callAnthropicReviewer({
           model: input.model,
@@ -1489,7 +1494,7 @@ function createProviderAwareAdvisoryReviewer(input: {
           input: reviewInput,
           logger: input.logger,
           maxTokens: 2_000,
-          rateLimitDeadlineMs: rateLimitRetryDisabledDeadlineMs(),
+          rateLimitDeadlineMs: reviewDeadlineMs,
           rateLimitBaseDelayMs: input.rateLimitBaseDelayMs,
           rateLimitMaxDelayMs: input.rateLimitMaxDelayMs,
           onRateLimitWait: input.onRateLimitWait,
@@ -1507,6 +1512,10 @@ function createProviderAwareAdvisoryReviewer(input: {
             { err },
             'advisory browser QA image review rate-limited; trying structured-evidence fallback',
           );
+          const fallbackDeadlineMs = Math.min(
+            rateLimitDeadlineMs,
+            Date.now() + ADVISORY_BROWSER_QA_REVIEW_RETRY_BUDGET_MS,
+          );
           try {
             const fallbackStdout = await callAnthropicReviewer({
               model: input.model,
@@ -1517,7 +1526,7 @@ function createProviderAwareAdvisoryReviewer(input: {
               logger: input.logger,
               maxTokens: 1_500,
               includeImages: false,
-              rateLimitDeadlineMs: rateLimitRetryDisabledDeadlineMs(),
+              rateLimitDeadlineMs: fallbackDeadlineMs,
               rateLimitBaseDelayMs: input.rateLimitBaseDelayMs,
               rateLimitMaxDelayMs: input.rateLimitMaxDelayMs,
               onRateLimitWait: input.onRateLimitWait,
@@ -1653,10 +1662,6 @@ async function retryRateLimited<T>(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function rateLimitRetryDisabledDeadlineMs(): number {
-  return Date.now() - 1;
 }
 
 function fallbackRateLimitDelayMs(
