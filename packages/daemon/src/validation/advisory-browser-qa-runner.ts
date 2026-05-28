@@ -241,7 +241,11 @@ export async function runAdvisoryBrowserQa(
       podId: options.podId,
       timeout: options.timeoutMs ?? 120_000,
     });
-    let observations = parseBrowserObservations(initialRun.stdout);
+    let observations = filterBrowserObservationsForTargets(
+      parseBrowserObservations(initialRun.stdout),
+      targets,
+      log,
+    );
     if (initialRun.exitCode !== 0 && observations.length === 0) {
       return {
         status: 'uncertain',
@@ -290,7 +294,11 @@ export async function runAdvisoryBrowserQa(
         podId: options.podId,
         timeout: options.timeoutMs ?? 120_000,
       });
-      const actionObservations = parseBrowserObservations(actionRun.stdout);
+      const actionObservations = filterBrowserObservationsForTargets(
+        parseBrowserObservations(actionRun.stdout),
+        targets,
+        log,
+      );
       if (actionObservations.length > 0) {
         observations = actionObservations;
       } else if (actionRun.exitCode !== 0) {
@@ -323,17 +331,22 @@ export async function runAdvisoryBrowserQa(
     });
 
     const targetById = new Map(targets.map((target) => [target.id, target]));
-    const advisoryObservations: AdvisoryBrowserQaObservation[] = review.observations.map(
+    const scopedReviewObservations = filterReviewerObservationsForTargets(
+      review.observations,
+      targets,
+      log,
+    );
+    const advisoryObservations: AdvisoryBrowserQaObservation[] = scopedReviewObservations.map(
       (observation, index) => {
-        const targetId = observation.targetId;
-        const target = targetId ? targetById.get(targetId) : undefined;
+        const targetId = observation.targetId ?? '';
+        const target = targetById.get(targetId);
         return {
           id: observation.id ?? `advisory-${index + 1}`,
           scenarioId: target?.type === 'scenario' ? target.scenarioId : undefined,
           status: observation.status,
           summary: observation.summary,
           details: observation.details,
-          screenshots: targetId ? (screenshotCollection.byTarget.get(targetId) ?? []) : [],
+          screenshots: screenshotCollection.byTarget.get(targetId) ?? [],
           suggestedFacts: observation.suggestedFacts,
         };
       },
@@ -660,6 +673,25 @@ function parseBrowserObservations(stdout: string): BrowserObservation[] {
     .filter((item) => item.targetId);
 }
 
+function filterBrowserObservationsForTargets(
+  observations: BrowserObservation[],
+  targets: AdvisoryChecklistTarget[],
+  log?: Logger,
+): BrowserObservation[] {
+  const targetIds = new Set(targets.map((target) => target.id));
+  const filtered = observations.filter((observation) => targetIds.has(observation.targetId));
+  const ignoredTargetIds = observations
+    .map((observation) => observation.targetId)
+    .filter((targetId) => !targetIds.has(targetId));
+  if (ignoredTargetIds.length > 0) {
+    log?.warn(
+      { ignoredTargetIds: [...new Set(ignoredTargetIds)] },
+      'advisory browser QA ignored observations outside the current checklist targets',
+    );
+  }
+  return filtered;
+}
+
 function parseBrowserFrames(value: unknown): BrowserFrame[] | undefined {
   if (!Array.isArray(value)) return undefined;
   return value
@@ -853,7 +885,7 @@ async function safePlanActions(
 ): Promise<Array<{ targetId: string; actions: AdvisoryBrowserAction[] }>> {
   if (!reviewer.planActions) return [];
   try {
-    return await reviewer.planActions(input);
+    return filterActionPlansForTargets(await reviewer.planActions(input), input.targets, log);
   } catch (err) {
     log?.warn({ err }, 'advisory browser QA action planning failed');
     return [];
@@ -904,12 +936,52 @@ function buildHeuristicActionPlan(
   return actions;
 }
 
+function filterActionPlansForTargets(
+  planned: Array<{ targetId: string; actions: AdvisoryBrowserAction[] }>,
+  targets: AdvisoryChecklistTarget[],
+  log?: Logger,
+): Array<{ targetId: string; actions: AdvisoryBrowserAction[] }> {
+  const targetIds = new Set(targets.map((target) => target.id));
+  return planned
+    .filter((item) => {
+      const keep = targetIds.has(item.targetId);
+      if (!keep) {
+        log?.warn(
+          { targetId: item.targetId },
+          'advisory browser QA ignored planned actions outside the current checklist targets',
+        );
+      }
+      return keep;
+    })
+    .filter((item) => item.actions.length > 0);
+}
+
+function filterReviewerObservationsForTargets(
+  observations: Awaited<ReturnType<AdvisoryBrowserQaReviewer['review']>>['observations'],
+  targets: AdvisoryChecklistTarget[],
+  log?: Logger,
+): Awaited<ReturnType<AdvisoryBrowserQaReviewer['review']>>['observations'] {
+  const targetIds = new Set(targets.map((target) => target.id));
+  const filtered = observations.filter((observation) => targetIds.has(observation.targetId ?? ''));
+  const ignoredTargetIds = observations
+    .map((observation) => observation.targetId ?? '<missing>')
+    .filter((targetId) => !targetIds.has(targetId));
+  if (ignoredTargetIds.length > 0) {
+    log?.warn(
+      { ignoredTargetIds: [...new Set(ignoredTargetIds)] },
+      'advisory browser QA ignored reviewer observations outside the current checklist targets',
+    );
+  }
+  return filtered;
+}
+
 function createProviderAwareAdvisoryReviewer(input: {
   model: string | undefined;
   provider?: ModelProvider | null;
   credentials?: ProviderCredentials | null;
   logger?: Logger;
 }): AdvisoryBrowserQaReviewer {
+  const rateLimitDeadlineMs = Date.now() + ADVISORY_BROWSER_QA_RATE_LIMIT_RETRY_BUDGET_MS;
   return {
     async planActions(reviewInput) {
       if (!input.model) return [];
@@ -925,6 +997,7 @@ function createProviderAwareAdvisoryReviewer(input: {
           logger: input.logger,
           maxTokens: 2_000,
           includeImages: false,
+          rateLimitDeadlineMs,
         });
         return parseActionPlanJson(stdout);
       } catch (err) {
@@ -959,6 +1032,7 @@ function createProviderAwareAdvisoryReviewer(input: {
           input: reviewInput,
           logger: input.logger,
           maxTokens: 2_000,
+          rateLimitDeadlineMs,
         });
         const parsed = parseReviewerJson(stdout);
         if (parsed) return parsed;
@@ -983,6 +1057,7 @@ function createProviderAwareAdvisoryReviewer(input: {
               logger: input.logger,
               maxTokens: 1_500,
               includeImages: false,
+              rateLimitDeadlineMs,
             });
             const fallbackParsed = parseReviewerJson(fallbackStdout);
             if (fallbackParsed) {
@@ -1024,6 +1099,8 @@ async function callAnthropicReviewer(input: {
   logger?: Logger;
   maxTokens: number;
   includeImages?: boolean;
+  rateLimitRetryBudgetMs?: number;
+  rateLimitDeadlineMs?: number;
 }): Promise<string> {
   const llm = await createProviderAnthropicClient(
     {
@@ -1064,6 +1141,8 @@ async function callAnthropicReviewer(input: {
         { timeout: 120_000 },
       ),
     input.logger,
+    input.rateLimitDeadlineMs ??
+      Date.now() + (input.rateLimitRetryBudgetMs ?? ADVISORY_BROWSER_QA_RATE_LIMIT_RETRY_BUDGET_MS),
   );
   return response.content
     .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
@@ -1072,8 +1151,11 @@ async function callAnthropicReviewer(input: {
     .trim();
 }
 
-async function retryRateLimited<T>(operation: () => Promise<T>, log?: Logger): Promise<T> {
-  const deadline = Date.now() + ADVISORY_BROWSER_QA_RATE_LIMIT_RETRY_BUDGET_MS;
+async function retryRateLimited<T>(
+  operation: () => Promise<T>,
+  log: Logger | undefined,
+  deadline: number,
+): Promise<T> {
   let attempt = 0;
   while (true) {
     try {
@@ -1195,6 +1277,7 @@ function buildActionPlannerPrompt(input: AdvisoryBrowserQaReviewInput): string {
   return `You are steering a real browser for advisory QA. The browser is open on the target app.
 
 Your job now is only to choose a small, safe action plan that helps verify the checklist. Prefer clicking visible controls by controlIndex from the observed controls. Do not invent selectors.
+Only return actions for targetId values listed under "Checklist targets". Ignore any stale target IDs from prior runs.
 
 ${describeAdvisoryInput(input)}
 
@@ -1230,6 +1313,7 @@ function buildReviewerPrompt(
   return `You are doing advisory browser QA for a running web app. This is non-blocking evidence only.
 
 ${evidenceInstruction}
+Only review targetId values listed under "Checklist targets". Ignore any stale target IDs from prior runs.
 
 ${describeAdvisoryInput(input)}
 

@@ -386,6 +386,64 @@ human_review: []
     expect(screenshotStore.write).toHaveBeenCalledOnce();
   });
 
+  it('ignores browser observations outside the current checklist targets', async () => {
+    const review = vi.fn(async (input) => {
+      expect(input.browserObservations.map((observation) => observation.targetId)).toEqual([
+        'scenario:dashboard',
+      ]);
+      return {
+        status: 'pass' as const,
+        reasoning: 'Current target only',
+        observations: [
+          {
+            id: 'dashboard-current',
+            targetId: 'scenario:dashboard',
+            status: 'pass' as const,
+            summary: 'Current dashboard evidence reviewed.',
+          },
+        ],
+      };
+    });
+    const hostBrowserRunner = createSequentialHostBrowserRunner([
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Current checklist target'],
+            screenshotPath: '/tmp/advisory/screenshots/current.png',
+          },
+          {
+            targetId: 'scenario:old-pod',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Old pod',
+            notes: ['Stale target from a different contract'],
+            screenshotPath: '/tmp/advisory/screenshots/stale.png',
+          },
+        ]),
+      },
+    ]);
+    const screenshotStore = createScreenshotStore();
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-current-only',
+      task: 'Check dashboard',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(contractYaml()),
+      hostBrowserRunner,
+      screenshotStore,
+      reviewer: { review },
+    });
+
+    expect(result.status).toBe('pass');
+    expect(result.screenshots).toHaveLength(1);
+    expect(result.screenshots[0]?.relativePath).toBe(
+      'screenshots/pod-current-only/advisory/advisory-0.png',
+    );
+    expect(screenshotStore.write).toHaveBeenCalledOnce();
+  });
+
   it('runs reviewer-planned browser actions and reviews the resulting frames', async () => {
     const hostBrowserRunner = createSequentialHostBrowserRunner([
       {
@@ -454,6 +512,86 @@ human_review: []
     expect(result.status).toBe('pass');
     expect(hostBrowserRunner.runScript).toHaveBeenCalledTimes(2);
     expect(result.screenshots).toHaveLength(2);
+  });
+
+  it('ignores reviewer-planned actions outside the current checklist targets', async () => {
+    const hostBrowserRunner = createSequentialHostBrowserRunner([
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Reached page'],
+            frames: [
+              browserFrame('initial', '/tmp/advisory/screenshots/initial.png', [
+                {
+                  index: 0,
+                  role: 'button',
+                  tag: 'button',
+                  text: 'Open details',
+                  ariaLabel: 'Open details',
+                  title: '',
+                  disabled: false,
+                  visible: true,
+                  rect: { x: 10, y: 20, width: 120, height: 30 },
+                },
+              ]),
+            ],
+          },
+        ]),
+      },
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Reached page'],
+            frames: [
+              browserFrame('initial', '/tmp/advisory/screenshots/action-initial.png'),
+              browserFrame('after-action-1', '/tmp/advisory/screenshots/action-after.png', [], {
+                status: 'pass',
+                action: { type: 'click', controlIndex: 0, reason: 'Open details' },
+                summary: 'Clicked control',
+              }),
+            ],
+          },
+        ]),
+      },
+    ]);
+    const planActions = vi.fn(async () => [
+      {
+        targetId: 'scenario:old-pod',
+        actions: [{ type: 'click' as const, controlIndex: 99, reason: 'Stale action' }],
+      },
+      {
+        targetId: 'scenario:dashboard',
+        actions: [{ type: 'click' as const, controlIndex: 0, reason: 'Open details' }],
+      },
+    ]);
+
+    await runAdvisoryBrowserQa({
+      podId: 'pod-actions-current-only',
+      task: 'Check dashboard controls',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(contractYaml()),
+      hostBrowserRunner,
+      screenshotStore: createScreenshotStore(),
+      reviewer: {
+        planActions,
+        review: vi.fn(async () => ({
+          status: 'pass',
+          reasoning: 'Current action reviewed',
+          observations: [],
+        })),
+      },
+    });
+
+    const actionScript = vi.mocked(hostBrowserRunner.runScript).mock.calls[1]?.[0] as string;
+    expect(hostBrowserRunner.runScript).toHaveBeenCalledTimes(2);
+    expect(actionScript).toContain('"scenario:dashboard"');
+    expect(actionScript).not.toContain('scenario:old-pod');
   });
 
   it('uses the help-control heuristic before asking the reviewer to plan actions', async () => {
@@ -529,6 +667,56 @@ human_review: []
 
     expect(hostBrowserRunner.runScript).toHaveBeenCalledTimes(2);
     expect(planActions).not.toHaveBeenCalled();
+  });
+
+  it('ignores reviewer observations outside the current checklist targets', async () => {
+    const hostBrowserRunner = createHostBrowserRunner(
+      browserStdout([
+        {
+          targetId: 'scenario:dashboard',
+          url: 'http://127.0.0.1:3000/',
+          title: 'Dashboard',
+          notes: ['Summary visible'],
+          screenshotPath: '/tmp/advisory/screenshots/advisory-0.png',
+        },
+      ]),
+    );
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-review-current-only',
+      task: 'Check dashboard',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(contractYaml()),
+      hostBrowserRunner,
+      screenshotStore: createScreenshotStore(),
+      reviewer: {
+        review: vi.fn(async () => ({
+          status: 'pass',
+          reasoning: 'Only current observations should survive',
+          observations: [
+            {
+              id: 'dashboard-current',
+              targetId: 'scenario:dashboard',
+              status: 'pass',
+              summary: 'Current target reviewed.',
+            },
+            {
+              id: 'old-target',
+              targetId: 'scenario:old-pod',
+              status: 'fail',
+              summary: 'Stale target should be ignored.',
+            },
+            {
+              id: 'missing-target',
+              status: 'uncertain',
+              summary: 'Targetless observation should be ignored.',
+            },
+          ],
+        })),
+      },
+    });
+
+    expect(result.observations.map((observation) => observation.id)).toEqual(['dashboard-current']);
   });
 
   it('returns uncertain advisory evidence when browser execution errors', async () => {
