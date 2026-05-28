@@ -87,11 +87,15 @@ export function serializeValidationResult(result: ValidationResult): unknown {
 }
 
 /**
- * Wire-shape a Pod for desktop/CLI consumption. Currently this only rewrites
- * `lastValidationResult` — the rest of the Pod has no internal-only paths.
+ * Wire-shape a Pod for desktop/CLI consumption. Stored spec files can be
+ * bulky, so they are withheld from list/detail payloads; validation evidence
+ * keeps its screenshots but exposes URL DTOs instead of internal refs.
  */
 export function serializePodForWire(pod: Pod): unknown {
-  const wirePod = { ...pod, specFiles: undefined };
+  const hasSpecFilesField = Object.prototype.hasOwnProperty.call(pod, 'specFiles');
+  if (!pod.lastValidationResult && !hasSpecFilesField) return pod;
+
+  const wirePod = hasSpecFilesField ? { ...pod, specFiles: undefined } : { ...pod };
   if (!wirePod.lastValidationResult) return wirePod;
   return {
     ...wirePod,
@@ -118,6 +122,11 @@ export function serializeSystemEventForWire(event: SystemEvent): SystemEvent {
       }
       if (event.reviewResult) {
         next.reviewResult = serializeTaskReview(event.reviewResult) as TaskReviewResult;
+      }
+      if (event.advisoryResult) {
+        next.advisoryResult = serializeAdvisoryBrowserQa(
+          event.advisoryResult,
+        ) as AdvisoryBrowserQaResult;
       }
       return next;
     }

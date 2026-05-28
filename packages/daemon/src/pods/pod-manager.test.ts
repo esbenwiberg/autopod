@@ -46,6 +46,30 @@ import type { PodRepository } from './pod-repository.js';
 
 const logger = pino({ level: 'silent' });
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function waitForAssertion(assertion: () => void): Promise<void> {
+  let lastError: unknown;
+  for (let i = 0; i < 20; i++) {
+    try {
+      assertion();
+      return;
+    } catch (err) {
+      lastError = err;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+  throw lastError;
+}
+
 function mockExecFileSuccess(): void {
   mockedExecFile.mockImplementation((...args: unknown[]) => {
     const callback = args[args.length - 1] as (
@@ -247,6 +271,7 @@ function createMockValidationEngine(result?: Partial<ValidationResult>): Validat
       duration: 5000,
       ...result,
     })),
+    runAdvisoryBrowserQa: vi.fn(async () => null),
   };
 }
 
@@ -505,9 +530,7 @@ describe('PodManager', () => {
         'user-1',
       );
 
-      expect(pod.specFiles).toEqual([
-        { path: 'specs/help-modal/brief.md', content: '# Brief\n' },
-      ]);
+      expect(pod.specFiles).toEqual([{ path: 'specs/help-modal/brief.md', content: '# Brief\n' }]);
     });
 
     it('enqueues the pod for processing', () => {
@@ -2767,6 +2790,219 @@ describe('PodManager', () => {
         expect.any(AbortSignal),
         expect.any(Object),
       );
+    });
+
+    it('normal validation creates the PR before advisory finishes', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createPodManager(ctx.deps);
+      const advisory = deferred<NonNullable<ValidationResult['advisoryBrowserQa']>>();
+      const advisoryResult: NonNullable<ValidationResult['advisoryBrowserQa']> = {
+        status: 'pass',
+        reasoning: 'Looks good.',
+        observations: [],
+        screenshots: [],
+        durationMs: 25,
+      };
+      const runAdvisoryBrowserQa = ctx.validationEngine.runAdvisoryBrowserQa;
+      if (!runAdvisoryBrowserQa) {
+        throw new Error('Expected validation engine to expose advisory runner');
+      }
+      vi.mocked(runAdvisoryBrowserQa).mockImplementationOnce(
+        async (_config, _result, _onProgress, _signal, callbacks) => {
+          callbacks?.onPhaseStarted?.('advisory');
+          const result = await advisory.promise;
+          callbacks?.onPhaseCompleted?.('advisory', 'pass', result);
+          return result;
+        },
+      );
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Add feature',
+          options: { agentMode: 'auto', output: 'pr', advisoryBrowserQaEnabled: true },
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      const events: unknown[] = [];
+      ctx.eventBus.subscribe((event) => events.push(event));
+
+      const validationPromise = manager.triggerValidation(pod.id);
+      await waitForAssertion(() => {
+        expect(ctx.prManager.createPr).toHaveBeenCalled();
+        expect(manager.getSession(pod.id).status).toBe('validated');
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+      });
+
+      const completedBeforeAdvisory = events.filter(
+        (event) => (event as { type?: string }).type === 'pod.validation_completed',
+      );
+      expect(completedBeforeAdvisory).toHaveLength(1);
+
+      advisory.resolve(advisoryResult);
+      await validationPromise;
+
+      expect(ctx.containerManager.stop).toHaveBeenCalledWith('ctr-1');
+      expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(
+        advisoryResult,
+      );
+      expect(
+        events.filter((event) => (event as { type?: string }).type === 'pod.validation_completed'),
+      ).toHaveLength(1);
+      expect(
+        events.some(
+          (event) =>
+            (event as { type?: string; phase?: string }).type ===
+              'pod.validation_phase_completed' &&
+            (event as { phase?: string }).phase === 'advisory',
+        ),
+      ).toBe(true);
+    });
+
+    it('approval completes while in-flight advisory QA keeps the container alive', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createPodManager(ctx.deps);
+      const advisory = deferred<NonNullable<ValidationResult['advisoryBrowserQa']>>();
+      const advisoryResult: NonNullable<ValidationResult['advisoryBrowserQa']> = {
+        status: 'pass',
+        reasoning: 'Ready after advisory.',
+        observations: [],
+        screenshots: [],
+        durationMs: 42,
+      };
+      const runAdvisoryBrowserQa = ctx.validationEngine.runAdvisoryBrowserQa;
+      if (!runAdvisoryBrowserQa) {
+        throw new Error('Expected validation engine to expose advisory runner');
+      }
+      vi.mocked(runAdvisoryBrowserQa).mockImplementationOnce(
+        async (_config, _result, _onProgress, _signal, callbacks) => {
+          callbacks?.onPhaseStarted?.('advisory');
+          const result = await advisory.promise;
+          callbacks?.onPhaseCompleted?.('advisory', 'pass', result);
+          return result;
+        },
+      );
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Add feature',
+          options: { agentMode: 'auto', output: 'pr', advisoryBrowserQaEnabled: true },
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      const validationPromise = manager.triggerValidation(pod.id);
+      await waitForAssertion(() => {
+        expect(ctx.prManager.createPr).toHaveBeenCalled();
+        expect(manager.getSession(pod.id).status).toBe('validated');
+      });
+
+      const approvalPromise = manager.approveSession(pod.id);
+      await new Promise((resolve) => setImmediate(resolve));
+
+      await approvalPromise;
+
+      expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
+        expect.objectContaining({ prUrl: 'https://github.com/org/repo/pull/42' }),
+      );
+      expect(manager.getSession(pod.id).status).toBe('complete');
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+
+      advisory.resolve(advisoryResult);
+      await validationPromise;
+      await waitForAssertion(() => {
+        expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
+      });
+      expect(manager.getSession(pod.id).status).toBe('complete');
+      expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(
+        advisoryResult,
+      );
+    });
+
+    it('revalidation creates the PR before advisory finishes', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createPodManager(ctx.deps);
+      const advisory = deferred<NonNullable<ValidationResult['advisoryBrowserQa']>>();
+      const advisoryResult: NonNullable<ValidationResult['advisoryBrowserQa']> = {
+        status: 'pass',
+        reasoning: 'Looks good after resume.',
+        observations: [],
+        screenshots: [],
+        durationMs: 31,
+      };
+      const runAdvisoryBrowserQa = ctx.validationEngine.runAdvisoryBrowserQa;
+      if (!runAdvisoryBrowserQa) {
+        throw new Error('Expected validation engine to expose advisory runner');
+      }
+      vi.mocked(runAdvisoryBrowserQa).mockImplementationOnce(
+        async (_config, _result, _onProgress, _signal, callbacks) => {
+          callbacks?.onPhaseStarted?.('advisory');
+          const result = await advisory.promise;
+          callbacks?.onPhaseCompleted?.('advisory', 'pass', result);
+          return result;
+        },
+      );
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Resume feature',
+          options: { agentMode: 'auto', output: 'pr', advisoryBrowserQaEnabled: true },
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      const events: unknown[] = [];
+      ctx.eventBus.subscribe((event) => events.push(event));
+
+      const revalidationPromise = manager.revalidateSession(pod.id, { force: true });
+      await waitForAssertion(() => {
+        expect(ctx.prManager.createPr).toHaveBeenCalled();
+        expect(manager.getSession(pod.id).status).toBe('validated');
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+      });
+
+      const completedBeforeAdvisory = events.filter(
+        (event) => (event as { type?: string }).type === 'pod.validation_completed',
+      );
+      expect(completedBeforeAdvisory).toHaveLength(1);
+
+      advisory.resolve(advisoryResult);
+      await expect(revalidationPromise).resolves.toEqual({ newCommits: false, result: 'pass' });
+
+      expect(ctx.containerManager.stop).toHaveBeenCalledWith('ctr-1');
+      expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(
+        advisoryResult,
+      );
+      expect(
+        events.filter((event) => (event as { type?: string }).type === 'pod.validation_completed'),
+      ).toHaveLength(1);
+      expect(
+        events.some(
+          (event) =>
+            (event as { type?: string; phase?: string }).type ===
+              'pod.validation_phase_completed' &&
+            (event as { phase?: string }).phase === 'advisory',
+        ),
+      ).toBe(true);
     });
 
     it('recovers from live container when workspace sync fails before validation', async () => {

@@ -26,6 +26,28 @@ human_review:
 `;
 }
 
+function scenarioOnlyContractYaml(extraScenarios = '', proves = ['dashboard']): string {
+  const provesYaml = proves.map((id) => `"${id}"`).join(', ');
+  return `contract_version: 1
+title: Advisory QA
+depends_on: []
+scenarios:
+  - id: dashboard
+    given: ["a user has data"]
+    when: ["they open the dashboard"]
+    then: ["the summary is visible"]
+${extraScenarios}required_facts:
+  - id: browser-proof
+    proves: [${provesYaml}]
+    kind: browser-test
+    artifact:
+      path: tests/browser/advisory.spec.ts
+      change: update
+    command: npx vitest --run tests/browser/advisory.spec.ts --grep advisory-proof
+human_review: []
+`;
+}
+
 function browserStdout(entries: unknown[]): string {
   return `noise
 AUTOPOD_ADVISORY_BROWSER_QA_JSON_START
@@ -111,6 +133,18 @@ function createScreenshotStore(): ScreenshotStore {
   } as unknown as ScreenshotStore;
 }
 
+function rateLimitError(
+  retryAfter?: string,
+): Error & { status: number; headers?: Record<string, string> } {
+  const err = new Error('429 rate limited') as Error & {
+    status: number;
+    headers?: Record<string, string>;
+  };
+  err.status = 429;
+  if (retryAfter) err.headers = { 'retry-after': retryAfter };
+  return err;
+}
+
 describe('buildAdvisoryChecklistTargets', () => {
   it('caps scenarios plus human review items at five targets', () => {
     const contract: SpecContract = {
@@ -167,7 +201,7 @@ describe('runAdvisoryBrowserQa', () => {
       podId: 'pod-1',
       task: 'Check dashboard',
       baseUrl: 'http://127.0.0.1:3000',
-      contract: parseSpecContract(contractYaml()),
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
       reviewerModel: 'review-model',
       hostBrowserRunner,
       screenshotStore,
@@ -188,6 +222,10 @@ describe('runAdvisoryBrowserQa', () => {
     });
 
     expect(result.status).toBe('pass');
+    const script = vi.mocked(hostBrowserRunner.runScript).mock.calls[0]?.[0];
+    expect(script).toContain('viewport = { width: 1280, height: 900 }');
+    expect(script).toContain('fullPage: false');
+    expect(script).toContain("scale: 'css'");
     expect(result.screenshots[0]?.relativePath).toBe('screenshots/pod-1/advisory/advisory-0.png');
     expect(result.observations[0]).toMatchObject({
       id: 'dashboard-ok',
@@ -229,17 +267,30 @@ human_review: []
   });
 
   it('records reviewer concerns as advisory failures', async () => {
-    const hostBrowserRunner = createHostBrowserRunner(
-      browserStdout([
-        {
-          targetId: 'human_review:visual-state',
-          url: 'http://127.0.0.1:3000/',
-          title: 'Dashboard',
-          notes: ['Empty state and data both visible'],
-          screenshotPath: '/tmp/advisory/screenshots/advisory-1.png',
-        },
-      ]),
-    );
+    const hostBrowserRunner = createSequentialHostBrowserRunner([
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Summary visible'],
+            screenshotPath: '/tmp/advisory/screenshots/advisory-0.png',
+          },
+        ]),
+      },
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'human_review:visual-state',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Empty state and data both visible'],
+            screenshotPath: '/tmp/advisory/screenshots/advisory-1.png',
+          },
+        ]),
+      },
+    ]);
 
     const result = await runAdvisoryBrowserQa({
       podId: 'pod-2',
@@ -249,29 +300,38 @@ human_review: []
       hostBrowserRunner,
       screenshotStore: createScreenshotStore(),
       reviewer: {
-        review: vi.fn(async () => ({
-          status: 'fail',
-          reasoning: 'Visual concern found',
-          observations: [
-            {
-              id: 'empty-state-overlap',
-              targetId: 'human_review:visual-state',
-              status: 'fail',
-              summary: 'Loaded data is overlapped by the empty state.',
-              suggestedFacts: [
-                'Add a browser-test proving the loaded dashboard hides empty state.',
-              ],
-            },
-          ],
-        })),
+        review: vi.fn(async (input) =>
+          input.targets[0]?.id === 'human_review:visual-state'
+            ? {
+                status: 'fail',
+                reasoning: 'Visual concern found',
+                observations: [
+                  {
+                    id: 'empty-state-overlap',
+                    targetId: 'human_review:visual-state',
+                    status: 'fail',
+                    summary: 'Loaded data is overlapped by the empty state.',
+                    suggestedFacts: [
+                      'Add a browser-test proving the loaded dashboard hides empty state.',
+                    ],
+                  },
+                ],
+              }
+            : {
+                status: 'pass',
+                reasoning: 'Scenario passes',
+                observations: [],
+              },
+        ),
       },
+      pauseBetweenTargetsMs: 0,
     });
 
     expect(result.status).toBe('fail');
-    expect(result.reasoning).toBe('Visual concern found');
-    expect(result.observations[0]?.suggestedFacts).toEqual([
-      'Add a browser-test proving the loaded dashboard hides empty state.',
-    ]);
+    expect(result.reasoning).toContain('Visual concern found');
+    expect(
+      result.observations.find((observation) => observation.status === 'fail')?.suggestedFacts,
+    ).toEqual(['Add a browser-test proving the loaded dashboard hides empty state.']);
   });
 
   it('passes screenshot bytes, accessibility, and visible controls to the reviewer', async () => {
@@ -328,7 +388,7 @@ human_review: []
       podId: 'pod-visual',
       task: 'Check dashboard visuals',
       baseUrl: 'http://127.0.0.1:3000',
-      contract: parseSpecContract(contractYaml()),
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
       hostBrowserRunner,
       screenshotStore: createScreenshotStore(),
       reviewer: { review },
@@ -350,23 +410,32 @@ human_review: []
         observations: [],
       };
     });
-    const hostBrowserRunner = createHostBrowserRunner(
-      browserStdout([
-        {
-          targetId: 'scenario:dashboard',
-          url: 'http://127.0.0.1:3000/',
-          title: 'Dashboard',
-          notes: ['Scenario page'],
-          screenshotPath: '/tmp/advisory/screenshots/scenario.png',
-        },
-        {
-          targetId: 'human_review:visual-state',
-          url: 'http://127.0.0.1:3000/',
-          title: 'Dashboard',
-          notes: ['Same page for human review'],
-          screenshotPath: '/tmp/advisory/screenshots/human-review.png',
-        },
-      ]),
+    const hostBrowserRunner = createSequentialHostBrowserRunner([
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Scenario page'],
+            screenshotPath: '/tmp/advisory/screenshots/scenario.png',
+          },
+        ]),
+      },
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'human_review:visual-state',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Same page for human review'],
+            screenshotPath: '/tmp/advisory/screenshots/human-review.png',
+          },
+        ]),
+      },
+    ]);
+    vi.mocked(hostBrowserRunner.readScreenshot).mockResolvedValue(
+      Buffer.from('same-pixels').toString('base64'),
     );
 
     const screenshotStore = createScreenshotStore();
@@ -379,11 +448,361 @@ human_review: []
       hostBrowserRunner,
       screenshotStore,
       reviewer: { review },
+      pauseBetweenTargetsMs: 0,
     });
 
     expect(result.status).toBe('pass');
     expect(result.screenshots).toHaveLength(1);
     expect(screenshotStore.write).toHaveBeenCalledOnce();
+  });
+
+  it('reviews checklist targets sequentially with a pause between targets', async () => {
+    let now = 0;
+    const sleep = vi.fn(async (ms: number) => {
+      now += ms;
+    });
+    const hostBrowserRunner = createSequentialHostBrowserRunner([
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Dashboard visible'],
+            screenshotPath: '/tmp/advisory/screenshots/dashboard.png',
+          },
+        ]),
+      },
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:settings',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Settings',
+            notes: ['Settings visible'],
+            screenshotPath: '/tmp/advisory/screenshots/settings.png',
+          },
+        ]),
+      },
+    ]);
+    const reviewedTargets: string[] = [];
+    const review = vi.fn(async (input) => {
+      const targetId = input.targets[0]?.id ?? '';
+      reviewedTargets.push(targetId);
+      return {
+        status: 'pass' as const,
+        reasoning: `${targetId} reviewed`,
+        observations: [
+          {
+            id: `${targetId}-ok`,
+            targetId,
+            status: 'pass' as const,
+            summary: `${targetId} passed.`,
+          },
+        ],
+      };
+    });
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-paced',
+      task: 'Check two screens',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(
+        scenarioOnlyContractYaml(
+          `  - id: settings
+    given: ["a user has settings"]
+    when: ["they open settings"]
+    then: ["the settings form is visible"]
+`,
+          ['dashboard', 'settings'],
+        ),
+      ),
+      hostBrowserRunner,
+      screenshotStore: createScreenshotStore(),
+      reviewer: { review },
+      pauseBetweenTargetsMs: 15_000,
+      now: () => now,
+      sleep,
+    });
+
+    expect(result.status).toBe('pass');
+    expect(reviewedTargets).toEqual(['scenario:dashboard', 'scenario:settings']);
+    expect(sleep).toHaveBeenCalledWith(15_000);
+    expect(result.observations).toHaveLength(2);
+  });
+
+  it('respects retry-after when a target reviewer call is rate-limited', async () => {
+    let now = 0;
+    const sleep = vi.fn(async (ms: number) => {
+      now += ms;
+    });
+    const hostBrowserRunner = createHostBrowserRunner(
+      browserStdout([
+        {
+          targetId: 'scenario:dashboard',
+          url: 'http://127.0.0.1:3000/',
+          title: 'Dashboard',
+          notes: ['Dashboard visible'],
+          screenshotPath: '/tmp/advisory/screenshots/dashboard.png',
+        },
+      ]),
+    );
+    const review = vi
+      .fn()
+      .mockRejectedValueOnce(rateLimitError('3'))
+      .mockResolvedValueOnce({
+        status: 'pass' as const,
+        reasoning: 'Dashboard reviewed after retry',
+        observations: [
+          {
+            id: 'dashboard-ok',
+            targetId: 'scenario:dashboard',
+            status: 'pass' as const,
+            summary: 'Dashboard passed.',
+          },
+        ],
+      });
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-retry-after',
+      task: 'Check dashboard',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
+      hostBrowserRunner,
+      screenshotStore: createScreenshotStore(),
+      reviewer: { review },
+      totalBudgetMs: 60_000,
+      rateLimitBaseDelayMs: 20_000,
+      now: () => now,
+      sleep,
+    });
+
+    expect(result.status).toBe('pass');
+    expect(sleep).toHaveBeenCalledWith(3_000);
+    expect(review).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let slow action planning consume the visual review budget', async () => {
+    let now = 0;
+    const sleep = vi.fn(async (ms: number) => {
+      now += ms;
+    });
+    const hostBrowserRunner = createHostBrowserRunner(
+      browserStdout([
+        {
+          targetId: 'scenario:dashboard',
+          url: 'http://127.0.0.1:3000/',
+          title: 'Dashboard',
+          notes: ['Dashboard visible'],
+          screenshotPath: '/tmp/advisory/screenshots/dashboard.png',
+        },
+      ]),
+    );
+    const planActions = vi.fn(() => new Promise<never>(() => {}));
+    const review = vi.fn(async () => ({
+      status: 'pass' as const,
+      reasoning: 'Visual review still ran',
+      observations: [
+        {
+          id: 'dashboard-ok',
+          targetId: 'scenario:dashboard',
+          status: 'pass' as const,
+          summary: 'Dashboard passed.',
+        },
+      ],
+    }));
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-slow-planner',
+      task: 'Check dashboard',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
+      hostBrowserRunner,
+      screenshotStore: createScreenshotStore(),
+      reviewer: { planActions, review },
+      totalBudgetMs: 60_000,
+      actionPlannerBudgetMs: 10_000,
+      minReviewAttemptMs: 30_000,
+      now: () => now,
+      sleep,
+    });
+
+    expect(result.status).toBe('pass');
+    expect(planActions).toHaveBeenCalledOnce();
+    expect(review).toHaveBeenCalledOnce();
+    expect(sleep).toHaveBeenCalledWith(10_000);
+  });
+
+  it('returns partial uncertain evidence when rate limits consume the advisory budget', async () => {
+    let now = 0;
+    const sleep = vi.fn(async (ms: number) => {
+      now += ms;
+    });
+    const hostBrowserRunner = createSequentialHostBrowserRunner([
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Dashboard visible'],
+            screenshotPath: '/tmp/advisory/screenshots/dashboard.png',
+          },
+        ]),
+      },
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:settings',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Settings',
+            notes: ['Settings visible'],
+            screenshotPath: '/tmp/advisory/screenshots/settings.png',
+          },
+        ]),
+      },
+    ]);
+    const review = vi.fn(async (input) => {
+      const targetId = input.targets[0]?.id;
+      if (targetId === 'scenario:settings') throw rateLimitError();
+      return {
+        status: 'pass' as const,
+        reasoning: 'Dashboard reviewed',
+        observations: [
+          {
+            id: 'dashboard-ok',
+            targetId,
+            status: 'pass' as const,
+            summary: 'Dashboard passed.',
+          },
+        ],
+      };
+    });
+    const progress: string[] = [];
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-partial-rate-limit',
+      task: 'Check two screens',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(
+        scenarioOnlyContractYaml(
+          `  - id: settings
+    given: ["a user has settings"]
+    when: ["they open settings"]
+    then: ["the settings form is visible"]
+`,
+          ['dashboard', 'settings'],
+        ),
+      ),
+      hostBrowserRunner,
+      screenshotStore: createScreenshotStore(),
+      reviewer: { review },
+      onProgress: (message) => progress.push(message),
+      totalBudgetMs: 70_000,
+      pauseBetweenTargetsMs: 0,
+      rateLimitBaseDelayMs: 20_000,
+      rateLimitMaxDelayMs: 20_000,
+      minReviewAttemptMs: 0,
+      now: () => now,
+      sleep,
+    });
+
+    expect(result.status).toBe('uncertain');
+    expect(result.observations.map((observation) => observation.status)).toEqual([
+      'pass',
+      'uncertain',
+    ]);
+    expect(result.screenshots).toHaveLength(2);
+    expect(progress.some((message) => message.includes('waiting 20s'))).toBe(true);
+  });
+
+  it('does not let a rate-limited first target consume the whole advisory run', async () => {
+    let now = 0;
+    const sleep = vi.fn(async (ms: number) => {
+      now += ms;
+    });
+    const hostBrowserRunner = createSequentialHostBrowserRunner([
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Dashboard visible'],
+            screenshotPath: '/tmp/advisory/screenshots/dashboard.png',
+          },
+        ]),
+      },
+      {
+        stdout: browserStdout([
+          {
+            targetId: 'scenario:settings',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Settings',
+            notes: ['Settings visible'],
+            screenshotPath: '/tmp/advisory/screenshots/settings.png',
+          },
+        ]),
+      },
+    ]);
+    const reviewedTargets: Array<string | undefined> = [];
+    const review = vi.fn(async (input) => {
+      const targetId = input.targets[0]?.id;
+      reviewedTargets.push(targetId);
+      if (targetId === 'scenario:dashboard') throw rateLimitError();
+      return {
+        status: 'pass' as const,
+        reasoning: 'Settings reviewed',
+        observations: [
+          {
+            id: 'settings-ok',
+            targetId,
+            status: 'pass' as const,
+            summary: 'Settings passed.',
+          },
+        ],
+      };
+    });
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-first-target-rate-limited',
+      task: 'Check two screens',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(
+        scenarioOnlyContractYaml(
+          `  - id: settings
+    given: ["a user has settings"]
+    when: ["they open settings"]
+    then: ["the settings form is visible"]
+`,
+          ['dashboard', 'settings'],
+        ),
+      ),
+      hostBrowserRunner,
+      screenshotStore: createScreenshotStore(),
+      reviewer: { review },
+      totalBudgetMs: 60_000,
+      pauseBetweenTargetsMs: 0,
+      rateLimitBaseDelayMs: 20_000,
+      rateLimitMaxDelayMs: 20_000,
+      rateLimitTargetBudgetMs: 20_000,
+      minReviewAttemptMs: 0,
+      now: () => now,
+      sleep,
+    });
+
+    expect(result.status).toBe('uncertain');
+    expect(result.observations.map((observation) => observation.status)).toEqual([
+      'uncertain',
+      'pass',
+    ]);
+    expect(result.screenshots).toHaveLength(2);
+    expect(reviewedTargets).toEqual([
+      'scenario:dashboard',
+      'scenario:dashboard',
+      'scenario:settings',
+    ]);
+    expect(result.reasoning).toContain('reviewed 2/2 checklist targets');
   });
 
   it('ignores browser observations outside the current checklist targets', async () => {
@@ -430,7 +849,7 @@ human_review: []
       podId: 'pod-current-only',
       task: 'Check dashboard',
       baseUrl: 'http://127.0.0.1:3000',
-      contract: parseSpecContract(contractYaml()),
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
       hostBrowserRunner,
       screenshotStore,
       reviewer: { review },
@@ -503,7 +922,7 @@ human_review: []
       podId: 'pod-actions',
       task: 'Open the help modal',
       baseUrl: 'http://127.0.0.1:3000',
-      contract: parseSpecContract(contractYaml()),
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
       hostBrowserRunner,
       screenshotStore: createScreenshotStore(),
       reviewer: { planActions, review },
@@ -575,7 +994,7 @@ human_review: []
       podId: 'pod-actions-current-only',
       task: 'Check dashboard controls',
       baseUrl: 'http://127.0.0.1:3000',
-      contract: parseSpecContract(contractYaml()),
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
       hostBrowserRunner,
       screenshotStore: createScreenshotStore(),
       reviewer: {
@@ -652,7 +1071,7 @@ human_review: []
       podId: 'pod-help',
       task: 'Add a how-to-use help modal triggered from a new ? icon button',
       baseUrl: 'http://127.0.0.1:3000',
-      contract: parseSpecContract(contractYaml()),
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
       hostBrowserRunner,
       screenshotStore: createScreenshotStore(),
       reviewer: {
@@ -686,7 +1105,7 @@ human_review: []
       podId: 'pod-review-current-only',
       task: 'Check dashboard',
       baseUrl: 'http://127.0.0.1:3000',
-      contract: parseSpecContract(contractYaml()),
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
       hostBrowserRunner,
       screenshotStore: createScreenshotStore(),
       reviewer: {
@@ -724,7 +1143,7 @@ human_review: []
       podId: 'pod-3',
       task: 'Check dashboard',
       baseUrl: 'http://127.0.0.1:3000',
-      contract: parseSpecContract(contractYaml()),
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
       hostBrowserRunner: createHostBrowserRunner('not json', 1),
       screenshotStore: createScreenshotStore(),
       reviewer: { review: vi.fn() },
@@ -732,6 +1151,12 @@ human_review: []
 
     expect(result.status).toBe('uncertain');
     expect(result.reasoning).toContain('script failed');
-    expect(result.observations).toEqual([]);
+    expect(result.observations).toMatchObject([
+      {
+        scenarioId: 'dashboard',
+        status: 'uncertain',
+        summary: 'Advisory browser QA script failed for dashboard.',
+      },
+    ]);
   });
 });

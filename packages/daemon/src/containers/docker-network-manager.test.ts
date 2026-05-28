@@ -63,6 +63,11 @@ describe('DockerNetworkManager', () => {
       expect(DEFAULT_ALLOWED_HOSTS).toContain('files.openai.com');
     });
 
+    it('includes Claude MAX/OAuth hosts', () => {
+      expect(DEFAULT_ALLOWED_HOSTS).toContain('platform.claude.com');
+      expect(DEFAULT_ALLOWED_HOSTS).toContain('mcp-proxy.anthropic.com');
+    });
+
     it('includes wildcard CDN domains for HAProxy SNI suffix match', () => {
       expect(DEFAULT_ALLOWED_HOSTS).toContain('*.blob.core.windows.net');
       expect(DEFAULT_ALLOWED_HOSTS).toContain('*.vo.msecnd.net');

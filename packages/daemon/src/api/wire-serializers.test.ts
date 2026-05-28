@@ -272,6 +272,49 @@ describe('serializeSystemEventForWire', () => {
     );
   });
 
+  it('rewrites advisory screenshot refs inside pod.validation_phase_completed', () => {
+    const advisoryRef = ref({ source: 'advisory', filename: 'concern.png' });
+    const out = serializeSystemEventForWire({
+      type: 'pod.validation_phase_completed',
+      timestamp: '2026-05-10T00:00:00Z',
+      podId: 'pod-12345',
+      phase: 'advisory',
+      phaseStatus: 'fail',
+      advisoryResult: {
+        status: 'fail',
+        reasoning: 'Visual concern found.',
+        observations: [
+          {
+            id: 'advisory-concern-nonblocking',
+            status: 'fail',
+            summary: 'Loaded data is overlapped by an empty state.',
+            screenshots: [advisoryRef],
+            suggestedFacts: ['Add a browser fact for the loaded dashboard state.'],
+          },
+        ],
+        screenshots: [advisoryRef],
+      },
+    }) as {
+      advisoryResult?: {
+        observations: Array<{
+          screenshots: Array<{ url: string; source: string; path: string }>;
+        }>;
+        screenshots: Array<{ url: string; source: string; path: string }>;
+      } | null;
+    };
+
+    expect(out.advisoryResult?.screenshots[0]).toEqual({
+      url: '/pods/pod-12345/screenshots/advisory/concern.png',
+      source: 'advisory',
+      path: '0',
+    });
+    expect(out.advisoryResult?.observations[0]?.screenshots[0]).toEqual({
+      url: '/pods/pod-12345/screenshots/advisory/concern.png',
+      source: 'advisory',
+      path: 'advisory-concern-nonblocking:0',
+    });
+  });
+
   it('returns non-validation events unchanged', () => {
     const event = {
       type: 'pod.status_changed' as const,

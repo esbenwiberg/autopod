@@ -228,6 +228,7 @@ export function createMockValidationEngine(
 
   return {
     validate: vi.fn(async (config) => (resultFactory ?? defaultFactory)(config)),
+    runAdvisoryBrowserQa: vi.fn(async () => null),
   };
 }
 

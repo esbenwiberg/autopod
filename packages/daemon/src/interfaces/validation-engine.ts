@@ -1,4 +1,5 @@
 import type {
+  AdvisoryBrowserQaResult,
   ModelProvider,
   PreSubmitReviewSnapshot,
   ProviderCredentials,
@@ -122,4 +123,12 @@ export interface ValidationEngine {
     signal?: AbortSignal,
     callbacks?: ValidationPhaseCallbacks,
   ): Promise<ValidationResult>;
+
+  runAdvisoryBrowserQa?(
+    config: ValidationEngineConfig,
+    blockingResult: ValidationResult,
+    onProgress?: (message: string) => void,
+    signal?: AbortSignal,
+    callbacks?: ValidationPhaseCallbacks,
+  ): Promise<AdvisoryBrowserQaResult | null>;
 }

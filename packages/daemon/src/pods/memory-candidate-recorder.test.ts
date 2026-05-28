@@ -321,6 +321,90 @@ describe('MemoryCandidateRecorder', () => {
     expect(candidateRepo.list('test-profile')).toHaveLength(1);
   });
 
+  it('retries after an early below-threshold event when later signals become useful', async () => {
+    podRepo.insert(basePod({ status: 'failed' }));
+
+    const recorder = makeRecorder();
+    recorder.start();
+
+    eventBus.emit({
+      type: 'pod.status_changed',
+      timestamp: new Date().toISOString(),
+      podId: POD_ID,
+      previousStatus: 'running',
+      newStatus: 'failed',
+    });
+
+    await flushAsync();
+
+    expect(candidateRepo.list('test-profile')).toHaveLength(0);
+    expect(createProfileAnthropicClient).not.toHaveBeenCalled();
+
+    podRepo.update(POD_ID, { status: 'complete', prFixAttempts: 2 });
+
+    eventBus.emit({
+      type: 'pod.completed',
+      timestamp: new Date().toISOString(),
+      podId: POD_ID,
+      finalStatus: 'complete',
+      summary: { id: POD_ID, profileName: 'test-profile' } as never,
+    });
+
+    await flushAsync();
+    recorder.stop();
+
+    expect(candidateRepo.list('test-profile')).toHaveLength(1);
+    expect(createProfileAnthropicClient).toHaveBeenCalledTimes(1);
+  });
+
+  it('deduplicates repeated events while extraction is in flight', async () => {
+    let resolveReviewer: (value: Anthropic.Message) => void = () => {};
+    const reviewerPromise = new Promise<Anthropic.Message>((resolve) => {
+      resolveReviewer = resolve;
+    });
+    const mockClient = {
+      messages: {
+        create: vi.fn().mockReturnValue(reviewerPromise),
+      },
+    } as unknown as Anthropic;
+    vi.mocked(createProfileAnthropicClient).mockResolvedValue({
+      ok: true,
+      client: mockClient,
+      model: 'claude-haiku-4-5-20251001',
+    });
+
+    podRepo.insert(basePod({ status: 'complete' }));
+    podRepo.update(POD_ID, { prFixAttempts: 2 });
+
+    const recorder = makeRecorder();
+    recorder.start();
+
+    const completedEvent = {
+      type: 'pod.completed' as const,
+      timestamp: new Date().toISOString(),
+      podId: POD_ID,
+      finalStatus: 'complete' as const,
+      summary: { id: POD_ID, profileName: 'test-profile' } as never,
+    };
+
+    eventBus.emit(completedEvent);
+    eventBus.emit(completedEvent);
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(createProfileAnthropicClient).toHaveBeenCalledTimes(1);
+    expect(mockClient.messages.create).toHaveBeenCalledTimes(1);
+
+    resolveReviewer({
+      content: [{ type: 'text', text: CANDIDATE_JSON }],
+    } as Anthropic.Message);
+
+    await flushAsync();
+    recorder.stop();
+
+    expect(candidateRepo.list('test-profile')).toHaveLength(1);
+  });
+
   it('skips when DB already has a candidate for the pod (restart idempotency)', async () => {
     podRepo.insert(basePod({ status: 'complete' }));
     podRepo.update(POD_ID, { prFixAttempts: 2 });

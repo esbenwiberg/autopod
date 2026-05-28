@@ -45,6 +45,8 @@ export interface MemoryCandidateRecorderDeps {
 
 const EXTRACTION_STATUSES: PodStatus[] = ['failed', 'review_required'];
 
+type ExtractionOutcome = 'done' | 'retryable' | 'ignored';
+
 /**
  * Listens for pod outcome events and extracts at most one durable profile
  * memory candidate per pod via a reviewer-model LLM call.
@@ -70,20 +72,23 @@ export function createMemoryCandidateRecorder(
   } = deps;
 
   const unsubscribers: Array<() => void> = [];
-  // In-memory set for fast idempotency — survives within one daemon instance.
+  // In-memory sets for fast idempotency — survive within one daemon instance.
+  // `processedPodIds` means extraction reached a durable decision, not merely
+  // that we saw an early status event.
   const processedPodIds = new Set<string>();
+  const inFlightPodIds = new Set<string>();
 
-  async function runExtraction(podId: string): Promise<void> {
+  async function runExtraction(podId: string): Promise<ExtractionOutcome> {
     // Double-check DB idempotency: handles daemon restarts between events.
     if (candidateRepo.existsForPod(podId)) {
       logger.debug({ podId }, 'Skipping extraction: candidate already exists for pod');
-      return;
+      return 'done';
     }
 
     const pod = podRepo.getOrThrow(podId);
 
     // Only extract for future agent-driven pods.
-    if (pod.options.agentMode !== 'auto') return;
+    if (pod.options.agentMode !== 'auto') return 'ignored';
 
     let profile: Profile;
     try {
@@ -93,7 +98,7 @@ export function createMemoryCandidateRecorder(
         { podId, profileName: pod.profileName },
         'Profile not found, skipping extraction',
       );
-      return;
+      return 'ignored';
     }
 
     const signals: QualitySignals = computeQualitySignals(podId, {
@@ -107,7 +112,7 @@ export function createMemoryCandidateRecorder(
 
     if (score < LESSON_POTENTIAL_THRESHOLD) {
       logger.debug({ podId, score }, 'Lesson potential below threshold, skipping extraction');
-      return;
+      return 'retryable';
     }
 
     // Build evidence from stored events and escalations.
@@ -123,7 +128,7 @@ export function createMemoryCandidateRecorder(
         { podId, reason: clientResult.reason },
         'Reviewer model unavailable for memory extraction',
       );
-      return;
+      return 'retryable';
     }
 
     const result = await extractCandidate({
@@ -148,21 +153,42 @@ export function createMemoryCandidateRecorder(
         { podId, candidateId: candidate.id, action: candidate.action, path: candidate.path },
         'Memory candidate created',
       );
-    } else {
+      return 'done';
+    }
+
+    if (result.kind === 'no_candidate') {
       logger.debug(
         { podId, kind: result.kind, reason: result.reason },
         'No memory candidate created',
       );
+      return 'done';
     }
+
+    logger.debug(
+      { podId, kind: result.kind, reason: result.reason },
+      'No memory candidate created',
+    );
+    return 'retryable';
   }
 
   function maybeTrigger(podId: string): void {
     if (processedPodIds.has(podId)) return;
-    processedPodIds.add(podId);
+    if (inFlightPodIds.has(podId)) return;
 
-    void runExtraction(podId).catch((err) => {
-      logger.warn({ err, podId }, 'Memory candidate extraction error');
-    });
+    inFlightPodIds.add(podId);
+
+    void runExtraction(podId)
+      .then((outcome) => {
+        if (outcome === 'done') {
+          processedPodIds.add(podId);
+        }
+      })
+      .catch((err) => {
+        logger.warn({ err, podId }, 'Memory candidate extraction error');
+      })
+      .finally(() => {
+        inFlightPodIds.delete(podId);
+      });
   }
 
   function handleEvent(event: SystemEvent): void {

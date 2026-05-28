@@ -18,8 +18,12 @@ import type { HostBrowserRunner } from './host-browser-runner.js';
 export const ADVISORY_BROWSER_QA_TARGET_CAP = 5;
 const ADVISORY_BROWSER_QA_ACTION_CAP = 5;
 const ADVISORY_BROWSER_QA_IMAGE_CAP = 4;
-const ADVISORY_BROWSER_QA_RATE_LIMIT_RETRY_BUDGET_MS = 10 * 60_000;
-const ADVISORY_BROWSER_QA_RATE_LIMIT_BASE_DELAY_MS = 15_000;
+const ADVISORY_BROWSER_QA_TOTAL_BUDGET_MS = 8 * 60_000;
+const ADVISORY_BROWSER_QA_PAUSE_BETWEEN_TARGETS_MS = 15_000;
+const ADVISORY_BROWSER_QA_MIN_REVIEW_ATTEMPT_MS = 5_000;
+const ADVISORY_BROWSER_QA_ACTION_PLANNER_BUDGET_MS = 15_000;
+const ADVISORY_BROWSER_QA_RATE_LIMIT_TARGET_BUDGET_MS = 30_000;
+const ADVISORY_BROWSER_QA_RATE_LIMIT_BASE_DELAY_MS = 20_000;
 const ADVISORY_BROWSER_QA_RATE_LIMIT_MAX_DELAY_MS = 120_000;
 
 type AdvisoryChecklistTarget =
@@ -170,6 +174,36 @@ export interface AdvisoryBrowserQaRunnerOptions {
   screenshotStore?: ScreenshotStore;
   reviewer?: AdvisoryBrowserQaReviewer;
   logger?: Logger;
+  onProgress?: (message: string) => void;
+  totalBudgetMs?: number;
+  pauseBetweenTargetsMs?: number;
+  rateLimitBaseDelayMs?: number;
+  rateLimitMaxDelayMs?: number;
+  rateLimitTargetBudgetMs?: number;
+  minReviewAttemptMs?: number;
+  actionPlannerBudgetMs?: number;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+interface AdvisoryBrowserQaPacing {
+  totalBudgetMs: number;
+  pauseBetweenTargetsMs: number;
+  rateLimitBaseDelayMs: number;
+  rateLimitMaxDelayMs: number;
+  minReviewAttemptMs: number;
+  actionPlannerBudgetMs: number;
+  rateLimitTargetBudgetMs: number;
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+}
+
+interface AdvisoryTargetRunResult {
+  status: 'pass' | 'fail' | 'uncertain';
+  reasoning: string;
+  observations: AdvisoryBrowserQaObservation[];
+  screenshots: ScreenshotRef[];
+  completed: boolean;
 }
 
 export function buildAdvisoryChecklistTargets(
@@ -211,7 +245,9 @@ function formatHumanReviewTarget(item: HumanReviewItem): string {
 export async function runAdvisoryBrowserQa(
   options: AdvisoryBrowserQaRunnerOptions,
 ): Promise<AdvisoryBrowserQaResult> {
-  const start = Date.now();
+  const pacing = resolvePacing(options);
+  const start = pacing.now();
+  const deadline = start + pacing.totalBudgetMs;
   const log = options.logger?.child({ component: 'advisory-browser-qa-runner' });
   const targets = buildAdvisoryChecklistTargets(options.contract);
 
@@ -232,30 +268,6 @@ export async function runAdvisoryBrowserQa(
 
   try {
     const screenshotDir = options.hostBrowserRunner.screenshotDir(options.podId);
-    const initialScript = buildBrowserScript({
-      baseUrl: options.baseUrl,
-      screenshotDir,
-      targets,
-    });
-    const initialRun = await options.hostBrowserRunner.runScript(initialScript, {
-      podId: options.podId,
-      timeout: options.timeoutMs ?? 120_000,
-    });
-    let observations = filterBrowserObservationsForTargets(
-      parseBrowserObservations(initialRun.stdout),
-      targets,
-      log,
-    );
-    if (initialRun.exitCode !== 0 && observations.length === 0) {
-      return {
-        status: 'uncertain',
-        reasoning: `Advisory browser QA script failed: ${initialRun.stderr.slice(0, 1_000)}`,
-        durationMs: Date.now() - start,
-        observations: [],
-        screenshots: [],
-      };
-    }
-
     const reviewer =
       options.reviewer ??
       createProviderAwareAdvisoryReviewer({
@@ -263,106 +275,72 @@ export async function runAdvisoryBrowserQa(
         provider: options.reviewerProvider,
         credentials: options.reviewerProviderCredentials,
         logger: log,
+        rateLimitDeadlineMs: deadline,
+        rateLimitBaseDelayMs: pacing.rateLimitBaseDelayMs,
+        rateLimitMaxDelayMs: pacing.rateLimitMaxDelayMs,
+        onRateLimitWait: (delayMs) =>
+          options.onProgress?.(`Advisory QA waiting ${formatWait(delayMs)} for reviewer quota…`),
       });
+    const targetResults: AdvisoryTargetRunResult[] = [];
+    const skippedTargets: AdvisoryChecklistTarget[] = [];
+    const persistedScreenshotsByDigest = new Map<string, ScreenshotRef>();
 
-    const initialScreenshotCollection = await collectAdvisoryScreenshots(
-      observations,
-      options.hostBrowserRunner,
-      options.podId,
-      { persist: false },
-      log,
-    );
-    const initialReviewInput = buildReviewInput({
-      task: options.task,
-      baseUrl: options.baseUrl,
-      targets,
-      observations,
-      screenshots: initialScreenshotCollection,
-    });
-    const heuristicPlan = buildHeuristicActionPlan(initialReviewInput);
-    const plannedActions =
-      heuristicPlan.size > 0 ? [] : await safePlanActions(reviewer, initialReviewInput, log);
-    const actionPlan = mergeActionPlans(plannedActions, heuristicPlan);
-    if (actionPlan.size > 0) {
-      const actionScript = buildBrowserScript({
-        baseUrl: options.baseUrl,
-        screenshotDir,
-        targets,
-        actionsByTarget: Object.fromEntries(actionPlan),
-      });
-      const actionRun = await options.hostBrowserRunner.runScript(actionScript, {
-        podId: options.podId,
-        timeout: options.timeoutMs ?? 120_000,
-      });
-      const actionObservations = filterBrowserObservationsForTargets(
-        parseBrowserObservations(actionRun.stdout),
-        targets,
-        log,
-      );
-      if (actionObservations.length > 0) {
-        observations = actionObservations;
-      } else if (actionRun.exitCode !== 0) {
-        log?.warn(
-          { stderr: actionRun.stderr.slice(0, 1_000) },
-          'advisory browser QA action script failed; reviewing initial observations',
-        );
+    for (let index = 0; index < targets.length; index++) {
+      const target = targets[index];
+      if (!target) continue;
+
+      if (remainingBudget(deadline, pacing) <= 0) {
+        skippedTargets.push(...targets.slice(index));
+        break;
       }
+
+      if (index > 0 && pacing.pauseBetweenTargetsMs > 0) {
+        const pauseMs = Math.min(pacing.pauseBetweenTargetsMs, remainingBudget(deadline, pacing));
+        if (pauseMs <= 0) {
+          skippedTargets.push(...targets.slice(index));
+          break;
+        }
+        options.onProgress?.(`Advisory QA pausing ${formatWait(pauseMs)} before the next check…`);
+        await pacing.sleep(pauseMs);
+      }
+
+      if (remainingBudget(deadline, pacing) <= 0) {
+        skippedTargets.push(...targets.slice(index));
+        break;
+      }
+
+      options.onProgress?.(
+        `Advisory QA reviewing ${index + 1}/${targets.length}: ${targetProgressLabel(target)}`,
+      );
+      targetResults.push(
+        await runAdvisoryTarget({
+          options,
+          pacing,
+          deadline,
+          log,
+          target,
+          targetIndex: index,
+          targetsCount: targets.length,
+          screenshotDir,
+          reviewer,
+          hostBrowserRunner: options.hostBrowserRunner,
+          screenshotStore: options.screenshotStore,
+          persistedScreenshotsByDigest,
+        }),
+      );
     }
 
-    const screenshotCollection = await collectAdvisoryScreenshots(
-      observations,
-      options.hostBrowserRunner,
-      options.podId,
-      { persist: true, screenshotStore: options.screenshotStore },
-      log,
-    );
-    const reviewInput = buildReviewInput({
-      task: options.task,
-      baseUrl: options.baseUrl,
-      targets,
-      observations,
-      screenshots: screenshotCollection,
-    });
-    const review = await reviewer.review({
-      task: reviewInput.task,
-      baseUrl: reviewInput.baseUrl,
-      targets: reviewInput.targets,
-      browserObservations: reviewInput.browserObservations,
-    });
-
-    const targetById = new Map(targets.map((target) => [target.id, target]));
-    const scopedReviewObservations = filterReviewerObservationsForTargets(
-      review.observations,
-      targets,
-      log,
-    );
-    const advisoryObservations: AdvisoryBrowserQaObservation[] = scopedReviewObservations.map(
-      (observation, index) => {
-        const targetId = observation.targetId ?? '';
-        const target = targetById.get(targetId);
-        return {
-          id: observation.id ?? `advisory-${index + 1}`,
-          scenarioId: target?.type === 'scenario' ? target.scenarioId : undefined,
-          status: observation.status,
-          summary: observation.summary,
-          details: observation.details,
-          screenshots: screenshotCollection.byTarget.get(targetId) ?? [],
-          suggestedFacts: observation.suggestedFacts,
-        };
-      },
-    );
-    const screenshots = [
-      ...new Map(
-        [...screenshotCollection.byTarget.values()].flat().map((ref) => [ref.relativePath, ref]),
-      ).values(),
-    ];
+    const observations = targetResults.flatMap((result) => result.observations);
+    const screenshots = uniqueScreenshots(targetResults.flatMap((result) => result.screenshots));
+    const status = aggregateStatus(targetResults, skippedTargets, targets.length);
+    const reasoning = aggregateReasoning(targetResults, skippedTargets, targets.length);
 
     return {
-      status: review.status,
-      reasoning: review.reasoning,
+      status,
+      reasoning,
       model: options.reviewerModel,
-      durationMs: Date.now() - start,
-      observations: advisoryObservations,
+      durationMs: pacing.now() - start,
+      observations,
       screenshots,
     };
   } catch (err) {
@@ -370,11 +348,425 @@ export async function runAdvisoryBrowserQa(
     return {
       status: 'uncertain',
       reasoning: `Advisory browser QA error: ${err instanceof Error ? err.message : String(err)}`,
-      durationMs: Date.now() - start,
+      durationMs: pacing.now() - start,
       observations: [],
       screenshots: [],
     };
   }
+}
+
+async function runAdvisoryTarget(input: {
+  options: AdvisoryBrowserQaRunnerOptions;
+  pacing: AdvisoryBrowserQaPacing;
+  deadline: number;
+  log?: Logger;
+  target: AdvisoryChecklistTarget;
+  targetIndex: number;
+  targetsCount: number;
+  screenshotDir: string;
+  reviewer: AdvisoryBrowserQaReviewer;
+  hostBrowserRunner: HostBrowserRunner;
+  screenshotStore: ScreenshotStore;
+  persistedScreenshotsByDigest: Map<string, ScreenshotRef>;
+}): Promise<AdvisoryTargetRunResult> {
+  const {
+    options,
+    pacing,
+    deadline,
+    log,
+    target,
+    targetIndex,
+    targetsCount,
+    screenshotDir,
+    reviewer,
+    hostBrowserRunner,
+    screenshotStore,
+    persistedScreenshotsByDigest,
+  } = input;
+  const targetNumber = targetIndex + 1;
+  const targetLabel = targetProgressLabel(target);
+  const targetScope = [target];
+
+  const initialScript = buildBrowserScript({
+    baseUrl: options.baseUrl,
+    screenshotDir,
+    targets: targetScope,
+  });
+  const initialRun = await hostBrowserRunner.runScript(initialScript, {
+    podId: options.podId,
+    timeout: Math.min(options.timeoutMs ?? 120_000, Math.max(1, remainingBudget(deadline, pacing))),
+  });
+  let observations = filterBrowserObservationsForTargets(
+    parseBrowserObservations(initialRun.stdout),
+    targetScope,
+    log,
+  );
+  if (initialRun.exitCode !== 0 && observations.length === 0) {
+    return {
+      status: 'uncertain',
+      reasoning: `Target ${targetLabel} browser script failed`,
+      completed: false,
+      observations: [
+        advisoryObservationForTarget(target, targetIndex, {
+          status: 'uncertain',
+          summary: `Advisory browser QA script failed for ${targetLabel}.`,
+          details: initialRun.stderr.slice(0, 1_000),
+          screenshots: [],
+        }),
+      ],
+      screenshots: [],
+    };
+  }
+  if (observations.length === 0) {
+    return {
+      status: 'uncertain',
+      reasoning: `Target ${targetLabel} produced no browser observations`,
+      completed: false,
+      observations: [
+        advisoryObservationForTarget(target, targetIndex, {
+          status: 'uncertain',
+          summary: `Advisory browser QA did not capture browser observations for ${targetLabel}.`,
+          screenshots: [],
+        }),
+      ],
+      screenshots: [],
+    };
+  }
+
+  const initialScreenshotCollection = await collectAdvisoryScreenshots(
+    observations,
+    hostBrowserRunner,
+    options.podId,
+    { persist: false },
+    log,
+  );
+  const initialReviewInput = buildReviewInput({
+    task: options.task,
+    baseUrl: options.baseUrl,
+    targets: targetScope,
+    observations,
+    screenshots: initialScreenshotCollection,
+  });
+  const heuristicPlan = buildHeuristicActionPlan(initialReviewInput);
+  const plannedActions =
+    heuristicPlan.size > 0
+      ? []
+      : await safePlanActions(reviewer, initialReviewInput, {
+          pacing,
+          deadline,
+          log,
+          targetLabel,
+        });
+  const actionPlan = mergeActionPlans(plannedActions, heuristicPlan);
+  if (actionPlan.size > 0 && remainingBudget(deadline, pacing) > 0) {
+    const actionScript = buildBrowserScript({
+      baseUrl: options.baseUrl,
+      screenshotDir,
+      targets: targetScope,
+      actionsByTarget: Object.fromEntries(actionPlan),
+    });
+    const actionRun = await hostBrowserRunner.runScript(actionScript, {
+      podId: options.podId,
+      timeout: Math.min(
+        options.timeoutMs ?? 120_000,
+        Math.max(1, remainingBudget(deadline, pacing)),
+      ),
+    });
+    const actionObservations = filterBrowserObservationsForTargets(
+      parseBrowserObservations(actionRun.stdout),
+      targetScope,
+      log,
+    );
+    if (actionObservations.length > 0) {
+      observations = actionObservations;
+    } else if (actionRun.exitCode !== 0) {
+      log?.warn(
+        { stderr: actionRun.stderr.slice(0, 1_000), targetId: target.id },
+        'advisory browser QA action script failed; reviewing initial observations',
+      );
+    }
+  }
+
+  const screenshotCollection = await collectAdvisoryScreenshots(
+    observations,
+    hostBrowserRunner,
+    options.podId,
+    { persist: true, screenshotStore, persistedByDigest: persistedScreenshotsByDigest },
+    log,
+  );
+  const screenshots = uniqueScreenshots([...screenshotCollection.byTarget.values()].flat());
+  if (remainingBudget(deadline, pacing) < pacing.minReviewAttemptMs) {
+    return {
+      status: 'uncertain',
+      reasoning: `Time budget expired before reviewer call for ${targetLabel}`,
+      completed: false,
+      observations: [
+        advisoryObservationForTarget(target, targetIndex, {
+          status: 'uncertain',
+          summary: `Advisory QA captured browser evidence for ${targetLabel}, but the reviewer call was skipped because the advisory time budget was nearly exhausted.`,
+          screenshots,
+        }),
+      ],
+      screenshots,
+    };
+  }
+
+  const reviewInput = buildReviewInput({
+    task: options.task,
+    baseUrl: options.baseUrl,
+    targets: targetScope,
+    observations,
+    screenshots: screenshotCollection,
+  });
+
+  try {
+    const review = await reviewTargetWithRateLimitBackoff({
+      reviewer,
+      reviewInput,
+      pacing,
+      deadline,
+      log,
+      onProgress: options.onProgress,
+      targetLabel,
+      targetNumber,
+      targetsCount,
+    });
+    const advisoryObservations = mapReviewObservations({
+      reviewObservations: review.observations,
+      targets: targetScope,
+      target,
+      targetIndex,
+      screenshotCollection,
+      log,
+    });
+    const observationsWithFallback =
+      advisoryObservations.length > 0 || review.status === 'pass'
+        ? advisoryObservations
+        : [
+            advisoryObservationForTarget(target, targetIndex, {
+              status: review.status,
+              summary: review.reasoning,
+              screenshots: screenshotCollection.byTarget.get(target.id) ?? [],
+            }),
+          ];
+
+    return {
+      status: review.status,
+      reasoning: review.reasoning,
+      completed: true,
+      observations: observationsWithFallback,
+      screenshots,
+    };
+  } catch (err) {
+    const detail = formatReviewerError(err);
+    return {
+      status: 'uncertain',
+      reasoning: `Reviewer could not complete ${targetLabel}: ${detail}`,
+      completed: false,
+      observations: [
+        advisoryObservationForTarget(target, targetIndex, {
+          status: 'uncertain',
+          summary: `Advisory QA captured browser evidence for ${targetLabel}, but the reviewer could not complete.`,
+          details: detail,
+          screenshots: screenshotCollection.byTarget.get(target.id) ?? [],
+        }),
+      ],
+      screenshots,
+    };
+  }
+}
+
+function resolvePacing(options: AdvisoryBrowserQaRunnerOptions): AdvisoryBrowserQaPacing {
+  return {
+    totalBudgetMs: options.totalBudgetMs ?? ADVISORY_BROWSER_QA_TOTAL_BUDGET_MS,
+    pauseBetweenTargetsMs:
+      options.pauseBetweenTargetsMs ?? ADVISORY_BROWSER_QA_PAUSE_BETWEEN_TARGETS_MS,
+    rateLimitBaseDelayMs:
+      options.rateLimitBaseDelayMs ?? ADVISORY_BROWSER_QA_RATE_LIMIT_BASE_DELAY_MS,
+    rateLimitMaxDelayMs: options.rateLimitMaxDelayMs ?? ADVISORY_BROWSER_QA_RATE_LIMIT_MAX_DELAY_MS,
+    rateLimitTargetBudgetMs:
+      options.rateLimitTargetBudgetMs ?? ADVISORY_BROWSER_QA_RATE_LIMIT_TARGET_BUDGET_MS,
+    minReviewAttemptMs: options.minReviewAttemptMs ?? ADVISORY_BROWSER_QA_MIN_REVIEW_ATTEMPT_MS,
+    actionPlannerBudgetMs:
+      options.actionPlannerBudgetMs ?? ADVISORY_BROWSER_QA_ACTION_PLANNER_BUDGET_MS,
+    now: options.now ?? Date.now,
+    sleep: options.sleep ?? sleep,
+  };
+}
+
+async function reviewTargetWithRateLimitBackoff(input: {
+  reviewer: AdvisoryBrowserQaReviewer;
+  reviewInput: AdvisoryBrowserQaReviewInput;
+  pacing: AdvisoryBrowserQaPacing;
+  deadline: number;
+  log?: Logger;
+  onProgress?: (message: string) => void;
+  targetLabel: string;
+  targetNumber: number;
+  targetsCount: number;
+}): Promise<Awaited<ReturnType<AdvisoryBrowserQaReviewer['review']>>> {
+  const {
+    reviewer,
+    reviewInput,
+    pacing,
+    deadline,
+    log,
+    onProgress,
+    targetLabel,
+    targetNumber,
+    targetsCount,
+  } = input;
+  let attempt = 0;
+  const targetRetryDeadline = Math.min(deadline, pacing.now() + pacing.rateLimitTargetBudgetMs);
+
+  while (true) {
+    try {
+      return await reviewer.review({
+        task: reviewInput.task,
+        baseUrl: reviewInput.baseUrl,
+        targets: reviewInput.targets,
+        browserObservations: reviewInput.browserObservations,
+      });
+    } catch (err) {
+      if (!isRateLimitError(err)) throw err;
+      const remainingMs = remainingBudget(deadline, pacing);
+      const remainingTargetRetryMs = Math.max(0, targetRetryDeadline - pacing.now());
+      if (remainingMs <= 0 || remainingTargetRetryMs <= 0) throw err;
+      const fallbackDelayMs = fallbackRateLimitDelayMs(
+        attempt,
+        pacing.rateLimitBaseDelayMs,
+        pacing.rateLimitMaxDelayMs,
+      );
+      const delayMs = retryDelayMs(err, fallbackDelayMs, pacing.rateLimitMaxDelayMs);
+      const waitMs = Math.min(delayMs, remainingMs, remainingTargetRetryMs);
+      if (waitMs <= 0) throw err;
+      log?.warn(
+        {
+          err,
+          attempt: attempt + 1,
+          delayMs: waitMs,
+          retryBudgetRemainingMs: remainingMs,
+          targetRetryBudgetRemainingMs: remainingTargetRetryMs,
+          targetId: reviewInput.targets[0]?.id,
+        },
+        'advisory browser QA reviewer rate-limited; retrying target after backoff',
+      );
+      onProgress?.(
+        `Advisory QA waiting ${formatWait(waitMs)} for reviewer quota before ${targetNumber}/${targetsCount}: ${targetLabel}`,
+      );
+      attempt += 1;
+      await pacing.sleep(waitMs);
+    }
+  }
+}
+
+function mapReviewObservations(input: {
+  reviewObservations: Awaited<ReturnType<AdvisoryBrowserQaReviewer['review']>>['observations'];
+  targets: AdvisoryChecklistTarget[];
+  target: AdvisoryChecklistTarget;
+  targetIndex: number;
+  screenshotCollection: CollectedAdvisoryScreenshots;
+  log?: Logger;
+}): AdvisoryBrowserQaObservation[] {
+  const scopedReviewObservations = filterReviewerObservationsForTargets(
+    input.reviewObservations,
+    input.targets,
+    input.log,
+  );
+  return scopedReviewObservations.map((observation, index) =>
+    advisoryObservationForTarget(input.target, input.targetIndex + index, {
+      id: observation.id,
+      status: observation.status,
+      summary: observation.summary,
+      details: observation.details,
+      screenshots: input.screenshotCollection.byTarget.get(input.target.id) ?? [],
+      suggestedFacts: observation.suggestedFacts,
+    }),
+  );
+}
+
+function advisoryObservationForTarget(
+  target: AdvisoryChecklistTarget,
+  index: number,
+  input: {
+    id?: string;
+    status: 'pass' | 'fail' | 'uncertain';
+    summary: string;
+    details?: string;
+    screenshots: ScreenshotRef[];
+    suggestedFacts?: string[];
+  },
+): AdvisoryBrowserQaObservation {
+  return {
+    id: input.id ?? `advisory-${index + 1}`,
+    scenarioId: target.type === 'scenario' ? target.scenarioId : undefined,
+    status: input.status,
+    summary: input.summary,
+    details: input.details,
+    screenshots: input.screenshots,
+    suggestedFacts: input.suggestedFacts,
+  };
+}
+
+function aggregateStatus(
+  targetResults: AdvisoryTargetRunResult[],
+  skippedTargets: AdvisoryChecklistTarget[],
+  targetCount: number,
+): AdvisoryBrowserQaResult['status'] {
+  if (targetResults.some((result) => result.status === 'fail')) return 'fail';
+  if (
+    skippedTargets.length > 0 ||
+    targetResults.length < targetCount ||
+    targetResults.some(
+      (result) =>
+        !result.completed ||
+        result.status === 'uncertain' ||
+        result.observations.some((observation) => observation.status === 'uncertain'),
+    )
+  ) {
+    return 'uncertain';
+  }
+  return 'pass';
+}
+
+function aggregateReasoning(
+  targetResults: AdvisoryTargetRunResult[],
+  skippedTargets: AdvisoryChecklistTarget[],
+  targetCount: number,
+): string {
+  const reviewed = targetResults.length;
+  const prefix =
+    skippedTargets.length > 0 || reviewed < targetCount
+      ? `Advisory browser QA reviewed ${reviewed}/${targetCount} checklist targets before the time budget expired.`
+      : `Advisory browser QA reviewed ${reviewed}/${targetCount} checklist targets.`;
+  const reasons = targetResults
+    .map((result) => result.reasoning)
+    .filter((reason, index, all) => reason && all.indexOf(reason) === index);
+  const skipped = skippedTargets.map(targetProgressLabel);
+  const suffix = [
+    reasons.length > 0 ? reasons.join(' ') : undefined,
+    skipped.length > 0 ? `Skipped: ${skipped.join(', ')}.` : undefined,
+  ]
+    .filter((part): part is string => typeof part === 'string')
+    .join(' ');
+  return suffix ? `${prefix} ${suffix}` : prefix;
+}
+
+function uniqueScreenshots(screenshots: ScreenshotRef[]): ScreenshotRef[] {
+  return [...new Map(screenshots.map((ref) => [ref.relativePath, ref])).values()];
+}
+
+function remainingBudget(deadline: number, pacing: Pick<AdvisoryBrowserQaPacing, 'now'>): number {
+  return Math.max(0, deadline - pacing.now());
+}
+
+function targetProgressLabel(target: AdvisoryChecklistTarget): string {
+  if (target.type === 'scenario') return target.scenarioId;
+  return target.id.replace(/^human_review:/, 'human review ');
+}
+
+function formatWait(ms: number): string {
+  return `${Math.ceil(ms / 1_000)}s`;
 }
 
 function skipResult(reason: string, start: number): AdvisoryBrowserQaResult {
@@ -406,6 +798,7 @@ const actionsByTarget = ${JSON.stringify(input.actionsByTarget ?? {})};
 await mkdir(screenshotDir, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const results = [];
+const viewport = { width: 1280, height: 900 };
 
 function safeFilePart(value) {
   return String(value).replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 80) || 'target';
@@ -517,7 +910,7 @@ async function captureFrame(page, targetId, frameIndex, label, action) {
   notes.push(bodyText.slice(0, 3000));
   const controls = await collectControls(page);
   const accessibility = await collectAccessibility(page);
-  await page.screenshot({ path: screenshotPath, fullPage: true });
+  await page.screenshot({ path: screenshotPath, fullPage: false, scale: 'css' });
   return {
     label,
     url: page.url(),
@@ -590,7 +983,7 @@ async function performAction(page, action, controls) {
 try {
   for (let i = 0; i < targets.length; i++) {
     const target = targets[i];
-    const page = await browser.newPage({ locale: 'en-US' });
+    const page = await browser.newPage({ locale: 'en-US', viewport, deviceScaleFactor: 1 });
     const notes = [];
     const frames = [];
     try {
@@ -775,13 +1168,21 @@ async function collectAdvisoryScreenshots(
   observations: BrowserObservation[],
   hostBrowserRunner: HostBrowserRunner,
   podId: string,
-  opts: { persist: false } | { persist: true; screenshotStore: ScreenshotStore },
+  opts:
+    | { persist: false }
+    | {
+        persist: true;
+        screenshotStore: ScreenshotStore;
+        persistedByDigest?: Map<string, ScreenshotRef>;
+      },
   log?: Logger,
 ): Promise<CollectedAdvisoryScreenshots> {
   const byTarget = new Map<string, ScreenshotRef[]>();
   const byFrame = new Map<string, { ref?: ScreenshotRef; base64: string }>();
-  const persistedByDigest = new Map<string, ScreenshotRef>();
-  let screenshotIndex = 0;
+  const persistedByDigest = opts.persist
+    ? (opts.persistedByDigest ?? new Map<string, ScreenshotRef>())
+    : new Map<string, ScreenshotRef>();
+  let screenshotIndex = persistedByDigest.size;
 
   for (const observation of observations) {
     const frames = observationFrames(observation);
@@ -881,13 +1282,56 @@ function buildReviewInput(input: {
 async function safePlanActions(
   reviewer: AdvisoryBrowserQaReviewer,
   input: AdvisoryBrowserQaReviewInput,
-  log?: Logger,
+  opts: {
+    pacing: AdvisoryBrowserQaPacing;
+    deadline: number;
+    log?: Logger;
+    targetLabel: string;
+  },
 ): Promise<Array<{ targetId: string; actions: AdvisoryBrowserAction[] }>> {
   if (!reviewer.planActions) return [];
+  const remainingMs = remainingBudget(opts.deadline, opts.pacing);
+  const maxWaitMs = Math.min(
+    opts.pacing.actionPlannerBudgetMs,
+    Math.max(0, remainingMs - opts.pacing.minReviewAttemptMs),
+  );
+  if (maxWaitMs <= 0) {
+    opts.log?.warn(
+      { target: opts.targetLabel, remainingMs },
+      'advisory browser QA skipped action planning to preserve reviewer budget',
+    );
+    return [];
+  }
+  const timedOut = Symbol('advisory-action-planner-timeout');
+  const planned = reviewer
+    .planActions(input)
+    .then((actions) => filterActionPlansForTargets(actions, input.targets, opts.log))
+    .catch((err) => {
+      opts.log?.warn({ err }, 'advisory browser QA action planning failed');
+      return [];
+    });
+  let cancelTimeout = () => {};
+  const timeout =
+    opts.pacing.sleep === sleep
+      ? new Promise<typeof timedOut>((resolve) => {
+          const timer = setTimeout(() => resolve(timedOut), maxWaitMs);
+          cancelTimeout = () => clearTimeout(timer);
+        })
+      : opts.pacing.sleep(maxWaitMs).then(() => timedOut);
   try {
-    return filterActionPlansForTargets(await reviewer.planActions(input), input.targets, log);
+    const result = await Promise.race([planned, timeout]);
+    cancelTimeout();
+    if (result === timedOut) {
+      opts.log?.warn(
+        { target: opts.targetLabel, timeoutMs: maxWaitMs },
+        'advisory browser QA action planning timed out; reviewing captured evidence',
+      );
+      return [];
+    }
+    return result;
   } catch (err) {
-    log?.warn({ err }, 'advisory browser QA action planning failed');
+    cancelTimeout();
+    opts.log?.warn({ err }, 'advisory browser QA action planning failed');
     return [];
   }
 }
@@ -980,13 +1424,22 @@ function createProviderAwareAdvisoryReviewer(input: {
   provider?: ModelProvider | null;
   credentials?: ProviderCredentials | null;
   logger?: Logger;
+  rateLimitDeadlineMs?: number;
+  rateLimitBaseDelayMs?: number;
+  rateLimitMaxDelayMs?: number;
+  onRateLimitWait?: (delayMs: number, attempt: number) => void;
 }): AdvisoryBrowserQaReviewer {
-  const rateLimitDeadlineMs = Date.now() + ADVISORY_BROWSER_QA_RATE_LIMIT_RETRY_BUDGET_MS;
+  const rateLimitDeadlineMs =
+    input.rateLimitDeadlineMs ?? Date.now() + ADVISORY_BROWSER_QA_TOTAL_BUDGET_MS;
   return {
     async planActions(reviewInput) {
       if (!input.model) return [];
       if (input.provider === 'openai' || input.provider === 'copilot') return [];
       const prompt = buildActionPlannerPrompt(reviewInput);
+      const plannerDeadlineMs = Math.min(
+        rateLimitDeadlineMs,
+        Date.now() + ADVISORY_BROWSER_QA_ACTION_PLANNER_BUDGET_MS,
+      );
       try {
         const stdout = await callAnthropicReviewer({
           model: input.model,
@@ -997,7 +1450,11 @@ function createProviderAwareAdvisoryReviewer(input: {
           logger: input.logger,
           maxTokens: 2_000,
           includeImages: false,
-          rateLimitDeadlineMs,
+          timeoutMs: ADVISORY_BROWSER_QA_ACTION_PLANNER_BUDGET_MS,
+          rateLimitDeadlineMs: plannerDeadlineMs,
+          rateLimitBaseDelayMs: input.rateLimitBaseDelayMs,
+          rateLimitMaxDelayMs: input.rateLimitMaxDelayMs,
+          onRateLimitWait: input.onRateLimitWait,
         });
         return parseActionPlanJson(stdout);
       } catch (err) {
@@ -1032,7 +1489,10 @@ function createProviderAwareAdvisoryReviewer(input: {
           input: reviewInput,
           logger: input.logger,
           maxTokens: 2_000,
-          rateLimitDeadlineMs,
+          rateLimitDeadlineMs: rateLimitRetryDisabledDeadlineMs(),
+          rateLimitBaseDelayMs: input.rateLimitBaseDelayMs,
+          rateLimitMaxDelayMs: input.rateLimitMaxDelayMs,
+          onRateLimitWait: input.onRateLimitWait,
         });
         const parsed = parseReviewerJson(stdout);
         if (parsed) return parsed;
@@ -1057,7 +1517,10 @@ function createProviderAwareAdvisoryReviewer(input: {
               logger: input.logger,
               maxTokens: 1_500,
               includeImages: false,
-              rateLimitDeadlineMs,
+              rateLimitDeadlineMs: rateLimitRetryDisabledDeadlineMs(),
+              rateLimitBaseDelayMs: input.rateLimitBaseDelayMs,
+              rateLimitMaxDelayMs: input.rateLimitMaxDelayMs,
+              onRateLimitWait: input.onRateLimitWait,
             });
             const fallbackParsed = parseReviewerJson(fallbackStdout);
             if (fallbackParsed) {
@@ -1071,6 +1534,7 @@ function createProviderAwareAdvisoryReviewer(input: {
               { err: fallbackErr },
               'advisory browser QA structured-evidence fallback failed',
             );
+            if (isRateLimitError(fallbackErr)) throw fallbackErr;
           }
           return {
             status: 'uncertain',
@@ -1099,8 +1563,12 @@ async function callAnthropicReviewer(input: {
   logger?: Logger;
   maxTokens: number;
   includeImages?: boolean;
+  timeoutMs?: number;
   rateLimitRetryBudgetMs?: number;
   rateLimitDeadlineMs?: number;
+  rateLimitBaseDelayMs?: number;
+  rateLimitMaxDelayMs?: number;
+  onRateLimitWait?: (delayMs: number, attempt: number) => void;
 }): Promise<string> {
   const llm = await createProviderAnthropicClient(
     {
@@ -1116,7 +1584,7 @@ async function callAnthropicReviewer(input: {
       const { stdout } = await runClaudeCli({
         model: input.model,
         input: `${input.prompt}\n\nNote: screenshot images could not be attached because no daemon-callable Anthropic API credentials were available. Use the structured browser observations only.`,
-        timeout: 120_000,
+        timeout: input.timeoutMs ?? 120_000,
       });
       return stdout;
     }
@@ -1138,11 +1606,14 @@ async function callAnthropicReviewer(input: {
             },
           ],
         },
-        { timeout: 120_000 },
+        { timeout: input.timeoutMs ?? 120_000 },
       ),
     input.logger,
     input.rateLimitDeadlineMs ??
-      Date.now() + (input.rateLimitRetryBudgetMs ?? ADVISORY_BROWSER_QA_RATE_LIMIT_RETRY_BUDGET_MS),
+      Date.now() + (input.rateLimitRetryBudgetMs ?? ADVISORY_BROWSER_QA_TOTAL_BUDGET_MS),
+    input.rateLimitBaseDelayMs ?? ADVISORY_BROWSER_QA_RATE_LIMIT_BASE_DELAY_MS,
+    input.rateLimitMaxDelayMs ?? ADVISORY_BROWSER_QA_RATE_LIMIT_MAX_DELAY_MS,
+    input.onRateLimitWait,
   );
   return response.content
     .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
@@ -1155,6 +1626,9 @@ async function retryRateLimited<T>(
   operation: () => Promise<T>,
   log: Logger | undefined,
   deadline: number,
+  baseDelayMs: number,
+  maxDelayMs: number,
+  onRateLimitWait?: (delayMs: number, attempt: number) => void,
 ): Promise<T> {
   let attempt = 0;
   while (true) {
@@ -1164,13 +1638,14 @@ async function retryRateLimited<T>(
       if (!isRateLimitError(err)) throw err;
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) throw err;
-      const fallbackDelayMs = fallbackRateLimitDelayMs(attempt);
-      const delayMs = retryDelayMs(err, fallbackDelayMs);
+      const fallbackDelayMs = fallbackRateLimitDelayMs(attempt, baseDelayMs, maxDelayMs);
+      const delayMs = retryDelayMs(err, fallbackDelayMs, maxDelayMs);
       log?.warn(
         { err, attempt: attempt + 1, delayMs, retryBudgetRemainingMs: remainingMs },
         'advisory browser QA reviewer rate-limited; retrying after backoff',
       );
       attempt += 1;
+      onRateLimitWait?.(Math.min(delayMs, remainingMs), attempt);
       await sleep(Math.min(delayMs, remainingMs));
     }
   }
@@ -1180,29 +1655,28 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function fallbackRateLimitDelayMs(attempt: number): number {
-  return Math.min(
-    ADVISORY_BROWSER_QA_RATE_LIMIT_BASE_DELAY_MS * 2 ** attempt,
-    ADVISORY_BROWSER_QA_RATE_LIMIT_MAX_DELAY_MS,
-  );
+function rateLimitRetryDisabledDeadlineMs(): number {
+  return Date.now() - 1;
 }
 
-function retryDelayMs(err: unknown, fallbackMs: number): number {
+function fallbackRateLimitDelayMs(
+  attempt: number,
+  baseDelayMs: number,
+  maxDelayMs: number,
+): number {
+  return Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
+}
+
+function retryDelayMs(err: unknown, fallbackMs: number, maxDelayMs: number): number {
   const retryAfter = headerValue(err, 'retry-after');
   const retryAfterSeconds = retryAfter ? Number(retryAfter) : Number.NaN;
   if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
-    return Math.max(
-      500,
-      Math.min(ADVISORY_BROWSER_QA_RATE_LIMIT_MAX_DELAY_MS, retryAfterSeconds * 1_000),
-    );
+    return Math.max(500, Math.min(maxDelayMs, retryAfterSeconds * 1_000));
   }
   if (retryAfter) {
     const retryAfterDate = Date.parse(retryAfter);
     if (Number.isFinite(retryAfterDate)) {
-      return Math.max(
-        500,
-        Math.min(ADVISORY_BROWSER_QA_RATE_LIMIT_MAX_DELAY_MS, retryAfterDate - Date.now()),
-      );
+      return Math.max(500, Math.min(maxDelayMs, retryAfterDate - Date.now()));
     }
   }
   return fallbackMs;

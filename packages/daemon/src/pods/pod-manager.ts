@@ -30,8 +30,8 @@ import type {
   RequestCredentialPayload,
   SastResult,
   SpawnFixResponse,
-  StdioInjectedMcpServer,
   SpecFile,
+  StdioInjectedMcpServer,
   TaskReviewResult,
   TaskSummary,
   UpdateFromBaseResponse,
@@ -185,11 +185,10 @@ function summarizeValidationPhases(result: ValidationResult): string {
         : 'fail';
   const factsStatus = result.factValidation?.status ?? 'skip';
   const reviewStatus = result.taskReview?.status ?? 'skip';
-  const advisoryStatus = result.advisoryBrowserQa?.status ?? 'skip';
   return (
     `lint: ${lintStatus}, sast: ${sastStatus}, build: ${buildStatus}, ` +
     `tests: ${testStatus}, health: ${healthStatus}, pages: ${pagesStatus}, ` +
-    `facts: ${factsStatus}, review: ${reviewStatus}, advisory: ${advisoryStatus}`
+    `facts: ${factsStatus}, review: ${reviewStatus}`
   );
 }
 
@@ -305,11 +304,7 @@ async function materializeSpecFiles(
   }
 
   if (changedPaths.length > 0) {
-    await worktreeManager.commitFiles(
-      worktreePath,
-      changedPaths,
-      'docs(spec): add pod spec files',
-    );
+    await worktreeManager.commitFiles(worktreePath, changedPaths, 'docs(spec): add pod spec files');
     logger.info(
       { worktreePath, fileCount: changedPaths.length },
       'Materialized spec files onto pod branch',
@@ -1463,6 +1458,33 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   /** Active AbortControllers for in-progress validation runs, keyed by podId. */
   const validationAbortControllers = new Map<string, AbortController>();
+
+  /** Active post-validation advisory QA runs, keyed by podId.
+   *  These are nonblocking for validation outcome, but approval must not cut
+   *  off the preview/container before screenshot-backed advisory QA finishes. */
+  const advisoryRuns = new Map<string, Promise<ValidationResult>>();
+
+  function cleanupContainerAfterAdvisorySettles(
+    pod: Pod,
+    label: string,
+    mode: 'kill' | 'stop' = 'kill',
+  ): Promise<void> {
+    const advisoryRun = advisoryRuns.get(pod.id);
+    if (!advisoryRun) {
+      return cleanupContainer(pod, label, mode);
+    }
+
+    emitActivityStatus(pod.id, 'Keeping container running until advisory browser QA finishes…');
+    void advisoryRun
+      .finally(() => cleanupContainer(pod, label, mode))
+      .catch((err) =>
+        logger.warn(
+          { err, podId: pod.id, label, mode },
+          'Deferred container cleanup after advisory QA failed',
+        ),
+      );
+    return Promise.resolve();
+  }
 
   /** Pods whose operator triggered update-from-base while they were validating.
    *  Consumed by the validation unwind to run the rebase instead of retrying the agent. */
@@ -3327,6 +3349,57 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     };
   }
 
+  async function runAdvisoryAfterValidation(
+    podId: string,
+    validationConfig: Parameters<ValidationEngine['validate']>[0],
+    blockingResult: ValidationResult,
+  ): Promise<ValidationResult> {
+    if (!validationEngine.runAdvisoryBrowserQa) {
+      return blockingResult;
+    }
+
+    const run = (async (): Promise<ValidationResult> => {
+      let advisoryResult: ValidationResult['advisoryBrowserQa'] | null = null;
+      try {
+        advisoryResult = await validationEngine.runAdvisoryBrowserQa(
+          validationConfig,
+          blockingResult,
+          (phase) => emitActivityStatus(podId, phase),
+          undefined,
+          buildPhaseEventCallbacks(podId),
+        );
+      } catch (err) {
+        logger.warn({ err, podId }, 'Advisory browser QA failed after validation');
+        emitActivityStatus(podId, 'Advisory browser QA failed — continuing');
+        return blockingResult;
+      }
+
+      if (!advisoryResult) return blockingResult;
+
+      const current = podRepo.getOrThrow(podId);
+      if (current.status === 'killed' || current.status === 'killing') {
+        return blockingResult;
+      }
+
+      const currentResult = current.lastValidationResult ?? blockingResult;
+      const mergedResult = {
+        ...currentResult,
+        advisoryBrowserQa: advisoryResult,
+      };
+      podRepo.update(podId, { lastValidationResult: mergedResult });
+      return mergedResult;
+    })();
+
+    advisoryRuns.set(podId, run);
+    try {
+      return await run;
+    } finally {
+      if (advisoryRuns.get(podId) === run) {
+        advisoryRuns.delete(podId);
+      }
+    }
+  }
+
   /**
    * If `err` is a DeletionGuardError, mark the pod as worktree-compromised so the desktop
    * disables Create PR / merge actions until a human reconciles the state. Emits an event
@@ -3887,8 +3960,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             contract: request.contract ?? null,
             options: resolvedPod,
             outputMode: effectiveOutputMode,
-            startBranch:
-              effectiveStartBranch !== effectiveBaseBranch ? effectiveStartBranch : null,
+            startBranch: effectiveStartBranch !== effectiveBaseBranch ? effectiveStartBranch : null,
             baseBranch: effectiveBaseBranch,
             specFiles: request.specFiles && request.specFiles.length > 0 ? request.specFiles : null,
             linkedPodId: request.linkedPodId ?? null,
@@ -6648,6 +6720,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async approveSession(podId: string, options?: { squash?: boolean }): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
+      if (advisoryRuns.has(podId)) {
+        emitActivityStatus(podId, 'Approval continuing while advisory browser QA runs…');
+      }
       const isWorkspacePod = pod.options?.agentMode === 'interactive';
 
       // No-change fast-path: skip PR creation and complete directly.
@@ -6708,7 +6783,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
           const s1 = transition(pod, 'approved');
           const s2 = transition(s1, 'merging');
-          await cleanupContainer(pod, 'approve-no-changes');
+          await cleanupContainerAfterAdvisorySettles(pod, 'approve-no-changes');
           const noChangePod = transition(s2, 'complete', {
             completedAt: new Date().toISOString(),
           });
@@ -7049,7 +7124,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       emitActivityStatus(podId, 'Pod complete');
-      await cleanupContainer(pod, 'approve-complete');
+      await cleanupContainerAfterAdvisorySettles(pod, 'approve-complete');
       const completedPod = transition(s2, 'complete', { completedAt: new Date().toISOString() });
 
       eventBus.emit({
@@ -8505,29 +8580,34 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           pendingUpdateFromBaseIntents.delete(podId);
           const validatedPod = transition(s2, 'validated', { prUrl });
           maybeTriggerDependents(validatedPod);
+          await runAdvisoryAfterValidation(podId, validationConfig, result);
+          const postAdvisoryPod = podRepo.getOrThrow(podId);
+          if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
+            return;
+          }
 
           // Fix pods don't own the PR — their parent does. Once a fix pod
           // validates, it rebases + pushes its branch and completes; the
           // parent's merge poller re-attempts the merge with the new commits.
           // This must run before the autoApprove check below: a fix pod must
           // never walk the normal approve/merge path.
-          if (validatedPod.linkedPodId) {
-            await completeFixPodAfterPush(validatedPod);
+          if (postAdvisoryPod.linkedPodId) {
+            await completeFixPodAfterPush(postAdvisoryPod);
             return;
           }
 
           // Stop the container (not remove) so it can be restarted for preview
-          if (s2.containerId) {
+          if (postAdvisoryPod.containerId) {
             try {
-              const cm = containerManagerFactory.get(s2.executionTarget);
-              await cm.stop(s2.containerId);
+              const cm = containerManagerFactory.get(postAdvisoryPod.executionTarget);
+              await cm.stop(postAdvisoryPod.containerId);
               logger.info({ podId }, 'Container stopped post-validation');
             } catch (err) {
               logger.warn({ err, podId }, 'Failed to stop container post-validation');
             }
           }
 
-          if (validatedPod.autoApprove) {
+          if (postAdvisoryPod.autoApprove) {
             logger.info({ podId }, 'Auto-approving pod after validation');
             setImmediate(() => {
               this.approveSession(podId).catch((err) =>
@@ -8791,47 +8871,49 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ? await loadCodeReviewSkill(pod.worktreePath, logger)
           : undefined;
 
+        const validationConfig = {
+          podId,
+          containerId: pod.containerId,
+          previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
+          containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
+          buildCommand: profile.buildCommand ?? '',
+          startCommand: profile.startCommand ?? '',
+          buildWorkDir: profile.buildWorkDir ?? undefined,
+          healthPath: profile.healthPath ?? '/',
+          healthTimeout: profile.healthTimeout ?? 120,
+          smokePages: profile.smokePages,
+          attempt,
+          task: pod.task,
+          diff,
+          testCommand: profile.testCommand,
+          buildTimeout: (profile.buildTimeout ?? 300) * 1_000,
+          testTimeout: (profile.testTimeout ?? 600) * 1_000,
+          lintCommand: profile.lintCommand ?? undefined,
+          lintTimeout: (profile.lintTimeout ?? 120) * 1_000,
+          sastCommand: profile.sastCommand ?? undefined,
+          sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
+          reviewerModel: resolveReviewerModel(profile, logger),
+          reviewerProvider: resolveReviewerProvider(profile),
+          reviewerProviderCredentials: profile.providerCredentials,
+          contract: pod.contract ?? undefined,
+          codeReviewSkill,
+          commitLog: commitLog || undefined,
+          plan: pod.plan ?? undefined,
+          taskSummary: pod.taskSummary ?? undefined,
+          worktreePath: pod.worktreePath ?? undefined,
+          startCommitSha: pod.startCommitSha ?? undefined,
+          hasWebUi: profile.hasWebUi ?? true,
+          advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
+          preSubmitReview: pod.preSubmitReview ?? undefined,
+          skipPhases: profile.skipValidationPhases ?? undefined,
+        };
+
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
         const revalidateController = new AbortController();
         validationAbortControllers.set(podId, revalidateController);
         try {
           result = await validationEngine.validate(
-            {
-              podId,
-              containerId: pod.containerId,
-              previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
-              containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
-              buildCommand: profile.buildCommand ?? '',
-              startCommand: profile.startCommand ?? '',
-              buildWorkDir: profile.buildWorkDir ?? undefined,
-              healthPath: profile.healthPath ?? '/',
-              healthTimeout: profile.healthTimeout ?? 120,
-              smokePages: profile.smokePages,
-              attempt,
-              task: pod.task,
-              diff,
-              testCommand: profile.testCommand,
-              buildTimeout: (profile.buildTimeout ?? 300) * 1_000,
-              testTimeout: (profile.testTimeout ?? 600) * 1_000,
-              lintCommand: profile.lintCommand ?? undefined,
-              lintTimeout: (profile.lintTimeout ?? 120) * 1_000,
-              sastCommand: profile.sastCommand ?? undefined,
-              sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
-              reviewerModel: resolveReviewerModel(profile, logger),
-              reviewerProvider: resolveReviewerProvider(profile),
-              reviewerProviderCredentials: profile.providerCredentials,
-              contract: pod.contract ?? undefined,
-              codeReviewSkill,
-              commitLog: commitLog || undefined,
-              plan: pod.plan ?? undefined,
-              taskSummary: pod.taskSummary ?? undefined,
-              worktreePath: pod.worktreePath ?? undefined,
-              startCommitSha: pod.startCommitSha ?? undefined,
-              hasWebUi: profile.hasWebUi ?? true,
-              advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
-              preSubmitReview: pod.preSubmitReview ?? undefined,
-              skipPhases: profile.skipValidationPhases ?? undefined,
-            },
+            validationConfig,
             (phase) => emitActivityStatus(podId, phase),
             revalidateController.signal,
             buildPhaseEventCallbacks(podId),
@@ -9018,18 +9100,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           const revalidatedPod = transition(s2, 'validated', { prUrl });
           maybeTriggerDependents(revalidatedPod);
+          await runAdvisoryAfterValidation(podId, validationConfig, result);
+          const postAdvisoryPod = podRepo.getOrThrow(podId);
+          if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
+            return { newCommits, result: 'pass' };
+          }
 
           // Stop the container
-          if (s2.containerId) {
+          if (postAdvisoryPod.containerId) {
             try {
-              const cm2 = containerManagerFactory.get(s2.executionTarget);
-              await cm2.stop(s2.containerId);
+              const cm2 = containerManagerFactory.get(postAdvisoryPod.executionTarget);
+              await cm2.stop(postAdvisoryPod.containerId);
             } catch (err) {
               logger.warn({ err, podId }, 'Failed to stop container post-revalidation');
             }
           }
 
-          if (revalidatedPod.autoApprove) {
+          if (postAdvisoryPod.autoApprove) {
             logger.info({ podId }, 'Auto-approving pod after revalidation');
             setImmediate(() => {
               this.approveSession(podId).catch((err) =>

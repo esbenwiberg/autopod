@@ -369,59 +369,10 @@ export function createLocalValidationEngine(
               : 'pass';
         callbacks?.onPhaseCompleted?.('review', reviewStatus, taskReview);
 
-        // ── Phase 9: Advisory Browser QA ──────────────────────────────
-        // Runs only after blocking checks are green. Its findings are
-        // screenshot-backed evidence for humans and never affect `overall`.
-        checkAbort();
-        let advisoryBrowserQa: AdvisoryBrowserQaResult | null = null;
-        const blockingChecksGreen =
-          tier1Pass &&
-          factsStatus !== 'fail' &&
-          factsStatus !== 'pending_human' &&
-          reviewStatus !== 'fail' &&
-          reviewSkipKind !== 'review-failed';
-        if (config.advisoryBrowserQaEnabled && skipPhases.includes('advisory')) {
-          advisoryBrowserQa = {
-            status: 'skip',
-            reasoning: 'profile-skip',
-            observations: [],
-            screenshots: [],
-            durationMs: 0,
-          };
-          callbacks?.onPhaseCompleted?.('advisory', 'skip', advisoryBrowserQa);
-        } else if (shouldRunAdvisoryBrowserQa(config, healthResult, blockingChecksGreen)) {
-          callbacks?.onPhaseStarted?.('advisory');
-          onProgress?.('Running advisory browser QA…');
-          advisoryBrowserQa = await runAdvisoryBrowserQa({
-            podId: config.podId,
-            task: config.task,
-            baseUrl: config.previewUrl,
-            contract: config.contract,
-            reviewerModel: config.reviewerModel,
-            reviewerProvider: config.reviewerProvider,
-            reviewerProviderCredentials: config.reviewerProviderCredentials,
-            hostBrowserRunner,
-            screenshotStore,
-            logger: log,
-          });
-          callbacks?.onPhaseCompleted?.(
-            'advisory',
-            advisoryBrowserQa.status === 'fail' ? 'fail' : 'pass',
-            advisoryBrowserQa,
-          );
-        } else if (config.advisoryBrowserQaEnabled && hasNoContractChecklist(config)) {
-          callbacks?.onPhaseStarted?.('advisory');
-          advisoryBrowserQa = {
-            status: 'skip',
-            reasoning: 'no-contract-checklist',
-            observations: [],
-            screenshots: [],
-            durationMs: 0,
-          };
-          callbacks?.onPhaseCompleted?.('advisory', 'skip', advisoryBrowserQa);
-        }
-
-        // ── Phase 10: Overall result ──────────────────────────────────
+        // ── Phase 9: Overall result ──────────────────────────────────
+        // Advisory Browser QA runs after the daemon has created/carry-forwarded
+        // the PR. Keeping it out of `validate()` makes advisory evidence
+        // nonblocking in both result semantics and scheduling.
         const pagesPass = pages.length === 0 || pages.every((p) => p.status === 'pass');
         const healthOk = healthResult.status === 'pass' || healthResult.status === 'skip';
         const smokeStatus =
@@ -461,7 +412,7 @@ export function createLocalValidationEngine(
           sast: sastResult,
           factValidation,
           taskReview,
-          advisoryBrowserQa,
+          advisoryBrowserQa: null,
           reviewSkipReason,
           reviewSkipKind,
           overall,
@@ -477,6 +428,77 @@ export function createLocalValidationEngine(
       } finally {
         stopMonitor?.();
       }
+    },
+
+    async runAdvisoryBrowserQa(
+      config: ValidationEngineConfig,
+      blockingResult: ValidationResult,
+      onProgress?: (message: string) => void,
+      signal?: AbortSignal,
+      callbacks?: ValidationPhaseCallbacks,
+    ): Promise<AdvisoryBrowserQaResult | null> {
+      const skipPhases = config.skipPhases ?? [];
+
+      function checkAbort(): void {
+        if (signal?.aborted) throw new ValidationInterruptedError('Validation interrupted by user');
+      }
+
+      checkAbort();
+      if (!config.advisoryBrowserQaEnabled || blockingResult.overall !== 'pass') {
+        return null;
+      }
+
+      if (skipPhases.includes('advisory')) {
+        const advisoryBrowserQa: AdvisoryBrowserQaResult = {
+          status: 'skip',
+          reasoning: 'profile-skip',
+          observations: [],
+          screenshots: [],
+          durationMs: 0,
+        };
+        callbacks?.onPhaseCompleted?.('advisory', 'skip', advisoryBrowserQa);
+        return advisoryBrowserQa;
+      }
+
+      if (shouldRunAdvisoryBrowserQa(config, blockingResult.smoke.health, true)) {
+        callbacks?.onPhaseStarted?.('advisory');
+        onProgress?.('Running advisory browser QA…');
+        const advisoryBrowserQa = await runAdvisoryBrowserQa({
+          podId: config.podId,
+          task: config.task,
+          baseUrl: config.previewUrl,
+          contract: config.contract,
+          reviewerModel: config.reviewerModel,
+          reviewerProvider: config.reviewerProvider,
+          reviewerProviderCredentials: config.reviewerProviderCredentials,
+          hostBrowserRunner,
+          screenshotStore,
+          logger: log,
+          onProgress,
+        });
+        checkAbort();
+        callbacks?.onPhaseCompleted?.(
+          'advisory',
+          advisoryBrowserQa.status === 'fail' ? 'fail' : 'pass',
+          advisoryBrowserQa,
+        );
+        return advisoryBrowserQa;
+      }
+
+      if (hasNoContractChecklist(config)) {
+        callbacks?.onPhaseStarted?.('advisory');
+        const advisoryBrowserQa: AdvisoryBrowserQaResult = {
+          status: 'skip',
+          reasoning: 'no-contract-checklist',
+          observations: [],
+          screenshots: [],
+          durationMs: 0,
+        };
+        callbacks?.onPhaseCompleted?.('advisory', 'skip', advisoryBrowserQa);
+        return advisoryBrowserQa;
+      }
+
+      return null;
     },
   };
 }

@@ -37,6 +37,14 @@ beforeEach(() => {
   vi.mocked(runClaudeCli).mockReset();
 });
 
+function getAdvisoryBrowserQaRunner(engine: ReturnType<typeof createLocalValidationEngine>) {
+  const runner = engine.runAdvisoryBrowserQa;
+  if (!runner) {
+    throw new Error('Expected local validation engine to expose advisory browser QA runner');
+  }
+  return runner;
+}
+
 describe('artifactChangeSatisfied', () => {
   const diff = `diff --git a/Client/src/Foo.ts b/Client/src/Foo.ts
 index 111..222 100644
@@ -714,6 +722,54 @@ describe('validate() — hasWebUi gating', () => {
     expect(pagesEvent?.status).toBe('skip');
   });
 
+  it('blocking validation does not run advisory inline', async () => {
+    const cm = stubContainerManager();
+    const hostBrowserRunner = {
+      getAvailability: vi.fn(),
+    } as unknown as HostBrowserRunner;
+    const engine = createLocalValidationEngine(cm, undefined, hostBrowserRunner);
+    const started: string[] = [];
+    const completed: Array<{ phase: string; status: string; result: unknown }> = [];
+    const callbacks: ValidationPhaseCallbacks = {
+      onPhaseStarted: (phase) => started.push(phase),
+      onPhaseCompleted: (phase, status, result) => completed.push({ phase, status, result }),
+    };
+
+    const config = baseConfig({
+      startCommand: '',
+      smokePages: [],
+      hasWebUi: true,
+      advisoryBrowserQaEnabled: true,
+      skipPhases: ['facts'],
+      reviewerModel: 'claude-review',
+      contract: parseSpecContract(`contract_version: 1
+title: Advisory
+depends_on: []
+scenarios:
+  - id: dashboard
+    given: ["state"]
+    when: ["open dashboard"]
+    then: ["summary is visible"]
+required_facts:
+  - id: browser-proof
+    proves: [dashboard]
+    kind: browser-test
+    artifact:
+      path: tests/browser/advisory.spec.ts
+      change: update
+    command: npx vitest --run tests/browser/advisory.spec.ts --grep dashboard
+human_review: []
+`),
+    });
+    const result = await engine.validate(config, undefined, undefined, callbacks);
+
+    expect(result.overall).toBe('pass');
+    expect(result.advisoryBrowserQa).toBeNull();
+    expect(hostBrowserRunner.getAvailability).not.toHaveBeenCalled();
+    expect(started).not.toContain('advisory');
+    expect(completed.some((c) => c.phase === 'advisory')).toBe(false);
+  });
+
   it('advisory-concern-nonblocking records concern evidence without affecting overall', async () => {
     vi.mocked(runClaudeCli).mockResolvedValue({
       stdout: JSON.stringify({
@@ -775,14 +831,14 @@ AUTOPOD_ADVISORY_BROWSER_QA_JSON_END`,
       onPhaseCompleted: (phase, status, result) => completed.push({ phase, status, result }),
     };
 
-    const result = await engine.validate(
-      baseConfig({
-        startCommand: '',
-        smokePages: [],
-        hasWebUi: true,
-        advisoryBrowserQaEnabled: true,
-        reviewerModel: 'claude-review',
-        contract: parseSpecContract(`contract_version: 1
+    const config = baseConfig({
+      startCommand: '',
+      smokePages: [],
+      hasWebUi: true,
+      advisoryBrowserQaEnabled: true,
+      skipPhases: ['facts'],
+      reviewerModel: 'claude-review',
+      contract: parseSpecContract(`contract_version: 1
 title: Advisory
 depends_on: []
 scenarios:
@@ -790,34 +846,42 @@ scenarios:
     given: ["state"]
     when: ["open dashboard"]
     then: ["summary is visible"]
-required_facts: []
-human_review:
-  - id: visual
-    covers: [dashboard]
-    criterion: "Dashboard layout is visually coherent."
-    reason: "Needs a browser."
+required_facts:
+  - id: browser-proof
+    proves: [dashboard]
+    kind: browser-test
+    artifact:
+      path: tests/browser/advisory.spec.ts
+      change: update
+    command: npx vitest --run tests/browser/advisory.spec.ts --grep dashboard
+human_review: []
 `),
-      }),
+    });
+    const result = await engine.validate(config, undefined, undefined, callbacks);
+    const advisory = await getAdvisoryBrowserQaRunner(engine)(
+      config,
+      result,
       undefined,
       undefined,
       callbacks,
     );
 
     expect(result.overall).toBe('pass');
-    expect(result.advisoryBrowserQa?.status).toBe('fail');
-    expect(result.advisoryBrowserQa?.observations[0]).toMatchObject({
+    expect(result.advisoryBrowserQa).toBeNull();
+    expect(advisory?.status).toBe('fail');
+    expect(advisory?.observations[0]).toMatchObject({
       id: 'empty-state-overlap',
       scenarioId: 'dashboard',
       status: 'fail',
       suggestedFacts: ['Add a browser fact for the loaded dashboard state.'],
     });
-    expect(result.advisoryBrowserQa?.screenshots[0]?.source).toBe('advisory');
+    expect(advisory?.screenshots[0]?.source).toBe('advisory');
     expect(hostBrowserRunner.runScript).toHaveBeenCalled();
     expect(started).toContain('advisory');
     expect(completed).toContainEqual({
       phase: 'advisory',
       status: 'fail',
-      result: result.advisoryBrowserQa,
+      result: advisory,
     });
   });
 
@@ -860,14 +924,14 @@ AUTOPOD_ADVISORY_BROWSER_QA_JSON_END`,
       screenshotStore as never,
     );
 
-    const result = await engine.validate(
-      baseConfig({
-        startCommand: '',
-        smokePages: [],
-        hasWebUi: true,
-        advisoryBrowserQaEnabled: true,
-        reviewerModel: undefined,
-        contract: parseSpecContract(`contract_version: 1
+    const config = baseConfig({
+      startCommand: '',
+      smokePages: [],
+      hasWebUi: true,
+      advisoryBrowserQaEnabled: true,
+      skipPhases: ['facts'],
+      reviewerModel: undefined,
+      contract: parseSpecContract(`contract_version: 1
 title: Advisory
 depends_on: []
 scenarios:
@@ -875,20 +939,25 @@ scenarios:
     given: ["state"]
     when: ["open dashboard"]
     then: ["summary is visible"]
-required_facts: []
-human_review:
-  - id: visual
-    covers: [dashboard]
-    criterion: "Dashboard layout is visually coherent."
-    reason: "Needs a browser."
+required_facts:
+  - id: browser-proof
+    proves: [dashboard]
+    kind: browser-test
+    artifact:
+      path: tests/browser/advisory.spec.ts
+      change: update
+    command: npx vitest --run tests/browser/advisory.spec.ts --grep dashboard
+human_review: []
 `),
-      }),
-    );
+    });
+    const result = await engine.validate(config);
+    const advisory = await getAdvisoryBrowserQaRunner(engine)(config, result);
 
     expect(result.overall).toBe('pass');
-    expect(result.advisoryBrowserQa?.status).toBe('uncertain');
-    expect(result.advisoryBrowserQa?.reasoning).toContain('No reviewer model configured');
-    expect(result.advisoryBrowserQa?.screenshots[0]?.source).toBe('advisory');
+    expect(result.advisoryBrowserQa).toBeNull();
+    expect(advisory?.status).toBe('uncertain');
+    expect(advisory?.reasoning).toContain('No reviewer model configured');
+    expect(advisory?.screenshots[0]?.source).toBe('advisory');
     expect(hostBrowserRunner.runScript).toHaveBeenCalled();
   });
 
@@ -903,27 +972,31 @@ human_review:
       onPhaseCompleted: (phase, status, result) => completed.push({ phase, status, result }),
     };
 
-    const result = await engine.validate(
-      baseConfig({
-        startCommand: '',
-        smokePages: [],
-        hasWebUi: true,
-        advisoryBrowserQaEnabled: true,
-        contract: parseSpecContract(`contract_version: 1
+    const config = baseConfig({
+      startCommand: '',
+      smokePages: [],
+      hasWebUi: true,
+      advisoryBrowserQaEnabled: true,
+      contract: parseSpecContract(`contract_version: 1
 title: Empty
 depends_on: []
 scenarios: []
 required_facts: []
 human_review: []
 `),
-      }),
+    });
+    const result = await engine.validate(config, undefined, undefined, callbacks);
+    const advisory = await getAdvisoryBrowserQaRunner(engine)(
+      config,
+      result,
       undefined,
       undefined,
       callbacks,
     );
 
     expect(result.overall).toBe('pass');
-    expect(result.advisoryBrowserQa).toMatchObject({
+    expect(result.advisoryBrowserQa).toBeNull();
+    expect(advisory).toMatchObject({
       status: 'skip',
       reasoning: 'no-contract-checklist',
     });
@@ -931,7 +1004,7 @@ human_review: []
     expect(completed).toContainEqual({
       phase: 'advisory',
       status: 'skip',
-      result: result.advisoryBrowserQa,
+      result: advisory,
     });
   });
 
@@ -946,14 +1019,13 @@ human_review: []
       onPhaseCompleted: (phase, status, result) => completed.push({ phase, status, result }),
     };
 
-    const result = await engine.validate(
-      baseConfig({
-        startCommand: '',
-        smokePages: [],
-        hasWebUi: true,
-        advisoryBrowserQaEnabled: true,
-        skipPhases: ['advisory'],
-        contract: parseSpecContract(`contract_version: 1
+    const config = baseConfig({
+      startCommand: '',
+      smokePages: [],
+      hasWebUi: true,
+      advisoryBrowserQaEnabled: true,
+      skipPhases: ['advisory'],
+      contract: parseSpecContract(`contract_version: 1
 title: Advisory
 depends_on: []
 scenarios:
@@ -968,14 +1040,19 @@ human_review:
     criterion: "Dashboard layout is visually coherent."
     reason: "Needs a browser."
 `),
-      }),
+    });
+    const result = await engine.validate(config, undefined, undefined, callbacks);
+    const advisory = await getAdvisoryBrowserQaRunner(engine)(
+      config,
+      result,
       undefined,
       undefined,
       callbacks,
     );
 
     expect(result.overall).toBe('pass');
-    expect(result.advisoryBrowserQa).toMatchObject({
+    expect(result.advisoryBrowserQa).toBeNull();
+    expect(advisory).toMatchObject({
       status: 'skip',
       reasoning: 'profile-skip',
     });
@@ -983,7 +1060,7 @@ human_review:
     expect(completed).toContainEqual({
       phase: 'advisory',
       status: 'skip',
-      result: result.advisoryBrowserQa,
+      result: advisory,
     });
   });
 });
