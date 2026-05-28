@@ -282,6 +282,35 @@ function createMockValidationEngine(result?: Partial<ValidationResult>): Validat
   };
 }
 
+function reviewInfrastructureFailureResult(
+  reviewSkipKind: 'review-failed' | 'review-timeout' = 'review-timeout',
+): Partial<ValidationResult> {
+  return {
+    overall: 'fail',
+    smoke: {
+      status: 'pass',
+      build: { status: 'pass', output: '', duration: 100 },
+      health: {
+        status: 'pass',
+        url: 'http://localhost:3000',
+        responseCode: 200,
+        duration: 50,
+      },
+      pages: [],
+    },
+    test: { status: 'pass', duration: 25, stdout: '', stderr: '' },
+    lint: { status: 'pass', output: '', duration: 10 },
+    sast: { status: 'skip', output: '', duration: 0 },
+    factValidation: { status: 'pass', results: [] },
+    taskReview: null,
+    reviewSkipKind,
+    reviewSkipReason:
+      reviewSkipKind === 'review-timeout'
+        ? 'Review timed out: Command timed out after 300000ms'
+        : 'Review failed: reviewer process exited with code 2',
+  };
+}
+
 interface TestContext {
   db: Database.Database;
   podRepo: PodRepository;
@@ -3241,6 +3270,130 @@ describe('PodManager', () => {
       expect(result.status).toBe('review_required');
     });
 
+    it('retries review infrastructure failures without agent rework', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        vi.mocked(ctx.validationEngine.validate)
+          .mockResolvedValueOnce({
+            podId: 'test',
+            attempt: 1,
+            timestamp: new Date().toISOString(),
+            duration: 5000,
+            ...reviewInfrastructureFailureResult('review-timeout'),
+          } as ValidationResult)
+          .mockResolvedValueOnce({
+            podId: 'test',
+            attempt: 1,
+            timestamp: new Date().toISOString(),
+            smoke: {
+              status: 'pass',
+              build: { status: 'pass', output: '', duration: 100 },
+              health: {
+                status: 'pass',
+                url: 'http://localhost:3000',
+                responseCode: 200,
+                duration: 50,
+              },
+              pages: [],
+            },
+            taskReview: {
+              status: 'pass',
+              reasoning: 'Looks good',
+              issues: [],
+              model: 'gpt-5',
+              screenshots: [],
+              diff: '+done',
+            },
+            overall: 'pass',
+            duration: 5000,
+          });
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Add feature' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/wt',
+          validationAttempts: 0,
+        });
+
+        const validationPromise = manager.triggerValidation(pod.id);
+        await vi.waitFor(() => expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1));
+        await vi.advanceTimersByTimeAsync(10_000);
+        await validationPromise;
+
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        const result = manager.getSession(pod.id);
+        expect(result.status).toBe('validated');
+        expect(result.validationAttempts).toBe(1);
+        expect(result.lastCorrectionMessage).toBeNull();
+
+        const messages = ctx.eventRepo
+          .getForSession(pod.id, { type: 'pod.agent_activity' })
+          .map((event) => {
+            const payload = event.payload as { event?: { message?: unknown } };
+            return payload.event?.message;
+          });
+        expect(messages).toContain('Review infrastructure timeout — retrying in 10s (1/3)');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('moves to review_required after review infrastructure retries exhaust', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext(reviewInfrastructureFailureResult('review-failed'));
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Add feature' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-1',
+          validationAttempts: 0,
+        });
+
+        const validationPromise = manager.triggerValidation(pod.id);
+        await vi.waitFor(() => expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1));
+        await vi.advanceTimersByTimeAsync(10_000);
+        await vi.waitFor(() => expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2));
+        await vi.advanceTimersByTimeAsync(30_000);
+        await vi.waitFor(() => expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(3));
+        await vi.advanceTimersByTimeAsync(90_000);
+        await validationPromise;
+
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(4);
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        const result = manager.getSession(pod.id);
+        expect(result.status).toBe('review_required');
+        expect(result.status).not.toBe('awaiting_input');
+        expect(result.validationAttempts).toBe(1);
+        expect(result.pendingEscalation).toBeNull();
+        expect(ctx.escalationRepo.listBySession(pod.id)).toHaveLength(0);
+        expect(result.lastCorrectionMessage).toBeNull();
+
+        const messages = ctx.eventRepo
+          .getForSession(pod.id, { type: 'pod.agent_activity' })
+          .map((event) => {
+            const payload = event.payload as { event?: { message?: unknown } };
+            return payload.event?.message;
+          });
+        expect(messages).toContain(
+          'Review infrastructure failure — retry budget exhausted, moving to review required',
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('moves pending fact deviations to review_required without retrying the agent', async () => {
       const ctx = createTestContext({
         overall: 'fail',
@@ -3437,6 +3590,48 @@ describe('PodManager', () => {
       // 2 retries before exhaustion (attempt 1 → retry, attempt 2 → retry, attempt 3 → review_required)
       expect(ctx.runtime.resume).toHaveBeenCalledTimes(2);
 
+      const result = manager.getSession(pod.id);
+      expect(result.status).toBe('review_required');
+      expect(result.validationAttempts).toBe(3);
+    });
+
+    it('keeps ordinary validation failures on correction feedback path', async () => {
+      const ctx = createTestContext({
+        overall: 'fail',
+        smoke: {
+          status: 'fail',
+          build: { status: 'fail', output: 'TypeScript build failed', duration: 100 },
+          health: {
+            status: 'skip',
+            url: 'http://localhost:3000',
+            responseCode: null,
+            duration: 0,
+          },
+          pages: [],
+        },
+        taskReview: null,
+        reviewSkipKind: 'upstream-failed',
+        reviewSkipReason: 'Skipped — earlier validation phases failed',
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.runtime.resume).toHaveBeenCalledTimes(2);
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(3);
+      const firstCorrection = vi.mocked(ctx.runtime.resume).mock.calls[0]?.[1];
+      expect(firstCorrection).toContain('Build Errors');
+      expect(firstCorrection).toContain('TypeScript build failed');
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('review_required');
       expect(result.validationAttempts).toBe(3);

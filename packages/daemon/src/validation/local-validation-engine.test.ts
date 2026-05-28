@@ -1317,6 +1317,39 @@ describe('validate() — facts + review gate', () => {
     expect(completed).toContainEqual({ phase: 'review', status: 'fail' });
   });
 
+  it('blocks validation when Codex review fails after deterministic gates pass', async () => {
+    const cm = codexReviewContainerManager({
+      reviewError: new Error('codex review exited with code 2'),
+    });
+    const engine = createLocalValidationEngine(cm);
+    const completed: Array<{ phase: string; status: string }> = [];
+
+    const result = await engine.validate(
+      baseConfig({
+        reviewerProvider: 'openai',
+        reviewerModel: 'gpt-5',
+        diff: `diff --git a/src/app.ts b/src/app.ts
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old
++new
+`,
+      }),
+      undefined,
+      undefined,
+      { onPhaseCompleted: (phase, status) => completed.push({ phase, status }) },
+    );
+
+    expect(result.taskReview).toBeNull();
+    expect(result.reviewSkipKind).toBe('review-failed');
+    expect(result.reviewSkipReason).toContain('codex review exited with code 2');
+    expect(result.overall).toBe('fail');
+    expect(result.smoke.status).toBe('pass');
+    expect(result.factValidation?.status).toBe('skip');
+    expect(completed).toContainEqual({ phase: 'review', status: 'fail' });
+  });
+
   it('marks profile-skip on Facts when skipPhases includes facts', async () => {
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);

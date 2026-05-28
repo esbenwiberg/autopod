@@ -563,6 +563,7 @@ export function buildActionableFailureSummary(status: PrMergeStatus, profile: Pr
 }
 
 const REVIEW_FEEDBACK_REPLY_MAX_CHARS = 2000;
+const REVIEW_INFRA_RETRY_BACKOFF_MS = [10_000, 30_000, 90_000] as const;
 
 function formatReviewFeedbackReply(response: ReviewFeedbackResponseItem): string {
   const outcomeLabel: Record<ReviewFeedbackResponseItem['outcome'], string> = {
@@ -573,6 +574,52 @@ function formatReviewFeedbackReply(response: ReviewFeedbackResponseItem): string
   };
   const body = response.response.trim().slice(0, REVIEW_FEEDBACK_REPLY_MAX_CHARS);
   return `Autopod fix pod response: ${outcomeLabel[response.outcome]}\n\n${body}`;
+}
+
+function isReviewInfrastructureOnlyFailure(result: ValidationResult): boolean {
+  if (result.taskReview !== null) return false;
+  if (result.reviewSkipKind !== 'review-timeout' && result.reviewSkipKind !== 'review-failed') {
+    return false;
+  }
+  if (result.smoke.build.status !== 'pass') return false;
+  if (result.smoke.health.status === 'fail') return false;
+  if (result.smoke.pages.some((page) => page.status === 'fail')) return false;
+  if (result.test?.status === 'fail') return false;
+  if (result.lint?.status === 'fail') return false;
+  if (result.sast?.status === 'fail') return false;
+  if (
+    result.factValidation &&
+    (result.factValidation.status === 'fail' || result.factValidation.status === 'pending_human')
+  ) {
+    return false;
+  }
+  return result.overall === 'fail';
+}
+
+function reviewInfrastructureFailureLabel(result: ValidationResult): string {
+  return result.reviewSkipKind === 'review-timeout'
+    ? 'Review infrastructure timeout'
+    : 'Review infrastructure failure';
+}
+
+async function waitForReviewInfrastructureRetry(
+  delayMs: number,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) {
+    throw new Error('Validation interrupted by user');
+  }
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, delayMs);
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(new Error('Validation interrupted by user'));
+      },
+      { once: true },
+    );
+  });
 }
 
 /** Auto-stop preview containers after this duration (default 10 minutes). */
@@ -8250,12 +8297,48 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const validationController = new AbortController();
         validationAbortControllers.set(podId, validationController);
         try {
-          result = await validationEngine.validate(
-            validationConfig,
-            (phase) => emitActivityStatus(podId, phase),
-            validationController.signal,
-            buildPhaseEventCallbacks(podId),
-          );
+          for (let reviewRetry = 0; ; reviewRetry += 1) {
+            result = await validationEngine.validate(
+              validationConfig,
+              (phase) => emitActivityStatus(podId, phase),
+              validationController.signal,
+              buildPhaseEventCallbacks(podId),
+            );
+
+            const retryDelayMs = REVIEW_INFRA_RETRY_BACKOFF_MS[reviewRetry];
+            if (!isReviewInfrastructureOnlyFailure(result) || retryDelayMs === undefined) {
+              break;
+            }
+
+            const retryNumber = reviewRetry + 1;
+            const retryLabel = reviewInfrastructureFailureLabel(result);
+            emitActivityStatus(
+              podId,
+              `${retryLabel} — retrying in ${retryDelayMs / 1000}s (${retryNumber}/${REVIEW_INFRA_RETRY_BACKOFF_MS.length})`,
+            );
+            logger.warn(
+              {
+                podId,
+                attempt,
+                reviewRetry: retryNumber,
+                maxReviewRetries: REVIEW_INFRA_RETRY_BACKOFF_MS.length,
+                retryDelayMs,
+                reviewSkipKind: result.reviewSkipKind,
+                reviewSkipReason: result.reviewSkipReason,
+              },
+              'Retrying validation after review infrastructure failure',
+            );
+            await waitForReviewInfrastructureRetry(retryDelayMs, validationController.signal);
+
+            const refreshed = podRepo.getOrThrow(podId);
+            if (isTerminalState(refreshed.status) || refreshed.status === 'killing') {
+              logger.info(
+                { podId, status: refreshed.status },
+                'Pod stopped during review infrastructure retry backoff',
+              );
+              return;
+            }
+          }
         } catch (validateErr) {
           // Treat unexpected validation errors as a failed result so retry logic still applies
           logger.error(
@@ -8561,6 +8644,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               const cm = containerManagerFactory.get(s2.executionTarget);
               await cm.stop(s2.containerId);
               logger.info({ podId }, 'Container stopped while awaiting fact deviation decision');
+            } catch (stopErr) {
+              logger.warn({ err: stopErr, podId }, 'Failed to stop container post-validation');
+            }
+          }
+          return;
+        }
+
+        if (isReviewInfrastructureOnlyFailure(effectiveResult)) {
+          emitActivityStatus(
+            podId,
+            `${reviewInfrastructureFailureLabel(effectiveResult)} — retry budget exhausted, moving to review required`,
+          );
+          transition(s2, 'review_required');
+
+          if (s2.containerId) {
+            try {
+              const cm = containerManagerFactory.get(s2.executionTarget);
+              await cm.stop(s2.containerId);
+              logger.info(
+                { podId },
+                'Container stopped after review infrastructure retries exhausted',
+              );
             } catch (stopErr) {
               logger.warn({ err: stopErr, podId }, 'Failed to stop container post-validation');
             }

@@ -288,7 +288,8 @@ describe('formatFeedback', () => {
       expect(output).toContain('Review Execution Failure');
       expect(output).toContain('Syntax error');
       expect(output).toContain('validation infrastructure failure');
-      expect(output).toContain('Report this blocker');
+      expect(output).not.toContain('Report this blocker');
+      expect(output).not.toContain('report_blocker');
     });
 
     it('tells the agent to report factDeviations for unavailable fact commands', () => {
