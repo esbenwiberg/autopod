@@ -639,13 +639,27 @@ async function reviewTargetWithRateLimitBackoff(input: {
         pacing.rateLimitMaxDelayMs,
       );
       const delayMs = retryDelayMs(err, fallbackDelayMs, pacing.rateLimitMaxDelayMs);
-      const waitMs = Math.min(delayMs, remainingMs, remainingTargetRetryMs);
-      if (waitMs <= 0) throw err;
+      // Truncating the wait would just stall then fail against a still-closed
+      // window. If either budget can't accommodate the provider's requested
+      // wait, surface the error now and let the next target proceed.
+      if (delayMs > remainingMs || delayMs > remainingTargetRetryMs) {
+        log?.warn(
+          {
+            err,
+            requestedDelayMs: delayMs,
+            retryBudgetRemainingMs: remainingMs,
+            targetRetryBudgetRemainingMs: remainingTargetRetryMs,
+            targetId: reviewInput.targets[0]?.id,
+          },
+          'advisory browser QA reviewer rate-limit window exceeds target retry budget; giving up',
+        );
+        throw err;
+      }
       log?.warn(
         {
           err,
           attempt: attempt + 1,
-          delayMs: waitMs,
+          delayMs,
           retryBudgetRemainingMs: remainingMs,
           targetRetryBudgetRemainingMs: remainingTargetRetryMs,
           targetId: reviewInput.targets[0]?.id,
@@ -653,10 +667,10 @@ async function reviewTargetWithRateLimitBackoff(input: {
         'advisory browser QA reviewer rate-limited; retrying target after backoff',
       );
       onProgress?.(
-        `Advisory QA waiting ${formatWait(waitMs)} for reviewer quota before ${targetNumber}/${targetsCount}: ${targetLabel}`,
+        `Advisory QA waiting ${formatWait(delayMs)} for reviewer quota before ${targetNumber}/${targetsCount}: ${targetLabel}`,
       );
       attempt += 1;
-      await pacing.sleep(waitMs);
+      await pacing.sleep(delayMs);
     }
   }
 }
@@ -1649,13 +1663,23 @@ async function retryRateLimited<T>(
       if (remainingMs <= 0) throw err;
       const fallbackDelayMs = fallbackRateLimitDelayMs(attempt, baseDelayMs, maxDelayMs);
       const delayMs = retryDelayMs(err, fallbackDelayMs, maxDelayMs);
+      // If the provider's requested wait exceeds our remaining budget, sleeping
+      // a truncated amount just stalls then retries into a still-closed window.
+      // Surface the error now so callers can move on instead of burning budget.
+      if (delayMs > remainingMs) {
+        log?.warn(
+          { err, requestedDelayMs: delayMs, retryBudgetRemainingMs: remainingMs },
+          'advisory browser QA reviewer rate-limit window exceeds retry budget; giving up',
+        );
+        throw err;
+      }
       log?.warn(
         { err, attempt: attempt + 1, delayMs, retryBudgetRemainingMs: remainingMs },
         'advisory browser QA reviewer rate-limited; retrying after backoff',
       );
       attempt += 1;
-      onRateLimitWait?.(Math.min(delayMs, remainingMs), attempt);
-      await sleep(Math.min(delayMs, remainingMs));
+      onRateLimitWait?.(delayMs, attempt);
+      await sleep(delayMs);
     }
   }
 }
@@ -1672,18 +1696,24 @@ function fallbackRateLimitDelayMs(
   return Math.min(baseDelayMs * 2 ** attempt, maxDelayMs);
 }
 
-function retryDelayMs(err: unknown, fallbackMs: number, maxDelayMs: number): number {
+function retryDelayMs(err: unknown, fallbackMs: number, _maxDelayMs: number): number {
+  // When the provider sends retry-after, honor it fully — the calling retry
+  // loop's deadline check is the real ceiling. Capping here just truncates a
+  // 60s wait to maxDelayMs and retries into the still-active window, wasting
+  // budget on guaranteed-to-fail attempts.
   const retryAfter = headerValue(err, 'retry-after');
   const retryAfterSeconds = retryAfter ? Number(retryAfter) : Number.NaN;
   if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
-    return Math.max(500, Math.min(maxDelayMs, retryAfterSeconds * 1_000));
+    return Math.max(500, retryAfterSeconds * 1_000);
   }
   if (retryAfter) {
     const retryAfterDate = Date.parse(retryAfter);
     if (Number.isFinite(retryAfterDate)) {
-      return Math.max(500, Math.min(maxDelayMs, retryAfterDate - Date.now()));
+      return Math.max(500, retryAfterDate - Date.now());
     }
   }
+  // Without a provider hint, the exponential fallback (already capped by the
+  // caller via fallbackRateLimitDelayMs) is our best guess.
   return fallbackMs;
 }
 

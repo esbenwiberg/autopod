@@ -582,6 +582,105 @@ human_review: []
     expect(review).toHaveBeenCalledTimes(2);
   });
 
+  it('honors retry-after even when it exceeds the configured max delay cap', async () => {
+    let now = 0;
+    const sleep = vi.fn(async (ms: number) => {
+      now += ms;
+    });
+    const hostBrowserRunner = createHostBrowserRunner(
+      browserStdout([
+        {
+          targetId: 'scenario:dashboard',
+          url: 'http://127.0.0.1:3000/',
+          title: 'Dashboard',
+          notes: ['Dashboard visible'],
+          screenshotPath: '/tmp/advisory/screenshots/dashboard.png',
+        },
+      ]),
+    );
+    const review = vi
+      .fn()
+      .mockRejectedValueOnce(rateLimitError('90'))
+      .mockResolvedValueOnce({
+        status: 'pass' as const,
+        reasoning: 'Dashboard reviewed after long wait',
+        observations: [
+          {
+            id: 'dashboard-ok',
+            targetId: 'scenario:dashboard',
+            status: 'pass' as const,
+            summary: 'Dashboard passed.',
+          },
+        ],
+      });
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-retry-after-uncapped',
+      task: 'Check dashboard',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
+      hostBrowserRunner,
+      screenshotStore: createScreenshotStore(),
+      reviewer: { review },
+      totalBudgetMs: 240_000,
+      rateLimitTargetBudgetMs: 180_000,
+      rateLimitBaseDelayMs: 20_000,
+      rateLimitMaxDelayMs: 30_000,
+      now: () => now,
+      sleep,
+    });
+
+    expect(result.status).toBe('pass');
+    // retry-after was 90s; the old capping logic would have truncated to 30s
+    // (rateLimitMaxDelayMs) and retried into the still-active window.
+    expect(sleep).toHaveBeenCalledWith(90_000);
+    expect(review).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces a 429 immediately when retry-after exceeds the remaining target budget', async () => {
+    let now = 0;
+    const sleep = vi.fn(async (ms: number) => {
+      now += ms;
+    });
+    const hostBrowserRunner = createHostBrowserRunner(
+      browserStdout([
+        {
+          targetId: 'scenario:dashboard',
+          url: 'http://127.0.0.1:3000/',
+          title: 'Dashboard',
+          notes: ['Dashboard visible'],
+          screenshotPath: '/tmp/advisory/screenshots/dashboard.png',
+        },
+      ]),
+    );
+    const review = vi.fn().mockRejectedValue(rateLimitError('600'));
+    const progress: string[] = [];
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-retry-after-too-long',
+      task: 'Check dashboard',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
+      hostBrowserRunner,
+      screenshotStore: createScreenshotStore(),
+      reviewer: { review },
+      onProgress: (message) => progress.push(message),
+      totalBudgetMs: 120_000,
+      rateLimitTargetBudgetMs: 60_000,
+      rateLimitBaseDelayMs: 20_000,
+      rateLimitMaxDelayMs: 30_000,
+      now: () => now,
+      sleep,
+    });
+
+    // The reviewer's requested wait (600s) exceeds the per-target budget (60s),
+    // so we should give up after the first failed attempt instead of stalling.
+    expect(review).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(result.status).toBe('uncertain');
+    expect(progress.some((message) => message.includes('waiting'))).toBe(false);
+  });
+
   it('does not let slow action planning consume the visual review budget', async () => {
     let now = 0;
     const sleep = vi.fn(async (ms: number) => {
