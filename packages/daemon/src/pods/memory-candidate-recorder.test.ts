@@ -1,4 +1,3 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import type { AgentActivityEvent, AgentTaskSummaryEvent, Profile } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +7,7 @@ import { createEventBus } from './event-bus.js';
 import { createEventRepository } from './event-repository.js';
 import { createMemoryCandidateRecorder } from './memory-candidate-recorder.js';
 import { createMemoryCandidateRepository } from './memory-candidate-repository.js';
+import { createMemoryExtractionAttemptRepository } from './memory-extraction-attempt-repository.js';
 import { createMemoryRepository } from './memory-repository.js';
 import type { NewPod } from './pod-repository.js';
 import { createPodRepository } from './pod-repository.js';
@@ -17,11 +17,11 @@ import { createValidationRepository } from './validation-repository.js';
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../providers/llm-client.js', () => ({
-  createProfileAnthropicClient: vi.fn(),
+vi.mock('../providers/memory-reviewer.js', () => ({
+  createProfileMemoryReviewer: vi.fn(),
 }));
 
-import { createProfileAnthropicClient } from '../providers/llm-client.js';
+import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 
 const CANDIDATE_JSON = JSON.stringify({
   create: true,
@@ -37,13 +37,10 @@ const CANDIDATE_JSON = JSON.stringify({
   updateTargetPath: null,
 });
 
-function makeMockAnthropicClient(responseText = CANDIDATE_JSON) {
+function makeMockReviewer(responseText = CANDIDATE_JSON) {
   return {
-    messages: {
-      create: vi.fn().mockResolvedValue({
-        content: [{ type: 'text', text: responseText }],
-      }),
-    },
+    model: 'claude-haiku-4-5-20251001',
+    generateText: vi.fn().mockResolvedValue(responseText),
   };
 }
 
@@ -127,6 +124,7 @@ describe('MemoryCandidateRecorder', () => {
   let eventRepo: ReturnType<typeof createEventRepository>;
   let escalationRepo: ReturnType<typeof createEscalationRepository>;
   let candidateRepo: ReturnType<typeof createMemoryCandidateRepository>;
+  let attemptRepo: ReturnType<typeof createMemoryExtractionAttemptRepository>;
   let memoryRepo: ReturnType<typeof createMemoryRepository>;
   let validationRepo: ReturnType<typeof createValidationRepository>;
   let eventBus: ReturnType<typeof createEventBus>;
@@ -140,15 +138,16 @@ describe('MemoryCandidateRecorder', () => {
     eventRepo = createEventRepository(db);
     escalationRepo = createEscalationRepository(db);
     candidateRepo = createMemoryCandidateRepository(db);
+    attemptRepo = createMemoryExtractionAttemptRepository(db);
     memoryRepo = createMemoryRepository(db);
     validationRepo = createValidationRepository(db);
     eventBus = createEventBus(eventRepo, logger);
 
     mockProfileStore = { get: vi.fn().mockReturnValue(makeProfile()) };
 
-    vi.mocked(createProfileAnthropicClient).mockResolvedValue({
+    vi.mocked(createProfileMemoryReviewer).mockResolvedValue({
       ok: true,
-      client: makeMockAnthropicClient() as unknown as Anthropic,
+      reviewer: makeMockReviewer(),
       model: 'claude-haiku-4-5-20251001',
     });
   });
@@ -168,6 +167,7 @@ describe('MemoryCandidateRecorder', () => {
       podRepo,
       profileStore: mockProfileStore as never,
       candidateRepo,
+      attemptRepo,
       memoryRepo,
       eventRepo,
       escalationRepo,
@@ -200,6 +200,12 @@ describe('MemoryCandidateRecorder', () => {
     expect(candidates[0]?.createdByPodId).toBe(POD_ID);
     expect(candidates[0]?.path).toBe('/gotchas/build-before-test.md');
     expect(candidates[0]?.status).toBe('pending');
+    expect(attemptRepo.getByPod(POD_ID)).toMatchObject({
+      status: 'candidate_created',
+      candidateId: candidates[0]?.id,
+      score: 0.3,
+      signals: ['pr_fix_attempts:2'],
+    });
   });
 
   it('creates a candidate on pod.status_changed to failed', async () => {
@@ -338,7 +344,12 @@ describe('MemoryCandidateRecorder', () => {
     await flushAsync();
 
     expect(candidateRepo.list('test-profile')).toHaveLength(0);
-    expect(createProfileAnthropicClient).not.toHaveBeenCalled();
+    expect(createProfileMemoryReviewer).not.toHaveBeenCalled();
+    expect(attemptRepo.getByPod(POD_ID)).toMatchObject({
+      status: 'below_threshold',
+      reason: 'lesson_potential_below_threshold',
+      score: 0,
+    });
 
     podRepo.update(POD_ID, { status: 'complete', prFixAttempts: 2 });
 
@@ -354,22 +365,22 @@ describe('MemoryCandidateRecorder', () => {
     recorder.stop();
 
     expect(candidateRepo.list('test-profile')).toHaveLength(1);
-    expect(createProfileAnthropicClient).toHaveBeenCalledTimes(1);
+    expect(createProfileMemoryReviewer).toHaveBeenCalledTimes(1);
+    expect(attemptRepo.getByPod(POD_ID)?.status).toBe('candidate_created');
   });
 
   it('deduplicates repeated events while extraction is in flight', async () => {
-    let resolveReviewer: (value: Anthropic.Message) => void = () => {};
-    const reviewerPromise = new Promise<Anthropic.Message>((resolve) => {
+    let resolveReviewer: (value: string) => void = () => {};
+    const reviewerPromise = new Promise<string>((resolve) => {
       resolveReviewer = resolve;
     });
-    const mockClient = {
-      messages: {
-        create: vi.fn().mockReturnValue(reviewerPromise),
-      },
-    } as unknown as Anthropic;
-    vi.mocked(createProfileAnthropicClient).mockResolvedValue({
+    const mockReviewer = {
+      model: 'claude-haiku-4-5-20251001',
+      generateText: vi.fn().mockReturnValue(reviewerPromise),
+    };
+    vi.mocked(createProfileMemoryReviewer).mockResolvedValue({
       ok: true,
-      client: mockClient,
+      reviewer: mockReviewer,
       model: 'claude-haiku-4-5-20251001',
     });
 
@@ -392,12 +403,10 @@ describe('MemoryCandidateRecorder', () => {
 
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    expect(createProfileAnthropicClient).toHaveBeenCalledTimes(1);
-    expect(mockClient.messages.create).toHaveBeenCalledTimes(1);
+    expect(createProfileMemoryReviewer).toHaveBeenCalledTimes(1);
+    expect(mockReviewer.generateText).toHaveBeenCalledTimes(1);
 
-    resolveReviewer({
-      content: [{ type: 'text', text: CANDIDATE_JSON }],
-    } as Anthropic.Message);
+    resolveReviewer(CANDIDATE_JSON);
 
     await flushAsync();
     recorder.stop();
@@ -467,12 +476,16 @@ describe('MemoryCandidateRecorder', () => {
     recorder.stop();
 
     expect(candidateRepo.list('test-profile')).toHaveLength(0);
+    expect(attemptRepo.getByPod(POD_ID)).toMatchObject({
+      status: 'below_threshold',
+      reason: 'lesson_potential_below_threshold',
+    });
   });
 
   it('records no candidate when reviewer model returns create:false', async () => {
-    vi.mocked(createProfileAnthropicClient).mockResolvedValue({
+    vi.mocked(createProfileMemoryReviewer).mockResolvedValue({
       ok: true,
-      client: makeMockAnthropicClient(JSON.stringify({ create: false })) as unknown as Anthropic,
+      reviewer: makeMockReviewer(JSON.stringify({ create: false })),
       model: 'claude-haiku-4-5-20251001',
     });
 
@@ -497,7 +510,7 @@ describe('MemoryCandidateRecorder', () => {
   });
 
   it('logs warning but does not throw when reviewer model is unavailable', async () => {
-    vi.mocked(createProfileAnthropicClient).mockResolvedValue({
+    vi.mocked(createProfileMemoryReviewer).mockResolvedValue({
       ok: false,
       reason: 'no_anthropic_api_key',
     });
@@ -521,6 +534,10 @@ describe('MemoryCandidateRecorder', () => {
     recorder.stop();
 
     expect(candidateRepo.list('test-profile')).toHaveLength(0);
+    expect(attemptRepo.getByPod(POD_ID)).toMatchObject({
+      status: 'reviewer_unavailable',
+      reason: 'no_anthropic_api_key',
+    });
   });
 
   it('extracts task summary and blockers from events for evidence', async () => {
@@ -543,10 +560,10 @@ describe('MemoryCandidateRecorder', () => {
     };
     eventRepo.insert(agentActivity);
 
-    const mockClient = makeMockAnthropicClient();
-    vi.mocked(createProfileAnthropicClient).mockResolvedValue({
+    const mockReviewer = makeMockReviewer();
+    vi.mocked(createProfileMemoryReviewer).mockResolvedValue({
       ok: true,
-      client: mockClient as never,
+      reviewer: mockReviewer,
       model: 'claude-haiku-4-5-20251001',
     });
 
@@ -565,9 +582,9 @@ describe('MemoryCandidateRecorder', () => {
     recorder.stop();
 
     // Verify the LLM was called with user content that includes the task summary
-    const createCalls = mockClient.messages.create.mock.calls;
+    const createCalls = vi.mocked(mockReviewer.generateText).mock.calls;
     expect(createCalls.length).toBe(1);
-    const userContent = createCalls[0]?.[0]?.messages?.[0]?.content as string;
+    const userContent = createCalls[0]?.[0]?.userMessage;
     expect(userContent).toContain('Implemented the migration runner');
   });
 

@@ -223,6 +223,7 @@ public struct AppRootView: View {
       memoryEntries: memoryStore.entries,
       activeMemories: memoryStore.activeMemories,
       pendingMemoryCandidates: memoryStore.pendingCandidates,
+      memoryExtractionAttempts: memoryStore.extractionAttempts,
       selectedMemoryUsage: memoryStore.selectedUsage,
       selectedMemorySourceEvidence: memoryStore.selectedSourceEvidence,
       selectedMemoryStaleEvidence: memoryStore.selectedStaleEvidence,
@@ -251,6 +252,7 @@ public struct AppRootView: View {
         }
         await memoryStore.loadMemories()
         await memoryStore.loadPendingCandidates(scopeIds: profileStore.profileNames)
+        await memoryStore.loadExtractionAttempts(profileNames: profileStore.profileNames)
         await memoryStore.loadAnalytics()
       }
     )

@@ -11,11 +11,12 @@ import type {
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ProfileStore } from '../profiles/index.js';
-import { createProfileAnthropicClient } from '../providers/llm-client.js';
+import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
 import type { MemoryCandidateRepository } from './memory-candidate-repository.js';
+import type { MemoryExtractionAttemptRepository } from './memory-extraction-attempt-repository.js';
 import {
   LESSON_POTENTIAL_THRESHOLD,
   computeLessonPotential,
@@ -24,6 +25,7 @@ import {
 import type { MemoryRepository } from './memory-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import { computeQualitySignals } from './quality-signals.js';
+import { resolveReviewerModel } from './runtime-resolver.js';
 import type { ValidationRepository } from './validation-repository.js';
 
 export interface MemoryCandidateRecorder {
@@ -36,6 +38,7 @@ export interface MemoryCandidateRecorderDeps {
   podRepo: PodRepository;
   profileStore: ProfileStore;
   candidateRepo: MemoryCandidateRepository;
+  attemptRepo?: MemoryExtractionAttemptRepository;
   memoryRepo: MemoryRepository;
   eventRepo: EventRepository;
   escalationRepo: EscalationRepository;
@@ -64,6 +67,7 @@ export function createMemoryCandidateRecorder(
     podRepo,
     profileStore,
     candidateRepo,
+    attemptRepo,
     memoryRepo,
     eventRepo,
     escalationRepo,
@@ -78,6 +82,30 @@ export function createMemoryCandidateRecorder(
   const processedPodIds = new Set<string>();
   const inFlightPodIds = new Set<string>();
 
+  function recordAttempt(input: {
+    podId: string;
+    profileName: string;
+    status: Parameters<MemoryExtractionAttemptRepository['record']>[0]['status'];
+    reason: string;
+    score: number | null;
+    signals: string[];
+    candidateId?: string | null;
+  }): void {
+    try {
+      attemptRepo?.record({
+        podId: input.podId,
+        profileName: input.profileName,
+        status: input.status,
+        reason: input.reason,
+        score: input.score,
+        signals: input.signals,
+        candidateId: input.candidateId ?? null,
+      });
+    } catch (err) {
+      logger.warn({ err, podId: input.podId }, 'Failed to record memory extraction attempt');
+    }
+  }
+
   async function runExtraction(podId: string): Promise<ExtractionOutcome> {
     // Double-check DB idempotency: handles daemon restarts between events.
     if (candidateRepo.existsForPod(podId)) {
@@ -88,7 +116,17 @@ export function createMemoryCandidateRecorder(
     const pod = podRepo.getOrThrow(podId);
 
     // Only extract for future agent-driven pods.
-    if (pod.options.agentMode !== 'auto') return 'ignored';
+    if (pod.options.agentMode !== 'auto') {
+      recordAttempt({
+        podId,
+        profileName: pod.profileName,
+        status: 'skipped',
+        reason: 'agent_mode_not_auto',
+        score: null,
+        signals: [],
+      });
+      return 'ignored';
+    }
 
     let profile: Profile;
     try {
@@ -98,6 +136,14 @@ export function createMemoryCandidateRecorder(
         { podId, profileName: pod.profileName },
         'Profile not found, skipping extraction',
       );
+      recordAttempt({
+        podId,
+        profileName: pod.profileName,
+        status: 'skipped',
+        reason: 'profile_not_found',
+        score: null,
+        signals: [],
+      });
       return 'ignored';
     }
 
@@ -112,6 +158,14 @@ export function createMemoryCandidateRecorder(
 
     if (score < LESSON_POTENTIAL_THRESHOLD) {
       logger.debug({ podId, score }, 'Lesson potential below threshold, skipping extraction');
+      recordAttempt({
+        podId,
+        profileName: pod.profileName,
+        status: 'below_threshold',
+        reason: 'lesson_potential_below_threshold',
+        score,
+        signals: lessonSignals,
+      });
       return 'retryable';
     }
 
@@ -120,14 +174,21 @@ export function createMemoryCandidateRecorder(
 
     const existingMemories = memoryRepo.list('profile', pod.profileName, true);
 
-    const reviewerModelId =
-      profile.reviewerModel ?? profile.defaultModel ?? pod.model ?? 'claude-haiku-4-5';
-    const clientResult = await createProfileAnthropicClient(profile, reviewerModelId, logger);
-    if (!clientResult.ok) {
+    const reviewerModelId = resolveReviewerModel(profile, logger);
+    const reviewerResult = await createProfileMemoryReviewer(profile, reviewerModelId, logger);
+    if (!reviewerResult.ok) {
       logger.warn(
-        { podId, reason: clientResult.reason },
+        { podId, reason: reviewerResult.reason },
         'Reviewer model unavailable for memory extraction',
       );
+      recordAttempt({
+        podId,
+        profileName: pod.profileName,
+        status: 'reviewer_unavailable',
+        reason: reviewerResult.reason,
+        score,
+        signals: lessonSignals,
+      });
       return 'retryable';
     }
 
@@ -136,8 +197,8 @@ export function createMemoryCandidateRecorder(
       lessonSignals,
       evidence,
       existingMemories,
-      anthropicClient: clientResult.client,
-      reviewerModel: clientResult.model,
+      reviewer: reviewerResult.reviewer,
+      reviewerModel: reviewerResult.model,
       logger,
     });
 
@@ -153,6 +214,15 @@ export function createMemoryCandidateRecorder(
         { podId, candidateId: candidate.id, action: candidate.action, path: candidate.path },
         'Memory candidate created',
       );
+      recordAttempt({
+        podId,
+        profileName: pod.profileName,
+        status: 'candidate_created',
+        reason: 'candidate_created',
+        score,
+        signals: lessonSignals,
+        candidateId: candidate.id,
+      });
       return 'done';
     }
 
@@ -161,6 +231,14 @@ export function createMemoryCandidateRecorder(
         { podId, kind: result.kind, reason: result.reason },
         'No memory candidate created',
       );
+      recordAttempt({
+        podId,
+        profileName: pod.profileName,
+        status: 'no_candidate',
+        reason: result.reason,
+        score,
+        signals: lessonSignals,
+      });
       return 'done';
     }
 
@@ -168,6 +246,14 @@ export function createMemoryCandidateRecorder(
       { podId, kind: result.kind, reason: result.reason },
       'No memory candidate created',
     );
+    recordAttempt({
+      podId,
+      profileName: pod.profileName,
+      status: classifySkippedResult(result.reason),
+      reason: result.reason,
+      score,
+      signals: lessonSignals,
+    });
     return 'retryable';
   }
 
@@ -215,6 +301,14 @@ export function createMemoryCandidateRecorder(
       unsubscribers.length = 0;
     },
   };
+}
+
+function classifySkippedResult(reason: string): 'reviewer_failed' | 'invalid_response' | 'skipped' {
+  if (reason.startsWith('reviewer_model_failed')) return 'reviewer_failed';
+  if (reason.startsWith('json_parse_failed') || reason.startsWith('output_invalid')) {
+    return 'invalid_response';
+  }
+  return 'skipped';
 }
 
 // ---------------------------------------------------------------------------

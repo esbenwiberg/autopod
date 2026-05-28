@@ -449,6 +449,99 @@ public struct MemoryCandidateUpdate: Equatable, Sendable, Codable {
   }
 }
 
+public enum MemoryExtractionAttemptStatus: Equatable, Sendable, Codable {
+  case candidateCreated
+  case belowThreshold
+  case reviewerUnavailable
+  case reviewerFailed
+  case invalidResponse
+  case noCandidate
+  case skipped
+  case unknown(String)
+
+  public init(from decoder: any Decoder) throws {
+    let value = try decoder.singleValueContainer().decode(String.self)
+    switch value {
+    case "candidate_created": self = .candidateCreated
+    case "below_threshold": self = .belowThreshold
+    case "reviewer_unavailable": self = .reviewerUnavailable
+    case "reviewer_failed": self = .reviewerFailed
+    case "invalid_response": self = .invalidResponse
+    case "no_candidate": self = .noCandidate
+    case "skipped": self = .skipped
+    default: self = .unknown(value)
+    }
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(rawValue)
+  }
+
+  public var rawValue: String {
+    switch self {
+    case .candidateCreated: "candidate_created"
+    case .belowThreshold: "below_threshold"
+    case .reviewerUnavailable: "reviewer_unavailable"
+    case .reviewerFailed: "reviewer_failed"
+    case .invalidResponse: "invalid_response"
+    case .noCandidate: "no_candidate"
+    case .skipped: "skipped"
+    case .unknown(let value): value
+    }
+  }
+
+  public var label: String {
+    switch self {
+    case .candidateCreated: "Candidate created"
+    case .belowThreshold: "Below threshold"
+    case .reviewerUnavailable: "Reviewer unavailable"
+    case .reviewerFailed: "Reviewer failed"
+    case .invalidResponse: "Invalid response"
+    case .noCandidate: "No candidate"
+    case .skipped: "Skipped"
+    case .unknown(let value): value
+    }
+  }
+}
+
+public struct MemoryExtractionAttempt: Identifiable, Equatable, Sendable, Codable {
+  public let id: String
+  public let podId: String
+  public let profileName: String
+  public let status: MemoryExtractionAttemptStatus
+  public let reason: String
+  public let score: Double?
+  public let signals: [String]
+  public let candidateId: String?
+  public let createdAt: String
+  public let updatedAt: String
+
+  public init(
+    id: String,
+    podId: String,
+    profileName: String,
+    status: MemoryExtractionAttemptStatus,
+    reason: String,
+    score: Double? = nil,
+    signals: [String] = [],
+    candidateId: String? = nil,
+    createdAt: String = "",
+    updatedAt: String = ""
+  ) {
+    self.id = id
+    self.podId = podId
+    self.profileName = profileName
+    self.status = status
+    self.reason = reason
+    self.score = score
+    self.signals = signals
+    self.candidateId = candidateId
+    self.createdAt = createdAt
+    self.updatedAt = updatedAt
+  }
+}
+
 public enum MemoryUsageKind: Equatable, Sendable, Codable {
   case selected
   case injected

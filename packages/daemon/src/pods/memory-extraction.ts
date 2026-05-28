@@ -1,4 +1,3 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import type {
   MemoryCandidate,
   MemoryEntry,
@@ -9,6 +8,7 @@ import type {
 } from '@autopod/shared';
 import { generateId, processContent } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { MemoryReviewer } from '../providers/memory-reviewer.js';
 
 export const LESSON_POTENTIAL_THRESHOLD = 0.2;
 
@@ -158,12 +158,11 @@ export async function extractCandidate(opts: {
   lessonSignals: string[];
   evidence: ExtractionEvidence;
   existingMemories: MemoryEntry[];
-  anthropicClient: Anthropic;
+  reviewer: MemoryReviewer;
   reviewerModel: string;
   logger: Logger;
 }): Promise<ExtractionResult> {
-  const { pod, lessonSignals, evidence, existingMemories, anthropicClient, reviewerModel, logger } =
-    opts;
+  const { pod, lessonSignals, evidence, existingMemories, reviewer, reviewerModel, logger } = opts;
 
   const sanitizedTask = sanitize(pod.task.slice(0, 500));
   const sanitizedSummary = evidence.taskSummary
@@ -199,23 +198,21 @@ export async function extractCandidate(opts: {
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(() => reject(new Error('reviewer_model_timeout')), API_TIMEOUT_MS);
     });
-    const result = await Promise.race<Anthropic.Message>([
-      anthropicClient.messages.create({
-        model: reviewerModel,
-        max_tokens: 512,
-        system: REVIEWER_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: userMessage }],
+    rawResponse = await Promise.race<string>([
+      reviewer.generateText({
+        systemPrompt: REVIEWER_SYSTEM_PROMPT,
+        userMessage,
+        maxTokens: 512,
       }),
       timeoutPromise,
     ]);
     clearTimeout(timeoutId);
-    const textBlock = result.content.find(
-      (b): b is { type: 'text'; text: string } => b.type === 'text',
-    );
-    rawResponse = textBlock?.text ?? '';
   } catch (err) {
     const reason = `reviewer_model_failed: ${err instanceof Error ? err.message : String(err)}`;
-    logger.warn({ podId: pod.id, reason }, 'Reviewer model call failed for memory extraction');
+    logger.warn(
+      { podId: pod.id, model: reviewerModel, reason },
+      'Reviewer model call failed for memory extraction',
+    );
     return { kind: 'skipped', reason };
   }
 

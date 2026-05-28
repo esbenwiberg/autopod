@@ -8,12 +8,14 @@ import type {
 import { generateId } from '@autopod/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { MemoryCandidateRepository } from '../../pods/memory-candidate-repository.js';
+import type { MemoryExtractionAttemptRepository } from '../../pods/memory-extraction-attempt-repository.js';
 import type { MemoryRepository } from '../../pods/memory-repository.js';
 import type { MemoryUsageRepository } from '../../pods/memory-usage-repository.js';
 
 export interface MemoryDeps {
   memoryRepo: MemoryRepository;
   memoryCandidateRepo?: MemoryCandidateRepository;
+  memoryExtractionAttemptRepo?: MemoryExtractionAttemptRepository;
   memoryUsageRepo?: MemoryUsageRepository;
 }
 
@@ -41,7 +43,7 @@ type CandidatePatchBody = Partial<
 };
 
 export function memoryRoutes(app: FastifyInstance, deps: MemoryDeps): void {
-  const { memoryRepo, memoryCandidateRepo, memoryUsageRepo } = deps;
+  const { memoryRepo, memoryCandidateRepo, memoryExtractionAttemptRepo, memoryUsageRepo } = deps;
 
   function candidateRepoOr503(reply: FastifyReply) {
     if (memoryCandidateRepo) return memoryCandidateRepo;
@@ -118,6 +120,24 @@ export function memoryRoutes(app: FastifyInstance, deps: MemoryDeps): void {
     const candidate = repo.get(id);
     if (!candidate) return reply.status(404).send({ error: `Memory candidate not found: ${id}` });
     return { candidateId: id, evidence: candidate.sourceEvidence };
+  });
+
+  // GET /memory/extraction-attempts?profileName=&limit=
+  app.get('/memory/extraction-attempts', async (request, reply) => {
+    if (!memoryExtractionAttemptRepo) {
+      return reply
+        .status(503)
+        .send({ error: 'Memory extraction attempts unavailable — repository not wired' });
+    }
+    const q = request.query as { profileName?: string; limit?: string };
+    if (!q.profileName) {
+      return reply.status(400).send({ error: 'profileName is required' });
+    }
+    const limit = q.limit ? Number.parseInt(q.limit, 10) : 20;
+    return memoryExtractionAttemptRepo.listByProfile(
+      q.profileName,
+      Number.isNaN(limit) ? 20 : limit,
+    );
   });
 
   // PATCH /memory/candidates/:id — approve/reject/update pending durable candidates.

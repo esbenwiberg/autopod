@@ -36,6 +36,7 @@ import {
   createFixFeedbackRepository,
   createMemoryCandidateRecorder,
   createMemoryCandidateRepository,
+  createMemoryExtractionAttemptRepository,
   createMemoryRepository,
   createMemoryUsageRepository,
   createNudgeRepository,
@@ -179,6 +180,7 @@ const validationRepo = createValidationRepository(db);
 const progressEventRepo = createProgressEventRepository(db);
 const memoryRepo = createMemoryRepository(db);
 const memoryCandidateRepo = createMemoryCandidateRepository(db);
+const memoryExtractionAttemptRepo = createMemoryExtractionAttemptRepository(db);
 const memoryUsageRepo = createMemoryUsageRepository(db);
 const pendingOverrideRepo = createPendingOverrideRepository(db);
 const qualityScoreRepo = createQualityScoreRepository(db);
@@ -638,6 +640,7 @@ const memoryCandidateRecorder = createMemoryCandidateRecorder({
   podRepo,
   profileStore,
   candidateRepo: memoryCandidateRepo,
+  attemptRepo: memoryExtractionAttemptRepo,
   memoryRepo,
   eventRepo,
   escalationRepo,
@@ -690,6 +693,7 @@ const app = await createServer({
   sessionTokenIssuer,
   memoryRepo,
   memoryCandidateRepo,
+  memoryExtractionAttemptRepo,
   memoryUsageRepo,
   pendingOverrideRepo,
   scheduledJobManager,

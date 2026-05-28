@@ -9,6 +9,7 @@ public final class MemoryStore {
     public private(set) var entries: [MemoryEntry] = []
     public private(set) var activeMemories: [MemoryEntry] = []
     public private(set) var pendingCandidates: [MemoryCandidate] = []
+    public private(set) var extractionAttempts: [MemoryExtractionAttempt] = []
     public private(set) var selectedMemory: MemoryEntry?
     public private(set) var selectedCandidate: MemoryCandidate?
     public private(set) var selectedUsage: [MemoryUsageEvent] = []
@@ -76,6 +77,7 @@ public final class MemoryStore {
     public func loadWorkbench(profileNames: [String], analyticsDays: Int = 30) async {
         await loadMemories()
         await loadPendingCandidates(scopeIds: profileNames)
+        await loadExtractionAttempts(profileNames: profileNames)
         await loadAnalytics(days: analyticsDays)
     }
 
@@ -99,6 +101,21 @@ public final class MemoryStore {
             self.error = error.localizedDescription
         }
         isLoading = false
+    }
+
+    public func loadExtractionAttempts(profileNames: [String], limit: Int = 20) async {
+        guard let api else { return }
+        let uniqueProfileNames = Array(Set(profileNames)).sorted()
+        do {
+            var fetched: [MemoryExtractionAttempt] = []
+            for profileName in uniqueProfileNames {
+                fetched += try await api.listMemoryExtractionAttempts(profileName: profileName, limit: limit)
+            }
+            extractionAttempts = Self.sortedAttemptsByUpdatedAt(fetched)
+        } catch {
+            print("[MemoryStore] Failed to load memory extraction attempts: \(error)")
+            self.error = error.localizedDescription
+        }
     }
 
     public func loadActiveMemories(scopeId: String? = nil) async {
@@ -450,5 +467,9 @@ public final class MemoryStore {
 
     private static func sortedCandidatesByUpdatedAt(_ candidates: [MemoryCandidate]) -> [MemoryCandidate] {
         candidates.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    private static func sortedAttemptsByUpdatedAt(_ attempts: [MemoryExtractionAttempt]) -> [MemoryExtractionAttempt] {
+        attempts.sorted { $0.updatedAt > $1.updatedAt }
     }
 }

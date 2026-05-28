@@ -248,6 +248,8 @@ export type {
   MemoryCandidateStatus,
   MemoryCandidateAction,
   MemoryCandidate,
+  MemoryExtractionAttemptStatus,
+  MemoryExtractionAttempt,
   MemoryUsageKind,
   MemoryUsageOutcome,
   MemoryUsageEvent,

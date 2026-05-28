@@ -19,6 +19,7 @@ import type {
   EventBus,
   EventRepository,
   MemoryCandidateRepository,
+  MemoryExtractionAttemptRepository,
   MemoryRepository,
   MemoryUsageRepository,
   PendingOverrideRepository,
@@ -81,6 +82,7 @@ export interface ServerDependencies {
   sessionTokenIssuer?: PodTokenIssuer;
   memoryRepo?: MemoryRepository;
   memoryCandidateRepo?: MemoryCandidateRepository;
+  memoryExtractionAttemptRepo?: MemoryExtractionAttemptRepository;
   memoryUsageRepo?: MemoryUsageRepository;
   pendingOverrideRepo?: PendingOverrideRepository;
   scheduledJobManager?: ScheduledJobManager;
@@ -181,6 +183,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     memoryRoutes(app, {
       memoryRepo: deps.memoryRepo,
       memoryCandidateRepo: deps.memoryCandidateRepo,
+      memoryExtractionAttemptRepo: deps.memoryExtractionAttemptRepo,
       memoryUsageRepo: deps.memoryUsageRepo,
     });
   }

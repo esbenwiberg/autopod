@@ -110,6 +110,40 @@ import Testing
     #expect(result.map(\.id) == ["u1"])
 }
 
+@Test func memoryWorkbenchShowsExtractionAttemptsOnWorkbenchEmptyStates() {
+    let attempt = MemoryExtractionAttempt(
+        id: "attempt-1",
+        podId: "pod-1",
+        profileName: "backend",
+        status: .reviewerUnavailable,
+        reason: "openai_auth_unavailable",
+        score: 0.3,
+        signals: ["pr_fix_attempts:2"]
+    )
+
+    let profileAttempts = MemoryManagementView.filteredExtractionAttempts(
+        [attempt],
+        scope: .profile,
+        query: "openai"
+    )
+    let globalAttempts = MemoryManagementView.filteredExtractionAttempts(
+        [attempt],
+        scope: .global,
+        query: ""
+    )
+
+    let podAttempts = MemoryManagementView.filteredExtractionAttempts(
+        [attempt],
+        scope: .pod,
+        query: ""
+    )
+
+    #expect(profileAttempts.map(\.id) == ["attempt-1"])
+    #expect(globalAttempts.map(\.id) == ["attempt-1"])
+    #expect(podAttempts.isEmpty)
+    #expect(MemoryManagementView.humanReadableAttemptReason("openai_auth_unavailable").contains("OpenAI"))
+}
+
 private func makeMemory(
     id: String,
     scope: MemoryScope = .profile,

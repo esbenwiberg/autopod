@@ -1,7 +1,7 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import type { MemoryEntry, Pod, QualitySignals } from '@autopod/shared';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
+import type { MemoryReviewer } from '../providers/memory-reviewer.js';
 import {
   LESSON_POTENTIAL_THRESHOLD,
   computeLessonPotential,
@@ -194,14 +194,11 @@ describe('computeLessonPotential', () => {
 // extractCandidate
 // ---------------------------------------------------------------------------
 
-function makeAnthropicClient(responseText: string): Anthropic {
+function makeReviewer(responseText: string): MemoryReviewer {
   return {
-    messages: {
-      create: vi.fn().mockResolvedValue({
-        content: [{ type: 'text', text: responseText }],
-      }),
-    },
-  } as unknown as Anthropic;
+    model: 'claude-haiku-4-5',
+    generateText: vi.fn().mockResolvedValue(responseText),
+  };
 }
 
 const VALID_JSON = JSON.stringify({
@@ -228,13 +225,13 @@ const evidence = {
 
 describe('extractCandidate', () => {
   it('returns candidate with sanitized content on valid LLM response', async () => {
-    const client = makeAnthropicClient(VALID_JSON);
+    const reviewer = makeReviewer(VALID_JSON);
     const result = await extractCandidate({
       pod: makePod(),
       lessonSignals: ['validation_failed'],
       evidence,
       existingMemories: [],
-      anthropicClient: client,
+      reviewer,
       reviewerModel: 'claude-haiku-4-5',
       logger,
     });
@@ -253,13 +250,13 @@ describe('extractCandidate', () => {
   });
 
   it('returns no_candidate when reviewer says create: false', async () => {
-    const client = makeAnthropicClient(JSON.stringify({ create: false }));
+    const reviewer = makeReviewer(JSON.stringify({ create: false }));
     const result = await extractCandidate({
       pod: makePod(),
       lessonSignals: ['validation_failed'],
       evidence,
       existingMemories: [],
-      anthropicClient: client,
+      reviewer,
       reviewerModel: 'claude-haiku-4-5',
       logger,
     });
@@ -267,17 +264,16 @@ describe('extractCandidate', () => {
   });
 
   it('returns skipped on reviewer model API failure', async () => {
-    const client = {
-      messages: {
-        create: vi.fn().mockRejectedValue(new Error('Connection refused')),
-      },
-    } as unknown as Anthropic;
+    const reviewer: MemoryReviewer = {
+      model: 'claude-haiku-4-5',
+      generateText: vi.fn().mockRejectedValue(new Error('Connection refused')),
+    };
     const result = await extractCandidate({
       pod: makePod(),
       lessonSignals: ['validation_failed'],
       evidence,
       existingMemories: [],
-      anthropicClient: client,
+      reviewer,
       reviewerModel: 'claude-haiku-4-5',
       logger,
     });
@@ -287,13 +283,13 @@ describe('extractCandidate', () => {
   });
 
   it('returns skipped on JSON parse failure', async () => {
-    const client = makeAnthropicClient('this is not json at all');
+    const reviewer = makeReviewer('this is not json at all');
     const result = await extractCandidate({
       pod: makePod(),
       lessonSignals: ['validation_failed'],
       evidence,
       existingMemories: [],
-      anthropicClient: client,
+      reviewer,
       reviewerModel: 'claude-haiku-4-5',
       logger,
     });
@@ -304,13 +300,13 @@ describe('extractCandidate', () => {
 
   it('strips markdown fence from LLM response', async () => {
     const fenced = `\`\`\`json\n${VALID_JSON}\n\`\`\``;
-    const client = makeAnthropicClient(fenced);
+    const reviewer = makeReviewer(fenced);
     const result = await extractCandidate({
       pod: makePod(),
       lessonSignals: ['validation_failed'],
       evidence,
       existingMemories: [],
-      anthropicClient: client,
+      reviewer,
       reviewerModel: 'claude-haiku-4-5',
       logger,
     });
@@ -319,13 +315,13 @@ describe('extractCandidate', () => {
 
   it('returns skipped when required fields are missing', async () => {
     const partial = JSON.stringify({ create: true, path: '/gotchas/x.md' }); // missing content etc.
-    const client = makeAnthropicClient(partial);
+    const reviewer = makeReviewer(partial);
     const result = await extractCandidate({
       pod: makePod(),
       lessonSignals: ['validation_failed'],
       evidence,
       existingMemories: [],
-      anthropicClient: client,
+      reviewer,
       reviewerModel: 'claude-haiku-4-5',
       logger,
     });
@@ -336,13 +332,13 @@ describe('extractCandidate', () => {
 
   it('returns skipped on unknown kind', async () => {
     const bad = JSON.stringify({ ...JSON.parse(VALID_JSON), kind: 'unknown_kind' });
-    const client = makeAnthropicClient(bad);
+    const reviewer = makeReviewer(bad);
     const result = await extractCandidate({
       pod: makePod(),
       lessonSignals: ['validation_failed'],
       evidence,
       existingMemories: [],
-      anthropicClient: client,
+      reviewer,
       reviewerModel: 'claude-haiku-4-5',
       logger,
     });
@@ -375,13 +371,13 @@ describe('extractCandidate', () => {
       ...JSON.parse(VALID_JSON),
       updateTargetPath: '/gotchas/migration-order.md',
     });
-    const client = makeAnthropicClient(jsonWithUpdate);
+    const reviewer = makeReviewer(jsonWithUpdate);
     const result = await extractCandidate({
       pod: makePod(),
       lessonSignals: ['validation_failed'],
       evidence,
       existingMemories: [existingMemory],
-      anthropicClient: client,
+      reviewer,
       reviewerModel: 'claude-haiku-4-5',
       logger,
     });
@@ -396,13 +392,13 @@ describe('extractCandidate', () => {
       ...JSON.parse(VALID_JSON),
       updateTargetPath: '/gotchas/nonexistent.md',
     });
-    const client = makeAnthropicClient(jsonWithMismatch);
+    const reviewer = makeReviewer(jsonWithMismatch);
     const result = await extractCandidate({
       pod: makePod(),
       lessonSignals: ['validation_failed'],
       evidence,
       existingMemories: [],
-      anthropicClient: client,
+      reviewer,
       reviewerModel: 'claude-haiku-4-5',
       logger,
     });
@@ -414,13 +410,13 @@ describe('extractCandidate', () => {
 
   it('clamps confidence to [0, 1]', async () => {
     const outOfRange = JSON.stringify({ ...JSON.parse(VALID_JSON), confidence: 1.5 });
-    const client = makeAnthropicClient(outOfRange);
+    const reviewer = makeReviewer(outOfRange);
     const result = await extractCandidate({
       pod: makePod(),
       lessonSignals: ['validation_failed'],
       evidence,
       existingMemories: [],
-      anthropicClient: client,
+      reviewer,
       reviewerModel: 'claude-haiku-4-5',
       logger,
     });
@@ -430,13 +426,13 @@ describe('extractCandidate', () => {
   });
 
   it('assigns high severity to evidence for validation/pr-fix signals', async () => {
-    const client = makeAnthropicClient(VALID_JSON);
+    const reviewer = makeReviewer(VALID_JSON);
     const result = await extractCandidate({
       pod: makePod(),
       lessonSignals: ['validation_failed', 'pr_fix_attempts:2'],
       evidence,
       existingMemories: [],
-      anthropicClient: client,
+      reviewer,
       reviewerModel: 'claude-haiku-4-5',
       logger,
     });

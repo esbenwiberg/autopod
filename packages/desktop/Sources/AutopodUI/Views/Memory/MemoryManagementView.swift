@@ -12,6 +12,7 @@ public struct MemoryManagementView: View {
     public var entries: [MemoryEntry]
     public var activeMemories: [MemoryEntry]
     public var pendingCandidates: [MemoryCandidate]
+    public var extractionAttempts: [MemoryExtractionAttempt]
     public var selectedUsage: [MemoryUsageEvent]
     public var selectedSourceEvidence: [MemorySourceEvidence]
     public var selectedStaleEvidence: [MemoryUsageEvent]
@@ -51,6 +52,7 @@ public struct MemoryManagementView: View {
         entries: [MemoryEntry],
         activeMemories: [MemoryEntry] = [],
         pendingCandidates: [MemoryCandidate] = [],
+        extractionAttempts: [MemoryExtractionAttempt] = [],
         selectedUsage: [MemoryUsageEvent] = [],
         selectedSourceEvidence: [MemorySourceEvidence] = [],
         selectedStaleEvidence: [MemoryUsageEvent] = [],
@@ -78,6 +80,7 @@ public struct MemoryManagementView: View {
         self.entries = entries
         self.activeMemories = activeMemories
         self.pendingCandidates = pendingCandidates
+        self.extractionAttempts = extractionAttempts
         self.selectedUsage = selectedUsage
         self.selectedSourceEvidence = selectedSourceEvidence
         self.selectedStaleEvidence = selectedStaleEvidence
@@ -119,6 +122,10 @@ public struct MemoryManagementView: View {
 
     private var candidates: [MemoryCandidate] {
         Self.filteredCandidates(pendingCandidates, scope: displayedScope, query: searchText)
+    }
+
+    private var visibleExtractionAttempts: [MemoryExtractionAttempt] {
+        Self.filteredExtractionAttempts(extractionAttempts, scope: displayedScope, query: searchText)
     }
 
     private var selectedMemory: MemoryEntry? {
@@ -817,20 +824,63 @@ public struct MemoryManagementView: View {
     // MARK: - Empty state
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             Image(systemName: "brain")
                 .font(.largeTitle)
                 .foregroundStyle(.tertiary)
             Text("No memories")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Text("Agents can suggest memories for review, or you can create one manually.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
+            if visibleExtractionAttempts.isEmpty {
+                Text("Agents can suggest memories for review, or you can create one manually.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(visibleExtractionAttempts.prefix(4)) { attempt in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: attemptIcon(attempt.status))
+                                .font(.caption)
+                                .foregroundStyle(attemptColor(attempt.status))
+                                .frame(width: 14)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(attempt.profileName) · \(attempt.status.label)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Text(Self.humanReadableAttemptReason(attempt.reason))
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: 360)
+                .padding(.top, 4)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(32)
+    }
+
+    private func attemptIcon(_ status: MemoryExtractionAttemptStatus) -> String {
+        switch status {
+        case .candidateCreated: "checkmark.circle"
+        case .belowThreshold, .noCandidate, .skipped: "minus.circle"
+        case .reviewerUnavailable, .reviewerFailed, .invalidResponse: "exclamationmark.triangle"
+        case .unknown: "questionmark.circle"
+        }
+    }
+
+    private func attemptColor(_ status: MemoryExtractionAttemptStatus) -> Color {
+        switch status {
+        case .candidateCreated: .green
+        case .belowThreshold, .noCandidate, .skipped: .secondary
+        case .reviewerUnavailable, .reviewerFailed, .invalidResponse: .orange
+        case .unknown: .secondary
+        }
     }
 
     private func detailHeader(
@@ -1090,6 +1140,46 @@ public struct MemoryManagementView: View {
                 || ($0.rationale?.localizedCaseInsensitiveContains(q) ?? false)
                 || $0.impactSummary.localizedCaseInsensitiveContains(q)
                 || $0.tags.contains { $0.localizedCaseInsensitiveContains(q) }
+        }
+    }
+
+    static func filteredExtractionAttempts(
+        _ attempts: [MemoryExtractionAttempt],
+        scope: MemoryScope,
+        query: String
+    ) -> [MemoryExtractionAttempt] {
+        guard scope != .pod else { return [] }
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return attempts }
+        return attempts.filter {
+            $0.profileName.localizedCaseInsensitiveContains(q)
+                || $0.podId.localizedCaseInsensitiveContains(q)
+                || $0.status.label.localizedCaseInsensitiveContains(q)
+                || $0.reason.localizedCaseInsensitiveContains(q)
+                || $0.signals.contains { $0.localizedCaseInsensitiveContains(q) }
+        }
+    }
+
+    static func humanReadableAttemptReason(_ reason: String) -> String {
+        switch reason {
+        case "lesson_potential_below_threshold":
+            return "Signals were too weak for a durable candidate."
+        case "openai_auth_unavailable":
+            return "OpenAI reviewer credentials were unavailable."
+        case "no_anthropic_api_key":
+            return "Anthropic reviewer credentials were unavailable."
+        case "provider_not_callable":
+            return "The profile provider could not run daemon-side review."
+        case "reviewer_decided_no_lesson":
+            return "The reviewer found no durable lesson."
+        case "candidate_created":
+            return "A pending candidate was created for review."
+        case "agent_mode_not_auto":
+            return "Interactive pods are not auto-extracted."
+        case "profile_not_found":
+            return "The pod profile could not be loaded."
+        default:
+            return reason.replacingOccurrences(of: "_", with: " ")
         }
     }
 

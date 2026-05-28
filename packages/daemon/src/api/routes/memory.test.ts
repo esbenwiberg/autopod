@@ -2,9 +2,11 @@ import type { MemoryCandidate, MemoryEntry } from '@autopod/shared';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createMemoryCandidateRepository } from '../../pods/memory-candidate-repository.js';
+import { createMemoryExtractionAttemptRepository } from '../../pods/memory-extraction-attempt-repository.js';
 import { createMemoryRepository } from '../../pods/memory-repository.js';
 import { createMemoryUsageRepository } from '../../pods/memory-usage-repository.js';
-import { createTestDb } from '../../test-utils/mock-helpers.js';
+import { createPodRepository } from '../../pods/pod-repository.js';
+import { createTestDb, insertTestProfile } from '../../test-utils/mock-helpers.js';
 import { memoryRoutes } from './memory.js';
 
 function makeCandidate(
@@ -66,17 +68,20 @@ describe('memory routes', () => {
   let db: ReturnType<typeof createTestDb>;
   let memoryRepo: ReturnType<typeof createMemoryRepository>;
   let candidateRepo: ReturnType<typeof createMemoryCandidateRepository>;
+  let attemptRepo: ReturnType<typeof createMemoryExtractionAttemptRepository>;
   let usageRepo: ReturnType<typeof createMemoryUsageRepository>;
 
   beforeEach(() => {
     db = createTestDb();
     memoryRepo = createMemoryRepository(db);
     candidateRepo = createMemoryCandidateRepository(db);
+    attemptRepo = createMemoryExtractionAttemptRepository(db);
     usageRepo = createMemoryUsageRepository(db);
     app = Fastify({ logger: false });
     memoryRoutes(app, {
       memoryRepo,
       memoryCandidateRepo: candidateRepo,
+      memoryExtractionAttemptRepo: attemptRepo,
       memoryUsageRepo: usageRepo,
     });
   });
@@ -178,6 +183,45 @@ describe('memory routes', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ memoryId: 'mem-usage', events: [{ id: 'usage-1' }] });
+  });
+
+  it('lists extraction attempts by profile', async () => {
+    insertTestProfile(db);
+    const podRepo = createPodRepository(db);
+    podRepo.insert({
+      id: 'pod-attempt',
+      profileName: 'test-profile',
+      task: 'fix flaky validation',
+      status: 'complete',
+      model: 'claude-haiku-4-5',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/pod-attempt',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      outputMode: 'pr',
+    });
+    attemptRepo.record({
+      podId: 'pod-attempt',
+      profileName: 'test-profile',
+      status: 'reviewer_unavailable',
+      reason: 'openai_auth_unavailable',
+      score: 0.3,
+      signals: ['pr_fix_attempts:2'],
+      candidateId: null,
+    });
+
+    const res = await app.inject('/memory/extraction-attempts?profileName=test-profile');
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject([
+      {
+        podId: 'pod-attempt',
+        status: 'reviewer_unavailable',
+        reason: 'openai_auth_unavailable',
+      },
+    ]);
   });
 
   it('returns source evidence', async () => {

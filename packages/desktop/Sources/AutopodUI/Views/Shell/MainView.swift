@@ -74,6 +74,7 @@ public struct MainView: View {
     public var memoryEntries: [MemoryEntry]
     public var activeMemories: [MemoryEntry]
     public var pendingMemoryCandidates: [MemoryCandidate]
+    public var memoryExtractionAttempts: [MemoryExtractionAttempt]
     public var selectedMemoryUsage: [MemoryUsageEvent]
     public var selectedMemorySourceEvidence: [MemorySourceEvidence]
     public var selectedMemoryStaleEvidence: [MemoryUsageEvent]
@@ -157,6 +158,7 @@ public struct MainView: View {
         memoryEntries: [MemoryEntry] = [],
         activeMemories: [MemoryEntry] = [],
         pendingMemoryCandidates: [MemoryCandidate] = [],
+        memoryExtractionAttempts: [MemoryExtractionAttempt] = [],
         selectedMemoryUsage: [MemoryUsageEvent] = [],
         selectedMemorySourceEvidence: [MemorySourceEvidence] = [],
         selectedMemoryStaleEvidence: [MemoryUsageEvent] = [],
@@ -237,6 +239,7 @@ public struct MainView: View {
         self.memoryEntries = memoryEntries
         self.activeMemories = activeMemories
         self.pendingMemoryCandidates = pendingMemoryCandidates
+        self.memoryExtractionAttempts = memoryExtractionAttempts
         self.selectedMemoryUsage = selectedMemoryUsage
         self.selectedMemorySourceEvidence = selectedMemorySourceEvidence
         self.selectedMemoryStaleEvidence = selectedMemoryStaleEvidence
@@ -395,6 +398,7 @@ public struct MainView: View {
                     entries: memoryEntries,
                     activeMemories: activeMemories,
                     pendingCandidates: pendingMemoryCandidates,
+                    extractionAttempts: memoryExtractionAttempts,
                     selectedUsage: selectedMemoryUsage,
                     selectedSourceEvidence: selectedMemorySourceEvidence,
                     selectedStaleEvidence: selectedMemoryStaleEvidence,

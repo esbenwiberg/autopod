@@ -425,6 +425,52 @@ describe('runMigrations — memory-learning-schema (migration 107)', () => {
   });
 });
 
+// ── Migration 109 — memory extraction attempts ──────────────────────────────
+
+describe('runMigrations — memory extraction attempts (migration 109)', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    runMigrations(db, MIGRATIONS_DIR, logger);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('memory_extraction_attempts table exists with correct columns and indexes', () => {
+    const cols = db
+      .prepare('PRAGMA table_info(memory_extraction_attempts)')
+      .all()
+      .map((r) => (r as { name: string }).name);
+
+    for (const col of [
+      'id',
+      'pod_id',
+      'profile_name',
+      'status',
+      'reason',
+      'score',
+      'signals',
+      'candidate_id',
+      'created_at',
+      'updated_at',
+    ]) {
+      expect(cols, `expected column: ${col}`).toContain(col);
+    }
+
+    const indexes = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
+      .all()
+      .map((r) => (r as { name: string }).name);
+
+    expect(indexes).toContain('idx_memory_extraction_attempts_pod');
+    expect(indexes).toContain('idx_memory_extraction_attempts_profile');
+    expect(indexes).toContain('idx_memory_extraction_attempts_status');
+  });
+});
+
 // ── Migration 104 — remove acceptance criteria ──────────────────────────────
 
 const MIGRATION_104_PATH = new URL(

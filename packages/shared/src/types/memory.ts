@@ -70,6 +70,28 @@ export interface MemoryCandidate {
   updatedAt: string;
 }
 
+export type MemoryExtractionAttemptStatus =
+  | 'candidate_created'
+  | 'below_threshold'
+  | 'reviewer_unavailable'
+  | 'reviewer_failed'
+  | 'invalid_response'
+  | 'no_candidate'
+  | 'skipped';
+
+export interface MemoryExtractionAttempt {
+  id: string;
+  podId: string;
+  profileName: string;
+  status: MemoryExtractionAttemptStatus;
+  reason: string;
+  score: number | null;
+  signals: string[];
+  candidateId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type MemoryUsageKind =
   | 'selected'
   | 'injected'

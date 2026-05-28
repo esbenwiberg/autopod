@@ -548,6 +548,17 @@ public actor DaemonAPI {
     try await request("GET", "/memory/candidates/\(id)/source-evidence")
   }
 
+  public func listMemoryExtractionAttempts(
+    profileName: String,
+    limit: Int = 20
+  ) async throws -> [MemoryExtractionAttempt] {
+    try await request(
+      "GET",
+      "/memory/extraction-attempts",
+      query: ["profileName": profileName, "limit": "\(limit)"]
+    )
+  }
+
   public func approveMemoryCandidate(_ id: String) async throws -> MemoryCandidate {
     try await request(
       "PATCH",

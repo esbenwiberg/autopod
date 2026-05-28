@@ -67,6 +67,10 @@ export {
   type MemoryCandidateRepository,
 } from './memory-candidate-repository.js';
 export {
+  createMemoryExtractionAttemptRepository,
+  type MemoryExtractionAttemptRepository,
+} from './memory-extraction-attempt-repository.js';
+export {
   createMemoryUsageRepository,
   type MemoryUsageRepository,
 } from './memory-usage-repository.js';
