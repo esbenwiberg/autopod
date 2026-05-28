@@ -1,0 +1,28 @@
+contract_version: 1
+title: "Update CLI template docs and website copy"
+depends_on: [01-establish-canonical-model-identity]
+scenarios:
+  - id: public-copy-canonical
+    given:
+      - "a user reads README, website examples, or opens the CLI profile template"
+    when:
+      - "they look for the recommended Claude model syntax"
+    then:
+      - "examples show canonical Claude IDs such as claude-opus-4-8"
+      - "short aliases are not presented as accepted new input"
+  - id: ask-ai-copy-uses-reviewer-model
+    given:
+      - "a user reads escalation documentation"
+    when:
+      - "they look for the model used by ask_ai and AI review"
+    then:
+      - "the docs point at profile.reviewerModel instead of escalation.askAi.model"
+required_facts:
+  - id: fact-public-copy-canonical
+    proves: [public-copy-canonical, ask-ai-copy-uses-reviewer-model]
+    kind: smoke-script
+    artifact:
+      path: scripts/check-canonical-model-copy.sh
+      change: create
+    command: bash scripts/check-canonical-model-copy.sh
+human_review: []

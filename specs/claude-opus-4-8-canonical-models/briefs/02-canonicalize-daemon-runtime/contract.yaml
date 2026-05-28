@@ -1,0 +1,56 @@
+contract_version: 1
+title: "Canonicalize daemon migration and runtime paths"
+depends_on: [01-establish-canonical-model-identity]
+scenarios:
+  - id: profile-alias-migration
+    given:
+      - "existing profiles contain short aliases in default_model, reviewer_model, or escalation_config.askAi.model"
+    when:
+      - "migration 110 runs"
+    then:
+      - "profile model-bearing fields are rewritten to canonical IDs, with opus becoming claude-opus-4-8"
+      - "historical pods.model rows are not rewritten"
+  - id: new-daemon-pods-use-opus-48
+    given:
+      - "a Claude profile has no explicit canonical override"
+    when:
+      - "the daemon resolves the model for a new pod"
+    then:
+      - "the resolved model is claude-opus-4-8 and short explicit overrides are rejected"
+  - id: legacy-runtime-defensive-aliases
+    given:
+      - "a legacy alias reaches a daemon runtime or daemon-side Anthropic helper"
+    when:
+      - "the runtime/helper expands the model before calling Claude"
+    then:
+      - "the call uses the current canonical ID, not a short alias"
+required_facts:
+  - id: fact-profile-alias-migration
+    proves: [profile-alias-migration]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/db/migrate.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- migrate.test.ts -t "canonicalize profile model aliases"
+  - id: fact-daemon-resolver-uses-opus-48
+    proves: [new-daemon-pods-use-opus-48]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/runtime-resolver.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- runtime-resolver.test.ts -t "Opus 4.8"
+  - id: fact-claude-cli-receives-canonical-id
+    proves: [legacy-runtime-defensive-aliases]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/runtimes/claude-runtime.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- claude-runtime.test.ts -t "model aliases"
+  - id: fact-llm-client-defensive-aliases
+    proves: [legacy-runtime-defensive-aliases]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/providers/llm-client.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- llm-client.test.ts -t "legacy aliases"
+human_review: []
