@@ -1,0 +1,75 @@
+contract_version: 1
+title: "Make advisory browser QA nonblocking"
+depends_on: []
+scenarios:
+  - id: blocking-validation-unblocks-pr
+    given:
+      - "a PR-output pod has advisory browser QA enabled"
+      - "all blocking validation checks pass"
+      - "advisory browser QA is still running"
+    when:
+      - "the daemon handles the successful blocking validation result"
+    then:
+      - "the daemon pushes the branch and creates or carries forward the PR before advisory finishes"
+      - "the pod transitions to validated before advisory finishes"
+      - "the blocking validation result remains overall pass"
+  - id: container-stays-running-for-advisory
+    given:
+      - "a validated pod has advisory browser QA enabled"
+      - "advisory browser QA has been scheduled after blocking validation passed"
+    when:
+      - "the advisory browser QA pass is still running"
+    then:
+      - "the daemon does not stop the pod container yet"
+      - "the daemon stops the pod container after advisory browser QA completes or skips"
+  - id: revalidation-follows-same-nonblocking-order
+    given:
+      - "a failed or review_required pod is resumed through validation-only revalidation"
+      - "advisory browser QA is enabled"
+      - "the blocking revalidation result passes"
+    when:
+      - "the daemon handles the successful revalidation result"
+    then:
+      - "the daemon creates or carries forward the PR before advisory finishes"
+      - "the pod transitions to validated before advisory finishes"
+      - "the container remains running until advisory completes or skips"
+  - id: advisory-completion-does-not-duplicate-validation-complete
+    given:
+      - "blocking validation has already emitted pod.validation_completed"
+      - "advisory browser QA later completes with pass, fail, uncertain, or skip"
+    when:
+      - "the daemon records and broadcasts the advisory result"
+    then:
+      - "the daemon emits advisory phase progress or completion for desktop"
+      - "the daemon does not emit a second pod.validation_completed event"
+      - "advisory status does not change pod status, retry behavior, PR creation, or overall pass/fail"
+required_facts:
+  - id: fact-blocking-validation-skips-inline-advisory
+    proves:
+      - blocking-validation-unblocks-pr
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/local-validation-engine.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- local-validation-engine.test.ts -t "blocking validation does not run advisory inline"
+  - id: fact-normal-validation-advisory-ordering
+    proves:
+      - blocking-validation-unblocks-pr
+      - container-stays-running-for-advisory
+      - advisory-completion-does-not-duplicate-validation-complete
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts -t "normal validation creates the PR before advisory finishes"
+  - id: fact-revalidation-advisory-ordering
+    proves:
+      - revalidation-follows-same-nonblocking-order
+      - container-stays-running-for-advisory
+      - advisory-completion-does-not-duplicate-validation-complete
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts -t "revalidation creates the PR before advisory finishes"
+human_review: []
