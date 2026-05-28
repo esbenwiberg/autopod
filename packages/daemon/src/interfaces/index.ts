@@ -18,6 +18,8 @@ export type {
   PrMergeStatus,
   CiFailureDetail,
   ReviewCommentDetail,
+  ReviewFeedbackReply,
+  ReviewFeedbackReplyResult,
   CreatePrConfig,
   MergePrConfig,
 } from './pr-manager.js';

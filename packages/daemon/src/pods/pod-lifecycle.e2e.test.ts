@@ -47,7 +47,14 @@ function createMockPrManager(): PrManager {
       usedFallback: false,
     })),
     mergePr: vi.fn(async () => ({ merged: true, autoMergeScheduled: false })),
-    getPrStatus: vi.fn(async () => ({ merged: true, open: false, blockReason: null })),
+    getPrStatus: vi.fn(async () => ({
+      merged: true,
+      open: false,
+      blockReason: null,
+      ciFailures: [],
+      reviewComments: [],
+    })),
+    replyToReviewFeedback: vi.fn(async () => ({ posted: 0, skipped: 0, errors: [] })),
   };
 }
 
@@ -355,6 +362,19 @@ describe('Pod Lifecycle E2E', () => {
       const fixPodId = manager.getSession(root.id).fixPodId;
       expect(fixPodId).toBeTruthy();
       if (!fixPodId) throw new Error('fix pod was not spawned');
+      ctx.podRepo.update(fixPodId, {
+        taskSummary: {
+          actualSummary: 'Fixed valid PR feedback and challenged one item.',
+          deviations: [],
+          reviewFeedbackResponses: [
+            {
+              feedbackId: 'gh-comment-123',
+              outcome: 'fixed',
+              response: 'Renamed `cfg` to `config` and verified the lint failure is gone.',
+            },
+          ],
+        },
+      });
       expect(ctx.fixFeedbackRepo.count(root.id)).toBe(2);
 
       // Process the fix pod — it drains the queue at the `running` transition,
@@ -374,6 +394,16 @@ describe('Pod Lifecycle E2E', () => {
       // owns the actual PR merge.
       expect(ctx.worktreeManager.pushBranch).toHaveBeenCalled();
       expect(prManager.mergePr).not.toHaveBeenCalled();
+      expect(prManager.replyToReviewFeedback).toHaveBeenCalledWith({
+        prUrl: 'https://github.com/org/repo/pull/42',
+        worktreePath: '/tmp/worktree/abc',
+        responses: [
+          {
+            feedbackId: 'gh-comment-123',
+            body: expect.stringContaining('Renamed `cfg` to `config`'),
+          },
+        ],
+      });
     });
   });
 

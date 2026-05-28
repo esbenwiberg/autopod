@@ -7,6 +7,7 @@ import type {
   MemoryEntry,
   MemoryOutcomeItem,
   MemoryScope,
+  ReviewFeedbackResponseItem,
   ScreenshotRef,
   ScreenshotSource,
 } from '@autopod/shared';
@@ -67,6 +68,7 @@ export interface PodBridge {
       };
     }>,
     memoryOutcomes?: MemoryOutcomeItem[],
+    reviewFeedbackResponses?: ReviewFeedbackResponseItem[],
   ): void;
   consumeMessages(podId: string): { hasMessage: boolean; message?: string };
   /** Check if an action requires human approval before execution */

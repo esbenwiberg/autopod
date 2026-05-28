@@ -6,13 +6,15 @@ import { GhPrManager } from './pr-manager.js';
 // Track call count so we can return different responses for sequential calls
 let callCount = 0;
 const execResponses: Array<{ stdout: string; stderr: string }> = [];
+const execCalls: unknown[][] = [];
 
 vi.mock('node:util', async () => {
   const actual = await vi.importActual<typeof import('node:util')>('node:util');
   return {
     ...actual,
     promisify: vi.fn(() => {
-      return async () => {
+      return async (...args: unknown[]) => {
+        execCalls.push(args);
         const response = execResponses[callCount] ?? { stdout: '', stderr: '' };
         callCount++;
         return response;
@@ -27,6 +29,7 @@ describe('GhPrManager', () => {
   beforeEach(() => {
     callCount = 0;
     execResponses.length = 0;
+    execCalls.length = 0;
   });
 
   it('can be instantiated', () => {
@@ -187,5 +190,114 @@ describe('GhPrManager', () => {
       ciFailures: [],
       reviewComments: [],
     });
+  });
+
+  it('getPrStatus includes feedback ids for change-request review comments', async () => {
+    execResponses.push({
+      stdout: JSON.stringify({
+        state: 'OPEN',
+        mergedAt: null,
+        statusCheckRollup: null,
+        reviewDecision: 'CHANGES_REQUESTED',
+        autoMergeRequest: null,
+      }),
+      stderr: '',
+    });
+    execResponses.push({
+      stdout: JSON.stringify({
+        reviews: [
+          {
+            databaseId: 10,
+            author: { login: 'alice' },
+            state: 'CHANGES_REQUESTED',
+            body: 'Please explain this edge case.',
+          },
+        ],
+      }),
+      stderr: '',
+    });
+    execResponses.push({
+      stdout: JSON.stringify([
+        {
+          id: 123,
+          user: { login: 'bob' },
+          body: 'Please add a null check.',
+          path: 'src/foo.ts',
+        },
+        {
+          id: 124,
+          in_reply_to_id: 123,
+          user: { login: 'carol' },
+          body: 'nested reply',
+          path: 'src/foo.ts',
+        },
+      ]),
+      stderr: '',
+    });
+
+    const manager = new GhPrManager({ logger });
+    const status = await manager.getPrStatus({
+      prUrl: 'https://github.com/org/repo/pull/42',
+    });
+
+    expect(status.reviewComments).toEqual([
+      {
+        id: 'gh-review-10',
+        author: 'alice',
+        body: 'Please explain this edge case.',
+        path: null,
+      },
+      {
+        id: 'gh-comment-123',
+        author: 'bob',
+        body: 'Please add a null check.',
+        path: 'src/foo.ts',
+      },
+    ]);
+  });
+
+  it('posts host-side GitHub replies and falls back to a PR comment for review-body ids', async () => {
+    const manager = new GhPrManager({ logger });
+
+    const result = await manager.replyToReviewFeedback({
+      prUrl: 'https://github.com/org/repo/pull/42',
+      worktreePath: '/tmp/worktree',
+      responses: [
+        {
+          feedbackId: 'gh-comment-123',
+          body: 'Autopod fix pod response: Fixed\n\nAdded the null check.',
+        },
+        {
+          feedbackId: 'gh-review-10',
+          body: 'Autopod fix pod response: Needs reviewer decision\n\nThis conflicts with API compatibility.',
+        },
+      ],
+    });
+
+    expect(result).toEqual({ posted: 2, skipped: 1, errors: [] });
+    expect(execCalls[0]).toEqual([
+      'gh',
+      [
+        'api',
+        '--method',
+        'POST',
+        'repos/org/repo/pulls/42/comments/123/replies',
+        '-f',
+        'body=Autopod fix pod response: Fixed\n\nAdded the null check.',
+      ],
+      { cwd: '/tmp/worktree', timeout: 15_000 },
+    ]);
+    expect(execCalls[1]).toEqual([
+      'gh',
+      [
+        'api',
+        '--method',
+        'POST',
+        'repos/org/repo/issues/42/comments',
+        '-f',
+        expect.stringContaining('gh-review-10'),
+      ],
+      { cwd: '/tmp/worktree', timeout: 15_000 },
+    ]);
   });
 });

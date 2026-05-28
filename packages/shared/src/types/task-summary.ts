@@ -21,6 +21,16 @@ export interface MemoryOutcomeItem {
   reason: string;
 }
 
+/** Per-review-feedback outcome reported by a PR fix pod. */
+export interface ReviewFeedbackResponseItem {
+  /** Stable ID rendered in the fix task, e.g. gh-comment-123 or ado-thread-456. */
+  feedbackId: string;
+  /** Final outcome from the fix pod's engineering judgment. */
+  outcome: 'fixed' | 'not_applicable' | 'needs_reviewer_decision' | 'could_not_verify';
+  /** Short host-posted reply explaining what changed or why no code change was made. */
+  response: string;
+}
+
 /** Agent-reported task summary submitted via report_task_summary before finishing. */
 export interface TaskSummary {
   /** High-level description of what was actually accomplished */
@@ -35,6 +45,8 @@ export interface TaskSummary {
   factDeviations?: FactDeviationRequest[];
   /** Final outcome for each memory that was selected/injected for this pod. */
   memoryOutcomes?: MemoryOutcomeItem[];
+  /** Host-posted responses to PR review feedback. Intended for fix pods only. */
+  reviewFeedbackResponses?: ReviewFeedbackResponseItem[];
 }
 
 export interface FactDeviationRequest {

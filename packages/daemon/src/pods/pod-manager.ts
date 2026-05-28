@@ -28,6 +28,7 @@ import type {
   PrivateRegistry,
   Profile,
   RequestCredentialPayload,
+  ReviewFeedbackResponseItem,
   SastResult,
   SpawnFixResponse,
   SpecFile,
@@ -94,6 +95,7 @@ import {
   createProfileAnthropicClient,
   persistRefreshedCredentials,
 } from '../providers/index.js';
+import type { MaxCredentialLineage, ProviderEnvResult } from '../providers/index.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import { cleanupClaudeState, ensureClaudeStateDir } from '../runtimes/claude-state-store.js';
 import { cleanupCodexState, ensureCodexStateDir } from '../runtimes/codex-state-store.js';
@@ -468,8 +470,11 @@ export function buildPrFixTask(
     '',
     `Original task: ${rootTask}`,
     '',
-    'Your job is to fix the failures listed below by pushing commits to the existing branch.',
+    'Your job is to evaluate the failures listed below, fix the ones that make engineering sense, and push commits to the existing branch.',
+    'Treat CI failures as objective unless you can show they are unrelated or flaky.',
+    'Treat reviewer comments as feedback to assess: fix valid comments; for stale, incorrect, harmful, or out-of-scope comments, leave the code unchanged and explain why.',
     'Do NOT create a new PR — one already exists.',
+    'Do NOT call PR/comment APIs from the container. If review comments include a feedbackId, report one `reviewFeedbackResponses` item per feedbackId in `report_task_summary`; the daemon host will post those replies.',
     '',
   ];
 
@@ -493,8 +498,9 @@ export function buildPrFixTask(
   if (status.reviewComments.length > 0) {
     sections.push('## Review Comments\n');
     for (const rc of status.reviewComments) {
+      const id = rc.id ? `[feedbackId: ${sanitizeExternal(rc.id)}] ` : '';
       const prefix = rc.path ? `\`${sanitizeExternal(rc.path)}\`: ` : '';
-      sections.push(`${prefix}${sanitizeExternal(rc.body)}`);
+      sections.push(`${id}${prefix}${sanitizeExternal(rc.body)}`);
       sections.push('');
     }
   }
@@ -546,13 +552,27 @@ export function buildActionableFailureSummary(status: PrMergeStatus, profile: Pr
   if (status.reviewComments.length > 0) {
     sections.push('## Review Comments\n');
     for (const rc of status.reviewComments) {
+      const id = rc.id ? `[feedbackId: ${sanitizeExternal(rc.id)}] ` : '';
       const prefix = rc.path ? `\`${sanitizeExternal(rc.path)}\`: ` : '';
-      sections.push(`${prefix}${sanitizeExternal(rc.body)}`);
+      sections.push(`${id}${prefix}${sanitizeExternal(rc.body)}`);
       sections.push('');
     }
   }
 
   return sections.join('\n').trim();
+}
+
+const REVIEW_FEEDBACK_REPLY_MAX_CHARS = 2000;
+
+function formatReviewFeedbackReply(response: ReviewFeedbackResponseItem): string {
+  const outcomeLabel: Record<ReviewFeedbackResponseItem['outcome'], string> = {
+    fixed: 'Fixed',
+    not_applicable: 'Not applicable',
+    needs_reviewer_decision: 'Needs reviewer decision',
+    could_not_verify: 'Could not verify',
+  };
+  const body = response.response.trim().slice(0, REVIEW_FEEDBACK_REPLY_MAX_CHARS);
+  return `Autopod fix pod response: ${outcomeLabel[response.outcome]}\n\n${body}`;
 }
 
 /** Auto-stop preview containers after this duration (default 10 minutes). */
@@ -1200,6 +1220,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    *  truth — any cleanup path that goes through `cleanupContainer` reaps the
    *  handle. */
   const haproxyDenyHandles = new Map<string, HaproxyDenyStreamHandle>();
+  const maxCredentialLineageByPod = new Map<string, MaxCredentialLineage>();
+
+  function rememberMaxCredentialLineage(podId: string, result: ProviderEnvResult): void {
+    if (result.maxCredentialLineage) {
+      maxCredentialLineageByPod.set(podId, result.maxCredentialLineage);
+    } else {
+      maxCredentialLineageByPod.delete(podId);
+    }
+  }
+
+  function forgetMaxCredentialLineage(podId: string): void {
+    maxCredentialLineageByPod.delete(podId);
+  }
 
   /** Best-effort: start the HAProxy deny log receiver for a restricted-mode
    *  pod and wire each denied SNI to a `pod.firewall_denied` event. Failures
@@ -1301,6 +1334,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }, CONTAINER_CLEANUP_TIMEOUT_MS);
       }),
     ]);
+    if (mode === 'kill') {
+      forgetMaxCredentialLineage(pod.id);
+    }
   }
 
   /** Pre-push security scan helper. Runs the repo scanner at the `push`
@@ -1850,6 +1886,53 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     );
   };
 
+  async function postFixPodReviewFeedbackReplies(fixPod: Pod): Promise<void> {
+    const responses = fixPod.taskSummary?.reviewFeedbackResponses ?? [];
+    const prUrl = fixPod.prUrl;
+    if (!prUrl || responses.length === 0) return;
+
+    const profile = profileStore.get(fixPod.profileName);
+    const prManager = prManagerFactory ? prManagerFactory(profile) : null;
+    if (!prManager?.replyToReviewFeedback) {
+      logger.info(
+        { podId: fixPod.id, responseCount: responses.length },
+        'Fix pod reported review feedback responses but PR manager cannot post replies',
+      );
+      return;
+    }
+
+    const replyResponses = responses
+      .filter((response) => response.response.trim().length > 0)
+      .map((response) => ({
+        feedbackId: response.feedbackId.trim(),
+        body: formatReviewFeedbackReply(response),
+      }))
+      .filter((response) => response.feedbackId.length > 0 && response.body.trim().length > 0);
+
+    if (replyResponses.length === 0) return;
+
+    try {
+      const result = await prManager.replyToReviewFeedback({
+        prUrl,
+        worktreePath: fixPod.worktreePath ?? undefined,
+        responses: replyResponses,
+      });
+      emitActivityStatus(
+        fixPod.id,
+        `Posted ${result.posted} review feedback repl${result.posted === 1 ? 'y' : 'ies'} (${result.skipped} fallback/skipped)`,
+      );
+      if (result.errors.length > 0) {
+        logger.warn(
+          { podId: fixPod.id, prUrl, errors: result.errors },
+          'Some fix-pod review feedback replies failed',
+        );
+      }
+    } catch (err) {
+      logger.warn({ err, podId: fixPod.id, prUrl }, 'Failed to post fix-pod review replies');
+      emitActivityStatus(fixPod.id, 'Review feedback replies failed to post');
+    }
+  }
+
   /**
    * Completes a fix pod once its work has validated.
    *
@@ -1868,6 +1951,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const baseBranch = fixPod.baseBranch ?? profile.defaultBranch ?? 'main';
     const branch = fixPod.branch ?? '';
     const worktreePath = fixPod.worktreePath;
+    let branchPushed = false;
 
     if (worktreePath && branch) {
       try {
@@ -1899,11 +1983,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               force: true,
               pat: selectGitPat(profile),
             });
+            branchPushed = true;
             emitActivityStatus(podId, 'Rebased fix branch pushed');
           } else {
             await worktreeManager.pushBranch(worktreePath, branch, {
               pat: selectGitPat(profile),
             });
+            branchPushed = true;
             emitActivityStatus(podId, 'Fix branch pushed');
           }
         });
@@ -1911,6 +1997,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         logger.warn({ err, podId }, 'Fix-pod post-validation push failed — completing anyway');
         emitActivityStatus(podId, 'Fix branch push failed — pod still completing');
       }
+    }
+
+    if (branchPushed) {
+      await postFixPodReviewFeedbackReplies(podRepo.getOrThrow(podId));
     }
 
     emitActivityStatus(podId, 'Fix pod complete — parent poller owns the merge');
@@ -2346,6 +2436,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           profileStore,
           pod.profileName,
           logger,
+          maxCredentialLineageByPod.get(pod.id),
         );
       } catch (err) {
         logger.warn(
@@ -2355,7 +2446,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     }
 
-    const result = await buildProviderEnv(profile, pod.id, logger);
+    const result = await buildProviderEnv(profile, pod.id, logger, { profileStore });
+    rememberMaxCredentialLineage(pod.id, result);
     // Re-write credential files to container in case tokens were rotated.
     // For Foundry token-auth this also rewrites the bearer-token secret file
     // with whatever getAzureToken returned (cached if still valid, else fresh).
@@ -2370,6 +2462,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     }
     return { POD_ID: pod.id, ...result.env };
+  }
+
+  async function persistMaxCredentialsForPod(podId: string, logMessage: string): Promise<void> {
+    const pod = podRepo.getOrThrow(podId);
+    if (!pod.containerId) return;
+    const profile = profileStore.get(pod.profileName);
+    if (profile.modelProvider !== 'max') return;
+
+    try {
+      await persistRefreshedCredentials(
+        pod.containerId,
+        containerManagerFactory.get(pod.executionTarget),
+        profileStore,
+        pod.profileName,
+        logger,
+        maxCredentialLineageByPod.get(podId),
+      );
+    } catch (err) {
+      logger.warn({ err, podId }, logMessage);
+    }
   }
 
   function touchHeartbeat(podId: string): void {
@@ -4221,6 +4333,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 profileStore,
                 pod.profileName,
                 logger,
+                maxCredentialLineageByPod.get(pod.id),
               );
             } catch (err) {
               logger.warn(
@@ -5609,6 +5722,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Build provider-aware env (API keys, OAuth creds, Foundry config)
         emitStatus('Building provider credentials…');
         const providerResult = await buildProviderEnv(profile, podId, logger, { profileStore });
+        rememberMaxCredentialLineage(podId, providerResult);
         const secretEnv: Record<string, string> = {
           POD_ID: podId,
           ...providerResult.env,
@@ -5922,6 +6036,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               profileStore,
               pod.profileName,
               logger,
+              maxCredentialLineageByPod.get(podId),
             );
           } catch (err) {
             logger.warn(
@@ -5951,6 +6066,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 profileStore,
                 failingPod.profileName,
                 logger,
+                maxCredentialLineageByPod.get(podId),
               );
             }
           }
@@ -6692,6 +6808,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
             const events = runtime.resume(podId, correctionMessage, pod.containerId, resumeEnv);
             const outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
+            await persistMaxCredentialsForPod(
+              podId,
+              'Failed to persist rotated credentials after override-guidance resume',
+            );
             if (outcome === 'completed') {
               await this.handleCompletion(podId);
             }
@@ -6735,6 +6855,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
         const events = runtime.resume(podId, message, pod.containerId, resumeEnv);
         const outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
+        await persistMaxCredentialsForPod(
+          podId,
+          'Failed to persist rotated credentials after human-message resume',
+        );
         if (outcome === 'completed') {
           await this.handleCompletion(podId);
         }
@@ -7248,6 +7372,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           events,
           deriveAgentAttempt(pod.phaseTokenUsage),
         );
+        await persistMaxCredentialsForPod(
+          podId,
+          'Failed to persist rotated credentials after rejection resume',
+        );
         if (outcome === 'completed') {
           await this.handleCompletion(podId);
         }
@@ -7340,6 +7468,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 profileStore,
                 pod.profileName,
                 logger,
+                maxCredentialLineageByPod.get(podId),
               );
             }
           } catch (err) {
@@ -7400,6 +7529,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       const killingSession = podRepo.getOrThrow(podId);
       transition(killingSession, 'killed', { completedAt: new Date().toISOString() });
+      forgetMaxCredentialLineage(podId);
 
       eventBus.emit({
         type: 'pod.completed',
@@ -8689,6 +8819,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           if (!s2.containerId) throw new Error(`Pod ${podId} has no container`);
           const events = runtime.resume(podId, correctionMessage, s2.containerId, resumeEnv);
           const outcome = await this.consumeAgentEvents(podId, events, attempt);
+          await persistMaxCredentialsForPod(
+            podId,
+            'Failed to persist rotated credentials after validation-feedback resume',
+          );
           if (outcome !== 'completed') {
             logger.info(
               { podId, attempt, maxAttempts: s2.maxValidationAttempts, outcome },

@@ -21,6 +21,7 @@ import type {
   MemoryUsageOutcome,
   PimActivationConfig,
   Profile,
+  ReviewFeedbackResponseItem,
 } from '@autopod/shared';
 import { MAX_DIFF_LENGTH, generateId } from '@autopod/shared';
 import type { Logger } from 'pino';
@@ -345,6 +346,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         };
       }>,
       memoryOutcomes?: MemoryOutcomeItem[],
+      reviewFeedbackResponses?: ReviewFeedbackResponseItem[],
     ): void {
       assertAgentWriteAllowed(podId, 'report_task_summary');
       podManager.touchHeartbeat(podId);
@@ -372,6 +374,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           factEvidenceCount: factEvidence?.length ?? 0,
           factDeviationCount: factDeviations?.length ?? 0,
           memoryOutcomeCount: memoryOutcomes?.length ?? 0,
+          reviewFeedbackResponseCount: reviewFeedbackResponses?.length ?? 0,
           actualSummary: actualSummary.slice(0, 100),
           preservedExistingSummary: summaryAlreadySet,
         },
@@ -388,16 +391,21 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           factEvidence,
           factDeviations,
           memoryOutcomes,
+          reviewFeedbackResponses,
         };
       } else if (
         existing.taskSummary &&
-        (factEvidence != null || factDeviations != null || memoryOutcomes != null)
+        (factEvidence != null ||
+          factDeviations != null ||
+          memoryOutcomes != null ||
+          reviewFeedbackResponses != null)
       ) {
         updates.taskSummary = {
           ...existing.taskSummary,
           ...(factEvidence != null ? { factEvidence } : {}),
           ...(factDeviations != null ? { factDeviations } : {}),
           ...(memoryOutcomes != null ? { memoryOutcomes } : {}),
+          ...(reviewFeedbackResponses != null ? { reviewFeedbackResponses } : {}),
         };
       }
       if (Object.keys(updates).length > 0) {
@@ -415,6 +423,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           factEvidence,
           factDeviations,
           memoryOutcomes,
+          reviewFeedbackResponses,
           timestamp: new Date().toISOString(),
         },
       });

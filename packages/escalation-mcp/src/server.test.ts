@@ -144,8 +144,58 @@ describe('createEscalationMcpServer memory reporting schema', () => {
         { memoryId: 'mem-2', outcome: 'not_applicable', reason: 'No matching files changed.' },
         { memoryId: 'mem-3', outcome: 'harmful_stale', reason: 'Contradicted current code.' },
       ],
+      undefined,
     );
     expect(result.content[0]?.text).toContain('3 memory outcomes recorded');
+  });
+
+  it('registers report_task_summary review feedback response schema', async () => {
+    const { createEscalationMcpServer } = await import('./server.js');
+    const bridge = makeBridge();
+    createEscalationMcpServer({ podId: 'sess-1', bridge });
+    const reportTaskSummary = getTool('report_task_summary');
+    const schema = z.object(reportTaskSummary.schema);
+    const input = schema.parse({
+      actualSummary: 'Fixed requested feedback',
+      deviations: [],
+      reviewFeedbackResponses: [
+        {
+          feedbackId: 'gh-comment-123',
+          outcome: 'fixed',
+          response: 'Renamed the option and added coverage.',
+        },
+        {
+          feedbackId: 'ado-thread-456',
+          outcome: 'needs_reviewer_decision',
+          response: 'This request conflicts with the existing public API.',
+        },
+      ],
+    });
+
+    const result = await reportTaskSummary.handler(input);
+
+    expect(bridge.reportTaskSummary).toHaveBeenCalledWith(
+      'sess-1',
+      'Fixed requested feedback',
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [
+        {
+          feedbackId: 'gh-comment-123',
+          outcome: 'fixed',
+          response: 'Renamed the option and added coverage.',
+        },
+        {
+          feedbackId: 'ado-thread-456',
+          outcome: 'needs_reviewer_decision',
+          response: 'This request conflicts with the existing public API.',
+        },
+      ],
+    );
+    expect(result.content[0]?.text).toContain('2 review feedback responses recorded');
   });
 
   it('rejects invalid report_task_summary memory outcome values before bridge invocation', async () => {

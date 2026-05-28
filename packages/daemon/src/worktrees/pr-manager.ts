@@ -10,6 +10,8 @@ import type {
   PrManager,
   PrMergeStatus,
   ReviewCommentDetail,
+  ReviewFeedbackReply,
+  ReviewFeedbackReplyResult,
 } from '../interfaces/pr-manager.js';
 import { buildPrBody } from './pr-body-builder.js';
 import {
@@ -264,15 +266,53 @@ export class GhPrManager implements PrManager {
           { cwd: config.worktreePath, timeout: 15_000 },
         );
         const reviewData = JSON.parse(reviewOut) as {
-          reviews: Array<{ author: { login: string }; state: string; body: string }>;
+          reviews: Array<{
+            id?: string;
+            databaseId?: number;
+            author: { login: string };
+            state: string;
+            body: string;
+          }>;
         };
-        for (const review of reviewData.reviews) {
+        for (const [index, review] of reviewData.reviews.entries()) {
           if (review.state === 'CHANGES_REQUESTED' && review.body) {
-            reviewComments.push({ author: review.author.login, body: review.body, path: null });
+            const reviewId = review.databaseId ?? review.id ?? index + 1;
+            reviewComments.push({
+              id: `gh-review-${reviewId}`,
+              author: review.author.login,
+              body: review.body,
+              path: null,
+            });
           }
         }
       } catch {
         // Non-fatal — reviewComments stays empty
+      }
+      try {
+        const { owner, repo, number } = parsePrUrl(config.prUrl);
+        const { stdout: commentsOut } = await execFileAsync(
+          'gh',
+          ['api', `repos/${owner}/${repo}/pulls/${number}/comments`],
+          { cwd: config.worktreePath, timeout: 15_000 },
+        );
+        const comments = JSON.parse(commentsOut) as Array<{
+          id: number;
+          in_reply_to_id?: number;
+          user: { login: string };
+          body: string;
+          path: string | null;
+        }>;
+        for (const comment of comments) {
+          if (comment.in_reply_to_id || !comment.body.trim()) continue;
+          reviewComments.push({
+            id: `gh-comment-${comment.id}`,
+            author: comment.user.login,
+            body: comment.body,
+            path: comment.path,
+          });
+        }
+      } catch {
+        // Non-fatal — PR-level review bodies still give the fix pod context.
       }
     } else if (pr.reviewDecision && pr.reviewDecision !== 'APPROVED') {
       const label = pr.reviewDecision === 'REVIEW_REQUIRED' ? 'Review required' : pr.reviewDecision;
@@ -287,6 +327,67 @@ export class GhPrManager implements PrManager {
       reviewComments,
       reviewDecision: pr.reviewDecision || undefined,
     };
+  }
+
+  async replyToReviewFeedback(config: {
+    prUrl: string;
+    worktreePath?: string;
+    responses: ReviewFeedbackReply[];
+  }): Promise<ReviewFeedbackReplyResult> {
+    const { owner, repo, number } = parsePrUrl(config.prUrl);
+    let posted = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+    const fallbackBodies: string[] = [];
+
+    for (const response of config.responses) {
+      const commentId = parseGitHubCommentFeedbackId(response.feedbackId);
+      if (!commentId) {
+        skipped++;
+        fallbackBodies.push(`- ${response.feedbackId}: ${response.body}`);
+        continue;
+      }
+
+      try {
+        await execFileAsync(
+          'gh',
+          [
+            'api',
+            '--method',
+            'POST',
+            `repos/${owner}/${repo}/pulls/${number}/comments/${commentId}/replies`,
+            '-f',
+            `body=${response.body}`,
+          ],
+          { cwd: config.worktreePath, timeout: 15_000 },
+        );
+        posted++;
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    if (fallbackBodies.length > 0) {
+      try {
+        await execFileAsync(
+          'gh',
+          [
+            'api',
+            '--method',
+            'POST',
+            `repos/${owner}/${repo}/issues/${number}/comments`,
+            '-f',
+            `body=Autopod fix pod review feedback responses:\n\n${fallbackBodies.join('\n\n')}`,
+          ],
+          { cwd: config.worktreePath, timeout: 15_000 },
+        );
+        posted++;
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    return { posted, skipped, errors };
   }
 }
 
@@ -305,6 +406,12 @@ function parsePrUrl(prUrl: string): { owner: string; repo: string; number: numbe
   const match = prUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
   if (!match) throw new Error(`Cannot parse PR URL: ${prUrl}`);
   return { owner: match[1], repo: match[2], number: Number.parseInt(match[3], 10) };
+}
+
+function parseGitHubCommentFeedbackId(feedbackId: string): number | null {
+  const match = feedbackId.match(/^gh-comment-(\d+)$/);
+  if (!match) return null;
+  return Number.parseInt(match[1], 10);
 }
 
 export class GitHubApiPrManager implements PrManager {
@@ -567,6 +674,7 @@ export class GitHubApiPrManager implements PrManager {
       );
       if (reviewsResp.ok) {
         const reviews = (await reviewsResp.json()) as Array<{
+          id: number;
           state: string;
           user: { login: string };
           body: string;
@@ -588,11 +696,43 @@ export class GitHubApiPrManager implements PrManager {
 
         for (const r of reviews) {
           if (r.state === 'CHANGES_REQUESTED' && r.body) {
-            reviewComments.push({ author: r.user.login, body: r.body, path: null });
+            reviewComments.push({
+              id: `gh-review-${r.id}`,
+              author: r.user.login,
+              body: r.body,
+              path: null,
+            });
           }
         }
         if (reviewComments.length > 0) {
           reasons.push('Changes requested');
+        }
+      }
+      if (reviewDecision === 'CHANGES_REQUESTED') {
+        const commentsResp = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/comments`,
+          { headers: this.headers },
+        );
+        if (commentsResp.ok) {
+          const comments = (await commentsResp.json()) as Array<{
+            id: number;
+            in_reply_to_id?: number;
+            user: { login: string };
+            body: string;
+            path: string | null;
+          }>;
+          for (const c of comments) {
+            if (c.in_reply_to_id || !c.body.trim()) continue;
+            reviewComments.push({
+              id: `gh-comment-${c.id}`,
+              author: c.user.login,
+              body: c.body,
+              path: c.path,
+            });
+          }
+          if (comments.length > 0 && !reasons.includes('Changes requested')) {
+            reasons.push('Changes requested');
+          }
         }
       }
     } catch {
@@ -607,5 +747,59 @@ export class GitHubApiPrManager implements PrManager {
       reviewComments,
       reviewDecision,
     };
+  }
+
+  async replyToReviewFeedback(config: {
+    prUrl: string;
+    responses: ReviewFeedbackReply[];
+  }): Promise<ReviewFeedbackReplyResult> {
+    const { owner, repo, number } = parsePrUrl(config.prUrl);
+    let posted = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+    const fallbackBodies: string[] = [];
+
+    for (const response of config.responses) {
+      const commentId = parseGitHubCommentFeedbackId(response.feedbackId);
+      if (!commentId) {
+        skipped++;
+        fallbackBodies.push(`- ${response.feedbackId}: ${response.body}`);
+        continue;
+      }
+
+      const reply = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/comments/${commentId}/replies`,
+        {
+          method: 'POST',
+          headers: this.headers,
+          body: JSON.stringify({ body: response.body }),
+        },
+      );
+      if (reply.ok) {
+        posted++;
+      } else {
+        errors.push(`GitHub reply error ${reply.status}: ${await reply.text()}`);
+      }
+    }
+
+    if (fallbackBodies.length > 0) {
+      const fallback = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/issues/${number}/comments`,
+        {
+          method: 'POST',
+          headers: this.headers,
+          body: JSON.stringify({
+            body: `Autopod fix pod review feedback responses:\n\n${fallbackBodies.join('\n\n')}`,
+          }),
+        },
+      );
+      if (fallback.ok) {
+        posted++;
+      } else {
+        errors.push(`GitHub PR comment error ${fallback.status}: ${await fallback.text()}`);
+      }
+    }
+
+    return { posted, skipped, errors };
   }
 }

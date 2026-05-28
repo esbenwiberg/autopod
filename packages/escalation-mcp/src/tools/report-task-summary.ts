@@ -1,4 +1,4 @@
-import type { FactEvidence, MemoryOutcomeItem } from '@autopod/shared';
+import type { FactEvidence, MemoryOutcomeItem, ReviewFeedbackResponseItem } from '@autopod/shared';
 import type { PodBridge } from '../pod-bridge.js';
 
 export interface ReportTaskSummaryInput {
@@ -26,6 +26,7 @@ export interface ReportTaskSummaryInput {
     };
   }>;
   memoryOutcomes?: MemoryOutcomeItem[];
+  reviewFeedbackResponses?: ReviewFeedbackResponseItem[];
 }
 
 export async function reportTaskSummary(
@@ -41,6 +42,7 @@ export async function reportTaskSummary(
     input.factEvidence,
     input.factDeviations,
     input.memoryOutcomes,
+    input.reviewFeedbackResponses,
   );
   const deviationCount = input.deviations.length;
   const deviationNote =
@@ -56,5 +58,8 @@ export async function reportTaskSummary(
   const memoryNote = input.memoryOutcomes?.length
     ? ` ${input.memoryOutcomes.length} memory outcome${input.memoryOutcomes.length === 1 ? '' : 's'} recorded.`
     : '';
-  return `Task summary registered. ${deviationNote}${factNote}${factDeviationNote}${memoryNote} The reviewer will assess any deviations.`;
+  const reviewFeedbackNote = input.reviewFeedbackResponses?.length
+    ? ` ${input.reviewFeedbackResponses.length} review feedback response${input.reviewFeedbackResponses.length === 1 ? '' : 's'} recorded for host-side PR replies.`
+    : '';
+  return `Task summary registered. ${deviationNote}${factNote}${factDeviationNote}${memoryNote}${reviewFeedbackNote} The reviewer will assess any deviations.`;
 }

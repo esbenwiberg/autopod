@@ -172,6 +172,34 @@ describe('PodBridge.reportTaskSummary — lock-on-first-write', () => {
     ]);
   });
 
+  it('updates review feedback responses on a locked re-report while preserving original summary text', () => {
+    const { bridge, podRepo, podId } = buildBridge();
+    const responses = [
+      {
+        feedbackId: 'gh-comment-123',
+        outcome: 'fixed' as const,
+        response: 'Added the missing null guard.',
+      },
+    ];
+
+    bridge.reportTaskSummary(podId, 'original summary', [], 'how-original');
+    bridge.reportTaskSummary(
+      podId,
+      'fix-cycle summary',
+      [],
+      'how-fix',
+      undefined,
+      undefined,
+      undefined,
+      responses,
+    );
+
+    const pod = podRepo.getOrThrow(podId);
+    expect(pod.taskSummary?.actualSummary).toBe('original summary');
+    expect(pod.taskSummary?.how).toBe('how-original');
+    expect(pod.taskSummary?.reviewFeedbackResponses).toEqual(responses);
+  });
+
   it('rejects stale agent progress and summaries after the pod leaves running state', () => {
     const { bridge, podRepo, podId, emit } = buildBridge();
 

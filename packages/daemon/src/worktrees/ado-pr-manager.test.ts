@@ -274,12 +274,14 @@ describe('AdoPrManager.getPrStatus', () => {
           body: {
             value: [
               {
+                id: 101,
                 status: 'active',
                 isDeleted: false,
                 pullRequestThreadContext: { filePath: 'src/foo.ts' },
                 comments: [{ author: { displayName: 'Bob' }, content: 'Fix this' }],
               },
               {
+                id: 102,
                 status: 'fixed', // resolved — should be ignored
                 isDeleted: false,
                 pullRequestThreadContext: null,
@@ -296,6 +298,7 @@ describe('AdoPrManager.getPrStatus', () => {
 
     expect(status.reviewComments).toHaveLength(1);
     expect(status.reviewComments[0]).toEqual({
+      id: 'ado-thread-101',
       author: 'Bob',
       body: 'Fix this',
       path: 'src/foo.ts',
@@ -313,6 +316,7 @@ describe('AdoPrManager.getPrStatus', () => {
           body: {
             value: [
               {
+                id: 101,
                 status: 'active',
                 isDeleted: true, // deleted — must be skipped
                 pullRequestThreadContext: null,
@@ -341,6 +345,7 @@ describe('AdoPrManager.getPrStatus', () => {
           body: {
             value: [
               {
+                id: 103,
                 status: 1, // integer 1 = active in some ADO API versions
                 isDeleted: false,
                 pullRequestThreadContext: null,
@@ -419,6 +424,38 @@ describe('AdoPrManager.getPrStatus', () => {
     expect(policyUrl).toContain('/_apis/policy/evaluations');
     expect(policyUrl).toContain('repo-guid-123');
     expect(policyUrl).toContain('42'); // PR id
+  });
+
+  it('posts host-side replies to ADO review threads', async () => {
+    const fetchMock = makeFetch([{ ok: true, body: { id: 1 } }]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const manager = new AdoPrManager(BASE_CONFIG);
+    const result = await manager.replyToReviewFeedback({
+      prUrl: PR_URL,
+      responses: [
+        {
+          feedbackId: 'ado-thread-123',
+          body: 'Autopod fix pod response: Fixed\n\nUpdated the null check.',
+        },
+        {
+          feedbackId: 'gh-comment-99',
+          body: 'Wrong provider.',
+        },
+      ],
+    });
+
+    expect(result).toEqual({ posted: 1, skipped: 1, errors: [] });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/pullrequests/42/threads/123/comments?api-version=7.1'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          content: 'Autopod fix pod response: Fixed\n\nUpdated the null check.',
+          commentType: 'text',
+        }),
+      }),
+    );
   });
 });
 

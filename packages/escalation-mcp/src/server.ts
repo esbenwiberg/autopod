@@ -221,6 +221,26 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         )
         .optional()
         .describe('Required when selected/injected memories exist: one final outcome per memory.'),
+      reviewFeedbackResponses: z
+        .array(
+          z.object({
+            feedbackId: z
+              .string()
+              .describe('Stable feedbackId shown in the PR fix task, e.g. gh-comment-123.'),
+            outcome: z
+              .enum(['fixed', 'not_applicable', 'needs_reviewer_decision', 'could_not_verify'])
+              .describe('How the fix pod handled this review comment.'),
+            response: z
+              .string()
+              .describe(
+                'Concise reply for the daemon host to post to the PR thread/comment. Explain the code change, or why no code change was appropriate.',
+              ),
+          }),
+        )
+        .optional()
+        .describe(
+          'For PR fix pods: host-side replies to review feedback. Do not use PR APIs from the container.',
+        ),
     },
     async (input) => {
       const response = await reportTaskSummary(podId, input, bridge);

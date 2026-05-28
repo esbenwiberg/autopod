@@ -88,12 +88,27 @@ export interface CiFailureDetail {
 }
 
 export interface ReviewCommentDetail {
+  /** Stable ID rendered to fix pods so they can report host-posted replies */
+  id?: string;
   /** Reviewer display name — stored for audit, NOT injected into agent task */
   author?: string;
   /** Comment body text */
   body: string;
   /** File path for inline comments, null for PR-level review comments */
   path: string | null;
+}
+
+export interface ReviewFeedbackReply {
+  /** Stable ID from ReviewCommentDetail.id / the fix task */
+  feedbackId: string;
+  /** Markdown body to post as a host-side reply */
+  body: string;
+}
+
+export interface ReviewFeedbackReplyResult {
+  posted: number;
+  skipped: number;
+  errors: string[];
 }
 
 export interface PrMergeStatus {
@@ -135,4 +150,9 @@ export interface PrManager {
   createPr(config: CreatePrConfig): Promise<CreatePrResult>;
   mergePr(config: MergePrConfig): Promise<MergePrResult>;
   getPrStatus(config: { prUrl: string; worktreePath?: string }): Promise<PrMergeStatus>;
+  replyToReviewFeedback?(config: {
+    prUrl: string;
+    worktreePath?: string;
+    responses: ReviewFeedbackReply[];
+  }): Promise<ReviewFeedbackReplyResult>;
 }

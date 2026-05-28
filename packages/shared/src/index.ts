@@ -169,6 +169,7 @@ export type {
   TaskSummary,
   DeviationsAssessment,
   MemoryOutcomeItem,
+  ReviewFeedbackResponseItem,
 } from './types/task-summary.js';
 
 export type {

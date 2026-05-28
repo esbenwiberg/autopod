@@ -9,6 +9,8 @@ import type {
   PrManager,
   PrMergeStatus,
   ReviewCommentDetail,
+  ReviewFeedbackReply,
+  ReviewFeedbackReplyResult,
 } from '../interfaces/pr-manager.js';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import { buildAdoAttachmentRef } from '../validation/screenshot-collector.js';
@@ -361,6 +363,12 @@ export class AdoPrManager implements PrManager {
     return prId;
   }
 
+  private parseAdoThreadFeedbackId(feedbackId: string): number | null {
+    const match = feedbackId.match(/^ado-thread-(\d+)$/);
+    if (!match) return null;
+    return Number.parseInt(match[1], 10);
+  }
+
   async mergePr(config: MergePrConfig): Promise<MergePrResult> {
     const prId = this.extractPrId(config.prUrl);
 
@@ -400,6 +408,39 @@ export class AdoPrManager implements PrManager {
 
     this.logger.info({ prUrl: config.prUrl, prId }, 'ADO pull request completed');
     return { merged: true, autoMergeScheduled: false };
+  }
+
+  async replyToReviewFeedback(config: {
+    prUrl: string;
+    responses: ReviewFeedbackReply[];
+  }): Promise<ReviewFeedbackReplyResult> {
+    const prId = this.extractPrId(config.prUrl);
+    let posted = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (const response of config.responses) {
+      const threadId = this.parseAdoThreadFeedbackId(response.feedbackId);
+      if (!threadId) {
+        skipped++;
+        continue;
+      }
+
+      try {
+        await this.adoFetch(`/pullrequests/${prId}/threads/${threadId}/comments?api-version=7.1`, {
+          method: 'POST',
+          body: JSON.stringify({
+            content: response.body,
+            commentType: 'text',
+          }),
+        });
+        posted++;
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    return { posted, skipped, errors };
   }
 
   async getPrStatus(config: { prUrl: string }): Promise<PrMergeStatus> {
@@ -520,6 +561,7 @@ export class AdoPrManager implements PrManager {
         { method: 'GET' },
       )) as {
         value: Array<{
+          id: number;
           status: string | number | undefined;
           isDeleted?: boolean;
           pullRequestThreadContext?: { filePath?: string } | null;
@@ -534,6 +576,7 @@ export class AdoPrManager implements PrManager {
         const first = thread.comments?.[0];
         if (!first?.content?.trim()) continue; // skip empty system/policy threads
         reviewComments.push({
+          id: `ado-thread-${thread.id}`,
           author: first.author.displayName,
           body: first.content,
           path: thread.pullRequestThreadContext?.filePath ?? null,

@@ -1,5 +1,5 @@
 import type { FactEvidence } from './contract.js';
-import type { MemoryOutcomeItem } from './task-summary.js';
+import type { MemoryOutcomeItem, ReviewFeedbackResponseItem } from './task-summary.js';
 
 export type RuntimeType = 'claude' | 'codex' | 'copilot';
 
@@ -144,4 +144,6 @@ export interface AgentTaskSummaryEvent {
   factEvidence?: FactEvidence[];
   /** Final outcome for each memory selected/injected for this pod. */
   memoryOutcomes?: MemoryOutcomeItem[];
+  /** Host-posted responses to PR review feedback. Intended for fix pods only. */
+  reviewFeedbackResponses?: ReviewFeedbackResponseItem[];
 }
