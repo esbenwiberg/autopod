@@ -1,6 +1,6 @@
 import type { MemoryEntry, Pod, QualitySignals } from '@autopod/shared';
 import pino from 'pino';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MemoryReviewer } from '../providers/memory-reviewer.js';
 import {
   LESSON_POTENTIAL_THRESHOLD,
@@ -9,6 +9,10 @@ import {
 } from './memory-extraction.js';
 
 const logger = pino({ level: 'silent' });
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -280,6 +284,63 @@ describe('extractCandidate', () => {
     expect(result.kind).toBe('skipped');
     if (result.kind !== 'skipped') return;
     expect(result.reason).toMatch(/reviewer_model_failed/);
+  });
+
+  it('retries a temporary reviewer rate limit before creating a candidate', async () => {
+    vi.useFakeTimers();
+    const rateLimitError = new Error('429 rate limited') as Error & {
+      status?: number;
+      headers?: Record<string, string>;
+    };
+    rateLimitError.status = 429;
+    rateLimitError.headers = { 'retry-after': '1' };
+    const reviewer: MemoryReviewer = {
+      model: 'claude-haiku-4-5',
+      generateText: vi.fn().mockRejectedValueOnce(rateLimitError).mockResolvedValue(VALID_JSON),
+    };
+
+    const pending = extractCandidate({
+      pod: makePod(),
+      lessonSignals: ['validation_failed'],
+      evidence,
+      existingMemories: [],
+      reviewer,
+      reviewerModel: 'claude-haiku-4-5',
+      logger,
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    const result = await pending;
+
+    expect(result.kind).toBe('candidate');
+    expect(reviewer.generateText).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry hard reviewer quota exhaustion', async () => {
+    const reviewer: MemoryReviewer = {
+      model: 'gpt-5-mini',
+      generateText: vi
+        .fn()
+        .mockRejectedValue(
+          new Error(
+            'openai_reviewer_http_429: You exceeded your current quota, please check your plan and billing details',
+          ),
+        ),
+    };
+
+    const result = await extractCandidate({
+      pod: makePod(),
+      lessonSignals: ['validation_failed'],
+      evidence,
+      existingMemories: [],
+      reviewer,
+      reviewerModel: 'gpt-5-mini',
+      logger,
+    });
+
+    expect(result.kind).toBe('skipped');
+    if (result.kind !== 'skipped') return;
+    expect(result.reason).toMatch(/reviewer_quota_exhausted/);
+    expect(reviewer.generateText).toHaveBeenCalledTimes(1);
   });
 
   it('returns skipped on JSON parse failure', async () => {

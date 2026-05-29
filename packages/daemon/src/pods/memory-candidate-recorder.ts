@@ -81,6 +81,21 @@ export function createMemoryCandidateRecorder(
   // that we saw an early status event.
   const processedPodIds = new Set<string>();
   const inFlightPodIds = new Set<string>();
+  let reviewerSlot: Promise<void> = Promise.resolve();
+
+  async function withReviewerSlot<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = reviewerSlot;
+    let release: () => void = () => {};
+    reviewerSlot = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
 
   function recordAttempt(input: {
     podId: string;
@@ -174,33 +189,47 @@ export function createMemoryCandidateRecorder(
 
     const existingMemories = memoryRepo.list('profile', pod.profileName, true);
 
-    const reviewerModelId = resolveReviewerModel(profile, logger);
-    const reviewerResult = await createProfileMemoryReviewer(profile, reviewerModelId, logger);
-    if (!reviewerResult.ok) {
+    const reviewerSlotResult = await withReviewerSlot(async () => {
+      const reviewerModelId = resolveReviewerModel(profile, logger);
+      const reviewerResult = await createProfileMemoryReviewer(profile, reviewerModelId, logger);
+      if (!reviewerResult.ok) {
+        return {
+          kind: 'reviewer_unavailable' as const,
+          reason: reviewerResult.reason,
+        };
+      }
+
+      return {
+        kind: 'extraction_result' as const,
+        result: await extractCandidate({
+          pod,
+          lessonSignals,
+          evidence,
+          existingMemories,
+          reviewer: reviewerResult.reviewer,
+          reviewerModel: reviewerResult.model,
+          logger,
+        }),
+      };
+    });
+
+    if (reviewerSlotResult.kind === 'reviewer_unavailable') {
       logger.warn(
-        { podId, reason: reviewerResult.reason },
+        { podId, reason: reviewerSlotResult.reason },
         'Reviewer model unavailable for memory extraction',
       );
       recordAttempt({
         podId,
         profileName: pod.profileName,
         status: 'reviewer_unavailable',
-        reason: reviewerResult.reason,
+        reason: reviewerSlotResult.reason,
         score,
         signals: lessonSignals,
       });
       return 'retryable';
     }
 
-    const result = await extractCandidate({
-      pod,
-      lessonSignals,
-      evidence,
-      existingMemories,
-      reviewer: reviewerResult.reviewer,
-      reviewerModel: reviewerResult.model,
-      logger,
-    });
+    const result = reviewerSlotResult.result;
 
     if (result.kind === 'candidate') {
       const candidate = candidateRepo.insert(result.input);
@@ -303,7 +332,10 @@ export function createMemoryCandidateRecorder(
   };
 }
 
-function classifySkippedResult(reason: string): 'reviewer_failed' | 'invalid_response' | 'skipped' {
+function classifySkippedResult(
+  reason: string,
+): 'reviewer_unavailable' | 'reviewer_failed' | 'invalid_response' | 'skipped' {
+  if (reason.startsWith('reviewer_quota_exhausted')) return 'reviewer_unavailable';
   if (reason.startsWith('reviewer_model_failed')) return 'reviewer_failed';
   if (reason.startsWith('json_parse_failed') || reason.startsWith('output_invalid')) {
     return 'invalid_response';

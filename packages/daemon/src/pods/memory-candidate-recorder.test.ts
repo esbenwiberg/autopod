@@ -414,6 +414,69 @@ describe('MemoryCandidateRecorder', () => {
     expect(candidateRepo.list('test-profile')).toHaveLength(1);
   });
 
+  it('serializes reviewer calls across simultaneous pod outcomes', async () => {
+    const firstPodId = 'pod-rec-test-a';
+    const secondPodId = 'pod-rec-test-b';
+    let resolveFirst: (value: string) => void = () => {};
+    const firstReviewerPromise = new Promise<string>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const firstReviewer = {
+      model: 'claude-haiku-4-5-20251001',
+      generateText: vi.fn().mockReturnValue(firstReviewerPromise),
+    };
+    const secondReviewer = makeMockReviewer();
+    vi.mocked(createProfileMemoryReviewer)
+      .mockResolvedValueOnce({
+        ok: true,
+        reviewer: firstReviewer,
+        model: 'claude-haiku-4-5-20251001',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        reviewer: secondReviewer,
+        model: 'claude-haiku-4-5-20251001',
+      });
+
+    podRepo.insert(basePod({ id: firstPodId, branch: 'autopod/first' }));
+    podRepo.update(firstPodId, { prFixAttempts: 2 });
+    podRepo.insert(basePod({ id: secondPodId, branch: 'autopod/second' }));
+    podRepo.update(secondPodId, { prFixAttempts: 2 });
+
+    const recorder = makeRecorder();
+    recorder.start();
+
+    eventBus.emit({
+      type: 'pod.completed',
+      timestamp: new Date().toISOString(),
+      podId: firstPodId,
+      finalStatus: 'complete',
+      summary: { id: firstPodId, profileName: 'test-profile' } as never,
+    });
+    eventBus.emit({
+      type: 'pod.completed',
+      timestamp: new Date().toISOString(),
+      podId: secondPodId,
+      finalStatus: 'complete',
+      summary: { id: secondPodId, profileName: 'test-profile' } as never,
+    });
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(createProfileMemoryReviewer).toHaveBeenCalledTimes(1);
+    expect(firstReviewer.generateText).toHaveBeenCalledTimes(1);
+    expect(secondReviewer.generateText).not.toHaveBeenCalled();
+
+    resolveFirst(CANDIDATE_JSON);
+
+    await flushAsync();
+    recorder.stop();
+
+    expect(createProfileMemoryReviewer).toHaveBeenCalledTimes(2);
+    expect(secondReviewer.generateText).toHaveBeenCalledTimes(1);
+    expect(candidateRepo.list('test-profile')).toHaveLength(2);
+  });
+
   it('skips when DB already has a candidate for the pod (restart idempotency)', async () => {
     podRepo.insert(basePod({ status: 'complete' }));
     podRepo.update(POD_ID, { prFixAttempts: 2 });
@@ -537,6 +600,46 @@ describe('MemoryCandidateRecorder', () => {
     expect(attemptRepo.getByPod(POD_ID)).toMatchObject({
       status: 'reviewer_unavailable',
       reason: 'no_anthropic_api_key',
+    });
+  });
+
+  it('records hard reviewer quota exhaustion as reviewer unavailable', async () => {
+    vi.mocked(createProfileMemoryReviewer).mockResolvedValue({
+      ok: true,
+      reviewer: {
+        model: 'gpt-5-mini',
+        generateText: vi
+          .fn()
+          .mockRejectedValue(
+            new Error(
+              'openai_reviewer_http_429: You exceeded your current quota, please check your plan and billing details',
+            ),
+          ),
+      },
+      model: 'gpt-5-mini',
+    });
+
+    podRepo.insert(basePod({ status: 'complete' }));
+    podRepo.update(POD_ID, { prFixAttempts: 2 });
+
+    const recorder = makeRecorder();
+    recorder.start();
+
+    eventBus.emit({
+      type: 'pod.completed',
+      timestamp: new Date().toISOString(),
+      podId: POD_ID,
+      finalStatus: 'complete',
+      summary: { id: POD_ID, profileName: 'test-profile' } as never,
+    });
+
+    await flushAsync();
+    recorder.stop();
+
+    expect(candidateRepo.list('test-profile')).toHaveLength(0);
+    expect(attemptRepo.getByPod(POD_ID)).toMatchObject({
+      status: 'reviewer_unavailable',
+      reason: expect.stringMatching(/reviewer_quota_exhausted/),
     });
   });
 

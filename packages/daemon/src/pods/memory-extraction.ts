@@ -15,6 +15,9 @@ export const LESSON_POTENTIAL_THRESHOLD = 0.2;
 const DEFAULT_REVIEWER_MODEL = 'claude-haiku-4-5';
 const MAX_EXCERPT_CHARS = 400;
 const API_TIMEOUT_MS = 20_000;
+const RATE_LIMIT_RETRY_BUDGET_MS = 90_000;
+const RATE_LIMIT_BASE_DELAY_MS = 5_000;
+const RATE_LIMIT_MAX_DELAY_MS = 30_000;
 const VALID_KINDS: MemoryKind[] = [
   'convention',
   'gotcha',
@@ -194,20 +197,31 @@ export async function extractCandidate(opts: {
 
   let rawResponse: string;
   try {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error('reviewer_model_timeout')), API_TIMEOUT_MS);
-    });
-    rawResponse = await Promise.race<string>([
-      reviewer.generateText({
-        systemPrompt: REVIEWER_SYSTEM_PROMPT,
-        userMessage,
-        maxTokens: 512,
-      }),
-      timeoutPromise,
-    ]);
-    clearTimeout(timeoutId);
+    rawResponse = await callReviewerWithRateLimitRetry(
+      () =>
+        withTimeout(
+          reviewer.generateText({
+            systemPrompt: REVIEWER_SYSTEM_PROMPT,
+            userMessage,
+            maxTokens: 512,
+          }),
+          API_TIMEOUT_MS,
+        ),
+      {
+        podId: pod.id,
+        reviewerModel,
+        logger,
+      },
+    );
   } catch (err) {
+    if (isQuotaExhaustedError(err)) {
+      const reason = `reviewer_quota_exhausted: ${formatReviewerError(err)}`;
+      logger.warn(
+        { podId: pod.id, model: reviewerModel, reason },
+        'Reviewer model quota exhausted for memory extraction',
+      );
+      return { kind: 'skipped', reason };
+    }
     const reason = `reviewer_model_failed: ${err instanceof Error ? err.message : String(err)}`;
     logger.warn(
       { podId: pod.id, model: reviewerModel, reason },
@@ -306,4 +320,134 @@ export async function extractCandidate(opts: {
       fallbackReason: null,
     },
   };
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race<T>([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('reviewer_model_timeout')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+async function callReviewerWithRateLimitRetry(
+  operation: () => Promise<string>,
+  context: { podId: string; reviewerModel: string; logger: Logger },
+): Promise<string> {
+  const deadline = Date.now() + RATE_LIMIT_RETRY_BUDGET_MS;
+  let attempt = 0;
+
+  while (true) {
+    try {
+      return await operation();
+    } catch (err) {
+      if (!isRateLimitError(err) || isQuotaExhaustedError(err)) throw err;
+
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw err;
+
+      const fallbackDelayMs = Math.min(
+        RATE_LIMIT_MAX_DELAY_MS,
+        RATE_LIMIT_BASE_DELAY_MS * 2 ** attempt,
+      );
+      const delayMs = retryDelayMs(err, fallbackDelayMs);
+      if (delayMs > remainingMs) {
+        context.logger.warn(
+          {
+            err,
+            podId: context.podId,
+            model: context.reviewerModel,
+            requestedDelayMs: delayMs,
+            retryBudgetRemainingMs: remainingMs,
+          },
+          'Reviewer model rate-limit window exceeds memory extraction retry budget',
+        );
+        throw err;
+      }
+
+      attempt++;
+      context.logger.warn(
+        {
+          err,
+          podId: context.podId,
+          model: context.reviewerModel,
+          attempt,
+          delayMs,
+          retryBudgetRemainingMs: remainingMs,
+        },
+        'Reviewer model rate-limited during memory extraction; retrying after backoff',
+      );
+      await sleep(delayMs);
+    }
+  }
+}
+
+function retryDelayMs(err: unknown, fallbackMs: number): number {
+  const retryAfter = headerValue(err, 'retry-after');
+  const retryAfterSeconds = retryAfter ? Number(retryAfter) : Number.NaN;
+  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
+    return Math.max(500, retryAfterSeconds * 1_000);
+  }
+  if (retryAfter) {
+    const retryAfterDate = Date.parse(retryAfter);
+    if (Number.isFinite(retryAfterDate)) {
+      return Math.max(500, retryAfterDate - Date.now());
+    }
+  }
+  return fallbackMs;
+}
+
+function headerValue(err: unknown, name: string): string | undefined {
+  const record = err && typeof err === 'object' ? (err as Record<string, unknown>) : {};
+  const headers = record.headers;
+  if (!headers || typeof headers !== 'object') return undefined;
+  const getter = (headers as { get?: (key: string) => string | null | undefined }).get;
+  if (typeof getter === 'function') return getter.call(headers, name) ?? undefined;
+  const entry = Object.entries(headers as Record<string, unknown>).find(
+    ([key]) => key.toLowerCase() === name.toLowerCase(),
+  );
+  return typeof entry?.[1] === 'string' ? entry[1] : undefined;
+}
+
+function formatReviewerError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function isRateLimitError(err: unknown): boolean {
+  const record = err && typeof err === 'object' ? (err as Record<string, unknown>) : {};
+  const status = record.status;
+  const type = record.type;
+  const error = record.error;
+  const text = formatReviewerError(err);
+  if (status === 429 || type === 'rate_limit_error') return true;
+  if (error && typeof error === 'object') {
+    const nestedType = (error as Record<string, unknown>).type;
+    if (nestedType === 'rate_limit_error') return true;
+  }
+  return /\b429\b|rate[_ -]?limit/i.test(text);
+}
+
+function isQuotaExhaustedError(err: unknown): boolean {
+  const record = err && typeof err === 'object' ? (err as Record<string, unknown>) : {};
+  const error = record.error;
+  const nestedCode =
+    error && typeof error === 'object' ? (error as Record<string, unknown>).code : undefined;
+  const code = record.code ?? nestedCode;
+  const text = formatReviewerError(err).toLowerCase();
+  return (
+    code === 'insufficient_quota' ||
+    text.includes('insufficient_quota') ||
+    text.includes('exceeded your current quota') ||
+    text.includes('check your plan and billing')
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
