@@ -1,0 +1,96 @@
+contract_version: 1
+title: "Defer advisory QA and PR enrichment across reviewer quota limits"
+depends_on: []
+scenarios:
+  - id: advisory-quota-deferred
+    given:
+      - "blocking validation has passed"
+      - "advisory browser QA is enabled"
+      - "the advisory reviewer provider returns a rate-limit error"
+    when:
+      - "the daemon runs advisory browser QA"
+    then:
+      - "the validation result remains passing and approvable"
+      - "advisory state records that reviewer quota is pending"
+      - "a later retry is scheduled instead of exhausting the inline budget"
+      - "pod activity logs identify the advisory target and reviewer stage that is waiting"
+  - id: approval-not-blocked-by-advisory
+    given:
+      - "a pod has passed blocking validation"
+      - "advisory browser QA is still pending reviewer quota"
+    when:
+      - "the user approves the pod"
+    then:
+      - "approval and PR/merge flow continue"
+      - "the advisory retry remains tracked as nonblocking enrichment"
+  - id: pr-narrative-deferred
+    given:
+      - "a pod is creating a PR"
+      - "LLM PR title or body generation returns a rate-limit error"
+    when:
+      - "the PR manager creates the PR"
+    then:
+      - "the PR is created with provisional template content"
+      - "a deferred PR enrichment retry is scheduled"
+      - "after reviewer quota clears, the daemon updates the PR title or body"
+  - id: advisory-targets-browser-testable
+    given:
+      - "a contract contains scenarios proven only by unit-test facts"
+      - "the contract also contains browser-test facts or explicit human review items"
+    when:
+      - "advisory browser QA builds its checklist"
+    then:
+      - "only browser-testable scenarios and explicit human review items become advisory targets"
+      - "unit-test-only adapter or config scenarios are not reviewed through the browser"
+  - id: no-browser-targets-skip
+    given:
+      - "advisory browser QA is enabled"
+      - "the contract has no browser-testable scenarios and no explicit human review items"
+    when:
+      - "blocking validation passes"
+    then:
+      - "advisory browser QA records a clear skip reason"
+      - "no reviewer model call is made"
+required_facts:
+  - id: fact-advisory-quota-deferred
+    proves:
+      - advisory-quota-deferred
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/advisory-browser-qa-runner.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- advisory-browser-qa-runner.test.ts --testNamePattern advisory-quota-deferred
+  - id: fact-approval-not-blocked
+    proves:
+      - approval-not-blocked-by-advisory
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts --testNamePattern approval-not-blocked-by-advisory
+  - id: fact-pr-enrichment-retry-github
+    proves:
+      - pr-narrative-deferred
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/worktrees/pr-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pr-manager.test.ts --testNamePattern pr-narrative-deferred
+  - id: fact-pr-enrichment-retry-ado
+    proves:
+      - pr-narrative-deferred
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/worktrees/ado-pr-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- ado-pr-manager.test.ts --testNamePattern pr-narrative-deferred
+  - id: fact-target-filtering
+    proves:
+      - advisory-targets-browser-testable
+      - no-browser-targets-skip
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/advisory-browser-qa-runner.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- advisory-browser-qa-runner.test.ts --testNamePattern advisory-targets-browser-testable
+human_review: []

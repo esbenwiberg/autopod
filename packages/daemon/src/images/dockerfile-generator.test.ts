@@ -252,6 +252,15 @@ describe('generateDockerfile', () => {
     expect(df).toContain('USER autopod');
   });
 
+  it('does not reinstall agent CLIs in warm images', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({ template: 'node22-pw' }),
+      gitCredentials: 'none',
+    });
+
+    expect(df).not.toContain('@anthropic-ai/claude-code @openai/codex @github/copilot');
+  });
+
   it('uses sha256 digest in FROM when imageDigests map is provided', () => {
     const digest = `sha256:${'f'.repeat(64)}`;
     const df = generateDockerfile({

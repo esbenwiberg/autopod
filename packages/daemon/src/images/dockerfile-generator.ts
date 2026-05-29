@@ -106,13 +106,6 @@ export function generateDockerfile(options: DockerfileOptions): string {
   // requirements, not caches.
   lines.push('', '# Pre-warm dependency caches (best-effort)', `RUN ${installCommand} || true`);
 
-  // Install agent CLIs so they're ready at container start (zero cold-start)
-  lines.push(
-    '',
-    '# Install agent CLIs into the image',
-    'RUN npm install -g @anthropic-ai/claude-code @openai/codex @github/copilot',
-  );
-
   // Per-sidecar image mods: tools the pod needs to interact with a sidecar
   // must be present in the image (the pod can't install them at runtime under
   // a restricted network policy). Dagger sidecar → install the Dagger CLI,

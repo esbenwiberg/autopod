@@ -120,7 +120,10 @@ function readSpecFiles(specRoot: string): SpecFile[] {
         continue;
       }
       if (!stat.isFile()) continue;
-      const rel = full.slice(root.length + 1).split(pathSeparatorRegex).join('/');
+      const rel = full
+        .slice(root.length + 1)
+        .split(pathSeparatorRegex)
+        .join('/');
       files.push({
         path: `${outputRoot}/${rel}`,
         content: readFileSync(full, 'utf-8'),

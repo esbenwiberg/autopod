@@ -12,7 +12,10 @@ describe('createProfileSchema model validation', () => {
         expect(defaultModel.error.issues[0]?.message).toContain(canonicalModelMessage);
       }
 
-      const reviewerModel = createProfileSchema.safeParse({ name: 'primary', reviewerModel: model });
+      const reviewerModel = createProfileSchema.safeParse({
+        name: 'primary',
+        reviewerModel: model,
+      });
       expect(reviewerModel.success).toBe(false);
       if (!reviewerModel.success) {
         expect(reviewerModel.error.issues[0]?.message).toContain(canonicalModelMessage);

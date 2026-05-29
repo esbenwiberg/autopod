@@ -1,0 +1,51 @@
+contract_version: 1
+title: "Wire desktop fact-decision experience"
+depends_on:
+  - 02-batch-fact-decisions-backend
+scenarios:
+  - id: overview-shows-required-fact-decision-needed
+    given:
+      - "a pod is failed or review_required"
+      - "its latest validation result has pending_human required facts"
+    when:
+      - "the operator opens the Overview tab"
+    then:
+      - "the overview names the state as Required fact decision needed"
+      - "the overview tells the operator how many required facts need decisions"
+      - "the overview routes the operator to Validation"
+  - id: validation-tab-batches-all-pending-facts
+    given:
+      - "a pod has multiple pending_human required facts"
+    when:
+      - "the operator opens the Validation tab"
+    then:
+      - "one Required Fact Decisions panel lists every pending fact"
+      - "no decision is preselected"
+      - "Apply Decisions & Revalidate is disabled until every pending fact has a decision"
+      - "submitting sends one batch request"
+  - id: desktop-uses-domain-decision-terms
+    given:
+      - "the desktop renders fact-decision controls or summaries"
+    when:
+      - "a pending or decided fact is visible"
+    then:
+      - "the UI uses Waive Required Fact, Use Replacement Proof, and Enforce Original Fact"
+      - "generic approve/reject wording is not used for fact-decision choices"
+  - id: pending-fact-notification-is-specific
+    given:
+      - "the event stream receives validationCompleted with factValidation.status pending_human"
+    when:
+      - "desktop notification handling runs"
+    then:
+      - "the app sends Required fact decision needed"
+      - "the app does not also send the generic Validation failed notification"
+required_facts: []
+human_review:
+  - id: review-desktop-fact-decision-flow
+    covers:
+      - overview-shows-required-fact-decision-needed
+      - validation-tab-batches-all-pending-facts
+      - desktop-uses-domain-decision-terms
+      - pending-fact-notification-is-specific
+    criterion: "On a macOS/Xcode-capable machine, verify the Overview and Validation tab match the approved wireframe, the batch submit remains disabled until all pending facts are decided, domain terms replace generic approve/reject wording, replacement proof only appears when available, and pending-human validation emits the specific native notification without the generic failure notification."
+    reason: "Autopod-self required facts run in a Linux pod, while desktop SwiftUI/AppKit behaviour requires a macOS/Xcode-capable environment."

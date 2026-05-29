@@ -902,6 +902,46 @@ describe('DockerContainerManager', () => {
       // Stream should be destroyed
       expect(muxStream.destroyed).toBe(true);
     });
+
+    it('drops late demux output after runtime force-closes output streams', async () => {
+      const muxStream = new PassThrough();
+      muxStream.resume();
+      docker.modem.demuxStream = vi.fn(
+        (
+          stream: NodeJS.ReadableStream,
+          stdoutWriter: NodeJS.WritableStream,
+          stderrWriter: NodeJS.WritableStream,
+        ) => {
+          stream.on('data', (chunk: Buffer) => {
+            stdoutWriter.write(chunk);
+            stderrWriter.write(chunk);
+          });
+        },
+      );
+
+      const mockExec = {
+        start: vi.fn().mockResolvedValue(muxStream),
+        inspect: vi.fn().mockResolvedValue({ ExitCode: 0 }),
+      };
+      container.exec.mockResolvedValue(mockExec);
+
+      const result = await manager.execStreaming('abc123', ['cmd']);
+      const stdout = result.stdout as PassThrough;
+      const stderr = result.stderr as PassThrough;
+      const outputErrors: Error[] = [];
+      stdout.on('error', (err: Error) => outputErrors.push(err));
+      stderr.on('error', (err: Error) => outputErrors.push(err));
+
+      stdout.end();
+      stderr.end();
+      muxStream.write(Buffer.from('late output frame'));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(outputErrors).toEqual([]);
+
+      muxStream.end();
+      await expect(result.exitCode).resolves.toBe(0);
+    });
   });
 
   // ─── Full spawn config integration ─────────────────────

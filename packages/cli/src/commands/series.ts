@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
-import { numericPrefix, parseBriefs, type SpecFile } from '@autopod/shared';
+import { type SpecFile, numericPrefix, parseBriefs } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
@@ -64,7 +64,10 @@ function collectSpecFiles(specRoot: string): SpecFile[] {
         continue;
       }
       if (!stat.isFile()) continue;
-      const rel = full.slice(root.length + 1).split(pathSeparatorRegex).join('/');
+      const rel = full
+        .slice(root.length + 1)
+        .split(pathSeparatorRegex)
+        .join('/');
       files.push({
         path: `${outputRoot}/${rel}`,
         content: readFileSync(full, 'utf-8'),
@@ -86,7 +89,10 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
       'Create a series of pods from a spec folder (containing purpose.md, design.md, and briefs/).',
     )
     .requiredOption('-p, --profile <name>', 'Profile to use for all pods')
-    .option('--start-branch <branch>', 'Branch/ref to start root pods from while targeting --base-branch')
+    .option(
+      '--start-branch <branch>',
+      'Branch/ref to start root pods from while targeting --base-branch',
+    )
     .option('-b, --base-branch <branch>', 'Base branch (default: profile default)')
     .option(
       '--pr-mode <mode>',

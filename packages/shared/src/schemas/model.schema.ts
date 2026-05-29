@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import type { z } from 'zod';
 import { LEGACY_CLAUDE_MODEL_ALIASES } from '../pricing/index.js';
 
 export const canonicalModelIdMessage =
@@ -7,4 +7,3 @@ export const canonicalModelIdMessage =
 export function withCanonicalModelIdPolicy<T extends z.ZodString>(schema: T) {
   return schema.refine((model) => !LEGACY_CLAUDE_MODEL_ALIASES.has(model), canonicalModelIdMessage);
 }
-

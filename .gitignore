@@ -17,6 +17,7 @@ coverage/
 **/.autopod-data/
 .autopod/
 !.autopod/review/SAMPLE-*.html
+.speclint-cache/
 tmp/
 .agentry/
 .playwright-mcp/

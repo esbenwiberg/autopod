@@ -52,7 +52,7 @@ function buildBridgeWithMemory(pods: StubSession[]): {
   const podsById = new Map(
     pods.map((pod) => [
       pod.id,
-      { ...pod, status: pod.status ?? 'running', taskSummary: null as TaskSummary | null },
+      { ...pod, status: 'running', taskSummary: null as TaskSummary | null },
     ]),
   );
   const podRepo = {

@@ -796,18 +796,32 @@ export class DockerContainerManager implements ContainerManager {
 
     const stdoutStream = new PassThrough();
     const stderrStream = new PassThrough();
+    const stdoutWriter = createGuardedDemuxWriter(stdoutStream, 'stdout', {
+      containerId,
+      command: safeCommand,
+      logger: this.logger,
+    });
+    const stderrWriter = createGuardedDemuxWriter(stderrStream, 'stderr', {
+      containerId,
+      command: safeCommand,
+      logger: this.logger,
+    });
 
     // Demux the Docker multiplexed stream into separate stdout/stderr
-    this.docker.modem.demuxStream(muxStream, stdoutStream, stderrStream);
+    this.docker.modem.demuxStream(muxStream, stdoutWriter, stderrWriter);
 
     // When the mux stream ends, close both output streams
     (muxStream as NodeJS.ReadableStream & { on: (...args: unknown[]) => unknown }).on('end', () => {
+      stdoutWriter.end();
+      stderrWriter.end();
       stdoutStream.end();
       stderrStream.end();
     });
     (muxStream as NodeJS.ReadableStream & { on: (...args: unknown[]) => unknown }).on(
       'error',
       (err: Error) => {
+        stdoutWriter.destroy(err);
+        stderrWriter.destroy(err);
         stdoutStream.destroy(err);
         stderrStream.destroy(err);
       },
@@ -977,4 +991,84 @@ function collectDemuxedOutput(
       }, timeout);
     }
   });
+}
+
+interface DemuxWriterContext {
+  containerId: string;
+  command: string[];
+  logger: Logger;
+}
+
+function createGuardedDemuxWriter(
+  target: PassThrough,
+  streamName: 'stdout' | 'stderr',
+  context: DemuxWriterContext,
+): Writable {
+  let loggedDrop = false;
+
+  const logDrop = (err?: Error | null) => {
+    if (loggedDrop) return;
+    loggedDrop = true;
+    context.logger.debug(
+      {
+        containerId: context.containerId,
+        command: context.command,
+        err,
+        stream: streamName,
+      },
+      'Dropped Docker demux output after output stream closed',
+    );
+  };
+
+  target.on('error', (err: Error) => {
+    if (isExpectedClosedOutputWrite(err)) {
+      logDrop(err);
+      return;
+    }
+    context.logger.warn(
+      {
+        containerId: context.containerId,
+        command: context.command,
+        err,
+        stream: streamName,
+      },
+      'Docker demux output stream error',
+    );
+  });
+
+  const writer = new Writable({
+    write(chunk: Buffer, _encoding, callback) {
+      if (target.destroyed || target.writableEnded || target.writableFinished) {
+        logDrop();
+        callback();
+        return;
+      }
+
+      target.write(chunk, (err?: Error | null) => {
+        if (err) logDrop(err);
+        callback();
+      });
+    },
+  });
+
+  writer.on('error', (err: Error) => {
+    context.logger.warn(
+      {
+        containerId: context.containerId,
+        command: context.command,
+        err,
+        stream: streamName,
+      },
+      'Docker demux writer error',
+    );
+  });
+
+  return writer;
+}
+
+function isExpectedClosedOutputWrite(err: Error): boolean {
+  return (
+    'code' in err &&
+    (err.code === 'ERR_STREAM_WRITE_AFTER_END' || err.code === 'ERR_STREAM_PUSH_AFTER_EOF')
+  );
 }

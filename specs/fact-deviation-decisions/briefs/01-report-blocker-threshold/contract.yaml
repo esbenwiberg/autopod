@@ -1,0 +1,53 @@
+contract_version: 1
+title: "Make report_blocker threshold-aware and nonblocking below threshold"
+depends_on: []
+scenarios:
+  - id: report-blocker-below-threshold-records-without-pausing
+    given:
+      - "a running pod calls report_blocker"
+      - "the pod has fewer prior report_blocker rows than the auto-pause threshold minus one"
+    when:
+      - "the MCP tool records the blocker"
+    then:
+      - "an escalation row is inserted with type report_blocker"
+      - "the pod is not moved to awaiting_input"
+      - "pendingEscalation is not set"
+      - "the MCP tool returns a continuing response without waiting for human input"
+  - id: report-blocker-threshold-pauses-for-human
+    given:
+      - "a running pod calls report_blocker"
+      - "the new report reaches the auto-pause threshold for report_blocker rows on that pod"
+    when:
+      - "the MCP tool records the blocker"
+    then:
+      - "the escalation row is inserted"
+      - "the daemon notifies the human through the existing escalation path"
+      - "the pod can move to awaiting_input with pendingEscalation set"
+      - "the MCP tool waits for the human response"
+required_facts:
+  - id: fact-report-blocker-below-threshold-nonblocking
+    proves:
+      - report-blocker-below-threshold-records-without-pausing
+    kind: unit-test
+    artifact:
+      path: packages/escalation-mcp/src/tools/escalation-tools.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/escalation-mcp test -- escalation-tools.test.ts -t "continues without waiting when report_blocker is below auto-pause threshold"
+  - id: fact-report-blocker-threshold-pauses
+    proves:
+      - report-blocker-threshold-pauses-for-human
+    kind: unit-test
+    artifact:
+      path: packages/escalation-mcp/src/tools/escalation-tools.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/escalation-mcp test -- escalation-tools.test.ts -t "waits for human when report_blocker reaches auto-pause threshold"
+  - id: fact-daemon-bridge-records-without-notifying
+    proves:
+      - report-blocker-below-threshold-records-without-pausing
+      - report-blocker-threshold-pauses-for-human
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-bridge-escalation.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- pod-bridge-escalation.test.ts
+human_review: []

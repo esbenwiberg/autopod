@@ -1,8 +1,5 @@
 import { z } from 'zod';
-import {
-  CLAUDE_DEFAULT_MODEL,
-  CLAUDE_REVIEWER_MODEL,
-} from '../pricing/index.js';
+import { CLAUDE_DEFAULT_MODEL, CLAUDE_REVIEWER_MODEL } from '../pricing/index.js';
 import {
   actionPolicySchema,
   outputModeSchema,

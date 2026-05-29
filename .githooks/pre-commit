@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
 
-npm run lint
-npm run format:check
-npm run typecheck
-npm test
-npm run build
-npm run secret-scan
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+node scripts/run-pnpm.mjs lint
+node scripts/run-pnpm.mjs typecheck
+node scripts/run-pnpm.mjs secret-scan

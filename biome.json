@@ -41,6 +41,7 @@
       "**/pnpm-lock.yaml",
       "**/.autopod-data/**",
       "**/.agentry/**",
+      "**/.speclint-cache/**",
       "packages/desktop/.build/**",
       "packages/desktop/build/**",
       "tmp/**"

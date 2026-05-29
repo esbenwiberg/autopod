@@ -2,101 +2,84 @@
 
 ## Status
 
-Accepted
+Proposed
 
 ## Context
 
-Autopod historically accepted short Claude aliases (`opus`, `sonnet`, and
-`haiku`) in profile defaults, create-pod model overrides, and the legacy
-`escalation.askAi.model` payload. That convenience became ambiguous once Opus
-4.8 became the current Opus choice for new Claude work: old `pods.model = 'opus'`
-rows describe work that ran under the earlier Opus 4.7 alias mapping, while new
-profile and pod writes should explicitly identify `claude-opus-4-8`.
+Autopod historically accepted short Claude model aliases such as `opus`, `sonnet`,
+and `haiku` in profile defaults and pod creation. Those aliases were convenient
+when there was only one obvious current Opus/Sonnet/Haiku target, but they made
+model identity noisy in storage, analytics, docs, and Desktop UI.
 
-ADR-022 already defines `MODEL_CANONICAL` as an analytics coalescing map over
-historical `pods.model` rows. That map must preserve the meaning of old pod rows,
-so changing `MODEL_CANONICAL.opus` to Opus 4.8 would rewrite history at read
-time. ADR-015 keeps model pricing as bundled JSON, which means the short alias
-price rows still need to exist temporarily for legacy raw lookup paths even
-though they are no longer a public input contract.
+ADR-022 introduced `MODEL_CANONICAL` so analytics could coalesce historical
+`pods.model` rows like `opus` into the canonical model that actually ran at the
+time, currently `claude-opus-4-7`. That solved read-side analytics bisection, but
+it did not settle the public input policy.
+
+Claude Opus 4.8 introduced a new current Opus ID: `claude-opus-4-8`. If Autopod
+keeps accepting `opus` as new input, the same short string would mean "current
+Opus" for new profile writes while still meaning "old Opus 4.7" for historical
+pod analytics. That split is surprising and makes cost, quality, and UI display
+harder to reason about.
 
 ## Decision
 
-New model-bearing writes must use canonical provider model IDs. Exact short
-Claude aliases are rejected by shared Zod schemas for:
+New model writes use canonical provider model IDs. Short aliases are legacy-only.
 
-- `createPodRequestSchema.model`
-- `createProfileSchema.defaultModel`
-- `updateProfileSchema.defaultModel`
-- `createProfileSchema.reviewerModel`
-- `updateProfileSchema.reviewerModel`
-- `createProfileSchema.escalation.askAi.model`
-- `updateProfileSchema.escalation.askAi.model`
+Specifically:
 
-The current shared Claude defaults are:
-
-```ts
-export const CLAUDE_DEFAULT_MODEL = 'claude-opus-4-8';
-export const CLAUDE_REVIEWER_MODEL = 'claude-sonnet-4-6';
-```
-
-The rejected legacy alias set is:
-
-```ts
-export const LEGACY_CLAUDE_MODEL_ALIASES = new Set(['opus', 'sonnet', 'haiku']);
-```
-
-Null profile values keep their inheritance semantics. A derived profile can
-still send or materialize `null` for model-bearing fields to inherit from its
-parent; the rejection applies only when a caller sends the exact short alias
-strings as concrete values.
-
-`MODEL_CANONICAL` remains a historical analytics map:
-
-```ts
-export const MODEL_CANONICAL = {
-  opus: 'claude-opus-4-7',
-  sonnet: 'claude-sonnet-4-6',
-  haiku: 'claude-haiku-4-5',
-};
-```
-
-Short alias price rows remain in `model-pricing.json` only as legacy-internal
-pricing shims pending GitHub issue #139. They must not be documented or treated
-as accepted new input.
+- Profile writes reject exact short Claude aliases in `defaultModel`,
+  `reviewerModel`, and legacy `escalation.askAi.model`.
+- Pod creation rejects exact short Claude aliases in `model` overrides.
+- Public docs, CLI templates, and Desktop curated pickers show canonical model
+  IDs such as `claude-opus-4-8`, not `opus`.
+- Existing profile rows are migrated forward: `opus` becomes
+  `claude-opus-4-8`, while `sonnet` and `haiku` become their current canonical
+  Claude IDs.
+- Historical `pods.model` rows are not rewritten.
+- `MODEL_CANONICAL.opus` remains historical and maps to `claude-opus-4-7` so
+  old pod analytics continue describing what actually ran.
+- Runtime/provider helper alias expansion may remain as defensive read
+  compatibility, but it is not a public input contract.
+- Short alias price rows in `model-pricing.json` may remain as a legacy-internal
+  cost shim until raw cost lookup paths are canonicalized.
 
 ## Consequences
 
-**Easier**
+Easier:
 
-- New profiles and pod overrides persist explicit model identities, so current
-  defaults can move to Opus 4.8 without overloading the old `opus` string.
-- Shared schema validation gives CLI, API, Desktop, issue watcher, and series
-  paths one consistent rejection message for legacy aliases.
-- Historical analytics remains stable because old `pods.model = 'opus'` rows
-  continue to coalesce to `claude-opus-4-7`.
+- Current profile and pod writes persist one canonical model spelling.
+- Desktop and CLI users see the real model ID that will be passed to the
+  provider.
+- Analytics can keep historical truth without making `opus` mean two different
+  things in new writes.
 
-**Harder**
+Harder:
 
-- Compatibility now has two layers with different purposes: schemas reject
-  aliases for new writes, while pricing and analytics still understand aliases
-  for historical data. Future edits must preserve that distinction.
-- Existing stored profile aliases require a daemon migration before all persisted
-  profile rows become canonical. This ADR defines the new-write contract; the
-  migration is owned by the daemon runtime brief.
+- External ad hoc scripts that still pass `--model opus` must change to
+  `--model claude-opus-4-8`.
+- Tests and fixtures that used short aliases as generic Claude placeholders must
+  be updated or explicitly marked as legacy-history tests.
+- Alias compatibility remains split by intent: profile migration maps `opus`
+  forward to 4.8, while historical pod analytics maps `opus` to 4.7.
 
-**Committed to**
+Committed to:
 
-- Do not remap `MODEL_CANONICAL.opus` to `claude-opus-4-8`.
-- Do not remove the short alias price rows until the legacy pricing shim cleanup
-  tracked by GitHub issue #139 is implemented.
-- Do not add network price fetching or runtime-specific price tables; ADR-015's
-  bundled JSON decision remains in force.
+- Canonical IDs everywhere except legacy cleanup/read paths.
+- No `pods.model` rewrite for historical analytics.
+- No new runtime controls in this decision. Claude fast mode, effort controls,
+  and mid-conversation system-message support are separate feature decisions.
+- Follow-up cleanup for short alias price rows is tracked separately in GitHub
+  issue #139.
 
-## Amends, not supersedes
+## Alternatives rejected
 
-ADR-022 remains the decision for historical analytics coalescing. This ADR
-narrows public input policy for new writes and clarifies that legacy aliases in
-pricing and analytics are compatibility mechanisms, not supported spellings for
-new profile or pod requests.
-
+- **Keep `opus` accepted as public input.** This preserves old convenience but
+  makes `opus` ambiguous after Opus 4.8: new profile writes would want it to mean
+  4.8, while old pod rows need it to mean 4.7.
+- **Rewrite historical `pods.model` rows.** This would hide what was actually
+  stored and risk changing historical analytics semantics. Read-side coalescing
+  from ADR-022 is the safer boundary.
+- **Remove all alias price rows immediately.** Some cost paths still price raw
+  historical `pods.model` values through `computeCost` / `effectiveCostUsd`.
+  Removing the rows is a separate cost-aggregation refactor.

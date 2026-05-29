@@ -12,11 +12,11 @@ Install dependencies with `npx pnpm install`. Before opening a PR, run the same
 loop CI uses:
 
 ```bash
-npx pnpm lint
-npx pnpm build
-npx pnpm typecheck
-npx pnpm test
+./scripts/validate.sh
 ```
+
+For a faster pre-push check that skips dependency installation, run
+`./scripts/validate.sh --quick`.
 
 For a package-scoped test run, use `npx pnpm --filter <package> test`, for
 example `npx pnpm --filter @autopod/daemon test`.
@@ -42,3 +42,7 @@ This repo ships hooks under `.githooks/`. Enable them with:
 ```bash
 git config core.hooksPath .githooks
 ```
+
+The `pre-push` hook runs `./scripts/validate.sh --quick`, so pushes fail locally
+before GitHub CI catches lint, build, typecheck, test, audit, or secret-scan
+regressions.
