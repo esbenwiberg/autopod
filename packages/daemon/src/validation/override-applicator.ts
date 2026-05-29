@@ -89,6 +89,13 @@ function computeOverall(result: ValidationResult): 'pass' | 'fail' {
   if (result.test?.status === 'fail') return 'fail';
   if (result.factValidation?.status === 'fail') return 'fail';
 
+  // Missing review output from a reviewer timeout/infrastructure failure is a
+  // blocking validation failure. Human dismissals may clear specific findings,
+  // but they must not turn an unavailable reviewer into a pass.
+  if (result.reviewSkipKind === 'review-failed' || result.reviewSkipKind === 'review-timeout') {
+    return 'fail';
+  }
+
   // Review-driven checks after overrides
   if (result.taskReview?.status === 'fail') return 'fail';
 

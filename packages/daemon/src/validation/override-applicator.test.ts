@@ -224,6 +224,18 @@ describe('applyOverrides', () => {
     expect(patched.overall).toBe('fail'); // build failure keeps it failed
   });
 
+  it('does not override review infrastructure failures', () => {
+    const result = makeBaseResult({
+      reviewSkipKind: 'review-timeout',
+      reviewSkipReason: 'Review timed out: codex review exceeded 300000ms',
+    });
+
+    const overrides = [makeDismiss('task_review', 'stale false positive')];
+    const patched = applyOverrides(result, overrides);
+
+    expect(patched.overall).toBe('fail');
+  });
+
   it('does not mutate the original result', () => {
     const result = makeBaseResult({
       taskReview: {
