@@ -16,6 +16,9 @@
   consultation point at `reviewerModel`.
 - Removed the visible `escalation.askAi.model` controls from both profile editor
   surfaces while preserving the stored/wire `escalationAskAiModel` field.
+- Desktop saves now write `profile.reviewerModel` into the legacy
+  `escalation.askAi.model` payload field so the hidden field cannot drift from
+  the user-facing reviewer/ask_ai model.
 - Added `scripts/check-desktop-canonical-models.sh` as the Linux-safe required
   fact for the Desktop source contract.
 
@@ -31,7 +34,7 @@ No intentional scope deviations. The required parent handover
 - `ClaudeModelCanonicalizer.normalizedLegacyAlias()` is the Desktop-side helper
   for legacy profile alias display/write compatibility.
 - `ProfileMapper.mapToFields()` still includes `escalation.askAi.model` for wire
-  compatibility, but canonicalizes legacy aliases before writing.
+  compatibility, but writes the canonicalized `reviewerModel` there.
 - `RuntimeModelOptions.options(... currentValue:)` preserves compatible explicit
   canonical values such as `claude-opus-4-7` even when they are not curated base
   options.
@@ -51,8 +54,8 @@ No intentional scope deviations. The required parent handover
 ## Landmines
 
 - Do not remove `escalationAskAiModel` or the encoded `escalation.askAi.model`
-  payload without a daemon/shared compatibility change; this brief only removed
-  the visible Desktop control.
+  payload without a daemon/shared compatibility change; Desktop still decodes
+  the stored value, but saves it from `reviewerModel`.
 - Linux does not have the Swift toolchain in this pod image. Desktop SwiftUI /
   AppKit verification remains a human/macOS review item per convention-001.
 - Avoid changing daemon migrations, shared schemas, or public docs from this

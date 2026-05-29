@@ -300,7 +300,7 @@ public enum ProfileMapper {
       "askHuman": profile.escalationAskHuman,
       "askAi": [
         "enabled": profile.escalationAskAiEnabled,
-        "model": canonicalProfileModel(profile.escalationAskAiModel),
+        "model": canonicalProfileModel(profile.reviewerModel),
         "maxCalls": profile.escalationAskAiMaxCalls,
       ] as [String: Any],
       "advisor": [

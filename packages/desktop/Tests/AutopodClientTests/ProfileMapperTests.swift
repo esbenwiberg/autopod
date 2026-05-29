@@ -72,6 +72,21 @@ import AutopodUI
   #expect(mapped.escalationAskAiModel == "claude-haiku-4-5")
 }
 
+@Test func profileMapperWritesReviewerModelToLegacyAskAiModelField() throws {
+  let profile = try decodeMapperProfile(
+    defaultModel: "claude-opus-4-8",
+    reviewerModel: "claude-sonnet-4-6",
+    askAiModel: "claude-haiku-4-5"
+  )
+  let mapped = ProfileMapper.map(profile)
+  let fields = ProfileMapper.mapToFields(mapped)
+  let escalation = fields["escalation"] as? [String: Any]
+  let askAi = escalation?["askAi"] as? [String: Any]
+
+  #expect(mapped.escalationAskAiModel == "claude-haiku-4-5")
+  #expect(askAi?["model"] as? String == "claude-sonnet-4-6")
+}
+
 @Test func profileMapperPreservesExplicitCanonicalOpus47() throws {
   let profile = try decodeMapperProfile(
     defaultModel: "claude-opus-4-7",
