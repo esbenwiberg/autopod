@@ -25,7 +25,7 @@ BODY=$(cat <<'JSON'
   "healthTimeout": 120,
   "smokePages": [{ "path": "/health" }],
   "maxValidationAttempts": 3,
-  "defaultModel": "sonnet",
+  "defaultModel": "claude-sonnet-4-6",
   "defaultRuntime": "claude",
   "networkPolicy": {
     "enabled": true,
@@ -33,7 +33,7 @@ BODY=$(cat <<'JSON'
   },
   "escalation": {
     "askHuman": true,
-    "askAi": { "enabled": true, "model": "opus", "maxCalls": 5 },
+    "askAi": { "enabled": true, "model": "claude-opus-4-8", "maxCalls": 5 },
     "autoPauseAfter": 10,
     "humanResponseTimeout": 7200
   },

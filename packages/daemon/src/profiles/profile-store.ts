@@ -23,6 +23,8 @@ import type {
 } from '@autopod/shared';
 import {
   AutopodError,
+  CLAUDE_DEFAULT_MODEL,
+  CLAUDE_REVIEWER_MODEL,
   ProfileExistsError,
   ProfileNotFoundError,
   createProfileSchema,
@@ -36,6 +38,12 @@ import type { CredentialsCipher } from '../crypto/credentials-cipher.js';
 import { resolveInheritance, validateInheritanceChain } from './inheritance.js';
 
 const logger = pino({ name: 'autopod' }).child({ component: 'profiles' });
+
+const LEGACY_PROFILE_MODEL_ALIASES: Readonly<Record<string, string>> = {
+  opus: CLAUDE_DEFAULT_MODEL,
+  sonnet: CLAUDE_REVIEWER_MODEL,
+  haiku: 'claude-haiku-4-5',
+};
 
 export interface ProfileStore {
   create(input: Record<string, unknown>): Profile;
@@ -60,6 +68,34 @@ export interface ProfileStore {
    * Returns `null` if no profile in the chain has credentials set.
    */
   resolveCredentialOwner(name: string): string | null;
+}
+
+function canonicalizeLegacyProfileModel(model: string | null): string | null {
+  if (!model) return model;
+  return LEGACY_PROFILE_MODEL_ALIASES[model] ?? model;
+}
+
+function canonicalizeLegacyEscalationConfig(config: unknown): unknown {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return config;
+
+  const profileConfig = config as Record<string, unknown>;
+  const askAi = profileConfig.askAi;
+  if (!askAi || typeof askAi !== 'object' || Array.isArray(askAi)) return config;
+
+  const askAiConfig = askAi as Record<string, unknown>;
+  const model = askAiConfig.model;
+  if (typeof model !== 'string') return config;
+
+  const canonical = LEGACY_PROFILE_MODEL_ALIASES[model];
+  if (!canonical) return config;
+
+  return {
+    ...profileConfig,
+    askAi: {
+      ...askAiConfig,
+      model: canonical,
+    },
+  };
 }
 
 /**
@@ -115,8 +151,8 @@ export function rowToProfile(
     healthTimeout: nullableNum(row.health_timeout),
     smokePages: JSON.parse((row.validation_pages as string) ?? '[]') as SmokePage[],
     maxValidationAttempts: nullableNum(row.max_validation_attempts),
-    defaultModel: nullableStr(row.default_model),
-    reviewerModel: nullableStr(row.reviewer_model),
+    defaultModel: canonicalizeLegacyProfileModel(nullableStr(row.default_model)),
+    reviewerModel: canonicalizeLegacyProfileModel(nullableStr(row.reviewer_model)),
     defaultRuntime: nullableStr(row.default_runtime) as Profile['defaultRuntime'],
     executionTarget: nullableStr(row.execution_target) as Profile['executionTarget'],
     customInstructions: nullableStr(row.custom_instructions),
@@ -124,7 +160,7 @@ export function rowToProfile(
       row.escalation_config === null || row.escalation_config === undefined
         ? null
         : (escalationConfigSchema.parse(
-            JSON.parse(row.escalation_config as string),
+            canonicalizeLegacyEscalationConfig(JSON.parse(row.escalation_config as string)),
           ) as EscalationConfig),
     extends: nullableStr(row.extends),
     workerProfile: nullableStr(row.worker_profile),

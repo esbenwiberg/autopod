@@ -471,6 +471,101 @@ describe('runMigrations — memory extraction attempts (migration 109)', () => {
   });
 });
 
+// ── Migration 110 — canonical profile model aliases ─────────────────────────
+
+const MIGRATION_110_PATH = new URL(
+  '../../src/db/migrations/110_canonicalize_profile_model_aliases.sql',
+  import.meta.url,
+);
+const MIGRATION_110_SQL = fs.readFileSync(MIGRATION_110_PATH, 'utf-8');
+
+function buildPre110Db(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_version (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE profiles (
+      name TEXT PRIMARY KEY,
+      default_model TEXT,
+      reviewer_model TEXT,
+      escalation_config TEXT
+    );
+    CREATE TABLE pods (
+      id TEXT PRIMARY KEY,
+      model TEXT NOT NULL
+    );
+  `);
+  db.prepare('INSERT INTO schema_version (version) VALUES (109)').run();
+}
+
+describe('runMigrations — canonical profile model aliases (migration 110)', () => {
+  let tmpDir: string;
+  let migrationsDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'migrate-110-test-'));
+    migrationsDir = path.join(tmpDir, 'migrations');
+    fs.mkdirSync(migrationsDir);
+    fs.writeFileSync(
+      path.join(migrationsDir, '110_canonicalize_profile_model_aliases.sql'),
+      MIGRATION_110_SQL,
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('rewrites profile aliases while leaving canonical values and pod history unchanged', () => {
+    const db = new Database(':memory:');
+    buildPre110Db(db);
+
+    db.prepare(
+      'INSERT INTO profiles (name, default_model, reviewer_model, escalation_config) VALUES (?, ?, ?, ?)',
+    ).run(
+      'legacy',
+      'opus',
+      'sonnet',
+      JSON.stringify({ askAi: { enabled: true, model: 'haiku', maxCalls: 5 } }),
+    );
+    db.prepare(
+      'INSERT INTO profiles (name, default_model, reviewer_model, escalation_config) VALUES (?, ?, ?, ?)',
+    ).run(
+      'canonical',
+      'claude-opus-4-7',
+      'claude-sonnet-4-6',
+      JSON.stringify({ askAi: { enabled: true, model: 'claude-opus-4-7', maxCalls: 5 } }),
+    );
+    db.prepare('INSERT INTO pods (id, model) VALUES (?, ?)').run('pod-legacy', 'opus');
+
+    runMigrations(db, migrationsDir, logger);
+
+    const legacy = db.prepare('SELECT * FROM profiles WHERE name = ?').get('legacy') as {
+      default_model: string;
+      reviewer_model: string;
+      escalation_config: string;
+    };
+    expect(legacy.default_model).toBe('claude-opus-4-8');
+    expect(legacy.reviewer_model).toBe('claude-sonnet-4-6');
+    expect(JSON.parse(legacy.escalation_config).askAi.model).toBe('claude-haiku-4-5');
+
+    const canonical = db.prepare('SELECT * FROM profiles WHERE name = ?').get('canonical') as {
+      default_model: string;
+      reviewer_model: string;
+      escalation_config: string;
+    };
+    expect(canonical.default_model).toBe('claude-opus-4-7');
+    expect(canonical.reviewer_model).toBe('claude-sonnet-4-6');
+    expect(JSON.parse(canonical.escalation_config).askAi.model).toBe('claude-opus-4-7');
+
+    const pod = db.prepare('SELECT model FROM pods WHERE id = ?').get('pod-legacy') as {
+      model: string;
+    };
+    expect(pod.model).toBe('opus');
+  });
+});
+
 // ── Migration 104 — remove acceptance criteria ──────────────────────────────
 
 const MIGRATION_104_PATH = new URL(

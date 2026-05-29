@@ -1,9 +1,15 @@
-import type { ModelProvider, Profile, RuntimeType } from '@autopod/shared';
+import {
+  type ModelProvider,
+  type Profile,
+  type RuntimeType,
+  CLAUDE_DEFAULT_MODEL as SHARED_CLAUDE_DEFAULT_MODEL,
+  CLAUDE_REVIEWER_MODEL as SHARED_CLAUDE_REVIEWER_MODEL,
+} from '@autopod/shared';
 import type { Logger } from 'pino';
 
 export const CODEX_DEFAULT_MODEL = 'auto';
-export const CLAUDE_DEFAULT_MODEL = 'claude-opus-4-7';
-export const CLAUDE_REVIEWER_MODEL = 'claude-sonnet-4-6';
+export const CLAUDE_DEFAULT_MODEL = SHARED_CLAUDE_DEFAULT_MODEL;
+export const CLAUDE_REVIEWER_MODEL = SHARED_CLAUDE_REVIEWER_MODEL;
 
 const CLAUDE_MODEL_ALIASES = new Set(['opus', 'sonnet', 'haiku']);
 

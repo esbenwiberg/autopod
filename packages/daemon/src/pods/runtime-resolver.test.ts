@@ -1,6 +1,7 @@
 import type { Profile } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import {
+  CLAUDE_DEFAULT_MODEL,
   CLAUDE_REVIEWER_MODEL,
   CODEX_DEFAULT_MODEL,
   resolvePodModel,
@@ -13,7 +14,7 @@ function profile(overrides: Partial<Profile> = {}): Profile {
   return {
     name: 'test-profile',
     defaultRuntime: 'claude',
-    defaultModel: 'opus',
+    defaultModel: CLAUDE_DEFAULT_MODEL,
     modelProvider: 'anthropic',
     providerCredentials: null,
     ...overrides,
@@ -53,9 +54,19 @@ describe('resolvePodRuntime', () => {
 
 describe('resolvePodModel', () => {
   it('uses the profile default for Anthropic profiles', () => {
-    expect(resolvePodModel(profile({ defaultModel: 'sonnet' }), undefined, 'claude')).toBe(
-      'sonnet',
+    expect(
+      resolvePodModel(profile({ defaultModel: 'claude-sonnet-4-6' }), undefined, 'claude'),
+    ).toBe('claude-sonnet-4-6');
+  });
+
+  it('defaults Claude profiles to Opus 4.8 when no profile model is configured', () => {
+    expect(resolvePodModel(profile({ defaultModel: null }), undefined, 'claude')).toBe(
+      CLAUDE_DEFAULT_MODEL,
     );
+  });
+
+  it('keeps explicit canonical Opus 4.7 overrides', () => {
+    expect(resolvePodModel(profile(), 'claude-opus-4-7', 'claude')).toBe('claude-opus-4-7');
   });
 
   it('uses the Codex default for OpenAI profiles with stale Claude aliases', () => {

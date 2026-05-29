@@ -80,6 +80,48 @@ describe('ProfileStore', () => {
       });
     });
 
+    it('normalizes legacy model aliases from existing profile rows', () => {
+      db.prepare(`
+        INSERT INTO profiles (
+          name, repo_url, default_branch, template, build_command, start_command,
+          health_path, health_timeout, validation_pages, max_validation_attempts,
+          default_model, reviewer_model, default_runtime, escalation_config
+        ) VALUES (
+          @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
+          @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
+          @defaultModel, @reviewerModel, @defaultRuntime, @escalationConfig
+        )
+      `).run({
+        name: 'legacy-models',
+        repoUrl: 'https://github.com/org/repo',
+        defaultBranch: 'main',
+        template: 'node22',
+        buildCommand: 'npm run build',
+        startCommand: 'npm start',
+        healthPath: '/health',
+        healthTimeout: 120,
+        validationPages: '[]',
+        maxValidationAttempts: 3,
+        defaultModel: 'opus',
+        reviewerModel: 'sonnet',
+        defaultRuntime: 'claude',
+        escalationConfig: JSON.stringify({
+          askHuman: true,
+          askAi: { enabled: true, model: 'haiku', maxCalls: 5 },
+          autoPauseAfter: 3,
+          humanResponseTimeout: 3600,
+        }),
+      });
+
+      const profile = store.getRaw('legacy-models');
+      expect(profile.defaultModel).toBe('claude-opus-4-8');
+      expect(profile.reviewerModel).toBe('claude-sonnet-4-6');
+      expect(profile.escalation?.askAi.model).toBe('claude-haiku-4-5');
+
+      const listed = store.list().find((item) => item.name === 'legacy-models');
+      expect(listed?.defaultModel).toBe('claude-opus-4-8');
+    });
+
     it('should create with all fields specified', () => {
       const profile = store.create({
         ...validInput,

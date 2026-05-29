@@ -47,7 +47,7 @@ if ! $ONLY_POD; then
   "healthTimeout": 10,
   "smokePages": [],
   "maxValidationAttempts": 1,
-  "defaultModel": "sonnet",
+  "defaultModel": "claude-sonnet-4-6",
   "defaultRuntime": "claude",
   "executionTarget": "local",
   "networkPolicy": {
@@ -57,7 +57,7 @@ if ! $ONLY_POD; then
   },
   "escalation": {
     "askHuman": true,
-    "askAi": { "enabled": false, "model": "opus", "maxCalls": 0 },
+    "askAi": { "enabled": false, "model": "claude-opus-4-8", "maxCalls": 0 },
     "autoPauseAfter": 20,
     "humanResponseTimeout": 7200
   },
