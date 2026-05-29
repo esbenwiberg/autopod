@@ -10,7 +10,7 @@ import {
   createSessionBridge,
 } from './pod-bridge-impl.js';
 
-type StubSession = { id: string; profileName: string };
+type StubSession = { id: string; profileName: string; status?: string };
 type Deps = SessionBridgeDependencies;
 
 function buildBridgeWithMemory(pods: StubSession[]): {
@@ -39,7 +39,7 @@ function buildBridgeWithMemory(pods: StubSession[]): {
     getSession: vi.fn((id: string) => {
       const pod = pods.find((s) => s.id === id);
       if (!pod) throw new Error(`unknown pod: ${id}`);
-      return pod;
+      return { status: 'running', ...pod };
     }),
     touchHeartbeat: vi.fn(),
   } as unknown as Deps['podManager'];
@@ -49,7 +49,10 @@ function buildBridgeWithMemory(pods: StubSession[]): {
     subscribe: vi.fn(),
   } as unknown as Deps['eventBus'];
   const podsById = new Map(
-    pods.map((pod) => [pod.id, { ...pod, taskSummary: null as TaskSummary | null }]),
+    pods.map((pod) => [
+      pod.id,
+      { status: 'running', ...pod, taskSummary: null as TaskSummary | null },
+    ]),
   );
   const podRepo = {
     update: vi.fn((id: string, updates: Record<string, unknown>) => {
