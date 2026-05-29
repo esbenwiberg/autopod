@@ -19,6 +19,8 @@
 - Desktop saves now write `profile.reviewerModel` into the legacy
   `escalation.askAi.model` payload field so the hidden field cannot drift from
   the user-facing reviewer/ask_ai model.
+- Missing Desktop reviewer model payloads now fall back to
+  `claude-sonnet-4-6` instead of inheriting the generation model.
 - Added `scripts/check-desktop-canonical-models.sh` as the Linux-safe required
   fact for the Desktop source contract.
 
@@ -35,6 +37,9 @@ No intentional scope deviations. The required parent handover
   for legacy profile alias display/write compatibility.
 - `ProfileMapper.mapToFields()` still includes `escalation.askAi.model` for wire
   compatibility, but writes the canonicalized `reviewerModel` there.
+- `ProfileMapper.map()` decodes stored `escalation.askAi.model` for round-trip
+  compatibility, but `reviewerModel` fallback is independently
+  `claude-sonnet-4-6`.
 - `RuntimeModelOptions.options(... currentValue:)` preserves compatible explicit
   canonical values such as `claude-opus-4-7` even when they are not curated base
   options.
