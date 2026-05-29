@@ -59,6 +59,35 @@ import AutopodUI
   #expect(pod?["advisoryBrowserQaEnabled"] as? Bool == false)
 }
 
+@Test func profileMapperCanonicalizesLegacyProfileModelAliases() throws {
+  let profile = try decodeMapperProfile(
+    defaultModel: "opus",
+    reviewerModel: "sonnet",
+    askAiModel: "haiku"
+  )
+  let mapped = ProfileMapper.map(profile)
+
+  #expect(mapped.defaultModel == "claude-opus-4-8")
+  #expect(mapped.reviewerModel == "claude-sonnet-4-6")
+  #expect(mapped.escalationAskAiModel == "claude-haiku-4-5")
+}
+
+@Test func profileMapperPreservesExplicitCanonicalOpus47() throws {
+  let profile = try decodeMapperProfile(
+    defaultModel: "claude-opus-4-7",
+    reviewerModel: "claude-opus-4-7",
+    askAiModel: "claude-opus-4-7"
+  )
+  let mapped = ProfileMapper.map(profile)
+  let fields = ProfileMapper.mapToFields(mapped)
+  let escalation = fields["escalation"] as? [String: Any]
+  let askAi = escalation?["askAi"] as? [String: Any]
+
+  #expect(mapped.defaultModel == "claude-opus-4-7")
+  #expect(mapped.reviewerModel == "claude-opus-4-7")
+  #expect(askAi?["model"] as? String == "claude-opus-4-7")
+}
+
 private func decodeMapperProfile(advisoryBrowserQaFragment: String) throws -> ProfileResponse {
   let json = """
   {
@@ -68,6 +97,31 @@ private func decodeMapperProfile(advisoryBrowserQaFragment: String) throws -> Pr
       "output": "pr",
       "validate": true\(advisoryBrowserQaFragment),
       "promotable": false
+    },
+    "version": 1,
+    "createdAt": "2026-05-25T00:00:00Z",
+    "updatedAt": "2026-05-25T00:00:00Z"
+  }
+  """.data(using: .utf8)!
+
+  return try JSONDecoder().decode(ProfileResponse.self, from: json)
+}
+
+private func decodeMapperProfile(
+  defaultModel: String,
+  reviewerModel: String,
+  askAiModel: String
+) throws -> ProfileResponse {
+  let json = """
+  {
+    "name": "app",
+    "defaultModel": "\(defaultModel)",
+    "reviewerModel": "\(reviewerModel)",
+    "escalation": {
+      "askHuman": true,
+      "askAi": { "enabled": true, "model": "\(askAiModel)", "maxCalls": 3 },
+      "autoPauseAfter": 1,
+      "humanResponseTimeout": 3600
     },
     "version": 1,
     "createdAt": "2026-05-25T00:00:00Z",
