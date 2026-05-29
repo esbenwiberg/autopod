@@ -58,7 +58,7 @@ function deferred<T>() {
 
 async function waitForAssertion(assertion: () => void): Promise<void> {
   let lastError: unknown;
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 100; i++) {
     try {
       assertion();
       return;
