@@ -109,9 +109,9 @@ code:not([class]){font-family:monospace;font-size:.8rem;background:rgba(99,102,2
     </div>
   </div>
   <p class="text-lg text-gray-300 leading-relaxed mb-4">You describe a task. autopod spins up an isolated container, lets an AI agent work, validates the output in a real browser, and only bothers you when there's something worth reviewing. Run dozens of agents in parallel — across repos, models, and runtimes — without babysitting a single one.</p>
-  <pre><code class="language-bash">$ ap run my-app "Add a dark mode toggle to the settings page" --model opus
+  <pre><code class="language-bash">$ ap run my-app "Add a dark mode toggle to the settings page" --model claude-opus-4-8
 
-  Session a1b2c3d4 created  (profile: my-app · model: claude-opus)
+  Session a1b2c3d4 created  (profile: my-app · model: claude-opus-4-8)
   Provisioning container...
   Agent running...
 
@@ -215,7 +215,7 @@ ap login</code></pre>
   --start "npm run preview -- --host 0.0.0.0 --port \$PORT" \
   --health "/" \
   --test "npm test" \
-  --model opus</code></pre>
+  --model claude-opus-4-8</code></pre>
   <h3>6. Run your first session</h3>
   <pre><code class="language-bash">ap run my-app "Add a contact form to the about page"
 
@@ -250,7 +250,7 @@ ap daemon stop</code></pre>
   <h3>Sessions</h3>
   <pre><code class="language-bash"># Create
 ap run &lt;profile&gt; "&lt;task&gt;"                   # Start a session
-ap run &lt;profile&gt; "&lt;task&gt;" --model opus      # Override model
+ap run &lt;profile&gt; "&lt;task&gt;" --model claude-opus-4-8  # Override model
 ap run &lt;profile&gt; "&lt;task&gt;" --runtime codex   # Codex runtime
 ap run &lt;profile&gt; "&lt;task&gt;" --runtime copilot # Copilot runtime
 ap run &lt;profile&gt; "&lt;task&gt;" --branch feat/x   # Custom branch
@@ -357,7 +357,7 @@ ap memory delete &lt;id&gt;</code></pre>
   --test "npm test" \
   --health "/" \
   --health-timeout 30000 \
-  --model opus \
+  --model claude-opus-4-8 \
   --runtime claude \
   --pr-provider github \
   --max-validation-attempts 3 \
@@ -426,11 +426,12 @@ adoPat: &lt;your-ado-pat&gt;   # encrypted at rest</code></pre>
 
   <section id="profile-escalation">
   <h3>Escalation Settings</h3>
-  <pre><code class="language-yaml">escalation:
+  <pre><code class="language-yaml">reviewerModel: claude-sonnet-4-6 # ask_ai and AI task review model
+escalation:
   askHuman: true
   askAi:
     enabled: true
-    model: sonnet           # also used as the AI task reviewer model
+    model: claude-sonnet-4-6 # legacy wire compatibility
     maxCalls: 5
   autoPauseAfter: 3         # auto-escalate after N consecutive failures
   humanResponseTimeout: 3600000  # 1 hour</code></pre>
@@ -517,7 +518,7 @@ escalation:
 name: my-app
 extends: frontend-base
 repo: owner/my-app
-model: opus
+model: claude-opus-4-8
 # All frontend-base fields are inherited; arrays merge by name</code></pre>
 </section>
 
@@ -578,7 +579,7 @@ ap reject &lt;id&gt; "&lt;note&gt;"   # Restart fresh from scratch</code></pre>
       <tr><td>3. Health check</td><td>Polls URL until HTTP 200</td><td><code>profile.health</code></td></tr>
       <tr><td>4. Smoke pages</td><td>Playwright visits pages, checks assertions. Runs on daemon host.</td><td><code>profile.smokePages</code></td></tr>
       <tr><td>5. AC validation</td><td>LLM evaluates each acceptance criterion in a real browser</td><td><code>session.acceptanceCriteria</code></td></tr>
-      <tr><td>6. AI task review</td><td>Separate model reviews diff against original task + prior findings (tiered context)</td><td><code>escalation.askAi.model</code></td></tr>
+      <tr><td>6. AI task review</td><td>Separate model reviews diff against original task + prior findings (tiered context)</td><td><code>profile.reviewerModel</code></td></tr>
       <tr><td>7. Overall</td><td>Pass only if all required phases pass</td><td>—</td></tr>
     </tbody>
   </table>
@@ -602,7 +603,7 @@ ap override &lt;id&gt; &lt;finding-id&gt; --guidance "Use our date-fns helper in
     <thead><tr><th>Tool</th><th>Blocking</th><th>Description</th></tr></thead>
     <tbody>
       <tr><td><code>ask_human</code></td><td>✅ Yes</td><td>Pause agent, send question to human, wait for response</td></tr>
-      <tr><td><code>ask_ai</code></td><td>✅ Yes</td><td>Consult reviewer model (rate-limited, max N per session)</td></tr>
+      <tr><td><code>ask_ai</code></td><td>✅ Yes</td><td>Consult <code>profile.reviewerModel</code> (rate-limited, max N per session)</td></tr>
       <tr><td><code>report_blocker</code></td><td>Conditional</td><td>Report a hard stop; auto-pauses after threshold</td></tr>
       <tr><td><code>report_plan</code></td><td>❌ No</td><td>Declare implementation plan + steps before starting</td></tr>
       <tr><td><code>report_progress</code></td><td>❌ No</td><td>Report phase transitions (currentPhase / totalPhases)</td></tr>
