@@ -167,6 +167,7 @@ public struct ProfileResponse: Codable, Sendable {
     name = ""; repoUrl = ""; defaultBranch = "main"; template = "node22"
     buildCommand = nil; startCommand = nil; healthPath = "/"; healthTimeout = 120
     smokePages = []; maxValidationAttempts = 3; defaultModel = "claude-opus-4-8"
+    reviewerModel = "claude-sonnet-4-6"
     defaultRuntime = "claude"; executionTarget = "local"
     escalation = .init(); mcpServers = []; claudeMdSections = []; skills = []
     outputMode = "pr"; modelProvider = "anthropic"; buildTimeout = 300

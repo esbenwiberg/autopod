@@ -52,9 +52,7 @@ public enum ProfileMapper {
       testTimeout: response.testTimeout ?? 600,
       maxValidationAttempts: response.maxValidationAttempts ?? 3,
       defaultModel: canonicalProfileModel(response.defaultModel ?? "claude-opus-4-8"),
-      reviewerModel: canonicalProfileModel(
-        response.reviewerModel ?? response.defaultModel ?? "claude-sonnet-4-6"
-      ),
+      reviewerModel: canonicalProfileModel(response.reviewerModel ?? "claude-sonnet-4-6"),
       defaultRuntime: runtime,
       executionTarget: target,
       modelProvider: provider,

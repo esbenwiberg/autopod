@@ -103,6 +103,34 @@ import AutopodUI
   #expect(askAi?["model"] as? String == "claude-opus-4-7")
 }
 
+@Test func profileMapperUsesCanonicalReviewerFallbackWhenReviewerMissing() throws {
+  let json = """
+  {
+    "name": "app",
+    "defaultModel": "claude-opus-4-8",
+    "escalation": {
+      "askHuman": true,
+      "askAi": { "enabled": true, "model": "claude-opus-4-7", "maxCalls": 3 },
+      "autoPauseAfter": 1,
+      "humanResponseTimeout": 3600
+    },
+    "version": 1,
+    "createdAt": "2026-05-25T00:00:00Z",
+    "updatedAt": "2026-05-25T00:00:00Z"
+  }
+  """.data(using: .utf8)!
+  let response = try JSONDecoder().decode(ProfileResponse.self, from: json)
+  let mapped = ProfileMapper.map(response)
+  let fields = ProfileMapper.mapToFields(mapped)
+  let escalation = fields["escalation"] as? [String: Any]
+  let askAi = escalation?["askAi"] as? [String: Any]
+
+  #expect(mapped.defaultModel == "claude-opus-4-8")
+  #expect(mapped.reviewerModel == "claude-sonnet-4-6")
+  #expect(mapped.escalationAskAiModel == "claude-opus-4-7")
+  #expect(askAi?["model"] as? String == "claude-sonnet-4-6")
+}
+
 private func decodeMapperProfile(advisoryBrowserQaFragment: String) throws -> ProfileResponse {
   let json = """
   {
