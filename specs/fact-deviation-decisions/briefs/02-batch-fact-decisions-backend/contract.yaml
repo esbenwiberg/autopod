@@ -1,0 +1,76 @@
+contract_version: 1
+title: "Replace single waiver API with batch fact-deviation decisions"
+depends_on:
+  - 01-report-blocker-threshold
+scenarios:
+  - id: batch-decisions-require-all-pending-facts
+    given:
+      - "a pod is failed or review_required"
+      - "the latest validation result has two pending_human required facts"
+    when:
+      - "the operator submits a fact decision batch"
+    then:
+      - "the daemon rejects the request unless every pending fact has exactly one decision"
+      - "unknown, duplicate, and non-pending fact IDs are rejected"
+  - id: batch-decisions-revalidate-once
+    given:
+      - "a pod has pending fact deviation requests"
+      - "the operator submits decisions for every pending fact"
+    when:
+      - "the daemon accepts the batch"
+    then:
+      - "taskSummary.factDeviations records all decisions"
+      - "validation is restarted exactly once with force enabled"
+  - id: domain-actions-map-to-validator-decisions
+    given:
+      - "the operator chooses waive_required_fact, use_replacement_proof, or enforce_original_fact"
+    when:
+      - "the daemon prepares task summary fact deviations"
+    then:
+      - "waive_required_fact maps to approved_waive"
+      - "use_replacement_proof maps to approved_replace"
+      - "enforce_original_fact maps to rejected"
+  - id: unavailable-required-command-is-visible
+    given:
+      - "a required fact exits 127 because its command is unavailable"
+    when:
+      - "the daemon stores or handles the validation result"
+    then:
+      - "the pod activity/log stream includes a user-visible line naming the unavailable fact command"
+      - "the existing agent feedback can still ask the agent to file factDeviations"
+required_facts:
+  - id: fact-batch-fact-decisions-route
+    proves:
+      - batch-decisions-require-all-pending-facts
+      - batch-decisions-revalidate-once
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/api/routes/pods.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pods.test.ts -t "fact decisions"
+  - id: fact-batch-fact-decisions-manager
+    proves:
+      - batch-decisions-revalidate-once
+      - domain-actions-map-to-validator-decisions
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts -t "applies batch fact decisions and revalidates once"
+  - id: fact-fact-decision-validation-semantics
+    proves:
+      - domain-actions-map-to-validator-decisions
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/local-validation-engine.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- local-validation-engine.test.ts -t "fact deviations"
+  - id: fact-unavailable-command-activity
+    proves:
+      - unavailable-required-command-is-visible
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts -t "logs unavailable required fact commands"
+human_review: []
