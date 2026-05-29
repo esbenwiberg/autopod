@@ -7543,6 +7543,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       emitActivityStatus(podId, 'Killing pod…');
       transition(pod, 'killing');
+      validationAbortControllers.get(podId)?.abort();
 
       // Run cleanup with a timeout so a hung Docker stop or git cleanup
       // can never leave the pod stuck in 'killing' forever.
