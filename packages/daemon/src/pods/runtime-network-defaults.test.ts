@@ -32,18 +32,22 @@ describe('addRuntimeNetworkDefaults', () => {
 
     expect(result?.allowedHosts).toContain('chatgpt.com');
     expect(result?.allowedHosts).toContain('*.chatgpt.com');
-    expect(result?.allowedHosts).toContain('github.com');
-    expect(result?.allowedHosts).toContain('api.github.com');
+    expect(result?.allowedHosts).not.toContain('github.com');
+    expect(result?.allowedHosts).not.toContain('api.github.com');
   });
 
-  it('does not override explicit replaceDefaults policies', () => {
+  it('adds Codex provider hosts for explicit replaceDefaults policies', () => {
     const result = addRuntimeNetworkDefaults(
       policy({ replaceDefaults: true }),
       profile({ modelProvider: 'openai' }),
       'codex',
     );
 
-    expect(result?.allowedHosts).toEqual(['example.com']);
+    expect(result?.allowedHosts).toContain('example.com');
+    expect(result?.allowedHosts).toContain('chatgpt.com');
+    expect(result?.allowedHosts).toContain('*.chatgpt.com');
+    expect(result?.allowedHosts).not.toContain('github.com');
+    expect(result?.allowedHosts).not.toContain('api.github.com');
   });
 
   it('leaves non-Codex Anthropic pods unchanged', () => {
