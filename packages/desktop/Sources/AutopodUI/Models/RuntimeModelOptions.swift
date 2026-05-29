@@ -39,14 +39,25 @@ enum RuntimeModelRole: Sendable {
     case reviewerModel
 }
 
-enum RuntimeModelOptions {
+public enum ClaudeModelCanonicalizer {
     private static let modelAliases: [String: String] = [
-        "opus": "claude-opus-4-7",
+        "opus": "claude-opus-4-8",
         "sonnet": "claude-sonnet-4-6",
         "haiku": "claude-haiku-4-5",
     ]
 
+    public static func normalizedLegacyAlias(_ model: String) -> String {
+        modelAliases[model] ?? model
+    }
+}
+
+enum RuntimeModelOptions {
     private static let modelPricing: [String: RuntimeModelPrice] = [
+        "claude-opus-4-8": RuntimeModelPrice(
+            inputPer1M: 5,
+            cachedInputPer1M: 0.5,
+            outputPer1M: 25
+        ),
         "claude-opus-4-7": RuntimeModelPrice(
             inputPer1M: 5,
             cachedInputPer1M: 0.5,
@@ -124,6 +135,15 @@ enum RuntimeModelOptions {
         ),
     ]
 
+    private static let modelLabels: [String: String] = [
+        "claude-opus-4-8": "Opus 4.8",
+        "claude-opus-4-7": "Opus 4.7",
+        "claude-opus-4-6": "Opus 4.6",
+        "claude-sonnet-4-6": "Sonnet 4.6",
+        "claude-sonnet-4-5": "Sonnet 4.5",
+        "claude-haiku-4-5": "Haiku 4.5",
+    ]
+
     static func options(
         for runtime: RuntimeType,
         role: RuntimeModelRole,
@@ -136,7 +156,10 @@ enum RuntimeModelOptions {
         guard !options.contains(where: { $0.value == canonicalCurrentValue }) else { return options }
         guard isCompatible(canonicalCurrentValue, with: runtime) else { return options }
 
-        options.append(RuntimeModelOption(value: canonicalCurrentValue, label: canonicalCurrentValue))
+        options.append(RuntimeModelOption(
+            value: canonicalCurrentValue,
+            label: modelLabels[canonicalCurrentValue] ?? canonicalCurrentValue
+        ))
         return options
     }
 
@@ -205,14 +228,14 @@ enum RuntimeModelOptions {
             switch role {
             case .defaultModel:
                 return [
-                    RuntimeModelOption(value: "claude-opus-4-7", label: "Opus 4.7"),
+                    RuntimeModelOption(value: "claude-opus-4-8", label: "Opus 4.8"),
                     RuntimeModelOption(value: "claude-sonnet-4-6", label: "Sonnet 4.6"),
                     RuntimeModelOption(value: "claude-haiku-4-5", label: "Haiku 4.5"),
                 ]
             case .reviewerModel:
                 return [
                     RuntimeModelOption(value: "claude-sonnet-4-6", label: "Sonnet 4.6"),
-                    RuntimeModelOption(value: "claude-opus-4-7", label: "Opus 4.7"),
+                    RuntimeModelOption(value: "claude-opus-4-8", label: "Opus 4.8"),
                     RuntimeModelOption(value: "claude-haiku-4-5", label: "Haiku 4.5"),
                 ]
             }
@@ -236,6 +259,6 @@ enum RuntimeModelOptions {
     }
 
     private static func canonicalValue(for model: String) -> String {
-        modelAliases[model] ?? model
+        ClaudeModelCanonicalizer.normalizedLegacyAlias(model)
     }
 }

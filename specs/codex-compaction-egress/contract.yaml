@@ -1,0 +1,37 @@
+contract_version: 1
+title: "Force Codex ChatGPT egress hosts"
+depends_on: []
+scenarios:
+  - id: codex-compaction-hosts-survive-replaced-defaults
+    given:
+      - "a Codex/OpenAI pod has network isolation enabled in restricted mode"
+      - "the profile sets networkPolicy.replaceDefaults to true"
+      - "the profile allowlist omits the ChatGPT hosts required by Codex remote compaction"
+    when:
+      - "the daemon applies runtime network defaults before building the firewall allowlist"
+    then:
+      - "chatgpt.com is added to the effective allowed hosts"
+      - "*.chatgpt.com is added to the effective allowed hosts"
+      - "the profile's existing custom allowed hosts are preserved"
+  - id: github-remains-profile-controlled
+    given:
+      - "a Codex/OpenAI pod has network isolation enabled in restricted mode"
+      - "the profile sets networkPolicy.replaceDefaults to true"
+      - "the profile does not explicitly allow GitHub"
+    when:
+      - "the daemon applies runtime network defaults"
+    then:
+      - "github.com is not added automatically"
+      - "api.github.com is not added automatically"
+      - "GitHub access remains controlled by the profile allowlist"
+required_facts:
+  - id: fact-codex-compaction-egress-defaults
+    proves:
+      - codex-compaction-hosts-survive-replaced-defaults
+      - github-remains-profile-controlled
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/runtime-network-defaults.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- runtime-network-defaults.test.ts
+human_review: []

@@ -64,7 +64,7 @@ describe('ProfileStore', () => {
       expect(profile.healthPath).toBe('/');
       expect(profile.healthTimeout).toBe(120);
       expect(profile.maxValidationAttempts).toBe(3);
-      expect(profile.defaultModel).toBe('opus');
+      expect(profile.defaultModel).toBe('claude-opus-4-8');
       expect(profile.defaultRuntime).toBe('claude');
       expect(profile.customInstructions).toBeNull();
       expect(profile.extends).toBeNull();
@@ -72,7 +72,7 @@ describe('ProfileStore', () => {
       expect(profile.smokePages).toEqual([]);
       expect(profile.escalation).toEqual({
         askHuman: true,
-        askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
+        askAi: { enabled: false, model: 'claude-sonnet-4-6', maxCalls: 5 },
         advisor: { enabled: false },
         autoPauseAfter: 3,
         humanResponseTimeout: 3600,
@@ -90,12 +90,12 @@ describe('ProfileStore', () => {
         healthTimeout: 60,
         smokePages: [{ path: '/', assertions: [{ selector: 'h1', type: 'exists' }] }],
         maxValidationAttempts: 5,
-        defaultModel: 'sonnet',
+        defaultModel: 'claude-sonnet-4-6',
         defaultRuntime: 'claude',
         customInstructions: 'Be careful',
         escalation: {
           askHuman: false,
-          askAi: { enabled: true, model: 'opus', maxCalls: 10 },
+          askAi: { enabled: true, model: 'claude-opus-4-8', maxCalls: 10 },
           autoPauseAfter: 5,
           humanResponseTimeout: 7200,
         },
@@ -108,7 +108,7 @@ describe('ProfileStore', () => {
       expect(profile.smokePages).toHaveLength(1);
       expect(profile.smokePages[0]?.assertions).toHaveLength(1);
       expect(profile.maxValidationAttempts).toBe(5);
-      expect(profile.defaultModel).toBe('sonnet');
+      expect(profile.defaultModel).toBe('claude-sonnet-4-6');
       expect(profile.customInstructions).toBe('Be careful');
       expect(profile.escalation.askHuman).toBe(false);
       expect(profile.escalation.askAi.enabled).toBe(true);
@@ -319,9 +319,9 @@ describe('ProfileStore', () => {
 
     it('should persist reviewerModel through update', () => {
       store.create(validInput);
-      const updated = store.update('my-app', { reviewerModel: 'sonnet' });
-      expect(updated.reviewerModel).toBe('sonnet');
-      expect(store.get('my-app').reviewerModel).toBe('sonnet');
+      const updated = store.update('my-app', { reviewerModel: 'claude-sonnet-4-6' });
+      expect(updated.reviewerModel).toBe('claude-sonnet-4-6');
+      expect(store.get('my-app').reviewerModel).toBe('claude-sonnet-4-6');
     });
   });
 
@@ -531,7 +531,7 @@ describe('ProfileStore', () => {
     it('should preserve escalation config through create/get', () => {
       const escalation = {
         askHuman: false,
-        askAi: { enabled: true, model: 'opus', maxCalls: 10 },
+        askAi: { enabled: true, model: 'claude-opus-4-8', maxCalls: 10 },
         advisor: { enabled: false },
         autoPauseAfter: 5,
         humanResponseTimeout: 7200,

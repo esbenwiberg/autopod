@@ -9,6 +9,7 @@ import {
 
 describe('MODEL_PRICING', () => {
   it('contains full claude model IDs', () => {
+    expect(MODEL_PRICING['claude-opus-4-8']).toBeDefined();
     expect(MODEL_PRICING['claude-opus-4-7']).toBeDefined();
     expect(MODEL_PRICING['claude-opus-4-6']).toBeDefined();
     expect(MODEL_PRICING['claude-sonnet-4-6']).toBeDefined();
@@ -26,10 +27,14 @@ describe('MODEL_PRICING', () => {
     expect(MODEL_PRICING['gpt-5-codex']).toBeDefined();
   });
 
-  it('contains short aliases', () => {
+  it('contains legacy short alias pricing shims', () => {
     expect(MODEL_PRICING.opus).toBeDefined();
     expect(MODEL_PRICING.sonnet).toBeDefined();
     expect(MODEL_PRICING.haiku).toBeDefined();
+  });
+
+  it('contains claude-opus-4-8 with the same price as claude-opus-4-7', () => {
+    expect(MODEL_PRICING['claude-opus-4-8']).toEqual(MODEL_PRICING['claude-opus-4-7']);
   });
 });
 
@@ -44,6 +49,10 @@ describe('computeCost', () => {
 
   it('computes blended cost for claude-opus-4-7', () => {
     expect(computeCost('claude-opus-4-7', 500_000, 500_000)).toBe(15.0);
+  });
+
+  it('computes blended cost for claude-opus-4-8', () => {
+    expect(computeCost('claude-opus-4-8', 500_000, 500_000)).toBe(15.0);
   });
 
   it('returns 0 for null model', () => {
@@ -114,6 +123,10 @@ describe('canonicalModelKey', () => {
 
   it('returns full canonical ID when already canonical', () => {
     expect(canonicalModelKey('claude-opus-4-7')).toBe('claude-opus-4-7');
+  });
+
+  it('returns claude-opus-4-8 when provided as a full canonical ID', () => {
+    expect(canonicalModelKey('claude-opus-4-8')).toBe('claude-opus-4-8');
   });
 
   it('returns null for unknown model string', () => {

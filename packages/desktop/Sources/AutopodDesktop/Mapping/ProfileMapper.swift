@@ -51,8 +51,8 @@ public enum ProfileMapper {
       buildTimeout: response.buildTimeout ?? 300,
       testTimeout: response.testTimeout ?? 600,
       maxValidationAttempts: response.maxValidationAttempts ?? 3,
-      defaultModel: response.defaultModel ?? "claude-opus-4-7",
-      reviewerModel: response.reviewerModel ?? response.defaultModel ?? "claude-sonnet-4-6",
+      defaultModel: canonicalProfileModel(response.defaultModel ?? "claude-opus-4-8"),
+      reviewerModel: canonicalProfileModel(response.reviewerModel ?? "claude-sonnet-4-6"),
       defaultRuntime: runtime,
       executionTarget: target,
       modelProvider: provider,
@@ -92,7 +92,7 @@ public enum ProfileMapper {
       },
       escalationAskHuman: escalation.askHuman,
       escalationAskAiEnabled: escalation.askAi.enabled,
-      escalationAskAiModel: escalation.askAi.model,
+      escalationAskAiModel: canonicalProfileModel(escalation.askAi.model),
       escalationAskAiMaxCalls: escalation.askAi.maxCalls,
       escalationAdvisorEnabled: escalation.advisor?.enabled ?? false,
       escalationAutoPauseAfter: escalation.autoPauseAfter,
@@ -298,7 +298,7 @@ public enum ProfileMapper {
       "askHuman": profile.escalationAskHuman,
       "askAi": [
         "enabled": profile.escalationAskAiEnabled,
-        "model": profile.escalationAskAiModel,
+        "model": canonicalProfileModel(profile.reviewerModel),
         "maxCalls": profile.escalationAskAiMaxCalls,
       ] as [String: Any],
       "advisor": [
@@ -475,6 +475,10 @@ public enum ProfileMapper {
     }
 
     return d
+  }
+
+  private static func canonicalProfileModel(_ model: String) -> String {
+    ClaudeModelCanonicalizer.normalizedLegacyAlias(model)
   }
 
   // MARK: - Helpers for type-checker performance

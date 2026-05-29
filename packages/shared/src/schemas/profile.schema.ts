@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import {
+  CLAUDE_DEFAULT_MODEL,
+  CLAUDE_REVIEWER_MODEL,
+} from '../pricing/index.js';
+import {
   actionPolicySchema,
   outputModeSchema,
   podOptionsSchema,
@@ -9,6 +13,7 @@ import {
   injectedMcpServerSchema,
   injectedSkillSchema,
 } from './injection.schema.js';
+import { withCanonicalModelIdPolicy } from './model.schema.js';
 
 // ---------------------------------------------------------------------------
 // Model provider credentials schemas
@@ -69,6 +74,8 @@ const smokePageSchema = z.object({
   path: z.string().min(1).startsWith('/'),
   assertions: z.array(pageAssertionSchema).optional(),
 });
+
+const canonicalModelIdSchema = withCanonicalModelIdPolicy(z.string());
 
 // Validates hostnames and IPs used in network allowlists.
 // Only alphanumerics, dots, and hyphens are permitted (plus a leading '*.' for wildcards).
@@ -222,7 +229,7 @@ export const escalationConfigSchema = z.object({
   askAi: z
     .object({
       enabled: z.boolean().default(false),
-      model: z.string().default('sonnet'),
+      model: canonicalModelIdSchema.default(CLAUDE_REVIEWER_MODEL),
       maxCalls: z.number().int().min(0).max(50).default(5),
     })
     .default({}),
@@ -279,9 +286,9 @@ const createProfileBaseSchema = z.object({
   // The daemon store normalizes null → [] at write time (see profile-store.ts).
   smokePages: z.array(smokePageSchema).nullable().default([]),
   maxValidationAttempts: z.number().int().min(1).max(10).nullable().default(3),
-  defaultModel: z.string().nullable().default('opus'),
+  defaultModel: canonicalModelIdSchema.nullable().default(CLAUDE_DEFAULT_MODEL),
   /** Optional reviewer model for task review. Falls back to defaultModel when null. */
-  reviewerModel: z.string().nullable().default(null),
+  reviewerModel: canonicalModelIdSchema.nullable().default(null),
   defaultRuntime: z.enum(['claude', 'codex', 'copilot']).nullable().default('claude'),
   executionTarget: z.enum(['local', 'aci']).nullable().default('local'),
   customInstructions: z.string().max(50_000).nullable().default(null),

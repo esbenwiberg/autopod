@@ -1,0 +1,33 @@
+contract_version: 1
+title: "Refresh desktop model picker and profile editor"
+depends_on: [01-establish-canonical-model-identity]
+scenarios:
+  - id: desktop-curated-opus-48
+    given:
+      - "a user edits a Claude profile in Desktop"
+    when:
+      - "the model picker and model help copy render"
+    then:
+      - "Opus 4.8 is the curated Opus choice and default"
+      - "explicit canonical Opus 4.7 values remain representable when already stored"
+  - id: desktop-ask-ai-model-hidden
+    given:
+      - "a user edits escalation settings in Desktop"
+    when:
+      - "the profile editor renders AI consultation controls"
+    then:
+      - "there is no user-facing askAi.model picker or short alias field"
+      - "reviewerModel is the documented model for AI review and ask_ai"
+required_facts:
+  - id: fact-desktop-model-copy-static
+    proves: [desktop-curated-opus-48, desktop-ask-ai-model-hidden]
+    kind: smoke-script
+    artifact:
+      path: scripts/check-desktop-canonical-models.sh
+      change: create
+    command: bash scripts/check-desktop-canonical-models.sh
+human_review:
+  - id: review-desktop-profile-editor
+    covers: [desktop-curated-opus-48, desktop-ask-ai-model-hidden]
+    criterion: "On macOS, the Desktop profile editor shows Opus 4.8 as the curated Opus option and no visible askAi model control remains."
+    reason: "Desktop SwiftUI/AppKit validation is macOS-only and convention-001 keeps it out of Linux pod required facts."

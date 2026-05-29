@@ -13,8 +13,8 @@ import Testing
     let defaultOptions = RuntimeModelOptions.options(for: .claude, role: .defaultModel).map(\.value)
     let reviewerOptions = RuntimeModelOptions.options(for: .claude, role: .reviewerModel).map(\.value)
 
-    #expect(defaultOptions == ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"])
-    #expect(reviewerOptions == ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"])
+    #expect(defaultOptions == ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"])
+    #expect(reviewerOptions == ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"])
 }
 
 @Test func runtimeModelNormalizationResetsIncompatibleSelections() {
@@ -22,7 +22,7 @@ import Testing
         RuntimeModelOptions.normalized("opus", for: .codex, role: .defaultModel) == "auto"
     )
     #expect(
-        RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .defaultModel) == "claude-opus-4-7"
+        RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .defaultModel) == "claude-opus-4-8"
     )
     #expect(
         RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .reviewerModel) == "claude-sonnet-4-6"
@@ -35,12 +35,28 @@ import Testing
 @Test func runtimeModelNormalizationExpandsClaudeAliases() {
     #expect(
         RuntimeModelOptions.normalized("opus", for: .claude, role: .defaultModel)
-            == "claude-opus-4-7"
+            == "claude-opus-4-8"
     )
     #expect(
         RuntimeModelOptions.normalized("sonnet", for: .claude, role: .reviewerModel)
             == "claude-sonnet-4-6"
     )
+}
+
+@Test func claudeModelOptionsPreserveExplicitCanonicalOpus47() {
+    let options = RuntimeModelOptions.options(
+        for: .claude,
+        role: .defaultModel,
+        currentValue: "claude-opus-4-7"
+    )
+
+    #expect(options.map(\.value) == [
+        "claude-opus-4-8",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5",
+        "claude-opus-4-7",
+    ])
+    #expect(options.last?.label == "Opus 4.7")
 }
 
 @Test func codexModelOptionsPreserveCompatibleCustomCurrentValue() {
@@ -72,7 +88,7 @@ import Testing
             == "$5 in / $0.50 cached / $30 out per 1M"
     )
     #expect(
-        RuntimeModelOptions.priceSummary(for: "claude-opus-4-7", runtime: .claude)
+        RuntimeModelOptions.priceSummary(for: "claude-opus-4-8", runtime: .claude)
             == "$5 in / $0.50 cached / $25 out per 1M"
     )
     #expect(

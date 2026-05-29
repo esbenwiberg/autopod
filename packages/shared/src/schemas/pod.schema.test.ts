@@ -2,6 +2,31 @@ import { describe, expect, it } from 'vitest';
 import { createPodRequestSchema } from './pod.schema.js';
 
 describe('createPodRequestSchema', () => {
+  it('rejects short Claude aliases in create-pod model overrides', () => {
+    for (const model of ['opus', 'sonnet', 'haiku']) {
+      const result = createPodRequestSchema.safeParse({
+        profileName: 'primary',
+        task: 'task',
+        model,
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.message).toContain('canonical Claude model ID');
+      }
+    }
+  });
+
+  it('accepts canonical Claude IDs in create-pod model overrides', () => {
+    for (const model of ['claude-opus-4-8', 'claude-opus-4-7', 'claude-sonnet-4-6']) {
+      const parsed = createPodRequestSchema.parse({
+        profileName: 'primary',
+        task: 'task',
+        model,
+      });
+      expect(parsed.model).toBe(model);
+    }
+  });
+
   it('preserves referenceRepos with sourceProfile through parse', () => {
     const parsed = createPodRequestSchema.parse({
       profileName: 'primary',
