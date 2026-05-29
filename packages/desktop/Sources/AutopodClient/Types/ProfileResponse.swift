@@ -166,7 +166,8 @@ public struct ProfileResponse: Codable, Sendable {
   public init() {
     name = ""; repoUrl = ""; defaultBranch = "main"; template = "node22"
     buildCommand = nil; startCommand = nil; healthPath = "/"; healthTimeout = 120
-    smokePages = []; maxValidationAttempts = 3; defaultModel = "claude-opus-4-7"
+    smokePages = []; maxValidationAttempts = 3; defaultModel = "claude-opus-4-8"
+    reviewerModel = "claude-sonnet-4-6"
     defaultRuntime = "claude"; executionTarget = "local"
     escalation = .init(); mcpServers = []; claudeMdSections = []; skills = []
     outputMode = "pr"; modelProvider = "anthropic"; buildTimeout = 300
@@ -275,7 +276,7 @@ public struct AskAiConfigResponse: Codable, Sendable {
   public var model: String
   public var maxCalls: Int
 
-  public init() { enabled = true; model = "sonnet"; maxCalls = 3 }
+  public init() { enabled = true; model = "claude-sonnet-4-6"; maxCalls = 3 }
 
   public init(from decoder: any Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)

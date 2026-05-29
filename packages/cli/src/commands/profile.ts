@@ -144,12 +144,18 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         healthTimeout: 120,
         smokePages: [{ path: '/' }],
         maxValidationAttempts: 3,
-        defaultModel: 'opus',
+        defaultModel: 'claude-opus-4-8',
+        reviewerModel: 'claude-sonnet-4-6',
         defaultRuntime: 'claude',
         customInstructions: null,
         escalation: {
           askHuman: true,
-          askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
+          askAi: {
+            enabled: false,
+            // Legacy wire compatibility; ask_ai and AI review use reviewerModel.
+            model: 'claude-sonnet-4-6',
+            maxCalls: 5,
+          },
           advisor: { enabled: false },
           autoPauseAfter: 3,
           humanResponseTimeout: 3600,

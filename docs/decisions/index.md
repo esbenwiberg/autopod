@@ -32,3 +32,4 @@
 | `ADR-026` | ADR-026: Parser-side `costUsd` emission for runtimes without native cost | Accepted | ADR-015 introduced `packages/shared/src/pricing/model-pricing.json` and the `computeCost(model, in, out)` / `effectiveCo |
 | `ADR-027` | ADR-027: Advisory Browser QA Is Evidence, Not Validation | Accepted | Autopod contracts now separate behavior descriptions (`scenarios`), executable |
 | `ADR-027` | ADR-027: Daemon-curated reviewer-model memory loop | Proposed | Autopod's memory system has oscillated between two bad states. When agents were encouraged to suggest memories directly, |
+| `ADR-028` | ADR-028: Canonical model ID input policy | Accepted | Autopod historically accepted short Claude aliases (`opus`, `sonnet`, and |

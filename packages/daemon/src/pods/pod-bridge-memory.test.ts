@@ -1,5 +1,5 @@
 import type { PodBridge } from '@autopod/escalation-mcp';
-import type { TaskSummary } from '@autopod/shared';
+import type { PodStatus, TaskSummary } from '@autopod/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createMemoryRepository } from './memory-repository.js';
@@ -10,7 +10,7 @@ import {
   createSessionBridge,
 } from './pod-bridge-impl.js';
 
-type StubSession = { id: string; profileName: string };
+type StubSession = { id: string; profileName: string; status?: PodStatus };
 type Deps = SessionBridgeDependencies;
 
 function buildBridgeWithMemory(pods: StubSession[]): {
@@ -25,21 +25,22 @@ function buildBridgeWithMemory(pods: StubSession[]): {
   // Seed FK targets: memory_entries.created_by_pod_id → pods(id) → profiles(name).
   const seededProfiles = new Set<string>();
   for (const s of pods) {
+    const status = s.status ?? 'running';
     if (!seededProfiles.has(s.profileName)) {
       insertTestProfile(db, { name: s.profileName });
       seededProfiles.add(s.profileName);
     }
     db.prepare(
-      `INSERT INTO pods (id, profile_name, task, model, branch, user_id)
-       VALUES (@id, @profile, 't', 'opus', 'main', 'u')`,
-    ).run({ id: s.id, profile: s.profileName });
+      `INSERT INTO pods (id, profile_name, task, model, branch, user_id, status)
+       VALUES (@id, @profile, 't', 'opus', 'main', 'u', @status)`,
+    ).run({ id: s.id, profile: s.profileName, status });
   }
 
   const podManager = {
     getSession: vi.fn((id: string) => {
       const pod = pods.find((s) => s.id === id);
       if (!pod) throw new Error(`unknown pod: ${id}`);
-      return pod;
+      return { ...pod, status: pod.status ?? 'running' };
     }),
     touchHeartbeat: vi.fn(),
   } as unknown as Deps['podManager'];
@@ -49,7 +50,10 @@ function buildBridgeWithMemory(pods: StubSession[]): {
     subscribe: vi.fn(),
   } as unknown as Deps['eventBus'];
   const podsById = new Map(
-    pods.map((pod) => [pod.id, { ...pod, taskSummary: null as TaskSummary | null }]),
+    pods.map((pod) => [
+      pod.id,
+      { ...pod, status: pod.status ?? 'running', taskSummary: null as TaskSummary | null },
+    ]),
   );
   const podRepo = {
     update: vi.fn((id: string, updates: Record<string, unknown>) => {

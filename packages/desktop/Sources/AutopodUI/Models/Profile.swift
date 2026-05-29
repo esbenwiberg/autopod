@@ -201,7 +201,7 @@ public struct Profile: Identifiable, Sendable {
         healthPath: String = "/", healthTimeout: Int = 120,
         buildTimeout: Int = 300, testTimeout: Int = 600,
         maxValidationAttempts: Int = 3,
-        defaultModel: String = "claude-opus-4-7", reviewerModel: String = "claude-sonnet-4-6",
+        defaultModel: String = "claude-opus-4-8", reviewerModel: String = "claude-sonnet-4-6",
         defaultRuntime: RuntimeType = .claude,
         executionTarget: ExecutionTarget = .local,
         modelProvider: ModelProvider = .anthropic, prProvider: PRProvider = .github,
@@ -221,7 +221,7 @@ public struct Profile: Identifiable, Sendable {
         claudeMdSections: [InjectedClaudeMdSection] = [],
         skills: [InjectedSkill] = [],
         escalationAskHuman: Bool = true,
-        escalationAskAiEnabled: Bool = true, escalationAskAiModel: String = "sonnet",
+        escalationAskAiEnabled: Bool = true, escalationAskAiModel: String = "claude-sonnet-4-6",
         escalationAskAiMaxCalls: Int = 3, escalationAdvisorEnabled: Bool = false,
         escalationAutoPauseAfter: Int = 1, escalationHumanResponseTimeout: Int = 3600,
         pod: PodConfig = PodConfig(),
@@ -835,7 +835,7 @@ public enum MockProfiles: Sendable {
     public static let myAppFast = Profile(
         name: "my-app-fast",
         repoUrl: "https://github.com/org/my-app.git",
-        defaultModel: "haiku",
+        defaultModel: "claude-haiku-4-5",
         extendsProfile: "my-app"
     )
 
@@ -866,7 +866,7 @@ public enum MockProfiles: Sendable {
         startCommand: "pnpm start",
         testCommand: "pnpm test",
         healthPath: "/api/health",
-        defaultModel: "claude-opus-4-7",
+        defaultModel: "claude-opus-4-8",
         hasGithubPat: true,
         networkEnabled: true, networkMode: .restricted,
         allowedHosts: ["api.stripe.com", "auth.google.com"],
@@ -882,7 +882,7 @@ public enum MockProfiles: Sendable {
             InjectedSkill(name: "db-migrate", description: "Run database migrations")
         ],
         escalationAskHuman: true,
-        escalationAskAiEnabled: true, escalationAskAiModel: "sonnet",
+        escalationAskAiEnabled: true, escalationAskAiModel: "claude-sonnet-4-6",
         escalationAskAiMaxCalls: 5,
         escalationAutoPauseAfter: 2, escalationHumanResponseTimeout: 7200,
         actionPolicyEnabled: true,
@@ -914,7 +914,7 @@ public enum MockProfiles: Sendable {
         startCommand: "dotnet run",
         testCommand: "dotnet test",
         healthPath: "/health",
-        defaultModel: "claude-opus-4-7",
+        defaultModel: "claude-opus-4-8",
         prProvider: .ado,
         hasAdoPat: true, hasRegistryPat: true,
         networkEnabled: true, networkMode: .restricted,

@@ -104,7 +104,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .buildRun:
             ["build command", "start command", "test command", "health path", "timeout", "npm", "dotnet", "python", "compile"]
         case .agent:
-            ["model", "opus", "sonnet", "auto", "gpt-5", "runtime", "claude", "codex", "copilot", "custom instructions", "system prompt"]
+            ["model", "claude-opus-4-8", "claude-sonnet-4-6", "auto", "gpt-5", "runtime", "claude", "codex", "copilot", "custom instructions", "system prompt"]
         case .providers:
             ["model provider", "anthropic", "max", "openai", "codex", "foundry", "azure foundry", "copilot", "pr provider", "code platform", "github", "ado", "azure devops", "oauth", "authenticate", "login", "endpoint", "project id", "api key"]
         case .escalation:
@@ -998,7 +998,7 @@ public struct ProfileEditorView: View {
     private var defaultModelHelp: String {
         switch profile.defaultRuntime {
         case .claude:
-            "Claude model for generation pods. Opus 4.7 is more capable; Sonnet 4.6 is faster and cheaper."
+            "Claude model for generation pods. Opus 4.8 is the curated Opus default; Sonnet 4.6 is faster and cheaper."
         case .codex:
             "Codex model for generation pods. GPT-5.3-Codex is coding-optimized; GPT-5.5 is frontier general reasoning."
         case .copilot:
@@ -1009,7 +1009,7 @@ public struct ProfileEditorView: View {
     private var reviewerModelHelp: String {
         switch profile.defaultRuntime {
         case .claude:
-            "Claude model used for required-facts review and task review. Sonnet 4.6 is the lower-cost default."
+            "Claude model used for required-facts review, task review, and ask_ai consultation. Sonnet 4.6 is the lower-cost default."
         case .codex:
             "Codex model used for required-facts review and task review. Auto follows the Codex account default."
         case .copilot:
@@ -1092,14 +1092,6 @@ public struct ProfileEditorView: View {
 
         if profile.escalationAskAiEnabled {
             HStack(spacing: 24) {
-                fieldRow("Consultation Model", help: "Which model to consult. Sonnet is cheaper; Opus is more thorough.") {
-                    Picker("", selection: $profile.escalationAskAiModel) {
-                        Text("Sonnet").tag("sonnet")
-                        Text("Opus").tag("opus")
-                    }
-                    .labelsHidden()
-                    .frame(width: 130)
-                }
                 fieldRow("Max Calls", help: "Maximum number of AI consultations per pod before forcing human escalation.") {
                     Stepper("\(profile.escalationAskAiMaxCalls)", value: $profile.escalationAskAiMaxCalls, in: 1...20)
                         .frame(width: 110)
@@ -3410,12 +3402,6 @@ public struct ProfileEditorView: View {
                 GridRow {
                     Text("Ask AI").font(.caption2).foregroundStyle(.tertiary)
                     Toggle("", isOn: $profile.escalationAskAiEnabled).toggleStyle(.switch).labelsHidden()
-                }
-                GridRow {
-                    Text("Ask AI model").font(.caption2).foregroundStyle(.tertiary)
-                    TextField("sonnet", text: $profile.escalationAskAiModel)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 180)
                 }
                 GridRow {
                     Text("Ask AI max calls").font(.caption2).foregroundStyle(.tertiary)

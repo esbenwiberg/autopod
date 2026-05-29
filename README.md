@@ -23,9 +23,9 @@
 You describe a task. autopod spins up an isolated container, lets an AI agent work, validates the output in a real browser, and only bothers you when there's something worth reviewing. Run dozens of agents in parallel — across repos, models, and runtimes — without babysitting a single one.
 
 ```
-$ ap run my-app "Add a dark mode toggle to the settings page" --model opus
+$ ap run my-app "Add a dark mode toggle to the settings page" --model claude-opus-4-8
 
-  Pod a1b2c3d4 created (profile: my-app, model: opus)
+  Pod a1b2c3d4 created (profile: my-app, model: claude-opus-4-8)
   Provisioning container...
   Agent running...
 
@@ -309,7 +309,7 @@ ap profile create my-app \
   --start "npm run preview -- --host 0.0.0.0 --port \$PORT" \
   --health "/" \
   --test "npm test" \
-  --model opus
+  --model claude-opus-4-8
 ```
 
 Available templates:
@@ -399,7 +399,7 @@ ap profile action-override remove <name> <action>
 ```bash
 # Create
 ap run <profile> "<task>"                   # Start a pod
-ap run <profile> "<task>" --model opus      # Override model
+ap run <profile> "<task>" --model claude-opus-4-8  # Override model
 ap run <profile> "<task>" --runtime codex   # Use Codex runtime
 ap run <profile> "<task>" --runtime copilot # Use Copilot runtime
 ap run <profile> "<task>" --branch feat/x   # Custom branch name
@@ -584,7 +584,7 @@ ap profile create my-app \
   --test "npm test" \
   --health "/" \
   --health-timeout 30000 \
-  --model opus \
+  --model claude-opus-4-8 \
   --runtime claude \
   --pr-provider github \
   --max-validation-attempts 3 \
@@ -748,17 +748,18 @@ This means egress policy is enforced at the hostname level even for HTTPS, witho
 Control how and when agents can ask for help:
 
 ```yaml
+reviewerModel: claude-sonnet-4-6 # Model used by ask_ai and AI task review
 escalation:
   askHuman: true                  # Allow agent to pause and ask human
   askAi:
     enabled: true                 # Allow agent to ask cheaper model
-    model: sonnet                 # Also used as the AI reviewer model in validation
+    model: claude-sonnet-4-6      # Legacy wire compatibility; reviewerModel is authoritative
     maxCalls: 5                   # Max AI-to-AI escalations per pod
   autoPauseAfter: 3              # Auto-escalate after N consecutive failures
   humanResponseTimeout: 3600000  # 1 hour before auto-killing stalled pod
 ```
 
-> **Note:** `escalation.askAi.model` does double duty — it's both the model agents consult during work *and* the model that reviews their output in the AI task review validation phase.
+> **Note:** `ask_ai` and the AI task review use `profile.reviewerModel`. `escalation.askAi.model` is retained only as a legacy wire-compatibility field.
 
 ### Multi-Provider Model Auth
 
@@ -1241,7 +1242,7 @@ Agent pods are ephemeral — they spin up, do work, and die. You only pay for co
 <details>
 <summary><b>What happens if the agent gets stuck?</b></summary>
 
-It can escalate via MCP tools: `ask_human` pauses and notifies you, `ask_ai` gets a second opinion from a cheaper model, `report_blocker` declares a hard stop. You can also proactively pause a pod (`ap pause`) and nudge the agent with new instructions (`ap nudge`) without killing its work.
+It can escalate via MCP tools: `ask_human` pauses and notifies you, `ask_ai` gets a second opinion from `profile.reviewerModel`, `report_blocker` declares a hard stop. You can also proactively pause a pod (`ap pause`) and nudge the agent with new instructions (`ap nudge`) without killing its work.
 </details>
 
 <details>

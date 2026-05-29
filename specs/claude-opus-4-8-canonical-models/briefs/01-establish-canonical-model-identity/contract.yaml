@@ -1,0 +1,48 @@
+contract_version: 1
+title: "Establish canonical model identity contracts"
+depends_on: []
+scenarios:
+  - id: opus-48-priced
+    given:
+      - "the shared pricing catalog is loaded"
+    when:
+      - "code asks for Claude Opus 4.8 pricing"
+    then:
+      - "claude-opus-4-8 is present with Opus regular input, cached-input, and output pricing"
+  - id: profile-alias-input-rejected
+    given:
+      - "a new or updated profile payload contains a short Claude alias"
+    when:
+      - "the shared profile schema parses the payload"
+    then:
+      - "the parse fails and the error tells the caller to use a canonical Claude model ID"
+  - id: pod-alias-input-rejected
+    given:
+      - "a create-pod request contains model: opus, sonnet, or haiku"
+    when:
+      - "the shared createPodRequestSchema parses the payload"
+    then:
+      - "the parse fails while canonical Claude IDs remain accepted"
+required_facts:
+  - id: fact-opus-48-priced
+    proves: [opus-48-priced]
+    kind: unit-test
+    artifact:
+      path: packages/shared/src/pricing/index.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/shared test -- pricing/index.test.ts -t "claude-opus-4-8"
+  - id: fact-profile-alias-input-rejected
+    proves: [profile-alias-input-rejected]
+    kind: unit-test
+    artifact:
+      path: packages/shared/src/schemas/profile.schema.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/shared test -- profile.schema.test.ts -t "short Claude aliases"
+  - id: fact-pod-alias-input-rejected
+    proves: [pod-alias-input-rejected]
+    kind: unit-test
+    artifact:
+      path: packages/shared/src/schemas/pod.schema.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/shared test -- pod.schema.test.ts -t "short Claude aliases"
+human_review: []
