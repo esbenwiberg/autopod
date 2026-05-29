@@ -103,7 +103,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
   }
 
   return {
-    createEscalation(escalation: EscalationRequest): void {
+    createEscalation(escalation: EscalationRequest, options = { notifyHuman: true }): void {
       podManager.touchHeartbeat(escalation.podId);
       escalationRepo.insert(escalation);
       logger.info(
@@ -111,12 +111,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         'Escalation created',
       );
       // Transition pod to awaiting_input so the TUI shows the pending question/approval
-      if (
-        escalation.type === 'ask_human' ||
-        escalation.type === 'report_blocker' ||
-        escalation.type === 'action_approval' ||
-        escalation.type === 'request_credential'
-      ) {
+      const shouldNotifyHuman =
+        options.notifyHuman !== false &&
+        (escalation.type === 'ask_human' ||
+          escalation.type === 'report_blocker' ||
+          escalation.type === 'action_approval' ||
+          escalation.type === 'request_credential');
+      if (shouldNotifyHuman) {
         podManager.notifyEscalation(escalation.podId, escalation);
       }
     },
@@ -128,6 +129,10 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
     getAiEscalationCount(podId: string): number {
       return escalationRepo.countBySessionAndType(podId, 'ask_ai');
+    },
+
+    getReportBlockerCount(podId: string): number {
+      return escalationRepo.countBySessionAndType(podId, 'report_blocker');
     },
 
     getMaxAiCalls(podId: string): number {

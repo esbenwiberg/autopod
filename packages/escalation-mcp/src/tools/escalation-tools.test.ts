@@ -17,6 +17,7 @@ function makeBridge(overrides: Partial<PodBridge> = {}): PodBridge {
     createEscalation: vi.fn(),
     resolveEscalation: vi.fn(),
     getAiEscalationCount: vi.fn().mockReturnValue(0),
+    getReportBlockerCount: vi.fn().mockReturnValue(0),
     getMaxAiCalls: vi.fn().mockReturnValue(5),
     getAutoPauseThreshold: vi.fn().mockReturnValue(3),
     getHumanResponseTimeout: vi.fn().mockReturnValue(5), // 5 seconds
@@ -280,9 +281,10 @@ describe('reportBlocker', () => {
     vi.useRealTimers();
   });
 
-  it('returns a non-blocking message when below autopause threshold', async () => {
+  it('continues without waiting when report_blocker is below auto-pause threshold', async () => {
+    const waitForResponse = vi.spyOn(pendingRequests, 'waitForResponse');
     const bridge = makeBridge({
-      getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getReportBlockerCount: vi.fn().mockReturnValue(1),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
     });
 
@@ -295,11 +297,22 @@ describe('reportBlocker', () => {
 
     expect(result).toContain('Cannot connect to DB');
     expect(result).toContain('Continuing');
+    expect(bridge.getReportBlockerCount).toHaveBeenCalledWith('sess-1');
+    expect(bridge.getAiEscalationCount).not.toHaveBeenCalled();
+    expect(bridge.createEscalation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        podId: 'sess-1',
+        type: 'report_blocker',
+        payload: expect.objectContaining({ description: 'Cannot connect to DB' }),
+      }),
+      { notifyHuman: false },
+    );
+    expect(waitForResponse).not.toHaveBeenCalled();
   });
 
   it('creates an escalation record', async () => {
     const bridge = makeBridge({
-      getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getReportBlockerCount: vi.fn().mockReturnValue(0),
       getAutoPauseThreshold: vi.fn().mockReturnValue(10),
     });
 
@@ -316,12 +329,14 @@ describe('reportBlocker', () => {
         type: 'report_blocker',
         payload: expect.objectContaining({ description: 'Stuck' }),
       }),
+      { notifyHuman: false },
     );
   });
 
-  it('blocks and waits for human response when autopause threshold is reached', async () => {
+  it('waits for human when report_blocker reaches auto-pause threshold', async () => {
+    const waitForResponse = vi.spyOn(pendingRequests, 'waitForResponse');
     const bridge = makeBridge({
-      getAiEscalationCount: vi.fn().mockReturnValue(2),
+      getReportBlockerCount: vi.fn().mockReturnValue(2),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3), // 2 + 1 = 3 >= threshold
       getHumanResponseTimeout: vi.fn().mockReturnValue(10),
     });
@@ -334,15 +349,25 @@ describe('reportBlocker', () => {
     );
 
     const createCall = (bridge.createEscalation as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+    expect(bridge.createEscalation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: createCall.id,
+        podId: 'sess-1',
+        type: 'report_blocker',
+      }),
+      { notifyHuman: true },
+    );
+    expect(waitForResponse).toHaveBeenCalledWith(createCall.id, 10_000);
+    expect(bridge.incrementEscalationCount).toHaveBeenCalledWith('sess-1');
     pendingRequests.resolve(createCall.id, 'Try a different approach');
 
     const result = await promise;
     expect(result).toBe('Try a different approach');
   });
 
-  it('increments escalation count', async () => {
+  it('does not increment human escalation count below threshold', async () => {
     const bridge = makeBridge({
-      getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getReportBlockerCount: vi.fn().mockReturnValue(0),
       getAutoPauseThreshold: vi.fn().mockReturnValue(10),
     });
 
@@ -353,7 +378,7 @@ describe('reportBlocker', () => {
       pendingRequests,
     );
 
-    expect(bridge.incrementEscalationCount).toHaveBeenCalledWith('sess-1');
+    expect(bridge.incrementEscalationCount).not.toHaveBeenCalled();
   });
 });
 

@@ -29,6 +29,7 @@ function makeBridge(overrides: Partial<PodBridge> = {}): PodBridge {
     createEscalation: vi.fn(),
     resolveEscalation: vi.fn(),
     getAiEscalationCount: vi.fn().mockReturnValue(0),
+    getReportBlockerCount: vi.fn().mockReturnValue(0),
     getMaxAiCalls: vi.fn().mockReturnValue(5),
     getAutoPauseThreshold: vi.fn().mockReturnValue(3),
     getHumanResponseTimeout: vi.fn().mockReturnValue(5),

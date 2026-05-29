@@ -17,10 +17,15 @@ export interface MemoryPlanIntentItem {
   reason: string;
 }
 
+export interface CreateEscalationOptions {
+  notifyHuman?: boolean;
+}
+
 export interface PodBridge {
-  createEscalation(escalation: EscalationRequest): void;
+  createEscalation(escalation: EscalationRequest, options?: CreateEscalationOptions): void;
   resolveEscalation(escalationId: string, response: EscalationResponse): void;
   getAiEscalationCount(podId: string): number;
+  getReportBlockerCount(podId: string): number;
   getMaxAiCalls(podId: string): number;
   getAutoPauseThreshold(podId: string): number;
   getHumanResponseTimeout(podId: string): number;

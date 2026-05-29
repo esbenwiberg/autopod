@@ -17,7 +17,8 @@ export async function reportBlocker(
 ): Promise<string> {
   const escalationId = generateId();
   const autoPauseThreshold = bridge.getAutoPauseThreshold(podId);
-  const currentCount = bridge.getAiEscalationCount(podId);
+  const currentCount = bridge.getReportBlockerCount(podId);
+  const shouldNotifyHuman = currentCount + 1 >= autoPauseThreshold;
 
   const escalation: EscalationRequest = {
     id: escalationId,
@@ -32,10 +33,10 @@ export async function reportBlocker(
     response: null,
   };
 
-  bridge.createEscalation(escalation);
-  bridge.incrementEscalationCount(podId);
+  bridge.createEscalation(escalation, { notifyHuman: shouldNotifyHuman });
 
-  if (currentCount + 1 >= autoPauseThreshold) {
+  if (shouldNotifyHuman) {
+    bridge.incrementEscalationCount(podId);
     // Block and wait for human
     const timeoutMs = bridge.getHumanResponseTimeout(podId) * 1000;
     const response = await pendingRequests.waitForResponse(escalationId, timeoutMs);
