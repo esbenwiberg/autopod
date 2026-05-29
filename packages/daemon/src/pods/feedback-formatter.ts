@@ -230,7 +230,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
     lines.push(result.reviewSkipReason);
     lines.push('');
     lines.push(
-      'This is a validation infrastructure failure, not an actionable code-review finding. Report this blocker instead of changing unrelated code.',
+      'This is a validation infrastructure failure, not an actionable code-review finding. Do not change unrelated code for this reviewer execution failure.',
     );
     lines.push('');
   }
