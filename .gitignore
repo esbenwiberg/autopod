@@ -21,6 +21,9 @@ coverage/
 tmp/
 .agentry/
 .playwright-mcp/
+.clawpatch/*
+!.clawpatch/
+!.clawpatch/config.json
 *.onnx
 packages/desktop/.build/
 packages/desktop/.swiftpm/xcode/xcuserdata/
