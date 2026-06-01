@@ -5,6 +5,7 @@ import { formatFeedback } from './feedback-formatter.js';
 function mockValidationResult(
   overrides: {
     buildFailed?: boolean;
+    setupFailed?: boolean;
     healthFailed?: boolean;
     pageFailed?: boolean;
     taskReviewFailed?: boolean;
@@ -15,9 +16,17 @@ function mockValidationResult(
     podId: 'sess-1',
     attempt: 1,
     timestamp: new Date().toISOString(),
+    setup: overrides.setupFailed
+      ? { status: 'fail', output: 'pip install failed', duration: 25 }
+      : { status: 'skip', output: '', duration: 0 },
     smoke: {
       status:
-        overrides.buildFailed || overrides.healthFailed || overrides.pageFailed ? 'fail' : 'pass',
+        overrides.setupFailed ||
+        overrides.buildFailed ||
+        overrides.healthFailed ||
+        overrides.pageFailed
+          ? 'fail'
+          : 'pass',
       build: {
         status: overrides.buildFailed ? 'fail' : 'pass',
         output: overrides.buildFailed ? 'Error: Cannot find module ./missing' : '',
@@ -67,6 +76,19 @@ function mockValidationResult(
 
 describe('formatFeedback', () => {
   describe('validation_failure', () => {
+    it('formats setup failure before downstream details', () => {
+      const result = formatFeedback({
+        type: 'validation_failure',
+        result: mockValidationResult({ setupFailed: true, buildFailed: true }),
+        task: 'Prepare validation tooling',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+      expect(result).toContain('Setup Errors');
+      expect(result).toContain('pip install failed');
+      expect(result.indexOf('### Setup Errors')).toBeLessThan(result.indexOf('### Build Errors'));
+    });
+
     it('formats build failure with build output', () => {
       const result = formatFeedback({
         type: 'validation_failure',

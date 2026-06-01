@@ -637,6 +637,188 @@ describe('validate() — hasWebUi gating', () => {
     };
   }
 
+  function commandTrackingContainerManager(
+    options: {
+      setupExitCode?: number;
+      buildTimeout?: number;
+    } = {},
+  ): { cm: ContainerManager; commands: string[]; timeouts: Array<number | undefined> } {
+    const commands: string[] = [];
+    const timeouts: Array<number | undefined> = [];
+    const execInContainer = vi.fn(
+      async (
+        _containerId: string,
+        command: string[],
+        execOptions?: { timeout?: number },
+      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+        const shell = command[2] ?? '';
+        if (shell.includes('git reset --hard HEAD') && shell.includes('git clean')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('node_modules/.bin') || shell.includes('chmod +x')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+
+        commands.push(shell);
+        timeouts.push(execOptions?.timeout);
+        if (shell === 'setup-command') {
+          return {
+            stdout: options.setupExitCode === 1 ? 'setup stdout' : 'setup ok',
+            stderr: options.setupExitCode === 1 ? 'setup stderr' : '',
+            exitCode: options.setupExitCode ?? 0,
+          };
+        }
+        return { stdout: `${shell} ok`, stderr: '', exitCode: 0 };
+      },
+    );
+
+    return {
+      cm: { ...stubContainerManager(), execInContainer } as unknown as ContainerManager,
+      commands,
+      timeouts,
+    };
+  }
+
+  it('runs setup before downstream command phases and records setup events/results', async () => {
+    const { cm, commands } = commandTrackingContainerManager();
+    const engine = createLocalValidationEngine(cm);
+    const started: string[] = [];
+    const completed: Array<{ phase: string; status: string; result: unknown }> = [];
+
+    const result = await engine.validate(
+      baseConfig({
+        validationSetupCommand: 'setup-command',
+        lintCommand: 'lint-command',
+        sastCommand: 'sast-command',
+        buildCommand: 'build-command',
+        testCommand: 'test-command',
+        startCommand: '',
+        smokePages: [],
+        hasWebUi: false,
+        skipPhases: ['facts', 'review'],
+      }),
+      undefined,
+      undefined,
+      {
+        onPhaseStarted: (phase) => started.push(phase),
+        onPhaseCompleted: (phase, status, phaseResult) =>
+          completed.push({ phase, status, result: phaseResult }),
+      },
+    );
+
+    expect(commands).toEqual([
+      'setup-command',
+      'lint-command',
+      'sast-command',
+      'build-command',
+      'test-command',
+    ]);
+    expect(started.slice(0, 5)).toEqual(['setup', 'lint', 'sast', 'build', 'test']);
+    expect(completed[0]).toMatchObject({
+      phase: 'setup',
+      status: 'pass',
+      result: { status: 'pass', output: 'setup ok' },
+    });
+    expect(result.setup).toMatchObject({ status: 'pass', output: 'setup ok' });
+    expect(result.overall).toBe('pass');
+  });
+
+  it('uses buildTimeout for setup command execution', async () => {
+    const { cm, commands, timeouts } = commandTrackingContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    await engine.validate(
+      baseConfig({
+        validationSetupCommand: 'setup-command',
+        buildTimeout: 12_345,
+        startCommand: '',
+        smokePages: [],
+        hasWebUi: false,
+        skipPhases: ['facts', 'review'],
+      }),
+    );
+
+    const setupIndex = commands.indexOf('setup-command');
+    expect(setupIndex).toBeGreaterThanOrEqual(0);
+    expect(timeouts[setupIndex]).toBe(12_345);
+  });
+
+  it('treats missing or profile-skipped setup as neutral', async () => {
+    const withoutSetup = commandTrackingContainerManager();
+    const engineWithoutSetup = createLocalValidationEngine(withoutSetup.cm);
+
+    const missingResult = await engineWithoutSetup.validate(
+      baseConfig({
+        lintCommand: 'lint-command',
+        startCommand: '',
+        smokePages: [],
+        hasWebUi: false,
+        skipPhases: ['facts', 'review'],
+      }),
+    );
+
+    expect(missingResult.setup?.status).toBe('skip');
+    expect(withoutSetup.commands).toContain('lint-command');
+
+    const skippedSetup = commandTrackingContainerManager();
+    const engineSkippedSetup = createLocalValidationEngine(skippedSetup.cm);
+    const skippedResult = await engineSkippedSetup.validate(
+      baseConfig({
+        validationSetupCommand: 'setup-command',
+        lintCommand: 'lint-command',
+        startCommand: '',
+        smokePages: [],
+        hasWebUi: false,
+        skipPhases: ['setup', 'facts', 'review'],
+      }),
+    );
+
+    expect(skippedResult.setup).toMatchObject({
+      status: 'skip',
+      output: 'Setup phase skipped by profile configuration',
+    });
+    expect(skippedSetup.commands).toEqual(['lint-command']);
+    expect(skippedResult.overall).toBe('pass');
+  });
+
+  it('fails setup and stops downstream validation phases', async () => {
+    const { cm, commands } = commandTrackingContainerManager({ setupExitCode: 1 });
+    const engine = createLocalValidationEngine(cm);
+    const completed: Array<{ phase: string; status: string }> = [];
+
+    const result = await engine.validate(
+      baseConfig({
+        validationSetupCommand: 'setup-command',
+        lintCommand: 'lint-command',
+        sastCommand: 'sast-command',
+        buildCommand: 'build-command',
+        testCommand: 'test-command',
+        startCommand: '',
+        smokePages: [],
+        hasWebUi: false,
+        skipPhases: ['facts', 'review'],
+      }),
+      undefined,
+      undefined,
+      { onPhaseCompleted: (phase, status) => completed.push({ phase, status }) },
+    );
+
+    expect(commands).toEqual(['setup-command']);
+    expect(completed).toEqual([{ phase: 'setup', status: 'fail' }]);
+    expect(result.overall).toBe('fail');
+    expect(result.setup).toMatchObject({
+      status: 'fail',
+      output: 'setup stdout\nsetup stderr',
+    });
+    expect(result.lint?.status).toBe('skip');
+    expect(result.sast?.status).toBe('skip');
+    expect(result.test?.status).toBe('skip');
+    expect(result.smoke.health.status).toBe('skip');
+    expect(result.factValidation?.status).toBe('skip');
+    expect(result.taskReview).toBeNull();
+    expect(result.reviewSkipReason).toBe('Skipped — validation setup failed');
+  });
+
   it('skips Health and Pages when hasWebUi is false', async () => {
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);

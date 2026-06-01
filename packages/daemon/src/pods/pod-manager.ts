@@ -30,6 +30,7 @@ import type {
   RequestCredentialPayload,
   ReviewFeedbackResponseItem,
   SastResult,
+  SetupResult,
   SpawnFixResponse,
   SpecFile,
   StdioInjectedMcpServer,
@@ -174,9 +175,10 @@ function injectPatIntoUrl(url: string, pat: string): string {
  * contradict an `overall: fail` (e.g. tests/pages failed but only build/health
  * shown). Order matches pipeline order so the first `fail` is the failing gate. */
 function summarizeValidationPhases(result: ValidationResult): string {
+  const setupStatus = result.setup?.status ?? 'skip';
   const lintStatus = result.lint?.status ?? 'skip';
   const sastStatus = result.sast?.status ?? 'skip';
-  const buildStatus = result.smoke.build.status;
+  const buildStatus = setupStatus === 'fail' ? 'skip' : result.smoke.build.status;
   const testStatus = result.test?.status ?? 'skip';
   const healthStatus = result.smoke.health.status;
   const pagesStatus =
@@ -188,7 +190,7 @@ function summarizeValidationPhases(result: ValidationResult): string {
   const factsStatus = result.factValidation?.status ?? 'skip';
   const reviewStatus = result.taskReview?.status ?? 'skip';
   return (
-    `lint: ${lintStatus}, sast: ${sastStatus}, build: ${buildStatus}, ` +
+    `setup: ${setupStatus}, lint: ${lintStatus}, sast: ${sastStatus}, build: ${buildStatus}, ` +
     `tests: ${testStatus}, health: ${healthStatus}, pages: ${pagesStatus}, ` +
     `facts: ${factsStatus}, review: ${reviewStatus}`
   );
@@ -201,6 +203,7 @@ function formatRetryDelay(delayMs: number): string {
 function failedValidationPhases(result: ValidationResult | null): string[] {
   if (!result) return [];
   const failed: string[] = [];
+  if (result.setup?.status === 'fail') failed.push('setup');
   if (result.lint?.status === 'fail') failed.push('lint');
   if (result.sast?.status === 'fail') failed.push('sast');
   if (result.smoke.build.status === 'fail') failed.push('build');
@@ -3486,7 +3489,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           phase,
           phaseStatus: status,
         };
-        if (phase === 'build') {
+        if (phase === 'setup') {
+          eventBus.emit({ ...base, setupResult: phaseResult as SetupResult });
+        } else if (phase === 'build') {
           eventBus.emit({ ...base, buildResult: phaseResult as BuildResult });
         } else if (phase === 'test') {
           eventBus.emit({
@@ -8382,6 +8387,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           containerId: pod.containerId,
           previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
           containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
+          validationSetupCommand: profile.validationSetupCommand ?? undefined,
           buildCommand: profile.buildCommand ?? '',
           startCommand: profile.startCommand ?? '',
           buildWorkDir: profile.buildWorkDir ?? undefined,
@@ -9225,6 +9231,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           containerId: pod.containerId,
           previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
           containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
+          validationSetupCommand: profile.validationSetupCommand ?? undefined,
           buildCommand: profile.buildCommand ?? '',
           startCommand: profile.startCommand ?? '',
           buildWorkDir: profile.buildWorkDir ?? undefined,

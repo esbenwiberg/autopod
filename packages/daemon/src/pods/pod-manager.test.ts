@@ -124,6 +124,7 @@ interface TestProfileOverrides {
   defaultModel?: string;
   defaultRuntime?: RuntimeType;
   modelProvider?: Profile['modelProvider'];
+  validationSetupCommand?: string | null;
 }
 
 function insertTestProfile(db: Database.Database, overrides: TestProfileOverrides | string = {}) {
@@ -136,6 +137,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       name, repo_url, default_branch, template, build_command, start_command,
       health_path, health_timeout, validation_pages, max_validation_attempts,
       default_model, default_runtime, escalation_config,
+      validation_setup_command,
       private_registries, registry_pat, registry_pat_expires_at, branch_prefix,
       pr_provider, github_pat, github_pat_expires_at, ado_pat, ado_pat_expires_at,
       model_provider
@@ -143,6 +145,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
       @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
       @defaultModel, @defaultRuntime, @escalationConfig,
+      @validationSetupCommand,
       @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix,
       @prProvider, @githubPat, @githubPatExpiresAt, @adoPat, @adoPatExpiresAt,
       @modelProvider
@@ -160,6 +163,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     maxValidationAttempts: 3,
     defaultModel: opts.defaultModel ?? 'opus',
     defaultRuntime: opts.defaultRuntime ?? 'claude',
+    validationSetupCommand: opts.validationSetupCommand ?? null,
     escalationConfig: JSON.stringify({
       askHuman: true,
       askAi: { enabled: true, model: 'sonnet', maxCalls: 5 },
@@ -308,6 +312,39 @@ function makeBuildFailure(): ValidationResult {
   });
 }
 
+function makeSetupFailure(): ValidationResult {
+  return makeValidationResult({
+    overall: 'fail',
+    setup: {
+      status: 'fail',
+      output: 'pip install failed\nruff: not found',
+      duration: 42,
+    },
+    smoke: {
+      status: 'fail',
+      build: {
+        status: 'pass',
+        output: 'Build phase skipped because validation setup failed',
+        duration: 0,
+      },
+      health: {
+        status: 'skip',
+        url: 'http://localhost:3000/health',
+        responseCode: null,
+        duration: 0,
+      },
+      pages: [],
+    },
+    lint: { status: 'skip', output: 'Skipped because validation setup failed', duration: 0 },
+    sast: { status: 'skip', output: 'Skipped because validation setup failed', duration: 0 },
+    test: { status: 'skip', duration: 0 },
+    factValidation: { status: 'skip', results: [] },
+    taskReview: null,
+    reviewSkipKind: 'upstream-failed',
+    reviewSkipReason: 'Skipped — validation setup failed',
+  });
+}
+
 function createMockValidationEngine(result?: Partial<ValidationResult>): ValidationEngine {
   return {
     validate: vi.fn(async () => makeValidationResult(result)),
@@ -411,6 +448,7 @@ function createTestContext(
         providerCredentials: row.provider_credentials
           ? JSON.parse(row.provider_credentials as string)
           : null,
+        validationSetupCommand: (row.validation_setup_command as string | null) ?? null,
         testCommand: (row.test_command as string) ?? null,
         prProvider: (row.pr_provider as 'github' | 'ado') ?? 'github',
         adoPat: (row.ado_pat as string) ?? null,
@@ -3588,6 +3626,96 @@ describe('PodManager', () => {
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('review_required');
       expect(result.validationAttempts).toBe(3);
+    });
+
+    it('passes setup command into validation and summarizes setup failures first', async () => {
+      const ctx = createTestContext(makeSetupFailure(), {
+        validationSetupCommand: 'pip install -e ".[dev]" semgrep',
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          validationSetupCommand: 'pip install -e ".[dev]" semgrep',
+          buildTimeout: 300_000,
+        }),
+        expect.any(Function),
+        expect.any(AbortSignal),
+        expect.any(Object),
+      );
+      const messages = ctx.eventRepo
+        .getForSession(pod.id, { type: 'pod.agent_activity' })
+        .map((event) => {
+          const payload = event.payload as { event?: { message?: unknown } };
+          return payload.event?.message;
+        });
+      expect(messages).toContain(
+        'Validation fail — setup: fail, lint: skip, sast: skip, build: skip, tests: skip, health: skip, pages: skip, facts: skip, review: skip',
+      );
+
+      const resumeMessage = vi.mocked(ctx.runtime.resume).mock.calls[0]?.[1];
+      expect(resumeMessage).toContain('### Setup Errors');
+      expect(resumeMessage).toContain('pip install failed');
+      expect(resumeMessage?.indexOf('### Setup Errors')).toBeLessThan(
+        resumeMessage?.indexOf('### Original Task') ?? Number.POSITIVE_INFINITY,
+      );
+    });
+
+    it('emits setup phase completion events from validation callbacks', async () => {
+      const ctx = createTestContext(undefined, {
+        validationSetupCommand: 'pip install -e ".[dev]" semgrep',
+      });
+      vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(
+        async (_config, _onProgress, _signal, callbacks) => {
+          const setupResult = { status: 'pass' as const, output: 'setup ok', duration: 12 };
+          callbacks?.onPhaseStarted?.('setup');
+          callbacks?.onPhaseCompleted?.('setup', 'pass', setupResult);
+          return makeValidationResult({ setup: setupResult });
+        },
+      );
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      const events: unknown[] = [];
+      ctx.eventBus.subscribe((event) => events.push(event));
+
+      await manager.triggerValidation(pod.id);
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'pod.validation_phase_started',
+          phase: 'setup',
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'pod.validation_phase_completed',
+          phase: 'setup',
+          phaseStatus: 'pass',
+          setupResult: { status: 'pass', output: 'setup ok', duration: 12 },
+        }),
+      );
     });
 
     it('approves a pending fact waiver and revalidates with the decision', async () => {
