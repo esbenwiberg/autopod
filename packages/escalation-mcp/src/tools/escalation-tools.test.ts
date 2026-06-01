@@ -204,13 +204,40 @@ describe('askHuman', () => {
     const bridge = makeBridge({
       getHumanResponseTimeout: vi.fn().mockReturnValue(1),
       getHumanResponseOnTimeout: vi.fn().mockReturnValue('ask_ai'),
-      callReviewerModel: vi.fn().mockResolvedValue('Fallback AI answer'),
+      callReviewerModel: vi
+        .fn()
+        .mockResolvedValue('AI review failed: AI reviewer requires a live pod container'),
     });
     const promise = askHuman('sess-1', { question: 'Slow?' }, bridge, pendingRequests);
     vi.advanceTimersByTime(1_500);
     const result = await promise;
-    expect(result).toContain('Auto-routed to AI');
-    expect(result).toContain('Fallback AI answer');
+    expect(result).toContain('[Auto-routed to AI after ask_human timeout]');
+    expect(result).toContain('AI review failed: AI reviewer requires a live pod container');
+  });
+
+  it('routes to AI immediately when ask_human is disabled for a series', async () => {
+    const bridge = makeBridge({
+      isAskHumanDisabled: vi.fn().mockReturnValue(true),
+      callReviewerModel: vi
+        .fn()
+        .mockResolvedValue('AI review failed: AI reviewer requires a live pod container'),
+    });
+
+    const result = await askHuman(
+      'sess-1',
+      { question: 'What next?', context: 'series context' },
+      bridge,
+      pendingRequests,
+    );
+
+    expect(result).toContain('[Auto-routed to AI — ask_human is disabled for this series]');
+    expect(result).toContain('AI review failed: AI reviewer requires a live pod container');
+    expect(bridge.callReviewerModel).toHaveBeenCalledWith(
+      'sess-1',
+      'What next?',
+      'series context',
+    );
+    expect(bridge.createEscalation).not.toHaveBeenCalled();
   });
 
   it('returns a cancellation message when the request is rejected', async () => {

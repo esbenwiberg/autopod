@@ -58,13 +58,14 @@ function deferred<T>() {
 
 async function waitForAssertion(assertion: () => void): Promise<void> {
   let lastError: unknown;
-  for (let i = 0; i < 100; i++) {
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
     try {
       assertion();
       return;
     } catch (err) {
       lastError = err;
-      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setTimeout(resolve, 5));
     }
   }
   throw lastError;

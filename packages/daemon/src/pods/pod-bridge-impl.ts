@@ -1,4 +1,3 @@
-import type { ContentBlock } from '@anthropic-ai/sdk/resources/messages.js';
 import type {
   PodBridge,
   PreSubmitReviewInput,
@@ -28,9 +27,9 @@ import type { Logger } from 'pino';
 import type { ActionEngine } from '../actions/action-engine.js';
 import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
 import { isPrivateIp } from '../api/ssrf-guard.js';
+import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
-import { createProfileAnthropicClient } from '../providers/llm-client.js';
 import { runContainerReviewer } from '../validation/container-reviewer-runner.js';
 import type { HostBrowserRunner } from '../validation/host-browser-runner.js';
 import {
@@ -169,7 +168,6 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       const pod = podManager.getSession(podId);
       const profile = profileStore.get(pod.profileName);
       const model = resolveReviewerModel(profile, logger);
-      const provider = resolveReviewerProvider(profile);
 
       // Enrich the prompt with pod state so the reviewer has full context
       // beyond what the agent manually passes.
@@ -204,50 +202,33 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       const prompt = `${contextParts.join('\n\n')}\n\nQuestion:\n${question}`;
 
       logger.info(
-        { podId, model, provider, question: question.slice(0, 100) },
+        {
+          podId,
+          model,
+          provider: resolveReviewerProvider(profile),
+          question: question.slice(0, 100),
+        },
         'Calling reviewer model',
       );
 
       try {
-        if (usesCodexReviewer(profile)) {
-          if (!pod.containerId) {
-            throw new Error('Codex reviewer requires a live pod container');
-          }
-          const cm = containerManagerFactory.get(pod.executionTarget);
-          const { stdout } = await runCodexReview({
-            podId,
-            containerId: pod.containerId,
-            containerManager: cm,
-            model,
-            prompt,
-            timeout: 60_000,
-          });
-          return stdout.trim();
+        if (!pod.containerId) {
+          return 'AI review failed: AI reviewer requires a live pod container';
         }
-
-        if (provider === 'copilot') {
-          throw new Error('Reviewer provider copilot is not supported by browser QA advisory');
-        }
-
-        const llm = await createProfileAnthropicClient(profile, model, logger);
-        if (!llm.ok) {
-          throw new Error(`Reviewer provider unavailable: ${llm.reason}`);
-        }
-
-        const response = await llm.client.messages.create({
-          model: llm.model,
-          max_tokens: 4_000,
-          messages: [{ role: 'user', content: prompt }],
+        const cm = containerManagerFactory.get(pod.executionTarget);
+        const reviewerExecEnv = await podManager.getReviewerExecEnv(pod);
+        const { stdout } = await runContainerReviewer({
+          podId,
+          containerId: pod.containerId,
+          containerManager: withReviewerExecEnv(cm, reviewerExecEnv),
+          profile,
+          model,
+          prompt,
           timeout: 60_000,
+          logger,
         });
 
-        return response.content
-          .filter(
-            (block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text',
-          )
-          .map((block) => block.text)
-          .join('')
-          .trim();
+        return stdout.trim();
       } catch (err) {
         logger.error({ err, podId }, 'Reviewer model call failed');
         return `AI review failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -1214,12 +1195,58 @@ function recordMemoryUsage(
   });
 }
 
-function usesCodexReviewer(profile: Profile): boolean {
-  if (profile.modelProvider === 'openai') return true;
-  if (profile.modelProvider !== 'foundry') return false;
+function withReviewerExecEnv(
+  containerManager: ContainerManager,
+  reviewerExecEnv: Record<string, string> | undefined,
+): ContainerManager {
+  if (!reviewerExecEnv) return containerManager;
 
-  const creds = profile.providerCredentials;
-  return creds?.provider === 'foundry' && (creds.apiSurface ?? 'anthropic') === 'openai';
+  return {
+    spawn(config) {
+      return containerManager.spawn(config);
+    },
+    kill(containerId) {
+      return containerManager.kill(containerId);
+    },
+    refreshFirewall(containerId, script) {
+      return containerManager.refreshFirewall(containerId, script);
+    },
+    stop(containerId) {
+      return containerManager.stop(containerId);
+    },
+    start(containerId) {
+      return containerManager.start(containerId);
+    },
+    writeFile(containerId, path, content) {
+      return containerManager.writeFile(containerId, path, content);
+    },
+    readFile(containerId, path) {
+      return containerManager.readFile(containerId, path);
+    },
+    readFileBinary(containerId, path) {
+      return containerManager.readFileBinary(containerId, path);
+    },
+    extractDirectoryFromContainer(containerId, containerPath, hostPath, excludes) {
+      return containerManager.extractDirectoryFromContainer(
+        containerId,
+        containerPath,
+        hostPath,
+        excludes,
+      );
+    },
+    getStatus(containerId) {
+      return containerManager.getStatus(containerId);
+    },
+    execInContainer(containerId, command, options) {
+      return containerManager.execInContainer(containerId, command, {
+        ...options,
+        env: { ...reviewerExecEnv, ...options?.env },
+      });
+    },
+    execStreaming(containerId, command, options) {
+      return containerManager.execStreaming(containerId, command, options);
+    },
+  };
 }
 
 const VALIDATE_LOCALLY_OUTPUT_BUDGET = 6_000;

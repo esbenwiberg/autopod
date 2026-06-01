@@ -29,6 +29,7 @@ type Deps = SessionBridgeDependencies;
 interface BuildOpts {
   profileOverrides?: Parameters<typeof insertTestProfile>[1];
   containerId?: string | null;
+  reviewerExecEnv?: Record<string, string>;
   execImpl?: (
     containerId: string,
     command: string[],
@@ -81,6 +82,7 @@ function buildBridge(opts: BuildOpts = {}): {
       executionTarget: 'local',
     })),
     touchHeartbeat: vi.fn(),
+    getReviewerExecEnv: vi.fn().mockResolvedValue(opts.reviewerExecEnv),
   } as unknown as Deps['podManager'];
 
   const eventBus = { emit: vi.fn(), subscribe: vi.fn() } as unknown as Deps['eventBus'];
@@ -354,16 +356,8 @@ describe('PodBridge.callReviewerModel', () => {
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
   });
 
-  it('uses the profile reviewerModel for Anthropic-compatible providers', async () => {
-    const createMessage = vi.fn().mockResolvedValue({
-      content: [{ type: 'text', text: 'advisor answer' }],
-    });
-    mockCreateProfileAnthropicClient.mockResolvedValueOnce({
-      ok: true,
-      client: { messages: { create: createMessage } },
-      model: 'claude-sonnet-4-6',
-    } as never);
-    const { bridge, podId } = buildBridge({
+  it('runs Max/Pro ask_ai reviewer calls through the container Claude CLI path', async () => {
+    const { bridge, execMock, podId } = buildBridge({
       profileOverrides: {
         modelProvider: 'max',
         reviewerModel: 'sonnet',
@@ -382,22 +376,29 @@ describe('PodBridge.callReviewerModel', () => {
           humanResponseTimeout: 3600,
         },
       },
+      reviewerExecEnv: { POD_ID: 'sess-1', CLAUDE_CONFIG_DIR: '/tmp/fresh-claude' },
+      execImpl: async () => ({ stdout: 'advisor answer\n', stderr: '', exitCode: 0 }),
     });
 
     const result = await bridge.callReviewerModel(podId, 'Review this', 'ctx');
 
     expect(result).toBe('advisor answer');
-    expect(mockCreateProfileAnthropicClient).toHaveBeenCalledWith(
-      expect.objectContaining({ modelProvider: 'max' }),
-      'sonnet',
-      expect.anything(),
-    );
-    expect(createMessage).toHaveBeenCalledWith(
+    expect(execMock).toHaveBeenCalledWith(
+      'container-abc',
+      [
+        'sh',
+        '-c',
+        expect.stringContaining(
+          "'/run/autopod/agent-shim.sh' claude -p --model 'sonnet' --output-format text",
+        ),
+      ],
       expect.objectContaining({
-        model: 'claude-sonnet-4-6',
-        messages: [expect.objectContaining({ role: 'user' })],
+        cwd: '/workspace',
+        timeout: 60_000,
+        env: { POD_ID: 'sess-1', CLAUDE_CONFIG_DIR: '/tmp/fresh-claude' },
       }),
     );
+    expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
     expect(mockRunCodexReview).not.toHaveBeenCalled();
   });
 
@@ -412,9 +413,31 @@ describe('PodBridge.callReviewerModel', () => {
 
     const result = await bridge.callReviewerModel(podId, 'Generate a browser QA script');
 
-    expect(result).toContain('Reviewer provider copilot is not supported');
+    expect(result).toContain('provider copilot is not supported');
     expect(mockRunCodexReview).not.toHaveBeenCalled();
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
+  });
+
+  it('returns a soft failure when no live container reviewer path is available', async () => {
+    const { bridge, podId } = buildBridge({
+      containerId: null,
+      profileOverrides: {
+        modelProvider: 'max',
+        reviewerModel: 'sonnet',
+        providerCredentials: {
+          provider: 'max',
+          accessToken: 'access',
+          refreshToken: 'refresh',
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      },
+    });
+
+    const result = await bridge.callReviewerModel(podId, 'Review this');
+
+    expect(result).toBe('AI review failed: AI reviewer requires a live pod container');
+    expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
+    expect(mockRunCodexReview).not.toHaveBeenCalled();
   });
 });
 
