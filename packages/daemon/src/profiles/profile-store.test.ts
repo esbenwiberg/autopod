@@ -54,6 +54,7 @@ describe('ProfileStore', () => {
       expect(profile.name).toBe('my-app');
       expect(profile.repoUrl).toBe('https://github.com/org/repo');
       expect(profile.buildCommand).toBe('npm run build');
+      expect(profile.validationSetupCommand).toBeNull();
       expect(profile.startCommand).toBe('node server.js --port $PORT');
     });
 
@@ -156,6 +157,26 @@ describe('ProfileStore', () => {
       expect(profile.escalation.askAi.enabled).toBe(true);
     });
 
+    it('persists validationSetupCommand without rewriting buildCommand', () => {
+      const profile = store.create({
+        ...validInput,
+        validationSetupCommand: 'pip install -e ".[dev]" semgrep',
+      });
+
+      expect(profile.validationSetupCommand).toBe('pip install -e ".[dev]" semgrep');
+      expect(profile.buildCommand).toBe('npm run build');
+      expect(store.getRaw('my-app').validationSetupCommand).toBe('pip install -e ".[dev]" semgrep');
+    });
+
+    it('preserves a null validationSetupCommand on base profiles', () => {
+      const profile = store.create({
+        ...validInput,
+        validationSetupCommand: null,
+      });
+
+      expect(profile.validationSetupCommand).toBeNull();
+    });
+
     it('should throw ProfileExistsError on duplicate name', () => {
       store.create(validInput);
       expect(() => store.create(validInput)).toThrow(ProfileExistsError);
@@ -175,9 +196,22 @@ describe('ProfileStore', () => {
       expect(raw.repoUrl).toBeNull();
       expect(raw.buildCommand).toBeNull();
       expect(raw.startCommand).toBeNull();
+      expect(raw.validationSetupCommand).toBeNull();
       const resolved = store.get('child');
       expect(resolved.repoUrl).toBe('https://github.com/org/repo');
       expect(resolved.buildCommand).toBe('npm run build');
+    });
+
+    it('inherits validationSetupCommand from a parent when omitted by a derived profile', () => {
+      store.create({
+        ...validInput,
+        name: 'parent',
+        validationSetupCommand: 'pip install -e ".[dev]"',
+      });
+      store.create({ name: 'child', extends: 'parent' });
+
+      expect(store.getRaw('child').validationSetupCommand).toBeNull();
+      expect(store.get('child').validationSetupCommand).toBe('pip install -e ".[dev]"');
     });
 
     it('stores missing fields on a derived profile as null (not schema defaults)', () => {
@@ -195,6 +229,7 @@ describe('ProfileStore', () => {
       expect(raw.healthTimeout).toBeNull();
       expect(raw.buildTimeout).toBeNull();
       expect(raw.testTimeout).toBeNull();
+      expect(raw.validationSetupCommand).toBeNull();
       expect(raw.maxValidationAttempts).toBeNull();
       expect(raw.defaultModel).toBeNull();
       expect(raw.defaultRuntime).toBeNull();
@@ -364,6 +399,17 @@ describe('ProfileStore', () => {
       const updated = store.update('my-app', { reviewerModel: 'claude-sonnet-4-6' });
       expect(updated.reviewerModel).toBe('claude-sonnet-4-6');
       expect(store.get('my-app').reviewerModel).toBe('claude-sonnet-4-6');
+    });
+
+    it('updates and clears validationSetupCommand', () => {
+      store.create(validInput);
+      const updated = store.update('my-app', {
+        validationSetupCommand: 'uv pip install ruff mypy',
+      });
+      expect(updated.validationSetupCommand).toBe('uv pip install ruff mypy');
+
+      const cleared = store.update('my-app', { validationSetupCommand: null });
+      expect(cleared.validationSetupCommand).toBeNull();
     });
   });
 

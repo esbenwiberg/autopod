@@ -4,6 +4,31 @@ import { createProfileSchema, updateProfileSchema } from './profile.schema.js';
 const canonicalModelMessage = 'canonical Claude model ID';
 
 describe('createProfileSchema model validation', () => {
+  it('accepts validationSetupCommand and setup as a skippable phase', () => {
+    const parsed = createProfileSchema.parse({
+      name: 'primary',
+      validationSetupCommand: 'pip install -e ".[dev]" semgrep',
+      skipValidationPhases: ['setup'],
+    });
+
+    expect(parsed.validationSetupCommand).toBe('pip install -e ".[dev]" semgrep');
+    expect(parsed.skipValidationPhases).toEqual(['setup']);
+
+    const nullable = createProfileSchema.parse({
+      name: 'nullable',
+      validationSetupCommand: null,
+    });
+    expect(nullable.validationSetupCommand).toBeNull();
+  });
+
+  it('preserves null inheritance for validationSetupCommand on derived profiles', () => {
+    const derived = createProfileSchema.parse({ name: 'child', extends: 'parent' });
+    expect(derived.validationSetupCommand).toBeNull();
+
+    const updated = updateProfileSchema.parse({ validationSetupCommand: null });
+    expect(updated.validationSetupCommand).toBeNull();
+  });
+
   it('rejects short Claude aliases in defaultModel, reviewerModel, and escalation.askAi.model', () => {
     for (const model of ['opus', 'sonnet', 'haiku']) {
       const defaultModel = createProfileSchema.safeParse({ name: 'primary', defaultModel: model });

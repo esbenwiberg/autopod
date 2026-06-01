@@ -16,6 +16,7 @@ import type {
 } from './validation.js';
 
 export type ValidationPhase =
+  | 'setup'
   | 'build'
   | 'test'
   | 'lint'

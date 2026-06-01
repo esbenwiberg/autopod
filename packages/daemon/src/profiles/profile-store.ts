@@ -182,6 +182,7 @@ export function rowToProfile(
     modelProvider: nullableStr(row.model_provider) as Profile['modelProvider'],
     providerCredentials: decryptCreds(row.provider_credentials),
     testCommand: nullableStr(row.test_command),
+    validationSetupCommand: nullableStr(row.validation_setup_command),
     buildEnv: row.build_env
       ? (JSON.parse(row.build_env as string) as Record<string, string>)
       : null,
@@ -343,7 +344,7 @@ export function createProfileStore(
           default_model, reviewer_model, default_runtime, execution_target, custom_instructions, escalation_config,
           extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
           agent_mode, output_target, validate, advisory_browser_qa_enabled, promotable,
-          model_provider, provider_credentials, test_command, pr_provider,
+          model_provider, provider_credentials, test_command, validation_setup_command, pr_provider,
           ado_pat, ado_pat_expires_at, github_pat, github_pat_expires_at,
           private_registries, registry_pat, registry_pat_expires_at, branch_prefix, container_memory_gb,
           build_timeout, test_timeout, build_env,
@@ -365,7 +366,7 @@ export function createProfileStore(
           @defaultModel, @reviewerModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
           @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
           @agentMode, @outputTarget, @validate, @advisoryBrowserQaEnabled, @promotable,
-          @modelProvider, @providerCredentials, @testCommand, @prProvider,
+          @modelProvider, @providerCredentials, @testCommand, @validationSetupCommand, @prProvider,
           @adoPat, @adoPatExpiresAt, @githubPat, @githubPatExpiresAt,
           @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix, @containerMemoryGb,
           @buildTimeout, @testTimeout, @buildEnv,
@@ -421,6 +422,7 @@ export function createProfileStore(
         modelProvider: parsed.modelProvider,
         providerCredentials: encryptCreds(parsed.providerCredentials),
         testCommand: parsed.testCommand ?? null,
+        validationSetupCommand: parsed.validationSetupCommand ?? null,
         lintCommand: parsed.lintCommand ?? null,
         lintTimeout: parsed.lintTimeout ?? null,
         sastCommand: parsed.sastCommand ?? null,
@@ -684,6 +686,10 @@ export function createProfileStore(
       if (parsed.testCommand !== undefined) {
         setClauses.push('test_command = @testCommand');
         fieldMap.testCommand = parsed.testCommand ?? null;
+      }
+      if (parsed.validationSetupCommand !== undefined) {
+        setClauses.push('validation_setup_command = @validationSetupCommand');
+        fieldMap.validationSetupCommand = parsed.validationSetupCommand ?? null;
       }
       if (parsed.buildWorkDir !== undefined) {
         setClauses.push('build_work_dir = @buildWorkDir');

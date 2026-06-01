@@ -302,6 +302,7 @@ const createProfileBaseSchema = z.object({
   modelProvider: modelProviderSchema.nullable().default('anthropic'),
   providerCredentials: providerCredentialsSchema.nullable().default(null),
   testCommand: z.string().nullable().optional().default(null),
+  validationSetupCommand: z.string().nullable().optional().default(null),
   /**
    * Extra env vars merged into validation phase execs (build/test/lint/sast).
    * Common use: `{ NODE_OPTIONS: "--max-old-space-size=4096" }` to raise V8
@@ -370,7 +371,18 @@ const createProfileBaseSchema = z.object({
   codeIntelligence: codeIntelligenceConfigSchema.nullable().default(null),
   skipValidationPhases: z
     .array(
-      z.enum(['lint', 'sast', 'build', 'test', 'health', 'pages', 'facts', 'review', 'advisory']),
+      z.enum([
+        'setup',
+        'lint',
+        'sast',
+        'build',
+        'test',
+        'health',
+        'pages',
+        'facts',
+        'review',
+        'advisory',
+      ]),
     )
     .nullable()
     .default(null),

@@ -55,6 +55,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         console.log(`${chalk.bold('Branch:')}     ${data.defaultBranch}`);
         console.log(`${chalk.bold('Template:')}   ${data.template}`);
         console.log(`${chalk.bold('Build:')}      ${data.buildCommand}`);
+        console.log(`${chalk.bold('Setup:')}      ${data.validationSetupCommand}`);
         console.log(`${chalk.bold('Start:')}      ${data.startCommand}`);
         console.log(
           `${chalk.bold('Health:')}     ${data.healthPath} (${data.healthTimeout}s timeout)`,
@@ -139,6 +140,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         defaultBranch: 'main',
         template: 'node22',
         buildCommand: null,
+        validationSetupCommand: null,
         startCommand: null,
         healthPath: '/',
         healthTimeout: 120,
