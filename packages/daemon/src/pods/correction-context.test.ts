@@ -93,6 +93,7 @@ function mockValidationResult(
     lintFailed?: boolean;
     sastFailed?: boolean;
     buildFailed?: boolean;
+    setupFailed?: boolean;
     testsFailed?: boolean;
     healthFailed?: boolean;
     pageFailed?: boolean;
@@ -104,9 +105,17 @@ function mockValidationResult(
     podId: 'sess-1',
     attempt: 1,
     timestamp: new Date().toISOString(),
+    setup: overrides.setupFailed
+      ? { status: 'fail', output: 'pip install failed', duration: 25 }
+      : { status: 'skip', output: '', duration: 0 },
     smoke: {
       status:
-        overrides.buildFailed || overrides.healthFailed || overrides.pageFailed ? 'fail' : 'pass',
+        overrides.setupFailed ||
+        overrides.buildFailed ||
+        overrides.healthFailed ||
+        overrides.pageFailed
+          ? 'fail'
+          : 'pass',
       build: {
         status: overrides.buildFailed ? 'fail' : 'pass',
         output: overrides.buildFailed ? 'Build error' : '',
@@ -170,6 +179,10 @@ function mockContainerManager(diff = '+added line\n-removed line'): ContainerMan
 }
 
 describe('determineFailedStep', () => {
+  it('returns setup when setup fails', () => {
+    expect(determineFailedStep(mockValidationResult({ setupFailed: true }))).toBe('setup');
+  });
+
   it('returns build when build fails', () => {
     expect(determineFailedStep(mockValidationResult({ buildFailed: true }))).toBe('build');
   });
@@ -212,6 +225,14 @@ describe('determineFailedStep', () => {
         mockValidationResult({ lintFailed: true, sastFailed: true, buildFailed: true }),
       ),
     ).toBe('lint');
+  });
+
+  it('prioritizes setup over downstream failures', () => {
+    expect(
+      determineFailedStep(
+        mockValidationResult({ setupFailed: true, lintFailed: true, buildFailed: true }),
+      ),
+    ).toBe('setup');
   });
 
   it('prioritizes build over tests', () => {

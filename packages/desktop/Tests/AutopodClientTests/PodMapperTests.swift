@@ -992,7 +992,7 @@ import AutopodUI
       == "http://127.0.0.1:3100/pods/advisory-test/screenshots/advisory/advisory-0.png"
   )
   #expect(checks.allPassed == true)
-  #expect(checks.validationPhaseCount == 8)
+  #expect(checks.validationPhaseCount == 9)
 }
 
 @Test func validationChecksExcludeAdvisoryQaFromPhaseCounts() {
@@ -1032,7 +1032,7 @@ import AutopodUI
   )
 
   #expect(checks.allPassed == true)
-  #expect(checks.validationPhaseCount == 8)
+  #expect(checks.validationPhaseCount == 9)
 }
 
 // MARK: - hasWebUi mapping tests (brief 02)
@@ -1102,4 +1102,48 @@ private let minimalSessionJson = """
   let response = try JSONDecoder().decode(SessionResponse.self, from: json)
   let pod = PodMapper.map(response)
   #expect(pod.hasWebUi == false)
+}
+
+@Test func mapperMapsSetupFailureAsBlockingValidationPhase() throws {
+  let validation = #"""
+  {
+    "podId": "web-ui-pod",
+    "attempt": 1,
+    "timestamp": "2026-04-01T09:08:00Z",
+    "overall": "fail",
+    "duration": 1200,
+    "setup": {
+      "status": "fail",
+      "output": "pip install -e .",
+      "duration": 1100,
+      "error": "ruff not found"
+    },
+    "smoke": {
+      "status": "fail",
+      "build": { "status": "skip", "output": "", "duration": 0 },
+      "health": { "status": "skip", "url": "", "responseCode": null, "duration": 0 },
+      "pages": []
+    },
+    "test": { "status": "skip", "duration": 0, "stdout": "", "stderr": "" },
+    "lint": { "status": "skip", "output": "", "duration": 0 },
+    "sast": { "status": "skip", "output": "", "duration": 0 },
+    "factValidation": { "status": "skip", "results": [] }
+  }
+  """#
+  let json = (minimalSessionJson.replacingOccurrences(
+    of: #""lastValidationResult": null"#,
+    with: #""lastValidationResult": \#(validation)"#
+  ) + " }").data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+  let checks = try #require(pod.validationChecks)
+
+  #expect(checks.setup == false)
+  #expect(checks.setupOutput == "pip install -e .\nruff not found")
+  #expect(checks.build == nil)
+  #expect(checks.lint == nil)
+  #expect(checks.sast == nil)
+  #expect(checks.allPassed == false)
+  #expect(checks.validationPhaseCount == 9)
 }

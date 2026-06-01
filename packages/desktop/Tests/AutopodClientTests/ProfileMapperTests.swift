@@ -59,6 +59,41 @@ import AutopodUI
   #expect(pod?["advisoryBrowserQaEnabled"] as? Bool == false)
 }
 
+@Test func profileResponseDecodesValidationSetupCommand() throws {
+  let response = try decodeMapperProfile(validationSetupCommand: "pip install semgrep")
+
+  #expect(response.validationSetupCommand == "pip install semgrep")
+}
+
+@Test func profileMapperMapsValidationSetupCommand() throws {
+  let response = try decodeMapperProfile(validationSetupCommand: "uv pip install ruff mypy")
+  let profile = ProfileMapper.map(response)
+
+  #expect(profile.validationSetupCommand == "uv pip install ruff mypy")
+}
+
+@Test func profilePatchIncludesValidationSetupCommandWhenSet() {
+  let profile = Profile(
+    name: "app",
+    repoUrl: "https://github.com/org/app.git",
+    validationSetupCommand: "pip install semgrep"
+  )
+
+  let fields = ProfileMapper.mapToFields(profile)
+  #expect(fields["validationSetupCommand"] as? String == "pip install semgrep")
+}
+
+@Test func profilePatchClearsNilValidationSetupCommandWithoutDefault() {
+  let profile = Profile(
+    name: "app",
+    repoUrl: "https://github.com/org/app.git",
+    validationSetupCommand: nil
+  )
+
+  let fields = ProfileMapper.mapToFields(profile)
+  #expect(fields["validationSetupCommand"] is NSNull)
+}
+
 @Test func profileMapperCanonicalizesLegacyProfileModelAliases() throws {
   let profile = try decodeMapperProfile(
     defaultModel: "opus",
@@ -141,6 +176,25 @@ private func decodeMapperProfile(advisoryBrowserQaFragment: String) throws -> Pr
       "validate": true\(advisoryBrowserQaFragment),
       "promotable": false
     },
+    "version": 1,
+    "createdAt": "2026-05-25T00:00:00Z",
+    "updatedAt": "2026-05-25T00:00:00Z"
+  }
+  """.data(using: .utf8)!
+
+  return try JSONDecoder().decode(ProfileResponse.self, from: json)
+}
+
+private func decodeMapperProfile(validationSetupCommand: String?) throws -> ProfileResponse {
+  let setupFragment: String
+  if let validationSetupCommand {
+    setupFragment = #","validationSetupCommand": "\#(validationSetupCommand)""#
+  } else {
+    setupFragment = #","validationSetupCommand": null"#
+  }
+  let json = """
+  {
+    "name": "app"\(setupFragment),
     "version": 1,
     "createdAt": "2026-05-25T00:00:00Z",
     "updatedAt": "2026-05-25T00:00:00Z"

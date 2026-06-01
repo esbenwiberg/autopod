@@ -29,6 +29,7 @@ public struct RawSystemEvent: Codable, Sendable {
   public let phase: String?
   public let phaseStatus: String?
   // Phase-specific results (only one is set per validation_phase_completed event):
+  public let setupResult: SetupResultResponse?
   public let buildResult: BuildResultResponse?
   public let testResult: TestResultResponse?
   public let lintResult: LintResultResponse?
@@ -66,6 +67,7 @@ public struct RawSystemEvent: Codable, Sendable {
 // MARK: - ValidationPhase
 
 public enum ValidationPhase: String, Sendable, CaseIterable {
+  case setup
   case lint
   case sast
   case build
@@ -78,6 +80,7 @@ public enum ValidationPhase: String, Sendable, CaseIterable {
 
   public var displayName: String {
     switch self {
+    case .setup: return "Setup"
     case .build: return "Build"
     case .test: return "Tests"
     case .lint: return "Lint"
@@ -97,6 +100,7 @@ public enum ValidationPhase: String, Sendable, CaseIterable {
 /// Exactly one result field is populated, matching the phase.
 public struct ValidationPhaseResult: Sendable {
   public let phaseStatus: String  // "pass" | "fail" | "skip" | "pending_human"
+  public let setupResult: SetupResultResponse?
   public let buildResult: BuildResultResponse?
   public let testResult: TestResultResponse?
   public let lintResult: LintResultResponse?
@@ -109,6 +113,7 @@ public struct ValidationPhaseResult: Sendable {
 
   init(from raw: RawSystemEvent) {
     phaseStatus = raw.phaseStatus ?? "skip"
+    setupResult = raw.setupResult
     buildResult = raw.buildResult
     testResult = raw.testResult
     lintResult = raw.lintResult

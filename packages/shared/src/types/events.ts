@@ -10,12 +10,14 @@ import type {
   LintResult,
   PageResult,
   SastResult,
+  SetupResult,
   TaskReviewResult,
   ValidationOverride,
   ValidationResult,
 } from './validation.js';
 
 export type ValidationPhase =
+  | 'setup'
   | 'build'
   | 'test'
   | 'lint'
@@ -103,6 +105,7 @@ export interface ValidationPhaseCompletedEvent {
   /** Phase outcome — separate from "status" to avoid JSON key collisions with other events */
   phaseStatus: 'pass' | 'fail' | 'skip' | 'pending_human';
   // Exactly one of these is populated per event, matching the phase:
+  setupResult?: SetupResult;
   buildResult?: BuildResult;
   testResult?: {
     status: 'pass' | 'fail' | 'skip';

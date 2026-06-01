@@ -159,6 +159,7 @@ import Testing
     "podId": "test-1",
     "attempt": 1,
     "timestamp": "2026-04-01T09:10:00Z",
+    "setup": { "status": "pass", "output": "tools installed", "duration": 15 },
     "smoke": {
       "status": "pass",
       "build": { "status": "pass", "output": "Build OK", "duration": 45 },
@@ -214,12 +215,67 @@ import Testing
 
   let result = try JSONDecoder().decode(ValidationResponse.self, from: json)
   #expect(result.overall == "pass")
+  #expect(result.setup?.status == "pass")
+  #expect(result.setup?.output == "tools installed")
   #expect(result.smoke.pages.count == 1)
   #expect(result.test?.status == "pass")
   #expect(result.taskReview?.requirementsCheck?.first?.met == true)
   #expect(result.advisoryBrowserQa?.status == "error")
   #expect(result.advisoryBrowserQa?.observations.first?.suggestedFacts?.count == 1)
   #expect(result.advisoryBrowserQa?.screenshots.first?.source == "advisory")
+}
+
+@Test func validationResponseDecodesHistoricalWithoutSetup() throws {
+  let json = """
+  {
+    "podId": "historical-1",
+    "attempt": 1,
+    "timestamp": "2026-04-01T09:10:00Z",
+    "smoke": {
+      "status": "pass",
+      "build": { "status": "pass", "output": "", "duration": 45 },
+      "health": { "status": "skip", "url": "", "responseCode": null, "duration": 0 },
+      "pages": []
+    },
+    "overall": "pass",
+    "duration": 180
+  }
+  """.data(using: .utf8)!
+
+  let result = try JSONDecoder().decode(ValidationResponse.self, from: json)
+  #expect(result.setup == nil)
+  #expect(result.smoke.build.status == "pass")
+}
+
+@Test func systemEventParsesSetupPhaseCompletion() throws {
+  let json = """
+  {
+    "type": "pod.validation_phase_completed",
+    "timestamp": "2026-04-01T09:10:00Z",
+    "podId": "test-1",
+    "phase": "setup",
+    "phaseStatus": "fail",
+    "setupResult": {
+      "status": "fail",
+      "output": "pip install -e .",
+      "duration": 1234,
+      "error": "ruff not found"
+    }
+  }
+  """.data(using: .utf8)!
+
+  let raw = try JSONDecoder().decode(RawSystemEvent.self, from: json)
+  let event = SystemEvent.parse(raw)
+
+  switch event {
+  case .validationPhaseCompleted(let id, let phase, let result):
+    #expect(id == "test-1")
+    #expect(phase == .setup)
+    #expect(result.phaseStatus == "fail")
+    #expect(result.setupResult?.error == "ruff not found")
+  default:
+    Issue.record("Expected validationPhaseCompleted event")
+  }
 }
 
 @Test func advisoryBrowserQaResponseDecodesSkippedStatus() throws {

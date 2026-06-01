@@ -189,7 +189,7 @@ public struct FeatureOverviewView: View {
                 archArrow
                 archComponent("Runtimes", icon: "cpu", desc: "Claude, Codex, Copilot", color: .cyan)
                 archArrow
-                archComponent("Validation", icon: "checkmark.shield", desc: "Smoke, tests, review", color: .mint)
+                archComponent("Validation", icon: "checkmark.shield", desc: "Setup, tests, review", color: .mint)
             }
             .frame(maxWidth: .infinity)
         }
@@ -324,7 +324,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .escalationSystem:
             "13+ MCP tools injected into agent containers enable structured escalation: ask a human, consult AI, report plans/progress/blockers, self-validate in browser, and manage persistent memories."
         case .validationPipeline:
-            "Eight gated validation checks: lint -> SAST -> build -> test -> health -> Playwright pages -> required facts -> AI review. Supports interrupt, per-finding overrides, proof-of-work evidence, review_required state, and tiered correction feedback."
+            "Nine gated validation checks: setup -> lint -> SAST -> build -> test -> health -> Playwright pages -> required facts -> AI review. Supports interrupt, per-finding overrides, proof-of-work evidence, review_required state, and tiered correction feedback."
         case .profileManagement:
             "Profiles define stack templates, credentials, network policies, registries, skills, and MCP servers. Versioned, inheritable, snapshotted at pod creation. Supports local Docker or ACI execution."
         case .realTimeMonitoring:
@@ -349,7 +349,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .multiRuntime:         ["Claude", "Codex", "Copilot"]
         case .actionControlPlane:   ["8 Groups", "PII Redact", "Audit"]
         case .escalationSystem:     ["13+ Tools", "Memory", "Browser Validate"]
-        case .validationPipeline:   ["7 Phases", "Screenshots", "Human Override"]
+        case .validationPipeline:   ["9 Phases", "Screenshots", "Human Override"]
         case .profileManagement:    ["Versioned", "Snapshotted", "Inheritance"]
         case .realTimeMonitoring:   ["20+ Events", "Replay", "PII Safe"]
         case .memoryStore:          ["Global", "Profile", "Pod"]
@@ -367,7 +367,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .multiRuntime:         "Pluggable runtimes with streaming parsers and pod persistence"
         case .actionControlPlane:   "8 groups, 22 actions — gated with injection detection, PII redaction, and PIM support"
         case .escalationSystem:     "13+ MCP tools: human escalation, AI consultation, memory, browser self-validation"
-        case .validationPipeline:   "8 validation gates: lint, SAST, build, test, health, pages, facts, AI review + interrupt + overrides + proof-of-work evidence"
+        case .validationPipeline:   "9 validation gates: setup, lint, SAST, build, test, health, pages, facts, AI review + interrupt + overrides + proof-of-work evidence"
         case .profileManagement:    "Versioned + snapshotted profiles, 11 stacks, 4 providers, local/ACI, inheritance + injection"
         case .realTimeMonitoring:   "Namespaced system events, persisted replay, PII-safe broadcast"
         case .memoryStore:          "3-scoped persistent knowledge: suggest → approve → inject into CLAUDE.md"
@@ -393,7 +393,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .escalationSystem:
             "An MCP server injected into every agent container provides 13+ tools for structured agent-human communication. Agents can ask humans (blocking), consult other AIs (rate-limited), report blockers (auto-pauses after threshold), submit plans and progress, report task summaries with deviations, check for operator messages, self-validate in browser, and manage persistent memories. The validate_in_browser tool generates Playwright scripts dynamically, executes them on the host, and returns screenshot evidence. Memory tools (memory_suggest, memory_list, memory_read, memory_search) enable agents to build and query accumulated knowledge. Dynamic action tools are registered per profile."
         case .validationPipeline:
-            "An eight-gate validation pipeline runs after the agent completes: Lint -> SAST -> Build -> Test -> Health Check -> Pages (Playwright) -> Required Facts -> AI Task Review, followed by an overall decision. Deterministic failures skip expensive AI review and go straight back to the agent as correction feedback. The AI reviewer receives tiered context: the diff, original task, contract, and findings from all prior attempts. When maxValidationAttempts is exhausted, the pod moves to review_required instead of failing. Humans can interrupt in-flight validation, queue per-finding overrides that are merged before the next pass, extend attempt counts, or create a linked workspace for manual fixes."
+            "A nine-gate validation pipeline runs after the agent completes: Setup -> Lint -> SAST -> Build -> Test -> Health Check -> Pages (Playwright) -> Required Facts -> AI Task Review, followed by an overall decision. Deterministic failures skip expensive AI review and go straight back to the agent as correction feedback. The AI reviewer receives tiered context: the diff, original task, contract, and findings from all prior attempts. When maxValidationAttempts is exhausted, the pod moves to review_required instead of failing. Humans can interrupt in-flight validation, queue per-finding overrides that are merged before the next pass, extend attempt counts, or create a linked workspace for manual fixes."
         case .profileManagement:
             "Profiles encode everything needed to run a pod: stack template, execution target (local Docker or ACI), model provider (Anthropic, MAX/PRO, OpenAI, Foundry, Copilot), network policy, output mode, branchPrefix, workerProfile, PIM groups, and all injections. Each update auto-increments a version counter. Pods snapshot the full resolved profile at creation for auditability. Inheritance chains (up to 5 levels) with special merge logic for skills, MCP servers, CLAUDE.md sections, smoke pages, and registries. The system-instructions-generator builds a complete CLAUDE.md with approved memories, priority-sorted sections, dynamic content fetches, and PII sanitization."
         case .realTimeMonitoring:
@@ -455,7 +455,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .escalationSystem:
             "The MCP server registers tools at container startup. Blocking tools (ask_human, report_blocker, validate_in_browser) use PendingRequests — a Promise-based map where the agent awaits resolution. The daemon resolves via API when a human responds. For validate_in_browser: an LLM generates a Playwright ESM script → written to /tmp/autopod-browser-check.mjs → executed via node → results parsed from stdout markers → screenshot evidence collected from /tmp/autopod-browser-checks/check-{n}.png."
         case .validationPipeline:
-            "Eight sequential gates: (1) Lint, (2) SAST, (3) Build, (4) Test, (5) Health Check, (6) Pages, (7) Required Facts from contract.yaml, (8) AI Task Review, then Overall. Interrupt aborts via AbortController and returns partial results. Per-finding overrides are flushed from PendingOverrideRepository before each pass. review_required is entered when retries are exhausted."
+            "Nine sequential gates: (1) Setup, (2) Lint, (3) SAST, (4) Build, (5) Test, (6) Health Check, (7) Pages, (8) Required Facts from contract.yaml, (9) AI Task Review, then Overall. Interrupt aborts via AbortController and returns partial results. Per-finding overrides are flushed from PendingOverrideRepository before each pass. review_required is entered when retries are exhausted."
         case .profileManagement:
             "Profile resolution: inheritance chain walked (max 5 levels), fields merged with special logic for arrays/objects. Skills resolved from GitHub APIs or local files (Promise.allSettled, failures logged and skipped). Registry injection generates .npmrc and NuGet.Config with immediate validation (npm config list / dotnet nuget list source). MCP server URLs rewritten to daemon proxy endpoints. AGENTS.md built from: task → contract → injected sections (priority-sorted, dynamic-fetched) → MCP tools → skills → workflow requirements."
         case .realTimeMonitoring:
@@ -547,14 +547,15 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
             ]
         case .validationPipeline:
             [
-                "Phase 1 — Lint: optional profile.lintCommand (default timeout 120s)",
-                "Phase 2 — SAST: optional profile.sastCommand (default timeout 300s)",
-                "Phase 3 — Build: runs profile.buildCommand (default timeout 300s), gates all downstream",
-                "Phase 4 — Test: runs profile.testCommand (default timeout 600s), requires build pass",
-                "Phase 5 — Health Check: polls profile.healthPath for HTTP 200, configurable timeout",
-                "Phase 6 — Pages: Playwright scripts from smokePages, captures screenshots + console errors",
-                "Phase 7 — Required Facts: contract.yaml commands verify durable proof artifacts and store evidence",
-                "Phase 8 — AI Task Review: reviewer model checks diff + original task + contract + prior findings",
+                "Phase 1 — Setup: optional profile.validationSetupCommand using the build timeout; failure skips downstream gates",
+                "Phase 2 — Lint: optional profile.lintCommand (default timeout 120s)",
+                "Phase 3 — SAST: optional profile.sastCommand (default timeout 300s)",
+                "Phase 4 — Build: runs profile.buildCommand (default timeout 300s), gates all downstream",
+                "Phase 5 — Test: runs profile.testCommand (default timeout 600s), requires build pass",
+                "Phase 6 — Health Check: polls profile.healthPath for HTTP 200, configurable timeout",
+                "Phase 7 — Pages: Playwright scripts from smokePages, captures screenshots + console errors",
+                "Phase 8 — Required Facts: contract.yaml commands verify durable proof artifacts and store evidence",
+                "Phase 9 — AI Task Review: reviewer model checks diff + original task + contract + prior findings",
                 "Overall: pass only if all required phases pass, strictly binary",
                 "Proof-of-work evidence: every fact command stores exit code, duration, output excerpts, artifact hashes, and optional attachments",
                 "Agent self-validation: validate_in_browser MCP tool during development",

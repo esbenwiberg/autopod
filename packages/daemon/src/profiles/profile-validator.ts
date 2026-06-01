@@ -209,6 +209,23 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
     errors.push('hasWebUi must be a boolean');
   }
 
+  // Validation setup command
+  const validationSetupCommand = input.validationSetupCommand;
+  if (
+    validationSetupCommand !== null &&
+    validationSetupCommand !== undefined &&
+    typeof validationSetupCommand !== 'string'
+  ) {
+    errors.push('validationSetupCommand must be a string or null');
+  } else if (typeof validationSetupCommand === 'string') {
+    for (const pattern of DANGEROUS_PATTERNS) {
+      if (pattern.test(validationSetupCommand)) {
+        errors.push(`validationSetupCommand contains dangerous pattern: ${pattern.source}`);
+        break;
+      }
+    }
+  }
+
   // Lint command
   const lintCommand = input.lintCommand;
   if (lintCommand !== null && lintCommand !== undefined && typeof lintCommand !== 'string') {
@@ -380,6 +397,7 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
   }
 
   const VALID_PHASES = [
+    'setup',
     'lint',
     'sast',
     'build',

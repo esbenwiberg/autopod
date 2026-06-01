@@ -875,14 +875,17 @@ public struct ProfileEditorView: View {
                 .disabled(inheritedFields.contains("buildCommand"))
         }
         inheritableFieldRow(
-            "Start Command",
-            fieldName: "startCommand",
-            help: "Starts the app server for health checks and smoke testing."
+            "Validation Setup",
+            fieldName: "validationSetupCommand",
+            help: "Runs before validation commands. Leave empty to skip."
         ) {
-            TextField("npm start", text: $profile.startCommand)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.callout, design: .monospaced))
-                .disabled(inheritedFields.contains("startCommand"))
+            TextField("Optional", text: Binding(
+                get: { profile.validationSetupCommand ?? "" },
+                set: { profile.validationSetupCommand = $0.isEmpty ? nil : $0 }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(.callout, design: .monospaced))
+            .disabled(inheritedFields.contains("validationSetupCommand"))
         }
         fieldRow("Test Command", help: "Runs after build to verify tests pass. Leave empty to skip.") {
             TextField("Optional", text: Binding(
@@ -891,6 +894,16 @@ public struct ProfileEditorView: View {
             ))
             .textFieldStyle(.roundedBorder)
             .font(.system(.callout, design: .monospaced))
+        }
+        inheritableFieldRow(
+            "Start Command",
+            fieldName: "startCommand",
+            help: "Starts the app server for health checks and smoke testing."
+        ) {
+            TextField("npm start", text: $profile.startCommand)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.callout, design: .monospaced))
+                .disabled(inheritedFields.contains("startCommand"))
         }
         fieldRow("Lint Command", help: "Runs before build. Common: 'npm run lint', 'biome check'. Leave empty to skip.") {
             TextField("Optional", text: Binding(
@@ -928,7 +941,7 @@ public struct ProfileEditorView: View {
                 Stepper("\(profile.healthTimeout)s", value: $profile.healthTimeout, in: 10...600, step: 10)
                     .frame(width: 110)
             }
-            fieldRow("Build", help: "Max seconds for the build command before it's killed.") {
+            fieldRow("Build + Setup", help: "Max seconds for build or validation setup.") {
                 Stepper("\(profile.buildTimeout)s", value: $profile.buildTimeout, in: 60...1800, step: 30)
                     .frame(width: 110)
             }
@@ -2629,6 +2642,14 @@ public struct ProfileEditorView: View {
                 ),
                 parent: editorPayload?.parent?.testCommand ?? "",
                 placeholder: "pnpm test")
+        case "validationSetupCommand":
+            nullableStringCard(field,
+                value: Binding(
+                    get: { profile.validationSetupCommand ?? "" },
+                    set: { profile.validationSetupCommand = $0.isEmpty ? nil : $0 }
+                ),
+                parent: editorPayload?.parent?.validationSetupCommand ?? "",
+                placeholder: "pip install -e \".[dev]\" semgrep")
         case "buildEnv":
             buildEnvOverrideCard(field: field)
         case "lintCommand":

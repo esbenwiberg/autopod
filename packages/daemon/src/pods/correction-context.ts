@@ -7,6 +7,7 @@ export interface CorrectionContext {
   task: string;
   customInstructions: string | null;
   failedStep:
+    | 'setup'
     | 'lint'
     | 'sast'
     | 'build'
@@ -49,6 +50,12 @@ export async function buildCorrectionContext(
 
   // 3. Grab text descriptions of what went wrong
   const screenshotDescriptions: string[] = [];
+
+  // Setup failures
+  if (validationResult.setup?.status === 'fail') {
+    const out = validationResult.setup.output?.trim();
+    screenshotDescriptions.push(out ? `Setup failed:\n${out.slice(0, 2_000)}` : 'Setup failed');
+  }
 
   // Lint failures
   if (validationResult.lint?.status === 'fail') {
@@ -111,6 +118,7 @@ export async function buildCorrectionContext(
 export function determineFailedStep(result: ValidationResult): CorrectionContext['failedStep'] {
   // Order matches the validation engine's pipeline order so the first failing
   // gate wins — that's the one the agent should focus on fixing first.
+  if (result.setup?.status === 'fail') return 'setup';
   if (result.lint?.status === 'fail') return 'lint';
   if (result.sast?.status === 'fail') return 'sast';
   if (result.smoke.build.status === 'fail') return 'build';

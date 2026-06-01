@@ -104,6 +104,8 @@ export interface Profile {
   providerCredentials: ProviderCredentials | null;
   /** Optional test command to run after build (e.g. 'pnpm test') */
   testCommand?: string | null;
+  /** Optional command to prepare validation-time tooling before validation phases run. */
+  validationSetupCommand?: string | null;
   /**
    * Extra environment variables injected into validation phase execs (build, test, lint, sast).
    * The agent's runtime env is not affected. Common use:

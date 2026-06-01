@@ -17,6 +17,8 @@ export interface ValidationEngineConfig {
   /** URL reachable from inside the container (e.g. http://127.0.0.1:3000).
    *  Used by Playwright scripts that run in-container. Falls back to previewUrl. */
   containerBaseUrl?: string;
+  /** Optional setup command run before all blocking validation phases. */
+  validationSetupCommand?: string | null;
   buildCommand: string;
   startCommand: string;
   healthPath: string;

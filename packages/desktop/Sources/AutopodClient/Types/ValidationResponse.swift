@@ -36,6 +36,7 @@ public struct ValidationResponse: Codable, Sendable {
   public let podId: String
   public let attempt: Int
   public let timestamp: String
+  public let setup: SetupResultResponse?
   public let smoke: SmokeResultResponse
   public let test: TestResultResponse?
   public let lint: LintResultResponse?
@@ -60,6 +61,19 @@ public struct StoredValidationResponse: Codable, Sendable, Identifiable {
 }
 
 // MARK: - Smoke
+
+public struct SetupResultResponse: Codable, Sendable {
+  public let status: String
+  public let output: String
+  public let duration: Int
+  public let error: String?
+
+  public var failureOutput: String? {
+    guard status == "fail" else { return nil }
+    let lines = [output, error].compactMap { $0 }.filter { !$0.isEmpty }
+    return lines.isEmpty ? nil : lines.joined(separator: "\n")
+  }
+}
 
 public struct SmokeResultResponse: Codable, Sendable {
   public let status: String

@@ -15,6 +15,7 @@ export interface ValidationResult {
   podId: string;
   attempt: number;
   timestamp: string;
+  setup?: SetupResult;
   smoke: SmokeResult;
   test?: { status: 'pass' | 'fail' | 'skip'; duration: number; stdout?: string; stderr?: string };
   lint?: LintResult;
@@ -37,6 +38,13 @@ export interface ValidationResult {
     | 'review-timeout';
   overall: 'pass' | 'fail';
   duration: number;
+}
+
+export interface SetupResult {
+  status: 'pass' | 'fail' | 'skip';
+  output: string;
+  duration: number;
+  error?: string;
 }
 
 export interface SmokeResult {

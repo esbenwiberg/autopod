@@ -34,6 +34,7 @@ public struct ValidationTab: View {
   @State private var isLoadingHistory = false
   @State private var historyError: String?
   @State private var expandedBuildOutput = false
+  @State private var expandedSetupOutput = false
   @State private var expandedTestOutput = false
   @State private var expandedLintOutput = false
   @State private var expandedSastOutput = false
@@ -124,6 +125,7 @@ public struct ValidationTab: View {
   }
 
   private func validationChecks(from response: ValidationResponse) -> ValidationChecks {
+    let setupOutput = response.setup?.failureOutput
     let buildOutput = response.smoke.build.status == "fail" && !response.smoke.build.output.isEmpty
       ? response.smoke.build.output
       : nil
@@ -225,10 +227,13 @@ public struct ValidationTab: View {
 
     return ValidationChecks(
       smoke: response.smoke.status == "pass",
+      setup: mapTriState(response.setup?.status),
+      build: mapTriState(response.smoke.build.status),
       tests: mapTriState(response.test?.status),
       lint: mapTriState(response.lint?.status),
       sast: mapTriState(response.sast?.status),
       review: mapTriState(response.taskReview?.status),
+      setupOutput: setupOutput,
       buildOutput: buildOutput,
       testOutput: testOutput,
       lintOutput: lintOutput,
@@ -271,7 +276,7 @@ public struct ValidationTab: View {
   }
 
   private var displayedPhases: [ValidationPhase] {
-    var phases: [ValidationPhase] = [.lint, .sast, .build, .test, .health, .pages, .facts, .review]
+    var phases: [ValidationPhase] = [.setup, .lint, .sast, .build, .test, .health, .pages, .facts, .review]
     if pod.pod.advisoryBrowserQaEnabled == true || displayedAdvisoryQa != nil {
       phases.append(.advisory)
     }
@@ -327,8 +332,10 @@ public struct ValidationTab: View {
     if let p = progress { return p.state(for: phase).status }
     guard let c = displayedChecks else { return .notStarted }
     switch phase {
+    case .setup:
+      return switch c.setup { case true: .passed; case false: .failed; default: .skipped }
     case .build:
-      return c.smoke || c.buildOutput == nil ? .passed : .failed
+      return switch c.build { case true: .passed; case false: .failed; default: .skipped }
     case .test:
       return switch c.tests { case true: .passed; case false: .failed; default: .skipped }
     case .lint:
@@ -407,6 +414,8 @@ public struct ValidationTab: View {
         if let advisory = c.advisoryQa {
           return advisoryChipSubLabel(advisory)
         }
+        return nil
+      case .setup:
         return nil
       default:
         return nil
@@ -879,6 +888,7 @@ public struct ValidationTab: View {
   private var phaseDetailPanel: some View {
     if let phase = displayPhase {
       switch phase {
+      case .setup:   setupDetail
       case .build:   buildDetail
       case .test:    testDetail
       case .lint:    lintDetail
@@ -918,6 +928,30 @@ public struct ValidationTab: View {
 
   // MARK: - Per-phase detail content
 
+  private var setupFailed: Bool {
+    phaseStatus(.setup) == .failed
+  }
+
+  @ViewBuilder
+  private var setupDetail: some View {
+    let status = phaseStatus(.setup)
+    let output: String? = progress?.setupOutput ?? displayedChecks?.setupOutput
+    let dur: Int? = progress?.setup.duration
+
+    VStack(alignment: .leading, spacing: 12) {
+      phaseStatusRow(status: status, passLabel: "Setup completed", failLabel: "Setup failed",
+                     skipLabel: "No validation setup configured", duration: dur)
+      if status == .failed {
+        Text("Downstream validation phases were skipped.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      if let output, !output.isEmpty {
+        outputBlock(title: "Setup Output", text: output, expanded: $expandedSetupOutput, color: status.color)
+      }
+    }
+  }
+
   @ViewBuilder
   private var buildDetail: some View {
     let status = phaseStatus(.build)
@@ -926,7 +960,7 @@ public struct ValidationTab: View {
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(status: status, passLabel: "Build succeeded", failLabel: "Build failed",
-                     skipLabel: "Build skipped", duration: dur)
+                     skipLabel: setupFailed ? "Setup failed — build skipped" : "Build skipped", duration: dur)
       if let output, !output.isEmpty {
         outputBlock(title: "Build Output", text: output, expanded: $expandedBuildOutput, color: status.color)
       }
@@ -938,11 +972,13 @@ public struct ValidationTab: View {
     let status = phaseStatus(.test)
     let output: String? = progress?.testOutput ?? displayedChecks?.testOutput
     let dur: Int? = progress?.test.duration
-    let smokeOk = displayedChecks?.smoke ?? (progress?.build.status == .passed)
+    let smokeOk = !setupFailed && (displayedChecks?.smoke ?? (progress?.build.status == .passed))
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(status: status, passLabel: "All tests passed", failLabel: "Tests failed",
-                     skipLabel: smokeOk ? "No test command configured" : "Build failed — tests skipped",
+                     skipLabel: setupFailed
+                       ? "Setup failed — tests skipped"
+                       : (smokeOk ? "No test command configured" : "Build failed — tests skipped"),
                      duration: dur)
       if let output, !output.isEmpty {
         outputBlock(title: "Test Output", text: output, expanded: $expandedTestOutput, color: status.color)
@@ -955,11 +991,13 @@ public struct ValidationTab: View {
     let status = phaseStatus(.lint)
     let output: String? = progress?.lintOutput ?? displayedChecks?.lintOutput
     let dur: Int? = progress?.lint.duration
-    let buildOk = displayedChecks?.smoke != false || (progress?.build.status == .passed)
+    let buildOk = !setupFailed && (displayedChecks?.smoke != false || (progress?.build.status == .passed))
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(status: status, passLabel: "Lint passed", failLabel: "Lint failed",
-                     skipLabel: buildOk ? "No lint command configured" : "Build failed — lint skipped",
+                     skipLabel: setupFailed
+                       ? "Setup failed — lint skipped"
+                       : (buildOk ? "No lint command configured" : "Build failed — lint skipped"),
                      duration: dur)
       if let output, !output.isEmpty {
         outputBlock(title: "Lint Output", text: output, expanded: $expandedLintOutput, color: status.color)
@@ -972,11 +1010,13 @@ public struct ValidationTab: View {
     let status = phaseStatus(.sast)
     let output: String? = progress?.sastOutput ?? displayedChecks?.sastOutput
     let dur: Int? = progress?.sast.duration
-    let buildOk = displayedChecks?.smoke != false || (progress?.build.status == .passed)
+    let buildOk = !setupFailed && (displayedChecks?.smoke != false || (progress?.build.status == .passed))
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(status: status, passLabel: "Security scan passed", failLabel: "Security scan failed",
-                     skipLabel: buildOk ? "No SAST command configured" : "Build failed — SAST skipped",
+                     skipLabel: setupFailed
+                       ? "Setup failed — SAST skipped"
+                       : (buildOk ? "No SAST command configured" : "Build failed — SAST skipped"),
                      duration: dur)
       if let output, !output.isEmpty {
         outputBlock(title: "Security Scan Output", text: output, expanded: $expandedSastOutput, color: status.color)

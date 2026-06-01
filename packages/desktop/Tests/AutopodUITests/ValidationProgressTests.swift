@@ -38,3 +38,43 @@ import Testing
   #expect(progress.advisoryDetail?.status == "fail")
   #expect(progress.advisoryDetail?.durationMs == 41845)
 }
+
+@Test func validationProgressCompletesSetupFailureFromPhaseEvent() throws {
+  var progress = ValidationProgress.initial(attempt: 1)
+  #expect(progress.state(for: .setup).status == .notStarted)
+  #expect(progress.hasRunningPhase == false)
+
+  progress.markStarted(.setup)
+  #expect(progress.activePhase == .setup)
+  #expect(progress.hasRunningPhase == true)
+
+  let raw = try JSONDecoder().decode(
+    RawSystemEvent.self,
+    from: """
+    {
+      "type": "pod.validation_phase_completed",
+      "timestamp": "2026-06-01T12:00:00.000Z",
+      "podId": "fond-sturgeon",
+      "phase": "setup",
+      "phaseStatus": "fail",
+      "setupResult": {
+        "status": "fail",
+        "output": "pip install -e .",
+        "duration": 987,
+        "error": "ruff not found"
+      }
+    }
+    """.data(using: .utf8)!
+  )
+
+  progress.markCompleted(.setup, result: ValidationPhaseResult(from: raw))
+
+  #expect(progress.setup.status == .failed)
+  #expect(progress.setup.duration == 987)
+  #expect(progress.setupOutput == "pip install -e .\nruff not found")
+  #expect(progress.lint.status == .skipped)
+  #expect(progress.build.status == .skipped)
+  #expect(progress.review.status == .skipped)
+  #expect(progress.activePhase == nil)
+  #expect(progress.hasRunningPhase == false)
+}

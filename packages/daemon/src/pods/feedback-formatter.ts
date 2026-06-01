@@ -45,6 +45,17 @@ function formatValidationFailure(input: ValidationFeedback): string {
   lines.push('Your changes did not pass validation. Fix the issues below and try again.');
   lines.push('');
 
+  // Setup errors
+  if (result.setup?.status === 'fail') {
+    lines.push('### Setup Errors');
+    if (result.setup.output) {
+      lines.push('```');
+      lines.push(result.setup.output.slice(0, 10_000));
+      lines.push('```');
+    }
+    lines.push('');
+  }
+
   // Build errors
   if (result.smoke.build.status === 'fail') {
     lines.push('### Build Errors');

@@ -30,6 +30,7 @@ public struct Profile: Identifiable, Sendable {
     public var startCommand: String
     public var buildWorkDir: String?
     public var testCommand: String?
+    public var validationSetupCommand: String?
     /// Extra env vars merged into validation phase execs (build/test/lint/sast).
     /// Common use: `NODE_OPTIONS=--max-old-space-size=4096` for memory-heavy
     /// production bundles. Does not affect the agent's runtime env.
@@ -194,6 +195,7 @@ public struct Profile: Identifiable, Sendable {
         buildCommand: String = "npm run build", startCommand: String = "npm start",
         buildWorkDir: String? = nil,
         testCommand: String? = nil,
+        validationSetupCommand: String? = nil,
         buildEnv: [String: String] = [:],
         lintCommand: String? = nil, lintTimeout: Int? = nil,
         sastCommand: String? = nil, sastTimeout: Int? = nil,
@@ -256,6 +258,7 @@ public struct Profile: Identifiable, Sendable {
         self.template = template; self.buildCommand = buildCommand
         self.startCommand = startCommand; self.buildWorkDir = buildWorkDir
         self.testCommand = testCommand
+        self.validationSetupCommand = validationSetupCommand
         self.buildEnv = buildEnv
         self.lintCommand = lintCommand; self.lintTimeout = lintTimeout
         self.sastCommand = sastCommand; self.sastTimeout = sastTimeout

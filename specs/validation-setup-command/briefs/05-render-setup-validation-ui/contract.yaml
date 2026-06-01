@@ -1,0 +1,36 @@
+contract_version: 1
+title: "Render setup in desktop validation UI"
+depends_on: [02-run-validation-setup-phase]
+scenarios:
+  - id: setup-chip-first
+    given:
+      - "a validation attempt includes setup state or setup result data"
+    when:
+      - "the user opens the Desktop Validation tab"
+    then:
+      - "Setup appears before Lint in the phase row"
+      - "Setup participates in blocking validation state"
+  - id: setup-failure-panel
+    given:
+      - "setup failed and downstream phases were skipped"
+    when:
+      - "the user selects Setup"
+    then:
+      - "the detail panel shows setup failure output"
+      - "downstream phases render as skipped or not run"
+  - id: historical-validation-renders
+    given:
+      - "a historical validation attempt has no setup fields"
+    when:
+      - "the user opens the Desktop Validation tab"
+    then:
+      - "the validation UI renders without crashing and does not invent setup output"
+required_facts: []
+human_review:
+  - id: review-desktop-setup-validation-ui
+    covers:
+      - setup-chip-first
+      - setup-failure-panel
+      - historical-validation-renders
+    criterion: "On a macOS/Xcode-capable machine, verify Setup appears first, failed setup output is readable, downstream skipped phases are gray/not run, and historical attempts still render."
+    reason: "Autopod-self required facts run in a Linux pod, while Desktop Swift/Xcode validation requires a macOS-capable environment."

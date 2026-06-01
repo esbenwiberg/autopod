@@ -229,11 +229,14 @@ public struct AdvisoryQaDetail: Sendable {
 // MARK: - Validation checks
 
 public struct ValidationChecks: Sendable {
+    public let setup: Bool?
     public let smoke: Bool
+    public let build: Bool?
     public let tests: Bool?
     public let lint: Bool?
     public let sast: Bool?
     public let review: Bool?
+    public let setupOutput: String?
     public let buildOutput: String?
     public let testOutput: String?
     public let lintOutput: String?
@@ -257,8 +260,9 @@ public struct ValidationChecks: Sendable {
     /// The formatted markdown feedback that was sent back to the agent after a failed validation attempt.
     public let correctionMessage: String?
     public init(
-        smoke: Bool, tests: Bool? = nil, lint: Bool? = nil, sast: Bool? = nil, review: Bool? = nil,
-        buildOutput: String? = nil, testOutput: String? = nil,
+        smoke: Bool, setup: Bool? = nil, build: Bool? = nil,
+        tests: Bool? = nil, lint: Bool? = nil, sast: Bool? = nil, review: Bool? = nil,
+        setupOutput: String? = nil, buildOutput: String? = nil, testOutput: String? = nil,
         lintOutput: String? = nil, sastOutput: String? = nil,
         reviewIssues: [String]? = nil, reviewFindings: [ValidationFindingResponse]? = nil,
         dismissedFindingIds: Set<String> = [],
@@ -275,8 +279,10 @@ public struct ValidationChecks: Sendable {
         proofOfWorkScreenshots: [ScreenshotRef]? = nil,
         correctionMessage: String? = nil
     ) {
-        self.smoke = smoke; self.tests = tests; self.lint = lint; self.sast = sast
+        self.setup = setup; self.smoke = smoke; self.build = build
+        self.tests = tests; self.lint = lint; self.sast = sast
         self.review = review
+        self.setupOutput = setupOutput
         self.buildOutput = buildOutput; self.testOutput = testOutput
         self.lintOutput = lintOutput; self.sastOutput = sastOutput
         self.reviewIssues = reviewIssues; self.reviewFindings = reviewFindings
@@ -293,10 +299,10 @@ public struct ValidationChecks: Sendable {
         self.correctionMessage = correctionMessage
     }
 
-    public var validationPhaseCount: Int { 8 }
+    public var validationPhaseCount: Int { 9 }
 
     public var allPassed: Bool {
-        smoke && (tests ?? true) && (lint ?? true) && (sast ?? true)
+        (setup ?? true) && smoke && (build ?? true) && (tests ?? true) && (lint ?? true) && (sast ?? true)
         && (review ?? true) && (factValidation ?? true)
     }
 }
@@ -362,6 +368,7 @@ public struct ValidationProgress: Sendable {
     public var attempt: Int
 
     // Phase status (updated by events)
+    public var setup: ValidationPhaseState
     public var build: ValidationPhaseState
     public var test: ValidationPhaseState
     public var lint: ValidationPhaseState
@@ -373,6 +380,7 @@ public struct ValidationProgress: Sendable {
     public var advisory: ValidationPhaseState
 
     // Phase result data (populated on completion, used by detail panel)
+    public var setupOutput: String?          // setup logs
     public var buildOutput: String?          // build logs
     public var testOutput: String?           // combined stdout/stderr
     public var lintOutput: String?           // lint stdout/stderr
@@ -394,6 +402,7 @@ public struct ValidationProgress: Sendable {
         let idle = ValidationPhaseState.notStarted
         return ValidationProgress(
             attempt: attempt,
+            setup: idle,
             build: idle, test: idle, lint: idle, sast: idle,
             health: idle, pages: idle, facts: idle, review: idle, advisory: idle,
             pageCount: 0, factTotalCount: 0
@@ -402,6 +411,7 @@ public struct ValidationProgress: Sendable {
 
     public func state(for phase: ValidationPhase) -> ValidationPhaseState {
         switch phase {
+        case .setup:   return setup
         case .build:   return build
         case .test:    return test
         case .lint:    return lint
@@ -415,7 +425,8 @@ public struct ValidationProgress: Sendable {
     }
 
     public var hasRunningPhase: Bool {
-        build.status == .running
+        setup.status == .running
+        || build.status == .running
         || test.status == .running
         || lint.status == .running
         || sast.status == .running
@@ -430,6 +441,7 @@ public struct ValidationProgress: Sendable {
         activePhase = phase
         let s = ValidationPhaseState(status: .running)
         switch phase {
+        case .setup:   setup   = s
         case .build:   build   = s
         case .test:    test    = s
         case .lint:    lint    = s
@@ -452,6 +464,12 @@ public struct ValidationProgress: Sendable {
             : result.phaseStatus == "pending_human" ? .pendingHuman
             : .skipped
         switch phase {
+        case .setup:
+            setup = ValidationPhaseState(status: ps, duration: result.setupResult?.duration)
+            setupOutput = result.setupResult?.failureOutput
+            if ps == .failed {
+                markNotStartedDownstreamPhasesSkipped()
+            }
         case .build:
             build = ValidationPhaseState(status: ps, duration: result.buildResult?.duration)
             buildOutput = result.buildResult.map { $0.output.isEmpty ? nil : $0.output } ?? nil
@@ -541,6 +559,18 @@ public struct ValidationProgress: Sendable {
             }
         }
         if activePhase == phase { activePhase = nil }
+    }
+
+    private mutating func markNotStartedDownstreamPhasesSkipped() {
+        let skipped = ValidationPhaseState(status: .skipped)
+        if lint.status == .notStarted { lint = skipped }
+        if sast.status == .notStarted { sast = skipped }
+        if build.status == .notStarted { build = skipped }
+        if test.status == .notStarted { test = skipped }
+        if health.status == .notStarted { health = skipped }
+        if pages.status == .notStarted { pages = skipped }
+        if facts.status == .notStarted { facts = skipped }
+        if review.status == .notStarted { review = skipped }
     }
 }
 

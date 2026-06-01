@@ -150,6 +150,7 @@ public enum PodMapper {
       guard let v = response.lastValidationResult else { return nil }
       let buildOutput = v.smoke.build.status == "fail" && !v.smoke.build.output.isEmpty
         ? v.smoke.build.output : nil
+      let setupOutput = v.setup?.failureOutput
       let testOutput: String? = {
         guard let t = v.test, t.status != "pass" else { return nil }
         let combined = [t.stdout, t.stderr].compactMap { $0 }.joined(separator: "\n")
@@ -233,10 +234,13 @@ public enum PodMapper {
       )
       return ValidationChecks(
         smoke: v.smoke.status == "pass",
+        setup: mapTriState(v.setup?.status),
+        build: mapTriState(v.smoke.build.status),
         tests: mapTriState(v.test?.status),
         lint: mapTriState(v.lint?.status),
         sast: mapTriState(v.sast?.status),
         review: mapTriState(v.taskReview?.status),
+        setupOutput: setupOutput,
         buildOutput: buildOutput,
         testOutput: testOutput,
         lintOutput: lintOutput,

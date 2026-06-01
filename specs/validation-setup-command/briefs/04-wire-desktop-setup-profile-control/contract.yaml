@@ -1,0 +1,35 @@
+contract_version: 1
+title: "Wire desktop setup profile control"
+depends_on: [01-add-validation-setup-profile-contract]
+scenarios:
+  - id: desktop-profile-setup-field-visible
+    given:
+      - "a desktop user edits a base profile"
+    when:
+      - "they view Build & Run settings"
+    then:
+      - "Validation Setup appears between Build Command and Test Command"
+      - "the field saves validationSetupCommand"
+  - id: desktop-profile-setup-field-overridable
+    given:
+      - "a desktop user edits a derived profile"
+    when:
+      - "they open profile overrides"
+    then:
+      - "validationSetupCommand can be inherited or overridden without clobbering the base profile"
+  - id: desktop-profile-build-timeout-label
+    given:
+      - "the profile editor shows validation timeouts"
+    when:
+      - "the Build timeout is displayed"
+    then:
+      - "the label reads Build + Setup"
+required_facts: []
+human_review:
+  - id: review-desktop-setup-profile-control
+    covers:
+      - desktop-profile-setup-field-visible
+      - desktop-profile-setup-field-overridable
+      - desktop-profile-build-timeout-label
+    criterion: "On a macOS/Xcode-capable machine, verify Desktop profile decode, edit, override, and patch behavior for validationSetupCommand, plus the Build + Setup timeout label."
+    reason: "Autopod-self required facts run in a Linux pod, while Desktop Swift/Xcode validation requires a macOS-capable environment."

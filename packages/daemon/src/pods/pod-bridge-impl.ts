@@ -1249,6 +1249,13 @@ interface ResolvedPhase {
 
 function resolveValidationPhase(phase: ValidationPhaseName, profile: Profile): ResolvedPhase {
   switch (phase) {
+    case 'setup':
+      return {
+        command: profile.skipValidationPhases?.includes('setup')
+          ? null
+          : (profile.validationSetupCommand?.trim() ?? null),
+        timeoutMs: (profile.buildTimeout ?? 300) * 1_000,
+      };
     case 'lint':
       return {
         command: profile.lintCommand ?? null,
