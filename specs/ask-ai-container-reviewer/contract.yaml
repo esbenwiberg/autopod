@@ -1,0 +1,61 @@
+contract_version: 1
+title: "Route escalation AI through live pod containers"
+depends_on: []
+scenarios:
+  - id: ask-ai-live-container-reviewer
+    given:
+      - "a running pod uses a Max/Pro-compatible profile and has a live container"
+      - "the agent calls ask_ai through the escalation MCP"
+    when:
+      - "the daemon bridge handles the reviewer request"
+    then:
+      - "the reviewer prompt is executed through the live pod container CLI path"
+      - "the daemon-side Anthropic SDK path is not used"
+      - "daemon ANTHROPIC_API_KEY is not required"
+  - id: ask-human-ai-routes-live-container-reviewer
+    given:
+      - "a running pod has a live container"
+      - "ask_human is auto-routed to AI because the series disables human prompts or because timeout fallback is configured as ask_ai"
+    when:
+      - "the ask_human tool needs the AI reviewer"
+    then:
+      - "the same live pod container reviewer path is used"
+      - "the existing ask_human auto-routing message prefix is preserved"
+  - id: refreshed-provider-env
+    given:
+      - "the pod profile requires refreshed provider exec env for reviewer CLI calls"
+      - "the pod has a live container"
+    when:
+      - "the bridge executes the in-container reviewer"
+    then:
+      - "the reviewer exec receives the refreshed provider env resolved for that pod"
+  - id: no-container-soft-failure
+    given:
+      - "a pod has no usable live container"
+      - "ask_ai or an ask_human AI route requests reviewer help"
+    when:
+      - "the bridge handles the reviewer request"
+    then:
+      - "the bridge returns AI review failed: AI reviewer requires a live pod container"
+      - "the bridge does not attempt a daemon-side reviewer SDK fallback"
+required_facts:
+  - id: fact-daemon-container-reviewer
+    proves:
+      - ask-ai-live-container-reviewer
+      - refreshed-provider-env
+      - no-container-soft-failure
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-bridge-validation.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-bridge-validation.test.ts
+  - id: fact-escalation-mcp-ai-routes
+    proves:
+      - ask-human-ai-routes-live-container-reviewer
+      - no-container-soft-failure
+    kind: unit-test
+    artifact:
+      path: packages/escalation-mcp/src/tools/escalation-tools.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/escalation-mcp test -- escalation-tools.test.ts
+human_review: []
