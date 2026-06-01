@@ -229,4 +229,29 @@ describe('createEscalationMcpServer memory reporting schema', () => {
 
     await expect(reportTaskSummary.handler(input)).rejects.toThrow(/memoryOutcomes is required/);
   });
+
+  it('accepts setup in validate_locally phases schema and forwards it to validation', async () => {
+    const { createEscalationMcpServer } = await import('./server.js');
+    const bridge = makeBridge({
+      runValidationPhase: vi.fn(async (_podId, phase) => ({
+        phase,
+        configured: true,
+        passed: true,
+        exitCode: 0,
+        command: `${phase}-command`,
+        durationMs: 1,
+        output: '',
+      })),
+    });
+    createEscalationMcpServer({ podId: 'sess-1', bridge });
+    const validateLocally = getTool('validate_locally');
+    const schema = z.object(validateLocally.schema);
+    const input = schema.parse({ phases: ['setup', 'lint'] });
+
+    const result = await validateLocally.handler(input);
+
+    expect(bridge.runValidationPhase).toHaveBeenCalledWith('sess-1', 'setup');
+    expect(bridge.runValidationPhase).toHaveBeenCalledWith('sess-1', 'lint');
+    expect(result.content[0]?.text).toContain('"passed": true');
+  });
 });

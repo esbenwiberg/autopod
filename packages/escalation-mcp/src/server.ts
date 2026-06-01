@@ -305,13 +305,13 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'validate_locally',
-    'Run the profile-configured lint, build, and tests inside your container — the same commands the daemon will re-run after you finish. Call before `report_task_summary` to catch failures while you still have full context. Returns structured results per phase. With no `phases` argument, runs lint → build → tests in order; tests are skipped automatically if build fails. Output is truncated to keep your context manageable.',
+    'Run the profile-configured setup, lint, build, and tests inside your container - the same commands the daemon will re-run after you finish. Call before `report_task_summary` to catch failures while you still have full context. Returns structured results per phase. With no `phases` argument, runs setup -> lint -> build -> tests in order; setup is prepended to requested downstream phases and tests are skipped automatically if build fails. Output is truncated to keep your context manageable.',
     {
       phases: z
-        .array(z.enum(['lint', 'build', 'tests']))
+        .array(z.enum(['setup', 'lint', 'build', 'tests']))
         .optional()
         .describe(
-          'Subset of phases to run. Omit to run all configured phases (recommended for the final pre-completion check). Useful for re-running just `tests` or just `lint` after a targeted fix.',
+          'Subset of phases to run. Omit to run all configured phases (recommended for the final pre-completion check). Setup is prepended to downstream requests when configured. Useful for re-running just `tests` or just `lint` after a targeted fix.',
         ),
     },
     async (input) => {

@@ -187,8 +187,8 @@ export interface PodBridge {
   validateBrowserUrl(podId: string, url: string): void;
 
   /**
-   * Run one of the profile's configured validation commands (lint, build, or
-   * tests) inside the pod's container, using the same cwd / env / timeout the
+   * Run one of the profile's configured validation commands (setup, lint,
+   * build, or tests) inside the pod's container, using the same cwd / env / timeout the
    * daemon's post-completion validation pipeline uses. Used by the
    * `validate_locally` tool so agents can catch failures pre-completion in
    * their own context, instead of being looped back through the full
@@ -214,7 +214,7 @@ export interface PodBridge {
   ): Promise<PreSubmitReviewToolResult>;
 }
 
-export type ValidationPhaseName = 'lint' | 'build' | 'tests';
+export type ValidationPhaseName = 'setup' | 'lint' | 'build' | 'tests';
 
 export interface PreSubmitReviewInput {
   /** Optional preview of the agent's planned task summary. */

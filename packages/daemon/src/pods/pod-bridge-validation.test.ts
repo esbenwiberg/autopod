@@ -136,6 +136,44 @@ describe('PodBridge.runValidationPhase', () => {
     );
   });
 
+  it('runs setup with validationSetupCommand and the build timeout', async () => {
+    const { bridge, execMock, podId } = buildBridge({
+      profileOverrides: {
+        validationSetupCommand: 'pip install -e ".[dev]" semgrep',
+        buildTimeout: 90,
+      },
+      execImpl: async () => ({ stdout: 'setup ok', stderr: '', exitCode: 0 }),
+    });
+
+    const result = await bridge.runValidationPhase(podId, 'setup');
+
+    expect(result.configured).toBe(true);
+    expect(result.passed).toBe(true);
+    expect(result.command).toBe('pip install -e ".[dev]" semgrep');
+    expect(result.output).toBe('setup ok');
+    expect(execMock).toHaveBeenCalledWith(
+      'container-abc',
+      ['sh', '-c', 'pip install -e ".[dev]" semgrep'],
+      expect.objectContaining({ cwd: '/workspace', timeout: 90_000 }),
+    );
+  });
+
+  it('does not execute setup when the profile skips setup', async () => {
+    const { bridge, execMock, podId } = buildBridge({
+      profileOverrides: {
+        validationSetupCommand: 'pip install -e ".[dev]" semgrep',
+        skipValidationPhases: ['setup'],
+      },
+    });
+
+    const result = await bridge.runValidationPhase(podId, 'setup');
+
+    expect(result.configured).toBe(false);
+    expect(result.passed).toBe(false);
+    expect(result.command).toBeNull();
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
   it('reports passed=false with output on a non-zero exit', async () => {
     const { bridge, podId } = buildBridge({
       profileOverrides: { testCommand: 'npm test' },
