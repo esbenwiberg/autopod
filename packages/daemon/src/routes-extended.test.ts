@@ -18,7 +18,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import type { JwtPayload } from '@autopod/shared';
+import type { JwtPayload, ScreenshotRef, ValidationResult } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import pino from 'pino';
@@ -33,6 +33,7 @@ import {
   createPodManager,
   createPodQueue,
   createPodRepository,
+  createValidationRepository,
 } from './pods/index.js';
 import { createNudgeRepository } from './pods/nudge-repository.js';
 import { createProfileStore } from './profiles/index.js';
@@ -127,6 +128,7 @@ describe('Extended Route Tests', () => {
     const escalationRepo = createEscalationRepository(db);
     const nudgeRepo = createNudgeRepository(db);
     const fixFeedbackRepo = createFixFeedbackRepository(db);
+    const validationRepo = createValidationRepository(db);
     const eventBus = createEventBus(eventRepo, logger);
     const authModule = createMockAuthModule();
 
@@ -222,6 +224,7 @@ describe('Extended Route Tests', () => {
       worktreeManager,
       runtimeRegistry,
       validationEngine,
+      validationRepo,
       enqueueSession: (id) => podQueue.enqueue(id),
       mcpBaseUrl: 'http://localhost:3100',
       daemonConfig: { mcpServers: [], claudeMdSections: [] },
@@ -472,6 +475,94 @@ describe('Extended Route Tests', () => {
       });
       expect(res.statusCode).toBe(200);
       expect(Array.isArray(res.json())).toBe(true);
+    });
+
+    it('returns persisted advisory browser QA with screenshot DTOs', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/pods',
+        headers: authHeaders,
+        payload: { profileName: 'test-app', task: 'Task' },
+      });
+      const podId = createRes.json().id as string;
+      const advisoryRef: ScreenshotRef = {
+        podId,
+        source: 'advisory',
+        filename: 'advisory-0.png',
+        relativePath: `screenshots/${podId}/advisory/advisory-0.png`,
+      };
+      const result: ValidationResult = {
+        podId,
+        attempt: 1,
+        timestamp: new Date().toISOString(),
+        smoke: {
+          status: 'pass',
+          build: { status: 'pass', output: 'ok', duration: 1000 },
+          health: {
+            status: 'pass',
+            url: 'http://localhost:3000/',
+            responseCode: 200,
+            duration: 100,
+          },
+          pages: [],
+        },
+        taskReview: null,
+        advisoryBrowserQa: {
+          status: 'fail',
+          reasoning: 'Advisory observation persisted.',
+          observations: [
+            {
+              id: 'obs-1',
+              scenarioId: 'scenario-1',
+              status: 'fail',
+              summary: 'Mobile nav clipped.',
+              details: 'The menu button is hidden.',
+              screenshots: [advisoryRef],
+            },
+          ],
+          screenshots: [advisoryRef],
+          durationMs: 3456,
+        },
+        overall: 'pass',
+        duration: 2000,
+      };
+      db.prepare(
+        `INSERT INTO validations (id, pod_id, attempt, result)
+         VALUES ('validation-1', ?, 1, ?)`,
+      ).run(podId, JSON.stringify(result));
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/pods/${podId}/validations`,
+        headers: authHeaders,
+      });
+
+      expect(res.statusCode).toBe(200);
+      const history = res.json() as Array<{
+        result: {
+          overall: string;
+          advisoryBrowserQa?: {
+            status: string;
+            screenshots: Array<{ url: string; source: string; path: string }>;
+            observations: Array<{
+              screenshots: Array<{ url: string; source: string; path: string }>;
+            }>;
+          };
+        };
+      }>;
+      expect(history).toHaveLength(1);
+      expect(history[0]?.result.overall).toBe('pass');
+      expect(history[0]?.result.advisoryBrowserQa?.status).toBe('fail');
+      expect(history[0]?.result.advisoryBrowserQa?.screenshots[0]).toEqual({
+        url: `/pods/${podId}/screenshots/advisory/advisory-0.png`,
+        source: 'advisory',
+        path: '0',
+      });
+      expect(history[0]?.result.advisoryBrowserQa?.observations[0]?.screenshots[0]).toEqual({
+        url: `/pods/${podId}/screenshots/advisory/advisory-0.png`,
+        source: 'advisory',
+        path: 'obs-1:0',
+      });
     });
 
     it('returns 404 for nonexistent pod', async () => {

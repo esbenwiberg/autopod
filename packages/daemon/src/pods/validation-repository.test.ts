@@ -99,6 +99,61 @@ describe('ValidationRepository', () => {
     expect(stored?.result.smoke.pages[0]?.screenshotPath).toBe('/screenshots/root.png');
   });
 
+  it('updates only the requested pod and attempt result', () => {
+    const db = setupDb();
+
+    db.prepare(
+      `INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+       VALUES ('sess-2', 'test-profile', 'test task', 'opus', 'claude', 'main', 'user-1')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+       VALUES ('sess-other', 'test-profile', 'test task', 'opus', 'claude', 'main', 'user-1')`,
+    ).run();
+
+    const repo = createValidationRepository(db);
+    repo.insert('sess-2', 1, makeResult('sess-2', 1));
+    repo.insert('sess-2', 2, makeResult('sess-2', 2));
+    repo.insert('sess-other', 1, makeResult('sess-other', 1));
+
+    const advisoryRef: ScreenshotRef = {
+      podId: 'sess-2',
+      source: 'advisory',
+      filename: 'advisory-0.png',
+      relativePath: 'screenshots/sess-2/advisory/advisory-0.png',
+    };
+    const updated = makeResult('sess-2', 2);
+    updated.advisoryBrowserQa = {
+      status: 'fail',
+      reasoning: 'Advisory issue only.',
+      observations: [
+        {
+          id: 'obs-1',
+          scenarioId: 'scenario-1',
+          status: 'fail',
+          summary: 'Layout overflowed.',
+          details: 'The submit button is clipped.',
+          screenshots: [advisoryRef],
+        },
+      ],
+      screenshots: [advisoryRef],
+      durationMs: 1234,
+    };
+
+    expect(repo.updateResult('sess-2', 2, updated)).toBe(true);
+    expect(repo.updateResult('sess-missing', 2, updated)).toBe(false);
+
+    const history = repo.getForSession('sess-2');
+    expect(history).toHaveLength(2);
+    expect(history[0]?.result.advisoryBrowserQa).toBeUndefined();
+    expect(history[1]?.result.advisoryBrowserQa?.reasoning).toBe('Advisory issue only.');
+    expect(history[1]?.result.advisoryBrowserQa?.screenshots[0]?.source).toBe('advisory');
+
+    const otherHistory = repo.getForSession('sess-other');
+    expect(otherHistory).toHaveLength(1);
+    expect(otherHistory[0]?.result.advisoryBrowserQa).toBeUndefined();
+  });
+
   it('round-trips ScreenshotRef fields through JSON serialisation', () => {
     const db = setupDb();
 

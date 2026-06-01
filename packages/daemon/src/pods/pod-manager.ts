@@ -3534,6 +3534,35 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return blockingResult;
     }
 
+    const mergeAdvisoryResult = (
+      advisoryResult: ValidationResult['advisoryBrowserQa'],
+    ): ValidationResult => {
+      if (!advisoryResult) return blockingResult;
+
+      const current = podRepo.getOrThrow(podId);
+      if (current.status === 'killed' || current.status === 'killing') {
+        return blockingResult;
+      }
+
+      const storedResult = {
+        ...blockingResult,
+        advisoryBrowserQa: advisoryResult,
+      };
+      validationRepo?.updateResult(podId, blockingResult.attempt, storedResult);
+
+      const currentResult = current.lastValidationResult ?? blockingResult;
+      if (currentResult.attempt !== blockingResult.attempt) {
+        return storedResult;
+      }
+
+      const mergedResult = {
+        ...currentResult,
+        advisoryBrowserQa: advisoryResult,
+      };
+      podRepo.update(podId, { lastValidationResult: mergedResult });
+      return mergedResult;
+    };
+
     const run = (async (): Promise<ValidationResult> => {
       let advisoryResult: ValidationResult['advisoryBrowserQa'] | null = null;
       try {
@@ -3544,12 +3573,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           if (beforeAdvisory.status === 'killed' || beforeAdvisory.status === 'killing') {
             return blockingResult;
           }
+          const callbacks = buildPhaseEventCallbacks(podId);
           advisoryResult = await validationEngine.runAdvisoryBrowserQa(
             validationConfig,
             blockingResult,
             (phase) => emitActivityStatus(podId, phase),
             undefined,
-            buildPhaseEventCallbacks(podId),
+            {
+              ...callbacks,
+              onPhaseCompleted: (phase, phaseStatus, phaseResult) => {
+                if (phase === 'advisory') {
+                  mergeAdvisoryResult(phaseResult as ValidationResult['advisoryBrowserQa']);
+                }
+                callbacks.onPhaseCompleted?.(phase, phaseStatus, phaseResult);
+              },
+            },
           );
         } finally {
           releaseAdvisoryQaSlot();
@@ -3562,18 +3600,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       if (!advisoryResult) return blockingResult;
 
-      const current = podRepo.getOrThrow(podId);
-      if (current.status === 'killed' || current.status === 'killing') {
-        return blockingResult;
-      }
-
-      const currentResult = current.lastValidationResult ?? blockingResult;
-      const mergedResult = {
-        ...currentResult,
-        advisoryBrowserQa: advisoryResult,
-      };
-      podRepo.update(podId, { lastValidationResult: mergedResult });
-      return mergedResult;
+      return mergeAdvisoryResult(advisoryResult);
     })();
 
     advisoryRuns.set(podId, run);

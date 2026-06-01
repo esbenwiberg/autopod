@@ -43,6 +43,7 @@ import { createFixFeedbackRepository } from './fix-feedback-repository.js';
 import { type PodManagerDependencies, createPodManager } from './pod-manager.js';
 import { createPodRepository } from './pod-repository.js';
 import type { PodRepository } from './pod-repository.js';
+import { createValidationRepository } from './validation-repository.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -392,6 +393,7 @@ interface TestContext {
   worktreeManager: WorktreeManager;
   runtimeRegistry: RuntimeRegistry;
   validationEngine: ValidationEngine;
+  validationRepo: ReturnType<typeof createValidationRepository>;
   prManager: PrManager;
   runtime: Runtime;
   enqueuedSessions: string[];
@@ -487,6 +489,7 @@ function createTestContext(
   const worktreeManager = createMockWorktreeManager();
   const runtimeRegistry = createMockRuntimeRegistry(runtime);
   const validationEngine = createMockValidationEngine(validationResult);
+  const validationRepo = createValidationRepository(db);
   const prManager = createMockPrManager();
 
   const enqueuedSessions: string[] = [];
@@ -502,6 +505,7 @@ function createTestContext(
     worktreeManager,
     runtimeRegistry,
     validationEngine,
+    validationRepo,
     prManagerFactory: () => prManager,
     enqueueSession: (id) => enqueuedSessions.push(id),
     mcpBaseUrl: 'http://localhost:8080',
@@ -520,6 +524,7 @@ function createTestContext(
     worktreeManager,
     runtimeRegistry,
     validationEngine,
+    validationRepo,
     prManager,
     runtime,
     enqueuedSessions,
@@ -2904,8 +2909,8 @@ describe('PodManager', () => {
       const manager = createPodManager(ctx.deps);
       const advisory = deferred<NonNullable<ValidationResult['advisoryBrowserQa']>>();
       const advisoryResult: NonNullable<ValidationResult['advisoryBrowserQa']> = {
-        status: 'pass',
-        reasoning: 'Looks good.',
+        status: 'fail',
+        reasoning: 'Advisory issue does not block.',
         observations: [],
         screenshots: [],
         durationMs: 25,
@@ -2946,6 +2951,8 @@ describe('PodManager', () => {
         expect(manager.getSession(pod.id).status).toBe('validated');
         expect(ctx.containerManager.stop).not.toHaveBeenCalled();
       });
+      expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(1);
+      expect(ctx.validationRepo.getForSession(pod.id)[0]?.result.advisoryBrowserQa).toBeUndefined();
 
       const completedBeforeAdvisory = events.filter(
         (event) => (event as { type?: string }).type === 'pod.validation_completed',
@@ -2959,6 +2966,10 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(
         advisoryResult,
       );
+      const storedHistory = ctx.validationRepo.getForSession(pod.id);
+      expect(storedHistory).toHaveLength(1);
+      expect(storedHistory[0]?.result.overall).toBe('pass');
+      expect(storedHistory[0]?.result.advisoryBrowserQa).toEqual(advisoryResult);
       expect(
         events.filter((event) => (event as { type?: string }).type === 'pod.validation_completed'),
       ).toHaveLength(1);
@@ -3039,6 +3050,74 @@ describe('PodManager', () => {
       );
     });
 
+    it('deferred advisory persistence does not clobber a newer validation result', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createPodManager(ctx.deps);
+      const advisory = deferred<NonNullable<ValidationResult['advisoryBrowserQa']>>();
+      const advisoryResult: NonNullable<ValidationResult['advisoryBrowserQa']> = {
+        status: 'pass',
+        reasoning: 'Attempt one advisory.',
+        observations: [],
+        screenshots: [],
+        durationMs: 19,
+      };
+      const runAdvisoryBrowserQa = ctx.validationEngine.runAdvisoryBrowserQa;
+      if (!runAdvisoryBrowserQa) {
+        throw new Error('Expected validation engine to expose advisory runner');
+      }
+      vi.mocked(runAdvisoryBrowserQa).mockImplementationOnce(
+        async (_config, _result, _onProgress, _signal, callbacks) => {
+          callbacks?.onPhaseStarted?.('advisory');
+          const result = await advisory.promise;
+          callbacks?.onPhaseCompleted?.('advisory', 'pass', result);
+          return result;
+        },
+      );
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Add feature',
+          options: { agentMode: 'auto', output: 'pr', advisoryBrowserQaEnabled: true },
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      const validationPromise = manager.triggerValidation(pod.id);
+      await waitForAssertion(() => {
+        expect(manager.getSession(pod.id).status).toBe('validated');
+        expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(1);
+      });
+
+      const firstResult = manager.getSession(pod.id).lastValidationResult;
+      if (!firstResult) {
+        throw new Error('Expected first validation result');
+      }
+      const newerResult: ValidationResult = {
+        ...firstResult,
+        attempt: 2,
+        timestamp: new Date().toISOString(),
+        advisoryBrowserQa: undefined,
+      };
+      ctx.podRepo.update(pod.id, { lastValidationResult: newerResult });
+
+      advisory.resolve(advisoryResult);
+      await validationPromise;
+
+      expect(manager.getSession(pod.id).lastValidationResult?.attempt).toBe(2);
+      expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toBeUndefined();
+      const storedHistory = ctx.validationRepo.getForSession(pod.id);
+      expect(storedHistory).toHaveLength(1);
+      expect(storedHistory[0]?.attempt).toBe(1);
+      expect(storedHistory[0]?.result.attempt).toBe(1);
+      expect(storedHistory[0]?.result.advisoryBrowserQa).toEqual(advisoryResult);
+    });
+
     it('revalidation creates the PR before advisory finishes', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       const manager = createPodManager(ctx.deps);
@@ -3086,6 +3165,8 @@ describe('PodManager', () => {
         expect(manager.getSession(pod.id).status).toBe('validated');
         expect(ctx.containerManager.stop).not.toHaveBeenCalled();
       });
+      expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(1);
+      expect(ctx.validationRepo.getForSession(pod.id)[0]?.result.advisoryBrowserQa).toBeUndefined();
 
       const completedBeforeAdvisory = events.filter(
         (event) => (event as { type?: string }).type === 'pod.validation_completed',
@@ -3099,6 +3180,9 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(
         advisoryResult,
       );
+      const storedHistory = ctx.validationRepo.getForSession(pod.id);
+      expect(storedHistory).toHaveLength(1);
+      expect(storedHistory[0]?.result.advisoryBrowserQa).toEqual(advisoryResult);
       expect(
         events.filter((event) => (event as { type?: string }).type === 'pod.validation_completed'),
       ).toHaveLength(1);
