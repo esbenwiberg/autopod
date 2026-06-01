@@ -6,6 +6,7 @@
 - Added `setup` to the shared validation phase union and to `skipValidationPhases` schema validation.
 - Added migration `112_validation_setup_command.sql` with `profiles.validation_setup_command TEXT NULL`.
 - Wired `validation_setup_command` through daemon profile-store row mapping, profile creation, and updates.
+- Verified `skipValidationPhases: ['setup']` round-trips through shared update parsing and daemon profile-store create/update paths.
 - Extended daemon profile validation so `validationSetupCommand` accepts string/null and rejects the same dangerous command patterns as build/lint/SAST commands.
 - Exposed the setup command in CLI profile show output, create templates, and edit preservation.
 - Added focused tests for shared schema parsing, daemon validation, profile-store persistence/inheritance/null behavior, and CLI show/create/edit coverage.
@@ -15,6 +16,7 @@
 - The `/add-profile-field` checklist normally includes Desktop layers. This brief explicitly deferred Desktop profile editing/rendering to later briefs, so no Desktop files were changed.
 - The actual worktree initially had no `111_agent_done_prompt.sql`, but pre-submit review enforced the planning-time cross-branch collision risk. The migration was moved to `112_validation_setup_command.sql`.
 - The brief requested commit and push, but the pod operating environment says not to run `git push`; changes were committed locally and the host system is expected to push.
+- Rework found the required tests already passing but made the skip-phase store persistence proof explicit.
 
 ## Changed Interfaces
 

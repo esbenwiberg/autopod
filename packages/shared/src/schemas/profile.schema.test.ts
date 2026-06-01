@@ -14,6 +14,11 @@ describe('createProfileSchema model validation', () => {
     expect(parsed.validationSetupCommand).toBe('pip install -e ".[dev]" semgrep');
     expect(parsed.skipValidationPhases).toEqual(['setup']);
 
+    const updated = updateProfileSchema.parse({
+      skipValidationPhases: ['setup'],
+    });
+    expect(updated.skipValidationPhases).toEqual(['setup']);
+
     const nullable = createProfileSchema.parse({
       name: 'nullable',
       validationSetupCommand: null,

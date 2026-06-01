@@ -223,6 +223,16 @@ describe('ProfileStore', () => {
       expect(store.get('child').validationSetupCommand).toBe('pip install -e ".[dev]"');
     });
 
+    it('persists setup as a skipped validation phase', () => {
+      const profile = store.create({
+        ...validInput,
+        skipValidationPhases: ['setup'],
+      });
+
+      expect(profile.skipValidationPhases).toEqual(['setup']);
+      expect(store.getRaw('my-app').skipValidationPhases).toEqual(['setup']);
+    });
+
     it('stores missing fields on a derived profile as null (not schema defaults)', () => {
       // Regression: a freshly-created derived profile with only name+extends
       // must leave every inheritable field null in the DB. Otherwise the
@@ -429,6 +439,16 @@ describe('ProfileStore', () => {
           validationSetupCommand: 'sudo pip install semgrep',
         }),
       ).toThrow('dangerous');
+    });
+
+    it('updates and clears setup in skipped validation phases', () => {
+      store.create(validInput);
+
+      const updated = store.update('my-app', { skipValidationPhases: ['setup'] });
+      expect(updated.skipValidationPhases).toEqual(['setup']);
+
+      const cleared = store.update('my-app', { skipValidationPhases: null });
+      expect(cleared.skipValidationPhases).toBeNull();
     });
   });
 
