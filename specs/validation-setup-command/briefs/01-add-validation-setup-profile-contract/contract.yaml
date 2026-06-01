@@ -1,0 +1,62 @@
+contract_version: 1
+title: "Add validation setup profile contract"
+depends_on: []
+scenarios:
+  - id: setup-command-persists
+    given:
+      - "a profile sets validationSetupCommand to null or a shell command"
+    when:
+      - "the daemon stores, resolves, and returns the profile"
+    then:
+      - "the effective profile preserves the configured value without rewriting buildCommand"
+  - id: setup-command-inherits
+    given:
+      - "a derived profile omits validationSetupCommand"
+    when:
+      - "the profile inheritance resolver builds the effective profile"
+    then:
+      - "the derived profile inherits the base setup command or preserves an explicit null according to existing profile inheritance semantics"
+  - id: setup-phase-skippable
+    given:
+      - "a profile sets skipValidationPhases to include setup"
+    when:
+      - "shared and daemon profile validation run"
+    then:
+      - "setup is accepted as a valid skipped validation phase"
+  - id: cli-exposes-setup-command
+    given:
+      - "a user creates, edits, or shows a profile through the CLI"
+    when:
+      - "the profile contains validationSetupCommand"
+    then:
+      - "the CLI preserves and displays the setup command field"
+required_facts:
+  - id: fact-profile-schema-setup-field
+    proves: [setup-command-persists, setup-phase-skippable]
+    kind: unit-test
+    artifact:
+      path: packages/shared/src/schemas/profile.schema.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/shared test -- profile.schema.test.ts
+  - id: fact-profile-store-setup-command
+    proves: [setup-command-persists, setup-command-inherits]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/profiles/profile-store.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- profile-store.test.ts
+  - id: fact-profile-validator-setup-command
+    proves: [setup-command-persists, setup-phase-skippable]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/profiles/profile-validator.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- profile-validator.test.ts
+  - id: fact-cli-profile-setup-command
+    proves: [cli-exposes-setup-command]
+    kind: unit-test
+    artifact:
+      path: packages/cli/src/commands/profile.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/cli test -- profile.test.ts
+human_review: []

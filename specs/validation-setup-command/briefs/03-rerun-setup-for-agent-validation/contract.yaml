@@ -1,0 +1,68 @@
+contract_version: 1
+title: "Rerun setup for agent self-validation"
+depends_on:
+  - 01-add-validation-setup-profile-contract
+  - 02-run-validation-setup-phase
+scenarios:
+  - id: validate-locally-default-includes-setup
+    given:
+      - "a pod has setup, lint, build, and test commands configured"
+    when:
+      - "an agent calls validate_locally without a phases list"
+    then:
+      - "the tool runs setup, lint, build, and tests in canonical order"
+  - id: validate-locally-explicit-phase-runs-setup-first
+    given:
+      - "a pod has setup and lint configured"
+    when:
+      - "an agent calls validate_locally with phases set to lint"
+    then:
+      - "setup runs before lint even though setup was not explicitly requested"
+  - id: validate-locally-reruns-setup-every-call
+    given:
+      - "a previous validate_locally call already ran setup"
+    when:
+      - "the agent calls validate_locally again"
+    then:
+      - "setup runs again before requested downstream phases"
+  - id: validate-locally-setup-failure-skips-requested
+    given:
+      - "setup exits non-zero"
+    when:
+      - "an agent calls validate_locally with downstream phases requested"
+    then:
+      - "the tool returns passed false and marks downstream requested phases skipped"
+  - id: validate-locally-profile-skips-setup
+    given:
+      - "the profile has skipValidationPhases including setup"
+    when:
+      - "an agent calls validate_locally with downstream phases requested"
+    then:
+      - "setup is not executed and downstream phases continue"
+required_facts:
+  - id: fact-validate-locally-setup-order
+    proves:
+      - validate-locally-default-includes-setup
+      - validate-locally-explicit-phase-runs-setup-first
+      - validate-locally-reruns-setup-every-call
+      - validate-locally-setup-failure-skips-requested
+    kind: unit-test
+    artifact:
+      path: packages/escalation-mcp/src/tools/validate-locally.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/escalation-mcp test -- validate-locally.test.ts
+  - id: fact-validate-locally-schema-setup
+    proves: [validate-locally-default-includes-setup]
+    kind: unit-test
+    artifact:
+      path: packages/escalation-mcp/src/server.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/escalation-mcp test -- server.test.ts
+  - id: fact-pod-bridge-setup-phase
+    proves: [validate-locally-profile-skips-setup]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-bridge-validation.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-bridge-validation.test.ts
+human_review: []
