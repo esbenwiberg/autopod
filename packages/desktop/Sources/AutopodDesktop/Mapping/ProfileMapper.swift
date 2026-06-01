@@ -40,6 +40,7 @@ public enum ProfileMapper {
       startCommand: response.startCommand ?? "",
       buildWorkDir: response.buildWorkDir,
       testCommand: response.testCommand,
+      validationSetupCommand: response.validationSetupCommand,
       buildEnv: response.buildEnv ?? [:],
       lintCommand: response.lintCommand,
       lintTimeout: response.lintTimeout,
@@ -259,6 +260,11 @@ public enum ProfileMapper {
     // Optional fields — only include if set
     if let v = profile.customInstructions { d["customInstructions"] = v }
     if let v = profile.testCommand { d["testCommand"] = v }
+    if let v = profile.validationSetupCommand, !v.isEmpty {
+      d["validationSetupCommand"] = v
+    } else {
+      d["validationSetupCommand"] = NSNull()
+    }
     if profile.buildEnv.isEmpty {
       d["buildEnv"] = NSNull()
     } else {

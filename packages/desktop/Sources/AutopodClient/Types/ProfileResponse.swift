@@ -36,6 +36,7 @@ public struct ProfileResponse: Codable, Sendable {
   public var modelProvider: String?
   public var providerCredentials: ProviderCredentialsResponse?
   public var testCommand: String?
+  public var validationSetupCommand: String?
   /// Extra env vars merged into validation phase execs (build/test/lint/sast).
   /// Common use: `NODE_OPTIONS=--max-old-space-size=4096` for memory-heavy
   /// production bundles. Does not affect the agent's runtime env.
@@ -88,6 +89,77 @@ public struct ProfileResponse: Codable, Sendable {
   public var createdAt: String
   public var updatedAt: String
 
+  private enum CodingKeys: String, CodingKey {
+    case name
+    case repoUrl
+    case defaultBranch
+    case template
+    case buildCommand
+    case startCommand
+    case buildWorkDir
+    case healthPath
+    case healthTimeout
+    case smokePages
+    case maxValidationAttempts
+    case defaultModel
+    case reviewerModel
+    case defaultRuntime
+    case executionTarget
+    case customInstructions
+    case escalation
+    case extends
+    case workerProfile
+    case warmImageTag
+    case warmImageBuiltAt
+    case mcpServers
+    case claudeMdSections
+    case skills
+    case networkPolicy
+    case actionPolicy
+    case outputMode
+    case pod
+    case modelProvider
+    case providerCredentials
+    case testCommand
+    case validationSetupCommand
+    case buildEnv
+    case buildTimeout
+    case testTimeout
+    case lintCommand
+    case lintTimeout
+    case sastCommand
+    case sastTimeout
+    case mergePollIntervalSec
+    case prProvider
+    case adoPat
+    case adoPatExpiresAt
+    case githubPat
+    case githubPatExpiresAt
+    case privateRegistries
+    case registryPat
+    case registryPatExpiresAt
+    case containerMemoryGb
+    case issueWatcherEnabled
+    case issueWatcherLabelPrefix
+    case branchPrefix
+    case hasWebUi
+    case tokenBudget
+    case tokenBudgetPolicy
+    case tokenBudgetWarnAt
+    case maxBudgetExtensions
+    case pimActivations
+    case mergeStrategy
+    case sidecars
+    case trustedSource
+    case codeIntelligence
+    case testPipeline
+    case securityScan
+    case deployment
+    case version
+    case createdAt
+    case updatedAt
+  }
+
   /// Decode array fields defensively — the raw shape from /editor may serialize
   /// missing arrays as null in some edge cases, even though resolved responses
   /// always return `[]`. Treat null/missing as an empty array.
@@ -124,6 +196,7 @@ public struct ProfileResponse: Codable, Sendable {
     modelProvider = try c.decodeIfPresent(String.self, forKey: .modelProvider)
     providerCredentials = try c.decodeIfPresent(ProviderCredentialsResponse.self, forKey: .providerCredentials)
     testCommand = try c.decodeIfPresent(String.self, forKey: .testCommand)
+    validationSetupCommand = try c.decodeIfPresent(String.self, forKey: .validationSetupCommand)
     buildEnv = try c.decodeIfPresent([String: String].self, forKey: .buildEnv)
     buildTimeout = try c.decodeIfPresent(Int.self, forKey: .buildTimeout)
     testTimeout = try c.decodeIfPresent(Int.self, forKey: .testTimeout)
@@ -172,6 +245,7 @@ public struct ProfileResponse: Codable, Sendable {
     escalation = .init(); mcpServers = []; claudeMdSections = []; skills = []
     outputMode = "pr"; modelProvider = "anthropic"; buildTimeout = 300
     testTimeout = 600; prProvider = "github"; privateRegistries = []
+    validationSetupCommand = nil
     adoPatExpiresAt = nil; githubPatExpiresAt = nil; registryPatExpiresAt = nil
     version = 1; createdAt = ""; updatedAt = ""
   }

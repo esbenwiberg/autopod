@@ -84,6 +84,18 @@ public enum ProfileOverrideCatalog {
             help: "Runs after repo clone. Must exit 0 for validation to proceed."
         ),
         .init(
+            key: "validationSetupCommand",
+            label: "Validation Setup",
+            section: .buildRun,
+            help: "Runs before validation commands. Leave inherited to use the parent setup."
+        ),
+        .init(
+            key: "testCommand",
+            label: "Test Command",
+            section: .buildRun,
+            help: "Runs after build. Leave empty to skip."
+        ),
+        .init(
             key: "startCommand",
             label: "Start Command",
             section: .buildRun,
@@ -94,12 +106,6 @@ public enum ProfileOverrideCatalog {
             label: "Build Working Dir",
             section: .buildRun,
             help: "Optional subdirectory under /workspace where build / test / start commands run. Useful for monorepos. Leave empty to use the repo root."
-        ),
-        .init(
-            key: "testCommand",
-            label: "Test Command",
-            section: .buildRun,
-            help: "Runs after build. Leave empty to skip."
         ),
         .init(
             key: "buildEnv",
@@ -145,9 +151,9 @@ public enum ProfileOverrideCatalog {
         ),
         .init(
             key: "buildTimeout",
-            label: "Build Timeout",
+            label: "Build + Setup",
             section: .buildRun,
-            help: "Seconds to wait for the build command."
+            help: "Seconds to wait for build or validation setup."
         ),
         .init(
             key: "testTimeout",
