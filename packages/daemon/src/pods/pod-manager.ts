@@ -8367,6 +8367,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ? await loadCodeReviewSkill(pod.worktreePath, logger)
           : undefined;
 
+        const reviewerExecEnv = await getResumeEnv(pod);
+
         // Flush any pending overrides enqueued via API and merge into pod overrides
         const pendingOverrides = deps.pendingOverrideRepo?.flush(podId) ?? [];
         let currentOverrides = pod.validationOverrides ?? [];
@@ -8399,6 +8401,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           reviewerModel: resolveReviewerModel(profile, logger),
           reviewerProvider: resolveReviewerProvider(profile),
           reviewerProviderCredentials: profile.providerCredentials,
+          ...(reviewerExecEnv ? { reviewerExecEnv } : {}),
           contract: pod.contract ?? undefined,
           codeReviewSkill,
           commitLog: commitLog || undefined,
@@ -9216,6 +9219,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ? await loadCodeReviewSkill(pod.worktreePath, logger)
           : undefined;
 
+        const reviewerExecEnv = await getResumeEnv(pod);
         const validationConfig = {
           podId,
           containerId: pod.containerId,
@@ -9240,6 +9244,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           reviewerModel: resolveReviewerModel(profile, logger),
           reviewerProvider: resolveReviewerProvider(profile),
           reviewerProviderCredentials: profile.providerCredentials,
+          ...(reviewerExecEnv ? { reviewerExecEnv } : {}),
           contract: pod.contract ?? undefined,
           codeReviewSkill,
           commitLog: commitLog || undefined,
