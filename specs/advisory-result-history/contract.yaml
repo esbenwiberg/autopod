@@ -1,0 +1,75 @@
+contract_version: 1
+title: "Persist Advisory Results In Validation History"
+depends_on: []
+scenarios:
+  - id: deferred-advisory-updates-history-row
+    given:
+      - "a pod has completed blocking validation with overall pass"
+      - "the validation attempt has already been inserted into validation history with advisoryBrowserQa null"
+    when:
+      - "deferred advisory browser QA finishes for that same pod attempt"
+    then:
+      - "pod.lastValidationResult includes the advisoryBrowserQa result"
+      - "the existing validation history row for the same pod attempt includes the advisoryBrowserQa result"
+      - "no duplicate validation attempt row is inserted for the advisory result"
+  - id: api-history-returns-advisory
+    given:
+      - "a validation history row has been enriched with an advisory browser QA result"
+    when:
+      - "a client requests GET /pods/:podId/validations"
+    then:
+      - "the returned validation attempt result includes advisoryBrowserQa"
+      - "any advisory screenshots are returned as screenshot URL DTOs, not internal filesystem references"
+  - id: desktop-history-refreshes-after-advisory
+    given:
+      - "Desktop has loaded validation history for a selected attempt before deferred advisory browser QA finished"
+      - "the selected history result does not yet include advisoryBrowserQa"
+    when:
+      - "Desktop receives the advisory completion signal after the daemon has persisted the advisory result"
+    then:
+      - "the Validation tab refreshes or replaces the selected history data"
+      - "the selected history view can render the advisory detail instead of stale advisoryBrowserQa null"
+  - id: advisory-remains-nonblocking
+    given:
+      - "blocking validation passes"
+      - "deferred advisory browser QA later returns a failing or uncertain advisory result"
+    when:
+      - "the advisory result is persisted and displayed"
+    then:
+      - "the validation overall result remains pass"
+      - "advisory persistence does not create a required fact or block PR creation"
+required_facts:
+  - id: fact-deferred-advisory-history-row
+    proves:
+      - deferred-advisory-updates-history-row
+      - advisory-remains-nonblocking
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- src/pods/pod-manager.test.ts
+  - id: fact-validation-repository-updates-attempt
+    proves:
+      - deferred-advisory-updates-history-row
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/validation-repository.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- src/pods/validation-repository.test.ts
+  - id: fact-api-history-advisory-wire
+    proves:
+      - api-history-returns-advisory
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/routes-extended.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- src/routes-extended.test.ts
+  - id: fact-desktop-history-refresh
+    proves:
+      - desktop-history-refreshes-after-advisory
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodUITests/ValidationHistoryRefreshTests.swift
+      change: create
+    command: swift test --package-path packages/desktop --filter ValidationHistoryRefresh
+human_review: []
