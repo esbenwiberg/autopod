@@ -195,7 +195,10 @@ describe('validateInBrowser', () => {
 
   function makeBridge(scriptOutput: string) {
     return {
-      callReviewerModel: vi.fn().mockResolvedValue('console.log("script")'),
+      callReviewerModel: vi
+        .fn()
+        .mockRejectedValue(new Error('callReviewerModel should not be used')),
+      generateBrowserValidationScript: vi.fn().mockResolvedValue('console.log("script")'),
       writeFileInContainer: vi.fn().mockResolvedValue(undefined),
       execInContainer: vi.fn().mockImplementation((_sid: string, cmd: string[]) => {
         if (cmd[0] === 'mkdir') {
@@ -290,9 +293,10 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
       bridge as never,
     );
 
-    // 1. LLM call to generate script
-    expect(bridge.callReviewerModel).toHaveBeenCalledOnce();
-    expect(bridge.callReviewerModel.mock.calls[0][0]).toBe('sess-42');
+    // 1. Dedicated browser-script bridge call to generate script
+    expect(bridge.generateBrowserValidationScript).toHaveBeenCalledOnce();
+    expect(bridge.generateBrowserValidationScript.mock.calls[0][0]).toBe('sess-42');
+    expect(bridge.callReviewerModel).not.toHaveBeenCalled();
 
     // 2. Write script to container
     expect(bridge.writeFileInContainer).toHaveBeenCalledOnce();
@@ -309,7 +313,10 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
 __AUTOPOD_BROWSER_RESULTS_END__`;
 
     const bridge = {
-      callReviewerModel: vi.fn().mockResolvedValue('console.log("script")'),
+      callReviewerModel: vi
+        .fn()
+        .mockRejectedValue(new Error('callReviewerModel should not be used')),
+      generateBrowserValidationScript: vi.fn().mockResolvedValue('console.log("script")'),
       writeFileInContainer: vi.fn().mockResolvedValue(undefined),
       execInContainer: vi.fn(),
       getPreviewUrl: vi.fn().mockReturnValue('http://127.0.0.1:45678'),
@@ -336,10 +343,11 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
     expect(bridge.writeFileInContainer).not.toHaveBeenCalled();
     expect(bridge.execInContainer).not.toHaveBeenCalled();
 
-    // LLM prompt should use the rewritten host URL
-    expect(bridge.callReviewerModel).toHaveBeenCalledOnce();
-    const prompt = bridge.callReviewerModel.mock.calls[0][1] as string;
+    // Script-generation prompt should use the rewritten host URL
+    expect(bridge.generateBrowserValidationScript).toHaveBeenCalledOnce();
+    const prompt = bridge.generateBrowserValidationScript.mock.calls[0][1] as string;
     expect(prompt).toContain('http://127.0.0.1:45678');
+    expect(bridge.callReviewerModel).not.toHaveBeenCalled();
   });
 
   it('falls back to container when host execution produces no result markers (e.g. ERR_CONNECTION_REFUSED)', async () => {
@@ -403,7 +411,10 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
 __AUTOPOD_BROWSER_RESULTS_END__`;
 
     const bridge = {
-      callReviewerModel: vi.fn().mockResolvedValue('script'),
+      callReviewerModel: vi
+        .fn()
+        .mockRejectedValue(new Error('callReviewerModel should not be used')),
+      generateBrowserValidationScript: vi.fn().mockResolvedValue('script'),
       writeFileInContainer: vi.fn().mockResolvedValue(undefined),
       execInContainer: vi.fn().mockImplementation((_sid: string, cmd: string[]) => {
         if (cmd[0] === 'mkdir') {

@@ -28,6 +28,13 @@ export interface PodBridge {
   logEscalationAnswer(podId: string, who: 'human' | 'ai', answer: string): void;
   getReviewerModel(podId: string): string;
   callReviewerModel(podId: string, question: string, context?: string): Promise<string>;
+  /**
+   * Generate the Playwright script for validate_in_browser through a live
+   * pod-container reviewer path. This must not fall back to daemon-side SDK
+   * billing credentials because subscription-backed profiles authenticate in
+   * the container CLI.
+   */
+  generateBrowserValidationScript(podId: string, prompt: string): Promise<string>;
   incrementEscalationCount(podId: string): void;
   reportPlan(
     podId: string,

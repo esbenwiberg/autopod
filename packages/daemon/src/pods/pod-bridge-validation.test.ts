@@ -28,6 +28,7 @@ type Deps = SessionBridgeDependencies;
 
 interface BuildOpts {
   profileOverrides?: Parameters<typeof insertTestProfile>[1];
+  containerId?: string | null;
   execImpl?: (
     containerId: string,
     command: string[],
@@ -42,12 +43,13 @@ function buildBridge(opts: BuildOpts = {}): {
 } {
   const db = createTestDb();
   const podId = 'sess-1';
+  const containerId = opts.containerId === undefined ? 'container-abc' : opts.containerId;
   insertTestProfile(db, { name: 'proj', ...opts.profileOverrides });
 
   db.prepare(
     `INSERT INTO pods (id, profile_name, task, model, branch, user_id, container_id)
      VALUES (@id, 'proj', 't', 'opus', 'main', 'u', @containerId)`,
-  ).run({ id: podId, containerId: 'container-abc' });
+  ).run({ id: podId, containerId });
 
   const execMock = vi
     .fn()
@@ -75,14 +77,14 @@ function buildBridge(opts: BuildOpts = {}): {
     getSession: vi.fn(() => ({
       id: podId,
       profileName: 'proj',
-      containerId: 'container-abc',
+      containerId,
       executionTarget: 'local',
     })),
     touchHeartbeat: vi.fn(),
   } as unknown as Deps['podManager'];
 
   const eventBus = { emit: vi.fn(), subscribe: vi.fn() } as unknown as Deps['eventBus'];
-  const cm = { execInContainer: execMock };
+  const cm = { execInContainer: execMock, writeFile: vi.fn().mockResolvedValue(undefined) };
   const containerManagerFactory = {
     get: vi.fn().mockReturnValue(cm),
   } as unknown as Deps['containerManagerFactory'];
@@ -375,6 +377,94 @@ describe('PodBridge.callReviewerModel', () => {
     expect(result).toContain('Reviewer provider copilot is not supported');
     expect(mockRunCodexReview).not.toHaveBeenCalled();
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
+  });
+});
+
+describe('PodBridge.generateBrowserValidationScript', () => {
+  beforeEach(() => {
+    mockRunCodexReview.mockReset();
+    mockCreateProfileAnthropicClient.mockReset();
+  });
+
+  it('runs Max/Pro browser script generation through the container Claude CLI path', async () => {
+    const { bridge, execMock, podId } = buildBridge({
+      profileOverrides: {
+        modelProvider: 'max',
+        reviewerModel: 'sonnet',
+        providerCredentials: {
+          provider: 'max',
+          accessToken: 'access',
+          refreshToken: 'refresh',
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      },
+      execImpl: async () => ({ stdout: 'generated playwright script\n', stderr: '', exitCode: 0 }),
+    });
+
+    const result = await bridge.generateBrowserValidationScript(podId, 'Generate a script');
+
+    expect(result).toBe('generated playwright script');
+    expect(execMock).toHaveBeenCalledWith(
+      'container-abc',
+      [
+        'sh',
+        '-c',
+        expect.stringContaining(
+          "'/run/autopod/agent-shim.sh' claude -p --model 'sonnet' --output-format text",
+        ),
+      ],
+      expect.objectContaining({ cwd: '/workspace', timeout: 60_000 }),
+    );
+    expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
+    expect(mockRunCodexReview).not.toHaveBeenCalled();
+  });
+
+  it('runs OpenAI browser script generation through the container Codex CLI path', async () => {
+    mockRunCodexReview.mockResolvedValueOnce({ stdout: 'generated playwright script' });
+    const { bridge, podId } = buildBridge({
+      profileOverrides: {
+        modelProvider: 'openai',
+        defaultRuntime: 'codex',
+        reviewerModel: 'gpt-5',
+        providerCredentials: { provider: 'openai', authMode: 'chatgpt', authJson: '{}' },
+      },
+    });
+
+    const result = await bridge.generateBrowserValidationScript(podId, 'Generate a script');
+
+    expect(result).toBe('generated playwright script');
+    expect(mockRunCodexReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        podId,
+        containerId: 'container-abc',
+        model: 'gpt-5',
+        prompt: 'Generate a script',
+        timeout: 60_000,
+      }),
+    );
+    expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
+  });
+
+  it('fails clearly when no live container reviewer path is available', async () => {
+    const { bridge, podId } = buildBridge({
+      containerId: null,
+      profileOverrides: {
+        modelProvider: 'max',
+        reviewerModel: 'sonnet',
+        providerCredentials: {
+          provider: 'max',
+          accessToken: 'access',
+          refreshToken: 'refresh',
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      },
+    });
+
+    await expect(
+      bridge.generateBrowserValidationScript(podId, 'Generate a script'),
+    ).rejects.toThrow(/reviewer unavailable: pod has no live container/);
+    expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
+    expect(mockRunCodexReview).not.toHaveBeenCalled();
   });
 });
 
