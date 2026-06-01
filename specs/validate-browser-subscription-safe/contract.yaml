@@ -1,0 +1,51 @@
+contract_version: 1
+title: "Make validate_in_browser script generation subscription-safe"
+depends_on: []
+scenarios:
+  - id: subscription-safe-script-generation
+    given:
+      - "validate_in_browser is called from a pod whose profile uses Max/Pro-compatible Claude CLI credentials"
+      - "the pod has a live container available for reviewer execution"
+      - "the tool has accepted a localhost URL and prepared its Playwright script-generation prompt"
+    when:
+      - "validate_in_browser requests a Playwright validation script"
+    then:
+      - "the daemon generates the script through the live pod container reviewer path"
+      - "the daemon does not call createProfileAnthropicClient or any daemon-side direct Anthropic SDK path"
+      - "the generated script is returned to the existing host/container browser execution flow"
+  - id: dedicated-tool-bridge-method
+    given:
+      - "validate_in_browser needs a Playwright script for either host-side browser execution or in-container fallback execution"
+    when:
+      - "the tool generates that script"
+    then:
+      - "it calls a dedicated browser-script bridge method rather than the generic callReviewerModel method"
+      - "URL rewriting, markdown fence stripping, screenshots, and host-to-container execution fallback keep their existing behavior"
+  - id: clear-no-container-failure
+    given:
+      - "validate_in_browser needs script generation"
+      - "no supported live container reviewer path is available"
+    when:
+      - "the bridge attempts to generate the browser validation script"
+    then:
+      - "the operation fails with a clear reviewer-unavailable error"
+      - "it does not fall back to daemon-side SDK or API-key billing credentials"
+required_facts:
+  - id: fact-max-profile-container-script-generation
+    proves:
+      - subscription-safe-script-generation
+      - clear-no-container-failure
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-bridge-validation.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-bridge-validation.test.ts
+  - id: fact-validate-browser-uses-dedicated-bridge
+    proves:
+      - dedicated-tool-bridge-method
+    kind: unit-test
+    artifact:
+      path: packages/escalation-mcp/src/tools/validate-in-browser.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/escalation-mcp test -- validate-in-browser.test.ts
+human_review: []
