@@ -471,6 +471,8 @@ export function createLocalValidationEngine(
           reviewerModel: config.reviewerModel,
           reviewerProvider: config.reviewerProvider,
           reviewerProviderCredentials: config.reviewerProviderCredentials,
+          containerId: config.containerId,
+          containerManager,
           hostBrowserRunner,
           screenshotStore,
           logger: log,

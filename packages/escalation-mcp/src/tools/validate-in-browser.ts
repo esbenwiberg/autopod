@@ -192,7 +192,7 @@ Requirements:
 
 Respond ONLY with the script code. No markdown fences, no explanation.`;
 
-  const rawScript = await bridge.callReviewerModel(podId, prompt);
+  const rawScript = await bridge.generateBrowserValidationScript(podId, prompt);
   return stripMarkdownFences(rawScript);
 }
 

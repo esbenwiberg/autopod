@@ -31,6 +31,7 @@ import { isPrivateIp } from '../api/ssrf-guard.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { createProfileAnthropicClient } from '../providers/llm-client.js';
+import { runContainerReviewer } from '../validation/container-reviewer-runner.js';
 import type { HostBrowserRunner } from '../validation/host-browser-runner.js';
 import {
   getPreSubmitCacheDecision,
@@ -250,6 +251,30 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       } catch (err) {
         logger.error({ err, podId }, 'Reviewer model call failed');
         return `AI review failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+
+    async generateBrowserValidationScript(podId: string, prompt: string): Promise<string> {
+      const pod = podManager.getSession(podId);
+      const profile = profileStore.get(pod.profileName);
+      const model = resolveReviewerModel(profile, logger);
+      const cm = containerManagerFactory.get(pod.executionTarget);
+
+      try {
+        const { stdout } = await runContainerReviewer({
+          podId,
+          containerId: pod.containerId,
+          containerManager: cm,
+          profile,
+          model,
+          prompt,
+          timeout: 60_000,
+          logger,
+        });
+        return stdout.trim();
+      } catch (err) {
+        logger.error({ err, podId }, 'Browser validation script reviewer failed');
+        throw err;
       }
     },
 
