@@ -14,7 +14,7 @@ export interface ContainerReviewerRunnerConfig {
   podId: string;
   containerId: string | null | undefined;
   containerManager: ContainerManager;
-  profile: Profile;
+  profile: Pick<Profile, 'modelProvider' | 'providerCredentials'>;
   model: string;
   prompt: string;
   timeout: number;

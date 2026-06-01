@@ -10,9 +10,11 @@ import type {
   SpecContract,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
+import { runContainerReviewer } from './container-reviewer-runner.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 
 export const ADVISORY_BROWSER_QA_TARGET_CAP = 5;
@@ -170,6 +172,8 @@ export interface AdvisoryBrowserQaRunnerOptions {
   reviewerModel?: string;
   reviewerProvider?: ModelProvider | null;
   reviewerProviderCredentials?: ProviderCredentials | null;
+  containerId?: string;
+  containerManager?: ContainerManager;
   timeoutMs?: number;
   hostBrowserRunner?: HostBrowserRunner;
   screenshotStore?: ScreenshotStore;
@@ -273,8 +277,11 @@ export async function runAdvisoryBrowserQa(
       options.reviewer ??
       createProviderAwareAdvisoryReviewer({
         model: options.reviewerModel,
+        podId: options.podId,
         provider: options.reviewerProvider,
         credentials: options.reviewerProviderCredentials,
+        containerId: options.containerId,
+        containerManager: options.containerManager,
         logger: log,
         rateLimitDeadlineMs: deadline,
         rateLimitBaseDelayMs: pacing.rateLimitBaseDelayMs,
@@ -1436,8 +1443,11 @@ function filterReviewerObservationsForTargets(
 
 function createProviderAwareAdvisoryReviewer(input: {
   model: string | undefined;
+  podId: string;
   provider?: ModelProvider | null;
   credentials?: ProviderCredentials | null;
+  containerId?: string;
+  containerManager?: ContainerManager;
   logger?: Logger;
   rateLimitDeadlineMs?: number;
   rateLimitBaseDelayMs?: number;
@@ -1458,8 +1468,11 @@ function createProviderAwareAdvisoryReviewer(input: {
       try {
         const stdout = await callAnthropicReviewer({
           model: input.model,
+          podId: input.podId,
           provider: input.provider,
           credentials: input.credentials,
+          containerId: input.containerId,
+          containerManager: input.containerManager,
           prompt,
           input: reviewInput,
           logger: input.logger,
@@ -1502,8 +1515,11 @@ function createProviderAwareAdvisoryReviewer(input: {
       try {
         const stdout = await callAnthropicReviewer({
           model: input.model,
+          podId: input.podId,
           provider: input.provider,
           credentials: input.credentials,
+          containerId: input.containerId,
+          containerManager: input.containerManager,
           prompt,
           input: reviewInput,
           logger: input.logger,
@@ -1533,8 +1549,11 @@ function createProviderAwareAdvisoryReviewer(input: {
           try {
             const fallbackStdout = await callAnthropicReviewer({
               model: input.model,
+              podId: input.podId,
               provider: input.provider,
               credentials: input.credentials,
+              containerId: input.containerId,
+              containerManager: input.containerManager,
               prompt: buildReviewerPrompt(reviewInput, { includeImages: false }),
               input: reviewInput,
               logger: input.logger,
@@ -1579,8 +1598,11 @@ function createProviderAwareAdvisoryReviewer(input: {
 
 async function callAnthropicReviewer(input: {
   model: string;
+  podId: string;
   provider?: ModelProvider | null;
   credentials?: ProviderCredentials | null;
+  containerId?: string;
+  containerManager?: ContainerManager;
   prompt: string;
   input: AdvisoryBrowserQaReviewInput;
   logger?: Logger;
@@ -1593,6 +1615,23 @@ async function callAnthropicReviewer(input: {
   rateLimitMaxDelayMs?: number;
   onRateLimitWait?: (delayMs: number, attempt: number) => void;
 }): Promise<string> {
+  if (input.includeImages === false && input.containerId && input.containerManager) {
+    const { stdout } = await runContainerReviewer({
+      podId: input.podId,
+      containerId: input.containerId,
+      containerManager: input.containerManager,
+      profile: {
+        modelProvider: input.provider ?? null,
+        providerCredentials: input.credentials ?? null,
+      },
+      model: input.model,
+      prompt: input.prompt,
+      timeout: input.timeoutMs ?? 120_000,
+      logger: input.logger,
+    });
+    return stdout.trim();
+  }
+
   const llm = await createProviderAnthropicClient(
     {
       provider: input.provider,
