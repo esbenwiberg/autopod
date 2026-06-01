@@ -29,6 +29,7 @@ type Deps = SessionBridgeDependencies;
 interface BuildOpts {
   profileOverrides?: Parameters<typeof insertTestProfile>[1];
   containerId?: string | null;
+  containerStatus?: 'running' | 'stopped' | 'unknown';
   reviewerExecEnv?: Record<string, string>;
   execImpl?: (
     containerId: string,
@@ -86,7 +87,11 @@ function buildBridge(opts: BuildOpts = {}): {
   } as unknown as Deps['podManager'];
 
   const eventBus = { emit: vi.fn(), subscribe: vi.fn() } as unknown as Deps['eventBus'];
-  const cm = { execInContainer: execMock, writeFile: vi.fn().mockResolvedValue(undefined) };
+  const cm = {
+    execInContainer: execMock,
+    getStatus: vi.fn().mockResolvedValue(opts.containerStatus ?? 'running'),
+    writeFile: vi.fn().mockResolvedValue(undefined),
+  };
   const containerManagerFactory = {
     get: vi.fn().mockReturnValue(cm),
   } as unknown as Deps['containerManagerFactory'];
@@ -436,6 +441,29 @@ describe('PodBridge.callReviewerModel', () => {
     const result = await bridge.callReviewerModel(podId, 'Review this');
 
     expect(result).toBe('AI review failed: AI reviewer requires a live pod container');
+    expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
+    expect(mockRunCodexReview).not.toHaveBeenCalled();
+  });
+
+  it('returns a soft failure when the recorded container is not running', async () => {
+    const { bridge, execMock, podId } = buildBridge({
+      containerStatus: 'stopped',
+      profileOverrides: {
+        modelProvider: 'max',
+        reviewerModel: 'sonnet',
+        providerCredentials: {
+          provider: 'max',
+          accessToken: 'access',
+          refreshToken: 'refresh',
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      },
+    });
+
+    const result = await bridge.callReviewerModel(podId, 'Review this');
+
+    expect(result).toBe('AI review failed: AI reviewer requires a live pod container');
+    expect(execMock).not.toHaveBeenCalled();
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
     expect(mockRunCodexReview).not.toHaveBeenCalled();
   });

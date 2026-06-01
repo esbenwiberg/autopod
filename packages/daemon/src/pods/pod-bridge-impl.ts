@@ -216,6 +216,10 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           return 'AI review failed: AI reviewer requires a live pod container';
         }
         const cm = containerManagerFactory.get(pod.executionTarget);
+        const containerStatus = await cm.getStatus(pod.containerId);
+        if (containerStatus !== 'running') {
+          return 'AI review failed: AI reviewer requires a live pod container';
+        }
         const reviewerExecEnv = await podManager.getReviewerExecEnv(pod);
         const { stdout } = await runContainerReviewer({
           podId,
