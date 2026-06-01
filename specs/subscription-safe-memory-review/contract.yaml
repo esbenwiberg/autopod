@@ -1,0 +1,91 @@
+contract_version: 1
+title: "Make automatic memory review subscription-safe"
+depends_on: []
+scenarios:
+  - id: ranking-container-first
+    given:
+      - "an agent-mode auto pod has approved memories that match the task"
+      - "the profile's daemon-side reviewer is unavailable but the pod/container auth path can run the reviewer"
+    when:
+      - "the daemon prepares the pod and selects memories before starting the agent"
+    then:
+      - "provider credential files and the agent shim are available before reviewer ranking runs"
+      - "memory ranking uses the container reviewer before attempting the daemon reviewer"
+      - "ranked memories are injected into Relevant Memory without claiming there were no relevant memories"
+  - id: ranking-unavailable-fallback-evidence
+    given:
+      - "an agent-mode auto pod has deterministic memory candidates"
+      - "both the container reviewer and daemon reviewer are unavailable or fail"
+    when:
+      - "the daemon selects memories before starting the agent"
+    then:
+      - "the pod still starts"
+      - "deterministic keyword fallback selects at most five memories"
+      - "selected and injected usage rows include a fallback relevance reason"
+      - "pod activity and Relevant Memory text show the reviewer-unavailable reason"
+  - id: extraction-container-first-with-bounded-cleanup
+    given:
+      - "an agent-mode auto pod reaches a high-signal outcome that crosses the lesson-potential threshold"
+      - "the pod has a live prepared container at completion time"
+    when:
+      - "automatic memory extraction runs"
+    then:
+      - "extraction attempts a container reviewer before daemon fallback"
+      - "the pre-cleanup container attempt is bounded and cannot block pod cleanup indefinitely"
+      - "candidate_created or no_candidate results are recorded normally when the reviewer succeeds"
+  - id: extraction-unavailable-evidence
+    given:
+      - "an agent-mode auto pod reaches a high-signal outcome that crosses the lesson-potential threshold"
+      - "the container reviewer is unavailable or times out"
+      - "the daemon reviewer fallback is also unavailable"
+    when:
+      - "automatic memory extraction runs"
+    then:
+      - "no memory candidate is created"
+      - "a memory extraction attempt is recorded with status reviewer_unavailable"
+      - "the attempt reason names the unavailable reviewer path"
+      - "pod lifecycle and cleanup continue"
+required_facts:
+  - id: fact-ranking-container-first
+    proves:
+      - ranking-container-first
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager
+  - id: fact-ranking-fallback-evidence
+    proves:
+      - ranking-unavailable-fallback-evidence
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/memory-selector.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- memory-selector
+  - id: fact-extraction-container-first
+    proves:
+      - extraction-container-first-with-bounded-cleanup
+      - extraction-unavailable-evidence
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/memory-candidate-recorder.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- memory-candidate-recorder
+  - id: fact-memory-reviewer-routing
+    proves:
+      - ranking-container-first
+      - extraction-container-first-with-bounded-cleanup
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/review-container-runner.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- review-container-runner
+  - id: fact-relevant-memory-unavailable-text
+    proves:
+      - ranking-unavailable-fallback-evidence
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/system-instructions-generator.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- system-instructions-generator memory
+human_review: []
