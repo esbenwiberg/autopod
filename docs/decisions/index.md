@@ -33,3 +33,4 @@
 | `ADR-027` | ADR-027: Advisory Browser QA Is Evidence, Not Validation | Accepted | Autopod contracts now separate behavior descriptions (`scenarios`), executable |
 | `ADR-027` | ADR-027: Daemon-curated reviewer-model memory loop | Proposed | Autopod's memory system has oscillated between two bad states. When agents were encouraged to suggest memories directly, |
 | `ADR-028` | ADR-028: Canonical model ID input policy | Proposed | Autopod historically accepted short Claude model aliases such as `opus`, `sonnet`, |
+| `ADR-029` | ADR-029: Validation setup is a first-class blocking phase | Proposed | Some profiles need to install validation tooling before lint, SAST, build, or |
