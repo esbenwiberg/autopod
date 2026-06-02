@@ -35,7 +35,7 @@ export interface CostAnalyticsResponse {
   sparkline: Array<{ day: string; costUsd: number }>;
   /** Delta vs the immediately preceding window of the same length. */
   deltaVsPrior: { value: number; direction: 'up' | 'down' | 'flat' };
-  /** Stacked bar segments. Order: agent_initial, rework_1..N, review, plan_eval, legacy. */
+  /** Stacked bar segments. Order: agent_initial, rework_1..N, review, plan_eval, advisory, legacy. */
   byPhase: Array<{ phase: string; costUsd: number }>;
   /** Profile × model breakdown for the matrix view. */
   byProfileModel: Array<{

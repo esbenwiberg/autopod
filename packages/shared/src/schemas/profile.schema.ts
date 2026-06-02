@@ -223,6 +223,7 @@ const securityScanPolicySchema = z.object({
 const mergeableFieldSchema = z.enum([
   'smokePages',
   'customInstructions',
+  'agentDonePrompt',
   'escalation',
   'mcpServers',
   'claudeMdSections',
@@ -303,6 +304,7 @@ const createProfileBaseSchema = z.object({
   defaultRuntime: z.enum(['claude', 'codex', 'copilot']).nullable().default('claude'),
   executionTarget: z.enum(['local', 'aci']).nullable().default('local'),
   customInstructions: z.string().max(50_000).nullable().default(null),
+  agentDonePrompt: z.string().max(50_000).nullable().default(null),
   escalation: escalationConfigSchema.nullable().default({}),
   extends: z.string().nullable().default(null),
   workerProfile: z.string().nullable().default(null),

@@ -21,6 +21,7 @@ export type ExecutionTarget = 'local' | 'aci';
 export type MergeableField =
   | 'smokePages'
   | 'customInstructions'
+  | 'agentDonePrompt'
   | 'escalation'
   | 'mcpServers'
   | 'claudeMdSections'
@@ -70,6 +71,8 @@ export interface Profile {
   defaultRuntime: RuntimeType | null;
   executionTarget: ExecutionTarget | null;
   customInstructions: string | null;
+  /** Profile-specific finish guidance the agent should follow before report_task_summary. */
+  agentDonePrompt: string | null;
   escalation: EscalationConfig | null;
   extends: string | null;
   /** Profile to use when spawning worker sessions from a workspace pod using this profile */
@@ -228,6 +231,23 @@ export interface Profile {
   skipValidationPhases: ValidationPhase[] | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export type PublicProfile = Omit<Profile, 'adoPat' | 'githubPat' | 'registryPat'> & {
+  adoPat: null;
+  githubPat: null;
+  registryPat: null;
+  hasAdoPat: boolean;
+  hasGithubPat: boolean;
+  hasRegistryPat: boolean;
+};
+
+export interface ProfileEditorPayload {
+  raw: PublicProfile;
+  resolved: PublicProfile;
+  parent: PublicProfile | null;
+  sourceMap: Record<string, 'own' | 'inherited' | 'merged'>;
+  credentialOwner: string | null;
 }
 
 export interface TestPipelineConfig {

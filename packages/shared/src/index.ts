@@ -12,6 +12,9 @@ export { buildEvidenceDocument, renderEvidenceYaml } from './evidence.js';
 
 export type {
   PhaseTokenUsage,
+  PodCostBreakdownResponse,
+  PodCostBucket,
+  PodCostSegment,
   PodStatus,
   Pod,
   CreatePodRequest,
@@ -31,6 +34,8 @@ export type {
 
 export type {
   Profile,
+  PublicProfile,
+  ProfileEditorPayload,
   StackTemplate,
   ExecutionTarget,
   SmokePage,
@@ -218,8 +223,11 @@ export type { WatchedIssue, WatchedIssueStatus } from './types/issue-watcher.js'
 
 export type {
   ScheduledJob,
+  ScheduledJobTemplate,
   CreateScheduledJobRequest,
+  CreateScheduledJobTemplateRequest,
   UpdateScheduledJobRequest,
+  UpdateScheduledJobTemplateRequest,
 } from './types/scheduled-job.js';
 
 export type {

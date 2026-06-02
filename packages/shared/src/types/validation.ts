@@ -162,8 +162,13 @@ export interface TaskReviewResult {
   requirementsCheck?: RequirementsCheckItem[];
   /** Reviewer's assessment of agent-reported and detected deviations */
   deviationsAssessment?: DeviationsAssessment;
-  /** Token counts from the LLM call(s) that produced this result. Absent for Tier-1 CLI reviews. */
-  tokenUsage?: { inputTokens: number; outputTokens: number };
+  /** Token counts from the LLM call(s) that produced this result. Absent for unmetered CLI reviews. */
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens?: number;
+    costUsd?: number;
+  };
 }
 
 export interface AdvisoryBrowserQaObservation {
@@ -185,6 +190,13 @@ export interface AdvisoryBrowserQaResult {
   durationMs?: number;
   observations: AdvisoryBrowserQaObservation[];
   screenshots: ScreenshotRef[];
+  /** Token counts from advisory reviewer calls, when available. */
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens?: number;
+    costUsd?: number;
+  };
 }
 
 /** A single failed finding extracted from a ValidationResult for recurring-detection. */

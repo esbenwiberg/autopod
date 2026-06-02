@@ -50,16 +50,36 @@ export interface SpecFile {
 
 /**
  * Token counts per processing phase for a pod. Agent phases use open-ended
- * `agent_rework_N` keys (N ≥ 1); `agent_initial` covers the first run.
- * `review` and `plan_eval` cover harness-side AI calls. Indexed as a Partial
+ * `agent_rework_N` keys (N >= 1); `agent_initial` covers the first run.
+ * `review`, `plan_eval`, and `advisory` cover harness-side AI calls. Indexed as a Partial
  * record so missing phases are treated as zero.
  */
 export type PhaseTokenUsage = Partial<
   Record<
-    'agent_initial' | `agent_rework_${number}` | 'review' | 'plan_eval',
-    { inputTokens: number; outputTokens: number }
+    'agent_initial' | `agent_rework_${number}` | 'review' | 'plan_eval' | 'advisory',
+    { inputTokens: number; outputTokens: number; cachedInputTokens?: number; costUsd?: number }
   >
 >;
+
+export type PodCostBucket = 'work' | 'rework' | 'validation' | 'advisory' | 'unattributed';
+
+export interface PodCostSegment {
+  bucket: PodCostBucket;
+  label: string;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  sourcePhases: string[];
+}
+
+export interface PodCostBreakdownResponse {
+  podId: string;
+  model: string | null;
+  totalCostUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  segments: PodCostSegment[];
+}
 
 export type PodStatus =
   | 'queued'
