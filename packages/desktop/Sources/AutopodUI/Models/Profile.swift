@@ -53,6 +53,7 @@ public struct Profile: Identifiable, Sendable {
     public var modelProvider: ModelProvider
     public var prProvider: PRProvider
     public var customInstructions: String?
+    public var agentDonePrompt: String?
     public var containerMemoryGb: Double?
     public var branchPrefix: String
     public var hasWebUi: Bool
@@ -207,7 +208,8 @@ public struct Profile: Identifiable, Sendable {
         defaultRuntime: RuntimeType = .claude,
         executionTarget: ExecutionTarget = .local,
         modelProvider: ModelProvider = .anthropic, prProvider: PRProvider = .github,
-        customInstructions: String? = nil, containerMemoryGb: Double? = nil,
+        customInstructions: String? = nil, agentDonePrompt: String? = nil,
+        containerMemoryGb: Double? = nil,
         branchPrefix: String = "autopod/", hasWebUi: Bool = true,
         tokenBudget: Int? = nil, tokenBudgetPolicy: TokenBudgetPolicy = .soft,
         tokenBudgetWarnAt: Double = 0.8, maxBudgetExtensions: Int? = nil,
@@ -270,6 +272,7 @@ public struct Profile: Identifiable, Sendable {
         self.defaultRuntime = defaultRuntime
         self.executionTarget = executionTarget; self.modelProvider = modelProvider
         self.prProvider = prProvider; self.customInstructions = customInstructions
+        self.agentDonePrompt = agentDonePrompt
         self.containerMemoryGb = containerMemoryGb
         self.branchPrefix = branchPrefix; self.hasWebUi = hasWebUi
         self.tokenBudget = tokenBudget; self.tokenBudgetPolicy = tokenBudgetPolicy

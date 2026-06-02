@@ -256,6 +256,10 @@ public actor DaemonAPI {
     try await request("GET", "/pods/\(id)/quality")
   }
 
+  public func getPodCost(_ id: String) async throws -> PodCostBreakdownResponse {
+    try await request("GET", "/pods/\(id)/cost")
+  }
+
   /// GET /pods/scores — persisted quality-score leaderboard.
   public func listQualityScores(
     runtime: String? = nil,
@@ -603,6 +607,26 @@ public actor DaemonAPI {
   }
 
   // MARK: - Scheduled Jobs
+
+  public func listScheduledJobTemplates() async throws -> [ScheduledJobTemplate] {
+    try await request("GET", "/scheduled-job-templates")
+  }
+
+  public func getScheduledJobTemplate(_ id: String) async throws -> ScheduledJobTemplate {
+    try await request("GET", "/scheduled-job-templates/\(id)")
+  }
+
+  public func createScheduledJobTemplate(_ body: CreateScheduledJobTemplateRequest) async throws -> ScheduledJobTemplate {
+    try await request("POST", "/scheduled-job-templates", body: try encode(body))
+  }
+
+  public func updateScheduledJobTemplate(_ id: String, _ body: UpdateScheduledJobTemplateRequest) async throws -> ScheduledJobTemplate {
+    try await request("PUT", "/scheduled-job-templates/\(id)", body: try encode(body))
+  }
+
+  public func deleteScheduledJobTemplate(_ id: String) async throws {
+    let _: EmptyResponse = try await request("DELETE", "/scheduled-job-templates/\(id)")
+  }
 
   public func listScheduledJobs() async throws -> [ScheduledJob] {
     try await request("GET", "/scheduled-jobs")

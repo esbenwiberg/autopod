@@ -187,6 +187,12 @@ public enum ProfileOverrideCatalog {
             section: .agent,
             help: "Appended to the container CLAUDE.md."
         ),
+        .init(
+            key: "agentDonePrompt",
+            label: "Agent Done Prompt",
+            section: .agent,
+            help: "Profile-specific finish guidance followed before report_task_summary."
+        ),
 
         // MARK: Providers
         .init(

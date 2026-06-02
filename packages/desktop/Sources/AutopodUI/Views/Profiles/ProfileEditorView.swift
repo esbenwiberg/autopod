@@ -1006,6 +1006,21 @@ public struct ProfileEditorView: View {
                     .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
             )
         }
+        fieldRow("Agent Done Prompt", help: "Profile-specific finish guidance the agent follows before report_task_summary.") {
+            TextEditor(text: Binding(
+                get: { profile.agentDonePrompt ?? "" },
+                set: { profile.agentDonePrompt = $0.isEmpty ? nil : $0 }
+            ))
+            .font(.system(.caption, design: .monospaced))
+            .frame(height: 100)
+            .padding(4)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+            )
+        }
     }
 
     private var defaultModelHelp: String {
@@ -2720,6 +2735,13 @@ public struct ProfileEditorView: View {
                     set: { profile.customInstructions = $0.isEmpty ? nil : $0 }
                 ),
                 parentValue: editorPayload?.parent?.customInstructions ?? "")
+        case "agentDonePrompt":
+            nullableTextOverrideCard(field: field,
+                value: Binding(
+                    get: { profile.agentDonePrompt ?? "" },
+                    set: { profile.agentDonePrompt = $0.isEmpty ? nil : $0 }
+                ),
+                parentValue: editorPayload?.parent?.agentDonePrompt ?? "")
 
         // MARK: Providers
         case "modelProvider":

@@ -5,6 +5,7 @@ import SwiftUI
 public struct MainView: View {
     public var pods: [Pod]
     public var scheduledJobs: [ScheduledJob]
+    public var scheduledJobTemplates: [ScheduledJobTemplate]
     public var isConnected: Bool
     public var connectionLabel: String
     public var connectionState: String
@@ -46,6 +47,7 @@ public struct MainView: View {
     public var loadArtifacts: ((String) async throws -> [SessionFileEntry])?
     public var loadContent: ((String, String) async throws -> SessionFileContent)?
     public var loadQuality: ((String) async throws -> PodQualitySignals)?
+    public var loadCost: ((String) async throws -> PodCostBreakdownResponse)?
     public var loadPreviewStatus: ((String) async throws -> PreviewStatus)?
     public var loadValidationHistory: ((String) async throws -> [StoredValidationResponse])?
     public var loadQualityScores: (() async throws -> [PodQualityScore])?
@@ -69,6 +71,9 @@ public struct MainView: View {
     public var onCreateJob: ((CreateScheduledJobRequest) -> Void)?
     public var onEditJob: ((String, UpdateScheduledJobRequest) -> Void)?
     public var onDeleteJob: ((ScheduledJob) -> Void)?
+    public var onCreateJobTemplate: ((CreateScheduledJobTemplateRequest) -> Void)?
+    public var onEditJobTemplate: ((String, UpdateScheduledJobTemplateRequest) -> Void)?
+    public var onDeleteJobTemplate: ((ScheduledJobTemplate) -> Void)?
 
     // Memory
     public var memoryEntries: [MemoryEntry]
@@ -102,6 +107,7 @@ public struct MainView: View {
     public init(
         pods: [Pod] = MockData.all,
         scheduledJobs: [ScheduledJob] = [],
+        scheduledJobTemplates: [ScheduledJobTemplate] = [],
         selectedSessionId: Binding<String?> = .constant(nil),
         isConnected: Bool = true,
         connectionLabel: String = "localhost:3000",
@@ -136,6 +142,7 @@ public struct MainView: View {
         loadArtifacts: ((String) async throws -> [SessionFileEntry])? = nil,
         loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
         loadQuality: ((String) async throws -> PodQualitySignals)? = nil,
+        loadCost: ((String) async throws -> PodCostBreakdownResponse)? = nil,
         loadPreviewStatus: ((String) async throws -> PreviewStatus)? = nil,
         loadValidationHistory: ((String) async throws -> [StoredValidationResponse])? = nil,
         loadQualityScores: (() async throws -> [PodQualityScore])? = nil,
@@ -155,6 +162,9 @@ public struct MainView: View {
         onCreateJob: ((CreateScheduledJobRequest) -> Void)? = nil,
         onEditJob: ((String, UpdateScheduledJobRequest) -> Void)? = nil,
         onDeleteJob: ((ScheduledJob) -> Void)? = nil,
+        onCreateJobTemplate: ((CreateScheduledJobTemplateRequest) -> Void)? = nil,
+        onEditJobTemplate: ((String, UpdateScheduledJobTemplateRequest) -> Void)? = nil,
+        onDeleteJobTemplate: ((ScheduledJobTemplate) -> Void)? = nil,
         memoryEntries: [MemoryEntry] = [],
         activeMemories: [MemoryEntry] = [],
         pendingMemoryCandidates: [MemoryCandidate] = [],
@@ -183,6 +193,7 @@ public struct MainView: View {
     ) {
         self.pods = pods
         self.scheduledJobs = scheduledJobs
+        self.scheduledJobTemplates = scheduledJobTemplates
         self._selectedSessionId = selectedSessionId
         self.isConnected = isConnected
         self.connectionLabel = connectionLabel
@@ -217,6 +228,7 @@ public struct MainView: View {
         self.loadArtifacts = loadArtifacts
         self.loadContent = loadContent
         self.loadQuality = loadQuality
+        self.loadCost = loadCost
         self.loadPreviewStatus = loadPreviewStatus
         self.loadValidationHistory = loadValidationHistory
         self.loadQualityScores = loadQualityScores
@@ -236,6 +248,9 @@ public struct MainView: View {
         self.onCreateJob = onCreateJob
         self.onEditJob = onEditJob
         self.onDeleteJob = onDeleteJob
+        self.onCreateJobTemplate = onCreateJobTemplate
+        self.onEditJobTemplate = onEditJobTemplate
+        self.onDeleteJobTemplate = onDeleteJobTemplate
         self.memoryEntries = memoryEntries
         self.activeMemories = activeMemories
         self.pendingMemoryCandidates = pendingMemoryCandidates
@@ -447,13 +462,17 @@ public struct MainView: View {
             } else if sidebarSelection == .scheduledJobs {
                 ScheduledJobsView(
                     jobs: scheduledJobs,
+                    templates: scheduledJobTemplates,
                     profileNames: profileNames,
                     onRunCatchup: onRunCatchup,
                     onSkipCatchup: onSkipCatchup,
                     onTriggerJob: onTriggerJob,
                     onCreateJob: onCreateJob,
                     onEditJob: onEditJob,
-                    onDeleteJob: onDeleteJob
+                    onDeleteJob: onDeleteJob,
+                    onCreateTemplate: onCreateJobTemplate,
+                    onEditTemplate: onEditJobTemplate,
+                    onDeleteTemplate: onDeleteJobTemplate
                 )
                 .frame(minWidth: 600)
             } else if sidebarSelection == .salesPitch {
@@ -590,6 +609,7 @@ public struct MainView: View {
                     loadArtifacts: loadArtifacts,
                     loadContent: loadContent,
                     loadQuality: loadQuality,
+                    loadCost: loadCost,
                     loadPreviewStatus: loadPreviewStatus,
                     loadValidationHistory: loadValidationHistory,
                     isLoadingLogs: isLoadingLogs,

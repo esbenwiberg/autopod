@@ -342,6 +342,22 @@ private func decodeProfileWithAdvisoryBrowserQa(
   }
 }
 
+@Test func agentEventResponseDecodesEventId() throws {
+  let json = """
+  {
+    "eventId": 42,
+    "type": "status",
+    "timestamp": "2026-06-02T08:00:00Z",
+    "message": "Creating worktree"
+  }
+  """.data(using: .utf8)!
+
+  let event = try JSONDecoder().decode(AgentEventResponse.self, from: json)
+
+  #expect(event.eventId == 42)
+  #expect(event.message == "Creating worktree")
+}
+
 @Test func createSessionRequestEncodes() throws {
   let contract = SpecContractResponse(
     contractVersion: 1,

@@ -35,6 +35,7 @@ public struct DetailPanelView: View {
     public var loadArtifacts: ((String) async throws -> [SessionFileEntry])?
     public var loadContent: ((String, String) async throws -> SessionFileContent)?
     public var loadQuality: ((String) async throws -> PodQualitySignals)?
+    public var loadCost: ((String) async throws -> PodCostBreakdownResponse)?
     public var loadPreviewStatus: ((String) async throws -> PreviewStatus)?
     public var loadValidationHistory: ((String) async throws -> [StoredValidationResponse])?
     public var isLoadingLogs: Bool
@@ -68,6 +69,7 @@ public struct DetailPanelView: View {
         loadArtifacts: ((String) async throws -> [SessionFileEntry])? = nil,
         loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
         loadQuality: ((String) async throws -> PodQualitySignals)? = nil,
+        loadCost: ((String) async throws -> PodCostBreakdownResponse)? = nil,
         loadPreviewStatus: ((String) async throws -> PreviewStatus)? = nil,
         loadValidationHistory: ((String) async throws -> [StoredValidationResponse])? = nil,
         isLoadingLogs: Bool = false,
@@ -97,6 +99,7 @@ public struct DetailPanelView: View {
         self.loadArtifacts = loadArtifacts
         self.loadContent = loadContent
         self.loadQuality = loadQuality
+        self.loadCost = loadCost
         self.loadPreviewStatus = loadPreviewStatus
         self.loadValidationHistory = loadValidationHistory
         self.isLoadingLogs = isLoadingLogs
@@ -223,7 +226,7 @@ public struct DetailPanelView: View {
                     onLoadAll: onLoadAllLogs
                 )
                 case .diff:       DiffTab(pod: pod, diffResponse: diffResponse, onRefresh: onRefreshDiff)
-                case .work:       WorkTab(pod: pod, loadQuality: loadQuality)
+                case .work:       WorkTab(pod: pod, loadQuality: loadQuality, loadCost: loadCost)
                 case .validation: ValidationTab(
                     pod: pod,
                     actions: actions,

@@ -128,9 +128,11 @@ extension ScheduledJob {
   static var previewActive: ScheduledJob {
     ScheduledJob(
       id: "abc123",
-      name: "Daily build check",
+      name: "Log triage",
+      templateId: "tmpl-log",
+      templateName: "Log triage",
       profileName: "my-app",
-      task: "Run the full test suite",
+      task: "Review logs and summarize actionable failures",
       cronExpression: "0 9 * * *",
       enabled: true,
       nextRunAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600)),
@@ -145,9 +147,11 @@ extension ScheduledJob {
   static var previewCatchup: ScheduledJob {
     ScheduledJob(
       id: "def456",
-      name: "Weekly report",
+      name: "Log triage",
+      templateId: "tmpl-log",
+      templateName: "Log triage",
       profileName: "webapp",
-      task: "Generate weekly report",
+      task: "Review logs and summarize actionable failures",
       cronExpression: "0 8 * * 1",
       enabled: true,
       nextRunAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600)),
@@ -162,15 +166,39 @@ extension ScheduledJob {
   static var previewDisabled: ScheduledJob {
     ScheduledJob(
       id: "ghi789",
-      name: "Nightly cleanup",
+      name: "Garbage cleanup",
+      templateId: "tmpl-clean",
+      templateName: "Garbage cleanup",
       profileName: "backend",
-      task: "Clean temp files",
+      task: "Remove stale temp files and summarize reclaimed disk space",
       cronExpression: "0 2 * * *",
       enabled: false,
       nextRunAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(7200)),
       lastRunAt: nil,
       lastPodId: nil,
       catchupPending: false,
+      createdAt: ISO8601DateFormatter().string(from: Date()),
+      updatedAt: ISO8601DateFormatter().string(from: Date())
+    )
+  }
+}
+
+extension ScheduledJobTemplate {
+  static var previewLogTriage: ScheduledJobTemplate {
+    ScheduledJobTemplate(
+      id: "tmpl-log",
+      name: "Log triage",
+      prompt: "Review logs and summarize actionable failures",
+      createdAt: ISO8601DateFormatter().string(from: Date()),
+      updatedAt: ISO8601DateFormatter().string(from: Date())
+    )
+  }
+
+  static var previewGarbageCleanup: ScheduledJobTemplate {
+    ScheduledJobTemplate(
+      id: "tmpl-clean",
+      name: "Garbage cleanup",
+      prompt: "Remove stale temp files and summarize reclaimed disk space",
       createdAt: ISO8601DateFormatter().string(from: Date()),
       updatedAt: ISO8601DateFormatter().string(from: Date())
     )

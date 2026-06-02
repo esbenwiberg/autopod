@@ -70,6 +70,7 @@ public struct AppRootView: View {
     MainView(
       pods: podStore.pods,
       scheduledJobs: scheduledJobStore.jobs,
+      scheduledJobTemplates: scheduledJobStore.templates,
       selectedSessionId: Binding(
         get: { podStore.selectedSessionId },
         set: { podStore.selectedSessionId = $0 }
@@ -165,6 +166,10 @@ public struct AppRootView: View {
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.getPodQuality(id)
       },
+      loadCost: { [connectionManager] (id: String) in
+        guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
+        return try await api.getPodCost(id)
+      },
       loadPreviewStatus: { [connectionManager] (id: String) in
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.previewStatus(podId: id)
@@ -220,6 +225,9 @@ public struct AppRootView: View {
       onCreateJob: { req in Task { try? await scheduledJobStore.createJob(req) } },
       onEditJob: { id, req in Task { try? await scheduledJobStore.updateJob(id, req) } },
       onDeleteJob: { job in Task { try? await scheduledJobStore.deleteJob(job.id) } },
+      onCreateJobTemplate: { req in Task { try? await scheduledJobStore.createTemplate(req) } },
+      onEditJobTemplate: { id, req in Task { try? await scheduledJobStore.updateTemplate(id, req) } },
+      onDeleteJobTemplate: { template in Task { try? await scheduledJobStore.deleteTemplate(template.id) } },
       memoryEntries: memoryStore.entries,
       activeMemories: memoryStore.activeMemories,
       pendingMemoryCandidates: memoryStore.pendingCandidates,

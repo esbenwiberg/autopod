@@ -21,6 +21,7 @@ public struct ProfileResponse: Codable, Sendable {
   public var defaultRuntime: String?
   public var executionTarget: String?
   public var customInstructions: String?
+  public var agentDonePrompt: String?
   public var escalation: EscalationConfigResponse?
   public var extends: String?
   public var workerProfile: String?
@@ -51,11 +52,14 @@ public struct ProfileResponse: Codable, Sendable {
   public var mergePollIntervalSec: Int?
   public var prProvider: String?
   public var adoPat: String?
+  public var hasAdoPat: Bool?
   public var adoPatExpiresAt: String?
   public var githubPat: String?
+  public var hasGithubPat: Bool?
   public var githubPatExpiresAt: String?
   public var privateRegistries: [PrivateRegistryResponse]
   public var registryPat: String?
+  public var hasRegistryPat: Bool?
   public var registryPatExpiresAt: String?
   public var containerMemoryGb: Double?
   public var issueWatcherEnabled: Bool?
@@ -68,7 +72,7 @@ public struct ProfileResponse: Codable, Sendable {
   public var maxBudgetExtensions: Int?
   public var pimActivations: [PimActivationResponse]?
   /// Per-field override of merge vs replace behavior for inheritance merge-special fields.
-  /// Keys: smokePages, customInstructions, escalation, mcpServers, claudeMdSections,
+  /// Keys: smokePages, customInstructions, agentDonePrompt, escalation, mcpServers, claudeMdSections,
   /// skills, privateRegistries. Values: "merge" (default) or "replace".
   public var mergeStrategy: [String: String]?
   /// Per-type sidecar configs (e.g. `sidecars.dagger`). Null = inherit.
@@ -181,6 +185,7 @@ public struct ProfileResponse: Codable, Sendable {
     defaultRuntime = try c.decodeIfPresent(String.self, forKey: .defaultRuntime)
     executionTarget = try c.decodeIfPresent(String.self, forKey: .executionTarget)
     customInstructions = try c.decodeIfPresent(String.self, forKey: .customInstructions)
+    agentDonePrompt = try c.decodeIfPresent(String.self, forKey: .agentDonePrompt)
     escalation = try c.decodeIfPresent(EscalationConfigResponse.self, forKey: .escalation)
     extends = try c.decodeIfPresent(String.self, forKey: .extends)
     workerProfile = try c.decodeIfPresent(String.self, forKey: .workerProfile)
@@ -207,11 +212,14 @@ public struct ProfileResponse: Codable, Sendable {
     mergePollIntervalSec = try c.decodeIfPresent(Int.self, forKey: .mergePollIntervalSec)
     prProvider = try c.decodeIfPresent(String.self, forKey: .prProvider)
     adoPat = try c.decodeIfPresent(String.self, forKey: .adoPat)
+    hasAdoPat = try c.decodeIfPresent(Bool.self, forKey: .hasAdoPat)
     adoPatExpiresAt = try c.decodeIfPresent(String.self, forKey: .adoPatExpiresAt)
     githubPat = try c.decodeIfPresent(String.self, forKey: .githubPat)
+    hasGithubPat = try c.decodeIfPresent(Bool.self, forKey: .hasGithubPat)
     githubPatExpiresAt = try c.decodeIfPresent(String.self, forKey: .githubPatExpiresAt)
     privateRegistries = (try c.decodeIfPresent([PrivateRegistryResponse].self, forKey: .privateRegistries)) ?? []
     registryPat = try c.decodeIfPresent(String.self, forKey: .registryPat)
+    hasRegistryPat = try c.decodeIfPresent(Bool.self, forKey: .hasRegistryPat)
     registryPatExpiresAt = try c.decodeIfPresent(String.self, forKey: .registryPatExpiresAt)
     containerMemoryGb = try c.decodeIfPresent(Double.self, forKey: .containerMemoryGb)
     issueWatcherEnabled = try c.decodeIfPresent(Bool.self, forKey: .issueWatcherEnabled)
@@ -242,10 +250,12 @@ public struct ProfileResponse: Codable, Sendable {
     smokePages = []; maxValidationAttempts = 3; defaultModel = "claude-opus-4-8"
     reviewerModel = "claude-sonnet-4-6"
     defaultRuntime = "claude"; executionTarget = "local"
+    agentDonePrompt = nil
     escalation = .init(); mcpServers = []; claudeMdSections = []; skills = []
     outputMode = "pr"; modelProvider = "anthropic"; buildTimeout = 300
     testTimeout = 600; prProvider = "github"; privateRegistries = []
     validationSetupCommand = nil
+    hasAdoPat = false; hasGithubPat = false; hasRegistryPat = false
     adoPatExpiresAt = nil; githubPatExpiresAt = nil; registryPatExpiresAt = nil
     version = 1; createdAt = ""; updatedAt = ""
   }

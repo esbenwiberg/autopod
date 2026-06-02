@@ -1,87 +1,64 @@
 import AutopodClient
 import SwiftUI
 
-/// Modal sheet for creating a new scheduled job.
+/// Modal sheet for creating a scheduled job from a reusable template.
 public struct CreateScheduledJobSheet: View {
   @Binding public var isPresented: Bool
+  public var templates: [ScheduledJobTemplate]
   public var profileNames: [String]
   public var onCreateJob: ((CreateScheduledJobRequest) -> Void)?
 
   public init(
     isPresented: Binding<Bool>,
+    templates: [ScheduledJobTemplate] = [],
     profileNames: [String] = ["my-app"],
     onCreateJob: ((CreateScheduledJobRequest) -> Void)? = nil
   ) {
     self._isPresented = isPresented
+    self.templates = templates
     self.profileNames = profileNames
     self.onCreateJob = onCreateJob
   }
 
-  private var profiles: [String] { profileNames.isEmpty ? ["my-app"] : profileNames }
+  private var profiles: [String] { profileNames.isEmpty ? ["my-app"] : profileNames.sorted() }
+  private var sortedTemplates: [ScheduledJobTemplate] { templates.sorted { $0.name < $1.name } }
 
+  @State private var selectedTemplateId = ""
   @State private var selectedProfile = ""
-  @State private var name = ""
   @State private var cronExpression = ""
-  @State private var task = ""
   @State private var enabled = true
 
   private var canCreate: Bool {
-    !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    !selectedTemplateId.isEmpty
+      && !selectedProfile.isEmpty
       && isValidCron(cronExpression)
-      && !task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   public var body: some View {
     VStack(spacing: 0) {
-      // Header
-      HStack {
-        Text("New Scheduled Job")
-          .font(.headline)
-        Spacer()
-        Button {
-          isPresented = false
-        } label: {
-          Image(systemName: "xmark.circle.fill")
-            .foregroundStyle(.tertiary)
-            .font(.title3)
-        }
-        .buttonStyle(.borderless)
-      }
-      .padding(.horizontal, 20)
-      .padding(.top, 20)
-      .padding(.bottom, 12)
-
+      header
       Divider()
 
-      // Form
       ScrollView {
         VStack(alignment: .leading, spacing: 18) {
-          // Profile
-          formSection("Profile") {
-            Picker("", selection: $selectedProfile) {
-              ForEach(profiles, id: \.self) { p in
-                Text(p).tag(p)
+          formSection("Template") {
+            Picker("", selection: $selectedTemplateId) {
+              ForEach(sortedTemplates) { template in
+                Text(template.name).tag(template.id)
               }
             }
             .labelsHidden()
           }
 
-          // Name
-          formSection("Name") {
-            HStack(spacing: 6) {
-              Image(systemName: "clock")
-                .foregroundStyle(.tertiary)
-                .font(.system(size: 11))
-              TextField("e.g. nightly-build-check", text: $name)
-                .textFieldStyle(.plain)
-                .font(.system(.callout, design: .monospaced))
+          formSection("Profile") {
+            Picker("", selection: $selectedProfile) {
+              ForEach(profiles, id: \.self) { profile in
+                Text(profile).tag(profile)
+              }
             }
-            .padding(8)
-            .background(Color(nsColor: .controlBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .labelsHidden()
           }
 
-          // Cron expression
           formSection("Schedule (cron)") {
             VStack(alignment: .leading, spacing: 4) {
               HStack(spacing: 6) {
@@ -108,31 +85,6 @@ public struct CreateScheduledJobSheet: View {
             }
           }
 
-          // Task
-          formSection("Task") {
-            TextEditor(text: $task)
-              .font(.system(.body, design: .default))
-              .frame(minHeight: 80, maxHeight: 150)
-              .padding(6)
-              .background(Color(nsColor: .controlBackgroundColor))
-              .clipShape(RoundedRectangle(cornerRadius: 6))
-              .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                  .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-              )
-              .overlay(alignment: .topLeading) {
-                if task.isEmpty {
-                  Text("Describe what the agent should do on each run...")
-                    .font(.body)
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 12)
-                    .allowsHitTesting(false)
-                }
-              }
-          }
-
-          // Enabled toggle
           formSection("State") {
             Toggle("Enable immediately", isOn: $enabled)
               .toggleStyle(.switch)
@@ -143,39 +95,60 @@ public struct CreateScheduledJobSheet: View {
       }
 
       Divider()
-
-      // Actions
-      HStack {
-        Spacer()
-        Button("Cancel") { isPresented = false }
-          .keyboardShortcut(.cancelAction)
-        Button("Create Job") {
-          let req = CreateScheduledJobRequest(
-            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-            profileName: selectedProfile,
-            task: task.trimmingCharacters(in: .whitespacesAndNewlines),
-            cronExpression: cronExpression.trimmingCharacters(in: .whitespacesAndNewlines),
-            enabled: enabled
-          )
-          onCreateJob?(req)
-          isPresented = false
-        }
-        .buttonStyle(.borderedProminent)
-        .keyboardShortcut(.defaultAction)
-        .disabled(!canCreate)
-      }
-      .padding(16)
+      actions
     }
-    .frame(minWidth: 460, maxWidth: 460, minHeight: 480)
+    .frame(minWidth: 460, maxWidth: 460, minHeight: 360)
     .background(Color(nsColor: .windowBackgroundColor))
     .onAppear {
+      if selectedTemplateId.isEmpty {
+        selectedTemplateId = sortedTemplates.first?.id ?? ""
+      }
       if selectedProfile.isEmpty {
         selectedProfile = profiles.first ?? ""
       }
     }
   }
 
-  // MARK: - Helpers
+  private var header: some View {
+    HStack {
+      Text("New Scheduled Job")
+        .font(.headline)
+      Spacer()
+      Button {
+        isPresented = false
+      } label: {
+        Image(systemName: "xmark.circle.fill")
+          .foregroundStyle(.tertiary)
+          .font(.title3)
+      }
+      .buttonStyle(.borderless)
+    }
+    .padding(.horizontal, 20)
+    .padding(.top, 20)
+    .padding(.bottom, 12)
+  }
+
+  private var actions: some View {
+    HStack {
+      Spacer()
+      Button("Cancel") { isPresented = false }
+        .keyboardShortcut(.cancelAction)
+      Button("Create Job") {
+        let req = CreateScheduledJobRequest(
+          templateId: selectedTemplateId,
+          profileName: selectedProfile,
+          cronExpression: cronExpression.trimmingCharacters(in: .whitespacesAndNewlines),
+          enabled: enabled
+        )
+        onCreateJob?(req)
+        isPresented = false
+      }
+      .buttonStyle(.borderedProminent)
+      .keyboardShortcut(.defaultAction)
+      .disabled(!canCreate)
+    }
+    .padding(16)
+  }
 
   private func isValidCron(_ expr: String) -> Bool {
     let parts = expr.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -215,12 +188,11 @@ public struct CreateScheduledJobSheet: View {
   }
 }
 
-// MARK: - Preview
-
 #Preview("Create Scheduled Job") {
   @Previewable @State var show = true
   CreateScheduledJobSheet(
     isPresented: $show,
+    templates: [.previewLogTriage, .previewGarbageCleanup],
     profileNames: ["my-app", "webapp", "backend"]
   )
 }

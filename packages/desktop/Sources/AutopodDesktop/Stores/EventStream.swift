@@ -42,7 +42,7 @@ public final class EventStream {
   private let podStore: PodStore
   private weak var memoryStore: MemoryStore?
   private weak var scheduledJobStore: ScheduledJobStore?
-  private var eventIdCounter = 0
+  private var localEventIdCounter = 0
   private var historicalRequestedScope: [String: HistoricalEventScope] = [:]
 
   private static let globalEventCap = 500
@@ -135,11 +135,14 @@ public final class EventStream {
       do {
         let events = try await api.getSessionEvents(podId, limit: requestedScope.limit)
         let mapped = events.enumerated().map { (i, e) in
-          // Use negative IDs so they never collide with the live eventIdCounter (which starts at 1)
-          mapAgentEvent(e, id: -(events.count - i))
+          // Legacy daemon responses did not include eventId, so keep a deterministic fallback.
+          mapAgentEvent(e, id: e.eventId ?? -(events.count - i))
         }
-        let liveEvents = (sessionEvents[podId] ?? []).filter { $0.id > 0 }
-        sessionEvents[podId] = mapped + liveEvents
+        let liveEvents = sessionEvents[podId] ?? []
+        sessionEvents[podId] = Self.mergeHistoricalAndLiveEvents(
+          historical: mapped,
+          live: liveEvents
+        )
         let loadedScope: HistoricalEventScope = {
           switch requestedScope {
           case .full:
@@ -190,7 +193,10 @@ public final class EventStream {
         Task { await podStore.loadDiff(podId) }
       }
 
-    case .agentActivity(let podId, let agentEvent):
+    case .agentActivity(let podId, var agentEvent):
+      if agentEvent.eventId == nil {
+        agentEvent.eventId = raw._eventId
+      }
       handleAgentActivity(podId: podId, event: agentEvent)
 
     case .validationStarted(let podId, let attempt):
@@ -298,8 +304,8 @@ public final class EventStream {
 
   private func handleAgentActivity(podId: String, event: AgentEventResponse) {
     // Build UI-level AgentEvent
-    eventIdCounter += 1
-    let uiEvent = mapAgentEvent(event, id: eventIdCounter)
+    let eventId = event.eventId ?? nextLocalEventId()
+    let uiEvent = mapAgentEvent(event, id: eventId)
 
     // Buffer events for throttled flush (avoids per-event @Observable mutations)
     pendingGlobalEvents.append(uiEvent)
@@ -377,7 +383,7 @@ public final class EventStream {
     guard !pendingGlobalEvents.isEmpty else { return }
 
     // Batch-apply global events
-    recentEvents.append(contentsOf: pendingGlobalEvents)
+    recentEvents = Self.appendDeduped(recentEvents, pendingGlobalEvents)
     if recentEvents.count > Self.globalEventCap {
       recentEvents.removeFirst(recentEvents.count - Self.globalEventCap)
     }
@@ -385,7 +391,9 @@ public final class EventStream {
     // Batch-apply per-pod events
     for (podId, event) in pendingSessionEvents {
       var buffer = sessionEvents[podId, default: []]
-      buffer.append(event)
+      if !buffer.contains(where: { $0.id == event.id }) {
+        buffer.append(event)
+      }
       if historicalEventScope[podId] != .full && buffer.count > Self.sessionEventCap {
         buffer.removeFirst(buffer.count - Self.sessionEventCap)
       }
@@ -394,6 +402,36 @@ public final class EventStream {
 
     pendingGlobalEvents.removeAll()
     pendingSessionEvents.removeAll()
+  }
+
+  private func nextLocalEventId() -> Int {
+    localEventIdCounter -= 1
+    return localEventIdCounter
+  }
+
+  public nonisolated static func mergeHistoricalAndLiveEvents(
+    historical: [AgentEvent],
+    live: [AgentEvent]
+  ) -> [AgentEvent] {
+    let historicalIds = Set(historical.map(\.id))
+    return (historical + live.filter { !historicalIds.contains($0.id) })
+      .sorted { lhs, rhs in
+        if lhs.timestamp == rhs.timestamp { return lhs.id < rhs.id }
+        return lhs.timestamp < rhs.timestamp
+      }
+  }
+
+  public nonisolated static func appendDeduped(
+    _ existing: [AgentEvent],
+    _ incoming: [AgentEvent]
+  ) -> [AgentEvent] {
+    var seen = Set(existing.map(\.id))
+    var result = existing
+    for event in incoming where !seen.contains(event.id) {
+      result.append(event)
+      seen.insert(event.id)
+    }
+    return result
   }
 
   private func mapAgentEvent(_ response: AgentEventResponse, id: Int) -> AgentEvent {

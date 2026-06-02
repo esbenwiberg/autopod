@@ -26,7 +26,7 @@ public struct CostDelta: Decodable, Equatable, Sendable {
 }
 
 public struct PhaseSegment: Decodable, Equatable, Sendable {
-    /// e.g. "agent_initial", "agent_rework_1", "review", "plan_eval", "agent_legacy"
+    /// e.g. "agent_initial", "agent_rework_1", "review", "plan_eval", "advisory", "agent_legacy"
     public let phase: String
     public let costUsd: Double
 

@@ -246,6 +246,7 @@ public struct ValidationOverrideEntry: Codable, Sendable {
 // MARK: - Agent event (mirrors packages/shared/src/types/runtime.ts AgentEvent)
 
 public struct AgentEventResponse: Codable, Sendable {
+  public var eventId: Int?
   public let type: String
   public let timestamp: String
 
@@ -299,6 +300,7 @@ public struct AgentEventResponse: Codable, Sendable {
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
+    eventId = try c.decodeIfPresent(Int.self, forKey: .eventId)
     type = try c.decode(String.self, forKey: .type)
     timestamp = try c.decode(String.self, forKey: .timestamp)
     message = try c.decodeIfPresent(String.self, forKey: .message)

@@ -9,6 +9,7 @@ public final class ScheduledJobStore {
   // MARK: - Published state
 
   public private(set) var jobs: [ScheduledJob] = []
+  public private(set) var templates: [ScheduledJobTemplate] = []
   public private(set) var isLoading = false
   public var error: String?
 
@@ -35,7 +36,10 @@ public final class ScheduledJobStore {
     isLoading = true
     error = nil
     do {
-      jobs = try await api.listScheduledJobs()
+      async let loadedJobs = api.listScheduledJobs()
+      async let loadedTemplates = api.listScheduledJobTemplates()
+      jobs = try await loadedJobs
+      templates = try await loadedTemplates
     } catch {
       self.error = error.localizedDescription
     }
@@ -105,6 +109,44 @@ public final class ScheduledJobStore {
     do {
       let job = try await api.createScheduledJob(request)
       jobs.append(job)
+    } catch {
+      self.error = error.localizedDescription
+      throw error
+    }
+  }
+
+  public func createTemplate(_ request: CreateScheduledJobTemplateRequest) async throws {
+    guard let api else { return }
+    do {
+      let template = try await api.createScheduledJobTemplate(request)
+      templates.append(template)
+      templates.sort { $0.name < $1.name }
+    } catch {
+      self.error = error.localizedDescription
+      throw error
+    }
+  }
+
+  public func updateTemplate(_ templateId: String, _ request: UpdateScheduledJobTemplateRequest) async throws {
+    guard let api else { return }
+    do {
+      let updated = try await api.updateScheduledJobTemplate(templateId, request)
+      if let idx = templates.firstIndex(where: { $0.id == templateId }) {
+        templates[idx] = updated
+      }
+      templates.sort { $0.name < $1.name }
+      jobs = try await api.listScheduledJobs()
+    } catch {
+      self.error = error.localizedDescription
+      throw error
+    }
+  }
+
+  public func deleteTemplate(_ templateId: String) async throws {
+    guard let api else { return }
+    do {
+      try await api.deleteScheduledJobTemplate(templateId)
+      templates.removeAll { $0.id == templateId }
     } catch {
       self.error = error.localizedDescription
       throw error

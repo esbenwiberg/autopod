@@ -1779,10 +1779,30 @@ public struct ValidationTab: View {
   }
 
   private func advisoryScreenshotSet(_ advisory: AdvisoryQaDetail) -> [ScreenshotRef] {
+    uniqueAdvisoryScreenshots(advisory.screenshots + advisory.observations.flatMap(\.screenshots))
+  }
+
+  private func advisoryAdditionalScreenshots(_ advisory: AdvisoryQaDetail) -> [ScreenshotRef] {
+    let observationScreenshotIds = Set(advisory.observations.flatMap(\.screenshots).map(\.id))
+    return uniqueAdvisoryScreenshots(advisory.screenshots.filter { !observationScreenshotIds.contains($0.id) })
+  }
+
+  private func advisoryObservationScreenshots(_ observation: AdvisoryQaObservationDetail) -> [ScreenshotRef] {
+    uniqueAdvisoryScreenshots(observation.screenshots)
+  }
+
+  private func uniqueAdvisoryScreenshots(_ screenshots: [ScreenshotRef]) -> [ScreenshotRef] {
     var seen: Set<String> = []
-    return (advisory.screenshots + advisory.observations.flatMap(\.screenshots)).filter { ref in
+    return screenshots.filter { ref in
       seen.insert(ref.id).inserted
     }
+  }
+
+  private func advisoryPreviewText(_ text: String, limit: Int = 220) -> String {
+    let compact = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    if compact.count <= limit { return compact }
+    return String(compact.prefix(max(0, limit - 3))).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
   }
 
   private func advisoryDisplayStatus(_ status: String) -> String {
@@ -1824,7 +1844,7 @@ public struct ValidationTab: View {
   private func advisoryQaDetail(_ advisory: AdvisoryQaDetail) -> some View {
     let displayStatus = advisoryDisplayStatus(advisory.status)
     let color = Color.secondary
-    let screenshots = advisoryScreenshotSet(advisory)
+    let additionalScreenshots = advisoryAdditionalScreenshots(advisory)
 
     VStack(alignment: .leading, spacing: 12) {
       HStack(spacing: 8) {
@@ -1853,11 +1873,7 @@ public struct ValidationTab: View {
       .clipShape(RoundedRectangle(cornerRadius: 8))
 
       if !advisory.reasoning.isEmpty {
-        Text(advisory.reasoning)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-          .textSelection(.enabled)
+        advisoryReasoningBlock(advisory.reasoning)
       }
 
       if !advisory.observations.isEmpty {
@@ -1871,15 +1887,40 @@ public struct ValidationTab: View {
         }
       }
 
-      if !screenshots.isEmpty {
+      if !additionalScreenshots.isEmpty {
         VStack(alignment: .leading, spacing: 6) {
-          Text("Advisory Screenshots")
+          Text("Additional Screenshots")
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
-          ForEach(screenshots) { screenshot in
+          ForEach(additionalScreenshots) { screenshot in
             ScreenshotThumbnail(ref: screenshot, allRefs: screenshotSet, onOpen: { openLightbox($0) })
           }
         }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func advisoryReasoningBlock(_ reasoning: String) -> some View {
+    let preview = advisoryPreviewText(reasoning)
+    if preview == reasoning {
+      Text(reasoning)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+        .textSelection(.enabled)
+    } else {
+      DisclosureGroup {
+        Text(reasoning)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+          .textSelection(.enabled)
+      } label: {
+        Text(preview)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
       }
     }
   }
@@ -1895,6 +1936,8 @@ public struct ValidationTab: View {
   @ViewBuilder
   private func advisoryObservationRow(_ observation: AdvisoryQaObservationDetail) -> some View {
     let color = Color.secondary
+    let screenshots = advisoryObservationScreenshots(observation)
+    let extraScreenshots = Array(screenshots.dropFirst())
     VStack(alignment: .leading, spacing: 7) {
       HStack(alignment: .top, spacing: 6) {
         Image(systemName: advisoryObservationIcon(observation.status))
@@ -1919,28 +1962,30 @@ public struct ValidationTab: View {
           .padding(.vertical, 2)
           .background(color.opacity(0.10), in: Capsule())
       }
-      if let details = observation.details, !details.isEmpty {
-        Text(details)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-          .textSelection(.enabled)
+      advisoryObservationDetailDisclosure(observation)
+      if let screenshot = screenshots.first {
+        ScreenshotThumbnail(
+          ref: screenshot,
+          allRefs: screenshotSet,
+          onOpen: { openLightbox($0) },
+          maxHeight: 220
+        )
       }
-      if let suggestedFacts = observation.suggestedFacts, !suggestedFacts.isEmpty {
-        VStack(alignment: .leading, spacing: 3) {
-          Text("Suggested facts")
+      if !extraScreenshots.isEmpty {
+        DisclosureGroup {
+          ForEach(extraScreenshots) { screenshot in
+            ScreenshotThumbnail(
+              ref: screenshot,
+              allRefs: screenshotSet,
+              onOpen: { openLightbox($0) },
+              maxHeight: 220
+            )
+          }
+        } label: {
+          Text("\(extraScreenshots.count) more screenshot\(extraScreenshots.count == 1 ? "" : "s")")
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.secondary)
-          ForEach(suggestedFacts, id: \.self) { fact in
-            Text(fact)
-              .font(.caption2)
-              .foregroundStyle(.secondary)
-              .fixedSize(horizontal: false, vertical: true)
-          }
         }
-      }
-      ForEach(observation.screenshots) { screenshot in
-        ScreenshotThumbnail(ref: screenshot, allRefs: screenshotSet, onOpen: { openLightbox($0) })
       }
     }
     .padding(10)
@@ -1948,6 +1993,42 @@ public struct ValidationTab: View {
     .background(Color(nsColor: .controlBackgroundColor))
     .clipShape(RoundedRectangle(cornerRadius: 8))
     .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.14), lineWidth: 1))
+  }
+
+  @ViewBuilder
+  private func advisoryObservationDetailDisclosure(_ observation: AdvisoryQaObservationDetail) -> some View {
+    let details = observation.details?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let suggestedFacts = observation.suggestedFacts ?? []
+    if details?.isEmpty == false || !suggestedFacts.isEmpty {
+      DisclosureGroup {
+        VStack(alignment: .leading, spacing: 6) {
+          if let details, !details.isEmpty {
+            Text(details)
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+              .textSelection(.enabled)
+          }
+          if !suggestedFacts.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+              Text("Suggested facts")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+              ForEach(suggestedFacts, id: \.self) { fact in
+                Text(fact)
+                  .font(.caption2)
+                  .foregroundStyle(.secondary)
+                  .fixedSize(horizontal: false, vertical: true)
+              }
+            }
+          }
+        }
+      } label: {
+        Text("Details")
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(.secondary)
+      }
+    }
   }
 
   private func advisoryObservationIcon(_ status: String) -> String {

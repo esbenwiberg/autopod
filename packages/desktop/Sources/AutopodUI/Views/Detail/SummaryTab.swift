@@ -2,18 +2,20 @@ import AutopodClient
 import MarkdownUI
 import SwiftUI
 
-/// Work tab — task, plan, task summary, deviations, and quality signals.
+/// Work tab — task, plan, task summary, deviations, quality signals, and cost.
 struct WorkTab: View {
     let pod: Pod
-    /// Optional closure for fetching session-quality signals. When nil
-    /// (previews, tests without daemon), the quality card is simply hidden.
+    /// Optional closures for fetching server-derived cards. When nil
+    /// (previews, tests without daemon), the cards are simply hidden.
     var loadQuality: ((String) async throws -> PodQualitySignals)? = nil
+    var loadCost: ((String) async throws -> PodCostBreakdownResponse)? = nil
 
     @State private var quality: PodQualitySignals? = nil
+    @State private var cost: PodCostBreakdownResponse? = nil
     @State private var selectedSection: WorkSection = .task
 
     private enum WorkSection: String, CaseIterable {
-        case task, plan, summary, deviations, quality
+        case task, plan, summary, deviations, quality, cost
 
         var label: String {
             switch self {
@@ -22,6 +24,7 @@ struct WorkTab: View {
             case .summary: "Summary"
             case .deviations: "Deviations"
             case .quality: "Quality"
+            case .cost: "Cost"
             }
         }
 
@@ -32,6 +35,7 @@ struct WorkTab: View {
             case .summary: "doc.text.below.ecg"
             case .deviations: "exclamationmark.triangle"
             case .quality: "gauge.with.dots.needle.67percent"
+            case .cost: "dollarsign.circle"
             }
         }
     }
@@ -51,6 +55,7 @@ struct WorkTab: View {
         }
         .task(id: pod.id) {
             await fetchQuality()
+            await fetchCost()
         }
         .onAppear {
             selectedSection = defaultSection
@@ -142,6 +147,12 @@ struct WorkTab: View {
             } else {
                 emptyWorkSection("No quality signals yet", icon: "gauge.with.dots.needle.67percent")
             }
+        case .cost:
+            if let cost {
+                SessionCostCard(breakdown: cost)
+            } else {
+                emptyWorkSection("No cost data yet", icon: "dollarsign.circle")
+            }
         }
     }
 
@@ -166,6 +177,15 @@ struct WorkTab: View {
             quality = try await loadQuality(pod.id)
         } catch {
             quality = nil
+        }
+    }
+
+    private func fetchCost() async {
+        guard let loadCost else { return }
+        do {
+            cost = try await loadCost(pod.id)
+        } catch {
+            cost = nil
         }
     }
 

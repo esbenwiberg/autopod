@@ -59,6 +59,7 @@ public enum ProfileMapper {
       modelProvider: provider,
       prProvider: prProvider,
       customInstructions: response.customInstructions,
+      agentDonePrompt: response.agentDonePrompt,
       containerMemoryGb: response.containerMemoryGb,
       branchPrefix: response.branchPrefix ?? "autopod/",
       hasWebUi: response.hasWebUi ?? true,
@@ -68,9 +69,9 @@ public enum ProfileMapper {
       maxBudgetExtensions: response.maxBudgetExtensions,
       issueWatcherEnabled: response.issueWatcherEnabled ?? false,
       issueWatcherLabelPrefix: response.issueWatcherLabelPrefix ?? "autopod",
-      hasGithubPat: response.githubPat != nil,
-      hasAdoPat: response.adoPat != nil,
-      hasRegistryPat: response.registryPat != nil,
+      hasGithubPat: response.hasGithubPat ?? (response.githubPat != nil),
+      hasAdoPat: response.hasAdoPat ?? (response.adoPat != nil),
+      hasRegistryPat: response.hasRegistryPat ?? (response.registryPat != nil),
       githubPatExpiresAt: response.githubPatExpiresAt,
       adoPatExpiresAt: response.adoPatExpiresAt,
       registryPatExpiresAt: response.registryPatExpiresAt,
@@ -258,7 +259,8 @@ public enum ProfileMapper {
     }
 
     // Optional fields — only include if set
-    if let v = profile.customInstructions { d["customInstructions"] = v }
+    d["customInstructions"] = profile.customInstructions ?? NSNull()
+    d["agentDonePrompt"] = profile.agentDonePrompt ?? NSNull()
     if let v = profile.testCommand { d["testCommand"] = v }
     if let v = profile.validationSetupCommand, !v.isEmpty {
       d["validationSetupCommand"] = v

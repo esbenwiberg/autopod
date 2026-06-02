@@ -114,6 +114,7 @@ private struct CostPhaseBarSectionView: View {
         "agent_initial": .blue,
         "review": .orange,
         "plan_eval": .purple,
+        "advisory": .pink,
         "agent_legacy": .gray,
     ]
 
