@@ -7,16 +7,21 @@ import {
   ValidationError,
 } from '@autopod/shared';
 import type {
+  AgentEvent,
   CreatePodRequest,
   CreateScheduledJobRequest,
+  CreateScheduledJobTemplateRequest,
   Pod,
   PodStatus,
   Profile,
+  PublicProfile,
   ScheduledJob,
+  ScheduledJobTemplate,
   SpecContract,
   SpecFile,
   UpdateFromBaseResponse,
   UpdateScheduledJobRequest,
+  UpdateScheduledJobTemplateRequest,
   ValidationResult,
   WatchedIssue,
 } from '@autopod/shared';
@@ -268,8 +273,21 @@ export class AutopodClient {
   }
 
   async getSessionLogs(id: string, buildLogs?: boolean): Promise<string> {
+    if (!buildLogs) {
+      const events = await this.getSessionEvents(id);
+      return events
+        .map(
+          (event) => `${event.timestamp} ${event.type} ${'message' in event ? event.message : ''}`,
+        )
+        .join('\n');
+    }
     const params = buildLogs ? '?build=true' : '';
     return this.request<string>('GET', `/pods/${id}/logs${params}`);
+  }
+
+  async getSessionEvents(id: string, limit?: number): Promise<AgentEvent[]> {
+    const params = limit ? `?limit=${encodeURIComponent(String(limit))}` : '';
+    return this.request<AgentEvent[]>('GET', `/pods/${id}/events${params}`);
   }
 
   async startPreview(id: string): Promise<{ previewUrl: string }> {
@@ -281,20 +299,20 @@ export class AutopodClient {
   }
 
   // Profiles
-  async listProfiles(): Promise<Profile[]> {
-    return this.request<Profile[]>('GET', '/profiles');
+  async listProfiles(): Promise<PublicProfile[]> {
+    return this.request<PublicProfile[]>('GET', '/profiles');
   }
 
-  async getProfile(name: string): Promise<Profile> {
-    return this.request<Profile>('GET', `/profiles/${name}`);
+  async getProfile(name: string): Promise<PublicProfile> {
+    return this.request<PublicProfile>('GET', `/profiles/${name}`);
   }
 
-  async createProfile(profile: Partial<Profile>): Promise<Profile> {
-    return this.request<Profile>('POST', '/profiles', profile);
+  async createProfile(profile: Partial<Profile>): Promise<PublicProfile> {
+    return this.request<PublicProfile>('POST', '/profiles', profile);
   }
 
-  async updateProfile(name: string, updates: Partial<Profile>): Promise<Profile> {
-    return this.request<Profile>('PATCH', `/profiles/${name}`, updates);
+  async updateProfile(name: string, updates: Partial<Profile>): Promise<PublicProfile> {
+    return this.request<PublicProfile>('PATCH', `/profiles/${name}`, updates);
   }
 
   async deleteProfile(name: string): Promise<void> {
@@ -308,11 +326,36 @@ export class AutopodClient {
   async setProfileCredentials(
     name: string,
     credentials: { modelProvider: string; providerCredentials: unknown; defaultRuntime?: string },
-  ): Promise<Profile> {
-    return this.request<Profile>('PATCH', `/profiles/${name}`, credentials);
+  ): Promise<PublicProfile> {
+    return this.request<PublicProfile>('PATCH', `/profiles/${name}`, credentials);
   }
 
   // Scheduled Jobs
+  async createScheduledJobTemplate(
+    req: CreateScheduledJobTemplateRequest,
+  ): Promise<ScheduledJobTemplate> {
+    return this.request<ScheduledJobTemplate>('POST', '/scheduled-job-templates', req);
+  }
+
+  async listScheduledJobTemplates(): Promise<ScheduledJobTemplate[]> {
+    return this.request<ScheduledJobTemplate[]>('GET', '/scheduled-job-templates');
+  }
+
+  async getScheduledJobTemplate(id: string): Promise<ScheduledJobTemplate> {
+    return this.request<ScheduledJobTemplate>('GET', `/scheduled-job-templates/${id}`);
+  }
+
+  async updateScheduledJobTemplate(
+    id: string,
+    req: UpdateScheduledJobTemplateRequest,
+  ): Promise<ScheduledJobTemplate> {
+    return this.request<ScheduledJobTemplate>('PUT', `/scheduled-job-templates/${id}`, req);
+  }
+
+  async deleteScheduledJobTemplate(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/scheduled-job-templates/${id}`);
+  }
+
   async createScheduledJob(req: CreateScheduledJobRequest): Promise<ScheduledJob> {
     return this.request<ScheduledJob>('POST', '/scheduled-jobs', req);
   }

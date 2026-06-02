@@ -1,5 +1,5 @@
 import { createInterface } from 'node:readline';
-import type { ScheduledJob } from '@autopod/shared';
+import type { ScheduledJob, ScheduledJobTemplate } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
@@ -47,6 +47,7 @@ function formatJobStatus(job: ScheduledJob): string {
 const jobColumns: ColumnDef<ScheduledJob>[] = [
   { header: 'ID', formatter: (j) => j.id.slice(0, 10), width: 12 },
   { header: 'NAME', key: 'name', width: 22 },
+  { header: 'TEMPLATE', key: 'templateName', width: 22 },
   { header: 'PROFILE', key: 'profileName', width: 14 },
   { header: 'CRON', key: 'cronExpression', width: 14 },
   { header: 'ENABLED', formatter: (j) => (j.enabled ? 'yes' : 'no'), width: 9 },
@@ -54,25 +55,145 @@ const jobColumns: ColumnDef<ScheduledJob>[] = [
   { header: 'STATUS', formatter: formatJobStatus, width: 16 },
 ];
 
+const templateColumns: ColumnDef<ScheduledJobTemplate>[] = [
+  { header: 'ID', formatter: (t) => t.id.slice(0, 10), width: 12 },
+  { header: 'NAME', key: 'name', width: 28 },
+  { header: 'PROMPT', formatter: (t) => t.prompt.replace(/\s+/g, ' ').slice(0, 48), width: 50 },
+];
+
+async function resolveTemplateId(client: AutopodClient, value: string): Promise<string> {
+  const templates = await client.listScheduledJobTemplates();
+  const exact = templates.find((template) => template.id === value || template.name === value);
+  if (exact) return exact.id;
+
+  const matches = templates.filter((template) =>
+    template.name.toLowerCase().includes(value.toLowerCase()),
+  );
+  if (matches.length === 1 && matches[0]) return matches[0].id;
+  if (matches.length > 1) {
+    throw new Error(
+      `Template "${value}" is ambiguous: ${matches.map((template) => template.name).join(', ')}`,
+    );
+  }
+
+  throw new Error(`Scheduled job template not found: ${value}`);
+}
+
 export function registerScheduleCommands(program: Command, getClient: () => AutopodClient): void {
   const schedule = program
     .command('schedule')
     .description('Manage scheduled jobs (ap schedule <subcommand>)');
 
-  // ap schedule create <profile> <name> <cron> <task>
+  // ap schedule create <profile> <cron> --template <id-or-name>
+  // Legacy form remains supported: ap schedule create <profile> <name> <cron> <task>
   schedule
-    .command('create <profile> <name> <cron> <task>')
+    .command('create <profile> [args...]')
     .description('Create a scheduled job')
-    .action(async (profile: string, name: string, cron: string, task: string) => {
+    .option('-t, --template <idOrName>', 'Template ID or name to use')
+    .option('--disabled', 'Create the scheduled job disabled')
+    .action(
+      async (profile: string, args: string[], opts: { template?: string; disabled?: boolean }) => {
+        const client = getClient();
+        let job: ScheduledJob;
+
+        if (opts.template) {
+          const [cron] = args;
+          if (!cron) {
+            throw new Error('Usage: ap schedule create <profile> <cron> --template <id-or-name>');
+          }
+          const templateId = await resolveTemplateId(client, opts.template);
+          job = await client.createScheduledJob({
+            profileName: profile,
+            templateId,
+            cronExpression: cron,
+            enabled: !opts.disabled,
+          });
+        } else {
+          const [name, cron, task] = args;
+          if (!name || !cron || !task) {
+            throw new Error('Usage: ap schedule create <profile> <name> <cron> <task>');
+          }
+          job = await client.createScheduledJob({
+            profileName: profile,
+            name,
+            cronExpression: cron,
+            task,
+            enabled: !opts.disabled,
+          });
+        }
+
+        console.log(chalk.green(`Schedule ${chalk.bold(job.id.slice(0, 10))} created.`));
+        console.log(`${chalk.bold('Template:')} ${job.templateName}`);
+        console.log(
+          `${chalk.bold('Next run:')} ${formatNextRun(job.nextRunAt)} (${job.nextRunAt})`,
+        );
+      },
+    );
+
+  const template = schedule.command('template').description('Manage scheduled job templates');
+
+  template
+    .command('create <name> <prompt>')
+    .description('Create a scheduled job template')
+    .action(async (name: string, prompt: string) => {
       const client = getClient();
-      const job = await client.createScheduledJob({
-        profileName: profile,
-        name,
-        cronExpression: cron,
-        task,
+      const created = await client.createScheduledJobTemplate({ name, prompt });
+      console.log(chalk.green(`Template ${chalk.bold(created.id.slice(0, 10))} created.`));
+    });
+
+  template
+    .command('list')
+    .description('List scheduled job templates')
+    .option('--json', 'Output as JSON')
+    .action(async (opts: { json?: boolean }) => {
+      const client = getClient();
+      const templates = await client.listScheduledJobTemplates();
+      withJsonOutput(opts, templates, (data) => {
+        if (data.length === 0) {
+          console.log(
+            'No scheduled job templates. Use: ap schedule template create <name> <prompt>',
+          );
+          return;
+        }
+        console.log(renderTable(data, templateColumns));
       });
-      console.log(chalk.green(`Schedule ${chalk.bold(job.id.slice(0, 10))} created.`));
-      console.log(`${chalk.bold('Next run:')} ${formatNextRun(job.nextRunAt)} (${job.nextRunAt})`);
+    });
+
+  template
+    .command('show <id>')
+    .description('Show a scheduled job template')
+    .action(async (id: string) => {
+      const client = getClient();
+      const item = await client.getScheduledJobTemplate(id);
+      console.log(`${chalk.bold('ID:')}     ${item.id}`);
+      console.log(`${chalk.bold('Name:')}   ${item.name}`);
+      console.log(`${chalk.bold('Prompt:')} ${item.prompt}`);
+    });
+
+  template
+    .command('edit <id>')
+    .description('Edit a scheduled job template')
+    .option('--name <name>', 'New template name')
+    .option('--prompt <prompt>', 'New template prompt')
+    .action(async (id: string, opts: { name?: string; prompt?: string }) => {
+      if (opts.name === undefined && opts.prompt === undefined) {
+        throw new Error('Pass at least one of --name or --prompt');
+      }
+      const client = getClient();
+      const updated = await client.updateScheduledJobTemplate(id, {
+        name: opts.name,
+        prompt: opts.prompt,
+      });
+      console.log(chalk.green(`Template ${chalk.bold(updated.id.slice(0, 10))} updated.`));
+    });
+
+  template
+    .command('delete <id>')
+    .description('Delete a scheduled job template')
+    .action(async (id: string) => {
+      const client = getClient();
+      await client.deleteScheduledJobTemplate(id);
+      console.log('Template deleted.');
     });
 
   // ap schedule list
@@ -101,6 +222,7 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
       const job = await client.getScheduledJob(id);
       console.log(`${chalk.bold('ID:')}           ${job.id}`);
       console.log(`${chalk.bold('Name:')}         ${job.name}`);
+      console.log(`${chalk.bold('Template:')}     ${job.templateName} (${job.templateId})`);
       console.log(`${chalk.bold('Profile:')}      ${job.profileName}`);
       console.log(`${chalk.bold('Cron:')}         ${job.cronExpression}`);
       console.log(`${chalk.bold('Enabled:')}      ${job.enabled ? 'yes' : 'no'}`);

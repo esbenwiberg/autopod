@@ -1,6 +1,13 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import type { AgentActivityEvent, Pod, PodStatus, SpecFile, SystemEvent } from '@autopod/shared';
+import type {
+  AgentActivityEvent,
+  AgentEvent,
+  Pod,
+  PodStatus,
+  SpecFile,
+  SystemEvent,
+} from '@autopod/shared';
 import { parseBriefs } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
@@ -454,10 +461,18 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       return;
     }
 
-    const logs = await withSpinner('Fetching logs...', () =>
-      client.getSessionLogs(resolvedId, opts.build),
-    );
-    process.stdout.write(logs);
+    if (opts.build) {
+      const logs = await withSpinner('Fetching logs...', () =>
+        client.getSessionLogs(resolvedId, opts.build),
+      );
+      process.stdout.write(logs);
+      return;
+    }
+
+    const events = await withSpinner('Fetching logs...', () => client.getSessionEvents(resolvedId));
+    for (const event of events) {
+      formatAgentLogEvent(resolvedId, event, { showReasoning: opts.showReasoning });
+    }
   }
   program
     .command('logs <id>')
@@ -889,4 +904,20 @@ function formatLogEvent(
     default:
       console.log(`${ts} ${chalk.dim(JSON.stringify(event))}`);
   }
+}
+
+function formatAgentLogEvent(
+  podId: string,
+  event: AgentEvent,
+  opts: { showReasoning?: boolean } = {},
+): void {
+  formatLogEvent(
+    {
+      type: 'pod.agent_activity',
+      timestamp: event.timestamp,
+      podId,
+      event,
+    } as AgentActivityEvent,
+    opts,
+  );
 }

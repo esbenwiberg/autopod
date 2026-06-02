@@ -16,6 +16,14 @@ vi.mock('ora', () => ({
 function createMockClient() {
   return {
     listSessions: vi.fn().mockResolvedValue([]),
+    getSessionEvents: vi.fn().mockResolvedValue([
+      {
+        type: 'status',
+        timestamp: '2026-06-02T08:00:00.000Z',
+        message: 'Creating worktree...',
+      },
+    ]),
+    getSessionLogs: vi.fn().mockResolvedValue('build log output'),
     updateFromBase: vi.fn().mockResolvedValue({ ok: true, action: 'queued_after_abort' }),
   } as unknown as AutopodClient;
 }
@@ -119,5 +127,18 @@ describe('update-from-base command', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
     logSpy.mockRestore();
     exitSpy.mockRestore();
+  });
+
+  it('prints non-follow logs from persisted events', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await program.parseAsync(['node', 'ap', 'logs', 'abcd1234']);
+
+    expect(mockClient.getSessionEvents).toHaveBeenCalledWith('abcd1234');
+    expect(mockClient.getSessionLogs).not.toHaveBeenCalled();
+    expect(logSpy.mock.calls.map((call) => call.join(' ')).join('\n')).toContain(
+      'Creating worktree...',
+    );
+    logSpy.mockRestore();
   });
 });

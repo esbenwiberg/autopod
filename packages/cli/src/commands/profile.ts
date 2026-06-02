@@ -2,7 +2,7 @@ import { spawn as cpSpawn, execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { ActionOverride, Profile } from '@autopod/shared';
+import type { ActionOverride, Profile, PublicProfile } from '@autopod/shared';
 import { ProfileNotFoundError, createProfileSchema, updateProfileSchema } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
@@ -63,13 +63,16 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         console.log(`${chalk.bold('Model:')}      ${data.defaultModel}`);
         console.log(`${chalk.bold('Runtime:')}    ${data.defaultRuntime}`);
         console.log(`${chalk.bold('Max retries:')} ${data.maxValidationAttempts}`);
+        if (data.agentDonePrompt) {
+          console.log(`${chalk.bold('Done prompt:')} ${data.agentDonePrompt.length} chars`);
+        }
         if (data.extends) {
           console.log(`${chalk.bold('Extends:')}    ${data.extends}`);
         }
         const patExpiries = [
-          data.githubPat ? `GitHub ${data.githubPatExpiresAt ?? '(no expiry)'}` : null,
-          data.adoPat ? `ADO ${data.adoPatExpiresAt ?? '(no expiry)'}` : null,
-          data.registryPat ? `Registry ${data.registryPatExpiresAt ?? '(no expiry)'}` : null,
+          hasGithubPat(data) ? `GitHub ${data.githubPatExpiresAt ?? '(no expiry)'}` : null,
+          hasAdoPat(data) ? `ADO ${data.adoPatExpiresAt ?? '(no expiry)'}` : null,
+          hasRegistryPat(data) ? `Registry ${data.registryPatExpiresAt ?? '(no expiry)'}` : null,
         ].filter(Boolean);
         if (patExpiries.length > 0) {
           console.log(`${chalk.bold('PAT expiry:')} ${patExpiries.join(', ')}`);
@@ -150,6 +153,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         reviewerModel: 'claude-sonnet-4-6',
         defaultRuntime: 'claude',
         customInstructions: null,
+        agentDonePrompt: null,
         escalation: {
           askHuman: true,
           askAi: {
@@ -204,6 +208,12 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         updatedAt: _u,
         warmImageTag: _w,
         warmImageBuiltAt: _wb,
+        hasGithubPat: _hgp,
+        hasAdoPat: _hap,
+        hasRegistryPat: _hrp,
+        githubPat: _gp,
+        adoPat: _ap,
+        registryPat: _rp,
         ...editable
       } = existing;
 
@@ -213,7 +223,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         return;
       }
 
-      const { name: _n, ...updates } = edited as Record<string, unknown>;
+      const updates = prepareProfileEditUpdates(edited as Record<string, unknown>);
       const parsed = updateProfileSchema.parse(updates) as Partial<Profile>;
       await withSpinner('Updating profile...', () => client.updateProfile(name, parsed));
       console.log(chalk.green(`Profile "${name}" updated.`));
@@ -755,6 +765,39 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       );
       console.log(chalk.green(`Warm image for "${name}" is ready.`));
     });
+}
+
+type ProfileWithOptionalPresence = Profile &
+  Partial<Pick<PublicProfile, 'hasGithubPat' | 'hasAdoPat' | 'hasRegistryPat'>>;
+
+function hasGithubPat(profile: ProfileWithOptionalPresence): boolean {
+  return profile.hasGithubPat ?? profile.githubPat !== null;
+}
+
+function hasAdoPat(profile: ProfileWithOptionalPresence): boolean {
+  return profile.hasAdoPat ?? profile.adoPat !== null;
+}
+
+function hasRegistryPat(profile: ProfileWithOptionalPresence): boolean {
+  return profile.hasRegistryPat ?? profile.registryPat !== null;
+}
+
+function prepareProfileEditUpdates(edited: Record<string, unknown>): Record<string, unknown> {
+  const {
+    name: _n,
+    hasGithubPat: _hgp,
+    hasAdoPat: _hap,
+    hasRegistryPat: _hrp,
+    ...updates
+  } = edited;
+
+  for (const field of ['githubPat', 'adoPat', 'registryPat'] as const) {
+    if (typeof updates[field] !== 'string' || updates[field].length === 0) {
+      delete updates[field];
+    }
+  }
+
+  return updates;
 }
 
 async function openInEditor(data: unknown): Promise<unknown> {

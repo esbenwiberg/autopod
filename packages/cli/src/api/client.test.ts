@@ -102,6 +102,24 @@ describe('AutopodClient', () => {
     });
   });
 
+  describe('logs', () => {
+    it('logs use persisted events', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse([{ type: 'status', timestamp: '2026-06-02T08:00:00.000Z', message: 'Ready' }]),
+      );
+
+      const result = await client.getSessionEvents('abc12345');
+
+      expect(result).toEqual([
+        { type: 'status', timestamp: '2026-06-02T08:00:00.000Z', message: 'Ready' },
+      ]);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/pods/abc12345/events',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
+  });
+
   describe('sendMessage', () => {
     it('sends POST with message body', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(undefined, 204));
@@ -154,6 +172,39 @@ describe('AutopodClient', () => {
       expect(mockFetch).toHaveBeenCalledWith(
         'http://localhost:3100/profiles/old-proj',
         expect.objectContaining({ method: 'DELETE' }),
+      );
+    });
+  });
+
+  describe('scheduled job templates', () => {
+    it('lists scheduled job templates', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse([{ id: 'tmpl-1', name: 'Log triage' }]));
+
+      const result = await client.listScheduledJobTemplates();
+
+      expect(result).toEqual([{ id: 'tmpl-1', name: 'Log triage' }]);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/scheduled-job-templates',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
+
+    it('creates a scheduled job template', async () => {
+      const template = { id: 'tmpl-1', name: 'Log triage', prompt: 'Check logs' };
+      mockFetch.mockResolvedValueOnce(jsonResponse(template, 201));
+
+      const result = await client.createScheduledJobTemplate({
+        name: 'Log triage',
+        prompt: 'Check logs',
+      });
+
+      expect(result).toEqual(template);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/scheduled-job-templates',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ name: 'Log triage', prompt: 'Check logs' }),
+        }),
       );
     });
   });
