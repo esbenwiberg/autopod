@@ -232,11 +232,7 @@ describe('askHuman', () => {
 
     expect(result).toContain('[Auto-routed to AI — ask_human is disabled for this series]');
     expect(result).toContain('AI review failed: AI reviewer requires a live pod container');
-    expect(bridge.callReviewerModel).toHaveBeenCalledWith(
-      'sess-1',
-      'What next?',
-      'series context',
-    );
+    expect(bridge.callReviewerModel).toHaveBeenCalledWith('sess-1', 'What next?', 'series context');
     expect(bridge.createEscalation).not.toHaveBeenCalled();
   });
 

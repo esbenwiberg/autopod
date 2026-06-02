@@ -1,7 +1,18 @@
 import type { Profile } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { runContainerReviewer } from '../validation/container-reviewer-runner.js';
 import { createProfileMemoryReviewer } from './memory-reviewer.js';
+
+vi.mock('../validation/container-reviewer-runner.js', async () => {
+  const actual = await vi.importActual<typeof import('../validation/container-reviewer-runner.js')>(
+    '../validation/container-reviewer-runner.js',
+  );
+  return {
+    ...actual,
+    runContainerReviewer: vi.fn(),
+  };
+});
 
 const logger = pino({ level: 'silent' });
 
@@ -52,6 +63,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  vi.mocked(runContainerReviewer).mockReset();
 });
 
 describe('createProfileMemoryReviewer', () => {
@@ -152,5 +164,135 @@ describe('createProfileMemoryReviewer', () => {
     const result = await createProfileMemoryReviewer(makeProfile(), 'gpt-5.5', logger);
 
     expect(result).toEqual({ ok: false, reason: 'openai_auth_unavailable' });
+  });
+
+  it('prefers the live container reviewer for ChatGPT/OpenAI profiles', async () => {
+    vi.mocked(runContainerReviewer).mockResolvedValue({ stdout: '{"selected":[]}' });
+
+    const result = await createProfileMemoryReviewer(makeProfile(), 'gpt-5.5', logger, {
+      container: {
+        podId: 'pod-1',
+        containerId: 'container-1',
+        containerManager: {} as never,
+        env: { OPENAI_API_KEY_FILE: '/run/autopod/openai-api-key' },
+        timeoutMs: 20_000,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    await expect(
+      result.reviewer.generateText({
+        systemPrompt: 'system',
+        userMessage: 'user',
+        maxTokens: 64,
+      }),
+    ).resolves.toBe('{"selected":[]}');
+    expect(runContainerReviewer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        podId: 'pod-1',
+        containerId: 'container-1',
+        model: 'gpt-5.5',
+        prompt: 'system\n\nuser',
+        env: { OPENAI_API_KEY_FILE: '/run/autopod/openai-api-key' },
+        timeout: 20_000,
+      }),
+    );
+  });
+
+  it('falls back to the daemon reviewer when the live container reviewer fails', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test');
+    vi.mocked(runContainerReviewer).mockRejectedValue(new Error('container timed out'));
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: '{"selected":[{"id":"mem"}]}' } }],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createProfileMemoryReviewer(makeProfile(), 'gpt-5.5', logger, {
+      container: {
+        podId: 'pod-1',
+        containerId: 'container-1',
+        containerManager: {} as never,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    await expect(
+      result.reviewer.generateText({
+        systemPrompt: 'system',
+        userMessage: 'user',
+        maxTokens: 64,
+      }),
+    ).resolves.toBe('{"selected":[{"id":"mem"}]}');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws a combined unavailable reason when container and daemon fallback both fail', async () => {
+    vi.mocked(runContainerReviewer).mockRejectedValue(new Error('container timed out'));
+
+    const result = await createProfileMemoryReviewer(makeProfile(), 'gpt-5.5', logger, {
+      container: {
+        podId: 'pod-1',
+        containerId: 'container-1',
+        containerManager: {} as never,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    await expect(
+      result.reviewer.generateText({
+        systemPrompt: 'system',
+        userMessage: 'user',
+        maxTokens: 64,
+      }),
+    ).rejects.toThrow(
+      'container_reviewer_unavailable: container timed out; daemon_reviewer_unavailable: openai_auth_unavailable',
+    );
+  });
+
+  it('does not construct daemon fallback before a successful live container review', async () => {
+    vi.mocked(runContainerReviewer).mockResolvedValue({ stdout: '{"selected":[]}' });
+
+    const result = await createProfileMemoryReviewer(makeProfile(), 'gpt-5.5', logger, {
+      container: {
+        podId: 'pod-1',
+        containerId: 'container-1',
+        containerManager: {} as never,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    await result.reviewer.generateText({
+      systemPrompt: 'system',
+      userMessage: 'user',
+      maxTokens: 64,
+    });
+    expect(runContainerReviewer).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks Copilot unavailable for automatic memory review when no daemon fallback exists', async () => {
+    const result = await createProfileMemoryReviewer(
+      makeProfile({ modelProvider: 'copilot' }),
+      'gpt-5.5',
+      logger,
+      {
+        container: {
+          podId: 'pod-1',
+          containerId: 'container-1',
+          containerManager: {} as never,
+        },
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('provider copilot is not supported');
+    expect(result.reason).toContain('daemon_reviewer_unavailable: provider_not_callable');
   });
 });

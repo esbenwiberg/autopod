@@ -1,14 +1,13 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import type { MemoryEntry, Pod, Profile } from '@autopod/shared';
 import { generateId, processContent } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { MemoryReviewer } from '../providers/memory-reviewer.js';
 import type { MemoryRepository } from './memory-repository.js';
 import type { MemoryUsageRepository } from './memory-usage-repository.js';
 
 export const MAX_RELEVANT_MEMORY_ENTRIES = 5;
 const PREFILTER_LIMIT = 20;
 const API_TIMEOUT_MS = 20_000;
-const DEFAULT_REVIEWER_MODEL = 'claude-haiku-4-5';
 
 const STOP_WORDS = new Set([
   'the',
@@ -49,7 +48,7 @@ export interface MemorySelectionResult {
 export interface MemorySelectorDeps {
   memoryRepo: MemoryRepository;
   usageRepo?: MemoryUsageRepository;
-  anthropicClient?: Anthropic;
+  reviewer?: MemoryReviewer;
   reviewerModel?: string;
   reviewerUnavailableReason?: string;
   logger: Logger;
@@ -60,7 +59,7 @@ export async function selectRelevantMemories(opts: {
   profile: Profile;
   deps: MemorySelectorDeps;
 }): Promise<MemorySelectionResult> {
-  const { pod, profile, deps } = opts;
+  const { pod, deps } = opts;
 
   if (pod.options.agentMode !== 'auto') {
     return { selected: [], unavailableReason: null };
@@ -79,23 +78,16 @@ export async function selectRelevantMemories(opts: {
     return { selected: [], unavailableReason: null };
   }
 
-  if (!deps.anthropicClient) {
+  if (!deps.reviewer) {
     const reason = deps.reviewerUnavailableReason ?? 'reviewer_model_unavailable';
     deps.logger.warn({ podId: pod.id, reason }, 'Memory ranking unavailable');
     return fallbackSelection(pod, deps.usageRepo, candidates, reason);
   }
 
-  const reviewerModel =
-    deps.reviewerModel ||
-    profile.reviewerModel ||
-    profile.defaultModel ||
-    pod.model ||
-    DEFAULT_REVIEWER_MODEL;
   const ranked = await rankWithReviewer({
     pod,
     candidates,
-    anthropicClient: deps.anthropicClient,
-    reviewerModel,
+    reviewer: deps.reviewer,
     logger: deps.logger,
   });
 
@@ -176,11 +168,10 @@ function tokenize(text: string): Set<string> {
 async function rankWithReviewer(opts: {
   pod: Pod;
   candidates: MemoryEntry[];
-  anthropicClient: Anthropic;
-  reviewerModel: string;
+  reviewer: MemoryReviewer;
   logger: Logger;
 }): Promise<{ kind: 'ranked'; selected: RelevantMemory[] } | { kind: 'failed'; reason: string }> {
-  const { pod, candidates, anthropicClient, reviewerModel, logger } = opts;
+  const { pod, candidates, reviewer, logger } = opts;
   const memoryById = new Map(candidates.map((memory) => [memory.id, memory]));
   const prompt = buildRankingPrompt(pod, candidates);
 
@@ -190,23 +181,18 @@ async function rankWithReviewer(opts: {
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(() => reject(new Error('reviewer_model_timeout')), API_TIMEOUT_MS);
     });
-    const result = await Promise.race<Anthropic.Message>([
-      anthropicClient.messages.create({
-        model: reviewerModel,
-        max_tokens: 1024,
-        system:
+    rawResponse = await Promise.race<string>([
+      reviewer.generateText({
+        maxTokens: 1024,
+        systemPrompt:
           'Rank approved Autopod memories for immediate relevance to the next coding pod. ' +
           'Return ONLY JSON: {"selected":[{"id":"memory-id","reason":"why this matters now"}]}. ' +
           'Select at most five. Include global memories only when strongly relevant. Do not invent IDs.',
-        messages: [{ role: 'user', content: prompt }],
+        userMessage: prompt,
       }),
       timeoutPromise,
     ]);
     clearTimeout(timeoutId);
-    const textBlock = result.content.find(
-      (block): block is { type: 'text'; text: string } => block.type === 'text',
-    );
-    rawResponse = textBlock?.text ?? '';
   } catch (err) {
     const reason = `reviewer_model_failed: ${err instanceof Error ? err.message : String(err)}`;
     logger.warn({ podId: pod.id, reason }, 'Reviewer model failed to rank memories');

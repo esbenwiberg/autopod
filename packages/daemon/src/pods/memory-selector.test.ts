@@ -1,4 +1,3 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import type { MemoryEntry, MemoryUsageEvent, Pod, Profile } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { MemoryRepository } from './memory-repository.js';
@@ -94,14 +93,11 @@ function makeUsageRepo(events: Array<Omit<MemoryUsageEvent, 'createdAt'>>): Memo
   };
 }
 
-function makeAnthropicClient(responseText: string): Anthropic {
+function makeReviewer(responseText: string) {
   return {
-    messages: {
-      create: vi.fn().mockResolvedValue({
-        content: [{ type: 'text', text: responseText }],
-      }),
-    },
-  } as unknown as Anthropic;
+    model: 'reviewer-model',
+    generateText: vi.fn().mockResolvedValue(responseText),
+  };
 }
 
 describe('memory selector', () => {
@@ -145,7 +141,7 @@ describe('memory selector', () => {
     );
     const usageEvents: Array<Omit<MemoryUsageEvent, 'createdAt'>> = [];
     const selectedIds = ['mem-5', 'mem-4', 'mem-3', 'mem-2', 'mem-1', 'mem-0'];
-    const client = makeAnthropicClient(
+    const reviewer = makeReviewer(
       JSON.stringify({
         selected: selectedIds.map((id) => ({ id, reason: `${id} matters now` })),
       }),
@@ -157,7 +153,7 @@ describe('memory selector', () => {
       deps: {
         memoryRepo: makeMemoryRepo(memories),
         usageRepo: makeUsageRepo(usageEvents),
-        anthropicClient: client,
+        reviewer,
         logger,
       },
     });
@@ -189,7 +185,7 @@ describe('memory selector', () => {
       profile: makeProfile(),
       deps: {
         memoryRepo: makeMemoryRepo([dependencyMemory]),
-        anthropicClient: makeAnthropicClient(
+        reviewer: makeReviewer(
           JSON.stringify({
             selected: [{ id: 'parent-memory', reason: 'Parent pod memory applies now.' }],
           }),
@@ -212,7 +208,7 @@ describe('memory selector', () => {
       }),
     ];
     const usageEvents: Array<Omit<MemoryUsageEvent, 'createdAt'>> = [];
-    const client = makeAnthropicClient('not json');
+    const reviewer = makeReviewer('not json');
 
     const result = await selectRelevantMemories({
       pod: makePod(),
@@ -220,7 +216,7 @@ describe('memory selector', () => {
       deps: {
         memoryRepo: makeMemoryRepo(memories),
         usageRepo: makeUsageRepo(usageEvents),
-        anthropicClient: client,
+        reviewer,
         logger,
       },
     });
@@ -228,6 +224,45 @@ describe('memory selector', () => {
     expect(result.unavailableReason).toContain('json_parse_failed');
     expect(result.selected.map((entry) => entry.memory.id)).toEqual(['profile', 'global']);
     expect(result.selected[0].relevanceReason).toContain('Reviewer ranking unavailable');
+    expect(usageEvents.map((event) => event.kind)).toEqual([
+      'selected',
+      'injected',
+      'selected',
+      'injected',
+    ]);
+  });
+
+  it('selects deterministic fallback memories and records evidence when reviewers are unavailable', async () => {
+    const memories = [
+      makeMemory({ id: 'profile', content: 'Authentication token refresh CLI profile memory.' }),
+      makeMemory({
+        id: 'global',
+        scope: 'global',
+        scopeId: null,
+        content: 'Authentication token refresh CLI global memory.',
+      }),
+    ];
+    const usageEvents: Array<Omit<MemoryUsageEvent, 'createdAt'>> = [];
+
+    const result = await selectRelevantMemories({
+      pod: makePod(),
+      profile: makeProfile(),
+      deps: {
+        memoryRepo: makeMemoryRepo(memories),
+        usageRepo: makeUsageRepo(usageEvents),
+        reviewerUnavailableReason:
+          'container_reviewer_unavailable: timeout; daemon_reviewer_unavailable: no_credentials',
+        logger,
+      },
+    });
+
+    expect(result.unavailableReason).toContain('container_reviewer_unavailable');
+    expect(result.selected.map((entry) => entry.memory.id)).toEqual(['profile', 'global']);
+    expect(result.selected[0]?.relevanceReason).toContain(
+      'selected by deterministic keyword prefilter',
+    );
+    expect(usageEvents).toHaveLength(4);
+    expect(usageEvents.every((event) => event.relevanceReason?.includes('timeout'))).toBe(true);
     expect(usageEvents.map((event) => event.kind)).toEqual([
       'selected',
       'injected',

@@ -8,7 +8,7 @@ import type { AgentEvent, ValidationResult } from '@autopod/shared';
  * coding agent.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { createPodManager } from './pods/pod-manager.js';
+import { AGENT_ENV_PATH, AGENT_SHIM_PATH, createPodManager } from './pods/pod-manager.js';
 import {
   completeEvent,
   createFailingValidationResult,
@@ -55,7 +55,9 @@ describe('E2E: happy path lifecycle', () => {
     // Verify infrastructure was wired up
     expect(ctx.containerManager.spawn).toHaveBeenCalledTimes(1);
     expect(ctx.worktreeManager.create).toHaveBeenCalledTimes(1);
-    expect(ctx.containerManager.writeFile).toHaveBeenCalledTimes(6); // mcp-probe.py + system-instructions.md + .claude.json + settings.json + credential guard hook + agent shim
+    expect(vi.mocked(ctx.containerManager.writeFile).mock.calls.map((call) => call[1])).toEqual(
+      expect.arrayContaining([AGENT_ENV_PATH, AGENT_SHIM_PATH]),
+    );
     expect(runtime.spawn).toHaveBeenCalledTimes(1);
     expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
 

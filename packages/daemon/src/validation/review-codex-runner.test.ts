@@ -73,6 +73,26 @@ describe('runCodexReview', () => {
     expect(harness.execs[0]?.command[2]).not.toContain('--model');
   });
 
+  it('passes reviewer env through to the container exec', async () => {
+    const harness = createHarness();
+
+    await runCodexReview({
+      podId: 'pod-1',
+      containerId: 'container-1',
+      containerManager: harness.manager,
+      model: 'auto',
+      prompt: 'review prompt',
+      env: { OPENAI_API_KEY_FILE: '/run/autopod/openai-api-key' },
+      timeout: 1234,
+    });
+
+    expect(harness.execs[0]?.options).toEqual({
+      cwd: '/workspace',
+      env: { OPENAI_API_KEY_FILE: '/run/autopod/openai-api-key' },
+      timeout: 1234,
+    });
+  });
+
   it('throws a CodexReviewError when the in-container review command fails', async () => {
     const harness = createHarness({
       stdout: 'codex review failed (exit 2)\nsh: 1: Syntax error: ";" unexpected',

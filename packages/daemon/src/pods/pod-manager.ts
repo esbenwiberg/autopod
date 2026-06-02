@@ -93,10 +93,10 @@ import { assertNoExpiredPat } from '../profiles/pat-expiry.js';
 import {
   buildClaudeConfigFiles,
   buildProviderEnv,
-  createProfileAnthropicClient,
   persistRefreshedCredentials,
 } from '../providers/index.js';
 import type { MaxCredentialLineage, ProviderEnvResult } from '../providers/index.js';
+import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import { cleanupClaudeState, ensureClaudeStateDir } from '../runtimes/claude-state-store.js';
 import { cleanupCodexState, ensureCodexStateDir } from '../runtimes/codex-state-store.js';
@@ -395,6 +395,7 @@ const CONTAINER_APP_PORT = 3000;
 
 /** Path to the agent shim script inside every pod container. */
 export const AGENT_SHIM_PATH = '/run/autopod/agent-shim.sh';
+export const AGENT_ENV_PATH = '/run/autopod/agent-env.sh';
 
 /**
  * Shim script written to every pod container before the agent exec.
@@ -409,6 +410,10 @@ export const AGENT_SHIM_PATH = '/run/autopod/agent-shim.sh';
 // backslash before a `$`, the source needs `\\` (one for JS, one survives).
 export const AGENT_SHIM_SCRIPT = `#!/bin/sh
 # Autopod agent shim — expand *_FILE env vars before exec-ing the agent
+if [ -f ${AGENT_ENV_PATH} ]; then
+  . ${AGENT_ENV_PATH}
+fi
+
 _read_file_var() {
   local var_name="$1" file_var="\${1}_FILE"
   local path
@@ -421,6 +426,17 @@ _read_file_var COPILOT_GITHUB_TOKEN
 _read_file_var VSS_NUGET_EXTERNAL_FEED_ENDPOINTS
 exec "$@"
 `;
+
+function buildAgentEnvFile(env: Record<string, string>): string {
+  return `${Object.entries(env)
+    .map(([key, value]) => {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+        throw new Error(`Invalid agent env var name: ${key}`);
+      }
+      return `export ${key}=${shellQuote(value)}`;
+    })
+    .join('\n')}\n`;
+}
 
 /**
  * Build the task string for a PR fix pod, injecting CI failure details and
@@ -918,6 +934,7 @@ export interface PodManagerDependencies {
   eventRepo?: EventRepository;
   memoryRepo?: import('./memory-repository.js').MemoryRepository;
   memoryUsageRepo?: import('./memory-usage-repository.js').MemoryUsageRepository;
+  beforeContainerCleanup?: (podId: string) => Promise<void>;
   pendingOverrideRepo?: import('./pending-override-repository.js').PendingOverrideRepository;
   enqueueSession: (podId: string) => void;
   /**
@@ -1349,6 +1366,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     mode: 'kill' | 'stop' = 'kill',
   ): Promise<void> {
     if (!pod.containerId) return;
+    if (mode === 'kill' && deps.beforeContainerCleanup) {
+      let extractionTimer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        deps
+          .beforeContainerCleanup(pod.id)
+          .catch((err) =>
+            logger.warn({ err, podId: pod.id, label }, 'Pre-cleanup memory extraction failed'),
+          )
+          .finally(() => {
+            if (extractionTimer) clearTimeout(extractionTimer);
+          }),
+        new Promise<void>((resolve) => {
+          extractionTimer = setTimeout(() => {
+            logger.warn(
+              { podId: pod.id, label, timeoutMs: 20_000 },
+              'Pre-cleanup memory extraction timed out — continuing container cleanup',
+            );
+            resolve();
+          }, 20_000);
+        }),
+      ]);
+    }
     // Stop denial receiver before killing/stopping the container so the
     // long-running socat exec gets a clean shutdown signal.
     await stopHaproxyDenyReceiver(pod.id);
@@ -5848,25 +5887,106 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Generate system instructions and deliver based on runtime
         const mcpUrl = `${mcpBaseUrl}/mcp/${podId}`;
 
+        // Build provider-aware env (API keys, OAuth creds, Foundry config) before memory
+        // ranking so automatic review can use the same prepared pod/container auth path
+        // as the agent runtime.
+        emitStatus('Building provider credentials…');
+        const providerResult = await buildProviderEnv(profile, podId, logger, { profileStore });
+        rememberMaxCredentialLineage(podId, providerResult);
+        const secretEnv: Record<string, string> = {
+          POD_ID: podId,
+          ...providerResult.env,
+        };
+
+        // Codex runtime: write OPENAI_API_KEY to a secret file, pass file path in env.
+        if (pod.runtime === 'codex' && process.env.OPENAI_API_KEY) {
+          const oaiFilePath = '/run/autopod/openai-api-key';
+          providerResult.secretFiles.push({
+            path: oaiFilePath,
+            content: process.env.OPENAI_API_KEY,
+          });
+          secretEnv.OPENAI_API_KEY_FILE = oaiFilePath;
+        }
+
+        // NuGet PAT: write to a 0400 secret file instead of passing in exec env.
+        const nugetSecret = buildNuGetSecretFile(profile.privateRegistries, effectiveRegistryPat);
+        if (nugetSecret) {
+          providerResult.secretFiles.push({ path: nugetSecret.path, content: nugetSecret.content });
+          secretEnv[nugetSecret.envFileKey] = nugetSecret.path;
+        }
+
+        // Write provider credential files to container (e.g., OAuth .credentials.json for MAX)
+        for (const file of providerResult.containerFiles) {
+          await containerManager.writeFile(containerId, file.path, file.content);
+          logger.info(
+            { podId, path: file.path, bytes: file.content.length },
+            'Wrote provider credential file to container',
+          );
+        }
+
+        // Write secret files (API keys, tokens) to /run/autopod/ with mode 0400.
+        // These are referenced by *_FILE env vars in secretEnv — the exec shim reads
+        // them and sets the real env var before starting the agent process.
+        await containerManager.execInContainer(containerId, ['mkdir', '-p', '/run/autopod'], {
+          timeout: 5_000,
+        });
+        for (const sf of providerResult.secretFiles) {
+          await containerManager.writeFile(containerId, sf.path, sf.content);
+          await containerManager.execInContainer(containerId, ['chmod', '0400', sf.path], {
+            timeout: 5_000,
+          });
+          logger.info({ podId, path: sf.path }, 'Wrote secret file to container (mode 0400)');
+        }
+        // Write the agent shim that reads *_FILE env vars and sets the real env var
+        // before exec-ing the runtime. SDKs that don't support the _FILE convention
+        // get the value via this shim so the raw secret is never in the exec's initial env.
+        await containerManager.writeFile(containerId, AGENT_ENV_PATH, buildAgentEnvFile(secretEnv));
+        await containerManager.execInContainer(containerId, ['chmod', '0400', AGENT_ENV_PATH], {
+          timeout: 5_000,
+        });
+        await containerManager.writeFile(containerId, AGENT_SHIM_PATH, AGENT_SHIM_SCRIPT);
+        await containerManager.execInContainer(containerId, ['chmod', '0500', AGENT_SHIM_PATH], {
+          timeout: 5_000,
+        });
+
         // Select approved memories before agent start. Reviewer ranking is best-effort:
         // if it is unavailable, the pod still starts with deterministic fallback context.
         let memorySelection: Awaited<ReturnType<typeof selectRelevantMemories>> | undefined;
         if (deps.memoryRepo && pod.options.agentMode === 'auto') {
           const reviewerModelId =
             profile.reviewerModel || profile.defaultModel || pod.model || 'claude-haiku-4-5';
-          const clientResult = await createProfileAnthropicClient(profile, reviewerModelId, logger);
+          const reviewerResult = await createProfileMemoryReviewer(
+            profile,
+            reviewerModelId,
+            logger,
+            {
+              container: {
+                podId,
+                containerId,
+                containerManager,
+                env: secretEnv,
+                timeoutMs: 20_000,
+              },
+            },
+          );
           memorySelection = await selectRelevantMemories({
             pod,
             profile,
             deps: {
               memoryRepo: deps.memoryRepo,
               usageRepo: deps.memoryUsageRepo,
-              anthropicClient: clientResult.ok ? clientResult.client : undefined,
-              reviewerModel: clientResult.ok ? clientResult.model : undefined,
-              reviewerUnavailableReason: clientResult.ok ? undefined : clientResult.reason,
+              reviewer: reviewerResult.ok ? reviewerResult.reviewer : undefined,
+              reviewerModel: reviewerResult.ok ? reviewerResult.model : undefined,
+              reviewerUnavailableReason: reviewerResult.ok ? undefined : reviewerResult.reason,
               logger,
             },
           });
+          if (memorySelection.unavailableReason && memorySelection.selected.length > 0) {
+            emitActivityStatus(
+              podId,
+              `Memory reviewer unavailable (${memorySelection.unavailableReason}); using deterministic keyword fallback.`,
+            );
+          }
         }
 
         const systemInstructions = generateSystemInstructions(profile, pod, mcpUrl, {
@@ -5925,62 +6045,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               }) satisfies McpServerConfig,
           ),
         ];
-
-        // Build provider-aware env (API keys, OAuth creds, Foundry config)
-        emitStatus('Building provider credentials…');
-        const providerResult = await buildProviderEnv(profile, podId, logger, { profileStore });
-        rememberMaxCredentialLineage(podId, providerResult);
-        const secretEnv: Record<string, string> = {
-          POD_ID: podId,
-          ...providerResult.env,
-        };
-
-        // Codex runtime: write OPENAI_API_KEY to a secret file, pass file path in env.
-        if (pod.runtime === 'codex' && process.env.OPENAI_API_KEY) {
-          const oaiFilePath = '/run/autopod/openai-api-key';
-          providerResult.secretFiles.push({
-            path: oaiFilePath,
-            content: process.env.OPENAI_API_KEY,
-          });
-          secretEnv.OPENAI_API_KEY_FILE = oaiFilePath;
-        }
-
-        // NuGet PAT: write to a 0400 secret file instead of passing in exec env.
-        const nugetSecret = buildNuGetSecretFile(profile.privateRegistries, effectiveRegistryPat);
-        if (nugetSecret) {
-          providerResult.secretFiles.push({ path: nugetSecret.path, content: nugetSecret.content });
-          secretEnv[nugetSecret.envFileKey] = nugetSecret.path;
-        }
-
-        // Write provider credential files to container (e.g., OAuth .credentials.json for MAX)
-        for (const file of providerResult.containerFiles) {
-          await containerManager.writeFile(containerId, file.path, file.content);
-          logger.info(
-            { podId, path: file.path, bytes: file.content.length },
-            'Wrote provider credential file to container',
-          );
-        }
-
-        // Write secret files (API keys, tokens) to /run/autopod/ with mode 0400.
-        // These are referenced by *_FILE env vars in secretEnv — the exec shim reads
-        // them and sets the real env var before starting the agent process.
-        await containerManager.execInContainer(containerId, ['mkdir', '-p', '/run/autopod'], {
-          timeout: 5_000,
-        });
-        for (const sf of providerResult.secretFiles) {
-          await containerManager.writeFile(containerId, sf.path, sf.content);
-          await containerManager.execInContainer(containerId, ['chmod', '0400', sf.path], {
-            timeout: 5_000,
-          });
-          logger.info({ podId, path: sf.path }, 'Wrote secret file to container (mode 0400)');
-        }
-        // Write the agent shim that reads *_FILE env vars and sets the real env var
-        // before exec-ing the runtime. SDKs that don't support the _FILE convention
-        // get the value via this shim so the raw secret is never in the exec's initial env.
-        await containerManager.writeFile(containerId, AGENT_SHIM_PATH, AGENT_SHIM_SCRIPT);
-        await containerManager.execInContainer(containerId, ['chmod', '0500', AGENT_SHIM_PATH], {
-          timeout: 5_000,
-        });
 
         // Verify credential files are readable by the container user
         if (providerResult.containerFiles.length > 0) {

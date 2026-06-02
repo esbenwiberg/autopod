@@ -29,6 +29,7 @@ export interface CodexReviewConfig {
   containerManager: ContainerManager;
   model: string;
   prompt: string;
+  env?: Record<string, string>;
   timeout: number;
 }
 
@@ -81,6 +82,7 @@ export async function runCodexReview(config: CodexReviewConfig): Promise<{ stdou
       ['sh', '-c', command],
       {
         cwd: '/workspace',
+        ...(config.env ? { env: config.env } : {}),
         timeout: config.timeout,
       },
     );

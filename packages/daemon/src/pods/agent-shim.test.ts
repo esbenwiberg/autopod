@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AGENT_SHIM_SCRIPT } from './pod-manager.js';
+import { AGENT_ENV_PATH, AGENT_SHIM_SCRIPT } from './pod-manager.js';
 
 // Regression: the shim is built from a JS template literal, so any unescaped
 // `${...}` gets interpolated by JS at compile time and silently corrupts the
@@ -22,6 +22,13 @@ describe('AGENT_SHIM_SCRIPT — rendered output', () => {
     expect(AGENT_SHIM_SCRIPT).toContain('_read_file_var OPENAI_API_KEY');
     expect(AGENT_SHIM_SCRIPT).toContain('_read_file_var COPILOT_GITHUB_TOKEN');
     expect(AGENT_SHIM_SCRIPT).toContain('_read_file_var VSS_NUGET_EXTERNAL_FEED_ENDPOINTS');
+  });
+
+  it('sources the pod env-pointer file before expanding *_FILE vars', () => {
+    expect(AGENT_SHIM_SCRIPT).toContain(`[ -f ${AGENT_ENV_PATH} ]`);
+    expect(AGENT_SHIM_SCRIPT.indexOf(`. ${AGENT_ENV_PATH}`)).toBeLessThan(
+      AGENT_SHIM_SCRIPT.indexOf('_read_file_var ANTHROPIC_API_KEY'),
+    );
   });
 });
 

@@ -17,6 +17,7 @@ export interface ContainerReviewerRunnerConfig {
   profile: Pick<Profile, 'modelProvider' | 'providerCredentials'>;
   model: string;
   prompt: string;
+  env?: Record<string, string>;
   timeout: number;
   logger?: Logger;
 }
@@ -28,7 +29,7 @@ export async function runContainerReviewer(
 ): Promise<{ stdout: string }> {
   if (!config.containerId) {
     throw new ContainerReviewerUnavailableError(
-      'Browser validation script reviewer unavailable: pod has no live container',
+      'Container reviewer unavailable: pod has no live container',
     );
   }
 
@@ -45,6 +46,7 @@ export async function runContainerReviewer(
       containerManager: config.containerManager,
       model: config.model,
       prompt: config.prompt,
+      env: config.env,
       timeout: config.timeout,
     });
   }
@@ -54,7 +56,7 @@ export async function runContainerReviewer(
   }
 
   throw new ContainerReviewerUnavailableError(
-    `Browser validation script reviewer unavailable: provider ${runner.provider} is not supported by the live container reviewer path`,
+    `Container reviewer unavailable: provider ${runner.provider} is not supported by the live container reviewer path`,
   );
 }
 
@@ -112,13 +114,14 @@ async function runClaudeContainerReview(
       ['sh', '-c', command],
       {
         cwd: '/workspace',
+        ...(config.env ? { env: config.env } : {}),
         timeout: config.timeout,
       },
     );
 
     if (result.exitCode !== 0) {
       throw new ContainerReviewerUnavailableError(
-        `Browser validation script reviewer unavailable: claude CLI failed in pod container (exit=${result.exitCode}): ${result.stdout || result.stderr}`,
+        `Container reviewer unavailable: claude CLI failed in pod container (exit=${result.exitCode}): ${result.stdout || result.stderr}`,
       );
     }
 
@@ -127,7 +130,7 @@ async function runClaudeContainerReview(
     if (err instanceof ContainerReviewerUnavailableError) throw err;
     const message = err instanceof Error ? err.message : String(err);
     throw new ContainerReviewerUnavailableError(
-      `Browser validation script reviewer unavailable: claude CLI failed in pod container: ${message}`,
+      `Container reviewer unavailable: claude CLI failed in pod container: ${message}`,
       { cause: err },
     );
   }
