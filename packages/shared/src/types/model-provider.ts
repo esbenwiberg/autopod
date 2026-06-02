@@ -7,8 +7,10 @@
  * - `openai`: OpenAI API key from daemon env, used by the Codex runtime
  * - `foundry`: Azure Foundry deployment with endpoint + project config
  * - `copilot`: GitHub Copilot CLI via OAuth token (`COPILOT_GITHUB_TOKEN`)
+ * - `openrouter`: OpenRouter aggregator — uses Codex runtime with a custom base URL.
+ *   Experimental: only models that pass the spike telemetry contract should be used.
  */
-export type ModelProvider = 'anthropic' | 'max' | 'openai' | 'foundry' | 'copilot';
+export type ModelProvider = 'anthropic' | 'max' | 'openai' | 'foundry' | 'copilot' | 'openrouter';
 
 /** Anthropic API key provider — uses daemon env `ANTHROPIC_API_KEY`. No per-profile creds. */
 export interface AnthropicCredentials {
@@ -108,9 +110,29 @@ export interface CopilotCredentials {
   model?: string;
 }
 
+/**
+ * OpenRouter aggregator provider.
+ *
+ * Routes the Codex runtime through OpenRouter's OpenAI-compatible endpoint.
+ * The `apiKey` is written to a secret file; `OPENAI_BASE_URL` is set to the
+ * OpenRouter endpoint so Codex resolves arbitrary provider/model strings
+ * (e.g. "deepseek/deepseek-r1", "minimax/minimax-01").
+ *
+ * Experimental — only use models that have passed the spike telemetry contract.
+ * Set `defaultRuntime: 'codex'` on the profile.
+ */
+export interface OpenRouterCredentials {
+  provider: 'openrouter';
+  /** OpenRouter API key. */
+  apiKey: string;
+  /** Override the base URL. Defaults to `https://openrouter.ai/api/v1`. */
+  baseUrl?: string;
+}
+
 export type ProviderCredentials =
   | AnthropicCredentials
   | OpenAiCredentials
   | MaxCredentials
   | FoundryCredentials
-  | CopilotCredentials;
+  | CopilotCredentials
+  | OpenRouterCredentials;

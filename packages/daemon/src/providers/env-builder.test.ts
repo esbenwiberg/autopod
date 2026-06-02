@@ -302,6 +302,70 @@ describe('buildProviderEnv', () => {
     });
   });
 
+  describe('openrouter provider', () => {
+    it('sets OPENAI_BASE_URL to openrouter default and writes key to secret file', async () => {
+      const profile = makeProfile({
+        modelProvider: 'openrouter',
+        defaultRuntime: 'codex',
+        providerCredentials: {
+          provider: 'openrouter',
+          apiKey: 'sk-or-test-key',
+        },
+      });
+
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
+
+      expect(result.env.OPENAI_BASE_URL).toBe('https://openrouter.ai/api/v1');
+      expect(result.env.OPENAI_API_KEY_FILE).toBe('/run/autopod/openrouter-api-key');
+      // Raw key must NOT be in env
+      expect(result.env.OPENAI_API_KEY).toBeUndefined();
+      expect(result.env.ANTHROPIC_API_KEY_FILE).toBeUndefined();
+      expect(result.secretFiles).toHaveLength(1);
+      expect(result.secretFiles[0]?.path).toBe('/run/autopod/openrouter-api-key');
+      expect(result.secretFiles[0]?.content).toBe('sk-or-test-key');
+      expect(result.containerFiles).toHaveLength(2); // .claude.json + settings.json
+      expect(result.requiresPostExecPersistence).toBe(false);
+    });
+
+    it('uses custom baseUrl when provided', async () => {
+      const profile = makeProfile({
+        modelProvider: 'openrouter',
+        defaultRuntime: 'codex',
+        providerCredentials: {
+          provider: 'openrouter',
+          apiKey: 'sk-or-test-key',
+          baseUrl: 'https://custom.proxy.example.com/v1',
+        },
+      });
+
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
+
+      expect(result.env.OPENAI_BASE_URL).toBe('https://custom.proxy.example.com/v1');
+    });
+
+    it('throws when credentials are missing', async () => {
+      const profile = makeProfile({
+        modelProvider: 'openrouter',
+        providerCredentials: null,
+      });
+
+      await expect(buildProviderEnv(profile, 'pod-1', logger)).rejects.toThrow(
+        'missing or mismatched providerCredentials',
+      );
+    });
+
+    it('throws when credentials have wrong provider type', async () => {
+      const profile = makeProfile({
+        modelProvider: 'openrouter',
+        providerCredentials: { provider: 'openai' },
+      });
+
+      await expect(buildProviderEnv(profile, 'pod-1', logger)).rejects.toThrow(
+        'missing or mismatched providerCredentials',
+      );
+    });
+  });
+
   describe('foundry provider — openai surface', () => {
     it('routes through OpenAI env vars instead of Anthropic when apiSurface=openai', async () => {
       const profile = makeProfile({

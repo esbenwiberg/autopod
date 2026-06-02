@@ -89,6 +89,9 @@ export async function buildProviderEnv(
     case 'copilot':
       return buildCopilotEnv(profile);
 
+    case 'openrouter':
+      return buildOpenRouterEnv(profile);
+
     default:
       // Exhaustiveness check
       throw new Error(`Unknown model provider: ${provider as string}`);
@@ -243,6 +246,40 @@ function buildCopilotEnv(profile: Profile): ProviderEnvResult {
     env,
     containerFiles: buildClaudeConfigFiles(),
     secretFiles: [{ path: filePath, content: creds.token }],
+    requiresPostExecPersistence: false,
+  };
+}
+
+const OPENROUTER_DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
+
+/**
+ * OpenRouter aggregator provider — routes the Codex runtime through OpenRouter's
+ * OpenAI-compatible endpoint by setting OPENAI_BASE_URL + injecting the API key
+ * via secret file. The model string on the pod (e.g. "deepseek/deepseek-r1") is
+ * passed straight through to OpenRouter as-is.
+ *
+ * Only use models that have passed the spike telemetry contract — tool events,
+ * file changes, token counts, and task summaries must all be observable.
+ */
+function buildOpenRouterEnv(profile: Profile): ProviderEnvResult {
+  const creds = profile.providerCredentials;
+
+  if (!creds || creds.provider !== 'openrouter') {
+    throw new Error(
+      `Profile "${profile.name}" has modelProvider=openrouter but missing or mismatched providerCredentials`,
+    );
+  }
+
+  const filePath = `${SECRET_DIR}/openrouter-api-key`;
+  const baseUrl = creds.baseUrl ?? OPENROUTER_DEFAULT_BASE_URL;
+
+  return {
+    env: {
+      OPENAI_BASE_URL: baseUrl,
+      OPENAI_API_KEY_FILE: filePath,
+    },
+    containerFiles: buildClaudeConfigFiles(),
+    secretFiles: [{ path: filePath, content: creds.apiKey }],
     requiresPostExecPersistence: false,
   };
 }
