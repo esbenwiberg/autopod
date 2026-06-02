@@ -971,6 +971,7 @@ export interface PodManager {
   sendMessage(podId: string, message: string): Promise<void>;
   notifyEscalation(podId: string, escalation: EscalationRequest): void;
   touchHeartbeat(podId: string): void;
+  getReviewerExecEnv(pod: Pod): Promise<Record<string, string> | undefined>;
   approveSession(podId: string, options?: { squash?: boolean }): Promise<void>;
   rejectSession(podId: string, reason?: string): Promise<void>;
   approveAllValidated(): Promise<{ approved: string[] }>;
@@ -9592,6 +9593,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     touchHeartbeat,
+    getReviewerExecEnv(pod: Pod): Promise<Record<string, string> | undefined> {
+      return getResumeEnv(pod);
+    },
 
     async deleteSession(podId: string): Promise<void> {
       clearPreviewTimer(podId);
