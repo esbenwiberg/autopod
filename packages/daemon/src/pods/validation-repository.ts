@@ -12,6 +12,7 @@ export interface StoredValidation {
 
 export interface ValidationRepository {
   insert(podId: string, attempt: number, result: ValidationResult): void;
+  updateResult(podId: string, attempt: number, result: ValidationResult): boolean;
   getForSession(podId: string): StoredValidation[];
 }
 
@@ -37,6 +38,21 @@ export function createValidationRepository(db: Database.Database): ValidationRep
         attempt,
         result: JSON.stringify(result),
       });
+    },
+
+    updateResult(podId: string, attempt: number, result: ValidationResult): boolean {
+      const info = db
+        .prepare(
+          `UPDATE validations
+           SET result = @result
+           WHERE pod_id = @podId AND attempt = @attempt`,
+        )
+        .run({
+          podId,
+          attempt,
+          result: JSON.stringify(result),
+        });
+      return info.changes > 0;
     },
 
     getForSession(podId: string): StoredValidation[] {

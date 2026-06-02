@@ -14,6 +14,16 @@ func validationPageScreenshot(
   }
 }
 
+public func validationHistoryShouldRefreshAfterAdvisory(
+  selectedHistory: StoredValidationResponse?,
+  progress: ValidationProgress?
+) -> Bool {
+  guard let selectedHistory else { return false }
+  guard selectedHistory.result.advisoryBrowserQa == nil else { return false }
+  guard progress?.advisoryDetail != nil else { return false }
+  return progress?.advisory.status != .running
+}
+
 /// Validation tab — shows live per-phase progress chips + a detail panel for the selected phase.
 ///
 /// Data priority:
@@ -456,6 +466,17 @@ public struct ValidationTab: View {
     }
     .onChange(of: selectedHistoryKey) { _, _ in
       selectedPhase = nil
+    }
+    .onChange(
+      of: validationHistoryShouldRefreshAfterAdvisory(
+        selectedHistory: selectedHistory,
+        progress: pod.validationProgress
+      )
+    ) { _, shouldRefresh in
+      guard shouldRefresh else { return }
+      Task {
+        await fetchValidationHistory()
+      }
     }
     .onChange(of: pod.status) { _, _ in
       updateFromBaseMessage = nil
