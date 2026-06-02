@@ -69,6 +69,13 @@ export type SpawnImpl = (
   options?: SpawnOptions,
 ) => ChildProcess;
 
+export interface ClaudeCliTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens?: number;
+  costUsd?: number;
+}
+
 /**
  * Runs the Claude CLI in print mode, piping `input` via stdin.
  *
@@ -92,13 +99,16 @@ export function runClaudeCli(opts: {
   spawnImpl?: SpawnImpl;
   /** Test seam — defaults to `'claude'`. */
   command?: string;
-  /** Test seam — defaults to `['-p', '--model', model, '--output-format', 'text']`. */
+  /** Output format for the default args. JSON lets callers capture cost/token telemetry. */
+  outputFormat?: 'text' | 'json';
+  /** Test seam — defaults to `['-p', '--model', model, '--output-format', outputFormat]`. */
   args?: readonly string[];
-}): Promise<{ stdout: string }> {
+}): Promise<{ stdout: string; tokenUsage?: ClaudeCliTokenUsage }> {
   const maxBuf = opts.maxBuffer ?? 2 * 1024 * 1024;
   const spawnFn = opts.spawnImpl ?? spawn;
   const command = opts.command ?? 'claude';
-  const args = opts.args ?? ['-p', '--model', opts.model, '--output-format', 'text'];
+  const outputFormat = opts.outputFormat ?? 'text';
+  const args = opts.args ?? ['-p', '--model', opts.model, '--output-format', outputFormat];
   const startTs = Date.now();
 
   return new Promise((resolve, reject) => {
@@ -172,7 +182,7 @@ export function runClaudeCli(opts: {
       clearTimeout(timer);
       if (maxBufferExceeded) return;
       if (code === 0) {
-        settle(() => resolve({ stdout }));
+        settle(() => resolve(parseClaudeCliStdout(stdout, outputFormat)));
         return;
       }
       settle(() =>
@@ -208,4 +218,54 @@ export function runClaudeCli(opts: {
       );
     });
   });
+}
+
+function parseClaudeCliStdout(
+  stdout: string,
+  outputFormat: 'text' | 'json',
+): { stdout: string; tokenUsage?: ClaudeCliTokenUsage } {
+  if (outputFormat !== 'json') return { stdout };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return { stdout };
+  }
+
+  const record = asRecord(parsed);
+  if (!record) return { stdout };
+
+  const result = typeof record.result === 'string' ? record.result : stdout;
+  const usage = asRecord(record.usage);
+  const inputTokens = numberField(usage?.input_tokens) ?? numberField(record.input_tokens);
+  const outputTokens = numberField(usage?.output_tokens) ?? numberField(record.output_tokens);
+  const cacheReadTokens =
+    numberField(usage?.cache_read_input_tokens) ?? numberField(record.cache_read_input_tokens);
+  const costUsd = numberField(record.total_cost_usd);
+
+  const tokenUsage =
+    inputTokens !== undefined ||
+    outputTokens !== undefined ||
+    cacheReadTokens !== undefined ||
+    costUsd !== undefined
+      ? {
+          inputTokens: inputTokens ?? 0,
+          outputTokens: outputTokens ?? 0,
+          ...(cacheReadTokens !== undefined && { cachedInputTokens: cacheReadTokens }),
+          ...(costUsd !== undefined && { costUsd }),
+        }
+      : undefined;
+
+  return { stdout: result, ...(tokenUsage && { tokenUsage }) };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function numberField(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }

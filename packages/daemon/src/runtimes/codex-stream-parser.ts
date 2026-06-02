@@ -15,9 +15,10 @@ import type { Logger } from 'pino';
  *
  * Token usage arrives in `token_count` events ahead of completion events; the
  * parser carries the most recent snapshot and flushes it as part of the final
- * `complete` AgentEvent so pod-manager's accumulator (`pod-manager.ts:~2898`)
+ * `task_complete` AgentEvent so pod-manager's accumulator (`pod-manager.ts:~2898`)
  * picks up `totalInputTokens` / `totalOutputTokens` the same way it does for
- * the Claude runtime.
+ * the Claude runtime. Codex also emits `turn_complete` for intermediate turns
+ * around tool calls; those are explicitly non-terminal.
  */
 
 interface CodexEnvelope {
@@ -449,8 +450,8 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
  * Parse `codex exec --json` JSONL into `AgentEvent` stream.
  *
  * Carries `token_count` snapshots forward and folds them into the
- * `turn_complete` / `task_complete` → `AgentCompleteEvent` so token telemetry
- * persists via the same pod-manager accumulator that handles Claude usage.
+ * `task_complete` → `AgentCompleteEvent` so token telemetry persists via the
+ * same pod-manager accumulator that handles Claude usage.
  *
  * Malformed lines are warned-and-skipped — never fatal.
  */
@@ -507,7 +508,16 @@ async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIte
       continue;
     }
 
-    if (msg.type === 'turn_complete' || msg.type === 'task_complete') {
+    if (msg.type === 'turn_complete') {
+      yield {
+        type: 'status',
+        timestamp: tsOf(env),
+        message: 'Codex turn complete',
+      };
+      continue;
+    }
+
+    if (msg.type === 'task_complete') {
       yield completeEventFromState(msg, env, latestUsage, latestModel, podId, logger);
       latestUsage = undefined;
       continue;

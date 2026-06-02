@@ -167,7 +167,7 @@ describe('CodexRuntime', () => {
           `${JSON.stringify({ id: '1', msg: { type: 'agent_message', message: 'Starting' } })}\n`,
         );
         (handle.stdout as PassThrough).write(
-          `${JSON.stringify({ id: '2', msg: { type: 'turn_complete', turn_id: 't1', last_agent_message: 'Done' } })}\n`,
+          `${JSON.stringify({ id: '2', msg: { type: 'task_complete', turn_id: 't1', last_agent_message: 'Done' } })}\n`,
         );
         // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
         (handle as any).finish(0);
@@ -202,6 +202,44 @@ describe('CodexRuntime', () => {
           'Do the thing',
         ],
         expect.objectContaining({ cwd: '/workspace' }),
+      );
+    });
+
+    it('does not treat turn_complete as final task completion', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      setTimeout(() => {
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({ id: '1', msg: { type: 'turn_complete', turn_id: 't1', last_agent_message: 'advisor answered' } })}\n`,
+        );
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(0);
+      }, 10);
+
+      const events: AgentEvent[] = [];
+      for await (const event of runtime.spawn({
+        podId: 'turn-only',
+        task: 'Do the thing',
+        model: 'o3-mini',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      })) {
+        events.push(event);
+      }
+
+      expect(events.some((event) => event.type === 'complete')).toBe(false);
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'status', message: 'Codex turn complete' }),
+          expect.objectContaining({
+            type: 'error',
+            fatal: true,
+            message: expect.stringContaining('without task_complete'),
+          }),
+        ]),
       );
     });
 
@@ -307,7 +345,7 @@ describe('CodexRuntime', () => {
       expect((errorEvent as any).fatal).toBe(true);
     });
 
-    it('terminates within grace window when stdout never closes after turn_complete', async () => {
+    it('terminates within grace window when stdout never closes after task_complete', async () => {
       // Wedged-container parity with claude-runtime: emit the parser's
       // `complete` event then deliberately leave stdout open and exit code
       // unresolved. The grace timer should end stdout and the bounded
@@ -324,7 +362,7 @@ describe('CodexRuntime', () => {
           (handle.stdout as PassThrough).write(
             `${JSON.stringify({
               id: '1',
-              msg: { type: 'turn_complete', turn_id: 't1', last_agent_message: 'Done' },
+              msg: { type: 'task_complete', turn_id: 't1', last_agent_message: 'Done' },
             })}\n`,
           );
           // Deliberately do NOT close stdout or resolve exit code.
@@ -404,7 +442,7 @@ describe('CodexRuntime', () => {
           })}\n`,
         );
         (handle.stdout as PassThrough).write(
-          `${JSON.stringify({ id: '2', msg: { type: 'turn_complete', turn_id: 't1', last_agent_message: 'Done' } })}\n`,
+          `${JSON.stringify({ id: '2', msg: { type: 'task_complete', turn_id: 't1', last_agent_message: 'Done' } })}\n`,
         );
         // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
         (handle as any).finish(0);
@@ -705,7 +743,7 @@ describe('CodexRuntime', () => {
 
       setTimeout(() => {
         (handle.stdout as PassThrough).write(
-          `${JSON.stringify({ id: '1', msg: { type: 'turn_complete', turn_id: 't1', last_agent_message: 'Fixed' } })}\n`,
+          `${JSON.stringify({ id: '1', msg: { type: 'task_complete', turn_id: 't1', last_agent_message: 'Fixed' } })}\n`,
         );
         (handle.stdout as PassThrough).push(null);
         // Resolve exitCode after stdout ends

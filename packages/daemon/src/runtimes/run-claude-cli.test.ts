@@ -21,6 +21,26 @@ describe('runClaudeCli', () => {
     expect(stdout).toBe('hi');
   });
 
+  it('extracts stdout and token usage from JSON output', async () => {
+    const { stdout, tokenUsage } = await runClaudeCli({
+      model: MODEL,
+      input: '',
+      timeout: 5_000,
+      outputFormat: 'json',
+      ...bash(
+        `printf '%s' '{"type":"result","result":"review ok","total_cost_usd":0.0123,"usage":{"input_tokens":1234,"cache_read_input_tokens":1000,"output_tokens":56}}'`,
+      ),
+    });
+
+    expect(stdout).toBe('review ok');
+    expect(tokenUsage).toEqual({
+      inputTokens: 1234,
+      cachedInputTokens: 1000,
+      outputTokens: 56,
+      costUsd: 0.0123,
+    });
+  });
+
   it('non-zero exit with stderr — captures exit code and includes stderr in message', async () => {
     await expect(
       runClaudeCli({

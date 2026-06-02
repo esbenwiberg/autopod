@@ -148,39 +148,8 @@ export class CodexRuntime implements Runtime {
       this.handles.delete(config.podId);
     }
 
-    // Bounded exit-code wait — wedged dockerd would otherwise hang us here
-    // even after the stream-grace timer destroyed stdout.
-    const exitResult = await awaitExitCodeBounded(handle.exitCode, {
-      runtimeName: 'codex-runtime',
-      podId: config.podId,
-      logger: this.logger,
-    });
-    if (exitResult.timedOut) {
-      yield {
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        message: 'Codex exit code did not resolve — container may be unresponsive',
-        fatal: false,
-      };
-    } else if (exitResult.code !== 0) {
-      const message =
-        exitResult.code === 127
-          ? 'Codex CLI not found in container image (exit 127)'
-          : `Codex process exited with code ${exitResult.code}`;
-      yield {
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        message,
-        fatal: true,
-      };
-    } else if (!outputState.sawComplete || outputState.nonStatusEvents === 0) {
-      yield {
-        type: 'error',
-        timestamp: new Date().toISOString(),
-        message: 'Codex exited successfully without JSON activity on stdout or rollout JSONL',
-        fatal: false,
-      };
-    }
+    const exitError = await this.codexExitError(config.podId, handle.exitCode, outputState);
+    if (exitError) yield exitError;
   }
 
   async *resume(
@@ -234,23 +203,18 @@ export class CodexRuntime implements Runtime {
 
     this.handles.set(podId, handle);
 
+    const outputState: OutputState = { events: 0, nonStatusEvents: 0, sawComplete: false };
+
     try {
       yield* withPostCompleteGrace(
-        withIdleLivenessProbe(
-          this.parseWithRolloutFallback(handle, podId, {
-            events: 0,
-            nonStatusEvents: 0,
-            sawComplete: false,
-          }),
-          {
-            streams: [handle.stdout, handle.stderr],
-            runtimeName: 'codex-runtime',
-            podId,
-            logger: this.logger,
-            containerManager: this.containerManager,
-            containerId,
-          },
-        ),
+        withIdleLivenessProbe(this.parseWithRolloutFallback(handle, podId, outputState), {
+          streams: [handle.stdout, handle.stderr],
+          runtimeName: 'codex-runtime',
+          podId,
+          logger: this.logger,
+          containerManager: this.containerManager,
+          containerId,
+        }),
         {
           streams: [handle.stdout, handle.stderr],
           runtimeName: 'codex-runtime',
@@ -261,6 +225,9 @@ export class CodexRuntime implements Runtime {
     } finally {
       this.handles.delete(podId);
     }
+
+    const exitError = await this.codexExitError(podId, handle.exitCode, outputState);
+    if (exitError) yield exitError;
   }
 
   async abort(podId: string): Promise<void> {
@@ -380,6 +347,64 @@ export class CodexRuntime implements Runtime {
     if (stdoutStats.sawComplete && stdoutStats.nonStatusEvents > 0) return;
 
     yield* this.replayLatestRollout(podId, seen, stdoutStats, outputState);
+  }
+
+  private async codexExitError(
+    podId: string,
+    exitCode: Promise<number>,
+    outputState: OutputState,
+  ): Promise<AgentEvent | null> {
+    // Bounded exit-code wait — wedged dockerd would otherwise hang us here
+    // even after the stream-grace timer destroyed stdout.
+    const exitResult = await awaitExitCodeBounded(exitCode, {
+      runtimeName: 'codex-runtime',
+      podId,
+      logger: this.logger,
+    });
+
+    if (exitResult.timedOut) {
+      return {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: outputState.sawComplete
+          ? 'Codex exit code did not resolve — container may be unresponsive'
+          : 'Codex exit code did not resolve before task completion — refusing to mark pod complete',
+        fatal: !outputState.sawComplete,
+      };
+    }
+
+    if (exitResult.code !== 0) {
+      const message =
+        exitResult.code === 127
+          ? 'Codex CLI not found in container image (exit 127)'
+          : `Codex process exited with code ${exitResult.code}`;
+      return {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message,
+        fatal: true,
+      };
+    }
+
+    if (!outputState.sawComplete) {
+      return {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'Codex exited without task_complete — refusing to mark pod complete',
+        fatal: true,
+      };
+    }
+
+    if (outputState.nonStatusEvents === 0) {
+      return {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'Codex exited successfully without JSON activity on stdout or rollout JSONL',
+        fatal: true,
+      };
+    }
+
+    return null;
   }
 
   private async *parseCodexLines(

@@ -390,7 +390,7 @@ describe('CodexStreamParser', () => {
   });
 
   describe('parse — stream-level integration', () => {
-    it('emits AgentCompleteEvent on turn_complete with accumulated token usage', async () => {
+    it('emits AgentCompleteEvent on task_complete with accumulated token usage', async () => {
       const stream = createMockStream([
         envelope('session_configured'),
         envelope('agent_message', { message: 'thinking' }),
@@ -407,7 +407,7 @@ describe('CodexStreamParser', () => {
             },
           },
         }),
-        envelope('turn_complete', {
+        envelope('task_complete', {
           turn_id: 't1',
           last_agent_message: 'All done.',
           duration_ms: 12_345,
@@ -432,7 +432,7 @@ describe('CodexStreamParser', () => {
       expect(toolCalls).toHaveLength(2);
     });
 
-    it('uses the most recent token_count snapshot when several arrive in a turn', async () => {
+    it('uses the most recent token_count snapshot when several arrive before completion', async () => {
       const stream = createMockStream([
         envelope('token_count', {
           info: { total_token_usage: { input_tokens: 100, output_tokens: 50 } },
@@ -440,7 +440,7 @@ describe('CodexStreamParser', () => {
         envelope('token_count', {
           info: { total_token_usage: { input_tokens: 999, output_tokens: 800 } },
         }),
-        envelope('turn_complete', { turn_id: 't1', last_agent_message: 'ok' }),
+        envelope('task_complete', { turn_id: 't1', last_agent_message: 'ok' }),
       ]);
       const events: AgentEvent[] = [];
       for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
@@ -455,7 +455,7 @@ describe('CodexStreamParser', () => {
         envelope('token_count', {
           info: { last_token_usage: { input_tokens: 10, output_tokens: 5 } },
         }),
-        envelope('turn_complete', { turn_id: 't', last_agent_message: '' }),
+        envelope('task_complete', { turn_id: 't', last_agent_message: '' }),
       ]);
       const events: AgentEvent[] = [];
       for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
@@ -472,8 +472,8 @@ describe('CodexStreamParser', () => {
         envelope('token_count', {
           info: { total_token_usage: { input_tokens: 100, output_tokens: 50 } },
         }),
-        envelope('turn_complete', { turn_id: 't1', last_agent_message: 'a' }),
-        envelope('turn_complete', { turn_id: 't2', last_agent_message: 'b' }),
+        envelope('task_complete', { turn_id: 't1', last_agent_message: 'a' }),
+        envelope('task_complete', { turn_id: 't2', last_agent_message: 'b' }),
       ]);
       const completes: AgentEvent[] = [];
       for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
@@ -487,20 +487,44 @@ describe('CodexStreamParser', () => {
 
     it('defaults to a generic result message when last_agent_message is empty', async () => {
       const stream = createMockStream([
-        envelope('turn_complete', { turn_id: 't1', last_agent_message: null }),
+        envelope('task_complete', { turn_id: 't1', last_agent_message: null }),
       ]);
       const events: AgentEvent[] = [];
       for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
         events.push(event);
       }
-      expect(events[0]).toMatchObject({ type: 'complete', result: 'Codex turn complete' });
+      expect(events[0]).toMatchObject({ type: 'complete', result: 'Codex task complete' });
+    });
+
+    it('treats turn_complete as a non-terminal heartbeat', async () => {
+      const stream = createMockStream([
+        envelope('token_count', {
+          info: { total_token_usage: { input_tokens: 42, output_tokens: 7 } },
+        }),
+        envelope('turn_complete', { turn_id: 't1', last_agent_message: 'tool answer' }),
+        envelope('task_complete', { turn_id: 't2', last_agent_message: 'done' }),
+      ]);
+      const events: AgentEvent[] = [];
+      for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
+        events.push(event);
+      }
+
+      expect(events[0]).toMatchObject({ type: 'status', message: 'Codex turn complete' });
+      const completes = events.filter((e) => e.type === 'complete');
+      expect(completes).toHaveLength(1);
+      expect(completes[0]).toMatchObject({
+        type: 'complete',
+        result: 'done',
+        totalInputTokens: 42,
+        totalOutputTokens: 7,
+      });
     });
 
     it('skips malformed JSONL lines without aborting', async () => {
       const stream = createMockStream([
         envelope('agent_message', { message: 'hi' }),
         'this is not json',
-        envelope('turn_complete', { turn_id: 't', last_agent_message: 'done' }),
+        envelope('task_complete', { turn_id: 't', last_agent_message: 'done' }),
       ]);
       const events: AgentEvent[] = [];
       for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
@@ -516,7 +540,7 @@ describe('CodexStreamParser', () => {
         '',
         '   ',
         envelope('agent_message', { message: 'x' }),
-        envelope('turn_complete', { turn_id: 't', last_agent_message: 'y' }),
+        envelope('task_complete', { turn_id: 't', last_agent_message: 'y' }),
       ]);
       const events: AgentEvent[] = [];
       for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
@@ -528,7 +552,7 @@ describe('CodexStreamParser', () => {
     it('maps patch_apply_end single file (update) to one file_change event', async () => {
       const stream = createMockStream([
         envelope('patch_apply_end', { changes: { 'src/foo.ts': { type: 'update' } } }),
-        envelope('turn_complete', { turn_id: 't', last_agent_message: 'done' }),
+        envelope('task_complete', { turn_id: 't', last_agent_message: 'done' }),
       ]);
       const events: AgentEvent[] = [];
       for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
@@ -552,7 +576,7 @@ describe('CodexStreamParser', () => {
             'src/old.ts': { type: 'delete' },
           },
         }),
-        envelope('turn_complete', { turn_id: 't', last_agent_message: 'done' }),
+        envelope('task_complete', { turn_id: 't', last_agent_message: 'done' }),
       ]);
       const events: AgentEvent[] = [];
       for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
@@ -572,7 +596,7 @@ describe('CodexStreamParser', () => {
       const stream = createMockStream([
         envelope('patch_apply_begin', { patch_id: 'p1' }),
         envelope('patch_apply_updated', { patch_id: 'p1' }),
-        envelope('turn_complete', { turn_id: 't', last_agent_message: 'done' }),
+        envelope('task_complete', { turn_id: 't', last_agent_message: 'done' }),
       ]);
       const events: AgentEvent[] = [];
       for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
@@ -582,7 +606,7 @@ describe('CodexStreamParser', () => {
       expect(events).toHaveLength(1); // only the complete event
     });
 
-    it('computes costUsd at turn_complete from session_configured model and token_count', async () => {
+    it('computes costUsd at task_complete from session_configured model and token_count', async () => {
       const inputTokens = 1_000_000;
       const outputTokens = 500_000;
       const stream = createMockStream([
@@ -590,7 +614,7 @@ describe('CodexStreamParser', () => {
         envelope('token_count', {
           info: { total_token_usage: { input_tokens: inputTokens, output_tokens: outputTokens } },
         }),
-        envelope('turn_complete', { turn_id: 't', last_agent_message: 'done' }),
+        envelope('task_complete', { turn_id: 't', last_agent_message: 'done' }),
       ]);
       const events: AgentEvent[] = [];
       for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
@@ -667,12 +691,12 @@ describe('CodexStreamParser', () => {
       expect(complete?.costUsd).toBeCloseTo(expected, 10);
     });
 
-    it('omits costUsd at turn_complete when no session_configured preceded it', async () => {
+    it('omits costUsd at task_complete when no session_configured preceded it', async () => {
       const stream = createMockStream([
         envelope('token_count', {
           info: { total_token_usage: { input_tokens: 100, output_tokens: 50 } },
         }),
-        envelope('turn_complete', { turn_id: 't', last_agent_message: 'done' }),
+        envelope('task_complete', { turn_id: 't', last_agent_message: 'done' }),
       ]);
       const events: AgentEvent[] = [];
       for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
@@ -698,7 +722,7 @@ describe('CodexStreamParser', () => {
         envelope('token_count', {
           info: { total_token_usage: { input_tokens: 100, output_tokens: 50 } },
         }),
-        envelope('turn_complete', { turn_id: 't', last_agent_message: 'done' }),
+        envelope('task_complete', { turn_id: 't', last_agent_message: 'done' }),
       ]);
       const events: AgentEvent[] = [];
       // biome-ignore lint/suspicious/noExplicitAny: test logger coercion
@@ -776,7 +800,7 @@ describe('CodexStreamParser', () => {
           timestamp: '2026-05-25T08:12:00.000Z',
           type: 'event_msg',
           payload: {
-            type: 'turn_complete',
+            type: 'task_complete',
             last_agent_message: 'Done',
           },
         }),
