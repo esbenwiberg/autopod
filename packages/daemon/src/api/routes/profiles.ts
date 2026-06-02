@@ -1,7 +1,20 @@
 import { AutopodError } from '@autopod/shared';
+import type { Profile, ProfileEditorPayload, PublicProfile } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ImageBuilder } from '../../images/index.js';
 import { type ProfileStore, buildSourceMap } from '../../profiles/index.js';
+
+function redactProfileSecrets(profile: Profile): PublicProfile {
+  return {
+    ...profile,
+    adoPat: null,
+    githubPat: null,
+    registryPat: null,
+    hasAdoPat: profile.adoPat !== null,
+    hasGithubPat: profile.githubPat !== null,
+    hasRegistryPat: profile.registryPat !== null,
+  };
+}
 
 export function profileRoutes(
   app: FastifyInstance,
@@ -13,18 +26,18 @@ export function profileRoutes(
   app.post('/profiles', async (request, reply) => {
     const profile = profileStore.create(request.body as Record<string, unknown>);
     reply.status(201);
-    return profile;
+    return redactProfileSecrets(profile);
   });
 
   // GET /profiles — list profiles
   app.get('/profiles', async () => {
-    return profileStore.list();
+    return profileStore.list().map(redactProfileSecrets);
   });
 
   // GET /profiles/:name — get profile
   app.get('/profiles/:name', async (request) => {
     const { name } = request.params as { name: string };
-    return profileStore.get(name);
+    return redactProfileSecrets(profileStore.get(name));
   });
 
   // GET /profiles/:name/editor — editor-oriented payload
@@ -41,7 +54,13 @@ export function profileRoutes(
     const parent = raw.extends ? profileStore.get(raw.extends) : null;
     const sourceMap = buildSourceMap(raw, parent);
     const credentialOwner = profileStore.resolveCredentialOwner(name);
-    return { raw, resolved, parent, sourceMap, credentialOwner };
+    return {
+      raw: redactProfileSecrets(raw),
+      resolved: redactProfileSecrets(resolved),
+      parent: parent ? redactProfileSecrets(parent) : null,
+      sourceMap,
+      credentialOwner,
+    } satisfies ProfileEditorPayload;
   });
 
   // PUT/PATCH /profiles/:name — update profile
@@ -52,7 +71,7 @@ export function profileRoutes(
     refreshNetworkPolicy(name).catch(() => {
       // Errors are logged inside refreshNetworkPolicy — don't surface to caller
     });
-    return updated;
+    return redactProfileSecrets(updated);
   };
   app.put('/profiles/:name', updateHandler);
   app.patch('/profiles/:name', updateHandler);

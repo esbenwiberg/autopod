@@ -18,6 +18,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     defaultRuntime: 'claude',
     executionTarget: 'local',
     customInstructions: null,
+    agentDonePrompt: null,
     escalation: {
       askHuman: true,
       askAi: { enabled: false, model: 'sonnet', maxCalls: 5 },
@@ -232,6 +233,26 @@ describe('resolveInheritance', () => {
     expect(resolved.customInstructions).toBe('child rules');
   });
 
+  it('should concatenate agentDonePrompt with separator', () => {
+    const parent = makeProfile({ name: 'parent', agentDonePrompt: 'run shared finish checks' });
+    const child = makeProfile({
+      name: 'child',
+      agentDonePrompt: 'run repo finish checks',
+      extends: 'parent',
+    });
+
+    const resolved = resolveInheritance(child, parent);
+    expect(resolved.agentDonePrompt).toBe('run shared finish checks\n\nrun repo finish checks');
+  });
+
+  it('should use parent agentDonePrompt when child has none', () => {
+    const parent = makeProfile({ name: 'parent', agentDonePrompt: 'run shared finish checks' });
+    const child = makeProfile({ name: 'child', agentDonePrompt: null, extends: 'parent' });
+
+    const resolved = resolveInheritance(child, parent);
+    expect(resolved.agentDonePrompt).toBe('run shared finish checks');
+  });
+
   it('should merge privateRegistries (parent first, child appended)', () => {
     const parent = makeProfile({
       name: 'parent',
@@ -353,6 +374,18 @@ describe('resolveInheritance', () => {
       });
       const resolved = resolveInheritance(child, parent);
       expect(resolved.customInstructions).toBe('child');
+    });
+
+    it('replaces agentDonePrompt with child value when mode is replace', () => {
+      const parent = makeProfile({ name: 'parent', agentDonePrompt: 'parent finish' });
+      const child = makeProfile({
+        name: 'child',
+        extends: 'parent',
+        agentDonePrompt: 'child finish',
+        mergeStrategy: { agentDonePrompt: 'replace' },
+      });
+      const resolved = resolveInheritance(child, parent);
+      expect(resolved.agentDonePrompt).toBe('child finish');
     });
 
     it('replaces escalation wholesale when mode is replace', () => {

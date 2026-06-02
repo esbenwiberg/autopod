@@ -18,6 +18,7 @@ function makeProfile(overrides?: Partial<Profile>): Profile {
     defaultRuntime: 'claude',
     executionTarget: 'local',
     customInstructions: null,
+    agentDonePrompt: null,
     escalation: {
       askHuman: true,
       askAi: { enabled: true, model: 'sonnet', maxCalls: 5 },
@@ -108,6 +109,32 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('ask_human');
     expect(md).toContain('ask_ai');
     expect(md).toContain('report_blocker');
+  });
+
+  it('includes profile finish prompt before report_task_summary when configured', () => {
+    const md = generateSystemInstructions(
+      makeProfile({
+        agentDonePrompt: 'If clawpatch.ai is available in this repo, run it and address findings.',
+      }),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+
+    const promptIndex = md.indexOf('<!-- BEGIN PROFILE AGENT DONE PROMPT -->');
+    const summaryIndex = md.indexOf('Summarise before finishing');
+    expect(promptIndex).toBeGreaterThan(0);
+    expect(summaryIndex).toBeGreaterThan(promptIndex);
+    expect(md).toContain('If clawpatch.ai is available in this repo, run it and address findings.');
+  });
+
+  it('omits profile finish prompt when not configured', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+
+    expect(md).not.toContain('PROFILE AGENT DONE PROMPT');
   });
 
   it('includes build and run commands', () => {

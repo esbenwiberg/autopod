@@ -508,8 +508,20 @@ export function generateSystemInstructions(
   lines.push(
     '4. **Check for messages**: Call `check_messages` between phases to see if the human has guidance.',
   );
+  let finishStep = 5;
+  if (profile.agentDonePrompt?.trim()) {
+    lines.push(
+      `${finishStep}. **Run the profile finish prompt before summarising**: Follow this profile-specific guidance before \`report_task_summary\`.`,
+    );
+    lines.push('');
+    lines.push('<!-- BEGIN PROFILE AGENT DONE PROMPT -->');
+    lines.push(profile.agentDonePrompt);
+    lines.push('<!-- END PROFILE AGENT DONE PROMPT -->');
+    lines.push('');
+    finishStep += 1;
+  }
   lines.push(
-    '5. **Summarise before finishing**: As your very last step, call `report_task_summary` with:',
+    `${finishStep}. **Summarise before finishing**: As your very last step, call \`report_task_summary\` with:`,
   );
   lines.push(
     '   - `actualSummary`: 2–4 sentences describing what the user gains — focus on outcomes and ' +
@@ -541,7 +553,7 @@ export function generateSystemInstructions(
       'whether they were justified. A well-reasoned deviation is better than silently skipping a step.',
   );
   lines.push(
-    '6. **Phases are yours to define**: Name them whatever makes sense for the task. Common patterns:',
+    `${finishStep + 1}. **Phases are yours to define**: Name them whatever makes sense for the task. Common patterns:`,
   );
   lines.push('   - Exploration → Implementation → Testing → Cleanup');
   lines.push('   - Analysis → Design → Build → Verify');

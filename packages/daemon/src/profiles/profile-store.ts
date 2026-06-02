@@ -156,6 +156,7 @@ export function rowToProfile(
     defaultRuntime: nullableStr(row.default_runtime) as Profile['defaultRuntime'],
     executionTarget: nullableStr(row.execution_target) as Profile['executionTarget'],
     customInstructions: nullableStr(row.custom_instructions),
+    agentDonePrompt: nullableStr(row.agent_done_prompt),
     escalation:
       row.escalation_config === null || row.escalation_config === undefined
         ? null
@@ -341,7 +342,7 @@ export function createProfileStore(
         INSERT INTO profiles (
           name, repo_url, default_branch, template, build_command, start_command, build_work_dir,
           health_path, health_timeout, validation_pages, max_validation_attempts,
-          default_model, reviewer_model, default_runtime, execution_target, custom_instructions, escalation_config,
+          default_model, reviewer_model, default_runtime, execution_target, custom_instructions, agent_done_prompt, escalation_config,
           extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
           agent_mode, output_target, validate, advisory_browser_qa_enabled, promotable,
           model_provider, provider_credentials, test_command, validation_setup_command, pr_provider,
@@ -363,7 +364,7 @@ export function createProfileStore(
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand, @buildWorkDir,
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
-          @defaultModel, @reviewerModel, @defaultRuntime, @executionTarget, @customInstructions, @escalationConfig,
+          @defaultModel, @reviewerModel, @defaultRuntime, @executionTarget, @customInstructions, @agentDonePrompt, @escalationConfig,
           @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
           @agentMode, @outputTarget, @validate, @advisoryBrowserQaEnabled, @promotable,
           @modelProvider, @providerCredentials, @testCommand, @validationSetupCommand, @prProvider,
@@ -400,6 +401,7 @@ export function createProfileStore(
         defaultRuntime: parsed.defaultRuntime,
         executionTarget: parsed.executionTarget,
         customInstructions: parsed.customInstructions,
+        agentDonePrompt: parsed.agentDonePrompt,
         escalationConfig: parsed.escalation === null ? null : JSON.stringify(parsed.escalation),
         extends: parsed.extends,
         workerProfile: parsed.workerProfile ?? null,
@@ -603,6 +605,10 @@ export function createProfileStore(
       if (parsed.customInstructions !== undefined) {
         setClauses.push('custom_instructions = @customInstructions');
         fieldMap.customInstructions = parsed.customInstructions;
+      }
+      if (parsed.agentDonePrompt !== undefined) {
+        setClauses.push('agent_done_prompt = @agentDonePrompt');
+        fieldMap.agentDonePrompt = parsed.agentDonePrompt;
       }
       if (parsed.escalation !== undefined) {
         setClauses.push('escalation_config = @escalationConfig');

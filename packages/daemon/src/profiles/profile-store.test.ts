@@ -68,6 +68,7 @@ describe('ProfileStore', () => {
       expect(profile.defaultModel).toBe('claude-opus-4-8');
       expect(profile.defaultRuntime).toBe('claude');
       expect(profile.customInstructions).toBeNull();
+      expect(profile.agentDonePrompt).toBeNull();
       expect(profile.extends).toBeNull();
       expect(profile.branchPrefix).toBe('autopod/');
       expect(profile.smokePages).toEqual([]);
@@ -136,6 +137,7 @@ describe('ProfileStore', () => {
         defaultModel: 'claude-sonnet-4-6',
         defaultRuntime: 'claude',
         customInstructions: 'Be careful',
+        agentDonePrompt: 'Run clawpatch.ai when available',
         escalation: {
           askHuman: false,
           askAi: { enabled: true, model: 'claude-opus-4-8', maxCalls: 10 },
@@ -153,6 +155,7 @@ describe('ProfileStore', () => {
       expect(profile.maxValidationAttempts).toBe(5);
       expect(profile.defaultModel).toBe('claude-sonnet-4-6');
       expect(profile.customInstructions).toBe('Be careful');
+      expect(profile.agentDonePrompt).toBe('Run clawpatch.ai when available');
       expect(profile.escalation.askHuman).toBe(false);
       expect(profile.escalation.askAi.enabled).toBe(true);
     });
@@ -265,6 +268,7 @@ describe('ProfileStore', () => {
       expect(raw.pod).toBeNull();
       // Object/array defaults likewise.
       expect(raw.escalation).toBeNull();
+      expect(raw.agentDonePrompt).toBeNull();
       // Resolved view pulls the parent's values.
       const resolved = store.get('child');
       expect(resolved.defaultBranch).toBe('main');
@@ -278,16 +282,23 @@ describe('ProfileStore', () => {
     });
 
     it('should return resolved profile with inheritance applied', () => {
-      store.create({ ...validInput, name: 'parent', customInstructions: 'parent rules' });
+      store.create({
+        ...validInput,
+        name: 'parent',
+        customInstructions: 'parent rules',
+        agentDonePrompt: 'parent finish',
+      });
       store.create({
         ...validInput,
         name: 'child',
         extends: 'parent',
         customInstructions: 'child rules',
+        agentDonePrompt: 'child finish',
       });
 
       const resolved = store.get('child');
       expect(resolved.customInstructions).toBe('parent rules\n\nchild rules');
+      expect(resolved.agentDonePrompt).toBe('parent finish\n\nchild finish');
     });
   });
 
@@ -371,11 +382,23 @@ describe('ProfileStore', () => {
       store.create({
         ...validInput,
         customInstructions: 'keep this',
+        agentDonePrompt: 'finish this way',
         healthTimeout: 200,
       });
       const updated = store.update('my-app', { buildCommand: 'pnpm build' });
       expect(updated.customInstructions).toBe('keep this');
+      expect(updated.agentDonePrompt).toBe('finish this way');
       expect(updated.healthTimeout).toBe(200);
+    });
+
+    it('should update agentDonePrompt and clear it with null', () => {
+      store.create(validInput);
+      const updated = store.update('my-app', {
+        agentDonePrompt: 'Run clawpatch.ai when available',
+      });
+      expect(updated.agentDonePrompt).toBe('Run clawpatch.ai when available');
+      const cleared = store.update('my-app', { agentDonePrompt: null });
+      expect(cleared.agentDonePrompt).toBeNull();
     });
 
     it('should verify new parent exists when changing extends', () => {
@@ -784,6 +807,7 @@ describe('ProfileStore', () => {
         ...validInput,
         name: 'grandparent',
         customInstructions: 'gp rules',
+        agentDonePrompt: 'gp finish',
         smokePages: [{ path: '/gp' }],
       });
       store.create({
@@ -791,6 +815,7 @@ describe('ProfileStore', () => {
         name: 'parent',
         extends: 'grandparent',
         customInstructions: 'parent rules',
+        agentDonePrompt: 'parent finish',
         smokePages: [{ path: '/parent' }],
       });
       store.create({
@@ -798,11 +823,13 @@ describe('ProfileStore', () => {
         name: 'child',
         extends: 'parent',
         customInstructions: 'child rules',
+        agentDonePrompt: 'child finish',
         smokePages: [{ path: '/child' }],
       });
 
       const resolved = store.get('child');
       expect(resolved.customInstructions).toBe('gp rules\n\nparent rules\n\nchild rules');
+      expect(resolved.agentDonePrompt).toBe('gp finish\n\nparent finish\n\nchild finish');
       expect(resolved.smokePages).toEqual([
         { path: '/gp' },
         { path: '/parent' },

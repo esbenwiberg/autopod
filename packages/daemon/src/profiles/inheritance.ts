@@ -18,6 +18,7 @@ const SPECIAL_MERGE_FIELDS: ReadonlySet<keyof Profile> = new Set([
   'smokePages',
   'escalation',
   'customInstructions',
+  'agentDonePrompt',
   'mcpServers',
   'claudeMdSections',
   'skills',
@@ -74,14 +75,17 @@ export function resolveInheritance(child: Profile, parent: Profile): Profile {
     } as EscalationConfig;
   }
 
-  // customInstructions: concatenate with separator (or use child-only — including null — on replace)
-  if (strategy.customInstructions === 'replace') {
-    resolved.customInstructions = child.customInstructions;
-  } else if (parent.customInstructions && child.customInstructions) {
-    resolved.customInstructions = `${parent.customInstructions}\n\n${child.customInstructions}`;
-  } else {
-    resolved.customInstructions = child.customInstructions ?? parent.customInstructions;
-  }
+  // Text prompt fields: concatenate with separator (or use child-only — including null — on replace)
+  resolved.customInstructions = mergeNullableText(
+    parent.customInstructions,
+    child.customInstructions,
+    strategy.customInstructions,
+  );
+  resolved.agentDonePrompt = mergeNullableText(
+    parent.agentDonePrompt,
+    child.agentDonePrompt,
+    strategy.agentDonePrompt,
+  );
 
   // mcpServers: merge by name (parent first, child overrides) or child-only on replace
   resolved.mcpServers =
@@ -116,6 +120,16 @@ export function resolveInheritance(child: Profile, parent: Profile): Profile {
   }
 
   return resolved;
+}
+
+function mergeNullableText(
+  parentValue: string | null,
+  childValue: string | null,
+  mode: 'merge' | 'replace' | undefined,
+): string | null {
+  if (mode === 'replace') return childValue;
+  if (parentValue && childValue) return `${parentValue}\n\n${childValue}`;
+  return childValue ?? parentValue;
 }
 
 /**
