@@ -510,6 +510,7 @@ function prManagerFactory(
 
 // Pending MCP ask_human requests — created before podManager so both can share the map
 const pendingRequestsByPod = new Map<string, PendingRequests>();
+let preCleanupMemoryExtraction: (podId: string) => Promise<void> = async () => {};
 
 podManager = createPodManager({
   podRepo,
@@ -542,6 +543,7 @@ podManager = createPodManager({
   sessionTokenIssuer,
   memoryRepo,
   memoryUsageRepo,
+  beforeContainerCleanup: (podId) => preCleanupMemoryExtraction(podId),
   pendingOverrideRepo,
   getSecret: (ref: string) => process.env[ref],
   repoScanner,
@@ -645,8 +647,10 @@ const memoryCandidateRecorder = createMemoryCandidateRecorder({
   eventRepo,
   escalationRepo,
   validationRepo,
+  containerManagerFactory,
   logger,
 });
+preCleanupMemoryExtraction = (podId) => memoryCandidateRecorder.extractNow(podId);
 memoryCandidateRecorder.start();
 
 // Issue watcher (polls GitHub Issues / ADO Work Items for labeled issues)

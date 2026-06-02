@@ -129,6 +129,7 @@ describe('MemoryCandidateRecorder', () => {
   let validationRepo: ReturnType<typeof createValidationRepository>;
   let eventBus: ReturnType<typeof createEventBus>;
   let mockProfileStore: { get: ReturnType<typeof vi.fn> };
+  let containerManagerFactory: { get: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     db = createTestDb();
@@ -144,6 +145,7 @@ describe('MemoryCandidateRecorder', () => {
     eventBus = createEventBus(eventRepo, logger);
 
     mockProfileStore = { get: vi.fn().mockReturnValue(makeProfile()) };
+    containerManagerFactory = { get: vi.fn(() => ({}) as never) };
 
     vi.mocked(createProfileMemoryReviewer).mockResolvedValue({
       ok: true,
@@ -161,7 +163,7 @@ describe('MemoryCandidateRecorder', () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
   }
 
-  function makeRecorder() {
+  function makeRecorder(options: { withContainerFactory?: boolean } = {}) {
     return createMemoryCandidateRecorder({
       eventBus,
       podRepo,
@@ -172,6 +174,7 @@ describe('MemoryCandidateRecorder', () => {
       eventRepo,
       escalationRepo,
       validationRepo,
+      ...(options.withContainerFactory ? { containerManagerFactory } : {}),
       logger,
     });
   }
@@ -600,6 +603,99 @@ describe('MemoryCandidateRecorder', () => {
     expect(attemptRepo.getByPod(POD_ID)).toMatchObject({
       status: 'reviewer_unavailable',
       reason: 'no_anthropic_api_key',
+    });
+  });
+
+  it('prefers a live container reviewer for high-signal extraction', async () => {
+    podRepo.insert(basePod({ status: 'complete' }));
+    podRepo.update(POD_ID, { prFixAttempts: 2, containerId: 'container-1' });
+
+    const recorder = makeRecorder({ withContainerFactory: true });
+    await recorder.extractNow(POD_ID);
+
+    expect(createProfileMemoryReviewer).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(String),
+      expect.any(Object),
+      {
+        container: {
+          podId: POD_ID,
+          containerId: 'container-1',
+          containerManager: expect.any(Object),
+          timeoutMs: 20_000,
+        },
+      },
+    );
+    expect(candidateRepo.list('test-profile')).toHaveLength(1);
+    expect(attemptRepo.getByPod(POD_ID)?.status).toBe('candidate_created');
+  });
+
+  it('falls back to daemon reviewer construction when the live container is unavailable', async () => {
+    podRepo.insert(basePod({ status: 'complete' }));
+    podRepo.update(POD_ID, { prFixAttempts: 2 });
+
+    const recorder = makeRecorder({ withContainerFactory: true });
+    await recorder.extractNow(POD_ID);
+
+    expect(createProfileMemoryReviewer).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(String),
+      expect.any(Object),
+      {},
+    );
+    expect(candidateRepo.list('test-profile')).toHaveLength(1);
+    expect(attemptRepo.getByPod(POD_ID)?.status).toBe('candidate_created');
+  });
+
+  it('records reviewer_unavailable when container and daemon reviewers are unavailable', async () => {
+    vi.mocked(createProfileMemoryReviewer).mockResolvedValue({
+      ok: false,
+      reason:
+        'container_reviewer_unavailable: timeout; daemon_reviewer_unavailable: openai_auth_unavailable',
+    });
+    podRepo.insert(basePod({ status: 'complete' }));
+    podRepo.update(POD_ID, { prFixAttempts: 2, containerId: 'container-1' });
+
+    const recorder = makeRecorder({ withContainerFactory: true });
+    await recorder.extractNow(POD_ID);
+
+    expect(candidateRepo.list('test-profile')).toHaveLength(0);
+    expect(attemptRepo.getByPod(POD_ID)).toMatchObject({
+      status: 'reviewer_unavailable',
+      reason:
+        'container_reviewer_unavailable: timeout; daemon_reviewer_unavailable: openai_auth_unavailable',
+      score: 0.3,
+      signals: ['pr_fix_attempts:2'],
+    });
+  });
+
+  it('records reviewer_unavailable when the container-first reviewer fails during extraction', async () => {
+    vi.mocked(createProfileMemoryReviewer).mockResolvedValue({
+      ok: true,
+      reviewer: {
+        model: 'gpt-5-mini',
+        generateText: vi
+          .fn()
+          .mockRejectedValue(
+            new Error(
+              'container_reviewer_unavailable: Container reviewer unavailable: codex timed out; daemon_reviewer_unavailable: openai_auth_unavailable',
+            ),
+          ),
+      },
+      model: 'gpt-5-mini',
+    });
+    podRepo.insert(basePod({ status: 'complete', runtime: 'codex' }));
+    podRepo.update(POD_ID, { prFixAttempts: 2, containerId: 'container-1' });
+
+    const recorder = makeRecorder({ withContainerFactory: true });
+    await recorder.extractNow(POD_ID);
+
+    expect(candidateRepo.list('test-profile')).toHaveLength(0);
+    expect(attemptRepo.getByPod(POD_ID)).toMatchObject({
+      status: 'reviewer_unavailable',
+      reason: expect.stringContaining('container_reviewer_unavailable'),
+      score: 0.3,
+      signals: ['pr_fix_attempts:2'],
     });
   });
 

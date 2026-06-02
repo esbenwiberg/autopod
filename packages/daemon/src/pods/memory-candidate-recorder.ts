@@ -10,6 +10,7 @@ import type {
   SystemEvent,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import type { EscalationRepository } from './escalation-repository.js';
@@ -31,6 +32,11 @@ import type { ValidationRepository } from './validation-repository.js';
 export interface MemoryCandidateRecorder {
   start(): void;
   stop(): void;
+  extractNow(podId: string): Promise<void>;
+}
+
+export interface MemoryRecorderContainerManagerFactory {
+  get(target: import('@autopod/shared').ExecutionTarget): ContainerManager;
 }
 
 export interface MemoryCandidateRecorderDeps {
@@ -43,6 +49,7 @@ export interface MemoryCandidateRecorderDeps {
   eventRepo: EventRepository;
   escalationRepo: EscalationRepository;
   validationRepo?: ValidationRepository;
+  containerManagerFactory?: MemoryRecorderContainerManagerFactory;
   logger: Logger;
 }
 
@@ -72,6 +79,7 @@ export function createMemoryCandidateRecorder(
     eventRepo,
     escalationRepo,
     validationRepo,
+    containerManagerFactory,
     logger,
   } = deps;
 
@@ -191,7 +199,21 @@ export function createMemoryCandidateRecorder(
 
     const reviewerSlotResult = await withReviewerSlot(async () => {
       const reviewerModelId = resolveReviewerModel(profile, logger);
-      const reviewerResult = await createProfileMemoryReviewer(profile, reviewerModelId, logger);
+      const reviewerResult = await createProfileMemoryReviewer(
+        profile,
+        reviewerModelId,
+        logger,
+        containerManagerFactory && pod.containerId
+          ? {
+              container: {
+                podId,
+                containerId: pod.containerId,
+                containerManager: containerManagerFactory.get(pod.executionTarget),
+                timeoutMs: 20_000,
+              },
+            }
+          : {},
+      );
       if (!reviewerResult.ok) {
         return {
           kind: 'reviewer_unavailable' as const,
@@ -306,6 +328,23 @@ export function createMemoryCandidateRecorder(
       });
   }
 
+  async function triggerNow(podId: string): Promise<void> {
+    if (processedPodIds.has(podId)) return;
+    if (inFlightPodIds.has(podId)) return;
+
+    inFlightPodIds.add(podId);
+    try {
+      const outcome = await runExtraction(podId);
+      if (outcome === 'done') {
+        processedPodIds.add(podId);
+      }
+    } catch (err) {
+      logger.warn({ err, podId }, 'Memory candidate extraction error');
+    } finally {
+      inFlightPodIds.delete(podId);
+    }
+  }
+
   function handleEvent(event: SystemEvent): void {
     if (event.type === 'pod.completed') {
       const e = event as PodCompletedEvent;
@@ -329,12 +368,17 @@ export function createMemoryCandidateRecorder(
       for (const unsub of unsubscribers) unsub();
       unsubscribers.length = 0;
     },
+
+    extractNow(podId: string): Promise<void> {
+      return triggerNow(podId);
+    },
   };
 }
 
 function classifySkippedResult(
   reason: string,
 ): 'reviewer_unavailable' | 'reviewer_failed' | 'invalid_response' | 'skipped' {
+  if (reason.startsWith('reviewer_unavailable')) return 'reviewer_unavailable';
   if (reason.startsWith('reviewer_quota_exhausted')) return 'reviewer_unavailable';
   if (reason.startsWith('reviewer_model_failed')) return 'reviewer_failed';
   if (reason.startsWith('json_parse_failed') || reason.startsWith('output_invalid')) {

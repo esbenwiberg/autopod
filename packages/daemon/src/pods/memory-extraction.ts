@@ -214,6 +214,14 @@ export async function extractCandidate(opts: {
       },
     );
   } catch (err) {
+    if (isReviewerUnavailableError(err)) {
+      const reason = `reviewer_unavailable: ${formatReviewerError(err)}`;
+      logger.warn(
+        { podId: pod.id, model: reviewerModel, reason },
+        'Reviewer model unavailable for memory extraction',
+      );
+      return { kind: 'skipped', reason };
+    }
     if (isQuotaExhaustedError(err)) {
       const reason = `reviewer_quota_exhausted: ${formatReviewerError(err)}`;
       logger.warn(
@@ -431,6 +439,13 @@ function isRateLimitError(err: unknown): boolean {
     if (nestedType === 'rate_limit_error') return true;
   }
   return /\b429\b|rate[_ -]?limit/i.test(text);
+}
+
+function isReviewerUnavailableError(err: unknown): boolean {
+  const text = formatReviewerError(err);
+  return (
+    text.includes('container_reviewer_unavailable') && text.includes('daemon_reviewer_unavailable')
+  );
 }
 
 function isQuotaExhaustedError(err: unknown): boolean {

@@ -20,6 +20,10 @@ vi.mock('node:child_process', () => ({
   execFile: vi.fn(),
 }));
 
+vi.mock('../providers/memory-reviewer.js', () => ({
+  createProfileMemoryReviewer: vi.fn(),
+}));
+
 import { execFile } from 'node:child_process';
 
 const mockedExecFile = vi.mocked(execFile);
@@ -31,6 +35,7 @@ import type {
   WorktreeManager,
 } from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
+import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import { DeletionGuardError } from '../worktrees/local-worktree-manager.js';
 import { createEscalationRepository } from './escalation-repository.js';
@@ -40,7 +45,14 @@ import type { EventBus } from './event-bus.js';
 import { createEventRepository } from './event-repository.js';
 import type { EventRepository } from './event-repository.js';
 import { createFixFeedbackRepository } from './fix-feedback-repository.js';
-import { type PodManagerDependencies, createPodManager } from './pod-manager.js';
+import { createMemoryRepository } from './memory-repository.js';
+import { createMemoryUsageRepository } from './memory-usage-repository.js';
+import {
+  AGENT_ENV_PATH,
+  AGENT_SHIM_PATH,
+  type PodManagerDependencies,
+  createPodManager,
+} from './pod-manager.js';
 import { createPodRepository } from './pod-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import { createValidationRepository } from './validation-repository.js';
@@ -351,6 +363,36 @@ function createMockValidationEngine(result?: Partial<ValidationResult>): Validat
     validate: vi.fn(async () => makeValidationResult(result)),
     runAdvisoryBrowserQa: vi.fn(async () => null),
   };
+}
+
+function insertApprovedMemory(
+  memoryRepo: ReturnType<typeof createMemoryRepository>,
+  overrides: {
+    id?: string;
+    scope?: 'global' | 'profile' | 'pod';
+    scopeId?: string | null;
+    content?: string;
+    path?: string;
+  } = {},
+) {
+  return memoryRepo.insert({
+    id: overrides.id ?? 'mem-auth-cli',
+    scope: overrides.scope ?? 'profile',
+    scopeId: overrides.scopeId ?? 'test-profile',
+    path: overrides.path ?? '/workflow/auth-cli.md',
+    content:
+      overrides.content ?? 'Authentication token refresh CLI memory for automatic ranking tests.',
+    rationale: 'Avoid breaking CLI auth refresh behavior.',
+    kind: 'workflow',
+    tags: ['auth', 'cli'],
+    appliesWhen: null,
+    avoidWhen: null,
+    confidence: 0.9,
+    sourceEvidence: [],
+    impactSummary: null,
+    approved: true,
+    createdByPodId: null,
+  });
 }
 
 function reviewInfrastructureFailureResult(
@@ -1847,6 +1889,18 @@ describe('PodManager', () => {
   });
 
   describe('processPod', () => {
+    beforeEach(() => {
+      vi.mocked(createProfileMemoryReviewer).mockReset();
+      vi.mocked(createProfileMemoryReviewer).mockResolvedValue({
+        ok: true,
+        model: 'reviewer-model',
+        reviewer: {
+          model: 'reviewer-model',
+          generateText: vi.fn().mockResolvedValue(JSON.stringify({ selected: [] })),
+        },
+      });
+    });
+
     it('transitions through provisioning and running', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
@@ -1863,6 +1917,113 @@ describe('PodManager', () => {
       expect(processed.status).toBe('validated');
       expect(processed.containerId).toBe('container-123');
       expect(processed.worktreePath).toBe('/tmp/worktree/abc');
+    });
+
+    it('prepares provider credentials and agent shim before automatic memory ranking', async () => {
+      const ctx = createTestContext();
+      const memoryRepo = createMemoryRepository(ctx.db);
+      const usageRepo = createMemoryUsageRepository(ctx.db);
+      ctx.deps.memoryRepo = memoryRepo;
+      ctx.deps.memoryUsageRepo = usageRepo;
+      insertApprovedMemory(memoryRepo);
+
+      const reviewer = {
+        model: 'reviewer-model',
+        generateText: vi.fn().mockResolvedValue(
+          JSON.stringify({
+            selected: [{ id: 'mem-auth-cli', reason: 'Relevant to auth refresh CLI work.' }],
+          }),
+        ),
+      };
+      vi.mocked(createProfileMemoryReviewer).mockResolvedValueOnce({
+        ok: true,
+        model: 'reviewer-model',
+        reviewer,
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Add authentication token refresh for the CLI',
+          skipValidation: true,
+        },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      expect(createProfileMemoryReviewer).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.any(String),
+        expect.any(Object),
+        {
+          container: {
+            podId: pod.id,
+            containerId: 'container-123',
+            containerManager: ctx.containerManager,
+            env: expect.objectContaining({ POD_ID: pod.id }),
+            timeoutMs: 20_000,
+          },
+        },
+      );
+      const envWriteOrder = vi.mocked(ctx.containerManager.writeFile).mock.invocationCallOrder[
+        vi
+          .mocked(ctx.containerManager.writeFile)
+          .mock.calls.findIndex((call) => call[1] === AGENT_ENV_PATH)
+      ];
+      const shimWriteOrder = vi.mocked(ctx.containerManager.writeFile).mock.invocationCallOrder[
+        vi
+          .mocked(ctx.containerManager.writeFile)
+          .mock.calls.findIndex((call) => call[1] === AGENT_SHIM_PATH)
+      ];
+      const reviewerCreateOrder = vi.mocked(createProfileMemoryReviewer).mock
+        .invocationCallOrder[0];
+      expect(envWriteOrder).toBeLessThan(reviewerCreateOrder);
+      expect(shimWriteOrder).toBeLessThan(reviewerCreateOrder);
+      const envFileWrite = vi
+        .mocked(ctx.containerManager.writeFile)
+        .mock.calls.find((call) => call[1] === AGENT_ENV_PATH);
+      expect(String(envFileWrite?.[2])).toContain(`export POD_ID='${pod.id}'`);
+      expect(reviewer.generateText).toHaveBeenCalledTimes(1);
+    });
+
+    it('emits pod activity when memory ranking uses deterministic fallback', async () => {
+      const ctx = createTestContext();
+      const memoryRepo = createMemoryRepository(ctx.db);
+      const usageRepo = createMemoryUsageRepository(ctx.db);
+      ctx.deps.memoryRepo = memoryRepo;
+      ctx.deps.memoryUsageRepo = usageRepo;
+      insertApprovedMemory(memoryRepo);
+      vi.mocked(createProfileMemoryReviewer).mockResolvedValueOnce({
+        ok: false,
+        reason:
+          'container_reviewer_unavailable: timeout; daemon_reviewer_unavailable: no_credentials',
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Add authentication token refresh for the CLI',
+          skipValidation: true,
+        },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      const usage = usageRepo.listByPod(pod.id);
+      expect(usage.map((event) => event.kind)).toEqual(['selected', 'injected']);
+      expect(usage[0]?.relevanceReason).toContain('deterministic keyword prefilter');
+
+      const statusMessages = ctx.eventRepo
+        .getForSession(pod.id, { type: 'pod.agent_activity' })
+        .map((event) => (event.payload as never as { event?: { message?: string } }).event?.message)
+        .filter(Boolean);
+      expect(statusMessages).toContain(
+        'Memory reviewer unavailable (container_reviewer_unavailable: timeout; daemon_reviewer_unavailable: no_credentials); using deterministic keyword fallback.',
+      );
     });
 
     it('starts the worktree from startBranch while keeping baseBranch as PR target', async () => {

@@ -1,5 +1,11 @@
 import type { Profile, ProviderCredentials } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { ContainerManager } from '../interfaces/container-manager.js';
+import {
+  ContainerReviewerUnavailableError,
+  resolveContainerReviewer,
+  runContainerReviewer,
+} from '../validation/container-reviewer-runner.js';
 import { getAzureToken } from './azure-token.js';
 import {
   type ProfileLlmClientUnavailableReason,
@@ -24,11 +30,20 @@ export type MemoryReviewerUnavailableReason =
   | ProfileLlmClientUnavailableReason
   | 'openai_auth_unavailable'
   | 'foundry_openai_auth_unavailable'
-  | 'provider_not_callable';
+  | 'provider_not_callable'
+  | string;
 
 export type MemoryReviewerResult =
   | { ok: true; reviewer: MemoryReviewer; model: string }
   | { ok: false; reason: MemoryReviewerUnavailableReason };
+
+export interface ContainerMemoryReviewerOptions {
+  podId: string;
+  containerId: string | null | undefined;
+  containerManager: ContainerManager;
+  env?: Record<string, string>;
+  timeoutMs?: number;
+}
 
 interface ChatCompletionResponse {
   choices?: Array<{
@@ -148,6 +163,112 @@ export async function createProfileMemoryReviewer(
   profile: Profile,
   reviewerModel: string,
   logger: Logger,
+  options: { container?: ContainerMemoryReviewerOptions } = {},
+): Promise<MemoryReviewerResult> {
+  if (options.container) {
+    return createContainerFirstMemoryReviewer(profile, reviewerModel, logger, options.container);
+  }
+  return createDaemonMemoryReviewer(profile, reviewerModel, logger);
+}
+
+async function createContainerFirstMemoryReviewer(
+  profile: Profile,
+  reviewerModel: string,
+  logger: Logger,
+  container: ContainerMemoryReviewerOptions,
+): Promise<MemoryReviewerResult> {
+  const containerRunner = resolveContainerReviewer(profile);
+
+  if (typeof containerRunner !== 'string') {
+    const daemonResult = await safeCreateDaemonMemoryReviewer(profile, reviewerModel, logger);
+    if (daemonResult.ok) return daemonResult;
+    return {
+      ok: false,
+      reason: combineUnavailableReasons(
+        `container_reviewer_unavailable: provider ${containerRunner.provider} is not supported`,
+        `daemon_reviewer_unavailable: ${daemonResult.reason}`,
+      ),
+    };
+  }
+
+  if (!container.containerId) {
+    const daemonResult = await safeCreateDaemonMemoryReviewer(profile, reviewerModel, logger);
+    if (daemonResult.ok) return daemonResult;
+    return {
+      ok: false,
+      reason: combineUnavailableReasons(
+        'container_reviewer_unavailable: pod has no live container',
+        `daemon_reviewer_unavailable: ${daemonResult.reason}`,
+      ),
+    };
+  }
+
+  const model =
+    reviewerModel === 'auto' && profile.modelProvider === 'openai'
+      ? DEFAULT_OPENAI_REVIEWER_MODEL
+      : reviewerModel;
+
+  return {
+    ok: true,
+    model,
+    reviewer: {
+      model,
+      async generateText(input) {
+        try {
+          const result = await runContainerReviewer({
+            podId: container.podId,
+            containerId: container.containerId,
+            containerManager: container.containerManager,
+            profile,
+            model,
+            prompt: buildMemoryReviewPrompt(input.systemPrompt, input.userMessage),
+            env: container.env,
+            timeout: container.timeoutMs ?? 20_000,
+            logger,
+          });
+          return result.stdout;
+        } catch (err) {
+          const containerReason = `container_reviewer_unavailable: ${reasonFromError(err)}`;
+          logger.warn(
+            { podId: container.podId, reason: containerReason },
+            'Container memory reviewer unavailable',
+          );
+          const daemonResult = await safeCreateDaemonMemoryReviewer(profile, reviewerModel, logger);
+          if (daemonResult.ok) {
+            return daemonResult.reviewer.generateText(input);
+          }
+          throw new ContainerReviewerUnavailableError(
+            combineUnavailableReasons(
+              containerReason,
+              `daemon_reviewer_unavailable: ${daemonResult.reason}`,
+            ),
+            { cause: err },
+          );
+        }
+      },
+    },
+  };
+}
+
+async function safeCreateDaemonMemoryReviewer(
+  profile: Profile,
+  reviewerModel: string,
+  logger: Logger,
+): Promise<MemoryReviewerResult> {
+  try {
+    return await createDaemonMemoryReviewer(profile, reviewerModel, logger);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `daemon_reviewer_failed: ${reasonFromError(err)}`,
+    };
+  }
+}
+
+async function createDaemonMemoryReviewer(
+  profile: Profile,
+  reviewerModel: string,
+  logger: Logger,
 ): Promise<MemoryReviewerResult> {
   if (profile.modelProvider === 'openai') {
     const creds = profile.providerCredentials;
@@ -206,4 +327,17 @@ export async function createProfileMemoryReviewer(
       },
     },
   };
+}
+
+function buildMemoryReviewPrompt(systemPrompt: string, userMessage: string): string {
+  return `${systemPrompt.trim()}\n\n${userMessage.trim()}`;
+}
+
+function combineUnavailableReasons(...reasons: Array<string | null | undefined>): string {
+  return reasons.filter(Boolean).join('; ');
+}
+
+function reasonFromError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
 }

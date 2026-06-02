@@ -66,6 +66,14 @@ describe('resolveContainerReviewer', () => {
         }),
       ),
     ).toBe('claude');
+    expect(resolveContainerReviewer(profile({ modelProvider: 'anthropic' }))).toBe('claude');
+    expect(resolveContainerReviewer(profile({ modelProvider: null }))).toBe('claude');
+  });
+
+  it('marks Copilot unavailable for the live container reviewer path', () => {
+    expect(resolveContainerReviewer(profile({ modelProvider: 'copilot' }))).toEqual({
+      provider: 'copilot',
+    });
   });
 });
 
@@ -84,6 +92,7 @@ describe('runContainerReviewer', () => {
       profile: profile({ modelProvider: 'max' }),
       model: 'sonnet',
       prompt: 'Generate script',
+      env: { ANTHROPIC_API_KEY_FILE: '/run/autopod/anthropic-api-key' },
       timeout: 60_000,
     });
 
@@ -96,7 +105,11 @@ describe('runContainerReviewer', () => {
     expect(cm.execInContainer).toHaveBeenCalledWith(
       'container-abc',
       ['sh', '-c', expect.stringContaining("'/run/autopod/agent-shim.sh' claude -p")],
-      expect.objectContaining({ cwd: '/workspace', timeout: 60_000 }),
+      expect.objectContaining({
+        cwd: '/workspace',
+        env: { ANTHROPIC_API_KEY_FILE: '/run/autopod/anthropic-api-key' },
+        timeout: 60_000,
+      }),
     );
     expect(mockRunCodexReview).not.toHaveBeenCalled();
   });
@@ -112,6 +125,7 @@ describe('runContainerReviewer', () => {
       profile: profile({ modelProvider: 'openai' }),
       model: 'gpt-5',
       prompt: 'Generate script',
+      env: { OPENAI_API_KEY_FILE: '/run/autopod/openai-api-key' },
       timeout: 60_000,
     });
 
@@ -123,6 +137,7 @@ describe('runContainerReviewer', () => {
         containerManager: cm,
         model: 'gpt-5',
         prompt: 'Generate script',
+        env: { OPENAI_API_KEY_FILE: '/run/autopod/openai-api-key' },
       }),
     );
   });
