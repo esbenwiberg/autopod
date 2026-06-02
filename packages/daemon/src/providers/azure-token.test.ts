@@ -23,7 +23,10 @@ describe('getAzureToken', () => {
       expiresOnTimestamp: Date.now() + 3600_000,
     });
     vi.doMock('@azure/identity', () => ({
-      DefaultAzureCredential: vi.fn().mockImplementation(() => ({ getToken })),
+      // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
+      DefaultAzureCredential: vi.fn().mockImplementation(function () {
+        return { getToken };
+      }),
     }));
 
     const result = await getAzureToken(SCOPE, logger);
@@ -37,7 +40,10 @@ describe('getAzureToken', () => {
       expiresOnTimestamp: Date.now() + 3600_000,
     });
     vi.doMock('@azure/identity', () => ({
-      DefaultAzureCredential: vi.fn().mockImplementation(() => ({ getToken })),
+      // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
+      DefaultAzureCredential: vi.fn().mockImplementation(function () {
+        return { getToken };
+      }),
     }));
 
     const a = await getAzureToken(SCOPE, logger);
@@ -49,9 +55,10 @@ describe('getAzureToken', () => {
 
   it('falls back to az CLI when DefaultAzureCredential throws', async () => {
     vi.doMock('@azure/identity', () => ({
-      DefaultAzureCredential: vi.fn().mockImplementation(() => ({
-        getToken: vi.fn().mockRejectedValue(new Error('no managed identity')),
-      })),
+      // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
+      DefaultAzureCredential: vi.fn().mockImplementation(function () {
+        return { getToken: vi.fn().mockRejectedValue(new Error('no managed identity')) };
+      }),
     }));
     const execFile = vi.fn(
       (
@@ -91,9 +98,10 @@ describe('getAzureToken', () => {
 
   it('throws with guidance when both managed identity and az CLI fail', async () => {
     vi.doMock('@azure/identity', () => ({
-      DefaultAzureCredential: vi.fn().mockImplementation(() => ({
-        getToken: vi.fn().mockRejectedValue(new Error('no identity available')),
-      })),
+      // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
+      DefaultAzureCredential: vi.fn().mockImplementation(function () {
+        return { getToken: vi.fn().mockRejectedValue(new Error('no identity available')) };
+      }),
     }));
     vi.doMock('node:child_process', () => ({
       execFile: (
@@ -113,7 +121,10 @@ describe('getAzureToken', () => {
       expiresOnTimestamp: Date.now() + 3600_000,
     }));
     vi.doMock('@azure/identity', () => ({
-      DefaultAzureCredential: vi.fn().mockImplementation(() => ({ getToken })),
+      // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
+      DefaultAzureCredential: vi.fn().mockImplementation(function () {
+        return { getToken };
+      }),
     }));
 
     const a = await getAzureToken('https://management.azure.com/.default', logger);

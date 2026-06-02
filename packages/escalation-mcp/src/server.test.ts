@@ -15,13 +15,16 @@ const { toolRegistrations } = vi.hoisted(() => ({
 }));
 
 vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
-  McpServer: vi.fn().mockImplementation(() => ({
-    tool: vi.fn(
-      (name: string, description: string, schema: z.ZodRawShape, handler: ToolHandler) => {
-        toolRegistrations.push({ name, description, schema, handler });
-      },
-    ),
-  })),
+  // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
+  McpServer: vi.fn().mockImplementation(function () {
+    return {
+      tool: vi.fn(
+        (name: string, description: string, schema: z.ZodRawShape, handler: ToolHandler) => {
+          toolRegistrations.push({ name, description, schema, handler });
+        },
+      ),
+    };
+  }),
 }));
 
 function makeBridge(overrides: Partial<PodBridge> = {}): PodBridge {

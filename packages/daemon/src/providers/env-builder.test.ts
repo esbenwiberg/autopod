@@ -267,12 +267,15 @@ describe('buildProviderEnv', () => {
       clearAzureTokenCache();
       vi.resetModules();
       vi.doMock('@azure/identity', () => ({
-        DefaultAzureCredential: vi.fn().mockImplementation(() => ({
-          getToken: vi.fn().mockResolvedValue({
-            token: 'entra-bearer-xyz',
-            expiresOnTimestamp: Date.now() + 3600_000,
-          }),
-        })),
+        // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
+        DefaultAzureCredential: vi.fn().mockImplementation(function () {
+          return {
+            getToken: vi.fn().mockResolvedValue({
+              token: 'entra-bearer-xyz',
+              expiresOnTimestamp: Date.now() + 3600_000,
+            }),
+          };
+        }),
       }));
     });
 
@@ -291,7 +294,9 @@ describe('buildProviderEnv', () => {
         },
       });
 
-      const result = await buildProviderEnv(profile, 'pod-1', logger);
+      // Dynamic import needed so vi.doMock + vi.resetModules picks up the fresh mock.
+      const { buildProviderEnv: freshBuildProviderEnv } = await import('./env-builder.js');
+      const result = await freshBuildProviderEnv(profile, 'pod-1', logger);
 
       expect(result.env.CLAUDE_CODE_USE_FOUNDRY).toBe('1');
       expect(result.env.ANTHROPIC_BASE_URL).toBe('https://foundry.azure.com/v1');

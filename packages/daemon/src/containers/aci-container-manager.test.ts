@@ -23,21 +23,27 @@ const {
 }));
 
 vi.mock('@azure/arm-containerinstance', () => ({
-  ContainerInstanceManagementClient: vi.fn().mockImplementation(() => ({
-    containerGroups: {
-      beginCreateOrUpdateAndWait: mockBeginCreateOrUpdateAndWait,
-      beginDeleteAndWait: mockBeginDeleteAndWait,
-      get: mockGet,
-    },
-    containers: {
-      executeCommand: mockExecuteCommand,
-      listLogs: mockListLogs,
-    },
-  })),
+  // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
+  ContainerInstanceManagementClient: vi.fn().mockImplementation(function () {
+    return {
+      containerGroups: {
+        beginCreateOrUpdateAndWait: mockBeginCreateOrUpdateAndWait,
+        beginDeleteAndWait: mockBeginDeleteAndWait,
+        get: mockGet,
+      },
+      containers: {
+        executeCommand: mockExecuteCommand,
+        listLogs: mockListLogs,
+      },
+    };
+  }),
 }));
 
 vi.mock('@azure/identity', () => ({
-  DefaultAzureCredential: vi.fn().mockImplementation(() => ({})),
+  // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
+  DefaultAzureCredential: vi.fn().mockImplementation(function () {
+    return {};
+  }),
 }));
 
 // ---------------------------------------------------------------------------
