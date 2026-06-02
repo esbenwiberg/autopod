@@ -86,6 +86,7 @@ describe('buildPrFixTask — PI + PII sanitization of reviewer-controlled conten
     expect(task).toContain('fix the ones that make engineering sense');
     expect(task).toContain('fix valid comments; for stale, incorrect, harmful, or out-of-scope');
     expect(task).toContain('Do NOT call PR/comment APIs from the container');
+    expect(task).toContain('Only `fixed` means the daemon may resolve');
     expect(task).toContain('[feedbackId: gh-comment-123]');
     expect(task).toContain('reviewFeedbackResponses');
   });

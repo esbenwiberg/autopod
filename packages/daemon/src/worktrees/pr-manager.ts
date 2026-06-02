@@ -47,6 +47,218 @@ function buildCreatePrResult(
   };
 }
 
+const GITHUB_REVIEW_THREADS_QUERY = `
+query AutopodReviewThreads($owner: String!, $repo: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $after) {
+        nodes {
+          id
+          isResolved
+          path
+          comments(first: 1) {
+            nodes {
+              databaseId
+              author {
+                login
+              }
+              body
+              path
+            }
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+}`;
+
+const GITHUB_RESOLVE_REVIEW_THREAD_MUTATION = `
+mutation AutopodResolveReviewThread($threadId: ID!) {
+  resolveReviewThread(input: { threadId: $threadId }) {
+    thread {
+      id
+      isResolved
+    }
+  }
+}`;
+
+interface GitHubReviewThreadGraphqlResponse {
+  data?: {
+    repository?: {
+      pullRequest?: {
+        reviewThreads?: {
+          nodes?: Array<{
+            id?: string;
+            isResolved?: boolean;
+            path?: string | null;
+            comments?: {
+              nodes?: Array<{
+                databaseId?: number | null;
+                author?: { login?: string | null } | null;
+                body?: string | null;
+                path?: string | null;
+              }> | null;
+            } | null;
+          }> | null;
+          pageInfo?: {
+            hasNextPage?: boolean;
+            endCursor?: string | null;
+          } | null;
+        } | null;
+      } | null;
+    } | null;
+  };
+  errors?: Array<{ message?: string }>;
+}
+
+function getGitHubReviewThreadsConnection(data: GitHubReviewThreadGraphqlResponse) {
+  return data.data?.repository?.pullRequest?.reviewThreads ?? null;
+}
+
+function formatGitHubGraphqlErrors(data: GitHubReviewThreadGraphqlResponse): string | null {
+  if (!data.errors?.length) return null;
+  return data.errors.map((error) => error.message ?? 'Unknown GraphQL error').join('; ');
+}
+
+function buildGitHubThreadFeedbackId(threadNodeId: string, commentId: number): string {
+  return `gh-thread-${encodeURIComponent(threadNodeId)}-comment-${commentId}`;
+}
+
+function parseGitHubThreadFeedbackId(
+  feedbackId: string,
+): { threadNodeId: string; commentId: number } | null {
+  const match = feedbackId.match(/^gh-thread-(.+)-comment-(\d+)$/);
+  if (!match) return null;
+  try {
+    return {
+      threadNodeId: decodeURIComponent(match[1]),
+      commentId: Number.parseInt(match[2], 10),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function mapGitHubReviewThreadComments(
+  data: GitHubReviewThreadGraphqlResponse,
+): ReviewCommentDetail[] {
+  const threads = getGitHubReviewThreadsConnection(data)?.nodes ?? [];
+  const comments: ReviewCommentDetail[] = [];
+
+  for (const thread of threads) {
+    if (!thread.id || thread.isResolved) continue;
+    const comment = thread.comments?.nodes?.[0];
+    const body = comment?.body?.trim();
+    if (!body || !comment?.databaseId) continue;
+
+    comments.push({
+      id: buildGitHubThreadFeedbackId(thread.id, comment.databaseId),
+      author: comment.author?.login ?? undefined,
+      body,
+      path: comment.path ?? thread.path ?? null,
+    });
+  }
+
+  return comments;
+}
+
+function getGitHubReviewThreadsPageInfo(data: GitHubReviewThreadGraphqlResponse): {
+  hasNextPage: boolean;
+  endCursor: string | null;
+} {
+  const pageInfo = getGitHubReviewThreadsConnection(data)?.pageInfo;
+  return {
+    hasNextPage: pageInfo?.hasNextPage === true,
+    endCursor: pageInfo?.endCursor ?? null,
+  };
+}
+
+async function fetchGitHubReviewThreadCommentsWithGh(config: {
+  owner: string;
+  repo: string;
+  number: number;
+  worktreePath?: string;
+}): Promise<ReviewCommentDetail[]> {
+  const comments: ReviewCommentDetail[] = [];
+  let after: string | null = null;
+
+  do {
+    const args = [
+      'api',
+      'graphql',
+      '-f',
+      `query=${GITHUB_REVIEW_THREADS_QUERY}`,
+      '-F',
+      `owner=${config.owner}`,
+      '-F',
+      `repo=${config.repo}`,
+      '-F',
+      `number=${config.number}`,
+    ];
+    if (after) {
+      args.push('-F', `after=${after}`);
+    }
+
+    const { stdout } = await execFileAsync('gh', args, {
+      cwd: config.worktreePath,
+      timeout: 15_000,
+    });
+    const data = JSON.parse(stdout) as GitHubReviewThreadGraphqlResponse;
+    const graphqlError = formatGitHubGraphqlErrors(data);
+    if (graphqlError) throw new Error(`GitHub GraphQL review-thread error: ${graphqlError}`);
+
+    comments.push(...mapGitHubReviewThreadComments(data));
+    const pageInfo = getGitHubReviewThreadsPageInfo(data);
+    after = pageInfo.hasNextPage ? pageInfo.endCursor : null;
+  } while (after);
+
+  return comments;
+}
+
+async function fetchGitHubReviewThreadCommentsWithApi(config: {
+  owner: string;
+  repo: string;
+  number: number;
+  headers: Record<string, string>;
+}): Promise<ReviewCommentDetail[]> {
+  const comments: ReviewCommentDetail[] = [];
+  let after: string | null = null;
+
+  do {
+    const response = await fetch('https://api.github.com/graphql', {
+      method: 'POST',
+      headers: config.headers,
+      body: JSON.stringify({
+        query: GITHUB_REVIEW_THREADS_QUERY,
+        variables: {
+          owner: config.owner,
+          repo: config.repo,
+          number: config.number,
+          after,
+        },
+      }),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`GitHub GraphQL review-thread error ${response.status}: ${text}`);
+    }
+
+    const data = (await response.json()) as GitHubReviewThreadGraphqlResponse;
+    const graphqlError = formatGitHubGraphqlErrors(data);
+    if (graphqlError) throw new Error(`GitHub GraphQL review-thread error: ${graphqlError}`);
+
+    comments.push(...mapGitHubReviewThreadComments(data));
+    const pageInfo = getGitHubReviewThreadsPageInfo(data);
+    after = pageInfo.hasNextPage ? pageInfo.endCursor : null;
+  } while (after);
+
+  return comments;
+}
+
 export interface GhPrManagerConfig {
   logger: Logger;
 }
@@ -290,29 +502,41 @@ export class GhPrManager implements PrManager {
       }
       try {
         const { owner, repo, number } = parsePrUrl(config.prUrl);
-        const { stdout: commentsOut } = await execFileAsync(
-          'gh',
-          ['api', `repos/${owner}/${repo}/pulls/${number}/comments`],
-          { cwd: config.worktreePath, timeout: 15_000 },
+        reviewComments.push(
+          ...(await fetchGitHubReviewThreadCommentsWithGh({
+            owner,
+            repo,
+            number,
+            worktreePath: config.worktreePath,
+          })),
         );
-        const comments = JSON.parse(commentsOut) as Array<{
-          id: number;
-          in_reply_to_id?: number;
-          user: { login: string };
-          body: string;
-          path: string | null;
-        }>;
-        for (const comment of comments) {
-          if (comment.in_reply_to_id || !comment.body.trim()) continue;
-          reviewComments.push({
-            id: `gh-comment-${comment.id}`,
-            author: comment.user.login,
-            body: comment.body,
-            path: comment.path,
-          });
-        }
       } catch {
-        // Non-fatal — PR-level review bodies still give the fix pod context.
+        try {
+          const { owner, repo, number } = parsePrUrl(config.prUrl);
+          const { stdout: commentsOut } = await execFileAsync(
+            'gh',
+            ['api', `repos/${owner}/${repo}/pulls/${number}/comments`],
+            { cwd: config.worktreePath, timeout: 15_000 },
+          );
+          const comments = JSON.parse(commentsOut) as Array<{
+            id: number;
+            in_reply_to_id?: number;
+            user: { login: string };
+            body: string;
+            path: string | null;
+          }>;
+          for (const comment of comments) {
+            if (comment.in_reply_to_id || !comment.body.trim()) continue;
+            reviewComments.push({
+              id: `gh-comment-${comment.id}`,
+              author: comment.user.login,
+              body: comment.body,
+              path: comment.path,
+            });
+          }
+        } catch {
+          // Non-fatal — PR-level review bodies still give the fix pod context.
+        }
       }
     } else if (pr.reviewDecision && pr.reviewDecision !== 'APPROVED') {
       const label = pr.reviewDecision === 'REVIEW_REQUIRED' ? 'Review required' : pr.reviewDecision;
@@ -337,11 +561,14 @@ export class GhPrManager implements PrManager {
     const { owner, repo, number } = parsePrUrl(config.prUrl);
     let posted = 0;
     let skipped = 0;
+    let resolved = 0;
     const errors: string[] = [];
+    const resolutionErrors: string[] = [];
     const fallbackBodies: string[] = [];
 
     for (const response of config.responses) {
-      const commentId = parseGitHubCommentFeedbackId(response.feedbackId);
+      const threadRef = parseGitHubThreadFeedbackId(response.feedbackId);
+      const commentId = threadRef?.commentId ?? parseGitHubCommentFeedbackId(response.feedbackId);
       if (!commentId) {
         skipped++;
         fallbackBodies.push(`- ${response.feedbackId}: ${response.body}`);
@@ -364,6 +591,27 @@ export class GhPrManager implements PrManager {
         posted++;
       } catch (err) {
         errors.push(err instanceof Error ? err.message : String(err));
+        continue;
+      }
+
+      if (response.outcome === 'fixed' && threadRef) {
+        try {
+          await execFileAsync(
+            'gh',
+            [
+              'api',
+              'graphql',
+              '-f',
+              `query=${GITHUB_RESOLVE_REVIEW_THREAD_MUTATION}`,
+              '-F',
+              `threadId=${threadRef.threadNodeId}`,
+            ],
+            { cwd: config.worktreePath, timeout: 15_000 },
+          );
+          resolved++;
+        } catch (err) {
+          resolutionErrors.push(err instanceof Error ? err.message : String(err));
+        }
       }
     }
 
@@ -387,7 +635,7 @@ export class GhPrManager implements PrManager {
       }
     }
 
-    return { posted, skipped, errors };
+    return { posted, skipped, resolved, errors, resolutionErrors };
   }
 }
 
@@ -709,29 +957,43 @@ export class GitHubApiPrManager implements PrManager {
         }
       }
       if (reviewDecision === 'CHANGES_REQUESTED') {
-        const commentsResp = await fetch(
-          `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/comments`,
-          { headers: this.headers },
-        );
-        if (commentsResp.ok) {
-          const comments = (await commentsResp.json()) as Array<{
-            id: number;
-            in_reply_to_id?: number;
-            user: { login: string };
-            body: string;
-            path: string | null;
-          }>;
-          for (const c of comments) {
-            if (c.in_reply_to_id || !c.body.trim()) continue;
-            reviewComments.push({
-              id: `gh-comment-${c.id}`,
-              author: c.user.login,
-              body: c.body,
-              path: c.path,
-            });
-          }
-          if (comments.length > 0 && !reasons.includes('Changes requested')) {
+        try {
+          reviewComments.push(
+            ...(await fetchGitHubReviewThreadCommentsWithApi({
+              owner,
+              repo,
+              number,
+              headers: this.headers,
+            })),
+          );
+          if (reviewComments.length > 0 && !reasons.includes('Changes requested')) {
             reasons.push('Changes requested');
+          }
+        } catch {
+          const commentsResp = await fetch(
+            `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/comments`,
+            { headers: this.headers },
+          );
+          if (commentsResp.ok) {
+            const comments = (await commentsResp.json()) as Array<{
+              id: number;
+              in_reply_to_id?: number;
+              user: { login: string };
+              body: string;
+              path: string | null;
+            }>;
+            for (const c of comments) {
+              if (c.in_reply_to_id || !c.body.trim()) continue;
+              reviewComments.push({
+                id: `gh-comment-${c.id}`,
+                author: c.user.login,
+                body: c.body,
+                path: c.path,
+              });
+            }
+            if (comments.length > 0 && !reasons.includes('Changes requested')) {
+              reasons.push('Changes requested');
+            }
           }
         }
       }
@@ -756,50 +1018,91 @@ export class GitHubApiPrManager implements PrManager {
     const { owner, repo, number } = parsePrUrl(config.prUrl);
     let posted = 0;
     let skipped = 0;
+    let resolved = 0;
     const errors: string[] = [];
+    const resolutionErrors: string[] = [];
     const fallbackBodies: string[] = [];
 
     for (const response of config.responses) {
-      const commentId = parseGitHubCommentFeedbackId(response.feedbackId);
+      const threadRef = parseGitHubThreadFeedbackId(response.feedbackId);
+      const commentId = threadRef?.commentId ?? parseGitHubCommentFeedbackId(response.feedbackId);
       if (!commentId) {
         skipped++;
         fallbackBodies.push(`- ${response.feedbackId}: ${response.body}`);
         continue;
       }
 
-      const reply = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/comments/${commentId}/replies`,
-        {
-          method: 'POST',
-          headers: this.headers,
-          body: JSON.stringify({ body: response.body }),
-        },
-      );
-      if (reply.ok) {
-        posted++;
-      } else {
-        errors.push(`GitHub reply error ${reply.status}: ${await reply.text()}`);
+      try {
+        const reply = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/comments/${commentId}/replies`,
+          {
+            method: 'POST',
+            headers: this.headers,
+            body: JSON.stringify({ body: response.body }),
+          },
+        );
+        if (reply.ok) {
+          posted++;
+        } else {
+          errors.push(`GitHub reply error ${reply.status}: ${await reply.text()}`);
+          continue;
+        }
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
+        continue;
+      }
+
+      if (response.outcome === 'fixed' && threadRef) {
+        try {
+          const resolve = await fetch('https://api.github.com/graphql', {
+            method: 'POST',
+            headers: this.headers,
+            body: JSON.stringify({
+              query: GITHUB_RESOLVE_REVIEW_THREAD_MUTATION,
+              variables: { threadId: threadRef.threadNodeId },
+            }),
+          });
+          if (!resolve.ok) {
+            resolutionErrors.push(
+              `GitHub resolve error ${resolve.status}: ${await resolve.text()}`,
+            );
+            continue;
+          }
+          const data = (await resolve.json()) as GitHubReviewThreadGraphqlResponse;
+          const graphqlError = formatGitHubGraphqlErrors(data);
+          if (graphqlError) {
+            resolutionErrors.push(`GitHub resolve error: ${graphqlError}`);
+            continue;
+          }
+          resolved++;
+        } catch (err) {
+          resolutionErrors.push(err instanceof Error ? err.message : String(err));
+        }
       }
     }
 
     if (fallbackBodies.length > 0) {
-      const fallback = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}/issues/${number}/comments`,
-        {
-          method: 'POST',
-          headers: this.headers,
-          body: JSON.stringify({
-            body: `Autopod fix pod review feedback responses:\n\n${fallbackBodies.join('\n\n')}`,
-          }),
-        },
-      );
-      if (fallback.ok) {
-        posted++;
-      } else {
-        errors.push(`GitHub PR comment error ${fallback.status}: ${await fallback.text()}`);
+      try {
+        const fallback = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/issues/${number}/comments`,
+          {
+            method: 'POST',
+            headers: this.headers,
+            body: JSON.stringify({
+              body: `Autopod fix pod review feedback responses:\n\n${fallbackBodies.join('\n\n')}`,
+            }),
+          },
+        );
+        if (fallback.ok) {
+          posted++;
+        } else {
+          errors.push(`GitHub PR comment error ${fallback.status}: ${await fallback.text()}`);
+        }
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
       }
     }
 
-    return { posted, skipped, errors };
+    return { posted, skipped, resolved, errors, resolutionErrors };
   }
 }

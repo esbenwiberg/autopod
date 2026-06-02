@@ -418,6 +418,7 @@ export class AdoPrManager implements PrManager {
     let posted = 0;
     let skipped = 0;
     const errors: string[] = [];
+    const resolutionErrors: string[] = [];
 
     for (const response of config.responses) {
       const threadId = this.parseAdoThreadFeedbackId(response.feedbackId);
@@ -440,7 +441,7 @@ export class AdoPrManager implements PrManager {
       }
     }
 
-    return { posted, skipped, errors };
+    return { posted, skipped, resolved: 0, errors, resolutionErrors };
   }
 
   async getPrStatus(config: { prUrl: string }): Promise<PrMergeStatus> {

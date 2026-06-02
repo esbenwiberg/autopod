@@ -18,5 +18,9 @@
   "codex-mini-latest": { "inputPer1M": 1.5, "cachedInputPer1M": 0.375, "outputPer1M": 6.0 },
   "opus": { "inputPer1M": 5.0, "cachedInputPer1M": 0.5, "outputPer1M": 25.0 },
   "sonnet": { "inputPer1M": 3.0, "cachedInputPer1M": 0.3, "outputPer1M": 15.0 },
-  "haiku": { "inputPer1M": 1.0, "cachedInputPer1M": 0.1, "outputPer1M": 5.0 }
+  "haiku": { "inputPer1M": 1.0, "cachedInputPer1M": 0.1, "outputPer1M": 5.0 },
+  "deepseek/deepseek-r1": { "inputPer1M": 0.55, "outputPer1M": 2.19 },
+  "deepseek/deepseek-chat-v3-0324": { "inputPer1M": 0.27, "outputPer1M": 1.1 },
+  "minimax/minimax-01": { "inputPer1M": 0.2, "outputPer1M": 1.1 },
+  "qwen/qwen-2.5-coder-32b-instruct": { "inputPer1M": 0.07, "outputPer1M": 0.16 }
 }

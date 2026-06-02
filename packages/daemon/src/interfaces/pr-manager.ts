@@ -1,5 +1,6 @@
 import type {
   Profile,
+  ReviewFeedbackResponseItem,
   ScanFinding,
   ScreenshotRef,
   TaskSummary,
@@ -101,6 +102,8 @@ export interface ReviewCommentDetail {
 export interface ReviewFeedbackReply {
   /** Stable ID from ReviewCommentDetail.id / the fix task */
   feedbackId: string;
+  /** Fix-pod assessment that decides whether a host can resolve the thread */
+  outcome: ReviewFeedbackResponseItem['outcome'];
   /** Markdown body to post as a host-side reply */
   body: string;
 }
@@ -108,7 +111,9 @@ export interface ReviewFeedbackReply {
 export interface ReviewFeedbackReplyResult {
   posted: number;
   skipped: number;
+  resolved: number;
   errors: string[];
+  resolutionErrors: string[];
 }
 
 export interface PrMergeStatus {

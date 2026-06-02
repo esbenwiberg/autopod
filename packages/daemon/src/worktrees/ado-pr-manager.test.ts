@@ -436,16 +436,24 @@ describe('AdoPrManager.getPrStatus', () => {
       responses: [
         {
           feedbackId: 'ado-thread-123',
+          outcome: 'fixed',
           body: 'Autopod fix pod response: Fixed\n\nUpdated the null check.',
         },
         {
           feedbackId: 'gh-comment-99',
+          outcome: 'not_applicable',
           body: 'Wrong provider.',
         },
       ],
     });
 
-    expect(result).toEqual({ posted: 1, skipped: 1, errors: [] });
+    expect(result).toEqual({
+      posted: 1,
+      skipped: 1,
+      resolved: 0,
+      errors: [],
+      resolutionErrors: [],
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/pullrequests/42/threads/123/comments?api-version=7.1'),
       expect.objectContaining({
