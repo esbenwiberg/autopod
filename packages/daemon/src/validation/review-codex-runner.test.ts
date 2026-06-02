@@ -9,10 +9,12 @@ interface CapturedExec {
 
 function createHarness(
   result: ExecResult = { stdout: '{"status":"pass"}', stderr: '', exitCode: 0 },
+  log = '',
 ) {
   const writes: Array<{ containerId: string; path: string; content: string | Buffer }> = [];
   const execs: CapturedExec[] = [];
-  const manager: Pick<ContainerManager, 'writeFile' | 'execInContainer'> = {
+  const reads: Array<{ containerId: string; path: string }> = [];
+  const manager: Pick<ContainerManager, 'writeFile' | 'execInContainer' | 'readFile'> = {
     async writeFile(containerId, path, content) {
       writes.push({ containerId, path, content });
     },
@@ -20,9 +22,13 @@ function createHarness(
       execs.push({ command, options });
       return result;
     },
+    async readFile(containerId, path) {
+      reads.push({ containerId, path });
+      return log;
+    },
   };
 
-  return { manager: manager as ContainerManager, writes, execs };
+  return { manager: manager as ContainerManager, writes, execs, reads };
 }
 
 describe('runCodexReview', () => {
@@ -53,9 +59,48 @@ describe('runCodexReview', () => {
     expect(script).toContain('if [ "$status" -ne 0 ]; then\n');
     expect(script).not.toContain('then;');
     expect(script).toContain("--model 'gpt-5-codex'");
+    expect(script).toContain('--json');
     expect(script).toContain("< '/tmp/autopod-codex-review-pod_1-2-");
     expect(script).toContain("> '/tmp/autopod-codex-review-pod_1-2-");
     expect(script).toContain("cat '/tmp/autopod-codex-review-pod_1-2-");
+  });
+
+  it('captures token usage from the Codex JSONL log', async () => {
+    const harness = createHarness(
+      { stdout: '{"status":"pass"}', stderr: '', exitCode: 0 },
+      [
+        JSON.stringify({
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              total_token_usage: {
+                input_tokens: 12_345,
+                cached_input_tokens: 10_000,
+                output_tokens: 678,
+              },
+            },
+          },
+        }),
+      ].join('\n'),
+    );
+
+    const result = await runCodexReview({
+      podId: 'pod-1',
+      containerId: 'container-1',
+      containerManager: harness.manager,
+      model: 'gpt-5-codex',
+      prompt: 'review prompt',
+      timeout: 1234,
+    });
+
+    expect(result.tokenUsage).toEqual({
+      inputTokens: 12_345,
+      cachedInputTokens: 10_000,
+      outputTokens: 678,
+    });
+    expect(harness.reads[0]?.containerId).toBe('container-1');
+    expect(harness.reads[0]?.path).toContain('/tmp/autopod-codex-review-pod-1-0-');
   });
 
   it('omits --model when model is auto', async () => {

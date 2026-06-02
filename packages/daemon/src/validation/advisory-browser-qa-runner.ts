@@ -12,10 +12,10 @@ import type {
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
-import { createProviderAnthropicClient } from '../providers/llm-client.js';
+import { createProviderAnthropicClient, resolveAnthropicModelId } from '../providers/llm-client.js';
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
-import { runContainerReviewer } from './container-reviewer-runner.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
+import { runCodexReview } from './review-codex-runner.js';
 
 export const ADVISORY_BROWSER_QA_TARGET_CAP = 5;
 const ADVISORY_BROWSER_QA_ACTION_CAP = 5;
@@ -28,6 +28,16 @@ const ADVISORY_BROWSER_QA_RATE_LIMIT_TARGET_BUDGET_MS = 60_000;
 const ADVISORY_BROWSER_QA_RATE_LIMIT_BASE_DELAY_MS = 20_000;
 const ADVISORY_BROWSER_QA_RATE_LIMIT_MAX_DELAY_MS = 120_000;
 const ADVISORY_BROWSER_QA_REVIEW_RETRY_BUDGET_MS = 120_000;
+const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
+const DEFAULT_OPENAI_ADVISORY_MODEL = 'gpt-5-mini';
+const ADVISORY_REASONING_MAX_CHARS = 360;
+const ADVISORY_OBSERVATION_SUMMARY_MAX_CHARS = 180;
+const ADVISORY_OBSERVATION_DETAILS_MAX_CHARS = 420;
+const ADVISORY_SUGGESTED_FACT_MAX_CHARS = 180;
+const ADVISORY_SUGGESTED_FACT_CAP = 3;
+
+type AiTokenUsage = NonNullable<AdvisoryBrowserQaResult['tokenUsage']>;
+type AdvisoryReviewResult = Awaited<ReturnType<AdvisoryBrowserQaReviewer['review']>>;
 
 type AdvisoryChecklistTarget =
   | {
@@ -161,6 +171,7 @@ export interface AdvisoryBrowserQaReviewer {
       details?: string;
       suggestedFacts?: string[];
     }>;
+    tokenUsage?: AiTokenUsage;
   }>;
 }
 
@@ -172,8 +183,9 @@ export interface AdvisoryBrowserQaRunnerOptions {
   reviewerModel?: string;
   reviewerProvider?: ModelProvider | null;
   reviewerProviderCredentials?: ProviderCredentials | null;
-  containerId?: string;
   containerManager?: ContainerManager;
+  containerId?: string;
+  reviewerExecEnv?: Record<string, string>;
   timeoutMs?: number;
   hostBrowserRunner?: HostBrowserRunner;
   screenshotStore?: ScreenshotStore;
@@ -209,6 +221,7 @@ interface AdvisoryTargetRunResult {
   observations: AdvisoryBrowserQaObservation[];
   screenshots: ScreenshotRef[];
   completed: boolean;
+  tokenUsage?: AiTokenUsage;
 }
 
 export function buildAdvisoryChecklistTargets(
@@ -276,12 +289,13 @@ export async function runAdvisoryBrowserQa(
     const reviewer =
       options.reviewer ??
       createProviderAwareAdvisoryReviewer({
-        model: options.reviewerModel,
         podId: options.podId,
+        model: options.reviewerModel,
         provider: options.reviewerProvider,
         credentials: options.reviewerProviderCredentials,
-        containerId: options.containerId,
         containerManager: options.containerManager,
+        containerId: options.containerId,
+        reviewerExecEnv: options.reviewerExecEnv,
         logger: log,
         rateLimitDeadlineMs: deadline,
         rateLimitBaseDelayMs: pacing.rateLimitBaseDelayMs,
@@ -342,6 +356,7 @@ export async function runAdvisoryBrowserQa(
     const screenshots = uniqueScreenshots(targetResults.flatMap((result) => result.screenshots));
     const status = aggregateStatus(targetResults, skippedTargets, targets.length);
     const reasoning = aggregateReasoning(targetResults, skippedTargets, targets.length);
+    const tokenUsage = sumTokenUsage(targetResults.map((result) => result.tokenUsage));
 
     return {
       status,
@@ -350,6 +365,7 @@ export async function runAdvisoryBrowserQa(
       durationMs: pacing.now() - start,
       observations,
       screenshots,
+      ...(tokenUsage && { tokenUsage }),
     };
   } catch (err) {
     log?.warn({ err }, 'advisory browser QA failed');
@@ -455,17 +471,13 @@ async function runAdvisoryTarget(input: {
     observations,
     screenshots: initialScreenshotCollection,
   });
-  const heuristicPlan = buildHeuristicActionPlan(initialReviewInput);
-  const plannedActions =
-    heuristicPlan.size > 0
-      ? []
-      : await safePlanActions(reviewer, initialReviewInput, {
-          pacing,
-          deadline,
-          log,
-          targetLabel,
-        });
-  const actionPlan = mergeActionPlans(plannedActions, heuristicPlan);
+  const plannedActions = await safePlanActions(reviewer, initialReviewInput, {
+    pacing,
+    deadline,
+    log,
+    targetLabel,
+  });
+  const actionPlan = mergeActionPlans(plannedActions);
   if (actionPlan.size > 0 && remainingBudget(deadline, pacing) > 0) {
     const actionScript = buildBrowserScript({
       baseUrl: options.baseUrl,
@@ -528,17 +540,19 @@ async function runAdvisoryTarget(input: {
   });
 
   try {
-    const review = await reviewTargetWithRateLimitBackoff({
-      reviewer,
-      reviewInput,
-      pacing,
-      deadline,
-      log,
-      onProgress: options.onProgress,
-      targetLabel,
-      targetNumber,
-      targetsCount,
-    });
+    const review = compactAdvisoryReview(
+      await reviewTargetWithRateLimitBackoff({
+        reviewer,
+        reviewInput,
+        pacing,
+        deadline,
+        log,
+        onProgress: options.onProgress,
+        targetLabel,
+        targetNumber,
+        targetsCount,
+      }),
+    );
     const advisoryObservations = mapReviewObservations({
       reviewObservations: review.observations,
       targets: targetScope,
@@ -564,6 +578,7 @@ async function runAdvisoryTarget(input: {
       completed: true,
       observations: observationsWithFallback,
       screenshots,
+      tokenUsage: review.tokenUsage,
     };
   } catch (err) {
     const detail = formatReviewerError(err);
@@ -695,13 +710,14 @@ function mapReviewObservations(input: {
     input.targets,
     input.log,
   );
+  const targetScreenshots = input.screenshotCollection.byTarget.get(input.target.id) ?? [];
   return scopedReviewObservations.map((observation, index) =>
     advisoryObservationForTarget(input.target, input.targetIndex + index, {
       id: observation.id,
       status: observation.status,
       summary: observation.summary,
       details: observation.details,
-      screenshots: input.screenshotCollection.byTarget.get(input.target.id) ?? [],
+      screenshots: index === 0 ? targetScreenshots : [],
       suggestedFacts: observation.suggestedFacts,
     }),
   );
@@ -728,6 +744,37 @@ function advisoryObservationForTarget(
     screenshots: input.screenshots,
     suggestedFacts: input.suggestedFacts,
   };
+}
+
+function compactAdvisoryReview(review: AdvisoryReviewResult): AdvisoryReviewResult {
+  return {
+    ...review,
+    reasoning: compactText(review.reasoning, ADVISORY_REASONING_MAX_CHARS),
+    observations: review.observations.map((observation) => ({
+      ...observation,
+      summary: compactText(observation.summary, ADVISORY_OBSERVATION_SUMMARY_MAX_CHARS),
+      details:
+        typeof observation.details === 'string' && observation.details.trim()
+          ? compactText(observation.details, ADVISORY_OBSERVATION_DETAILS_MAX_CHARS)
+          : undefined,
+      suggestedFacts: compactSuggestedFacts(observation.suggestedFacts),
+    })),
+  };
+}
+
+function compactSuggestedFacts(facts: string[] | undefined): string[] | undefined {
+  if (!facts) return undefined;
+  const compacted = facts
+    .map((fact) => compactText(fact, ADVISORY_SUGGESTED_FACT_MAX_CHARS))
+    .filter((fact, index, all) => fact.length > 0 && all.indexOf(fact) === index)
+    .slice(0, ADVISORY_SUGGESTED_FACT_CAP);
+  return compacted.length > 0 ? compacted : undefined;
+}
+
+function compactText(value: string, maxChars: number): string {
+  const cleaned = value.replace(/\s+/g, ' ').trim();
+  if (cleaned.length <= maxChars) return cleaned;
+  return `${cleaned.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
 function aggregateStatus(
@@ -771,11 +818,36 @@ function aggregateReasoning(
   ]
     .filter((part): part is string => typeof part === 'string')
     .join(' ');
-  return suffix ? `${prefix} ${suffix}` : prefix;
+  return compactText(suffix ? `${prefix} ${suffix}` : prefix, ADVISORY_REASONING_MAX_CHARS);
+}
+
+function sumTokenUsage(usages: Array<AiTokenUsage | undefined>): AiTokenUsage | undefined {
+  const total: AiTokenUsage = { inputTokens: 0, outputTokens: 0 };
+  let sawUsage = false;
+  let cachedInputTokens = 0;
+  let costUsd = 0;
+
+  for (const usage of usages) {
+    if (!usage) continue;
+    sawUsage = true;
+    total.inputTokens += usage.inputTokens;
+    total.outputTokens += usage.outputTokens;
+    cachedInputTokens += usage.cachedInputTokens ?? 0;
+    costUsd += usage.costUsd ?? 0;
+  }
+
+  if (!sawUsage) return undefined;
+  if (cachedInputTokens > 0) total.cachedInputTokens = cachedInputTokens;
+  if (costUsd > 0) total.costUsd = costUsd;
+  return total;
 }
 
 function uniqueScreenshots(screenshots: ScreenshotRef[]): ScreenshotRef[] {
-  return [...new Map(screenshots.map((ref) => [ref.relativePath, ref])).values()];
+  return [...new Map(screenshots.map((ref) => [screenshotKey(ref), ref])).values()];
+}
+
+function screenshotKey(ref: ScreenshotRef): string {
+  return ref.relativePath || `${ref.podId}:${ref.source}:${ref.filename}`;
 }
 
 function remainingBudget(deadline: number, pacing: Pick<AdvisoryBrowserQaPacing, 'now'>): number {
@@ -1228,7 +1300,10 @@ async function collectAdvisoryScreenshots(
             persistedByDigest.set(digest, ref);
             screenshotIndex += 1;
           }
-          byTarget.set(observation.targetId, [...(byTarget.get(observation.targetId) ?? []), ref]);
+          byTarget.set(
+            observation.targetId,
+            uniqueScreenshots([...(byTarget.get(observation.targetId) ?? []), ref]),
+          );
         }
         byFrame.set(frameKey(observation.targetId, frameIndex), { ref, base64 });
       } catch (err) {
@@ -1360,46 +1435,13 @@ async function safePlanActions(
 
 function mergeActionPlans(
   planned: Array<{ targetId: string; actions: AdvisoryBrowserAction[] }>,
-  heuristic: Map<string, AdvisoryBrowserAction[]>,
 ): Map<string, AdvisoryBrowserAction[]> {
   const merged = new Map<string, AdvisoryBrowserAction[]>();
   for (const item of planned) {
     const actions = item.actions.map(sanitizeAction).slice(0, ADVISORY_BROWSER_QA_ACTION_CAP);
     if (item.targetId && actions.length > 0) merged.set(item.targetId, actions);
   }
-  for (const [targetId, actions] of heuristic) {
-    if (!merged.has(targetId))
-      merged.set(targetId, actions.slice(0, ADVISORY_BROWSER_QA_ACTION_CAP));
-  }
   return merged;
-}
-
-function buildHeuristicActionPlan(
-  input: AdvisoryBrowserQaReviewInput,
-): Map<string, AdvisoryBrowserAction[]> {
-  const actions = new Map<string, AdvisoryBrowserAction[]>();
-  const targetById = new Map(input.targets.map((target) => [target.id, target]));
-  for (const observation of input.browserObservations) {
-    const target = targetById.get(observation.targetId);
-    const text = `${input.task}\n${target?.prompt ?? ''}`.toLowerCase();
-    if (!/(help|how.to.use|modal|dialog|toolbar)/i.test(text)) continue;
-    const initial = observation.frames[0];
-    const helpControl = initial?.controls?.find((control) => {
-      if (!control.visible || control.disabled) return false;
-      const label = `${control.ariaLabel} ${control.title} ${control.text}`.trim();
-      return control.role === 'button' && /(^|\s)(help|\?)(\s|$)/i.test(label);
-    });
-    if (helpControl) {
-      actions.set(observation.targetId, [
-        {
-          type: 'click',
-          controlIndex: helpControl.index,
-          reason: 'Open the visible Help control to verify the modal/dialog scenario.',
-        },
-      ]);
-    }
-  }
-  return actions;
 }
 
 function filterActionPlansForTargets(
@@ -1442,12 +1484,13 @@ function filterReviewerObservationsForTargets(
 }
 
 function createProviderAwareAdvisoryReviewer(input: {
-  model: string | undefined;
   podId: string;
+  model: string | undefined;
   provider?: ModelProvider | null;
   credentials?: ProviderCredentials | null;
-  containerId?: string;
   containerManager?: ContainerManager;
+  containerId?: string;
+  reviewerExecEnv?: Record<string, string>;
   logger?: Logger;
   rateLimitDeadlineMs?: number;
   rateLimitBaseDelayMs?: number;
@@ -1459,31 +1502,65 @@ function createProviderAwareAdvisoryReviewer(input: {
   return {
     async planActions(reviewInput) {
       if (!input.model) return [];
-      if (input.provider === 'openai' || input.provider === 'copilot') return [];
+      if (input.provider === 'copilot') return [];
       const prompt = buildActionPlannerPrompt(reviewInput);
       const plannerDeadlineMs = Math.min(
         rateLimitDeadlineMs,
         Date.now() + ADVISORY_BROWSER_QA_ACTION_PLANNER_BUDGET_MS,
       );
       try {
-        const stdout = await callAnthropicReviewer({
-          model: input.model,
-          podId: input.podId,
-          provider: input.provider,
-          credentials: input.credentials,
-          containerId: input.containerId,
-          containerManager: input.containerManager,
-          prompt,
-          input: reviewInput,
-          logger: input.logger,
-          maxTokens: 2_000,
-          includeImages: false,
-          timeoutMs: ADVISORY_BROWSER_QA_ACTION_PLANNER_BUDGET_MS,
-          rateLimitDeadlineMs: plannerDeadlineMs,
-          rateLimitBaseDelayMs: input.rateLimitBaseDelayMs,
-          rateLimitMaxDelayMs: input.rateLimitMaxDelayMs,
-          onRateLimitWait: input.onRateLimitWait,
-        });
+        let stdout: string;
+        try {
+          const containerResult = await callContainerReviewer({
+            podId: input.podId,
+            containerManager: input.containerManager,
+            containerId: input.containerId,
+            env: input.reviewerExecEnv,
+            model: input.model,
+            provider: input.provider,
+            credentials: input.credentials,
+            prompt,
+            timeoutMs: ADVISORY_BROWSER_QA_ACTION_PLANNER_BUDGET_MS,
+          });
+          stdout = containerResult.stdout;
+        } catch (err) {
+          if (!shouldFallbackToDirectReviewer(input.provider, input.credentials)) throw err;
+          input.logger?.warn(
+            { err, provider: input.provider },
+            'advisory browser QA container action planner failed; falling back to direct reviewer',
+          );
+          stdout =
+            input.provider === 'openai'
+              ? await callOpenAiReviewer({
+                  model: input.model,
+                  credentials: input.credentials,
+                  prompt,
+                  input: reviewInput,
+                  logger: input.logger,
+                  maxTokens: 2_000,
+                  includeImages: false,
+                  timeoutMs: ADVISORY_BROWSER_QA_ACTION_PLANNER_BUDGET_MS,
+                  rateLimitDeadlineMs: plannerDeadlineMs,
+                  rateLimitBaseDelayMs: input.rateLimitBaseDelayMs,
+                  rateLimitMaxDelayMs: input.rateLimitMaxDelayMs,
+                  onRateLimitWait: input.onRateLimitWait,
+                })
+              : await callAnthropicReviewer({
+                  model: input.model,
+                  provider: input.provider,
+                  credentials: input.credentials,
+                  prompt,
+                  input: reviewInput,
+                  logger: input.logger,
+                  maxTokens: 2_000,
+                  includeImages: false,
+                  timeoutMs: ADVISORY_BROWSER_QA_ACTION_PLANNER_BUDGET_MS,
+                  rateLimitDeadlineMs: plannerDeadlineMs,
+                  rateLimitBaseDelayMs: input.rateLimitBaseDelayMs,
+                  rateLimitMaxDelayMs: input.rateLimitMaxDelayMs,
+                  onRateLimitWait: input.onRateLimitWait,
+                });
+        }
         return parseActionPlanJson(stdout);
       } catch (err) {
         input.logger?.warn({ err }, 'advisory browser QA action planner failed');
@@ -1499,7 +1576,7 @@ function createProviderAwareAdvisoryReviewer(input: {
         };
       }
 
-      if (input.provider === 'openai' || input.provider === 'copilot') {
+      if (input.provider === 'copilot') {
         return {
           status: 'uncertain',
           reasoning: `Reviewer provider ${input.provider} does not yet support screenshot image input for advisory browser QA.`,
@@ -1508,33 +1585,72 @@ function createProviderAwareAdvisoryReviewer(input: {
       }
 
       const prompt = buildReviewerPrompt(reviewInput, { includeImages: true });
+      const structuredEvidencePrompt = buildReviewerPrompt(reviewInput, { includeImages: false });
       const reviewDeadlineMs = Math.min(
         rateLimitDeadlineMs,
         Date.now() + ADVISORY_BROWSER_QA_REVIEW_RETRY_BUDGET_MS,
       );
       try {
-        const stdout = await callAnthropicReviewer({
-          model: input.model,
-          podId: input.podId,
-          provider: input.provider,
-          credentials: input.credentials,
-          containerId: input.containerId,
-          containerManager: input.containerManager,
-          prompt,
-          input: reviewInput,
-          logger: input.logger,
-          maxTokens: 2_000,
-          rateLimitDeadlineMs: reviewDeadlineMs,
-          rateLimitBaseDelayMs: input.rateLimitBaseDelayMs,
-          rateLimitMaxDelayMs: input.rateLimitMaxDelayMs,
-          onRateLimitWait: input.onRateLimitWait,
-        });
+        let stdout: string;
+        let tokenUsage: AiTokenUsage | undefined;
+        try {
+          const containerResult = await callContainerReviewer({
+            podId: input.podId,
+            containerManager: input.containerManager,
+            containerId: input.containerId,
+            env: input.reviewerExecEnv,
+            model: input.model,
+            provider: input.provider,
+            credentials: input.credentials,
+            prompt: structuredEvidencePrompt,
+            timeoutMs: input.provider === 'openai' ? 120_000 : 180_000,
+          });
+          stdout = containerResult.stdout;
+          tokenUsage = containerResult.tokenUsage;
+        } catch (err) {
+          if (!shouldFallbackToDirectReviewer(input.provider, input.credentials)) throw err;
+          input.logger?.warn(
+            { err, provider: input.provider },
+            'advisory browser QA container reviewer failed; falling back to direct reviewer',
+          );
+          if (input.provider === 'openai') {
+            stdout = await callOpenAiReviewer({
+              model: input.model,
+              credentials: input.credentials,
+              prompt,
+              input: reviewInput,
+              logger: input.logger,
+              maxTokens: 2_000,
+              rateLimitDeadlineMs: reviewDeadlineMs,
+              rateLimitBaseDelayMs: input.rateLimitBaseDelayMs,
+              rateLimitMaxDelayMs: input.rateLimitMaxDelayMs,
+              onRateLimitWait: input.onRateLimitWait,
+            });
+          } else {
+            const result = await callAnthropicReviewerDetailed({
+              model: input.model,
+              provider: input.provider,
+              credentials: input.credentials,
+              prompt,
+              input: reviewInput,
+              logger: input.logger,
+              maxTokens: 2_000,
+              rateLimitDeadlineMs: reviewDeadlineMs,
+              rateLimitBaseDelayMs: input.rateLimitBaseDelayMs,
+              rateLimitMaxDelayMs: input.rateLimitMaxDelayMs,
+              onRateLimitWait: input.onRateLimitWait,
+            });
+            stdout = result.stdout;
+            tokenUsage = result.tokenUsage;
+          }
+        }
         const parsed = parseReviewerJson(stdout);
-        if (parsed) return parsed;
+        if (parsed) return { ...parsed, ...(tokenUsage && { tokenUsage }) };
         return {
           status: 'uncertain',
           reasoning: 'Advisory browser QA reviewer returned malformed JSON',
           observations: [],
+          ...(tokenUsage && { tokenUsage }),
         };
       } catch (err) {
         if (isRateLimitError(err)) {
@@ -1547,28 +1663,47 @@ function createProviderAwareAdvisoryReviewer(input: {
             Date.now() + ADVISORY_BROWSER_QA_REVIEW_RETRY_BUDGET_MS,
           );
           try {
-            const fallbackStdout = await callAnthropicReviewer({
-              model: input.model,
-              podId: input.podId,
-              provider: input.provider,
-              credentials: input.credentials,
-              containerId: input.containerId,
-              containerManager: input.containerManager,
-              prompt: buildReviewerPrompt(reviewInput, { includeImages: false }),
-              input: reviewInput,
-              logger: input.logger,
-              maxTokens: 1_500,
-              includeImages: false,
-              rateLimitDeadlineMs: fallbackDeadlineMs,
-              rateLimitBaseDelayMs: input.rateLimitBaseDelayMs,
-              rateLimitMaxDelayMs: input.rateLimitMaxDelayMs,
-              onRateLimitWait: input.onRateLimitWait,
-            });
+            const fallbackPrompt = buildReviewerPrompt(reviewInput, { includeImages: false });
+            let fallbackStdout: string;
+            let fallbackTokenUsage: AiTokenUsage | undefined;
+            if (input.provider === 'openai') {
+              fallbackStdout = await callOpenAiReviewer({
+                model: input.model,
+                credentials: input.credentials,
+                prompt: fallbackPrompt,
+                input: reviewInput,
+                logger: input.logger,
+                maxTokens: 1_500,
+                includeImages: false,
+                rateLimitDeadlineMs: fallbackDeadlineMs,
+                rateLimitBaseDelayMs: input.rateLimitBaseDelayMs,
+                rateLimitMaxDelayMs: input.rateLimitMaxDelayMs,
+                onRateLimitWait: input.onRateLimitWait,
+              });
+            } else {
+              const fallbackResult = await callAnthropicReviewerDetailed({
+                model: input.model,
+                provider: input.provider,
+                credentials: input.credentials,
+                prompt: fallbackPrompt,
+                input: reviewInput,
+                logger: input.logger,
+                maxTokens: 1_500,
+                includeImages: false,
+                rateLimitDeadlineMs: fallbackDeadlineMs,
+                rateLimitBaseDelayMs: input.rateLimitBaseDelayMs,
+                rateLimitMaxDelayMs: input.rateLimitMaxDelayMs,
+                onRateLimitWait: input.onRateLimitWait,
+              });
+              fallbackStdout = fallbackResult.stdout;
+              fallbackTokenUsage = fallbackResult.tokenUsage;
+            }
             const fallbackParsed = parseReviewerJson(fallbackStdout);
             if (fallbackParsed) {
               return {
                 ...fallbackParsed,
                 reasoning: `Image review was rate-limited; reviewed structured browser evidence instead. ${fallbackParsed.reasoning}`,
+                ...(fallbackTokenUsage && { tokenUsage: fallbackTokenUsage }),
               };
             }
           } catch (fallbackErr) {
@@ -1596,13 +1731,265 @@ function createProviderAwareAdvisoryReviewer(input: {
   };
 }
 
-async function callAnthropicReviewer(input: {
-  model: string;
+async function callContainerReviewer(input: {
   podId: string;
+  containerManager?: ContainerManager;
+  containerId?: string;
+  env?: Record<string, string>;
+  model: string;
   provider?: ModelProvider | null;
   credentials?: ProviderCredentials | null;
-  containerId?: string;
-  containerManager?: ContainerManager;
+  prompt: string;
+  timeoutMs: number;
+}): Promise<{ stdout: string; tokenUsage?: AiTokenUsage }> {
+  if (!input.containerManager || !input.containerId) {
+    throw new Error('container_reviewer_unavailable: no live pod container');
+  }
+
+  const runtime = resolveContainerReviewerRuntime(input.provider, input.credentials);
+  if (!runtime) {
+    throw new Error(`container_reviewer_unavailable: provider ${input.provider ?? 'legacy'}`);
+  }
+
+  if (runtime === 'codex') {
+    return runCodexReview({
+      podId: input.podId,
+      containerId: input.containerId,
+      containerManager: input.containerManager,
+      model: input.model,
+      prompt: input.prompt,
+      timeout: input.timeoutMs,
+      ...(input.env ? { env: input.env } : {}),
+    });
+  }
+
+  return runClaudeContainerReview({
+    podId: input.podId,
+    containerId: input.containerId,
+    containerManager: input.containerManager,
+    model: input.model,
+    prompt: input.prompt,
+    timeout: input.timeoutMs,
+    ...(input.env ? { env: input.env } : {}),
+  });
+}
+
+function resolveContainerReviewerRuntime(
+  provider: ModelProvider | null | undefined,
+  credentials: ProviderCredentials | null | undefined,
+): 'claude' | 'codex' | null {
+  if (provider === 'copilot') return null;
+  if (provider === 'openai') return 'codex';
+  if (
+    provider === 'foundry' &&
+    credentials?.provider === 'foundry' &&
+    (credentials.apiSurface ?? 'anthropic') === 'openai'
+  ) {
+    return 'codex';
+  }
+  return 'claude';
+}
+
+function shouldFallbackToDirectReviewer(
+  provider: ModelProvider | null | undefined,
+  credentials: ProviderCredentials | null | undefined,
+): boolean {
+  if (provider === 'max' || provider === 'copilot') return false;
+  if (
+    provider === 'openai' &&
+    credentials?.provider === 'openai' &&
+    (credentials.authMode === 'chatgpt' || credentials.authJson)
+  ) {
+    return false;
+  }
+  if (
+    provider === 'foundry' &&
+    credentials?.provider === 'foundry' &&
+    (credentials.apiSurface ?? 'anthropic') === 'openai'
+  ) {
+    return false;
+  }
+  return true;
+}
+
+async function runClaudeContainerReview(input: {
+  podId: string;
+  containerId: string;
+  containerManager: ContainerManager;
+  model: string;
+  prompt: string;
+  timeout: number;
+  env?: Record<string, string>;
+}): Promise<{ stdout: string; tokenUsage?: AiTokenUsage }> {
+  const suffix = `${safePathPart(input.podId)}-${Date.now()}`;
+  const promptPath = `/tmp/autopod-claude-review-${suffix}.prompt`;
+  const outputPath = `/tmp/autopod-claude-review-${suffix}.out`;
+  const logPath = `/tmp/autopod-claude-review-${suffix}.log`;
+
+  await input.containerManager.writeFile(input.containerId, promptPath, input.prompt);
+
+  const modelArgs =
+    input.model && input.model !== 'auto'
+      ? ` --model ${shellQuote(resolveAnthropicModelId(input.model))}`
+      : '';
+  const claudeCommand = [
+    `${shellQuote('/run/autopod/agent-shim.sh')} claude -p`,
+    modelArgs.trim(),
+    '--output-format json',
+    '--',
+    `< ${shellQuote(promptPath)}`,
+    `> ${shellQuote(outputPath)} 2> ${shellQuote(logPath)}`,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const command = [
+    `rm -f ${shellQuote(outputPath)} ${shellQuote(logPath)}`,
+    claudeCommand,
+    'status=$?',
+    'if [ "$status" -ne 0 ]; then',
+    '  echo "claude review failed (exit $status)"',
+    `  tail -c 4000 ${shellQuote(logPath)} 2>/dev/null || true`,
+    '  exit "$status"',
+    'fi',
+    `cat ${shellQuote(outputPath)}`,
+  ].join('\n');
+
+  const result = await input.containerManager.execInContainer(
+    input.containerId,
+    ['sh', '-c', command],
+    {
+      cwd: '/workspace',
+      timeout: input.timeout,
+      ...(input.env ? { env: input.env } : {}),
+    },
+  );
+
+  if (result.exitCode !== 0) {
+    throw new Error(`claude container review failed (exit=${result.exitCode}): ${result.stdout}`);
+  }
+
+  return parseClaudeContainerReviewStdout(result.stdout);
+}
+
+function parseClaudeContainerReviewStdout(stdout: string): {
+  stdout: string;
+  tokenUsage?: AiTokenUsage;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return { stdout };
+  }
+
+  const record = asRecord(parsed);
+  if (!record) return { stdout };
+
+  const result = typeof record.result === 'string' ? record.result : stdout;
+  const usage = asRecord(record.usage);
+  const inputTokens = numberField(usage?.input_tokens) ?? numberField(record.input_tokens);
+  const outputTokens = numberField(usage?.output_tokens) ?? numberField(record.output_tokens);
+  const cachedInputTokens =
+    numberField(usage?.cache_read_input_tokens) ?? numberField(record.cache_read_input_tokens);
+  const costUsd = numberField(record.total_cost_usd);
+  const tokenUsage =
+    inputTokens !== undefined ||
+    outputTokens !== undefined ||
+    cachedInputTokens !== undefined ||
+    costUsd !== undefined
+      ? {
+          inputTokens: inputTokens ?? 0,
+          outputTokens: outputTokens ?? 0,
+          ...(cachedInputTokens !== undefined && { cachedInputTokens }),
+          ...(costUsd !== undefined && { costUsd }),
+        }
+      : undefined;
+
+  return { stdout: result, ...(tokenUsage && { tokenUsage }) };
+}
+
+function safePathPart(value: string): string {
+  return value.replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 80) || 'pod';
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function numberField(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+interface OpenAiResponsesApiResponse {
+  output_text?: string;
+  output?: Array<{
+    content?: Array<{
+      text?: string;
+    }>;
+  }>;
+}
+
+interface OpenAiChatCompletionResponse {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+    };
+  }>;
+}
+
+type OpenAiContentPart =
+  | { type: 'input_text'; text: string }
+  | { type: 'input_image'; image_url: string; detail: 'high' };
+
+type OpenAiChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail: 'high' } };
+
+function parseOpenAiAuthJson(authJson: string | undefined): string | null {
+  if (!authJson) return null;
+  try {
+    const parsed = JSON.parse(authJson) as {
+      OPENAI_API_KEY?: string | null;
+      tokens?: {
+        access_token?: string | null;
+      };
+    };
+    return parsed.OPENAI_API_KEY ?? parsed.tokens?.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveOpenAiReviewerConfig(input: {
+  model: string;
+  credentials?: ProviderCredentials | null;
+}): { token: string; model: string; baseUrl: string } {
+  const token =
+    process.env.OPENAI_API_KEY ??
+    (input.credentials?.provider === 'openai'
+      ? parseOpenAiAuthJson(input.credentials.authJson)
+      : null);
+  if (!token) throw new Error('Reviewer provider unavailable: openai_auth_unavailable');
+  return {
+    token,
+    model: input.model === 'auto' ? DEFAULT_OPENAI_ADVISORY_MODEL : input.model,
+    baseUrl: trimTrailingSlash(process.env.OPENAI_BASE_URL ?? DEFAULT_OPENAI_BASE_URL),
+  };
+}
+
+function trimTrailingSlash(url: string): string {
+  return url.endsWith('/') ? url.slice(0, -1) : url;
+}
+
+async function callOpenAiReviewer(input: {
+  model: string;
+  credentials?: ProviderCredentials | null;
   prompt: string;
   input: AdvisoryBrowserQaReviewInput;
   logger?: Logger;
@@ -1615,23 +2002,311 @@ async function callAnthropicReviewer(input: {
   rateLimitMaxDelayMs?: number;
   onRateLimitWait?: (delayMs: number, attempt: number) => void;
 }): Promise<string> {
-  if (input.includeImages === false && input.containerId && input.containerManager) {
-    const { stdout } = await runContainerReviewer({
-      podId: input.podId,
-      containerId: input.containerId,
-      containerManager: input.containerManager,
-      profile: {
-        modelProvider: input.provider ?? null,
-        providerCredentials: input.credentials ?? null,
-      },
-      model: input.model,
-      prompt: input.prompt,
-      timeout: input.timeoutMs ?? 120_000,
-      logger: input.logger,
-    });
-    return stdout.trim();
+  const reviewer = resolveOpenAiReviewerConfig({
+    model: input.model,
+    credentials: input.credentials,
+  });
+  const content =
+    input.includeImages === false
+      ? [{ type: 'input_text', text: input.prompt } satisfies OpenAiContentPart]
+      : buildOpenAiContent(input.prompt, input.input);
+  const retryDeadline =
+    input.rateLimitDeadlineMs ??
+    Date.now() + (input.rateLimitRetryBudgetMs ?? ADVISORY_BROWSER_QA_TOTAL_BUDGET_MS);
+  const rateLimitBaseDelayMs =
+    input.rateLimitBaseDelayMs ?? ADVISORY_BROWSER_QA_RATE_LIMIT_BASE_DELAY_MS;
+  const rateLimitMaxDelayMs =
+    input.rateLimitMaxDelayMs ?? ADVISORY_BROWSER_QA_RATE_LIMIT_MAX_DELAY_MS;
+  const timeoutMs = input.timeoutMs ?? 120_000;
+  let text = '';
+
+  try {
+    const response = await retryRateLimited(
+      () =>
+        fetchOpenAiResponse({
+          url: `${reviewer.baseUrl}/responses`,
+          token: reviewer.token,
+          model: reviewer.model,
+          content,
+          maxTokens: input.maxTokens,
+          timeoutMs,
+        }),
+      input.logger,
+      retryDeadline,
+      rateLimitBaseDelayMs,
+      rateLimitMaxDelayMs,
+      input.onRateLimitWait,
+    );
+    text = extractOpenAiResponseText(response);
+  } catch (err) {
+    if (!shouldFallbackToOpenAiChatCompletions(err)) throw err;
+    input.logger?.warn(
+      { err },
+      'OpenAI Responses advisory reviewer was unavailable; falling back to chat completions',
+    );
+    const response = await retryRateLimited(
+      () =>
+        fetchOpenAiChatCompletion({
+          url: `${reviewer.baseUrl}/chat/completions`,
+          token: reviewer.token,
+          model: reviewer.model,
+          content: buildOpenAiChatContent(content),
+          maxTokens: input.maxTokens,
+          timeoutMs,
+        }),
+      input.logger,
+      retryDeadline,
+      rateLimitBaseDelayMs,
+      rateLimitMaxDelayMs,
+      input.onRateLimitWait,
+    );
+    text = extractOpenAiChatCompletionText(response);
   }
 
+  if (!text) throw new Error('openai_reviewer_empty_response');
+  return text;
+}
+
+async function fetchOpenAiResponse(input: {
+  url: string;
+  token: string;
+  model: string;
+  content: OpenAiContentPart[];
+  maxTokens: number;
+  timeoutMs: number;
+}): Promise<OpenAiResponsesApiResponse> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), input.timeoutMs);
+  try {
+    const response = await fetch(input.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${input.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: input.model,
+        max_output_tokens: input.maxTokens,
+        input: [
+          {
+            role: 'user',
+            content: input.content,
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw openAiHttpError('responses', response.status, response.headers, text);
+    }
+    return (await response.json()) as OpenAiResponsesApiResponse;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchOpenAiChatCompletion(input: {
+  url: string;
+  token: string;
+  model: string;
+  content: OpenAiChatContentPart[];
+  maxTokens: number;
+  timeoutMs: number;
+}): Promise<OpenAiChatCompletionResponse> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), input.timeoutMs);
+  try {
+    const response = await fetch(input.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${input.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: input.model,
+        max_tokens: input.maxTokens,
+        messages: [
+          {
+            role: 'user',
+            content: input.content,
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw openAiHttpError('chat_completions', response.status, response.headers, text);
+    }
+    return (await response.json()) as OpenAiChatCompletionResponse;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function openAiHttpError(
+  endpoint: 'responses' | 'chat_completions',
+  status: number,
+  headers: Headers,
+  bodyText: string,
+): Error & {
+  status: number;
+  headers: Headers;
+  bodyText: string;
+  endpoint: 'responses' | 'chat_completions';
+} {
+  const err = new Error(`openai_reviewer_http_${status}: ${bodyText.slice(0, 200)}`) as Error & {
+    status: number;
+    headers: Headers;
+    bodyText: string;
+    endpoint: 'responses' | 'chat_completions';
+  };
+  err.status = status;
+  err.headers = headers;
+  err.bodyText = bodyText;
+  err.endpoint = endpoint;
+  return err;
+}
+
+function parseOpenAiHttpError(err: unknown): {
+  status: number;
+  message: string;
+  code?: string;
+  type?: string;
+} | null {
+  const record = err && typeof err === 'object' ? (err as Record<string, unknown>) : {};
+  const status = record.status;
+  if (typeof status !== 'number') return null;
+  const bodyText = typeof record.bodyText === 'string' ? record.bodyText : '';
+  if (!bodyText) return null;
+
+  try {
+    const parsed = JSON.parse(bodyText) as {
+      error?: {
+        message?: string;
+        code?: string | null;
+        type?: string | null;
+      };
+    };
+    const message = parsed.error?.message?.trim();
+    if (!message) return null;
+    return {
+      status,
+      message,
+      code: parsed.error?.code ?? undefined,
+      type: parsed.error?.type ?? undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function shouldFallbackToOpenAiChatCompletions(err: unknown): boolean {
+  const record = err && typeof err === 'object' ? (err as Record<string, unknown>) : {};
+  const status = record.status;
+  const endpoint = record.endpoint;
+  if (endpoint !== 'responses' || (status !== 401 && status !== 403)) return false;
+  const bodyText = typeof record.bodyText === 'string' ? record.bodyText : '';
+  const text = `${formatReviewerError(err)}\n${bodyText}`;
+  return /api\.responses\.write|missing scopes?|insufficient permissions|permission/i.test(text);
+}
+
+function isNonRetryableOpenAiQuotaError(err: unknown): boolean {
+  const parsed = parseOpenAiHttpError(err);
+  if (parsed?.status !== 429) return false;
+  const codeOrType = `${parsed.code ?? ''} ${parsed.type ?? ''}`.toLowerCase();
+  if (/\binsufficient_quota\b/.test(codeOrType)) return true;
+  return /exceeded your current quota|billing details/i.test(parsed.message);
+}
+
+function extractOpenAiResponseText(response: OpenAiResponsesApiResponse): string {
+  if (typeof response.output_text === 'string' && response.output_text.trim()) {
+    return response.output_text.trim();
+  }
+  return (
+    response.output
+      ?.flatMap((item) => item.content ?? [])
+      .map((part) => part.text)
+      .filter((text): text is string => typeof text === 'string' && text.trim().length > 0)
+      .join('')
+      .trim() ?? ''
+  );
+}
+
+function extractOpenAiChatCompletionText(response: OpenAiChatCompletionResponse): string {
+  return response.choices?.[0]?.message?.content?.trim() ?? '';
+}
+
+function buildOpenAiContent(
+  prompt: string,
+  input: AdvisoryBrowserQaReviewInput,
+): OpenAiContentPart[] {
+  const content: OpenAiContentPart[] = [{ type: 'input_text', text: prompt }];
+  let imageCount = 0;
+  for (const observation of input.browserObservations) {
+    for (const frame of observation.frames) {
+      if (!frame.imageLabel || !frame.screenshotBase64) continue;
+      if (imageCount >= ADVISORY_BROWSER_QA_IMAGE_CAP) continue;
+      content.push({
+        type: 'input_image',
+        image_url: `data:image/png;base64,${frame.screenshotBase64}`,
+        detail: 'high',
+      });
+      imageCount += 1;
+    }
+  }
+  return content;
+}
+
+function buildOpenAiChatContent(content: OpenAiContentPart[]): OpenAiChatContentPart[] {
+  return content.map((part) => {
+    if (part.type === 'input_text') return { type: 'text', text: part.text };
+    return {
+      type: 'image_url',
+      image_url: {
+        url: part.image_url,
+        detail: part.detail,
+      },
+    };
+  });
+}
+
+async function callAnthropicReviewer(input: {
+  model: string;
+  provider?: ModelProvider | null;
+  credentials?: ProviderCredentials | null;
+  prompt: string;
+  input: AdvisoryBrowserQaReviewInput;
+  logger?: Logger;
+  maxTokens: number;
+  includeImages?: boolean;
+  timeoutMs?: number;
+  rateLimitRetryBudgetMs?: number;
+  rateLimitDeadlineMs?: number;
+  rateLimitBaseDelayMs?: number;
+  rateLimitMaxDelayMs?: number;
+  onRateLimitWait?: (delayMs: number, attempt: number) => void;
+}): Promise<string> {
+  return (await callAnthropicReviewerDetailed(input)).stdout;
+}
+
+async function callAnthropicReviewerDetailed(input: {
+  model: string;
+  provider?: ModelProvider | null;
+  credentials?: ProviderCredentials | null;
+  prompt: string;
+  input: AdvisoryBrowserQaReviewInput;
+  logger?: Logger;
+  maxTokens: number;
+  includeImages?: boolean;
+  timeoutMs?: number;
+  rateLimitRetryBudgetMs?: number;
+  rateLimitDeadlineMs?: number;
+  rateLimitBaseDelayMs?: number;
+  rateLimitMaxDelayMs?: number;
+  onRateLimitWait?: (delayMs: number, attempt: number) => void;
+}): Promise<{ stdout: string; tokenUsage?: AiTokenUsage }> {
   const llm = await createProviderAnthropicClient(
     {
       provider: input.provider,
@@ -1643,12 +2318,13 @@ async function callAnthropicReviewer(input: {
   );
   if (!llm.ok) {
     if (!input.provider || input.provider === 'anthropic') {
-      const { stdout } = await runClaudeCli({
+      const { stdout, tokenUsage } = await runClaudeCli({
         model: input.model,
         input: `${input.prompt}\n\nNote: screenshot images could not be attached because no daemon-callable Anthropic API credentials were available. Use the structured browser observations only.`,
         timeout: input.timeoutMs ?? 120_000,
+        outputFormat: 'json',
       });
-      return stdout;
+      return { stdout, tokenUsage };
     }
     throw new Error(`Reviewer provider unavailable: ${llm.reason}`);
   }
@@ -1677,11 +2353,18 @@ async function callAnthropicReviewer(input: {
     input.rateLimitMaxDelayMs ?? ADVISORY_BROWSER_QA_RATE_LIMIT_MAX_DELAY_MS,
     input.onRateLimitWait,
   );
-  return response.content
+  const stdout = response.content
     .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
     .map((block) => block.text)
     .join('')
     .trim();
+  const cachedInputTokens = response.usage.cache_read_input_tokens ?? 0;
+  const tokenUsage: AiTokenUsage = {
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+    ...(cachedInputTokens > 0 && { cachedInputTokens }),
+  };
+  return { stdout, tokenUsage };
 }
 
 async function retryRateLimited<T>(
@@ -1769,11 +2452,19 @@ function headerValue(err: unknown, name: string): string | undefined {
 }
 
 function formatReviewerError(err: unknown): string {
+  const openAiError = parseOpenAiHttpError(err);
+  if (openAiError) {
+    const qualifier = [openAiError.code, openAiError.type]
+      .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      .join('/');
+    return `openai_reviewer_http_${openAiError.status}: ${openAiError.message}${qualifier ? ` (${qualifier})` : ''}`;
+  }
   if (err instanceof Error) return err.message;
   return String(err);
 }
 
 function isRateLimitError(err: unknown): boolean {
+  if (isNonRetryableOpenAiQuotaError(err)) return false;
   const record = err && typeof err === 'object' ? (err as Record<string, unknown>) : {};
   const status = record.status;
   const type = record.type;
@@ -1868,19 +2559,20 @@ ${describeAdvisoryInput(input)}
 Return JSON only:
 {
   "status": "pass" | "fail" | "uncertain",
-  "reasoning": "short summary",
+  "reasoning": "short summary, max 2 sentences",
   "observations": [
     {
       "id": "stable id",
       "targetId": "one checklist target id",
       "status": "pass" | "fail" | "uncertain",
-      "summary": "what was observed",
-      "details": "optional detail",
-      "suggestedFacts": ["optional durable fact suggestions"]
+      "summary": "what was observed, max 1 sentence",
+      "details": "optional detail, max 2 short sentences",
+      "suggestedFacts": ["optional durable fact suggestions, each max 1 sentence"]
     }
   ]
 }
 
+Keep the response concise. Do not repeat the same uncertainty or limitation explanation across multiple observations; put it once in reasoning or in the most relevant observation.
 Use status "fail" for concerns, but remember this advisory result must not be treated as a validation blocker.`;
 }
 

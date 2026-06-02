@@ -31,6 +31,13 @@ export interface CodexReviewConfig {
   prompt: string;
   env?: Record<string, string>;
   timeout: number;
+  env?: Record<string, string>;
+}
+
+export interface CodexReviewTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens?: number;
 }
 
 const SHIM_PATH = '/run/autopod/agent-shim.sh';
@@ -40,7 +47,9 @@ const SHIM_PATH = '/run/autopod/agent-shim.sh';
  * profile-provisioned credentials as the agent runtime (ChatGPT auth.json,
  * OPENAI_API_KEY_FILE, Foundry OpenAI env, etc.).
  */
-export async function runCodexReview(config: CodexReviewConfig): Promise<{ stdout: string }> {
+export async function runCodexReview(
+  config: CodexReviewConfig,
+): Promise<{ stdout: string; tokenUsage?: CodexReviewTokenUsage }> {
   const suffix = `${safePathPart(config.podId)}-${config.attempt ?? 0}-${Date.now()}`;
   const promptPath = `/tmp/autopod-codex-review-${suffix}.prompt`;
   const outputPath = `/tmp/autopod-codex-review-${suffix}.out`;
@@ -55,6 +64,7 @@ export async function runCodexReview(config: CodexReviewConfig): Promise<{ stdou
     '--cd /workspace',
     '--sandbox read-only',
     '--skip-git-repo-check',
+    '--json',
     '--output-last-message',
     shellQuote(outputPath),
     modelArgs.trim(),
@@ -84,6 +94,7 @@ export async function runCodexReview(config: CodexReviewConfig): Promise<{ stdou
         cwd: '/workspace',
         ...(config.env ? { env: config.env } : {}),
         timeout: config.timeout,
+        ...(config.env ? { env: config.env } : {}),
       },
     );
 
@@ -96,7 +107,13 @@ export async function runCodexReview(config: CodexReviewConfig): Promise<{ stdou
       });
     }
 
-    return { stdout: result.stdout };
+    const tokenUsage = await readCodexReviewTokenUsage(
+      config.containerManager,
+      config.containerId,
+      logPath,
+    );
+
+    return { stdout: result.stdout, ...(tokenUsage && { tokenUsage }) };
   } catch (err) {
     if (err instanceof CodexReviewError) throw err;
     const message = err instanceof Error ? err.message : String(err);
@@ -115,4 +132,75 @@ function safePathPart(value: string): string {
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+async function readCodexReviewTokenUsage(
+  containerManager: ContainerManager,
+  containerId: string,
+  logPath: string,
+): Promise<CodexReviewTokenUsage | undefined> {
+  try {
+    return parseCodexReviewTokenUsage(await containerManager.readFile(containerId, logPath));
+  } catch {
+    return undefined;
+  }
+}
+
+function parseCodexReviewTokenUsage(log: string): CodexReviewTokenUsage | undefined {
+  let latestUsage: Record<string, unknown> | null = null;
+
+  for (const line of log.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    let envelope: unknown;
+    try {
+      envelope = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+
+    const message = unwrapCodexReviewEvent(envelope);
+    if (!message || message.type !== 'token_count') continue;
+
+    const info = asRecord(message.info);
+    const usage = asRecord(info?.total_token_usage) ?? asRecord(info?.last_token_usage);
+    if (usage) latestUsage = usage;
+  }
+
+  if (!latestUsage) return undefined;
+
+  const inputTokens = numberField(latestUsage.input_tokens) ?? 0;
+  const outputTokens = numberField(latestUsage.output_tokens) ?? 0;
+  const cachedInputTokens = numberField(latestUsage.cached_input_tokens);
+
+  return {
+    inputTokens,
+    outputTokens,
+    ...(cachedInputTokens !== undefined && { cachedInputTokens }),
+  };
+}
+
+function unwrapCodexReviewEvent(envelope: unknown): Record<string, unknown> | null {
+  const event = asRecord(envelope);
+  if (!event) return null;
+
+  const msg = asRecord(event.msg);
+  if (msg && typeof msg.type === 'string') return msg;
+
+  const payload = asRecord(event.payload);
+  if (payload && typeof payload.type === 'string') return payload;
+
+  if (typeof event.type === 'string') return event;
+  return null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function numberField(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }

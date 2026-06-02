@@ -967,6 +967,12 @@ human_review: []
           },
         ],
       }),
+      tokenUsage: {
+        inputTokens: 3456,
+        cachedInputTokens: 2000,
+        outputTokens: 234,
+        costUsd: 0.067,
+      },
     });
 
     const cm = stubContainerManager();
@@ -1058,6 +1064,12 @@ human_review: []
       suggestedFacts: ['Add a browser fact for the loaded dashboard state.'],
     });
     expect(advisory?.screenshots[0]?.source).toBe('advisory');
+    expect(advisory?.tokenUsage).toEqual({
+      inputTokens: 3456,
+      cachedInputTokens: 2000,
+      outputTokens: 234,
+      costUsd: 0.067,
+    });
     expect(hostBrowserRunner.runScript).toHaveBeenCalled();
     expect(started).toContain('advisory');
     expect(completed).toContainEqual({
@@ -1302,6 +1314,7 @@ describe('validate() — facts + review gate', () => {
 
   function codexReviewContainerManager(options?: {
     reviewStdout?: string;
+    reviewLog?: string;
     reviewError?: Error;
     commands?: string[];
     prompts?: string[];
@@ -1349,7 +1362,12 @@ describe('validate() — facts + review gate', () => {
       writeFile: vi.fn(async (_containerId: string, _path: string, content: string | Buffer) => {
         options?.prompts?.push(String(content));
       }),
-      readFile: fail('readFile'),
+      readFile: vi.fn(async (_containerId: string, path: string) => {
+        if (path.includes('/tmp/autopod-codex-review-') && path.endsWith('.log')) {
+          return options?.reviewLog ?? '';
+        }
+        throw new Error(`stub: readFile unexpectedly called: ${path}`);
+      }),
       readFileBinary: fail('readFileBinary'),
       extractDirectoryFromContainer: fail('extractDirectoryFromContainer'),
       getStatus: fail('getStatus'),
@@ -1437,10 +1455,73 @@ describe('validate() — facts + review gate', () => {
     expect(result.overall).toBe('pass');
   });
 
+  it('captures Tier 1 Claude review token usage', async () => {
+    vi.mocked(runClaudeCli).mockResolvedValue({
+      stdout: JSON.stringify({
+        status: 'pass',
+        reasoning: 'Claude reviewer passed',
+        issues: [],
+      }),
+      tokenUsage: {
+        inputTokens: 4321,
+        cachedInputTokens: 3000,
+        outputTokens: 123,
+        costUsd: 0.045,
+      },
+    });
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: `diff --git a/src/app.ts b/src/app.ts
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old
++new
+`,
+      }),
+    );
+
+    expect(result.taskReview).toMatchObject({
+      status: 'pass',
+      model: 'claude-sonnet-4-6',
+      reasoning: 'Claude reviewer passed',
+      tokenUsage: {
+        inputTokens: 4321,
+        cachedInputTokens: 3000,
+        outputTokens: 123,
+        costUsd: 0.045,
+      },
+    });
+    expect(vi.mocked(runClaudeCli).mock.calls[0]?.[0]).toMatchObject({
+      model: 'claude-sonnet-4-6',
+      outputFormat: 'json',
+    });
+  });
+
   it('runs Review through Codex for OpenAI reviewer profiles', async () => {
     const commands: string[] = [];
     const prompts: string[] = [];
-    const cm = codexReviewContainerManager({ commands, prompts });
+    const cm = codexReviewContainerManager({
+      commands,
+      prompts,
+      reviewLog: JSON.stringify({
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            total_token_usage: {
+              input_tokens: 12_345,
+              cached_input_tokens: 10_000,
+              output_tokens: 678,
+            },
+          },
+        },
+      }),
+    });
     const engine = createLocalValidationEngine(cm);
 
     const result = await engine.validate(
@@ -1466,6 +1547,11 @@ describe('validate() — facts + review gate', () => {
     expect(commands.some((cmd) => cmd.includes('codex exec'))).toBe(true);
     expect(commands.some((cmd) => cmd.includes("--model 'gpt-5'"))).toBe(true);
     expect(prompts[0]).toContain('## DIFF');
+    expect(result.taskReview?.tokenUsage).toEqual({
+      inputTokens: 12_345,
+      cachedInputTokens: 10_000,
+      outputTokens: 678,
+    });
   });
 
   it('blocks validation when Codex review times out', async () => {

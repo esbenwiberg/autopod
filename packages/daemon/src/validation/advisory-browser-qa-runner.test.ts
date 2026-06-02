@@ -1,5 +1,6 @@
 import { type SpecContract, parseSpecContract } from '@autopod/shared';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import {
   ADVISORY_BROWSER_QA_TARGET_CAP,
@@ -7,6 +8,23 @@ import {
   runAdvisoryBrowserQa,
 } from './advisory-browser-qa-runner.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
+
+const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
+const originalOpenAiBaseUrl = process.env.OPENAI_BASE_URL;
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  if (originalOpenAiApiKey === undefined) {
+    Reflect.deleteProperty(process.env, 'OPENAI_API_KEY');
+  } else {
+    process.env.OPENAI_API_KEY = originalOpenAiApiKey;
+  }
+  if (originalOpenAiBaseUrl === undefined) {
+    Reflect.deleteProperty(process.env, 'OPENAI_BASE_URL');
+  } else {
+    process.env.OPENAI_BASE_URL = originalOpenAiBaseUrl;
+  }
+});
 
 function contractYaml(extraScenarios = ''): string {
   return `contract_version: 1
@@ -133,6 +151,14 @@ function createScreenshotStore(): ScreenshotStore {
   } as unknown as ScreenshotStore;
 }
 
+function createContainerManager(stdout: string): ContainerManager {
+  return {
+    writeFile: vi.fn(async () => {}),
+    readFile: vi.fn(async () => ''),
+    execInContainer: vi.fn(async () => ({ stdout, stderr: '', exitCode: 0 })),
+  } as unknown as ContainerManager;
+}
+
 function rateLimitError(
   retryAfter?: string,
 ): Error & { status: number; headers?: Record<string, string> } {
@@ -239,6 +265,131 @@ describe('runAdvisoryBrowserQa', () => {
       'advisory-0.png',
       expect.any(Buffer),
     );
+  });
+
+  it('reviews advisory evidence through Claude CLI inside the pod for MAX profiles', async () => {
+    const containerManager = createContainerManager(
+      JSON.stringify({
+        result: JSON.stringify({
+          status: 'pass',
+          reasoning: 'Container Claude reviewed structured evidence.',
+          observations: [
+            {
+              id: 'container-claude-dashboard-ok',
+              targetId: 'scenario:dashboard',
+              status: 'pass',
+              summary: 'The dashboard marker is visible in the structured browser evidence.',
+            },
+          ],
+        }),
+        usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 5 },
+        total_cost_usd: 0.01,
+      }),
+    );
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-max-container',
+      task: 'Check dashboard visuals',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
+      reviewerModel: 'claude-sonnet-4-6',
+      reviewerProvider: 'max',
+      reviewerProviderCredentials: {
+        provider: 'max',
+        accessToken: 'redacted',
+        refreshToken: 'redacted',
+        expiresAt: '2026-06-01T12:00:00.000Z',
+      },
+      containerManager,
+      containerId: 'container-max',
+      reviewerExecEnv: { POD_ID: 'pod-max-container' },
+      hostBrowserRunner: createHostBrowserRunner(
+        browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Reached page'],
+            frames: [browserFrame('initial', '/tmp/advisory/screenshots/container-claude.png')],
+          },
+        ]),
+      ),
+      screenshotStore: createScreenshotStore(),
+    });
+
+    expect(result.status).toBe('pass');
+    expect(result.reasoning).toContain('Container Claude reviewed structured evidence.');
+    expect(result.tokenUsage).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 20,
+      cachedInputTokens: 5,
+      costUsd: 0.01,
+    });
+    expect(containerManager.writeFile).toHaveBeenCalledWith(
+      'container-max',
+      expect.stringContaining('/tmp/autopod-claude-review-'),
+      expect.stringContaining('You do not receive screenshot images'),
+    );
+    const execCommand = vi.mocked(containerManager.execInContainer).mock.calls[0]?.[1].join(' ');
+    expect(execCommand).toContain('claude -p');
+    expect(execCommand).toContain('--model');
+    expect(execCommand).toContain('claude-sonnet-4-6');
+  });
+
+  it('reviews advisory evidence through Codex CLI inside the pod for ChatGPT auth profiles', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const containerManager = createContainerManager(
+      JSON.stringify({
+        status: 'pass',
+        reasoning: 'Container Codex reviewed structured evidence.',
+        observations: [
+          {
+            id: 'container-codex-dashboard-ok',
+            targetId: 'scenario:dashboard',
+            status: 'pass',
+            summary: 'The dashboard marker is visible in the structured browser evidence.',
+          },
+        ],
+      }),
+    );
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-pro-container',
+      task: 'Check dashboard visuals',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
+      reviewerModel: 'gpt-5',
+      reviewerProvider: 'openai',
+      reviewerProviderCredentials: { provider: 'openai', authMode: 'chatgpt', authJson: '{}' },
+      containerManager,
+      containerId: 'container-pro',
+      hostBrowserRunner: createHostBrowserRunner(
+        browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Reached page'],
+            frames: [browserFrame('initial', '/tmp/advisory/screenshots/container-codex.png')],
+          },
+        ]),
+      ),
+      screenshotStore: createScreenshotStore(),
+    });
+
+    expect(result.status).toBe('pass');
+    expect(result.reasoning).toContain('Container Codex reviewed structured evidence.');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(containerManager.writeFile).toHaveBeenCalledWith(
+      'container-pro',
+      expect.stringContaining('/tmp/autopod-codex-review-'),
+      expect.stringContaining('You do not receive screenshot images'),
+    );
+    const execCommand = vi.mocked(containerManager.execInContainer).mock.calls[0]?.[1].join(' ');
+    expect(execCommand).toContain('codex exec');
+    expect(execCommand).toContain('--model');
+    expect(execCommand).toContain('gpt-5');
   });
 
   it('skips with no-contract-checklist when scenarios and human review are empty', async () => {
@@ -398,6 +549,268 @@ human_review: []
     expect(review).toHaveBeenCalledOnce();
   });
 
+  it('sends advisory screenshots to OpenAI Responses image input', async () => {
+    process.env.OPENAI_API_KEY = 'sk-test-advisory';
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        model: string;
+        input: Array<{
+          content: Array<{ type: string; text?: string; image_url?: string; detail?: string }>;
+        }>;
+      };
+      const content = body.input[0]?.content ?? [];
+      expect(body.model).toBe('gpt-5-mini');
+      expect(content.some((part) => part.type === 'input_text')).toBe(true);
+      if (!content.some((part) => part.type === 'input_image')) {
+        return new Response(JSON.stringify({ output_text: JSON.stringify({ actions: [] }) }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      expect(content).toContainEqual(
+        expect.objectContaining({
+          type: 'input_image',
+          image_url: `data:image/png;base64,${Buffer.from('png').toString('base64')}`,
+          detail: 'high',
+        }),
+      );
+      return new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            status: 'pass',
+            reasoning: 'OpenAI saw the advisory screenshot.',
+            observations: [
+              {
+                id: 'openai-dashboard-ok',
+                targetId: 'scenario:dashboard',
+                status: 'pass',
+                summary: 'The dashboard marker is visible in the screenshot.',
+              },
+            ],
+          }),
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-openai-vision',
+      task: 'Check dashboard visuals',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
+      reviewerModel: 'auto',
+      reviewerProvider: 'openai',
+      hostBrowserRunner: createHostBrowserRunner(
+        browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Reached page'],
+            frames: [browserFrame('initial', '/tmp/advisory/screenshots/openai.png')],
+          },
+        ]),
+      ),
+      screenshotStore: createScreenshotStore(),
+    });
+
+    expect(result.status).toBe('pass');
+    expect(result.reasoning).toContain('OpenAI saw the advisory screenshot.');
+    expect(result.observations[0]).toMatchObject({
+      id: 'openai-dashboard-ok',
+      scenarioId: 'dashboard',
+      status: 'pass',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/responses',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          authorization: 'Bearer sk-test-advisory',
+          'content-type': 'application/json',
+        }),
+      }),
+    );
+  });
+
+  it('falls back to OpenAI Chat Completions image input when Responses lacks scope', async () => {
+    process.env.OPENAI_API_KEY = 'sk-test-advisory';
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const url = String(_url);
+      if (url.endsWith('/responses')) {
+        const body = JSON.parse(String(init?.body)) as {
+          input: Array<{
+            content: Array<{ type: string; text?: string; image_url?: string; detail?: string }>;
+          }>;
+        };
+        const content = body.input[0]?.content ?? [];
+        if (!content.some((part) => part.type === 'input_image')) {
+          return new Response(JSON.stringify({ output_text: JSON.stringify({ actions: [] }) }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            error: {
+              message:
+                'You have insufficient permissions for this operation. Missing scopes: api.responses.write.',
+            },
+          }),
+          { status: 401, headers: { 'content-type': 'application/json' } },
+        );
+      }
+
+      expect(url).toBe('https://api.openai.com/v1/chat/completions');
+      const body = JSON.parse(String(init?.body)) as {
+        model: string;
+        messages: Array<{
+          content: Array<{
+            type: string;
+            text?: string;
+            image_url?: { url: string; detail: string };
+          }>;
+        }>;
+      };
+      const content = body.messages[0]?.content ?? [];
+      expect(body.model).toBe('gpt-5-mini');
+      expect(content.some((part) => part.type === 'text')).toBe(true);
+      expect(content).toContainEqual(
+        expect.objectContaining({
+          type: 'image_url',
+          image_url: {
+            url: `data:image/png;base64,${Buffer.from('png').toString('base64')}`,
+            detail: 'high',
+          },
+        }),
+      );
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  status: 'pass',
+                  reasoning: 'Chat Completions saw the advisory screenshot.',
+                  observations: [
+                    {
+                      id: 'openai-chat-dashboard-ok',
+                      targetId: 'scenario:dashboard',
+                      status: 'pass',
+                      summary: 'The dashboard marker is visible in the screenshot.',
+                    },
+                  ],
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-openai-chat-vision',
+      task: 'Check dashboard visuals',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
+      reviewerModel: 'auto',
+      reviewerProvider: 'openai',
+      hostBrowserRunner: createHostBrowserRunner(
+        browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Reached page'],
+            frames: [browserFrame('initial', '/tmp/advisory/screenshots/openai-chat.png')],
+          },
+        ]),
+      ),
+      screenshotStore: createScreenshotStore(),
+    });
+
+    expect(result.status).toBe('pass');
+    expect(result.reasoning).toContain('Chat Completions saw the advisory screenshot.');
+    expect(result.observations[0]).toMatchObject({
+      id: 'openai-chat-dashboard-ok',
+      scenarioId: 'dashboard',
+      status: 'pass',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          authorization: 'Bearer sk-test-advisory',
+          'content-type': 'application/json',
+        }),
+      }),
+    );
+  });
+
+  it('does not retry OpenAI insufficient quota errors as rate limits', async () => {
+    process.env.OPENAI_API_KEY = 'sk-test-advisory';
+    const progress: string[] = [];
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        input: Array<{
+          content: Array<{ type: string }>;
+        }>;
+      };
+      const content = body.input[0]?.content ?? [];
+      if (!content.some((part) => part.type === 'input_image')) {
+        return new Response(JSON.stringify({ output_text: JSON.stringify({ actions: [] }) }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          error: {
+            message: 'You exceeded your current quota, please check your plan and billing details.',
+            type: 'insufficient_quota',
+            code: 'insufficient_quota',
+          },
+        }),
+        { status: 429, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-openai-quota',
+      task: 'Check dashboard visuals',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
+      reviewerModel: 'auto',
+      reviewerProvider: 'openai',
+      hostBrowserRunner: createHostBrowserRunner(
+        browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Reached page'],
+            frames: [browserFrame('initial', '/tmp/advisory/screenshots/openai-quota.png')],
+          },
+        ]),
+      ),
+      screenshotStore: createScreenshotStore(),
+      onProgress: (message) => progress.push(message),
+    });
+
+    expect(result.status).toBe('uncertain');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(progress.some((message) => message.includes('waiting'))).toBe(false);
+    expect(result.reasoning).toContain('openai_reviewer_http_429');
+    expect(result.reasoning).toContain('insufficient_quota');
+    expect(result.reasoning).not.toContain('"error"');
+    expect(result.observations[0]?.summary).not.toContain('"error"');
+  });
+
   it('reuses repeated screenshot bytes in storage and reviewer image attachments', async () => {
     const review = vi.fn(async (input) => {
       const frames = input.browserObservations.flatMap((observation) => observation.frames);
@@ -454,6 +867,105 @@ human_review: []
     expect(result.status).toBe('pass');
     expect(result.screenshots).toHaveLength(1);
     expect(screenshotStore.write).toHaveBeenCalledOnce();
+  });
+
+  it('attaches a target screenshot to only one observation when reviewer returns many notes', async () => {
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-many-notes',
+      task: 'Check dashboard notes',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
+      hostBrowserRunner: createHostBrowserRunner(
+        browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Reached page'],
+            frames: [browserFrame('initial', '/tmp/advisory/screenshots/dashboard.png')],
+          },
+        ]),
+      ),
+      screenshotStore: createScreenshotStore(),
+      reviewer: {
+        review: vi.fn(async () => ({
+          status: 'uncertain',
+          reasoning: 'Two advisory notes were returned.',
+          observations: [
+            {
+              id: 'first-note',
+              targetId: 'scenario:dashboard',
+              status: 'uncertain',
+              summary: 'First note has the screenshot.',
+            },
+            {
+              id: 'second-note',
+              targetId: 'scenario:dashboard',
+              status: 'uncertain',
+              summary: 'Second note should not repeat the same image.',
+            },
+          ],
+        })),
+      },
+    });
+
+    expect(result.screenshots).toHaveLength(1);
+    expect(result.observations).toHaveLength(2);
+    expect(result.observations[0]?.screenshots).toHaveLength(1);
+    expect(result.observations[1]?.screenshots).toHaveLength(0);
+  });
+
+  it('compacts verbose reviewer text before returning advisory results', async () => {
+    const longReasoning = Array.from({ length: 30 }, (_, index) => `reason-${index}`).join(' ');
+    const longSummary = Array.from({ length: 30 }, (_, index) => `summary-${index}`).join(' ');
+    const longDetails = Array.from({ length: 80 }, (_, index) => `detail-${index}`).join(' ');
+    const longFacts = Array.from(
+      { length: 5 },
+      (_, index) =>
+        `fact-${index} ${Array.from({ length: 30 }, (__, word) => `word-${word}`).join(' ')}`,
+    );
+
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod-verbose-notes',
+      task: 'Check dashboard text output',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
+      hostBrowserRunner: createHostBrowserRunner(
+        browserStdout([
+          {
+            targetId: 'scenario:dashboard',
+            url: 'http://127.0.0.1:3000/',
+            title: 'Dashboard',
+            notes: ['Reached page'],
+            frames: [browserFrame('initial', '/tmp/advisory/screenshots/dashboard.png')],
+          },
+        ]),
+      ),
+      screenshotStore: createScreenshotStore(),
+      reviewer: {
+        review: vi.fn(async () => ({
+          status: 'uncertain',
+          reasoning: longReasoning,
+          observations: [
+            {
+              id: 'verbose-note',
+              targetId: 'scenario:dashboard',
+              status: 'uncertain',
+              summary: longSummary,
+              details: longDetails,
+              suggestedFacts: longFacts,
+            },
+          ],
+        })),
+      },
+    });
+
+    const observation = result.observations[0];
+    expect(result.reasoning.length).toBeLessThanOrEqual(360);
+    expect(observation?.summary.length).toBeLessThanOrEqual(180);
+    expect(observation?.details?.length).toBeLessThanOrEqual(420);
+    expect(observation?.suggestedFacts).toHaveLength(3);
+    expect(observation?.suggestedFacts?.every((fact) => fact.length <= 180)).toBe(true);
   });
 
   it('reviews checklist targets sequentially with a pause between targets', async () => {
@@ -1112,59 +1624,43 @@ human_review: []
     expect(actionScript).not.toContain('scenario:old-pod');
   });
 
-  it('uses the help-control heuristic before asking the reviewer to plan actions', async () => {
-    const hostBrowserRunner = createSequentialHostBrowserRunner([
-      {
-        stdout: browserStdout([
-          {
-            targetId: 'scenario:dashboard',
-            url: 'http://127.0.0.1:3000/',
-            title: 'Dashboard',
-            notes: ['Reached page'],
-            frames: [
-              browserFrame('initial', '/tmp/advisory/screenshots/help-before.png', [
-                {
-                  index: 4,
-                  role: 'button',
-                  tag: 'button',
-                  text: '?',
-                  ariaLabel: 'Help',
-                  title: '',
-                  disabled: false,
-                  visible: true,
-                  rect: { x: 300, y: 20, width: 24, height: 24 },
-                },
-              ]),
-            ],
-          },
-        ]),
-      },
-      {
-        stdout: browserStdout([
-          {
-            targetId: 'scenario:dashboard',
-            url: 'http://127.0.0.1:3000/',
-            title: 'Dashboard',
-            notes: ['Reached page'],
-            frames: [
-              browserFrame('initial', '/tmp/advisory/screenshots/help-before-2.png'),
-              browserFrame('after-action-1', '/tmp/advisory/screenshots/help-after.png', [], {
-                status: 'pass',
-                action: { type: 'click', controlIndex: 4, reason: 'Open Help' },
-                summary: 'Clicked control',
-              }),
-            ],
-          },
-        ]),
-      },
-    ]);
+  it('does not auto-click visible help controls without a reviewer action plan', async () => {
+    const hostBrowserRunner = createHostBrowserRunner(
+      browserStdout([
+        {
+          targetId: 'scenario:dashboard',
+          url: 'http://127.0.0.1:3000/',
+          title: 'Dashboard',
+          notes: ['Reached page'],
+          frames: [
+            browserFrame('initial', '/tmp/advisory/screenshots/help-before.png', [
+              {
+                index: 4,
+                role: 'button',
+                tag: 'button',
+                text: '?',
+                ariaLabel: 'Help',
+                title: '',
+                disabled: false,
+                visible: true,
+                rect: { x: 300, y: 20, width: 24, height: 24 },
+              },
+            ]),
+          ],
+        },
+      ]),
+    );
 
-    const planActions = vi.fn(async () => [
-      {
-        targetId: 'scenario:dashboard',
-        actions: [{ type: 'click' as const, controlIndex: 99, reason: 'Wrong control' }],
-      },
-    ]);
+    const planActions = vi.fn(async () => []);
+    const review = vi.fn(async (input) => {
+      expect(input.browserObservations[0]?.frames).toHaveLength(1);
+      expect(input.browserObservations[0]?.frames[0]?.action).toBeUndefined();
+      return {
+        status: 'pass' as const,
+        reasoning: 'Help control was left closed unless explicitly planned.',
+        observations: [],
+      };
+    });
 
     await runAdvisoryBrowserQa({
       podId: 'pod-help',
@@ -1175,16 +1671,13 @@ human_review: []
       screenshotStore: createScreenshotStore(),
       reviewer: {
         planActions,
-        review: vi.fn(async () => ({
-          status: 'pass',
-          reasoning: 'Help opened',
-          observations: [],
-        })),
+        review,
       },
     });
 
-    expect(hostBrowserRunner.runScript).toHaveBeenCalledTimes(2);
-    expect(planActions).not.toHaveBeenCalled();
+    expect(hostBrowserRunner.runScript).toHaveBeenCalledTimes(1);
+    expect(planActions).toHaveBeenCalledOnce();
+    expect(review).toHaveBeenCalledOnce();
   });
 
   it('ignores reviewer observations outside the current checklist targets', async () => {

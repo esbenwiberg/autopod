@@ -34,6 +34,12 @@ export interface ValidationEngineConfig {
   reviewerProviderCredentials?: ProviderCredentials | null;
   /** Anthropic API key for Tier 2 tool-use review. Defaults to ANTHROPIC_API_KEY env var. */
   reviewerApiKey?: string;
+  /**
+   * Env vars required when reviewer helpers run through a fresh CLI inside the
+   * pod container. This mirrors the agent runtime's provider env (`*_FILE`
+   * pointers, `POD_ID`, Foundry endpoint vars) without exposing raw secrets.
+   */
+  reviewerExecEnv?: Record<string, string>;
   testCommand?: string | null;
   /** Subdirectory relative to /workspace where build/test/start commands execute. */
   buildWorkDir?: string | null;

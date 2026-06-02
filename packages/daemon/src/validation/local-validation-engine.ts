@@ -9,7 +9,6 @@ import type {
   FactValidationResult,
   HealthResult,
   PageResult,
-  SetupResult,
   TaskReviewResult,
   ValidationOverride,
   ValidationResult,
@@ -148,69 +147,7 @@ export function createLocalValidationEngine(
         checkAbort();
         await resetWorktreeToHead(containerManager, config, log);
 
-        // ── Phase 1: Setup ─────────────────────────────────────────────
-        checkAbort();
-        let setupResult: SetupResult;
-        if (skipPhases.includes('setup')) {
-          setupResult = {
-            status: 'skip',
-            output: 'Setup phase skipped by profile configuration',
-            duration: 0,
-          };
-        } else {
-          callbacks?.onPhaseStarted?.('setup');
-          if (config.validationSetupCommand?.trim()) onProgress?.('Running validation setup…');
-          setupResult = await runSetup(containerManager, config, log);
-        }
-        callbacks?.onPhaseCompleted?.('setup', setupResult.status, setupResult);
-
-        if (setupResult.status === 'fail') {
-          const duration = Date.now() - startTime;
-          const buildResult = {
-            status: 'pass' as const,
-            output: 'Build phase skipped because validation setup failed',
-            duration: 0,
-          };
-          const healthResult: HealthResult = {
-            status: 'skip',
-            url: config.previewUrl + config.healthPath,
-            responseCode: null,
-            duration: 0,
-          };
-
-          return {
-            podId: config.podId,
-            attempt: config.attempt,
-            timestamp: new Date().toISOString(),
-            setup: setupResult,
-            smoke: {
-              status: 'fail',
-              build: buildResult,
-              health: healthResult,
-              pages: [],
-            },
-            test: { status: 'skip', duration: 0 },
-            lint: {
-              status: 'skip',
-              output: 'Skipped because validation setup failed',
-              duration: 0,
-            },
-            sast: {
-              status: 'skip',
-              output: 'Skipped because validation setup failed',
-              duration: 0,
-            },
-            factValidation: { status: 'skip', results: [] },
-            taskReview: null,
-            advisoryBrowserQa: null,
-            reviewSkipReason: 'Skipped — validation setup failed',
-            reviewSkipKind: 'upstream-failed',
-            overall: 'fail',
-            duration,
-          };
-        }
-
-        // ── Phase 2: Lint ──────────────────────────────────────────────
+        // ── Phase 1: Lint ──────────────────────────────────────────────
         checkAbort();
         let lintResult: Awaited<ReturnType<typeof runLint>>;
         if (skipPhases.includes('lint')) {
@@ -222,7 +159,7 @@ export function createLocalValidationEngine(
         }
         callbacks?.onPhaseCompleted?.('lint', lintResult.status, lintResult);
 
-        // ── Phase 3: SAST ──────────────────────────────────────────────
+        // ── Phase 2: SAST ──────────────────────────────────────────────
         checkAbort();
         let sastResult: Awaited<ReturnType<typeof runSast>>;
         if (skipPhases.includes('sast')) {
@@ -234,7 +171,7 @@ export function createLocalValidationEngine(
         }
         callbacks?.onPhaseCompleted?.('sast', sastResult.status, sastResult);
 
-        // ── Phase 4: Build ─────────────────────────────────────────────
+        // ── Phase 3: Build ─────────────────────────────────────────────
         checkAbort();
         let buildResult: Awaited<ReturnType<typeof runBuild>>;
         if (skipPhases.includes('build')) {
@@ -250,7 +187,7 @@ export function createLocalValidationEngine(
         }
         callbacks?.onPhaseCompleted?.('build', buildResult.status, buildResult);
 
-        // ── Phase 5: Test ──────────────────────────────────────────────
+        // ── Phase 4: Test ──────────────────────────────────────────────
         checkAbort();
         let testResult: { status: 'pass' | 'fail' | 'skip'; duration: number };
         if (skipPhases.includes('test')) {
@@ -265,7 +202,7 @@ export function createLocalValidationEngine(
         }
         callbacks?.onPhaseCompleted?.('test', testResult.status, testResult);
 
-        // ── Phase 6: Health check ──────────────────────────────────────
+        // ── Phase 5: Health check ──────────────────────────────────────
         // Skipped when the profile has no web UI — there's nothing to start,
         // no endpoint to poll, and downstream Pages validation is
         // inapplicable too.
@@ -309,7 +246,7 @@ export function createLocalValidationEngine(
           });
         }
 
-        // ── Phase 7: Page validation ───────────────────────────────────
+        // ── Phase 6: Page validation ───────────────────────────────────
         checkAbort();
         let pages: PageResult[];
         let pagesStatus: 'pass' | 'fail' | 'skip';
@@ -347,7 +284,6 @@ export function createLocalValidationEngine(
         // 'skip' counts as pass (legit skips: no test command, no smoke pages,
         // no web UI, profile-level skipPhases).
         const tier1Pass =
-          setupResult.status !== 'fail' &&
           lintResult.status !== 'fail' &&
           sastResult.status !== 'fail' &&
           buildResult.status === 'pass' &&
@@ -355,7 +291,7 @@ export function createLocalValidationEngine(
           healthResult.status !== 'fail' &&
           pagesStatus !== 'fail';
 
-        // ── Phase 8: Required Facts ────────────────────────────────────
+        // ── Phase 7: Required Facts ────────────────────────────────────
         // Contract facts are the post-merge survival layer: concrete artifacts
         // and commands the validator can execute without model interpretation.
         checkAbort();
@@ -375,7 +311,7 @@ export function createLocalValidationEngine(
         }
         callbacks?.onPhaseCompleted?.('facts', factsStatus, factValidation);
 
-        // ── Phase 9: AI Task Review ────────────────────────────────────
+        // ── Phase 8: AI Task Review ────────────────────────────────────
         checkAbort();
         let taskReview: TaskReviewResult | null;
         let reviewSkipReason: string | undefined;
@@ -433,7 +369,7 @@ export function createLocalValidationEngine(
               : 'pass';
         callbacks?.onPhaseCompleted?.('review', reviewStatus, taskReview);
 
-        // ── Phase 10: Overall result ──────────────────────────────────
+        // ── Phase 9: Overall result ──────────────────────────────────
         // Advisory Browser QA runs after the daemon has created/carry-forwarded
         // the PR. Keeping it out of `validate()` makes advisory evidence
         // nonblocking in both result semantics and scheduling.
@@ -465,7 +401,6 @@ export function createLocalValidationEngine(
           podId: config.podId,
           attempt: config.attempt,
           timestamp: new Date().toISOString(),
-          setup: setupResult,
           smoke: {
             status: smokeStatus,
             build: buildResult,
@@ -536,8 +471,9 @@ export function createLocalValidationEngine(
           reviewerModel: config.reviewerModel,
           reviewerProvider: config.reviewerProvider,
           reviewerProviderCredentials: config.reviewerProviderCredentials,
-          containerId: config.containerId,
           containerManager,
+          containerId: config.containerId,
+          ...(config.reviewerExecEnv ? { reviewerExecEnv: config.reviewerExecEnv } : {}),
           hostBrowserRunner,
           screenshotStore,
           logger: log,
@@ -580,7 +516,6 @@ function makeInterruptedResult(
     podId: config.podId,
     attempt: config.attempt,
     timestamp: new Date().toISOString(),
-    setup: { status: 'skip', output: '', duration: 0 },
     smoke: {
       status: 'fail',
       build: { status: 'skip', output: '', duration: 0 },
@@ -665,60 +600,6 @@ export function startAppStabilityMonitor(url: string, onCrash: () => void): () =
 
   return () => {
     stopped = true;
-  };
-}
-
-// ── Setup phase ─────────────────────────────────────────────────────────────
-
-async function runSetup(
-  containerManager: ContainerManager,
-  config: ValidationEngineConfig,
-  log?: Logger,
-): Promise<SetupResult> {
-  const command = config.validationSetupCommand?.trim();
-  if (!command) {
-    log?.info('no validation setup command configured, skipping setup');
-    return { status: 'skip', output: '', duration: 0 };
-  }
-
-  const setupStart = Date.now();
-  const setupCwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
-  log?.info({ validationSetupCommand: command }, 'running validation setup');
-
-  let result: { stdout: string; stderr: string; exitCode: number };
-  try {
-    result = await containerManager.execInContainer(config.containerId, ['sh', '-c', command], {
-      cwd: setupCwd,
-      timeout: config.buildTimeout ?? 300_000,
-      ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
-    });
-  } catch (err) {
-    const duration = Date.now() - setupStart;
-    const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
-    const message = err instanceof Error ? err.message : String(err);
-    log?.warn({ duration }, `validation setup timed out: ${message}`);
-    return {
-      status: 'fail',
-      output: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 50_000),
-      duration,
-      error: message,
-    };
-  }
-
-  const duration = Date.now() - setupStart;
-  const output = `${result.stdout}\n${result.stderr}`.trim();
-  const status = result.exitCode === 0 ? ('pass' as const) : ('fail' as const);
-
-  if (status === 'fail') {
-    log?.warn({ exitCode: result.exitCode, duration }, 'validation setup failed');
-  } else {
-    log?.info({ duration }, 'validation setup passed');
-  }
-
-  return {
-    status,
-    output: output.slice(0, 50_000),
-    duration,
   };
 }
 
@@ -2233,7 +2114,7 @@ async function runTaskReview(
 ): Promise<{
   result: TaskReviewResult | null;
   skipReason?: string;
-  tokenUsage?: { inputTokens: number; outputTokens: number };
+  tokenUsage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
 }> {
   if (!config.reviewerModel || !config.diff || !config.task) {
     const reason = !config.diff
@@ -2271,6 +2152,9 @@ async function runTaskReview(
 
   try {
     let tier1Parsed: ReturnType<typeof parseReviewJson> = null;
+    let tier1TokenUsage:
+      | { inputTokens: number; outputTokens: number; cachedInputTokens?: number }
+      | undefined;
 
     if (!diffIsTruncated || reviewRunner === 'codex') {
       // Reuse the agent's pre-submit verdict when it applies to the same diff
@@ -2285,22 +2169,30 @@ async function runTaskReview(
         );
       } else {
         // ── Tier 1: Single-shot review with enriched context ──────────────
-        const { stdout } =
-          reviewRunner === 'codex'
-            ? await runCodexReview({
-                podId: config.podId,
-                attempt: config.attempt,
-                containerId: config.containerId,
-                containerManager,
-                model: config.reviewerModel,
-                prompt,
-                timeout: reviewTimeout,
-              })
-            : await runClaudeCli({
-                model: config.reviewerModel,
-                input: prompt,
-                timeout: reviewTimeout,
-              });
+        let stdout: string;
+        if (reviewRunner === 'codex') {
+          const codexReview = await runCodexReview({
+            podId: config.podId,
+            attempt: config.attempt,
+            containerId: config.containerId,
+            containerManager,
+            model: config.reviewerModel,
+            prompt,
+            timeout: reviewTimeout,
+            ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
+          });
+          stdout = codexReview.stdout;
+          tier1TokenUsage = codexReview.tokenUsage;
+        } else {
+          const claudeReview = await runClaudeCli({
+            model: config.reviewerModel,
+            input: prompt,
+            timeout: reviewTimeout,
+            outputFormat: 'json',
+          });
+          stdout = claudeReview.stdout;
+          tier1TokenUsage = claudeReview.tokenUsage;
+        }
 
         tier1Parsed = applyDiffFilterToParsed(
           enforceRequirementsStatus(parseReviewJson(stdout.trim())),
@@ -2348,7 +2240,9 @@ async function runTaskReview(
           diff: config.diff,
           requirementsCheck: tier1Parsed.requirementsCheck,
           deviationsAssessment: tier1Parsed.deviationsAssessment,
+          tokenUsage: tier1TokenUsage,
         },
+        tokenUsage: tier1TokenUsage,
       };
     }
 
@@ -2365,7 +2259,9 @@ async function runTaskReview(
             diff: config.diff,
             requirementsCheck: tier1Parsed.requirementsCheck,
             deviationsAssessment: tier1Parsed.deviationsAssessment,
+            tokenUsage: tier1TokenUsage,
           },
+          tokenUsage: tier1TokenUsage,
         };
       }
       return {
@@ -2494,7 +2390,9 @@ async function runTaskReview(
           diff: config.diff,
           requirementsCheck: tier1Parsed.requirementsCheck,
           deviationsAssessment: tier1Parsed.deviationsAssessment,
+          tokenUsage: tier1TokenUsage,
         },
+        tokenUsage: tier1TokenUsage,
       };
     }
   } catch (err) {
