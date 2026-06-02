@@ -341,13 +341,13 @@ Required wrap-up section, always last:
 ```markdown
 ## Wrap-up
 Before finishing:
-1. Run `/simplify` and address its findings.
+1. Follow the profile finish prompt, if one is configured.
 2. Re-run build and tests; both must still pass.
 3. Commit and push.
 ```
 
-`/simplify` is process, not a required fact — that's why it's a wrap-up step.
-Required facts remain about observable outcomes only.
+The profile finish prompt is process, not a required fact — that's why it's a
+wrap-up step. Required facts remain about observable outcomes only.
 
 #### What briefs should NOT contain
 
