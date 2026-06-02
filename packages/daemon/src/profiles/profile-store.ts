@@ -198,6 +198,7 @@ export function rowToProfile(
     adoPatExpiresAt: nullableStr(row.ado_pat_expires_at),
     githubPat: decryptPat(row.github_pat),
     githubPatExpiresAt: nullableStr(row.github_pat_expires_at),
+    openrouterApiKey: decryptPat(row.openrouter_api_key),
     privateRegistries: JSON.parse((row.private_registries as string) ?? '[]') as PrivateRegistry[],
     registryPat: decryptPat(row.registry_pat),
     registryPatExpiresAt: nullableStr(row.registry_pat_expires_at),
@@ -346,7 +347,7 @@ export function createProfileStore(
           extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
           agent_mode, output_target, validate, advisory_browser_qa_enabled, promotable,
           model_provider, provider_credentials, test_command, validation_setup_command, pr_provider,
-          ado_pat, ado_pat_expires_at, github_pat, github_pat_expires_at,
+          ado_pat, ado_pat_expires_at, github_pat, github_pat_expires_at, openrouter_api_key,
           private_registries, registry_pat, registry_pat_expires_at, branch_prefix, container_memory_gb,
           build_timeout, test_timeout, build_env,
           lint_command, lint_timeout, sast_command, sast_timeout,
@@ -368,7 +369,7 @@ export function createProfileStore(
           @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
           @agentMode, @outputTarget, @validate, @advisoryBrowserQaEnabled, @promotable,
           @modelProvider, @providerCredentials, @testCommand, @validationSetupCommand, @prProvider,
-          @adoPat, @adoPatExpiresAt, @githubPat, @githubPatExpiresAt,
+          @adoPat, @adoPatExpiresAt, @githubPat, @githubPatExpiresAt, @openrouterApiKey,
           @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix, @containerMemoryGb,
           @buildTimeout, @testTimeout, @buildEnv,
           @lintCommand, @lintTimeout, @sastCommand, @sastTimeout,
@@ -436,6 +437,7 @@ export function createProfileStore(
         adoPatExpiresAt: parsed.adoPatExpiresAt ?? null,
         githubPat: encryptPat(parsed.githubPat),
         githubPatExpiresAt: parsed.githubPatExpiresAt ?? null,
+        openrouterApiKey: encryptPat(parsed.openrouterApiKey),
         privateRegistries: JSON.stringify(parsed.privateRegistries ?? []),
         registryPat: encryptPat(parsed.registryPat),
         registryPatExpiresAt: parsed.registryPatExpiresAt ?? null,
@@ -716,6 +718,10 @@ export function createProfileStore(
       if (parsed.githubPat !== undefined) {
         setClauses.push('github_pat = @githubPat');
         fieldMap.githubPat = encryptPat(parsed.githubPat);
+      }
+      if (parsed.openrouterApiKey !== undefined) {
+        setClauses.push('openrouter_api_key = @openrouterApiKey');
+        fieldMap.openrouterApiKey = encryptPat(parsed.openrouterApiKey);
       }
       if (parsed.githubPatExpiresAt !== undefined) {
         setClauses.push('github_pat_expires_at = @githubPatExpiresAt');

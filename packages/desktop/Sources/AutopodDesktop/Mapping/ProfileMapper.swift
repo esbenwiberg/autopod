@@ -72,6 +72,7 @@ public enum ProfileMapper {
       hasGithubPat: response.hasGithubPat ?? (response.githubPat != nil),
       hasAdoPat: response.hasAdoPat ?? (response.adoPat != nil),
       hasRegistryPat: response.hasRegistryPat ?? (response.registryPat != nil),
+      openrouterApiKey: response.openrouterApiKey,
       githubPatExpiresAt: response.githubPatExpiresAt,
       adoPatExpiresAt: response.adoPatExpiresAt,
       registryPatExpiresAt: response.registryPatExpiresAt,
@@ -294,6 +295,7 @@ public enum ProfileMapper {
     if let v = profile.containerMemoryGb { d["containerMemoryGb"] = v }
     if let v = profile.githubPat { d["githubPat"] = v }
     if let v = profile.adoPat { d["adoPat"] = v }
+    if let v = profile.openrouterApiKey { d["openrouterApiKey"] = v }
     if let v = profile.registryPat { d["registryPat"] = v }
     d["githubPatExpiresAt"] = profile.githubPatExpiresAt ?? NSNull()
     d["adoPatExpiresAt"] = profile.adoPatExpiresAt ?? NSNull()

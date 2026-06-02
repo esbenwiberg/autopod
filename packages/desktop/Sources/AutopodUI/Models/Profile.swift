@@ -74,6 +74,7 @@ public struct Profile: Identifiable, Sendable {
     public var hasRegistryPat: Bool
     public var githubPat: String?
     public var adoPat: String?
+    public var openrouterApiKey: String?
     public var registryPat: String?
     public var githubPatExpiresAt: String?
     public var adoPatExpiresAt: String?
@@ -216,6 +217,7 @@ public struct Profile: Identifiable, Sendable {
         issueWatcherEnabled: Bool = false, issueWatcherLabelPrefix: String = "autopod",
         hasGithubPat: Bool = false, hasAdoPat: Bool = false, hasRegistryPat: Bool = false,
         githubPat: String? = nil, adoPat: String? = nil, registryPat: String? = nil,
+        openrouterApiKey: String? = nil,
         githubPatExpiresAt: String? = nil, adoPatExpiresAt: String? = nil,
         registryPatExpiresAt: String? = nil,
         networkEnabled: Bool = false, networkMode: NetworkPolicyMode = .restricted,
@@ -282,6 +284,7 @@ public struct Profile: Identifiable, Sendable {
         self.hasGithubPat = hasGithubPat; self.hasAdoPat = hasAdoPat
         self.hasRegistryPat = hasRegistryPat
         self.githubPat = githubPat; self.adoPat = adoPat; self.registryPat = registryPat
+        self.openrouterApiKey = openrouterApiKey
         self.githubPatExpiresAt = githubPatExpiresAt
         self.adoPatExpiresAt = adoPatExpiresAt
         self.registryPatExpiresAt = registryPatExpiresAt
@@ -540,15 +543,16 @@ public enum ExecutionTarget: String, CaseIterable, Sendable {
 }
 
 public enum ModelProvider: String, CaseIterable, Sendable {
-    case anthropic, max, openai, foundry, copilot
+    case anthropic, max, openai, foundry, copilot, openrouter
 
     public var label: String {
         switch self {
-        case .anthropic: "Anthropic"
-        case .max:       "Max"
-        case .openai:    "OpenAI (Codex)"
-        case .foundry:   "Foundry"
-        case .copilot:   "Copilot"
+        case .anthropic:   "Anthropic"
+        case .max:         "Max"
+        case .openai:      "OpenAI (Codex)"
+        case .foundry:     "Foundry"
+        case .copilot:     "Copilot"
+        case .openrouter:  "OpenRouter"
         }
     }
 }

@@ -154,6 +154,8 @@ export interface Profile {
   adoPatExpiresAt?: string | null;
   /** GitHub Personal Access Token (encrypted at rest). Used for PR creation and action read access. */
   githubPat: string | null;
+  /** OpenRouter API key (encrypted at rest). Used when modelProvider is 'openrouter'. */
+  openrouterApiKey: string | null;
   /** Date-only PAT expiry metadata, formatted as YYYY-MM-DD. Non-secret. */
   githubPatExpiresAt?: string | null;
   /** Private package registries (npm/NuGet) for Azure DevOps feeds */
@@ -233,10 +235,14 @@ export interface Profile {
   updatedAt: string;
 }
 
-export type PublicProfile = Omit<Profile, 'adoPat' | 'githubPat' | 'registryPat'> & {
+export type PublicProfile = Omit<
+  Profile,
+  'adoPat' | 'githubPat' | 'registryPat' | 'openrouterApiKey'
+> & {
   adoPat: null;
   githubPat: null;
   registryPat: null;
+  openrouterApiKey: null;
   hasAdoPat: boolean;
   hasGithubPat: boolean;
   hasRegistryPat: boolean;

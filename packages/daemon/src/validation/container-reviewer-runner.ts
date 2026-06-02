@@ -33,6 +33,13 @@ export async function runContainerReviewer(
     );
   }
 
+  const containerStatus = await config.containerManager.getStatus(config.containerId);
+  if (containerStatus !== 'running') {
+    throw new ContainerReviewerUnavailableError(
+      `Container reviewer unavailable: container is ${containerStatus} (not running)`,
+    );
+  }
+
   const runner = resolveContainerReviewer(config.profile);
   config.logger?.info(
     { podId: config.podId, model: config.model, runner },

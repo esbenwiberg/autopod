@@ -199,7 +199,7 @@ public enum ProfileOverrideCatalog {
             key: "modelProvider",
             label: "Model Provider",
             section: .providers,
-            help: "anthropic / max / openai / foundry / copilot. Credentials are tied to this choice."
+            help: "anthropic / max / openai / foundry / copilot / openrouter. Credentials are tied to this choice."
         ),
         .init(
             key: "prProvider",

@@ -348,26 +348,52 @@ describe('buildProviderEnv', () => {
       expect(result.env.OPENAI_BASE_URL).toBe('https://custom.proxy.example.com/v1');
     });
 
-    it('throws when credentials are missing', async () => {
+    it('falls back to OPENROUTER_API_KEY env var when no per-profile credentials', async () => {
+      process.env.OPENROUTER_API_KEY = 'sk-or-from-env';
       const profile = makeProfile({
         modelProvider: 'openrouter',
+        defaultRuntime: 'codex',
         providerCredentials: null,
       });
 
-      await expect(buildProviderEnv(profile, 'pod-1', logger)).rejects.toThrow(
-        'missing or mismatched providerCredentials',
-      );
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
+
+      expect(result.env.OPENAI_BASE_URL).toBe('https://openrouter.ai/api/v1');
+      expect(result.env.OPENAI_API_KEY_FILE).toBe('/run/autopod/openrouter-api-key');
+      expect(result.secretFiles[0]?.content).toBe('sk-or-from-env');
+
+      process.env.OPENROUTER_API_KEY = undefined;
     });
 
-    it('throws when credentials have wrong provider type', async () => {
+    it('sets OPENAI_BASE_URL without a key when neither creds nor env are set', async () => {
+      process.env.OPENROUTER_API_KEY = undefined;
       const profile = makeProfile({
         modelProvider: 'openrouter',
+        defaultRuntime: 'codex',
+        providerCredentials: null,
+      });
+
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
+
+      expect(result.env.OPENAI_BASE_URL).toBe('https://openrouter.ai/api/v1');
+      expect(result.env.OPENAI_API_KEY_FILE).toBeUndefined();
+      expect(result.secretFiles).toHaveLength(0);
+    });
+
+    it('ignores mismatched credentials and falls back to env var', async () => {
+      process.env.OPENROUTER_API_KEY = 'sk-or-env-fallback';
+      const profile = makeProfile({
+        modelProvider: 'openrouter',
+        defaultRuntime: 'codex',
         providerCredentials: { provider: 'openai' },
       });
 
-      await expect(buildProviderEnv(profile, 'pod-1', logger)).rejects.toThrow(
-        'missing or mismatched providerCredentials',
-      );
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
+
+      expect(result.env.OPENAI_BASE_URL).toBe('https://openrouter.ai/api/v1');
+      expect(result.secretFiles[0]?.content).toBe('sk-or-env-fallback');
+
+      process.env.OPENROUTER_API_KEY = undefined;
     });
   });
 

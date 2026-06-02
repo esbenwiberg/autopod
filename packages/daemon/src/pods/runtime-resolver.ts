@@ -15,6 +15,7 @@ const CLAUDE_MODEL_ALIASES = new Set(['opus', 'sonnet', 'haiku']);
 
 export function usesOpenAiSurface(profile: Profile): boolean {
   if (profile.modelProvider === 'openai') return true;
+  if (profile.modelProvider === 'openrouter') return true;
   if (profile.modelProvider !== 'foundry') return false;
 
   const creds = profile.providerCredentials;

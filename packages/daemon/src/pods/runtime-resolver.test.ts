@@ -34,6 +34,12 @@ describe('resolvePodRuntime', () => {
     expect(resolvePodRuntime(profile({ modelProvider: 'openai' }), 'claude')).toBe('codex');
   });
 
+  it('forces Codex for OpenRouter profiles regardless of the requested runtime', () => {
+    expect(resolvePodRuntime(profile({ modelProvider: 'openrouter' }), undefined)).toBe('codex');
+    expect(resolvePodRuntime(profile({ modelProvider: 'openrouter' }), 'claude')).toBe('codex');
+    expect(resolvePodRuntime(profile({ modelProvider: 'openrouter' }), 'codex')).toBe('codex');
+  });
+
   it('forces Codex for Foundry OpenAI-surface profiles', () => {
     expect(
       resolvePodRuntime(

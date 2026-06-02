@@ -57,6 +57,7 @@ public struct ProfileResponse: Codable, Sendable {
   public var githubPat: String?
   public var hasGithubPat: Bool?
   public var githubPatExpiresAt: String?
+  public var openrouterApiKey: String?
   public var privateRegistries: [PrivateRegistryResponse]
   public var registryPat: String?
   public var hasRegistryPat: Bool?
@@ -110,6 +111,7 @@ public struct ProfileResponse: Codable, Sendable {
     case defaultRuntime
     case executionTarget
     case customInstructions
+    case agentDonePrompt
     case escalation
     case extends
     case workerProfile
@@ -136,11 +138,15 @@ public struct ProfileResponse: Codable, Sendable {
     case mergePollIntervalSec
     case prProvider
     case adoPat
+    case hasAdoPat
     case adoPatExpiresAt
     case githubPat
+    case hasGithubPat
     case githubPatExpiresAt
+    case openrouterApiKey
     case privateRegistries
     case registryPat
+    case hasRegistryPat
     case registryPatExpiresAt
     case containerMemoryGb
     case issueWatcherEnabled
@@ -217,6 +223,7 @@ public struct ProfileResponse: Codable, Sendable {
     githubPat = try c.decodeIfPresent(String.self, forKey: .githubPat)
     hasGithubPat = try c.decodeIfPresent(Bool.self, forKey: .hasGithubPat)
     githubPatExpiresAt = try c.decodeIfPresent(String.self, forKey: .githubPatExpiresAt)
+    openrouterApiKey = try c.decodeIfPresent(String.self, forKey: .openrouterApiKey)
     privateRegistries = (try c.decodeIfPresent([PrivateRegistryResponse].self, forKey: .privateRegistries)) ?? []
     registryPat = try c.decodeIfPresent(String.self, forKey: .registryPat)
     hasRegistryPat = try c.decodeIfPresent(Bool.self, forKey: .hasRegistryPat)

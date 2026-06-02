@@ -33,6 +33,7 @@ function containerManager(
   return {
     writeFile: vi.fn().mockResolvedValue(undefined),
     execInContainer: vi.fn().mockResolvedValue(execResult),
+    getStatus: vi.fn().mockResolvedValue('running' as const),
   } as unknown as ContainerManager;
 }
 

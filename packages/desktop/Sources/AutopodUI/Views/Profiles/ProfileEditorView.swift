@@ -106,7 +106,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .agent:
             ["model", "claude-opus-4-8", "claude-sonnet-4-6", "auto", "gpt-5", "runtime", "claude", "codex", "copilot", "custom instructions", "system prompt"]
         case .providers:
-            ["model provider", "anthropic", "max", "openai", "codex", "foundry", "azure foundry", "copilot", "pr provider", "code platform", "github", "ado", "azure devops", "oauth", "authenticate", "login", "endpoint", "project id", "api key"]
+            ["model provider", "anthropic", "max", "openai", "codex", "foundry", "azure foundry", "copilot", "openrouter", "open router", "deepseek", "minimax", "pr provider", "code platform", "github", "ado", "azure devops", "oauth", "authenticate", "login", "endpoint", "project id", "api key"]
         case .escalation:
             ["escalation", "ask human", "ai consultation", "advisor", "auto pause", "guardrails", "human response timeout", "token budget", "budget", "soft", "hard", "warn at", "extensions", "limit"]
         case .container:
@@ -973,13 +973,28 @@ public struct ProfileEditorView: View {
     @ViewBuilder
     private var agentFields: some View {
         HStack(spacing: 24) {
-            fieldRow("Default Model", help: defaultModelHelp) {
-                runtimeModelPickerWithPrice(selection: $profile.defaultModel, role: .defaultModel)
-                    .frame(width: 210)
-            }
-            fieldRow("Reviewer Model", help: reviewerModelHelp) {
-                runtimeModelPickerWithPrice(selection: $profile.reviewerModel, role: .reviewerModel)
-                    .frame(width: 210)
+            if profile.modelProvider == .openrouter {
+                fieldRow("Default Model", help: "OpenRouter model string, e.g. deepseek/deepseek-r1 or minimax/minimax-01.") {
+                    TextField("provider/model", text: $profile.defaultModel)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.callout, design: .monospaced))
+                        .frame(width: 210)
+                }
+                fieldRow("Reviewer Model", help: "OpenRouter model for task review. Leave blank to use the default model.") {
+                    TextField("provider/model (optional)", text: $profile.reviewerModel)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.callout, design: .monospaced))
+                        .frame(width: 210)
+                }
+            } else {
+                fieldRow("Default Model", help: defaultModelHelp) {
+                    runtimeModelPickerWithPrice(selection: $profile.defaultModel, role: .defaultModel)
+                        .frame(width: 210)
+                }
+                fieldRow("Reviewer Model", help: reviewerModelHelp) {
+                    runtimeModelPickerWithPrice(selection: $profile.reviewerModel, role: .reviewerModel)
+                        .frame(width: 210)
+                }
             }
             fieldRow("Runtime", help: "AI runtime engine — Claude Code, OpenAI Codex, or GitHub Copilot.") {
                 Picker("", selection: $profile.defaultRuntime) {
@@ -1080,6 +1095,8 @@ public struct ProfileEditorView: View {
     }
 
     private func normalizeRuntimeModelSelections(resetCodexRestrictedModel: Bool = false) {
+        // OpenRouter profiles use free-form model strings — skip normalization.
+        guard profile.modelProvider != .openrouter else { return }
         profile.defaultModel = RuntimeModelOptions.normalized(
             profile.defaultModel,
             for: profile.defaultRuntime,
@@ -1262,7 +1279,7 @@ public struct ProfileEditorView: View {
             .labelsHidden()
             .frame(width: 160)
             .onChange(of: profile.modelProvider) { _, newValue in
-                if newValue == .openai {
+                if newValue == .openai || newValue == .openrouter {
                     profile.defaultRuntime = .codex
                     normalizeRuntimeModelSelections(resetCodexRestrictedModel: true)
                 }
@@ -1286,6 +1303,25 @@ public struct ProfileEditorView: View {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.blue.opacity(0.7))
                 Text("Codex uses either this profile's ChatGPT login or the daemon's OPENAI_API_KEY.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+
+        if profile.modelProvider == .openrouter {
+            fieldRow("API Key", help: "OpenRouter API key, stored encrypted in this profile. Overrides the daemon's OPENROUTER_API_KEY env var.") {
+                SecureField("sk-or-...", text: Binding(
+                    get: { profile.openrouterApiKey ?? "" },
+                    set: { profile.openrouterApiKey = $0.isEmpty ? nil : $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.callout, design: .monospaced))
+                .frame(minWidth: 260)
+            }
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.blue.opacity(0.7))
+                Text("Routes the Codex runtime to any OpenRouter provider/model (e.g. deepseek/deepseek-r1). Falls back to OPENROUTER_API_KEY daemon env var if no key is set here.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

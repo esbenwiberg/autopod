@@ -258,28 +258,37 @@ const OPENROUTER_DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
  * via secret file. The model string on the pod (e.g. "deepseek/deepseek-r1") is
  * passed straight through to OpenRouter as-is.
  *
- * Only use models that have passed the spike telemetry contract — tool events,
- * file changes, token counts, and task summaries must all be observable.
+ * API key resolution order:
+ *   1. Per-profile providerCredentials.apiKey (set via desktop or CLI)
+ *   2. Daemon env var OPENROUTER_API_KEY (convenience for dev / single-key setups)
+ *
+ * Only use models that have passed the spike telemetry contract.
  */
 function buildOpenRouterEnv(profile: Profile): ProviderEnvResult {
   const creds = profile.providerCredentials;
-
-  if (!creds || creds.provider !== 'openrouter') {
-    throw new Error(
-      `Profile "${profile.name}" has modelProvider=openrouter but missing or mismatched providerCredentials`,
-    );
-  }
+  const isOpenRouterCreds = creds?.provider === 'openrouter';
+  const baseUrl = isOpenRouterCreds
+    ? (creds.baseUrl ?? OPENROUTER_DEFAULT_BASE_URL)
+    : OPENROUTER_DEFAULT_BASE_URL;
+  // Key priority: per-profile openrouterApiKey > per-profile providerCredentials.apiKey > daemon env
+  const apiKey =
+    profile.openrouterApiKey ??
+    (isOpenRouterCreds ? creds.apiKey : undefined) ??
+    process.env.OPENROUTER_API_KEY;
 
   const filePath = `${SECRET_DIR}/openrouter-api-key`;
-  const baseUrl = creds.baseUrl ?? OPENROUTER_DEFAULT_BASE_URL;
+  const env: Record<string, string> = { OPENAI_BASE_URL: baseUrl };
+  const secretFiles: ProviderEnvResult['secretFiles'] = [];
+
+  if (apiKey) {
+    secretFiles.push({ path: filePath, content: apiKey });
+    env.OPENAI_API_KEY_FILE = filePath;
+  }
 
   return {
-    env: {
-      OPENAI_BASE_URL: baseUrl,
-      OPENAI_API_KEY_FILE: filePath,
-    },
+    env,
     containerFiles: buildClaudeConfigFiles(),
-    secretFiles: [{ path: filePath, content: creds.apiKey }],
+    secretFiles,
     requiresPostExecPersistence: false,
   };
 }
