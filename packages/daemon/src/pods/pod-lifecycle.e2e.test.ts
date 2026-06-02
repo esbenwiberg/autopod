@@ -54,7 +54,13 @@ function createMockPrManager(): PrManager {
       ciFailures: [],
       reviewComments: [],
     })),
-    replyToReviewFeedback: vi.fn(async () => ({ posted: 0, skipped: 0, errors: [] })),
+    replyToReviewFeedback: vi.fn(async () => ({
+      posted: 0,
+      skipped: 0,
+      resolved: 0,
+      errors: [],
+      resolutionErrors: [],
+    })),
   };
 }
 
@@ -333,6 +339,15 @@ describe('Pod Lifecycle E2E', () => {
       const prManager = createMockPrManager();
       ctx.deps.prManagerFactory = () => prManager;
       const manager = createPodManager(ctx.deps);
+      const events = collectEvents(ctx);
+      if (!prManager.replyToReviewFeedback) throw new Error('replyToReviewFeedback missing');
+      vi.mocked(prManager.replyToReviewFeedback).mockResolvedValueOnce({
+        posted: 1,
+        skipped: 0,
+        resolved: 1,
+        errors: [],
+        resolutionErrors: [],
+      });
 
       // Root pod: drive it to merge_pending with a PR + worktree.
       const root = manager.createSession(
@@ -400,10 +415,22 @@ describe('Pod Lifecycle E2E', () => {
         responses: [
           {
             feedbackId: 'gh-comment-123',
+            outcome: 'fixed',
             body: expect.stringContaining('Renamed `cfg` to `config`'),
           },
         ],
       });
+      const activityMessages = events
+        .filter(
+          (event): event is SystemEvent & { type: 'pod.agent_activity' } =>
+            event.type === 'pod.agent_activity' &&
+            event.podId === fixPodId &&
+            event.event.type === 'status',
+        )
+        .map((event) => event.event.message);
+      expect(activityMessages).toContain(
+        'Posted 1 review feedback reply; resolved 1 conversation (0 fallback/skipped)',
+      );
     });
   });
 

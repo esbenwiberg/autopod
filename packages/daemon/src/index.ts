@@ -63,6 +63,7 @@ import { createSafetyEventsRepository } from './safety/safety-events-repository.
 import { createScheduledJobManager } from './scheduled-jobs/scheduled-job-manager.js';
 import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-repository.js';
 import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
+import { createScheduledJobTemplateRepository } from './scheduled-jobs/scheduled-job-template-repository.js';
 import { createModelManager, createRepoScanner, createScanRepository } from './security/index.js';
 import { capLargeStrings } from './util/log-sanitizer.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
@@ -574,8 +575,10 @@ function makeActionEngine(profile: import('@autopod/shared').Profile) {
 
 // Scheduled jobs
 const scheduledJobRepo = createScheduledJobRepository(db);
+const scheduledJobTemplateRepo = createScheduledJobTemplateRepository(db);
 const scheduledJobManager = createScheduledJobManager({
   scheduledJobRepo,
+  scheduledJobTemplateRepo,
   podManager,
   eventBus,
   logger,

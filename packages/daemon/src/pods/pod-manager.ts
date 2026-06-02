@@ -19,6 +19,7 @@ import type {
   InjectedMcpServer,
   LintResult,
   McpServerConfig,
+  MemoryEntry,
   NetworkPolicy,
   PageResult,
   PhaseTokenUsage,
@@ -95,7 +96,11 @@ import {
   buildProviderEnv,
   persistRefreshedCredentials,
 } from '../providers/index.js';
-import type { MaxCredentialLineage, ProviderEnvResult } from '../providers/index.js';
+import type {
+  MaxCredentialLineage,
+  ProfileLlmClientResult,
+  ProviderEnvResult,
+} from '../providers/index.js';
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import { cleanupClaudeState, ensureClaudeStateDir } from '../runtimes/claude-state-store.js';
@@ -120,7 +125,9 @@ import { formatFeedback } from './feedback-formatter.js';
 import type { FixFeedbackRepository } from './fix-feedback-repository.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
 import { reconcileLocalSessions } from './local-reconciler.js';
-import { selectRelevantMemories } from './memory-selector.js';
+import type { MemoryRepository } from './memory-repository.js';
+import { prefilterMemories, selectRelevantMemories } from './memory-selector.js';
+import type { MemoryUsageRepository } from './memory-usage-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
@@ -455,8 +462,6 @@ export function buildPrFixTask(
   profile: Profile,
   userMessage?: string,
 ): string {
-  const attempt = (pod.prFixAttempts ?? 0) + 1;
-
   // Walk linkedPodId back to the originating pod (fix→fix→…→original).
   // Prevents nested [PR FIX] boilerplate + duplicate review-comment blocks when a
   // fix pod somehow ends up spawning a sub-fixer. Series pods don't use
@@ -469,6 +474,11 @@ export function buildPrFixTask(
       break;
     }
   }
+  const attempt = pod.linkedPodId
+    ? Math.max(ancestor.prFixAttempts ?? 0, 1)
+    : (pod.prFixAttempts ?? 0) + 1;
+  const iterationLabel = pod.linkedPodId ? `, iteration ${pod.fixIteration ?? 0}` : '';
+  const prUrl = pod.prUrl ?? ancestor.prUrl;
 
   // Single-PR series pods share one branch and one PR, so the per-pod `task`
   // only describes one brief — the cross-brief framing the fixer needs lives
@@ -489,7 +499,7 @@ export function buildPrFixTask(
     }).text;
 
   const sections: string[] = [
-    `[PR FIX] The pull request at ${pod.prUrl} needs fixes (attempt ${attempt}).`,
+    `[PR FIX] The pull request at ${prUrl} needs fixes (attempt ${attempt}${iterationLabel}).`,
     '',
     `Original task: ${rootTask}`,
     '',
@@ -498,6 +508,7 @@ export function buildPrFixTask(
     'Treat reviewer comments as feedback to assess: fix valid comments; for stale, incorrect, harmful, or out-of-scope comments, leave the code unchanged and explain why.',
     'Do NOT create a new PR — one already exists.',
     'Do NOT call PR/comment APIs from the container. If review comments include a feedbackId, report one `reviewFeedbackResponses` item per feedbackId in `report_task_summary`; the daemon host will post those replies.',
+    'Use outcome `fixed` only when the requested change was actually made and verified. Only `fixed` means the daemon may resolve that PR review conversation; `not_applicable`, `needs_reviewer_decision`, and `could_not_verify` leave it open with your explanation.',
     '',
   ];
 
@@ -1208,6 +1219,10 @@ function deriveAgentAttempt(phaseTokenUsage: PhaseTokenUsage | null): number {
   return 1 + highestRework;
 }
 
+function agentPhaseBucketKey(attempt: number): 'agent_initial' | `agent_rework_${number}` {
+  return attempt === 0 ? 'agent_initial' : `agent_rework_${attempt}`;
+}
+
 function hasLatestPersistedAgentTerminalEventComplete(
   eventRepo: EventRepository | undefined,
   podId: string,
@@ -1224,6 +1239,119 @@ function hasLatestPersistedAgentTerminalEventComplete(
     }
   }
   return latestTerminalEvent === 'complete';
+}
+
+function agentCompleteEventKey(event: Extract<AgentEvent, { type: 'complete' }>): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        timestamp: event.timestamp,
+        result: event.result,
+        totalInputTokens: event.totalInputTokens ?? null,
+        totalOutputTokens: event.totalOutputTokens ?? null,
+        costUsd: event.costUsd ?? null,
+      }),
+    )
+    .digest('hex');
+}
+
+function persistedAgentCompleteEventKeys(
+  eventRepo: EventRepository | undefined,
+  podId: string,
+): Set<string> {
+  const keys = new Set<string>();
+  if (!eventRepo) return keys;
+  for (const event of eventRepo.getForSession(podId, { type: 'pod.agent_activity' })) {
+    if (event.payload.type !== 'pod.agent_activity') continue;
+    const agentEvent = event.payload.event;
+    if (agentEvent.type === 'complete') {
+      keys.add(agentCompleteEventKey(agentEvent));
+    }
+  }
+  return keys;
+}
+
+function hasAlreadyCountedCompleteEvent(
+  pod: Pod,
+  attempt: number,
+  event: Extract<AgentEvent, { type: 'complete' }>,
+): boolean {
+  const inputTokens = event.totalInputTokens ?? 0;
+  const outputTokens = event.totalOutputTokens ?? 0;
+  const hasTokenTelemetry =
+    event.totalInputTokens !== undefined || event.totalOutputTokens !== undefined;
+  const bucket = pod.phaseTokenUsage?.[agentPhaseBucketKey(attempt)];
+  const tokensAlreadyCounted =
+    !hasTokenTelemetry ||
+    ((bucket?.inputTokens ?? 0) >= inputTokens && (bucket?.outputTokens ?? 0) >= outputTokens);
+  const costAlreadyCounted = event.costUsd === undefined || pod.costUsd >= event.costUsd;
+  return tokensAlreadyCounted && costAlreadyCounted;
+}
+
+function podMemoryScopeIds(pod: Pod): string[] {
+  return Array.from(new Set([pod.id, ...(pod.dependsOnPodIds ?? [])]));
+}
+
+function approvedMemoriesForPod(pod: Pod, memoryRepo: MemoryRepository): MemoryEntry[] {
+  return [
+    ...podMemoryScopeIds(pod).flatMap((podId) => memoryRepo.list('pod', podId, true)),
+    ...memoryRepo.list('profile', pod.profileName, true),
+    ...memoryRepo.list('global', null, true),
+  ];
+}
+
+export async function selectMemoryBriefingForPod(opts: {
+  pod: Pod;
+  profile: Profile;
+  memoryRepo: MemoryRepository;
+  usageRepo?: MemoryUsageRepository;
+  logger: Logger;
+  createReviewerClient?: (
+    profile: Profile,
+    reviewerModelId: string,
+    logger: Logger,
+  ) => Promise<ProfileLlmClientResult>;
+}): Promise<Awaited<ReturnType<typeof selectRelevantMemories>>> {
+  const { pod, profile, memoryRepo, usageRepo, logger } = opts;
+  if (pod.options.agentMode !== 'auto') {
+    return { selected: [], unavailableReason: null };
+  }
+
+  const candidates = prefilterMemories({
+    pod,
+    memories: approvedMemoriesForPod(pod, memoryRepo),
+  });
+  if (candidates.length === 0) {
+    return { selected: [], unavailableReason: null };
+  }
+
+  const reviewerModelId =
+    profile.reviewerModel || profile.defaultModel || pod.model || 'claude-haiku-4-5';
+  const createReviewerClient = opts.createReviewerClient ?? createProfileAnthropicClient;
+  let reviewerClient: ProfileLlmClientResult | null = null;
+  let reviewerUnavailableReason: string | undefined;
+  try {
+    reviewerClient = await createReviewerClient(profile, reviewerModelId, logger);
+    if (!reviewerClient.ok) {
+      reviewerUnavailableReason = reviewerClient.reason;
+    }
+  } catch (err) {
+    reviewerUnavailableReason = 'reviewer_model_client_unavailable';
+    logger.warn({ err, podId: pod.id }, 'Memory reviewer client unavailable — using fallback');
+  }
+
+  return selectRelevantMemories({
+    pod,
+    profile,
+    deps: {
+      memoryRepo,
+      usageRepo,
+      anthropicClient: reviewerClient?.ok ? reviewerClient.client : undefined,
+      reviewerModel: reviewerClient?.ok ? reviewerClient.model : undefined,
+      reviewerUnavailableReason,
+      logger,
+    },
+  });
 }
 
 export function createPodManager(deps: PodManagerDependencies): PodManager {
@@ -1983,6 +2111,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       .filter((response) => response.response.trim().length > 0)
       .map((response) => ({
         feedbackId: response.feedbackId.trim(),
+        outcome: response.outcome,
         body: formatReviewFeedbackReply(response),
       }))
       .filter((response) => response.feedbackId.length > 0 && response.body.trim().length > 0);
@@ -1997,12 +2126,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       });
       emitActivityStatus(
         fixPod.id,
-        `Posted ${result.posted} review feedback repl${result.posted === 1 ? 'y' : 'ies'} (${result.skipped} fallback/skipped)`,
+        `Posted ${result.posted} review feedback repl${result.posted === 1 ? 'y' : 'ies'}; resolved ${result.resolved} conversation${result.resolved === 1 ? '' : 's'} (${result.skipped} fallback/skipped)`,
       );
       if (result.errors.length > 0) {
         logger.warn(
           { podId: fixPod.id, prUrl, errors: result.errors },
           'Some fix-pod review feedback replies failed',
+        );
+      }
+      if (result.resolutionErrors.length > 0) {
+        logger.warn(
+          { podId: fixPod.id, prUrl, errors: result.resolutionErrors },
+          'Some fix-pod review feedback resolutions failed',
         );
       }
     } catch (err) {
@@ -3370,6 +3505,33 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     bumpActivityTimestamp(podId);
   }
 
+  function emitActivityError(podId: string, message: string, fatal = true): void {
+    const timestamp = new Date().toISOString();
+    eventBus.emit({
+      type: 'pod.agent_activity',
+      timestamp,
+      podId,
+      event: { type: 'error', timestamp, message, fatal },
+    });
+    bumpActivityTimestamp(podId);
+  }
+
+  type OperatorFailurePhase = 'setup' | 'agent' | 'completion';
+
+  function operatorErrorMessage(err: unknown, phase: OperatorFailurePhase): string {
+    const raw = err instanceof Error && err.message.trim().length > 0 ? err.message : String(err);
+    const sanitized = processContent(raw.slice(0, 1200), {
+      sanitization: { preset: 'standard' },
+    }).text.trim();
+    const prefix =
+      phase === 'setup'
+        ? 'Pod setup failed before the agent could finish'
+        : phase === 'completion'
+          ? 'Pod failed while finalizing after the agent run'
+          : 'Pod failed while the agent was running';
+    return `${prefix}: ${sanitized || 'unknown error'}`;
+  }
+
   function describeSyncFailure(err: unknown): string {
     if (err instanceof Error && err.message.trim()) {
       return `${err.name}: ${err.message}`;
@@ -3640,7 +3802,47 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       if (!advisoryResult) return blockingResult;
 
-      return mergeAdvisoryResult(advisoryResult);
+      const current = podRepo.getOrThrow(podId);
+      if (current.status === 'killed' || current.status === 'killing') {
+        return blockingResult;
+      }
+
+      if (advisoryResult.tokenUsage) {
+        const existingUsage = current.phaseTokenUsage ?? {};
+        const prevAdvisory = existingUsage.advisory ?? { inputTokens: 0, outputTokens: 0 };
+        const cachedInputTokens =
+          (prevAdvisory.cachedInputTokens ?? 0) +
+          (advisoryResult.tokenUsage.cachedInputTokens ?? 0);
+        const costUsd = (prevAdvisory.costUsd ?? 0) + (advisoryResult.tokenUsage.costUsd ?? 0);
+        podRepo.update(podId, {
+          phaseTokenUsage: {
+            ...existingUsage,
+            advisory: {
+              inputTokens: prevAdvisory.inputTokens + advisoryResult.tokenUsage.inputTokens,
+              outputTokens: prevAdvisory.outputTokens + advisoryResult.tokenUsage.outputTokens,
+              ...(cachedInputTokens > 0 && { cachedInputTokens }),
+              ...(costUsd > 0 && { costUsd }),
+            },
+          },
+        });
+      }
+
+      // Always persist the advisory result into validation history regardless of
+      // whether a newer validation attempt has superseded the live lastValidationResult.
+      const storedResult = { ...blockingResult, advisoryBrowserQa: advisoryResult };
+      validationRepo?.updateResult(podId, blockingResult.attempt, storedResult);
+
+      const currentResult = current.lastValidationResult ?? blockingResult;
+      if (currentResult.attempt !== blockingResult.attempt) {
+        return storedResult;
+      }
+
+      const mergedResult = {
+        ...currentResult,
+        advisoryBrowserQa: advisoryResult,
+      };
+      podRepo.update(podId, { lastValidationResult: mergedResult });
+      return mergedResult;
     })();
 
     advisoryRuns.set(podId, run);
@@ -4531,6 +4733,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     async processPod(podId: string): Promise<void> {
       let pod = podRepo.getOrThrow(podId);
       const startingAttempt = deriveAgentAttempt(pod.phaseTokenUsage);
+      let visibleFailurePhase: OperatorFailurePhase = 'setup';
 
       // Defense-in-depth: processPod must only run for pods in queued/handoff state.
       // The queue's activeIds dedup prevents most races, but this guard ensures
@@ -5408,6 +5611,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // transition is committed — a crash between `provisioning` and
         // `running` leaves the queue intact for the next iteration to drain.
         if (pod.linkedPodId) {
+          const parent = podRepo.getOrThrow(pod.linkedPodId);
+          const maxAttempts = parent.maxPrFixAttempts ?? DEFAULT_MAX_PR_FIX_ATTEMPTS;
+          emitStatus(
+            `Starting fix iteration ${pod.fixIteration ?? 0}, parent attempt ${parent.prFixAttempts ?? 0}/${maxAttempts}`,
+          );
           const queued = fixFeedbackRepo.drain(pod.linkedPodId);
           if (queued.length > 0) {
             const userMessage = queued.map((m) => m.message).join('\n\n---\n\n');
@@ -6116,6 +6324,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             { podId, output: pod.options.output },
             'skipAgent: bypassing runtime spawn, proceeding to handleCompletion',
           );
+          visibleFailurePhase = 'completion';
           await this.handleCompletion(podId);
           return;
         }
@@ -6130,6 +6339,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             { podId, worktreePath },
             'Recovery found persisted agent complete event — skipping agent spawn',
           );
+          visibleFailurePhase = 'completion';
           await this.handleCompletion(podId);
           return;
         }
@@ -6296,6 +6506,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
         }
 
+        visibleFailurePhase = 'agent';
         const outcome = await this.consumeAgentEvents(podId, events, startingAttempt);
 
         // Persist rotated OAuth credentials if provider requires it (MAX/PRO token rotation)
@@ -6318,10 +6529,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         if (outcome === 'completed') {
+          visibleFailurePhase = 'completion';
           await this.handleCompletion(podId);
         }
       } catch (err) {
         logger.error({ err, podId }, 'Pod processing error');
+        emitActivityError(podId, operatorErrorMessage(err, visibleFailurePhase), true);
         // Best-effort: recover rotated MAX/PRO tokens before the failure path
         // tears the container down. The happy-path persist at the end of the
         // try block was bypassed, so without this the latest refresh token
@@ -6373,9 +6586,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       attempt = 0,
     ): Promise<AgentRunOutcome> {
       let outcome: AgentRunOutcome = 'completed';
+      const seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
       startCommitPolling(podId);
       try {
         for await (const event of events) {
+          if (event.type === 'complete') {
+            const completeKey = agentCompleteEventKey(event);
+            if (
+              seenCompleteEvents.has(completeKey) &&
+              hasAlreadyCountedCompleteEvent(podRepo.getOrThrow(podId), attempt, event)
+            ) {
+              logger.info(
+                { podId, timestamp: event.timestamp },
+                'Skipping duplicate agent complete event replay',
+              );
+              continue;
+            }
+            seenCompleteEvents.add(completeKey);
+          }
+
           eventBus.emit({
             type: 'pod.agent_activity',
             timestamp: event.timestamp,
@@ -6451,17 +6680,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             if (event.totalInputTokens !== undefined || event.totalOutputTokens !== undefined) {
               tokenUpdates.inputTokens = newInputTokens;
               tokenUpdates.outputTokens = newOutputTokens;
-              const bucketKey =
-                attempt === 0
-                  ? ('agent_initial' as const)
-                  : (`agent_rework_${attempt}` as `agent_rework_${number}`);
+              const bucketKey = agentPhaseBucketKey(attempt);
               const existing = currentSession.phaseTokenUsage ?? {};
               const prev = existing[bucketKey] ?? { inputTokens: 0, outputTokens: 0 };
+              const phaseCostUsd = (prev.costUsd ?? 0) + (event.costUsd ?? 0);
               tokenUpdates.phaseTokenUsage = {
                 ...existing,
                 [bucketKey]: {
                   inputTokens: prev.inputTokens + (event.totalInputTokens ?? 0),
                   outputTokens: prev.outputTokens + (event.totalOutputTokens ?? 0),
+                  ...(phaseCostUsd > 0 && { costUsd: phaseCostUsd }),
                 },
               };
             }
@@ -8615,12 +8843,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const currentPod = podRepo.getOrThrow(podId);
           const existing = currentPod.phaseTokenUsage ?? {};
           const prev = existing.review ?? { inputTokens: 0, outputTokens: 0 };
+          const cachedInputTokens =
+            (prev.cachedInputTokens ?? 0) + (result.taskReview.tokenUsage.cachedInputTokens ?? 0);
+          const costUsd = (prev.costUsd ?? 0) + (result.taskReview.tokenUsage.costUsd ?? 0);
           podRepo.update(podId, {
             phaseTokenUsage: {
               ...existing,
               review: {
                 inputTokens: prev.inputTokens + result.taskReview.tokenUsage.inputTokens,
                 outputTokens: prev.outputTokens + result.taskReview.tokenUsage.outputTokens,
+                ...(cachedInputTokens > 0 && { cachedInputTokens }),
+                ...(costUsd > 0 && { costUsd }),
               },
             },
           });
@@ -9378,12 +9611,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const currentPod = podRepo.getOrThrow(podId);
           const existingUsage = currentPod.phaseTokenUsage ?? {};
           const prevReview = existingUsage.review ?? { inputTokens: 0, outputTokens: 0 };
+          const cachedInputTokens =
+            (prevReview.cachedInputTokens ?? 0) +
+            (result.taskReview.tokenUsage.cachedInputTokens ?? 0);
+          const costUsd = (prevReview.costUsd ?? 0) + (result.taskReview.tokenUsage.costUsd ?? 0);
           podRepo.update(podId, {
             phaseTokenUsage: {
               ...existingUsage,
               review: {
                 inputTokens: prevReview.inputTokens + result.taskReview.tokenUsage.inputTokens,
                 outputTokens: prevReview.outputTokens + result.taskReview.tokenUsage.outputTokens,
+                ...(cachedInputTokens > 0 && { cachedInputTokens }),
+                ...(costUsd > 0 && { costUsd }),
               },
             },
           });

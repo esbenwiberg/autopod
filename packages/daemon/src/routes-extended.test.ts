@@ -6,6 +6,7 @@
  * - POST /pods/:id/message
  * - POST /pods/:id/nudge
  * - GET /pods/:id/validations
+ * - GET /pods/:id/cost
  * - POST /pods/:id/approve (error path — only valid from validated state)
  * - POST /pods/:id/reject (error path)
  * - POST /pods/approve-all
@@ -353,6 +354,80 @@ describe('Extended Route Tests', () => {
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(200);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Pod cost
+  // -------------------------------------------------------------------------
+
+  describe('GET /pods/:id/cost', () => {
+    function insertCostPod(id: string): void {
+      db.prepare(`
+        INSERT INTO pods (
+          id, profile_name, task, status, model, runtime, execution_target, branch,
+          user_id, max_validation_attempts, skip_validation,
+          output_mode, agent_mode, output_target, validate, promotable,
+          cost_usd, input_tokens, output_tokens, phase_token_usage
+        ) VALUES (
+          @id, 'test-app', 'Task', 'complete', 'gpt-5', 'codex', 'local', 'branch-cost',
+          'user-1', 3, 0,
+          'pr', 'auto', 'pr', 1, 0,
+          10, 3000000, 0, @phaseTokenUsage
+        )
+      `).run({
+        id,
+        phaseTokenUsage: JSON.stringify({
+          agent_initial: { inputTokens: 1_000_000, outputTokens: 0 },
+          agent_rework_1: { inputTokens: 1_000_000, outputTokens: 0 },
+          review: { inputTokens: 1_000_000, outputTokens: 0 },
+        }),
+      });
+    }
+
+    it('returns grouped per-pod cost breakdown', async () => {
+      insertCostPod('pod-cost-1');
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods/pod-cost-1/cost',
+        headers: authHeaders,
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.podId).toBe('pod-cost-1');
+      // totalCostUsd = stored agent cost (10) + harness review cost (1M tokens × $1.25/M for gpt-5 = 1.25)
+      expect(body.totalCostUsd).toBe(11.25);
+      expect(body.inputTokens).toBe(3_000_000);
+      expect(body.segments.map((segment: { bucket: string }) => segment.bucket)).toEqual([
+        'work',
+        'rework',
+        'validation',
+        'advisory',
+        'unattributed',
+      ]);
+      expect(
+        body.segments.find((segment: { bucket: string }) => segment.bucket === 'work'),
+      ).toMatchObject({ costUsd: 1.25, inputTokens: 1_000_000 });
+      expect(
+        body.segments.find((segment: { bucket: string }) => segment.bucket === 'validation'),
+      ).toMatchObject({ costUsd: 1.25, inputTokens: 1_000_000 });
+      // unattributed = agentCostUsd (10) - attributedAgent (work 1.25 + rework 1.25) = 7.5
+      // validation is harness-scoped so it does not reduce the agent gap
+      expect(
+        body.segments.find((segment: { bucket: string }) => segment.bucket === 'unattributed'),
+      ).toMatchObject({ costUsd: 7.5 });
+    });
+
+    it('returns 404 for a missing pod', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods/missing-cost/cost',
+        headers: authHeaders,
+      });
+
+      expect(res.statusCode).toBe(404);
     });
   });
 

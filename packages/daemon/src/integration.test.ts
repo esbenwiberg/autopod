@@ -77,6 +77,18 @@ const validProfileInput = {
   startCommand: 'node server.js --port $PORT',
 };
 
+function expectRedactedPatFields(
+  profile: Record<string, unknown>,
+  expected: { github?: boolean; ado?: boolean; registry?: boolean } = {},
+): void {
+  expect(profile.githubPat).toBeNull();
+  expect(profile.adoPat).toBeNull();
+  expect(profile.registryPat).toBeNull();
+  expect(profile.hasGithubPat).toBe(expected.github ?? false);
+  expect(profile.hasAdoPat).toBe(expected.ado ?? false);
+  expect(profile.hasRegistryPat).toBe(expected.registry ?? false);
+}
+
 describe('Integration', () => {
   let db: Database.Database;
   let app: FastifyInstance;
@@ -259,6 +271,136 @@ describe('Integration', () => {
       });
       expect(res.statusCode).toBe(201);
       expect(res.json().name).toBe('test-app');
+    });
+
+    it('redacts PATs and returns presence flags from profile read endpoints', async () => {
+      const secretProfile = {
+        ...validProfileInput,
+        githubPat: 'ghp_secret_profile_read',
+        adoPat: 'ado_secret_profile_read',
+        registryPat: 'registry_secret_profile_read',
+        githubPatExpiresAt: '2026-12-31',
+        adoPatExpiresAt: '2026-11-30',
+        registryPatExpiresAt: '2026-10-31',
+      };
+
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: secretProfile,
+      });
+      expect(createRes.statusCode).toBe(201);
+      expectRedactedPatFields(createRes.json(), { github: true, ado: true, registry: true });
+      expect(createRes.body).not.toContain('ghp_secret_profile_read');
+      expect(createRes.body).not.toContain('ado_secret_profile_read');
+      expect(createRes.body).not.toContain('registry_secret_profile_read');
+
+      const listRes = await app.inject({
+        method: 'GET',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(listRes.statusCode).toBe(200);
+      expectRedactedPatFields(listRes.json()[0], { github: true, ado: true, registry: true });
+      expect(listRes.body).not.toContain('ghp_secret_profile_read');
+      expect(listRes.body).not.toContain('ado_secret_profile_read');
+      expect(listRes.body).not.toContain('registry_secret_profile_read');
+
+      const getRes = await app.inject({
+        method: 'GET',
+        url: '/profiles/test-app',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(getRes.statusCode).toBe(200);
+      expectRedactedPatFields(getRes.json(), { github: true, ado: true, registry: true });
+      expect(getRes.body).not.toContain('ghp_secret_profile_read');
+      expect(getRes.body).not.toContain('ado_secret_profile_read');
+      expect(getRes.body).not.toContain('registry_secret_profile_read');
+
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: '/profiles/test-app',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { buildCommand: 'pnpm build' },
+      });
+      expect(patchRes.statusCode).toBe(200);
+      expectRedactedPatFields(patchRes.json(), { github: true, ado: true, registry: true });
+      expect(patchRes.body).not.toContain('ghp_secret_profile_read');
+      expect(patchRes.body).not.toContain('ado_secret_profile_read');
+      expect(patchRes.body).not.toContain('registry_secret_profile_read');
+    });
+
+    it('redacts PATs from the editor payload while preserving inherited presence flags', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          ...validProfileInput,
+          githubPat: 'ghp_secret_editor_parent',
+          adoPat: 'ado_secret_editor_parent',
+          registryPat: 'registry_secret_editor_parent',
+        },
+      });
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          ...validProfileInput,
+          name: 'test-app-derived',
+          extends: 'test-app',
+        },
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/profiles/test-app-derived/editor',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expectRedactedPatFields(body.raw);
+      expectRedactedPatFields(body.resolved, { github: true, ado: true, registry: true });
+      expectRedactedPatFields(body.parent, { github: true, ado: true, registry: true });
+      expect(res.body).not.toContain('ghp_secret_editor_parent');
+      expect(res.body).not.toContain('ado_secret_editor_parent');
+      expect(res.body).not.toContain('registry_secret_editor_parent');
+    });
+
+    it('PATCH /profiles/:name preserves stored PATs when PAT fields are omitted', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/profiles',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          ...validProfileInput,
+          githubPat: 'ghp_secret_preserved',
+          adoPat: 'ado_secret_preserved',
+          registryPat: 'registry_secret_preserved',
+        },
+      });
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/profiles/test-app',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { buildCommand: 'pnpm build' },
+      });
+      expect(res.statusCode).toBe(200);
+      expectRedactedPatFields(res.json(), { github: true, ado: true, registry: true });
+
+      const row = db
+        .prepare('SELECT github_pat, ado_pat, registry_pat FROM profiles WHERE name = ?')
+        .get('test-app') as {
+        github_pat: string | null;
+        ado_pat: string | null;
+        registry_pat: string | null;
+      };
+      expect(row.github_pat).toBe('ghp_secret_preserved');
+      expect(row.ado_pat).toBe('ado_secret_preserved');
+      expect(row.registry_pat).toBe('registry_secret_preserved');
     });
 
     it('GET /profiles lists profiles', async () => {

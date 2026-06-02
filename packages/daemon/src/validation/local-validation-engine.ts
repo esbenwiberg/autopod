@@ -147,6 +147,56 @@ export function createLocalValidationEngine(
         checkAbort();
         await resetWorktreeToHead(containerManager, config, log);
 
+        // ── Phase 0.5: Setup ───────────────────────────────────────────
+        // Optional pre-validation setup command (e.g. seed a DB, start a
+        // service) that must pass before any blocking phases run.
+        checkAbort();
+        let setupResult: import('@autopod/shared').SetupResult;
+        if (skipPhases.includes('setup')) {
+          setupResult = {
+            status: 'skip',
+            output: 'Setup phase skipped by profile configuration',
+            duration: 0,
+          };
+          callbacks?.onPhaseCompleted?.('setup', 'skip', setupResult);
+        } else if (!config.validationSetupCommand) {
+          setupResult = { status: 'skip', output: '', duration: 0 };
+          callbacks?.onPhaseCompleted?.('setup', 'skip', setupResult);
+        } else {
+          callbacks?.onPhaseStarted?.('setup');
+          const setupStart = Date.now();
+          let setupExecResult: { stdout: string; stderr: string; exitCode: number };
+          try {
+            setupExecResult = await containerManager.execInContainer(
+              config.containerId,
+              ['sh', '-c', config.validationSetupCommand],
+              { cwd: '/workspace', timeout: config.buildTimeout ?? 300_000 },
+            );
+          } catch (err) {
+            const duration = Date.now() - setupStart;
+            const message = err instanceof Error ? err.message : String(err);
+            setupResult = { status: 'fail', output: message, duration };
+            callbacks?.onPhaseCompleted?.('setup', 'fail', setupResult);
+            return makeSetupFailedResult(config, startTime, setupResult);
+          }
+          const setupDuration = Date.now() - setupStart;
+          if (setupExecResult.exitCode !== 0) {
+            setupResult = {
+              status: 'fail',
+              output: [setupExecResult.stdout, setupExecResult.stderr].filter(Boolean).join('\n'),
+              duration: setupDuration,
+            };
+            callbacks?.onPhaseCompleted?.('setup', 'fail', setupResult);
+            return makeSetupFailedResult(config, startTime, setupResult);
+          }
+          setupResult = {
+            status: 'pass',
+            output: setupExecResult.stdout,
+            duration: setupDuration,
+          };
+          callbacks?.onPhaseCompleted?.('setup', 'pass', setupResult);
+        }
+
         // ── Phase 1: Lint ──────────────────────────────────────────────
         checkAbort();
         let lintResult: Awaited<ReturnType<typeof runLint>>;
@@ -401,6 +451,7 @@ export function createLocalValidationEngine(
           podId: config.podId,
           attempt: config.attempt,
           timestamp: new Date().toISOString(),
+          setup: setupResult,
           smoke: {
             status: smokeStatus,
             build: buildResult,
@@ -507,6 +558,39 @@ export function createLocalValidationEngine(
 }
 
 /** Return a partial interrupted ValidationResult (phase-complete data preserved) */
+function makeSetupFailedResult(
+  config: ValidationEngineConfig,
+  startTime: number,
+  setupResult: import('@autopod/shared').SetupResult,
+): ValidationResult {
+  return {
+    podId: config.podId,
+    attempt: config.attempt,
+    timestamp: new Date().toISOString(),
+    setup: setupResult,
+    smoke: {
+      status: 'fail',
+      build: { status: 'skip', output: '', duration: 0 },
+      health: {
+        status: 'skip',
+        url: config.previewUrl + config.healthPath,
+        responseCode: null,
+        duration: 0,
+      },
+      pages: [],
+    },
+    test: { status: 'skip', duration: 0 },
+    lint: { status: 'skip', output: '', duration: 0 },
+    sast: { status: 'skip', output: '', duration: 0 },
+    factValidation: { status: 'skip', results: [] },
+    taskReview: null,
+    reviewSkipReason: 'Skipped — validation setup failed',
+    reviewSkipKind: null,
+    overall: 'fail',
+    duration: Date.now() - startTime,
+  };
+}
+
 function makeInterruptedResult(
   config: ValidationEngineConfig,
   startTime: number,

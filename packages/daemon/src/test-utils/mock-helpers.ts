@@ -33,6 +33,7 @@ import { createPodRepository } from '../pods/pod-repository.js';
 import type { PodRepository } from '../pods/pod-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { createScheduledJobRepository } from '../scheduled-jobs/scheduled-job-repository.js';
+import { createScheduledJobTemplateRepository } from '../scheduled-jobs/scheduled-job-template-repository.js';
 
 export const logger = pino({ level: 'silent' });
 
@@ -346,12 +347,27 @@ export function insertTestScheduledJob(
   overrides: Partial<ScheduledJob> = {},
 ): ScheduledJob {
   const repo = createScheduledJobRepository(db);
+  const templateRepo = createScheduledJobTemplateRepository(db);
   const futureDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const id = overrides.id ?? `job-${Date.now()}`;
+  const templateId = overrides.templateId ?? `tmpl-${id}`;
+  const templateName = overrides.templateName ?? overrides.name ?? `Test Job ${id}`;
+  const prompt = overrides.task ?? 'Run the test task';
+
+  if (!db.prepare('SELECT 1 FROM scheduled_job_templates WHERE id = ?').get(templateId)) {
+    templateRepo.insert({
+      id: templateId,
+      name: templateName,
+      prompt,
+    });
+  }
+
   return repo.insert({
-    id: overrides.id ?? `job-${Date.now()}`,
-    name: overrides.name ?? 'Test Job',
+    id,
+    name: templateName,
+    templateId,
     profileName: overrides.profileName ?? 'test-profile',
-    task: overrides.task ?? 'Run the test task',
+    task: prompt,
     cronExpression: overrides.cronExpression ?? '0 9 * * 1',
     enabled: overrides.enabled ?? true,
     nextRunAt: overrides.nextRunAt ?? futureDate,

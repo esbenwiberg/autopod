@@ -21,6 +21,7 @@ import type { PodManager } from '../../pods/index.js';
 import { computeMemoryEffectivenessAnalytics } from '../../pods/memory-effectiveness-aggregator.js';
 import { computeModelsAnalytics } from '../../pods/models-aggregator.js';
 import type { PendingOverrideRepository } from '../../pods/pending-override-repository.js';
+import { computePodCostBreakdown } from '../../pods/pod-cost-breakdown.js';
 import type { PodRepository } from '../../pods/pod-repository.js';
 import type { QualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { computeQualitySignals } from '../../pods/quality-signals.js';
@@ -237,9 +238,9 @@ export function podRoutes(
       // (produced before the claude-stream-parser fix in c97af9a).
       if (raw && typeof raw === 'object' && Array.isArray(raw.output)) {
         const joined = (raw.output as Array<{ text?: string }>).map((b) => b.text ?? '').join('\n');
-        return { ...raw, output: joined || undefined };
+        return { ...raw, eventId: e.id, output: joined || undefined };
       }
-      return raw;
+      return { ...raw, eventId: e.id };
     });
   });
 
@@ -259,6 +260,12 @@ export function podRoutes(
       qualityScoreRepo,
       validationRepo,
     });
+  });
+
+  // GET /pods/:podId/cost — per-pod cost grouped into operator-facing buckets
+  app.get('/pods/:podId/cost', async (request) => {
+    const { podId } = request.params as { podId: string };
+    return computePodCostBreakdown(podManager.getSession(podId));
   });
 
   // GET /pods/quality/trends — daily average quality scores (trailing N days)

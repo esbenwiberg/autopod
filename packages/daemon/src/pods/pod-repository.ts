@@ -394,9 +394,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
       ? (JSON.parse(row.deploy_baseline_hashes as string) as Record<string, string>)
       : null,
     phaseTokenUsage: row.phase_token_usage
-      ? (JSON.parse(row.phase_token_usage as string) as Partial<
-          Record<'review' | 'plan_eval', { inputTokens: number; outputTokens: number }>
-        >)
+      ? (JSON.parse(row.phase_token_usage as string) as PhaseTokenUsage)
       : null,
     networkPolicyResolved: (row.network_policy_resolved as NetworkPolicyMode) ?? null,
     lastRecoveryTrigger: (row.last_recovery_trigger as 'wake' | 'restart' | null) ?? null,

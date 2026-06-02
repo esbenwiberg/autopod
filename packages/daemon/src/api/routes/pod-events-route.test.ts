@@ -50,8 +50,8 @@ describe('GET /pods/:podId/events', () => {
   });
 
   it('returns all agent activity events when no limit is provided', async () => {
-    eventRepo.insert(agentActivity('first'));
-    eventRepo.insert(agentActivity('second'));
+    const firstId = eventRepo.insert(agentActivity('first'));
+    const secondId = eventRepo.insert(agentActivity('second'));
 
     const res = await app.inject({
       method: 'GET',
@@ -59,7 +59,28 @@ describe('GET /pods/:podId/events', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject([{ message: 'first' }, { message: 'second' }]);
+    expect(res.json()).toMatchObject([
+      { eventId: firstId, message: 'first' },
+      { eventId: secondId, message: 'second' },
+    ]);
+  });
+
+  it('returns stable event ids', async () => {
+    const id = eventRepo.insert(agentActivity('stable'));
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/sess-001/events',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([
+      expect.objectContaining({
+        eventId: id,
+        type: 'status',
+        message: 'stable',
+      }),
+    ]);
   });
 
   it('returns the latest limited agent activity events in chronological order', async () => {

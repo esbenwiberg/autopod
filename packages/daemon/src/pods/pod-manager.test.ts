@@ -52,6 +52,7 @@ import {
   AGENT_SHIM_PATH,
   type PodManagerDependencies,
   createPodManager,
+  selectMemoryBriefingForPod,
 } from './pod-manager.js';
 import { createPodRepository } from './pod-repository.js';
 import type { PodRepository } from './pod-repository.js';
@@ -269,7 +270,13 @@ function createMockPrManager(): PrManager {
       ciFailures: [],
       reviewComments: [],
     })),
-    replyToReviewFeedback: vi.fn(async () => ({ posted: 0, skipped: 0, errors: [] })),
+    replyToReviewFeedback: vi.fn(async () => ({
+      posted: 0,
+      skipped: 0,
+      resolved: 0,
+      errors: [],
+      resolutionErrors: [],
+    })),
   };
 }
 
@@ -578,6 +585,68 @@ function createTestContext(
 describe('PodManager', () => {
   beforeEach(() => {
     mockExecFileSuccess();
+  });
+
+  describe('memory briefing startup', () => {
+    it('memory reviewer setup is fail-soft', async () => {
+      const ctx = createTestContext();
+      const memoryRepo = createMemoryRepository(ctx.db);
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Authentication token refresh CLI',
+          skipValidation: true,
+        },
+        'user-1',
+      );
+      const profile = ctx.profileStore.get('test-profile');
+      const createReviewerClient = vi.fn(async () => {
+        throw new Error('expired refresh token');
+      });
+
+      const noCandidateResult = await selectMemoryBriefingForPod({
+        pod,
+        profile,
+        memoryRepo,
+        logger,
+        createReviewerClient,
+      });
+
+      expect(noCandidateResult).toEqual({ selected: [], unavailableReason: null });
+      expect(createReviewerClient).not.toHaveBeenCalled();
+
+      memoryRepo.insert({
+        id: 'mem-auth-refresh',
+        scope: 'profile',
+        scopeId: 'test-profile',
+        path: '/workflow/auth-refresh.md',
+        content: 'Authentication token refresh CLI workflow must preserve existing sessions.',
+        rationale: null,
+        kind: 'workflow',
+        tags: ['auth', 'cli'],
+        appliesWhen: null,
+        avoidWhen: null,
+        confidence: 0.9,
+        sourceEvidence: [],
+        impactSummary: null,
+        approved: true,
+        createdByPodId: null,
+      });
+
+      const fallbackResult = await selectMemoryBriefingForPod({
+        pod,
+        profile,
+        memoryRepo,
+        logger,
+        createReviewerClient,
+      });
+
+      expect(createReviewerClient).toHaveBeenCalledTimes(1);
+      expect(fallbackResult.unavailableReason).toBe('reviewer_model_client_unavailable');
+      expect(fallbackResult.selected.map((entry) => entry.memory.id)).toEqual(['mem-auth-refresh']);
+      expect(fallbackResult.selected[0]?.relevanceReason).toContain('Reviewer ranking unavailable');
+    });
   });
 
   describe('createSession', () => {
@@ -2761,10 +2830,16 @@ describe('PodManager', () => {
         });
         ctx.db
           .prepare(`
+            INSERT INTO scheduled_job_templates (id, name, prompt)
+            VALUES ('tmpl-clean-scan', 'Daily vuln scan', 'Run the daily vuln scan')
+          `)
+          .run();
+        ctx.db
+          .prepare(`
             INSERT INTO scheduled_jobs (
-              id, name, profile_name, task, cron_expression, next_run_at
+              id, name, template_id, profile_name, task, cron_expression, next_run_at
             ) VALUES (
-              'job-clean-scan', 'Daily vuln scan', 'test-profile', 'Run the daily vuln scan',
+              'job-clean-scan', 'Daily vuln scan', 'tmpl-clean-scan', 'test-profile', 'Run the daily vuln scan',
               '0 9 * * *', '2030-01-01T00:00:00.000Z'
             )
           `)
@@ -3075,6 +3150,12 @@ describe('PodManager', () => {
         observations: [],
         screenshots: [],
         durationMs: 25,
+        tokenUsage: {
+          inputTokens: 3000,
+          cachedInputTokens: 2000,
+          outputTokens: 250,
+          costUsd: 0.12,
+        },
       };
       const runAdvisoryBrowserQa = ctx.validationEngine.runAdvisoryBrowserQa;
       if (!runAdvisoryBrowserQa) {
@@ -3127,10 +3208,12 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(
         advisoryResult,
       );
-      const storedHistory = ctx.validationRepo.getForSession(pod.id);
-      expect(storedHistory).toHaveLength(1);
-      expect(storedHistory[0]?.result.overall).toBe('pass');
-      expect(storedHistory[0]?.result.advisoryBrowserQa).toEqual(advisoryResult);
+      expect(manager.getSession(pod.id).phaseTokenUsage?.advisory).toEqual({
+        inputTokens: 3000,
+        cachedInputTokens: 2000,
+        outputTokens: 250,
+        costUsd: 0.12,
+      });
       expect(
         events.filter((event) => (event as { type?: string }).type === 'pod.validation_completed'),
       ).toHaveLength(1);
@@ -4889,6 +4972,36 @@ describe('PodManager', () => {
       expect(recycled?.fixIteration).toBe(1);
       expect(ctx.fixFeedbackRepo.count(root.id)).toBe(1);
       expect(manager.getSession(root.id).prFixAttempts).toBe(2);
+    });
+
+    it('recycled fix pod shows parent attempt in task and startup marker', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
+
+      await manager.spawnFixSession(root.id, 'round one');
+      const firstFix = ctx.podRepo.list({}).find((p) => p.linkedPodId === root.id);
+      if (!firstFix) throw new Error('fix pod missing');
+      ctx.fixFeedbackRepo.drain(root.id);
+      ctx.podRepo.update(firstFix.id, { status: 'complete' });
+
+      await manager.spawnFixSession(root.id, 'round two');
+      const recycled = ctx.podRepo.getOrThrow(firstFix.id);
+      expect(recycled.fixIteration).toBe(1);
+      expect(manager.getSession(root.id).prFixAttempts).toBe(2);
+
+      await manager.processPod(recycled.id);
+
+      const processedFix = manager.getSession(recycled.id);
+      expect(processedFix.task).toContain('needs fixes (attempt 2, iteration 1)');
+      const markerMessages = ctx.eventRepo
+        .getForSession(recycled.id, { type: 'pod.agent_activity' })
+        .map((event) => {
+          const payload = event.payload as { event?: { message?: unknown } };
+          return payload.event?.message;
+        })
+        .filter((message): message is string => typeof message === 'string');
+      expect(markerMessages).toContain('Starting fix iteration 1, parent attempt 2/3');
     });
 
     it('recycles a merge_pending fix pod whose pushed fix did not unblock the PR', async () => {
@@ -6668,6 +6781,69 @@ describe('PodManager', () => {
       });
     });
 
+    it('does not recount replayed duplicate complete events', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Replay task', skipValidation: true },
+        'user-1',
+      );
+      const replayed: AgentEvent = {
+        type: 'complete',
+        timestamp: '2026-06-01T05:10:09.085Z',
+        result: 'already counted',
+        totalInputTokens: 1000,
+        totalOutputTokens: 500,
+        costUsd: 0.25,
+      };
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        inputTokens: 1000,
+        outputTokens: 500,
+        costUsd: 0.25,
+        phaseTokenUsage: { agent_initial: { inputTokens: 1000, outputTokens: 500, costUsd: 0.25 } },
+      });
+      ctx.eventRepo.insert({
+        type: 'pod.agent_activity',
+        timestamp: replayed.timestamp,
+        podId: pod.id,
+        event: replayed,
+      });
+
+      async function* events(): AsyncIterable<AgentEvent> {
+        yield replayed;
+        yield {
+          type: 'complete',
+          timestamp: '2026-06-01T05:11:09.085Z',
+          result: 'new completion',
+          totalInputTokens: 200,
+          totalOutputTokens: 50,
+          costUsd: 0.1,
+        };
+      }
+
+      await manager.consumeAgentEvents(pod.id, events());
+
+      const result = manager.getSession(pod.id);
+      expect(result.inputTokens).toBe(1200);
+      expect(result.outputTokens).toBe(550);
+      expect(result.costUsd).toBeCloseTo(0.35);
+      expect(result.phaseTokenUsage?.agent_initial).toEqual({
+        inputTokens: 1200,
+        outputTokens: 550,
+        costUsd: 0.35,
+      });
+      const completeEvents = ctx.eventRepo
+        .getForSession(pod.id, { type: 'pod.agent_activity' })
+        .filter(
+          (stored) =>
+            stored.payload.type === 'pod.agent_activity' &&
+            stored.payload.event.type === 'complete',
+        );
+      expect(completeEvents).toHaveLength(2);
+    });
+
     it('existing review writes still land under phaseTokenUsage.review and do not trample agent buckets', async () => {
       const ctx = createTestContext({
         overall: 'pass',
@@ -6678,7 +6854,12 @@ describe('PodManager', () => {
           model: 'claude-3-5-sonnet',
           screenshots: [],
           diff: '',
-          tokenUsage: { inputTokens: 2000, outputTokens: 150 },
+          tokenUsage: {
+            inputTokens: 2000,
+            outputTokens: 150,
+            cachedInputTokens: 1200,
+            costUsd: 0.42,
+          },
         },
       });
       const manager = createPodManager(ctx.deps);
@@ -6699,7 +6880,12 @@ describe('PodManager', () => {
 
       const result = manager.getSession(pod.id);
       // Review tokens must be present
-      expect(result.phaseTokenUsage?.review).toEqual({ inputTokens: 2000, outputTokens: 150 });
+      expect(result.phaseTokenUsage?.review).toEqual({
+        inputTokens: 2000,
+        outputTokens: 150,
+        cachedInputTokens: 1200,
+        costUsd: 0.42,
+      });
       // agent_initial must be untouched
       expect(result.phaseTokenUsage?.agent_initial).toEqual({
         inputTokens: 1000,
@@ -7151,6 +7337,41 @@ describe('worker startup diagnostics', () => {
     expect(statusMessages(ctx, pod.id)).toContain(
       'Agent CLI missing: codex is not installed in this image. Rebuild the codex base/warm image. codex: not found',
     );
+  });
+
+  it('pre-agent setup failure emits a visible fatal activity', async () => {
+    const runtime = createMockRuntime();
+    const ctx = createTestContext();
+    ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+    vi.mocked(ctx.containerManager.writeFile).mockRejectedValueOnce(
+      new Error('failed to write config with token ghp_1234567890abcdefghijklmnopqrstuvwxyz1234'),
+    );
+
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget', skipValidation: true },
+      'user-1',
+    );
+
+    await manager.processPod(pod.id);
+
+    expect(manager.getSession(pod.id).status).toBe('failed');
+    expect(runtime.spawn).not.toHaveBeenCalled();
+    const errorEvents = ctx.eventRepo
+      .getForSession(pod.id, { type: 'pod.agent_activity' })
+      .map((event) => {
+        const payload = event.payload as {
+          event?: { type?: string; message?: unknown; fatal?: boolean };
+        };
+        return payload.event;
+      })
+      .filter((event) => event?.type === 'error');
+
+    expect(errorEvents).toHaveLength(1);
+    expect(errorEvents[0]?.fatal).toBe(true);
+    expect(errorEvents[0]?.message).toContain('Pod setup failed before the agent could finish');
+    expect(errorEvents[0]?.message).not.toContain('ghp_1234567890');
+    expect(errorEvents[0]?.message).toContain('[API_KEY_REDACTED]');
   });
 });
 
