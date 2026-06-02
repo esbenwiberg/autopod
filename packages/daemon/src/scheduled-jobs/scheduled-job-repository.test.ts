@@ -6,6 +6,7 @@ import {
   insertTestScheduledJob,
 } from '../test-utils/mock-helpers.js';
 import { createScheduledJobRepository } from './scheduled-job-repository.js';
+import { createScheduledJobTemplateRepository } from './scheduled-job-template-repository.js';
 
 describe('ScheduledJobRepository', () => {
   let db: Database.Database;
@@ -22,6 +23,8 @@ describe('ScheduledJobRepository', () => {
     const fetched = repo.getOrThrow(job.id);
     expect(fetched.id).toBe(job.id);
     expect(fetched.name).toBe(job.name);
+    expect(fetched.templateId).toBe(job.templateId);
+    expect(fetched.templateName).toBe(job.templateName);
     expect(fetched.profileName).toBe('test-profile');
     expect(fetched.enabled).toBe(true);
     expect(fetched.catchupPending).toBe(false);
@@ -42,13 +45,40 @@ describe('ScheduledJobRepository', () => {
     expect(jobs).toHaveLength(2);
   });
 
-  it('update changes fields and bumps updatedAt', () => {
+  it('update changes job fields and bumps updatedAt', () => {
     const repo = createScheduledJobRepository(db);
     const job = insertTestScheduledJob(db);
 
-    const updated = repo.update(job.id, { name: 'Updated Name', enabled: false });
-    expect(updated.name).toBe('Updated Name');
+    const updated = repo.update(job.id, { cronExpression: '0 12 * * *', enabled: false });
+    expect(updated.cronExpression).toBe('0 12 * * *');
     expect(updated.enabled).toBe(false);
+  });
+
+  it('returns current template name and prompt for linked jobs', () => {
+    const repo = createScheduledJobRepository(db);
+    const templateRepo = createScheduledJobTemplateRepository(db);
+    const job = insertTestScheduledJob(db, {
+      id: 'job-linked',
+      name: 'Original template',
+      task: 'Original prompt',
+    });
+
+    templateRepo.update(job.templateId, {
+      name: 'Updated template',
+      prompt: 'Updated prompt',
+    });
+
+    const fetched = repo.getOrThrow(job.id);
+    expect(fetched.name).toBe('Updated template');
+    expect(fetched.templateName).toBe('Updated template');
+    expect(fetched.task).toBe('Updated prompt');
+  });
+
+  it('blocks deleting a template used by a scheduled job', () => {
+    const templateRepo = createScheduledJobTemplateRepository(db);
+    const job = insertTestScheduledJob(db);
+
+    expect(() => templateRepo.delete(job.templateId)).toThrow();
   });
 
   it('delete removes the job', () => {

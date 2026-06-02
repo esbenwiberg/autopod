@@ -11,6 +11,7 @@ import {
 import { SCHEDULER_USER_ID, createScheduledJobManager } from './scheduled-job-manager.js';
 import type { ScheduledJobManagerDeps } from './scheduled-job-manager.js';
 import { createScheduledJobRepository } from './scheduled-job-repository.js';
+import { createScheduledJobTemplateRepository } from './scheduled-job-template-repository.js';
 
 /** Insert a minimal pods row so FK constraints on last_pod_id are satisfied. */
 function insertMinimalSession(db: Database.Database, id: string): void {
@@ -87,6 +88,7 @@ function makeSession(id: string): Pod {
 
 function makeDeps(db: Database.Database): ScheduledJobManagerDeps {
   const scheduledJobRepo = createScheduledJobRepository(db);
+  const scheduledJobTemplateRepo = createScheduledJobTemplateRepository(db);
 
   const podManager = {
     createSession: vi.fn(() => {
@@ -101,7 +103,7 @@ function makeDeps(db: Database.Database): ScheduledJobManagerDeps {
     subscribe: vi.fn(),
   } as unknown as ScheduledJobManagerDeps['eventBus'];
 
-  return { scheduledJobRepo, podManager, eventBus, logger };
+  return { scheduledJobRepo, scheduledJobTemplateRepo, podManager, eventBus, logger };
 }
 
 describe('ScheduledJobManager', () => {
@@ -125,6 +127,7 @@ describe('ScheduledJobManager', () => {
       });
 
       expect(job.name).toBe('Daily scan');
+      expect(job.templateName).toBe('Daily scan');
       expect(job.cronExpression).toBe('0 9 * * 1');
       expect(job.enabled).toBe(true);
       expect(job.catchupPending).toBe(false);
@@ -171,6 +174,25 @@ describe('ScheduledJobManager', () => {
       });
       expect(job.enabled).toBe(false);
     });
+
+    it('creates a job from an existing template', () => {
+      const deps = makeDeps(db);
+      const manager = createScheduledJobManager(deps);
+      const template = manager.createTemplate({
+        name: 'Log triage',
+        prompt: 'Review logs and summarize actionable failures',
+      });
+
+      const job = manager.create({
+        templateId: template.id,
+        profileName: 'test-profile',
+        cronExpression: '0 9 * * 1',
+      });
+
+      expect(job.templateId).toBe(template.id);
+      expect(job.name).toBe('Log triage');
+      expect(job.task).toBe('Review logs and summarize actionable failures');
+    });
   });
 
   describe('update', () => {
@@ -182,6 +204,28 @@ describe('ScheduledJobManager', () => {
       const updated = manager.update(job.id, { name: 'New name', task: 'New task' });
       expect(updated.name).toBe('New name');
       expect(updated.task).toBe('New task');
+    });
+
+    it('uses updated template prompt on future fires', async () => {
+      const deps = makeDeps(db);
+      const manager = createScheduledJobManager(deps);
+      const template = manager.createTemplate({
+        name: 'Security scan',
+        prompt: 'Original prompt',
+      });
+      const job = manager.create({
+        templateId: template.id,
+        profileName: 'test-profile',
+        cronExpression: '0 9 * * 1',
+      });
+
+      manager.updateTemplate(template.id, { prompt: 'Updated prompt' });
+      await manager.trigger(job.id);
+
+      expect(deps.podManager.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ task: 'Updated prompt' }),
+        SCHEDULER_USER_ID,
+      );
     });
 
     it('recomputes nextRunAt when cronExpression changes', () => {

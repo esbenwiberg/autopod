@@ -5,6 +5,11 @@ import { createScheduledJobScheduler } from './scheduled-job-scheduler.js';
 
 function createMockManager(): ScheduledJobManager {
   return {
+    createTemplate: vi.fn(),
+    listTemplates: vi.fn(() => []),
+    getTemplate: vi.fn(),
+    updateTemplate: vi.fn(),
+    deleteTemplate: vi.fn(),
     create: vi.fn(),
     list: vi.fn(() => []),
     get: vi.fn(),

@@ -1,15 +1,19 @@
 import { AutopodError, generateId } from '@autopod/shared';
 import type {
   CreateScheduledJobRequest,
+  CreateScheduledJobTemplateRequest,
   Pod,
   ScheduledJob,
+  ScheduledJobTemplate,
   UpdateScheduledJobRequest,
+  UpdateScheduledJobTemplateRequest,
 } from '@autopod/shared';
 import cronParser from 'cron-parser';
 import type { Logger } from 'pino';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodManager } from '../pods/pod-manager.js';
 import type { ScheduledJobRepository } from './scheduled-job-repository.js';
+import type { ScheduledJobTemplateRepository } from './scheduled-job-template-repository.js';
 
 // cron-parser is CommonJS — use default import then destructure
 const { parseExpression } = cronParser;
@@ -18,12 +22,18 @@ export const SCHEDULER_USER_ID = 'scheduler';
 
 export interface ScheduledJobManagerDeps {
   scheduledJobRepo: ScheduledJobRepository;
+  scheduledJobTemplateRepo: ScheduledJobTemplateRepository;
   podManager: PodManager;
   eventBus: EventBus;
   logger: Logger;
 }
 
 export interface ScheduledJobManager {
+  createTemplate(req: CreateScheduledJobTemplateRequest): ScheduledJobTemplate;
+  listTemplates(): ScheduledJobTemplate[];
+  getTemplate(id: string): ScheduledJobTemplate;
+  updateTemplate(id: string, req: UpdateScheduledJobTemplateRequest): ScheduledJobTemplate;
+  deleteTemplate(id: string): void;
   create(req: CreateScheduledJobRequest): ScheduledJob;
   list(): ScheduledJob[];
   get(id: string): ScheduledJob;
@@ -50,7 +60,7 @@ function validateCronExpression(cronExpression: string): void {
 }
 
 export function createScheduledJobManager(deps: ScheduledJobManagerDeps): ScheduledJobManager {
-  const { scheduledJobRepo, podManager, eventBus, logger } = deps;
+  const { scheduledJobRepo, scheduledJobTemplateRepo, podManager, eventBus, logger } = deps;
 
   async function fireJob(job: ScheduledJob): Promise<Pod> {
     return podManager.createSession(
@@ -64,16 +74,45 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
   }
 
   return {
+    createTemplate(req: CreateScheduledJobTemplateRequest): ScheduledJobTemplate {
+      return scheduledJobTemplateRepo.insert({
+        id: generateId(),
+        name: req.name,
+        prompt: req.prompt,
+      });
+    },
+
+    listTemplates(): ScheduledJobTemplate[] {
+      return scheduledJobTemplateRepo.list();
+    },
+
+    getTemplate(id: string): ScheduledJobTemplate {
+      return scheduledJobTemplateRepo.getOrThrow(id);
+    },
+
+    updateTemplate(id: string, req: UpdateScheduledJobTemplateRequest): ScheduledJobTemplate {
+      return scheduledJobTemplateRepo.update(id, req);
+    },
+
+    deleteTemplate(id: string): void {
+      scheduledJobTemplateRepo.delete(id);
+    },
+
     create(req: CreateScheduledJobRequest): ScheduledJob {
       validateCronExpression(req.cronExpression);
       const nextRunAt = computeNextRunAt(req.cronExpression);
       const id = generateId();
+      const template =
+        req.templateId !== undefined
+          ? scheduledJobTemplateRepo.getOrThrow(req.templateId)
+          : createLegacyTemplate(req);
 
       return scheduledJobRepo.insert({
         id,
-        name: req.name,
+        name: template.name,
+        templateId: template.id,
         profileName: req.profileName,
-        task: req.task,
+        task: template.prompt,
         cronExpression: req.cronExpression,
         enabled: req.enabled ?? true,
         nextRunAt,
@@ -94,9 +133,28 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
     update(id: string, req: UpdateScheduledJobRequest): ScheduledJob {
       const job = scheduledJobRepo.getOrThrow(id);
       const changes: Partial<ScheduledJob> = {};
+      let template =
+        req.templateId !== undefined
+          ? scheduledJobTemplateRepo.getOrThrow(req.templateId)
+          : scheduledJobTemplateRepo.getOrThrow(job.templateId);
 
-      if (req.name !== undefined) changes.name = req.name;
-      if (req.task !== undefined) changes.task = req.task;
+      if (req.name !== undefined || req.task !== undefined) {
+        template = scheduledJobTemplateRepo.update(template.id, {
+          name: req.name,
+          prompt: req.task,
+        });
+      }
+
+      if (req.templateId !== undefined) {
+        changes.templateId = template.id;
+        changes.name = template.name;
+        changes.task = template.prompt;
+      } else if (req.name !== undefined || req.task !== undefined) {
+        changes.name = template.name;
+        changes.task = template.prompt;
+      }
+
+      if (req.profileName !== undefined) changes.profileName = req.profileName;
       if (req.enabled !== undefined) changes.enabled = req.enabled;
 
       if (req.cronExpression !== undefined) {
@@ -250,4 +308,34 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
       }
     },
   };
+
+  function createLegacyTemplate(req: CreateScheduledJobRequest): ScheduledJobTemplate {
+    if (!req.name || !req.task) {
+      throw new AutopodError(
+        'templateId is required unless legacy name and task are provided',
+        'INVALID_INPUT',
+        400,
+      );
+    }
+
+    return scheduledJobTemplateRepo.insert({
+      id: generateId(),
+      name: uniqueLegacyTemplateName(req.name),
+      prompt: req.task,
+    });
+  }
+
+  function uniqueLegacyTemplateName(name: string): string {
+    const existing = new Set(
+      scheduledJobTemplateRepo.list().map((template) => template.name.toLowerCase()),
+    );
+    if (!existing.has(name.toLowerCase())) return name;
+
+    for (let i = 2; i < 10_000; i++) {
+      const candidate = `${name} (${i})`;
+      if (!existing.has(candidate.toLowerCase())) return candidate;
+    }
+
+    return `${name} (${generateId()})`;
+  }
 }

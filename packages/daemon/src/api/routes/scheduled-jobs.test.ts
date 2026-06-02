@@ -9,6 +9,8 @@ import { scheduledJobRoutes } from './scheduled-jobs.js';
 const mockJob = {
   id: 'job-123',
   name: 'Test Job',
+  templateId: 'tmpl-123',
+  templateName: 'Test Job',
   profileName: 'my-profile',
   task: 'Run the task',
   cronExpression: '0 9 * * 1',
@@ -17,6 +19,14 @@ const mockJob = {
   lastRunAt: null,
   lastPodId: null,
   catchupPending: false,
+  createdAt: '2025-04-14T00:00:00.000Z',
+  updatedAt: '2025-04-14T00:00:00.000Z',
+};
+
+const mockTemplate = {
+  id: 'tmpl-123',
+  name: 'Test Job',
+  prompt: 'Run the task',
   createdAt: '2025-04-14T00:00:00.000Z',
   updatedAt: '2025-04-14T00:00:00.000Z',
 };
@@ -37,6 +47,11 @@ function createMockScheduledJobManager(
   overrides: Partial<ScheduledJobManager> = {},
 ): ScheduledJobManager {
   return {
+    createTemplate: vi.fn(() => mockTemplate),
+    listTemplates: vi.fn(() => [mockTemplate]),
+    getTemplate: vi.fn(() => mockTemplate),
+    updateTemplate: vi.fn(() => mockTemplate),
+    deleteTemplate: vi.fn(() => {}),
     create: vi.fn(() => mockJob),
     list: vi.fn(() => [mockJob]),
     get: vi.fn(() => mockJob),
@@ -111,6 +126,59 @@ describe('scheduled-jobs routes', () => {
       });
 
       expect(res.statusCode).toBe(400);
+    });
+
+    it('accepts template-based creation', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/scheduled-jobs',
+        payload: {
+          templateId: 'tmpl-123',
+          profileName: 'my-profile',
+          cronExpression: '0 9 * * 1',
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(vi.mocked(manager.create).mock.calls.at(-1)?.[0]).toMatchObject({
+        templateId: 'tmpl-123',
+      });
+    });
+  });
+
+  describe('scheduled job template routes', () => {
+    it('creates a template', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/scheduled-job-templates',
+        payload: { name: 'Template', prompt: 'Prompt' },
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toMatchObject({ id: 'tmpl-123' });
+    });
+
+    it('lists templates', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/scheduled-job-templates',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual([mockTemplate]);
+    });
+
+    it('blocks template delete errors from manager', async () => {
+      vi.mocked(manager.deleteTemplate).mockImplementationOnce(() => {
+        throw new AutopodError('Template is used', 'CONFLICT', 409);
+      });
+
+      const res = await app.inject({
+        method: 'DELETE',
+        url: '/scheduled-job-templates/tmpl-123',
+      });
+
+      expect(res.statusCode).toBe(409);
     });
   });
 

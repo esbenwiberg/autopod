@@ -2,8 +2,22 @@ import type { ScheduledJob } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
+export interface ScheduledJobInsert {
+  id: string;
+  templateId: string;
+  profileName: string;
+  cronExpression: string;
+  enabled: boolean;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  lastPodId: string | null;
+  catchupPending: boolean;
+  name: string;
+  task: string;
+}
+
 export interface ScheduledJobRepository {
-  insert(job: Omit<ScheduledJob, 'createdAt' | 'updatedAt'>): ScheduledJob;
+  insert(job: ScheduledJobInsert): ScheduledJob;
   getOrThrow(id: string): ScheduledJob;
   list(): ScheduledJob[];
   update(id: string, changes: Partial<ScheduledJob>): ScheduledJob;
@@ -15,11 +29,20 @@ export interface ScheduledJobRepository {
 }
 
 function mapRow(row: Record<string, unknown>): ScheduledJob {
+  const templateName = ((row.template_name as string) ?? (row.name as string)) as string;
+  const templatePrompt = row.template_prompt as string | Buffer | null | undefined;
+  const task = Buffer.isBuffer(templatePrompt)
+    ? templatePrompt.toString('utf8')
+    : (templatePrompt ??
+      (Buffer.isBuffer(row.task) ? (row.task as Buffer).toString('utf8') : (row.task as string)));
+
   return {
     id: row.id as string,
-    name: row.name as string,
+    name: templateName,
+    templateId: row.template_id as string,
+    templateName,
     profileName: row.profile_name as string,
-    task: Buffer.isBuffer(row.task) ? (row.task as Buffer).toString('utf8') : (row.task as string),
+    task,
     cronExpression: row.cron_expression as string,
     enabled: Boolean(row.enabled),
     nextRunAt: row.next_run_at as string,
@@ -32,19 +55,29 @@ function mapRow(row: Record<string, unknown>): ScheduledJob {
 }
 
 export function createScheduledJobRepository(db: Database.Database): ScheduledJobRepository {
+  const selectWithTemplate = `
+    SELECT
+      sj.*,
+      t.name AS template_name,
+      t.prompt AS template_prompt
+    FROM scheduled_jobs sj
+    LEFT JOIN scheduled_job_templates t ON t.id = sj.template_id
+  `;
+
   return {
-    insert(job: Omit<ScheduledJob, 'createdAt' | 'updatedAt'>): ScheduledJob {
+    insert(job: ScheduledJobInsert): ScheduledJob {
       db.prepare(`
         INSERT INTO scheduled_jobs (
-          id, name, profile_name, task, cron_expression, enabled,
+          id, name, template_id, profile_name, task, cron_expression, enabled,
           next_run_at, last_run_at, last_pod_id, catchup_pending
         ) VALUES (
-          @id, @name, @profileName, @task, @cronExpression, @enabled,
+          @id, @name, @templateId, @profileName, @task, @cronExpression, @enabled,
           @nextRunAt, @lastRunAt, @lastPodId, @catchupPending
         )
       `).run({
         id: job.id,
         name: job.name,
+        templateId: job.templateId,
         profileName: job.profileName,
         task: job.task,
         cronExpression: job.cronExpression,
@@ -58,7 +91,7 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
     },
 
     getOrThrow(id: string): ScheduledJob {
-      const row = db.prepare('SELECT * FROM scheduled_jobs WHERE id = ?').get(id) as
+      const row = db.prepare(`${selectWithTemplate} WHERE sj.id = ?`).get(id) as
         | Record<string, unknown>
         | undefined;
       if (!row) {
@@ -68,9 +101,10 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
     },
 
     list(): ScheduledJob[] {
-      const rows = db
-        .prepare('SELECT * FROM scheduled_jobs ORDER BY created_at ASC')
-        .all() as Record<string, unknown>[];
+      const rows = db.prepare(`${selectWithTemplate} ORDER BY sj.created_at ASC`).all() as Record<
+        string,
+        unknown
+      >[];
       return rows.map(mapRow);
     },
 
@@ -84,6 +118,14 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
       if (changes.name !== undefined) {
         setClauses.push('name = @name');
         params.name = changes.name;
+      }
+      if (changes.templateId !== undefined) {
+        setClauses.push('template_id = @templateId');
+        params.templateId = changes.templateId;
+      }
+      if (changes.profileName !== undefined) {
+        setClauses.push('profile_name = @profileName');
+        params.profileName = changes.profileName;
       }
       if (changes.task !== undefined) {
         setClauses.push('task = @task');
@@ -129,9 +171,11 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
     listDue(): ScheduledJob[] {
       const rows = db
         .prepare(`
-          SELECT * FROM scheduled_jobs
-          WHERE enabled = 1 AND catchup_pending = 0 AND datetime(next_run_at) <= datetime('now')
-          ORDER BY next_run_at ASC
+          ${selectWithTemplate}
+          WHERE sj.enabled = 1
+            AND sj.catchup_pending = 0
+            AND datetime(sj.next_run_at) <= datetime('now')
+          ORDER BY sj.next_run_at ASC
         `)
         .all() as Record<string, unknown>[];
       return rows.map(mapRow);
@@ -140,9 +184,11 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
     listOverdue(): ScheduledJob[] {
       const rows = db
         .prepare(`
-          SELECT * FROM scheduled_jobs
-          WHERE enabled = 1 AND catchup_pending = 0 AND datetime(next_run_at) < datetime('now')
-          ORDER BY next_run_at ASC
+          ${selectWithTemplate}
+          WHERE sj.enabled = 1
+            AND sj.catchup_pending = 0
+            AND datetime(sj.next_run_at) < datetime('now')
+          ORDER BY sj.next_run_at ASC
         `)
         .all() as Record<string, unknown>[];
       return rows.map(mapRow);
@@ -150,7 +196,11 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
 
     listPendingCatchup(): ScheduledJob[] {
       const rows = db
-        .prepare('SELECT * FROM scheduled_jobs WHERE catchup_pending = 1 ORDER BY next_run_at ASC')
+        .prepare(`
+          ${selectWithTemplate}
+          WHERE sj.catchup_pending = 1
+          ORDER BY sj.next_run_at ASC
+        `)
         .all() as Record<string, unknown>[];
       return rows.map(mapRow);
     },
