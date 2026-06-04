@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { stat, unlink } from 'node:fs/promises';
 import { extname } from 'node:path';
+import { createInterface } from 'node:readline/promises';
+import type { Pod, PodStatus, PublicProfile } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { IPty } from 'node-pty';
@@ -22,69 +24,90 @@ const IMAGE_EXTENSIONS = new Set([
   '.heic',
 ]);
 
+const DEFAULT_ATTACH_TIMEOUT_MS = 10 * 60 * 1000;
+const ATTACH_POLL_INTERVAL_MS = 1_500;
+const TERMINAL_STATUSES = new Set<PodStatus>(['complete', 'killed', 'failed']);
+
+type AttachSessionRunner = (containerName: string) => Promise<number>;
+type ProfilePicker = (client: AutopodClient) => Promise<string>;
+type SleepFn = (ms: number) => Promise<void>;
+type NowFn = () => number;
+
+interface WorkspaceCommandDeps {
+  runAttachSession?: AttachSessionRunner;
+  pickProfile?: ProfilePicker;
+  sleep?: SleepFn;
+  now?: NowFn;
+}
+
+interface ResolvedWorkspaceCommandDeps {
+  attachSession: AttachSessionRunner;
+  pickProfile: ProfilePicker;
+  sleep: SleepFn;
+  now: NowFn;
+}
+
+interface WorkspaceCreateOptions {
+  attach?: boolean;
+  branch?: string;
+  label?: string;
+  pimGroup?: string[];
+  timeout?: number;
+}
+
 function attachDebug(msg: string): void {
   if (process.env.AUTOPOD_ATTACH_DEBUG === '1') {
     process.stderr.write(`[autopod:attach] ${msg}\n`);
   }
 }
 
-export function registerWorkspaceCommands(program: Command, getClient: () => AutopodClient): void {
-  // ap workspace <profile> [description]
-  program
-    .command('workspace <profile> [description]')
-    .description('Create a workspace pod — an interactive container with no agent')
-    .option(
-      '-b, --branch <name>',
-      'Name for the new working branch (defaults to autopod/<id>). Pass --base-branch on "ap run" for the handoff, not here.',
-    )
-    .option(
-      '--pim-group <spec>',
-      'PIM group to activate: <groupId> or <groupId:displayName> (repeatable)',
-      (val: string, acc: string[]) => {
-        acc.push(val);
-        return acc;
-      },
-      [] as string[],
-    )
-    .action(
-      async (
-        profile: string,
-        description: string | undefined,
-        opts: { branch?: string; pimGroup?: string[] },
-      ) => {
-        const client = getClient();
-        const pimGroups = opts.pimGroup?.length
-          ? opts.pimGroup.map((spec) => {
-              const colonIdx = spec.indexOf(':');
-              if (colonIdx === -1) return { groupId: spec };
-              return {
-                groupId: spec.slice(0, colonIdx),
-                displayName: spec.slice(colonIdx + 1),
-              };
-            })
-          : undefined;
+export function registerWorkspaceCommands(
+  program: Command,
+  getClient: () => AutopodClient,
+  deps: WorkspaceCommandDeps = {},
+): void {
+  const attachSession = deps.runAttachSession ?? runAttachSession;
+  const pickProfile = deps.pickProfile ?? pickProfileInteractively;
+  const sleep =
+    deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const now = deps.now ?? (() => Date.now());
 
-        const pod = await withSpinner('Creating workspace pod...', () =>
-          client.createSession({
-            profileName: profile,
-            task: description ?? 'Workspace pod',
-            outputMode: 'workspace',
-            branch: opts.branch,
-            pimGroups,
-          }),
-        );
+  // ap workspace <profile> [label]
+  addWorkspaceOptions(
+    program
+      .command('workspace <profile> [label]')
+      .description('Create a workspace pod — an interactive container with no agent'),
+  )
+    .option('--attach', 'Wait for the container and attach as soon as it is running')
+    .action(async (profile: string, label: string | undefined, opts: WorkspaceCreateOptions) => {
+      const client = getClient();
+      await createWorkspacePod(client, profile, label, opts, {
+        attachSession,
+        pickProfile,
+        sleep,
+        now,
+      });
+    });
 
-        console.log(chalk.green(`Workspace ${chalk.bold(pod.id)} created.`));
-        console.log(`${chalk.bold('Profile:')}  ${pod.profileName}`);
-        console.log(`${chalk.bold('Status:')}   ${formatStatus(pod.status)}`);
-        console.log(`${chalk.bold('Branch:')}   ${pod.branch}`);
-        console.log();
-        console.log(chalk.dim(`Enter the container:  ap attach ${pod.id.slice(0, 8)}`));
-        console.log(
-          chalk.dim(`Hand off to worker:   ap run ${profile} <task> --base-branch ${pod.branch}`),
-        );
+  // ap shell [profile]
+  addWorkspaceOptions(
+    program.command('shell [profile]').description('Create an interactive pod and attach to it'),
+  ).action(async (profile: string | undefined, opts: WorkspaceCreateOptions) => {
+    const client = getClient();
+    const selectedProfile = profile ?? (await pickProfile(client));
+    await createWorkspacePod(
+      client,
+      selectedProfile,
+      undefined,
+      { ...opts, attach: true },
+      {
+        attachSession,
+        pickProfile,
+        sleep,
+        now,
       },
     );
+  });
 
   // ap attach <id>
   program
@@ -95,47 +118,7 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
       const resolvedId = await resolvePodId(client, id);
       const pod = await client.getSession(resolvedId);
 
-      if (pod.options?.agentMode !== 'interactive' && pod.outputMode !== 'workspace') {
-        console.error(chalk.red(`Pod ${resolvedId} is not an interactive pod.`));
-        process.exit(1);
-      }
-
-      if (pod.status !== 'running') {
-        console.error(
-          chalk.red(`Pod ${resolvedId} is ${pod.status} — can only attach to running pods.`),
-        );
-        process.exit(1);
-      }
-
-      const containerName = `autopod-${pod.id}`;
-      console.log(chalk.dim(`Attaching to ${containerName}…`));
-      console.log(chalk.dim('Type "exit" to detach. Run "ap complete <id>" when done.\n'));
-
-      const exitCode = await runAttachSession(containerName);
-
-      console.log();
-
-      // Non-zero exit may mean the container stopped unexpectedly
-      if (exitCode !== 0) {
-        try {
-          const refreshed = await client.getSession(resolvedId);
-          if (refreshed.status !== 'running') {
-            console.log(chalk.yellow('Container stopped unexpectedly.'));
-            console.log(
-              chalk.dim(
-                `Run "ap complete ${resolvedId.slice(0, 8)}" to recover changes and push branch.`,
-              ),
-            );
-            return;
-          }
-        } catch {
-          // Couldn't refresh — fall through to normal detach message
-        }
-      }
-
-      console.log(chalk.dim('Detached. Pod is still running.'));
-      console.log(chalk.dim(`Re-attach:  ap attach ${resolvedId.slice(0, 8)}`));
-      console.log(chalk.dim(`Complete:   ap complete ${resolvedId.slice(0, 8)}`));
+      await attachToRunningPod(client, pod, attachSession);
     });
 
   // ap complete <id>
@@ -361,6 +344,237 @@ export function registerWorkspaceCommands(program: Command, getClient: () => Aut
 
       console.log(chalk.green(`Done. ${tool} CLI installed in pod ${resolvedId.slice(0, 8)}.`));
     });
+}
+
+function addWorkspaceOptions(command: Command): Command {
+  return command
+    .option(
+      '-b, --branch <name>',
+      'Name for the new working branch (defaults to autopod/<id>). Pass --base-branch on "ap run" for the handoff, not here.',
+    )
+    .option(
+      '--pim-group <spec>',
+      'PIM group to activate: <groupId> or <groupId:displayName> (repeatable)',
+      collectRepeatable,
+      [] as string[],
+    )
+    .option('--label <text>', 'Label shown in pod lists and status output')
+    .option(
+      '--timeout <seconds>',
+      'Seconds to wait for the workspace container before attaching',
+      parseTimeoutSeconds,
+      DEFAULT_ATTACH_TIMEOUT_MS,
+    );
+}
+
+function collectRepeatable(value: string, previous: string[]): string[] {
+  return previous.concat(value);
+}
+
+function parseTimeoutSeconds(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error('--timeout must be a positive whole number of seconds');
+  }
+  return parsed * 1000;
+}
+
+function parsePimGroups(specs: string[] | undefined):
+  | {
+      groupId: string;
+      displayName?: string;
+    }[]
+  | undefined {
+  if (!specs?.length) return undefined;
+  return specs.map((spec) => {
+    const colonIdx = spec.indexOf(':');
+    if (colonIdx === -1) return { groupId: spec };
+    return {
+      groupId: spec.slice(0, colonIdx),
+      displayName: spec.slice(colonIdx + 1),
+    };
+  });
+}
+
+async function pickProfileInteractively(client: AutopodClient): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error('Profile is required when stdin is not interactive. Try: ap shell <profile>');
+  }
+
+  const profiles = await withSpinner('Fetching profiles...', () => client.listProfiles());
+  if (profiles.length === 0) {
+    throw new Error('No profiles found. Create one with: ap profile create');
+  }
+
+  const sortedProfiles = [...profiles].sort((a, b) => a.name.localeCompare(b.name));
+  if (sortedProfiles.length === 1) {
+    const [profile] = sortedProfiles;
+    console.log(chalk.dim(`Using only profile: ${profile.name}`));
+    return profile.name;
+  }
+
+  console.log(chalk.bold('Select profile:'));
+  sortedProfiles.forEach((profile, index) => {
+    console.log(
+      `  ${chalk.cyan(String(index + 1).padStart(2, ' '))}. ${formatProfileChoice(profile)}`,
+    );
+  });
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    while (true) {
+      const answer = (await rl.question(chalk.cyan('Profile: '))).trim();
+      if (!answer) continue;
+
+      if (/^\d+$/.test(answer)) {
+        const profile = sortedProfiles[Number.parseInt(answer, 10) - 1];
+        if (profile) return profile.name;
+      }
+
+      const exactMatch = sortedProfiles.find((profile) => profile.name === answer);
+      if (exactMatch) return exactMatch.name;
+
+      console.log(
+        chalk.yellow(`Choose 1-${sortedProfiles.length} or enter an exact profile name.`),
+      );
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+function formatProfileChoice(profile: PublicProfile): string {
+  const details = [
+    profile.extends ? `extends ${profile.extends}` : profile.template,
+    profile.repoUrl?.replace(/^https?:\/\//, ''),
+  ].filter(Boolean);
+  return details.length
+    ? `${chalk.bold(profile.name)} ${chalk.dim(`(${details.join(', ')})`)}`
+    : chalk.bold(profile.name);
+}
+
+async function createWorkspacePod(
+  client: AutopodClient,
+  profile: string,
+  positionalLabel: string | undefined,
+  opts: WorkspaceCreateOptions,
+  deps: ResolvedWorkspaceCommandDeps,
+): Promise<void> {
+  const label = opts.label ?? positionalLabel ?? 'Workspace pod';
+  const pod = await withSpinner('Creating workspace pod...', () =>
+    client.createSession({
+      profileName: profile,
+      task: label,
+      outputMode: 'workspace',
+      branch: opts.branch,
+      pimGroups: parsePimGroups(opts.pimGroup),
+    }),
+  );
+
+  printWorkspaceSummary(pod);
+
+  if (!opts.attach) {
+    console.log();
+    console.log(chalk.dim(`Enter the container:  ap attach ${pod.id.slice(0, 8)}`));
+    console.log(
+      chalk.dim(`Hand off to worker:   ap run ${profile} <task> --base-branch ${pod.branch}`),
+    );
+    return;
+  }
+
+  const runningPod = await withSpinner(
+    `Waiting for workspace ${pod.id.slice(0, 8)} to start...`,
+    () => waitForPodRunning(client, pod, opts.timeout ?? DEFAULT_ATTACH_TIMEOUT_MS, deps),
+  );
+
+  await attachToRunningPod(client, runningPod, deps.attachSession);
+}
+
+function printWorkspaceSummary(pod: Pod): void {
+  console.log(chalk.green(`Workspace ${chalk.bold(pod.id)} created.`));
+  console.log(`${chalk.bold('Profile:')}  ${pod.profileName}`);
+  console.log(`${chalk.bold('Status:')}   ${formatStatus(pod.status)}`);
+  console.log(`${chalk.bold('Branch:')}   ${pod.branch}`);
+}
+
+async function waitForPodRunning(
+  client: AutopodClient,
+  initialPod: Pod,
+  timeoutMs: number,
+  deps: ResolvedWorkspaceCommandDeps,
+): Promise<Pod> {
+  let pod = initialPod;
+  const deadline = deps.now() + timeoutMs;
+
+  while (pod.status !== 'running') {
+    if (TERMINAL_STATUSES.has(pod.status)) {
+      throw new Error(
+        `Pod ${pod.id.slice(0, 8)} reached ${pod.status} before it became attachable.`,
+      );
+    }
+
+    const remainingMs = deadline - deps.now();
+    if (remainingMs <= 0) {
+      throw new Error(
+        `Pod ${pod.id.slice(0, 8)} is still ${pod.status} after ${Math.ceil(
+          timeoutMs / 1000,
+        )}s — container may have failed to start.`,
+      );
+    }
+
+    await deps.sleep(Math.min(ATTACH_POLL_INTERVAL_MS, remainingMs));
+    pod = await client.getSession(pod.id);
+  }
+
+  return pod;
+}
+
+function isInteractivePod(pod: Pod): boolean {
+  return pod.options?.agentMode === 'interactive' || pod.outputMode === 'workspace';
+}
+
+async function attachToRunningPod(
+  client: AutopodClient,
+  pod: Pod,
+  attachSession: AttachSessionRunner,
+): Promise<void> {
+  if (!isInteractivePod(pod)) {
+    console.error(chalk.red(`Pod ${pod.id} is not an interactive pod.`));
+    process.exit(1);
+  }
+
+  if (pod.status !== 'running') {
+    console.error(chalk.red(`Pod ${pod.id} is ${pod.status} — can only attach to running pods.`));
+    process.exit(1);
+  }
+
+  const containerName = `autopod-${pod.id}`;
+  console.log(chalk.dim(`Attaching to ${containerName}…`));
+  console.log(chalk.dim('Type "exit" to detach. Run "ap complete <id>" when done.\n'));
+
+  const exitCode = await attachSession(containerName);
+
+  console.log();
+
+  // Non-zero exit may mean the container stopped unexpectedly
+  if (exitCode !== 0) {
+    try {
+      const refreshed = await client.getSession(pod.id);
+      if (refreshed.status !== 'running') {
+        console.log(chalk.yellow('Container stopped unexpectedly.'));
+        console.log(
+          chalk.dim(`Run "ap complete ${pod.id.slice(0, 8)}" to recover changes and push branch.`),
+        );
+        return;
+      }
+    } catch {
+      // Couldn't refresh — fall through to normal detach message
+    }
+  }
+
+  console.log(chalk.dim('Detached. Pod is still running.'));
+  console.log(chalk.dim(`Re-attach:  ap attach ${pod.id.slice(0, 8)}`));
+  console.log(chalk.dim(`Complete:   ap complete ${pod.id.slice(0, 8)}`));
 }
 
 async function ensureSpawnHelperExecutable(): Promise<void> {
