@@ -383,6 +383,15 @@ import AutopodUI
   #expect(rollup?.members.first?.status == .waived)
 }
 
+@Test func readinessAvailabilityStatusesAreNotApprovable() {
+  #expect(ReadinessStatus.ready.canApproveFromReadinessTab == true)
+  #expect(ReadinessStatus.needsReview.canApproveFromReadinessTab == true)
+  #expect(ReadinessStatus.risky.canApproveFromReadinessTab == true)
+  #expect(ReadinessStatus.waived.canApproveFromReadinessTab == true)
+  #expect(ReadinessStatus.notAvailable.canApproveFromReadinessTab == false)
+  #expect(ReadinessStatus.notApplicable.canApproveFromReadinessTab == false)
+}
+
 @Test func mapsMissingRunningAt() throws {
   let json = """
   {

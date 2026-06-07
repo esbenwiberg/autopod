@@ -15,6 +15,8 @@
   a local Series Readiness rollup from loaded member pod snapshots.
 - Card-level approvals are disabled unless readiness is `ready`, so non-ready approvals must go
   through the detail Readiness tab.
+- Source reference chips in the Readiness tab use a wrapping SwiftUI `Layout` so they do not
+  overflow compact panels.
 
 ## Deviations
 
@@ -36,6 +38,9 @@
 - `SeriesReadinessReview.rollup(for:seriesPods:)` is a UI projection only. It prefers an
   owner `readinessReview.scope == .series` snapshot, even when member pods are not loaded, and
   otherwise derives a rollup from loaded member pod snapshots.
+- `ReadinessStatus.canApproveFromReadinessTab` is the approval-state guard. Only `ready`,
+  `needs_review`, `risky`, and `waived` are approvable; `not_available` and `not_applicable` stay
+  pending/unavailable.
 - `ReadinessSourceRef.detailTab` intentionally maps `quality` to Work and `event` to Logs. PR refs
   open `href` when present; there is no new PR drilldown tab.
 

@@ -55,6 +55,13 @@ public enum ReadinessStatus: String, Sendable, CaseIterable {
         self == .ready
     }
 
+    public var canApproveFromReadinessTab: Bool {
+        switch self {
+        case .ready, .needsReview, .risky, .waived: true
+        case .notAvailable, .notApplicable: false
+        }
+    }
+
     public var isGreen: Bool {
         self == .ready || self == .notApplicable
     }
