@@ -1424,7 +1424,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const pod = podRepo.getOrThrow(podId);
       const allowPostDecision = options.advisoryQaInFlight === false;
       const refreshableStatuses = allowPostDecision
-        ? ['validated', 'review_required', 'failed', 'approved', 'merging', 'merge_pending', 'complete']
+        ? [
+            'validated',
+            'review_required',
+            'failed',
+            'approved',
+            'merging',
+            'merge_pending',
+            'complete',
+          ]
         : ['validated', 'review_required', 'failed'];
       if (!refreshableStatuses.includes(pod.status)) {
         return;

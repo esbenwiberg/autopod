@@ -3296,6 +3296,12 @@ describe('PodManager', () => {
         expect.objectContaining({ prUrl: 'https://github.com/org/repo/pull/42' }),
       );
       expect(manager.getSession(pod.id).status).toBe('complete');
+      expect(manager.getSession(pod.id).readinessReview).toMatchObject({
+        status: 'needs_review',
+        findings: expect.arrayContaining([
+          expect.objectContaining({ id: 'advisory-qa-in-flight' }),
+        ]),
+      });
       expect(ctx.containerManager.kill).not.toHaveBeenCalled();
       expect(ctx.containerManager.stop).not.toHaveBeenCalled();
 
@@ -3308,6 +3314,12 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(
         advisoryResult,
       );
+      expect(manager.getSession(pod.id).readinessReview).toMatchObject({
+        status: 'ready',
+        areas: expect.arrayContaining([
+          expect.objectContaining({ area: 'advisory_qa', status: 'ready' }),
+        ]),
+      });
     });
 
     it('deferred advisory persistence does not clobber a newer validation result', async () => {

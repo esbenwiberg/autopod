@@ -313,6 +313,17 @@ describe('deriveReadinessReview', () => {
       ]),
     );
   });
+
+  it('marks force-approve paths as waived', () => {
+    const result = review({
+      pod: pod({ lastCorrectionMessage: '[FORCE APPROVED] accepted by operator' }),
+    });
+
+    expect(result.status).toBe('waived');
+    expect(result.areas).toEqual(
+      expect.arrayContaining([expect.objectContaining({ area: 'validation', status: 'waived' })]),
+    );
+  });
 });
 
 describe('deriveSeriesReadiness', () => {
