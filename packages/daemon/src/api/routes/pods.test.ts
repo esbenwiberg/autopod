@@ -2546,6 +2546,18 @@ describe('POST /pods approve routes', () => {
     });
   });
 
+  it('approve rejects invalid approval metadata', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/pods/pod-ready/approve',
+      headers: authHeaders,
+      payload: { reason: 123 },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(podManager.approveSession).not.toHaveBeenCalled();
+  });
+
   it('approve-all readiness returns approved and skipped pods', async () => {
     const res = await app.inject({
       method: 'POST',

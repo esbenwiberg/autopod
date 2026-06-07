@@ -579,10 +579,17 @@ export function podRoutes(
     return workspace;
   });
 
+  const approvePodBodySchema = z
+    .object({
+      squash: z.boolean().optional(),
+      reason: z.string().max(2000).optional(),
+    })
+    .default({});
+
   // POST /pods/:podId/approve — approve pod
   app.post('/pods/:podId/approve', async (request) => {
     const { podId } = request.params as { podId: string };
-    const body = (request.body ?? {}) as { squash?: boolean; reason?: string };
+    const body = approvePodBodySchema.parse(request.body ?? {});
     await podManager.approveSession(podId, { squash: body.squash, reason: body.reason });
     return { ok: true };
   });
