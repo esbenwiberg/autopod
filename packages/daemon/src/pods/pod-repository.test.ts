@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { PodNotFoundError } from '@autopod/shared';
+import { PodNotFoundError, type ReadinessReview } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { type NewPod, type PodRepository, createPodRepository } from './pod-repository.js';
@@ -55,6 +55,67 @@ const validSession: NewPod = {
   maxValidationAttempts: 3,
   skipValidation: false,
   outputMode: 'pr',
+};
+
+const readinessReview: ReadinessReview = {
+  status: 'needs_review',
+  summary: 'Validation passed, but denied egress needs operator review.',
+  computedAt: '2026-06-07T12:00:00.000Z',
+  scope: 'pod',
+  areas: [
+    {
+      area: 'validation',
+      status: 'ready',
+      title: 'Validation',
+      summary: 'Latest blocking validation passed.',
+      sourceRefs: [{ kind: 'validation', label: 'Validation', id: 'attempt-1' }],
+    },
+    {
+      area: 'security',
+      status: 'ready',
+      title: 'Security',
+      summary: 'No blocking findings.',
+      sourceRefs: [{ kind: 'evidence', label: 'Security scan', id: 'scan-1' }],
+    },
+    {
+      area: 'network',
+      status: 'needs_review',
+      title: 'Network',
+      summary: 'Denied egress events were recorded.',
+      sourceRefs: [{ kind: 'event', label: 'Denied egress', id: 'event-1' }],
+    },
+    {
+      area: 'advisory_qa',
+      status: 'not_available',
+      title: 'Advisory QA',
+      summary: 'Advisory QA has not completed.',
+      sourceRefs: [],
+    },
+    {
+      area: 'pr',
+      status: 'not_applicable',
+      title: 'PR',
+      summary: 'No PR exists yet.',
+      sourceRefs: [],
+    },
+  ],
+  findings: [
+    {
+      id: 'network-denied-egress',
+      area: 'network',
+      severity: 'warning',
+      title: 'Denied egress observed',
+      detail: 'The pod attempted an outbound connection blocked by policy.',
+      sourceRefs: [{ kind: 'event', label: 'Denied egress', id: 'event-1' }],
+    },
+  ],
+  approval: {
+    approvedAt: '2026-06-07T12:05:00.000Z',
+    approvedBy: 'human',
+    statusAtApproval: 'needs_review',
+    scope: 'pod',
+    reason: 'Connection was expected during package restore.',
+  },
 };
 
 describe('PodRepository', () => {
@@ -268,6 +329,33 @@ describe('PodRepository', () => {
       repo.update('sess-001', { validationWaiver: null });
 
       expect(repo.getOrThrow('sess-001').validationWaiver).toBeNull();
+    });
+
+    it('readiness round-trips a compact snapshot through update, get, and list', () => {
+      repo.insert(validSession);
+      repo.update('sess-001', { readinessReview });
+
+      expect(repo.getOrThrow('sess-001').readinessReview).toEqual(readinessReview);
+      expect(repo.list().find((pod) => pod.id === 'sess-001')?.readinessReview).toEqual(
+        readinessReview,
+      );
+
+      const stored = db
+        .prepare('SELECT readiness_review FROM pods WHERE id = ?')
+        .get('sess-001') as { readiness_review: string };
+      expect(JSON.parse(stored.readiness_review)).toEqual(readinessReview);
+    });
+
+    it('readiness clears the stored snapshot with null', () => {
+      repo.insert(validSession);
+      repo.update('sess-001', { readinessReview });
+      repo.update('sess-001', { readinessReview: null });
+
+      expect(repo.getOrThrow('sess-001').readinessReview).toBeNull();
+      const stored = db
+        .prepare('SELECT readiness_review FROM pods WHERE id = ?')
+        .get('sess-001') as { readiness_review: string | null };
+      expect(stored.readiness_review).toBeNull();
     });
 
     it('should store and retrieve pendingEscalation as JSON', () => {

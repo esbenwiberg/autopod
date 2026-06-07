@@ -11,6 +11,7 @@ import type {
   PodStatus,
   PreSubmitReviewSnapshot,
   Profile,
+  ReadinessReview,
   ReferenceRepo,
   SpecContract,
   SpecFile,
@@ -151,6 +152,7 @@ export interface PodUpdates {
   preSubmitReview?: PreSubmitReviewSnapshot | null;
   validationOverrides?: ValidationOverride[] | null;
   validationWaiver?: ValidationWaiver | null;
+  readinessReview?: ReadinessReview | null;
   profileSnapshot?: Profile | null;
   prFixAttempts?: number;
   fixIteration?: number;
@@ -340,6 +342,9 @@ function rowToSession(row: Record<string, unknown>): Pod {
       : null,
     validationWaiver: row.validation_waiver
       ? (JSON.parse(row.validation_waiver as string) as ValidationWaiver)
+      : null,
+    readinessReview: row.readiness_review
+      ? (JSON.parse(row.readiness_review as string) as ReadinessReview)
       : null,
     pimGroups: row.pim_groups ? (JSON.parse(row.pim_groups as string) as PimGroupConfig[]) : null,
     profileSnapshot: profileSnapshotData,
@@ -672,6 +677,11 @@ export function createPodRepository(db: Database.Database): PodRepository {
         setClauses.push('validation_waiver = @validationWaiver');
         params.validationWaiver =
           changes.validationWaiver !== null ? JSON.stringify(changes.validationWaiver) : null;
+      }
+      if (changes.readinessReview !== undefined) {
+        setClauses.push('readiness_review = @readinessReview');
+        params.readinessReview =
+          changes.readinessReview !== null ? JSON.stringify(changes.readinessReview) : null;
       }
       if (changes.profileSnapshot !== undefined) {
         setClauses.push('profile_snapshot = @profileSnapshot');
