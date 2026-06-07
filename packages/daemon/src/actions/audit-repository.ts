@@ -125,27 +125,39 @@ export function createActionAuditRepository(db: Database.Database): ActionAuditR
     },
 
     getSafetySummary(podId: string): ActionAuditSafetySummary {
-      const entries = this.listBySession(podId, 10_000);
+      const rows = db
+        .prepare(
+          `SELECT pii_detected, quarantine_score, pii_categories
+           FROM action_audit
+           WHERE pod_id = @podId`,
+        )
+        .all({ podId }) as Array<{
+        pii_detected: number;
+        quarantine_score: number;
+        pii_categories: string | null;
+      }>;
       const piiCategories = new Set<string>();
       let quarantineCount = 0;
       let piiCount = 0;
       let maxQuarantineScore = 0;
 
-      for (const entry of entries) {
-        if (entry.quarantineScore > 0) {
+      for (const row of rows) {
+        if (row.quarantine_score > 0) {
           quarantineCount++;
-          maxQuarantineScore = Math.max(maxQuarantineScore, entry.quarantineScore);
+          maxQuarantineScore = Math.max(maxQuarantineScore, row.quarantine_score);
         }
-        if (entry.piiDetected) {
+        if (row.pii_detected === 1) {
           piiCount++;
         }
-        for (const category of entry.piiCategories ?? []) {
-          piiCategories.add(category);
+        if (row.pii_categories) {
+          for (const category of JSON.parse(row.pii_categories) as string[]) {
+            piiCategories.add(category);
+          }
         }
       }
 
       return {
-        rowCount: entries.length,
+        rowCount: rows.length,
         quarantineCount,
         piiCount,
         piiCategories: [...piiCategories].sort(),
