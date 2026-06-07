@@ -36,6 +36,7 @@ export interface InsertScanInput {
 export interface ScanRepository {
   insert(input: InsertScanInput): StoredScan;
   getForPod(podId: string): StoredScan[];
+  getLatestForPod(podId: string, checkpoint?: ScanCheckpoint): StoredScan | null;
 }
 
 export function createScanRepository(db: Database.Database): ScanRepository {
@@ -118,6 +119,12 @@ export function createScanRepository(db: Database.Database): ScanRepository {
         findingsByScan.set(scanId, list);
       }
       return scanRows.map((row) => rowToScan(row, findingsByScan.get(row.id as string) ?? []));
+    },
+
+    getLatestForPod(podId: string, checkpoint?: ScanCheckpoint): StoredScan | null {
+      const scans = this.getForPod(podId);
+      const scoped = checkpoint ? scans.filter((scan) => scan.checkpoint === checkpoint) : scans;
+      return scoped[scoped.length - 1] ?? null;
     },
   };
 }

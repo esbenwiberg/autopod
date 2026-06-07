@@ -3140,7 +3140,7 @@ describe('PodManager', () => {
       );
     });
 
-    it('normal validation creates the PR before advisory finishes', async () => {
+    it('readiness refresh updates after deferred advisory finishes', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       const manager = createPodManager(ctx.deps);
       const advisory = deferred<NonNullable<ValidationResult['advisoryBrowserQa']>>();
@@ -3195,6 +3195,15 @@ describe('PodManager', () => {
       });
       expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(1);
       expect(ctx.validationRepo.getForSession(pod.id)[0]?.result.advisoryBrowserQa).toBeUndefined();
+      expect(manager.getSession(pod.id).readinessReview).toMatchObject({
+        status: 'needs_review',
+        areas: expect.arrayContaining([
+          expect.objectContaining({ area: 'advisory_qa', status: 'not_available' }),
+        ]),
+        findings: expect.arrayContaining([
+          expect.objectContaining({ id: 'advisory-qa-in-flight' }),
+        ]),
+      });
 
       const completedBeforeAdvisory = events.filter(
         (event) => (event as { type?: string }).type === 'pod.validation_completed',
@@ -3208,6 +3217,13 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(
         advisoryResult,
       );
+      expect(manager.getSession(pod.id).readinessReview).toMatchObject({
+        status: 'needs_review',
+        areas: expect.arrayContaining([
+          expect.objectContaining({ area: 'advisory_qa', status: 'needs_review' }),
+        ]),
+        findings: expect.arrayContaining([expect.objectContaining({ id: 'advisory-qa-concern' })]),
+      });
       expect(manager.getSession(pod.id).phaseTokenUsage?.advisory).toEqual({
         inputTokens: 3000,
         cachedInputTokens: 2000,

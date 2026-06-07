@@ -1,9 +1,6 @@
 export type ReadinessStatus = 'ready' | 'needs_review' | 'risky' | 'waived';
 
-export type ReadinessAreaStatus =
-  | ReadinessStatus
-  | 'not_applicable'
-  | 'not_available';
+export type ReadinessAreaStatus = ReadinessStatus | 'not_applicable' | 'not_available';
 
 export type ReadinessArea =
   | 'validation'

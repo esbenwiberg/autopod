@@ -133,6 +133,8 @@ import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
 import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
+import type { QualityScoreRepository } from './quality-score-repository.js';
+import { createReadinessService } from './readiness-review.js';
 import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
 import { deriveReferenceRepos, resolveRefRepoPat } from './reference-repos.js';
 import {
@@ -976,6 +978,8 @@ export interface PodManagerDependencies {
   reviewInfrastructureRetryBackoffMs?: readonly number[];
   /** Safety events repository for writing per-pattern detection rows. */
   safetyEventsRepo?: import('../safety/safety-events-repository.js').SafetyEventsRepository;
+  /** Persisted behavioural quality scores used by Readiness Review when available. */
+  qualityScoreRepo?: QualityScoreRepository;
   logger: Logger;
 }
 
@@ -1381,6 +1385,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     screenshotStore,
     hostScreenshotDir,
     safetyEventsRepo,
+    qualityScoreRepo,
   } = deps;
   const reviewInfrastructureRetryBackoffMs =
     deps.reviewInfrastructureRetryBackoffMs ?? REVIEW_INFRA_RETRY_BACKOFF_MS;
@@ -1405,6 +1410,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    *  handle. */
   const haproxyDenyHandles = new Map<string, HaproxyDenyStreamHandle>();
   const maxCredentialLineageByPod = new Map<string, MaxCredentialLineage>();
+  const readinessService = createReadinessService({
+    podRepo,
+    validationRepo,
+    scanRepo,
+    actionAuditRepo: deps.actionAuditRepo,
+    eventRepo: deps.eventRepo,
+    qualityScoreRepo,
+  });
+
+  function refreshReadiness(podId: string, options: { advisoryQaInFlight?: boolean } = {}): void {
+    try {
+      const pod = podRepo.getOrThrow(podId);
+      if (!['validated', 'review_required', 'failed'].includes(pod.status)) {
+        return;
+      }
+      readinessService.refreshPodReadiness(podId, options);
+    } catch (err) {
+      logger.warn({ err, podId }, 'Failed to refresh Readiness Review');
+    }
+  }
 
   function rememberMaxCredentialLineage(podId: string, result: ProviderEnvResult): void {
     if (result.maxCredentialLineage) {
@@ -3762,6 +3787,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         advisoryBrowserQa: advisoryResult,
       };
       podRepo.update(podId, { lastValidationResult: mergedResult });
+      refreshReadiness(podId);
       return mergedResult;
     };
 
@@ -3842,6 +3868,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         advisoryBrowserQa: advisoryResult,
       };
       podRepo.update(podId, { lastValidationResult: mergedResult });
+      refreshReadiness(podId);
       return mergedResult;
     })();
 
@@ -4111,6 +4138,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       previousStatus,
       newStatus: to,
     });
+    if (to === 'validated' || to === 'review_required' || to === 'failed') {
+      refreshReadiness(pod.id);
+    }
     return podRepo.getOrThrow(pod.id);
   }
 
@@ -7377,6 +7407,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async approveSession(podId: string, options?: { squash?: boolean }): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
+      refreshReadiness(podId, { advisoryQaInFlight: advisoryRuns.has(podId) });
       if (advisoryRuns.has(podId)) {
         emitActivityStatus(podId, 'Approval continuing while advisory browser QA runs…');
       }
@@ -9254,6 +9285,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // intent must not fire on a later revalidation for this pod.
           pendingUpdateFromBaseIntents.delete(podId);
           const validatedPod = transition(s2, 'validated', { prUrl });
+          refreshReadiness(podId, {
+            advisoryQaInFlight:
+              validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
+          });
           maybeTriggerDependents(validatedPod);
           await runAdvisoryAfterValidation(podId, validationConfig, result);
           const postAdvisoryPod = podRepo.getOrThrow(podId);
@@ -9769,6 +9804,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
 
           const revalidatedPod = transition(s2, 'validated', { prUrl });
+          refreshReadiness(podId, {
+            advisoryQaInFlight:
+              validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
+          });
           maybeTriggerDependents(revalidatedPod);
           await runAdvisoryAfterValidation(podId, validationConfig, result);
           const postAdvisoryPod = podRepo.getOrThrow(podId);

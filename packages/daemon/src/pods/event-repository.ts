@@ -12,6 +12,7 @@ export interface StoredEvent {
 export interface EventRepository {
   insert(event: SystemEvent): number; // returns auto-increment id
   getSince(lastId: number, limit?: number): StoredEvent[];
+  countForSession(podId: string, type: string): number;
   getForSession(
     podId: string,
     options?: {
@@ -67,6 +68,13 @@ export function createEventRepository(db: Database.Database): EventRepository {
               .prepare('SELECT * FROM events WHERE id > ? ORDER BY id ASC LIMIT ?')
               .all(lastId, limit) as Record<string, unknown>[]);
       return rows.map(rowToStoredEvent);
+    },
+
+    countForSession(podId: string, type: string): number {
+      const row = db
+        .prepare('SELECT COUNT(*) AS count FROM events WHERE pod_id = @podId AND type = @type')
+        .get({ podId, type }) as { count: number };
+      return row.count;
     },
 
     getForSession(podId: string, options = {}): StoredEvent[] {

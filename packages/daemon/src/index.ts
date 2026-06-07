@@ -549,6 +549,7 @@ podManager = createPodManager({
   getSecret: (ref: string) => process.env[ref],
   repoScanner,
   scanRepo,
+  qualityScoreRepo,
   screenshotStore,
   hostScreenshotDir: (podId) => hostBrowserRunner.screenshotDir(podId),
   safetyEventsRepo,

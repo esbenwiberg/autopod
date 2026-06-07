@@ -5,11 +5,7 @@ import {
   readinessReviewSchema,
   readinessStatusSchema,
 } from '../schemas/pod.schema.js';
-import type {
-  ReadinessAreaStatus,
-  ReadinessReview,
-  ReadinessStatus,
-} from './readiness.js';
+import type { ReadinessAreaStatus, ReadinessReview, ReadinessStatus } from './readiness.js';
 
 const compactSnapshot: ReadinessReview = {
   status: 'needs_review',
