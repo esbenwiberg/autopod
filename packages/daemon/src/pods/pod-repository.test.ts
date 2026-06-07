@@ -358,6 +358,26 @@ describe('PodRepository', () => {
       expect(stored.readiness_review).toBeNull();
     });
 
+    it('readiness rejects raw evidence fields before storage', () => {
+      repo.insert(validSession);
+
+      expect(() =>
+        repo.update('sess-001', {
+          readinessReview: {
+            ...readinessReview,
+            findings: [
+              {
+                ...readinessReview.findings[0],
+                logs: 'raw log output must stay in the log surface',
+              },
+            ],
+          } as unknown as ReadinessReview,
+        }),
+      ).toThrow('Readiness Review stores source references');
+
+      expect(repo.getOrThrow('sess-001').readinessReview).toBeNull();
+    });
+
     it('should store and retrieve pendingEscalation as JSON', () => {
       repo.insert(validSession);
       const escalation = { id: 'esc-1', type: 'ask_human', question: 'help?' };

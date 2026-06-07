@@ -25,6 +25,7 @@ import {
   PodNotFoundError,
   outputModeFromPodOptions,
   podOptionsFromOutputMode,
+  readinessReviewSchema,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { extractFindings } from '../validation/finding-fingerprint.js';
@@ -681,7 +682,9 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.readinessReview !== undefined) {
         setClauses.push('readiness_review = @readinessReview');
         params.readinessReview =
-          changes.readinessReview !== null ? JSON.stringify(changes.readinessReview) : null;
+          changes.readinessReview !== null
+            ? JSON.stringify(readinessReviewSchema.parse(changes.readinessReview))
+            : null;
       }
       if (changes.profileSnapshot !== undefined) {
         setClauses.push('profile_snapshot = @profileSnapshot');

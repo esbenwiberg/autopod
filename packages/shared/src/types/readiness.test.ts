@@ -108,6 +108,24 @@ describe('Readiness Review types and schemas', () => {
     }
   });
 
+  it('rejects known raw evidence payload fields while tolerating future fields', () => {
+    const result = readinessReviewSchema.safeParse({
+      ...compactSnapshot,
+      futureField: { tolerated: true },
+      findings: [
+        {
+          ...compactSnapshot.findings[0],
+          screenshots: [{ path: '/tmp/raw.png' }],
+        },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(['findings', 0, 'screenshots']);
+    }
+  });
+
   it('accepts null and undefined for old pods with no readiness snapshot', () => {
     expect(nullableReadinessReviewSchema.parse(null)).toBeNull();
     expect(nullableReadinessReviewSchema.parse(undefined)).toBeUndefined();

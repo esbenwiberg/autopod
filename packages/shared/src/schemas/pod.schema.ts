@@ -58,6 +58,45 @@ const humanReviewSchema = z.object({
   reason: z.string().min(1).max(500),
 });
 
+const forbiddenReadinessRawEvidenceFields = new Set([
+  'logs',
+  'rawLogs',
+  'screenshots',
+  'rawScreenshots',
+  'diff',
+  'rawDiff',
+  'actionAuditBundle',
+  'actionAuditRecords',
+  'securityScanOutput',
+  'scanOutput',
+  'prCheckPayload',
+  'prChecks',
+]);
+
+function rejectForbiddenReadinessRawEvidence(
+  value: unknown,
+  ctx: z.RefinementCtx,
+  path: Array<string | number> = [],
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => rejectForbiddenReadinessRawEvidence(item, ctx, [...path, index]));
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+
+  for (const [key, child] of Object.entries(value)) {
+    if (forbiddenReadinessRawEvidenceFields.has(key)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [...path, key],
+        message: 'Readiness Review stores source references, not raw evidence payloads',
+      });
+      continue;
+    }
+    rejectForbiddenReadinessRawEvidence(child, ctx, [...path, key]);
+  }
+}
+
 export const specContractSchema = z.object({
   contractVersion: z.literal(1),
   title: z.string().min(1).max(200),
@@ -237,7 +276,8 @@ export const readinessReviewSchema = z
     findings: z.array(readinessFindingSchema).max(100),
     approval: readinessApprovalSchema.nullable().optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((value, ctx) => rejectForbiddenReadinessRawEvidence(value, ctx));
 
 export const nullableReadinessReviewSchema = readinessReviewSchema.nullable().optional();
 
