@@ -18,7 +18,7 @@ struct ReadinessTab: View {
     }
 
     private var canApprove: Bool {
-        guard decisionStatus != nil else { return false }
+        guard let decisionStatus, decisionStatus.canApproveFromReadinessTab else { return false }
         return !requiresReason || !approvalReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -27,14 +27,14 @@ struct ReadinessTab: View {
             VStack(alignment: .leading, spacing: 16) {
                 if let seriesReadiness {
                     seriesSection(seriesReadiness)
-                    if pod.readinessReview != nil {
+                    if pod.readinessReview?.scope == .pod {
                         Divider()
                     }
                 }
 
-                if let readiness = pod.readinessReview {
+                if let readiness = pod.readinessReview, readiness.scope == .pod {
                     podSection(readiness)
-                } else {
+                } else if seriesReadiness == nil {
                     pendingSection
                 }
 
@@ -287,7 +287,7 @@ struct ReadinessTab: View {
                 let reason = approvalReason.trimmingCharacters(in: .whitespacesAndNewlines)
                 Task { await actions.approve(pod.id, reason.isEmpty ? nil : reason) }
             } label: {
-                Label(requiresReason ? "Approve with reason" : "Approve after review", systemImage: "checkmark")
+                Label(approvalButtonLabel, systemImage: "checkmark")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
@@ -303,7 +303,17 @@ struct ReadinessTab: View {
         if decisionStatus.requiresApprovalReason {
             return "A reason is required for \(decisionStatus.label) readiness."
         }
+        if !decisionStatus.canApproveFromReadinessTab {
+            return "Readiness is pending or unavailable."
+        }
         return "Approve this pod using the current Readiness Review."
+    }
+
+    private var approvalButtonLabel: String {
+        guard let decisionStatus, decisionStatus.canApproveFromReadinessTab else {
+            return "Readiness unavailable"
+        }
+        return requiresReason ? "Approve with reason" : "Approve after review"
     }
 
     private func sourceRefs(_ refs: [ReadinessSourceRef]) -> some View {
@@ -314,6 +324,9 @@ struct ReadinessTab: View {
                 } label: {
                     Label(ref.label, systemImage: sourceIcon(ref))
                         .font(.caption2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 180)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
@@ -369,13 +382,64 @@ private extension View {
     }
 }
 
-private struct FlowLayout<Content: View>: View {
+private struct FlowLayout: Layout {
     let spacing: CGFloat
-    @ViewBuilder var content: () -> Content
 
-    var body: some View {
-        HStack(spacing: spacing) {
-            content()
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let maxWidth = proposal.width ?? subviews.reduce(CGFloat.zero) { width, subview in
+            width + subview.sizeThatFits(.unspecified).width + spacing
+        }
+        var currentX: CGFloat = 0
+        var currentRowHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var widestRow: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            let wraps = currentX > 0 && currentX + size.width > maxWidth
+            if wraps {
+                widestRow = max(widestRow, currentX - spacing)
+                totalHeight += currentRowHeight + spacing
+                currentX = 0
+                currentRowHeight = 0
+            }
+            currentX += size.width + spacing
+            currentRowHeight = max(currentRowHeight, size.height)
+        }
+
+        widestRow = max(widestRow, currentX > 0 ? currentX - spacing : 0)
+        totalHeight += currentRowHeight
+        return CGSize(width: min(maxWidth, widestRow), height: totalHeight)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        var currentX = bounds.minX
+        var currentY = bounds.minY
+        var currentRowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            let wraps = currentX > bounds.minX && currentX + size.width > bounds.maxX
+            if wraps {
+                currentX = bounds.minX
+                currentY += currentRowHeight + spacing
+                currentRowHeight = 0
+            }
+            subview.place(
+                at: CGPoint(x: currentX, y: currentY),
+                proposal: ProposedViewSize(width: size.width, height: size.height)
+            )
+            currentX += size.width + spacing
+            currentRowHeight = max(currentRowHeight, size.height)
         }
     }
 }

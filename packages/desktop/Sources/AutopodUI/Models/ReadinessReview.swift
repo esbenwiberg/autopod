@@ -42,6 +42,15 @@ public enum ReadinessStatus: String, Sendable, CaseIterable {
         self == .risky || self == .waived
     }
 
+    public var canApproveFromReadinessTab: Bool {
+        switch self {
+        case .ready, .needsReview, .risky, .waived:
+            true
+        case .notAvailable, .notApplicable:
+            false
+        }
+    }
+
     public var canApproveFromHeader: Bool {
         self == .ready
     }
@@ -275,6 +284,9 @@ public struct SeriesReadinessReview: Sendable, Hashable {
 public extension SeriesReadinessReview {
     static func rollup(for owner: Pod, seriesPods inputPods: [Pod]) -> SeriesReadinessReview? {
         guard owner.isSeriesReadinessOwner else { return nil }
+        if let readiness = owner.readinessReview, readiness.scope == .series {
+            return fromDaemonScopedSnapshot(readiness, owner: owner, seriesPods: inputPods)
+        }
         let pods = inputPods.isEmpty ? [owner] : inputPods
         guard let seriesId = owner.seriesId, pods.count > 1 else { return nil }
 
@@ -331,6 +343,47 @@ public extension SeriesReadinessReview {
             branch: owner.branch,
             areas: areas,
             findings: memberFindings,
+            members: members
+        )
+    }
+
+    static func fromDaemonScopedSnapshot(
+        _ readiness: ReadinessReview,
+        owner: Pod,
+        seriesPods inputPods: [Pod]
+    ) -> SeriesReadinessReview? {
+        guard readiness.scope == .series else { return nil }
+        let pods = inputPods.isEmpty ? [owner] : inputPods
+        let members = pods.isEmpty
+            ? [
+                SeriesMemberReadiness(
+                    id: owner.id,
+                    title: owner.briefTitle ?? owner.id,
+                    status: readiness.status,
+                    summary: readiness.summary
+                ),
+            ]
+            : pods.sorted { $0.startedAt < $1.startedAt }.map { pod in
+                SeriesMemberReadiness(
+                    id: pod.id,
+                    title: pod.briefTitle ?? pod.id,
+                    status: pod.id == owner.id
+                        ? readiness.status
+                        : pod.readinessReview?.status ?? .notAvailable,
+                    summary: pod.id == owner.id
+                        ? readiness.summary
+                        : pod.readinessReview?.summary ?? "Readiness unavailable."
+                )
+            }
+
+        return SeriesReadinessReview(
+            status: readiness.status,
+            summary: readiness.summary,
+            computedAt: readiness.computedAt,
+            seriesId: readiness.approval?.seriesId ?? owner.seriesId ?? owner.id,
+            branch: owner.branch,
+            areas: readiness.areas,
+            findings: readiness.findings,
             members: members
         )
     }

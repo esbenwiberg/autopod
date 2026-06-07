@@ -11,8 +11,8 @@
 - The Readiness tab renders pod readiness as an approval companion: compact green rows, expanded
   non-green rows, source refs limited to existing Validation, Work, Logs, Diff, Evidence, and PR
   surfaces, plus reason-gated approval for `risky` and `waived`.
-- Single-PR series final pods compute a local Series Readiness rollup from loaded member pod
-  snapshots and show it before pod-level readiness.
+- Single-PR series final pods prefer daemon-scoped series readiness snapshots and otherwise compute
+  a local Series Readiness rollup from loaded member pod snapshots.
 - Card-level approvals are disabled unless readiness is `ready`, so non-ready approvals must go
   through the detail Readiness tab.
 
@@ -33,8 +33,9 @@
 - `DaemonAPI.approvePod(_:, squash:, reason:)` sends `{ squash?, reason? }` only when at least one
   field is present.
 - `Pod.readinessReview` is optional. Nil should be treated as pending/unavailable, not as ready.
-- `SeriesReadinessReview.rollup(for:seriesPods:)` is a UI projection only. It is not persisted and
-  depends on the detail view having loaded member pods.
+- `SeriesReadinessReview.rollup(for:seriesPods:)` is a UI projection only. It prefers an
+  owner `readinessReview.scope == .series` snapshot, even when member pods are not loaded, and
+  otherwise derives a rollup from loaded member pod snapshots.
 - `ReadinessSourceRef.detailTab` intentionally maps `quality` to Work and `event` to Logs. PR refs
   open `href` when present; there is no new PR drilldown tab.
 
@@ -52,8 +53,7 @@
 
 - The Linux Autopod-self image has no `swift` executable, so focused Swift tests could not run in
   this pod. Run the Desktop package tests/build on a macOS/Xcode-capable machine before merging.
-- The UI rollup infers the series approval surface from member pod snapshots already available in
-  the detail view. If a future daemon returns a first-class series readiness object, prefer that
-  over recomputing in the UI.
+- The UI rollup can render a daemon-scoped series snapshot without member pods, but member rows are
+  richer when the detail view has loaded the full series pod list.
 - Do not reintroduce optimistic approval status changes in `ActionHandler`; daemon readiness gates
   can reject missing reasons or non-ready automation paths.

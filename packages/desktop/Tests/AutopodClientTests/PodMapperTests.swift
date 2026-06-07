@@ -328,6 +328,61 @@ import AutopodUI
   #expect(rollup?.summary == "1 finding(s) across 1 of 2 pod(s).")
 }
 
+@Test func seriesReadinessUsesDaemonScopedSnapshotWithoutMembers() {
+  let seriesReview = ReadinessReview(
+    status: .waived,
+    summary: "Validation was waived across the series.",
+    computedAt: Date(timeIntervalSince1970: 40),
+    scope: .series,
+    areas: [
+      ReadinessAreaReview(
+        area: .validation,
+        status: .waived,
+        title: "Validation",
+        summary: "Waived.",
+        sourceRefs: [ReadinessSourceRef(kind: .validation, label: "Validation")]
+      ),
+    ],
+    findings: [
+      ReadinessFinding(
+        id: "validation-waiver",
+        area: .validation,
+        severity: .warning,
+        title: "Validation waiver recorded",
+        detail: "Operator accepted missing proof.",
+        sourceRefs: [ReadinessSourceRef(kind: .validation, label: "Validation")]
+      ),
+    ],
+    approval: ReadinessApproval(
+      approvedAt: Date(timeIntervalSince1970: 45),
+      approvedBy: "operator",
+      statusAtApproval: .waived,
+      scope: .series,
+      seriesId: "series-2",
+      reason: "Known external outage."
+    )
+  )
+  let owner = Pod(
+    id: "05-final",
+    status: .validated,
+    pod: PodConfig(agentMode: .auto, output: .pr),
+    branch: "feature/readiness",
+    profileName: "autopod-self",
+    model: "gpt-5",
+    startedAt: Date(timeIntervalSince1970: 30),
+    seriesId: "series-2",
+    readinessReview: seriesReview
+  )
+
+  let rollup = SeriesReadinessReview.rollup(for: owner, seriesPods: [])
+
+  #expect(rollup?.status == .waived)
+  #expect(rollup?.seriesId == "series-2")
+  #expect(rollup?.summary == "Validation was waived across the series.")
+  #expect(rollup?.members.first?.id == "05-final")
+  #expect(rollup?.members.first?.status == .waived)
+}
+
 @Test func mapsMissingRunningAt() throws {
   let json = """
   {
