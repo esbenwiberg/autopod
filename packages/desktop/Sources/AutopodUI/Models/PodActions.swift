@@ -5,7 +5,7 @@ import AutopodClient
 /// Views call these; the app layer provides real implementations.
 /// All closures default to no-ops so previews work without wiring.
 public struct PodActions: Sendable {
-  public var approve: @MainActor @Sendable (String) async -> Void
+  public var approve: @MainActor @Sendable (String, String?) async -> Void
   public var reject: @MainActor @Sendable (String, String?) async -> Void
   public var reply: @MainActor @Sendable (String, String) async -> Void
   public var nudge: @MainActor @Sendable (String, String) async -> Void
@@ -107,7 +107,7 @@ public struct PodActions: Sendable {
   public var updateFromBase: @MainActor @Sendable (String) async -> UpdateFromBaseResponse?
 
   public init(
-    approve: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
+    approve: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     reject: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     reply: @escaping @MainActor @Sendable (String, String) async -> Void = { _, _ in },
     nudge: @escaping @MainActor @Sendable (String, String) async -> Void = { _, _ in },

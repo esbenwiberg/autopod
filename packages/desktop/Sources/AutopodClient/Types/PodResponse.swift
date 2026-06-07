@@ -165,6 +165,9 @@ public struct SessionResponse: Codable, Sendable {
   /// Up to 10 most-recent queued feedback messages for the popover.
   /// Absent from pre-brief-02 daemon responses; decode defensively.
   public let recentQueueMessages: [QueueMessageResponse]?
+  /// Latest compact Readiness Review snapshot. Null/absent means old pods or
+  /// pods that have not reached the readiness refresh points yet.
+  public let readinessReview: ReadinessReviewResponse?
 
   // Backend serializes PodOptions under the key `options`; the Swift field is
   // named `pod` for readability (matches the domain model). Remap on the wire.
@@ -194,7 +197,51 @@ public struct SessionResponse: Codable, Sendable {
     case fixIteration
     case queueLength
     case recentQueueMessages
+    case readinessReview
   }
+}
+
+public struct ReadinessReviewResponse: Codable, Sendable {
+  public let status: String
+  public let summary: String
+  public let computedAt: String
+  public let scope: String
+  public let areas: [ReadinessAreaReviewResponse]
+  public let findings: [ReadinessFindingResponse]
+  public let approval: ReadinessApprovalResponse?
+}
+
+public struct ReadinessAreaReviewResponse: Codable, Sendable {
+  public let area: String
+  public let status: String
+  public let title: String
+  public let summary: String
+  public let sourceRefs: [ReadinessSourceRefResponse]
+}
+
+public struct ReadinessFindingResponse: Codable, Sendable {
+  public let id: String
+  public let area: String
+  public let severity: String
+  public let title: String
+  public let detail: String
+  public let sourceRefs: [ReadinessSourceRefResponse]
+}
+
+public struct ReadinessSourceRefResponse: Codable, Sendable {
+  public let kind: String
+  public let label: String
+  public let id: String?
+  public let href: String?
+}
+
+public struct ReadinessApprovalResponse: Codable, Sendable {
+  public let approvedAt: String
+  public let approvedBy: String?
+  public let statusAtApproval: String
+  public let scope: String
+  public let seriesId: String?
+  public let reason: String?
 }
 
 public struct ValidationWaiverResponse: Codable, Sendable {

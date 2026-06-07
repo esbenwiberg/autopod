@@ -747,14 +747,18 @@ public struct SessionCardFinal: View {
                     // All checks passed, or a human explicitly waived the failures.
                     HStack(spacing: 6) {
                         Button {
-                            Task { await actions.approve(pod.id) }
+                            Task { await actions.approve(pod.id, nil) }
                         } label: {
                             Label(approveLabel, systemImage: "checkmark")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
-                        .tint(pod.validationWaiver == nil ? .green : .orange)
+                        .tint(pod.readinessReview?.status == .ready ? .green : .orange)
+                        .disabled(pod.readinessReview?.status != .ready)
+                        .help(pod.readinessReview?.status == .ready
+                            ? "Approve this ready pod."
+                            : "Open the pod detail Readiness tab to review and approve.")
                         Button("Reject") {
                             showRejectFeedback = true
                         }
@@ -782,12 +786,14 @@ public struct SessionCardFinal: View {
                         .controlSize(.small)
                     }
                     Button {
-                        Task { await actions.approve(pod.id) }
+                        Task { await actions.approve(pod.id, nil) }
                     } label: {
-                        Label("Approve Anyway", systemImage: "checkmark")
+                        Label("Review & Approve", systemImage: "checkmark")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .disabled(true)
+                    .help("Open the pod detail Readiness tab to review and approve.")
                 }
                 if pod.containerUrl != nil {
                     Button {
@@ -949,7 +955,7 @@ public struct SessionCardFinal: View {
     }
 
     private var approveLabel: String {
-        return pod.validationWaiver == nil ? "Approve" : "Approve Waived"
+        return pod.readinessReview?.status == .ready ? "Approve" : "Review & Approve"
     }
 
     @State private var showQueuePopover = false

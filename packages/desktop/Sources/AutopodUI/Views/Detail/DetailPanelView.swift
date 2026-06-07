@@ -126,6 +126,18 @@ public struct DetailPanelView: View {
     private var relatedEventReferences: [RelatedEventReference] {
         Self.relatedEventReferences(for: pod, seriesPods: seriesPods)
     }
+    private var seriesReadiness: SeriesReadinessReview? {
+        SeriesReadinessReview.rollup(for: pod, seriesPods: seriesPods)
+    }
+    private var activeReadinessStatus: ReadinessStatus? {
+        seriesReadiness?.status ?? pod.readinessReview?.status
+    }
+    private var readinessPillTitle: String {
+        if seriesReadiness != nil {
+            return "Series Readiness: \(activeReadinessStatus?.label ?? "pending")"
+        }
+        return "Readiness: \(activeReadinessStatus?.label ?? "pending")"
+    }
     @State private var showPromoteMenu: Bool = false
 
     /// Artifact payload beats everything; for series pods the graph is the landing view;
@@ -215,7 +227,15 @@ public struct DetailPanelView: View {
             // SwiftTerm NSView (and its scrollback buffer) isn't destroyed.
             ZStack {
                 switch selectedTab {
-                case .overview:   OverviewTab(pod: pod, events: events, actions: actions, loadQuality: loadQuality, loadPreviewStatus: loadPreviewStatus)
+                case .overview:   OverviewTab(
+                    pod: pod,
+                    events: events,
+                    actions: actions,
+                    seriesReadiness: seriesReadiness,
+                    loadQuality: loadQuality,
+                    loadPreviewStatus: loadPreviewStatus,
+                    onOpenReadiness: { selectedTab = .readiness }
+                )
                 case .logs:       LogStreamView(
                     events: events,
                     sessionBranch: pod.branch,
@@ -232,6 +252,13 @@ public struct DetailPanelView: View {
                     actions: actions,
                     loadValidationHistory: loadValidationHistory
                 )
+                case .readiness:
+                    ReadinessTab(
+                        pod: pod,
+                        seriesReadiness: seriesReadiness,
+                        actions: actions,
+                        onOpenTab: { selectedTab = $0 }
+                    )
                 case .evidence:   EvidenceTab(
                     pod: pod,
                     loadFiles: loadFiles,
@@ -347,6 +374,7 @@ public struct DetailPanelView: View {
                 HStack(spacing: 10) {
                     podIdentity
                     Spacer(minLength: 8)
+                    readinessHeaderPill
                     headerActions
                 }
 
@@ -354,6 +382,7 @@ public struct DetailPanelView: View {
                     HStack(spacing: 10) {
                         podIdentity
                         Spacer(minLength: 0)
+                        readinessHeaderPill
                     }
                     ScrollView(.horizontal, showsIndicators: false) {
                         headerActions
@@ -442,6 +471,32 @@ public struct DetailPanelView: View {
         let chosen = generatedCandidates.first ?? taskCandidates.first
         guard let chosen else { return nil }
         return truncateTagline(chosen)
+    }
+
+    private var readinessHeaderPill: some View {
+        let status = activeReadinessStatus ?? .notAvailable
+        return Button {
+            selectedTab = .readiness
+        } label: {
+            Text(readinessPillTitle)
+                .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                .foregroundStyle(status.color)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(status.color.opacity(0.12), in: Capsule())
+                .overlay(Capsule().stroke(status.color.opacity(0.22), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .help("Open Readiness Review")
+    }
+
+    private func routeApprovalFromHeader() {
+        guard activeReadinessStatus?.canApproveFromHeader == true else {
+            selectedTab = .readiness
+            return
+        }
+        Task { await actions.approve(pod.id, nil) }
     }
 
     private func cleanTaskLine(_ line: String) -> String {
@@ -658,13 +713,13 @@ public struct DetailPanelView: View {
                 if pod.validationChecks?.allPassed != false || pod.validationWaiver != nil {
                     // All checks passed, or a human explicitly waived the failures.
                     Button {
-                        Task { await actions.approve(pod.id) }
+                        routeApprovalFromHeader()
                     } label: {
-                        Label(pod.validationWaiver == nil ? "Approve" : "Approve Waived", systemImage: "checkmark")
+                        Label(activeReadinessStatus?.canApproveFromHeader == true ? "Approve" : "Review & Approve", systemImage: "checkmark")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .tint(pod.validationWaiver == nil ? .green : .orange)
+                    .tint(activeReadinessStatus?.canApproveFromHeader == true ? .green : .orange)
                     Button("Reject") {
                         showRejectFeedback = true
                     }
@@ -689,9 +744,9 @@ public struct DetailPanelView: View {
                     .controlSize(.small)
                     forkButton
                     Button {
-                        Task { await actions.approve(pod.id) }
+                        routeApprovalFromHeader()
                     } label: {
-                        Label("Approve Anyway", systemImage: "checkmark")
+                        Label("Review & Approve", systemImage: "checkmark")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -1626,13 +1681,14 @@ struct WorktreeCompromisedBanner: View {
 // MARK: - Tab enum
 
 public enum DetailTab: CaseIterable {
-    case overview, work, validation, evidence, diff, logs, terminal, series
+    case overview, work, validation, readiness, evidence, diff, logs, terminal, series
 
     var label: String {
         switch self {
         case .overview:    "Overview"
         case .work:        "Work"
         case .validation:  "Validation"
+        case .readiness:   "Readiness"
         case .evidence:    "Evidence"
         case .diff:        "Diff"
         case .logs:        "Logs"
@@ -1646,6 +1702,7 @@ public enum DetailTab: CaseIterable {
         case .overview:    "square.text.square"
         case .work:        "doc.text.below.ecg"
         case .validation:  "checkmark.seal"
+        case .readiness:   "checkmark.shield"
         case .evidence:    "photo.on.rectangle.angled"
         case .diff:        "doc.text.magnifyingglass"
         case .logs:        "text.line.last.and.arrowtriangle.forward"

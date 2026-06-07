@@ -3,7 +3,8 @@ import AppKit
 import AutopodClient
 import AutopodUI
 
-/// Executes pod actions against the daemon API with optimistic UI updates.
+/// Executes pod actions against the daemon API. Approval waits for daemon
+/// acceptance because readiness gates may reject the request.
 @Observable
 @MainActor
 public final class ActionHandler {
@@ -30,7 +31,7 @@ public final class ActionHandler {
   /// Build a PodActions struct wired to this handler.
   public var actions: PodActions {
     PodActions(
-      approve: { [weak self] id in await self?.approve(id) },
+      approve: { [weak self] id, reason in await self?.approve(id, reason: reason) },
       reject: { [weak self] id, feedback in await self?.reject(id, feedback: feedback) },
       reply: { [weak self] id, message in await self?.reply(id, message: message) },
       nudge: { [weak self] id, message in await self?.nudge(id, message: message) },
@@ -129,13 +130,12 @@ public final class ActionHandler {
 
   // MARK: - Actions
 
-  public func approve(_ podId: String) async {
+  public func approve(_ podId: String, reason: String? = nil) async {
     pendingAction = "approve-\(podId)"
-    podStore.updateStatus(podId, to: .approved)
     do {
-      try await api.approvePod(podId)
+      try await api.approvePod(podId, reason: reason)
+      // Status is updated by the daemon event after readiness gates accept the approval.
     } catch {
-      podStore.updateStatus(podId, to: .validated)
       lastError = error.localizedDescription
     }
     pendingAction = nil

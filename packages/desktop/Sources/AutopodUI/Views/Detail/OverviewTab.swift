@@ -8,6 +8,7 @@ struct OverviewTab: View {
     let pod: Pod
     let events: [AgentEvent]
     var actions: PodActions = .preview
+    var seriesReadiness: SeriesReadinessReview?
     var pendingMemories: [MemoryEntry] = []
     var onApproveMemory: (String) -> Void = { _ in }
     var onRejectMemory: (String) -> Void = { _ in }
@@ -17,6 +18,7 @@ struct OverviewTab: View {
     /// Optional closure for fetching preview server status. When nil, the
     /// Preview card is static (shows last cached status or nil). Polled every 5 s.
     var loadPreviewStatus: ((String) async throws -> PreviewStatus)? = nil
+    var onOpenReadiness: () -> Void = {}
 
     @State private var replyText = ""
     @State private var infrastructureExpanded = false
@@ -27,6 +29,8 @@ struct OverviewTab: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 overviewStatusStrip
+
+                readinessCompactCard
 
                 if pod.worktreeCompromised {
                     WorktreeCompromisedBanner()
@@ -188,6 +192,65 @@ struct OverviewTab: View {
                 snapshotTile(icon: "checkmark.seal", label: "Quality", value: "—")
             }
         }
+    }
+
+    private var readinessCompactCard: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.shield")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(readinessCardStatus.color)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(readinessCardLine)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(readinessCardSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 8)
+            Button("Open Readiness") {
+                onOpenReadiness()
+            }
+            .controlSize(.small)
+        }
+        .padding(12)
+        .background(readinessCardStatus.color.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(readinessCardStatus.color.opacity(0.16), lineWidth: 1))
+    }
+
+    private var readinessCardStatus: ReadinessStatus {
+        seriesReadiness?.status ?? pod.readinessReview?.status ?? .notAvailable
+    }
+
+    private var readinessCardLine: String {
+        if let seriesReadiness {
+            return "Series Readiness: \(seriesReadiness.status.label) - \(seriesReadiness.summary)"
+        }
+        guard let readiness = pod.readinessReview else {
+            return "Readiness: pending/unavailable"
+        }
+        return "Readiness: \(readiness.status.label) - \(readiness.summary)"
+    }
+
+    private var readinessCardSubtitle: String {
+        if let seriesReadiness {
+            let count = seriesReadiness.findings.filter { $0.severity != .info }.count
+            if count == 0 { return "All member pods are ready" }
+            return "\(count) finding\(count == 1 ? "" : "s") across member pods"
+        }
+        guard let readiness = pod.readinessReview else {
+            return "Readiness pending validation"
+        }
+        let nonInfoFindings = readiness.findings.filter { $0.severity != .info }.count
+        if nonInfoFindings == 0 {
+            return "No findings need a human decision"
+        }
+        return "\(nonInfoFindings) finding\(nonInfoFindings == 1 ? "" : "s") before approval"
     }
 
     private func snapshotTile(icon: String, label: String, value: String) -> some View {
