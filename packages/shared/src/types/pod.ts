@@ -218,7 +218,7 @@ export interface Pod {
   preSubmitReview: PreSubmitReviewSnapshot | null;
   validationOverrides: ValidationOverride[] | null;
   validationWaiver: ValidationWaiver | null;
-  readinessReview: ReadinessReview | null;
+  readinessReview?: ReadinessReview | null;
   pimGroups: PimGroupConfig[] | null;
   /** Snapshot of the resolved profile config at pod creation time (after inheritance). */
   profileSnapshot: Profile | null;
