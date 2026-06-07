@@ -1,0 +1,93 @@
+contract_version: 1
+title: "Compute pod and series Readiness Review"
+depends_on:
+  - 01-shared-types-and-persistence
+scenarios:
+  - id: clean-pod-is-ready
+    given:
+      - "a pod has passed blocking validation"
+      - "security, actions, network, scope, quality, advisory QA, and PR inputs have no findings"
+    when:
+      - "the daemon computes Readiness Review"
+    then:
+      - "the top-level status is ready"
+      - "all applicable areas are ready"
+  - id: soft-signals-need-review
+    given:
+      - >-
+        a pod has one soft signal such as denied egress, security warn,
+        advisory concern, scope drift, action quarantine, low quality, or
+        scanner-error fail-open
+    when:
+      - "the daemon computes Readiness Review"
+    then:
+      - "the top-level status is needs_review"
+      - "the relevant area has a finding with an existing source ref"
+      - "validation overall, retry behavior, and PR creation semantics are unchanged"
+  - id: hard-signals-are-risky
+    given:
+      - >-
+        a pod has failed or unknown blocking validation, an invalid action audit
+        chain, compromised worktree state, or a blocked PR gate
+    when:
+      - "the daemon computes Readiness Review"
+    then:
+      - "the top-level status is risky"
+      - "the risky finding identifies the area and source ref"
+  - id: waiver-paths-are-waived
+    given:
+      - "a pod used a validation waiver, skipped validation, or force-approved a failed validation"
+    when:
+      - "the daemon computes Readiness Review"
+    then:
+      - "the top-level status is waived when no separate non-waiver hard risk exists"
+      - "a separate hard risk makes the top-level status risky while preserving the waiver finding"
+  - id: advisory-refreshes-readiness
+    given:
+      - "blocking validation has completed and advisory browser QA finishes later"
+    when:
+      - "the deferred advisory result is persisted"
+    then:
+      - "the pod readiness snapshot is recomputed"
+      - "advisory pass leaves readiness ready if no other findings exist"
+      - "advisory concern or error changes readiness to needs_review"
+  - id: single-pr-series-rollup-uses-members
+    given:
+      - "a single-PR series has multiple member pods"
+      - "member pods have ready, needs_review, risky, waived, or missing readiness snapshots"
+    when:
+      - "the daemon computes Series Readiness"
+    then:
+      - "the rollup uses all member pods with the same series_id"
+      - "risky or waived outrank needs_review, and needs_review outranks ready"
+      - "missing member snapshots produce a needs_review finding"
+      - "no series table or stored series snapshot is required"
+required_facts:
+  - id: fact-readiness-pure-derivation
+    proves:
+      - clean-pod-is-ready
+      - soft-signals-need-review
+      - hard-signals-are-risky
+      - waiver-paths-are-waived
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/readiness-review.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- readiness-review.test.ts
+  - id: fact-readiness-refresh-hooks
+    proves:
+      - advisory-refreshes-readiness
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts -t "readiness refresh"
+  - id: fact-series-readiness-rollup
+    proves:
+      - single-pr-series-rollup-uses-members
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/readiness-review.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- readiness-review.test.ts -t "series"
+human_review: []

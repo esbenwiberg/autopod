@@ -1,0 +1,64 @@
+contract_version: 1
+title: "Expose compact Readiness in existing CLI/API flows"
+depends_on:
+  - 03-approval-and-automation-gates
+scenarios:
+  - id: cli-approve-passes-reason
+    given:
+      - "the operator runs ap approve for one pod with --reason"
+    when:
+      - "the CLI calls the daemon client"
+    then:
+      - "the request includes the reason text"
+      - "squash behavior remains unchanged"
+  - id: cli-status-shows-readiness
+    given:
+      - "a pod status response includes readinessReview"
+    when:
+      - "the operator runs ap status for that pod"
+    then:
+      - "the output includes one compact Readiness line with status and summary"
+      - "the output does not include raw evidence payloads"
+  - id: cli-status-handles-missing-readiness
+    given:
+      - "an old pod has no readiness snapshot"
+    when:
+      - "the operator runs ap status for that pod"
+    then:
+      - "the output clearly says Readiness is pending or unavailable"
+      - "the command exits successfully"
+  - id: cli-approve-all-renders-skipped
+    given:
+      - "approve-all returns approved pods and skipped pods"
+    when:
+      - "the CLI prints the result"
+    then:
+      - "approved pod IDs are shown"
+      - "skipped pod IDs, readiness statuses, and skip reasons are shown"
+required_facts:
+  - id: fact-cli-approve-reason
+    proves:
+      - cli-approve-passes-reason
+    kind: unit-test
+    artifact:
+      path: packages/cli/src/commands/session.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/cli test -- session.test.ts -t "approve reason"
+  - id: fact-cli-status-readiness
+    proves:
+      - cli-status-shows-readiness
+      - cli-status-handles-missing-readiness
+    kind: unit-test
+    artifact:
+      path: packages/cli/src/commands/pod.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/cli test -- pod.test.ts -t "readiness"
+  - id: fact-cli-approve-all-skipped
+    proves:
+      - cli-approve-all-renders-skipped
+    kind: unit-test
+    artifact:
+      path: packages/cli/src/commands/session.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/cli test -- session.test.ts -t "approve all readiness"
+human_review: []
