@@ -1422,7 +1422,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   function refreshReadiness(podId: string, options: { advisoryQaInFlight?: boolean } = {}): void {
     try {
       const pod = podRepo.getOrThrow(podId);
-      if (!['validated', 'review_required', 'failed'].includes(pod.status)) {
+      const allowPostDecision = options.advisoryQaInFlight === false;
+      const refreshableStatuses = allowPostDecision
+        ? ['validated', 'review_required', 'failed', 'approved', 'merging', 'merge_pending', 'complete']
+        : ['validated', 'review_required', 'failed'];
+      if (!refreshableStatuses.includes(pod.status)) {
         return;
       }
       readinessService.refreshPodReadiness(podId, options);
@@ -3787,7 +3791,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         advisoryBrowserQa: advisoryResult,
       };
       podRepo.update(podId, { lastValidationResult: mergedResult });
-      refreshReadiness(podId);
+      refreshReadiness(podId, { advisoryQaInFlight: false });
       return mergedResult;
     };
 
@@ -3868,7 +3872,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         advisoryBrowserQa: advisoryResult,
       };
       podRepo.update(podId, { lastValidationResult: mergedResult });
-      refreshReadiness(podId);
+      refreshReadiness(podId, { advisoryQaInFlight: false });
       return mergedResult;
     })();
 

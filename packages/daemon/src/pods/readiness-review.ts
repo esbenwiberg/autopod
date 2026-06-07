@@ -231,14 +231,14 @@ function validationArea(inputs: ReadinessInputs): {
 } {
   const { pod, latestValidation } = inputs;
   const refs = SOURCE_REFS.validation;
-  if (pod.validationWaiver) {
+  if (pod.validationWaiver || pod.lastCorrectionMessage?.startsWith('[FORCE APPROVED]')) {
     return area('validation', 'waived', 'Validation was waived by an operator.', [
       finding({
         id: 'validation-waiver',
         area: 'validation',
         severity: 'warning',
         title: 'Validation waiver recorded',
-        detail: pod.validationWaiver.reason || 'Validation proof was bypassed.',
+        detail: pod.validationWaiver?.reason || 'Validation proof was bypassed by force approval.',
         sourceRefs: refs,
       }),
     ]);
