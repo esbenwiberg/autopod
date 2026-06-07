@@ -337,6 +337,17 @@ function makeReadinessReview(status: ReadinessStatus, summary?: string): Readine
   };
 }
 
+function validatedPodUpdates(
+  podId: string,
+  updates: Parameters<TestContext['podRepo']['update']>[1] = {},
+): Parameters<TestContext['podRepo']['update']>[1] {
+  return {
+    status: 'validated',
+    lastValidationResult: makeValidationResult({ podId }),
+    ...updates,
+  };
+}
+
 function makeReviewInfraFailure(overrides: Partial<ValidationResult> = {}): ValidationResult {
   return makeValidationResult({
     overall: 'fail',
@@ -1241,7 +1252,7 @@ describe('PodManager', () => {
       );
 
       // Move to validated state
-      ctx.podRepo.update(pod.id, { status: 'validated' });
+      ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
 
       await manager.approveSession(pod.id);
 
@@ -1258,7 +1269,7 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, { status: 'validated' });
+      ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
 
       const events: unknown[] = [];
       ctx.eventBus.subscribe((e) => events.push(e));
@@ -1290,11 +1301,7 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: `Approve ${testCase.status}` },
           'user-1',
         );
-        ctx.podRepo.update(pod.id, {
-          status: 'validated',
-          lastValidationResult: makeValidationResult({ podId: pod.id }),
-          ...(testCase.updates ?? {}),
-        });
+        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, testCase.updates ?? {}));
         if (testCase.status === 'needs_review') {
           ctx.eventBus.emit({
             type: 'pod.firewall_denied',
@@ -1356,11 +1363,7 @@ describe('PodManager', () => {
       );
 
       for (const pod of [ready, needsReview, risky, waived]) {
-        ctx.podRepo.update(pod.id, {
-          status: 'validated',
-          autoApprove: true,
-          lastValidationResult: makeValidationResult({ podId: pod.id }),
-        });
+        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { autoApprove: true }));
       }
       ctx.eventBus.emit({
         type: 'pod.firewall_denied',
@@ -1429,9 +1432,8 @@ describe('PodManager', () => {
         readinessReview: makeReadinessReview('risky', 'Member has a hard release risk.'),
       });
       ctx.podRepo.update(owner.id, {
-        status: 'validated',
+        ...validatedPodUpdates(owner.id),
         prUrl: 'https://github.com/org/repo/pull/42',
-        lastValidationResult: makeValidationResult({ podId: owner.id }),
         readinessReview: makeReadinessReview('ready'),
       });
 
@@ -1470,7 +1472,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         prUrl: 'https://github.com/org/repo/pull/42',
       });
@@ -1495,7 +1497,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         prUrl: 'https://github.com/org/repo/pull/42',
       });
@@ -1514,7 +1516,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         filesChanged: 1,
       });
@@ -1547,7 +1549,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         filesChanged: 1,
       });
@@ -1575,7 +1577,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         filesChanged: 1,
       });
@@ -1605,7 +1607,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         filesChanged: 1,
       });
@@ -1627,7 +1629,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         filesChanged: 1,
       });
@@ -1653,7 +1655,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         filesChanged: 1,
       });
@@ -1682,7 +1684,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         filesChanged: 1,
         prUrl: null,
@@ -1724,7 +1726,7 @@ describe('PodManager', () => {
       // Child must not be enqueued yet (waiting for parent)
       expect(ctx.enqueuedSessions).not.toContain(child.id);
 
-      ctx.podRepo.update(parent.id, { status: 'validated', branch: 'feature/parent' });
+      ctx.podRepo.update(parent.id, validatedPodUpdates(parent.id, { branch: 'feature/parent' }));
       await manager.approveSession(parent.id);
 
       expect(manager.getSession(parent.id).status).toBe('complete');
@@ -1751,7 +1753,7 @@ describe('PodManager', () => {
         'user-1',
       );
 
-      ctx.podRepo.update(parent.id, { status: 'validated' });
+      ctx.podRepo.update(parent.id, validatedPodUpdates(parent.id));
       ctx.enqueuedSessions.length = 0;
 
       manager.rehydrateDependentSessions();
@@ -1802,7 +1804,7 @@ describe('PodManager', () => {
       expect(ctx.enqueuedSessions).not.toContain(child.id);
       expect(manager.getSession(child.id).status).toBe('queued');
 
-      await manager.approveSession(parent.id);
+      await manager.approveSession(parent.id, { reason: 'Force-approved parent is acceptable' });
 
       expect(ctx.enqueuedSessions).toContain(child.id);
       expect(manager.getSession(child.id).baseBranch).toBe('release/2026-05');
@@ -1837,7 +1839,7 @@ describe('PodManager', () => {
       );
 
       ctx.db.prepare('UPDATE pods SET branch = ? WHERE id = ?').run('feature/child', child.id);
-      ctx.podRepo.update(parent.id, { status: 'validated' });
+      ctx.podRepo.update(parent.id, validatedPodUpdates(parent.id));
       ctx.enqueuedSessions.length = 0;
 
       manager.rehydrateDependentSessions();
@@ -1898,7 +1900,7 @@ describe('PodManager', () => {
         );
         // Stale cache says 5 files changed, but the worktree actually has zero.
         ctx.podRepo.update(pod.id, {
-          status: 'validated',
+          ...validatedPodUpdates(pod.id),
           worktreePath: '/tmp/wt',
           filesChanged: 5,
           linesAdded: 100,
@@ -1937,7 +1939,7 @@ describe('PodManager', () => {
         );
         // Cached zero — old bug would have taken the fast-path and dropped the branch.
         ctx.podRepo.update(pod.id, {
-          status: 'validated',
+          ...validatedPodUpdates(pod.id),
           worktreePath: '/tmp/wt',
           filesChanged: 0,
         });
@@ -1978,7 +1980,7 @@ describe('PodManager', () => {
           'user-1',
         );
         ctx.podRepo.update(pod.id, {
-          status: 'validated',
+          ...validatedPodUpdates(pod.id),
           worktreePath: '/tmp/wt',
           filesChanged: 0,
         });
@@ -2008,7 +2010,7 @@ describe('PodManager', () => {
           'user-1',
         );
         ctx.podRepo.update(pod.id, {
-          status: 'validated',
+          ...validatedPodUpdates(pod.id),
           worktreePath: '/tmp/wt',
           filesChanged: 0,
         });
@@ -2034,7 +2036,7 @@ describe('PodManager', () => {
           'user-1',
         );
         ctx.podRepo.update(pod.id, {
-          status: 'validated',
+          ...validatedPodUpdates(pod.id),
           worktreePath: '/tmp/wt',
           filesChanged: 0,
         });
@@ -7772,7 +7774,7 @@ describe('updateFromBase', () => {
     // Advance pod to validated with a PR so approveSession runs the pushBranch path
     ctx.podRepo.update(pod.id, { status: 'running' });
     ctx.podRepo.update(pod.id, { status: 'validating' });
-    ctx.podRepo.update(pod.id, { status: 'validated' });
+    ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
     ctx.podRepo.update(pod.id, { prUrl: 'https://github.com/org/repo/pull/42' });
 
     await manager.approveSession(pod.id);
@@ -7788,7 +7790,7 @@ describe('updateFromBase', () => {
     ctx.podRepo.update(pod.id, { status: 'provisioning' });
     ctx.podRepo.update(pod.id, { status: 'running' });
     ctx.podRepo.update(pod.id, { status: 'validating' });
-    ctx.podRepo.update(pod.id, { status: 'validated' });
+    ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
 
     await manager.approveSession(pod.id);
 

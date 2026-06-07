@@ -328,13 +328,13 @@ describe('deriveReadinessReview', () => {
     );
   });
 
-  it('marks waived pods with advisory in flight as needs_review', () => {
+  it('keeps waived pods waived with advisory in flight findings', () => {
     const result = review({
       pod: pod({ lastCorrectionMessage: '[FORCE APPROVED] accepted by operator' }),
       advisoryQaInFlight: true,
     });
 
-    expect(result.status).toBe('needs_review');
+    expect(result.status).toBe('waived');
     expect(result.findings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'validation-waiver' }),
