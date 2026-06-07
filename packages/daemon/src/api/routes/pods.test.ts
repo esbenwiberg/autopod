@@ -2464,3 +2464,105 @@ describe('POST /pods/:podId/update-from-base', () => {
     expect(res.json()).toMatchObject({ ok: true, action: 'queued_after_abort' });
   });
 });
+
+describe('POST /pods approve routes', () => {
+  let db: Database.Database;
+  let app: FastifyInstance;
+  let podManager: {
+    approveSession: ReturnType<typeof vi.fn>;
+    approveAllValidated: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(async () => {
+    db = createTestDb();
+    const profileStore = createProfileStore(db);
+    const eventRepo = createEventRepository(db);
+    const eventBus = createEventBus(eventRepo, logger);
+    const authModule = createMockAuthModule();
+    podManager = {
+      approveSession: vi.fn().mockResolvedValue(undefined),
+      approveAllValidated: vi.fn().mockResolvedValue({
+        approved: ['ready-pod'],
+        skipped: [
+          {
+            podId: 'review-pod',
+            status: 'needs_review',
+            reason: 'Readiness Review is needs_review: Network finding.',
+          },
+        ],
+      }),
+    };
+    const podBridge = {
+      createEscalation: vi.fn(),
+      resolveEscalation: vi.fn(),
+      getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getMaxAiCalls: vi.fn().mockReturnValue(5),
+      getAutoPauseThreshold: vi.fn().mockReturnValue(3),
+      getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
+      getReviewerModel: vi.fn().mockReturnValue('sonnet'),
+      callReviewerModel: vi.fn().mockResolvedValue('ok'),
+      incrementEscalationCount: vi.fn(),
+      reportPlan: vi.fn(),
+      reportProgress: vi.fn(),
+      consumeMessages: vi.fn().mockReturnValue({ hasMessage: false }),
+      executeAction: vi.fn(),
+      getAvailableActions: vi.fn().mockReturnValue([]),
+      writeFileInContainer: vi.fn(),
+      execInContainer: vi.fn(),
+    };
+
+    app = await createServer({
+      authModule,
+      podManager: podManager as unknown as ReturnType<typeof createPodManager>,
+      profileStore,
+      eventBus,
+      eventRepo,
+      podBridge,
+      pendingRequestsByPod: new Map(),
+      db,
+      logLevel: 'silent',
+      prettyLog: false,
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+    db.close();
+  });
+
+  it('approve forwards optional squash and reason metadata', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/pods/pod-ready/approve',
+      headers: authHeaders,
+      payload: { squash: true, reason: 'Reviewed readiness findings' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+    expect(podManager.approveSession).toHaveBeenCalledWith('pod-ready', {
+      squash: true,
+      reason: 'Reviewed readiness findings',
+    });
+  });
+
+  it('approve-all readiness returns approved and skipped pods', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/pods/approve-all',
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      approved: ['ready-pod'],
+      skipped: [
+        {
+          podId: 'review-pod',
+          status: 'needs_review',
+          reason: 'Readiness Review is needs_review: Network finding.',
+        },
+      ],
+    });
+  });
+});

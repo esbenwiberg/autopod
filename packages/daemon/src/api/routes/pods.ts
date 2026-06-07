@@ -582,8 +582,8 @@ export function podRoutes(
   // POST /pods/:podId/approve — approve pod
   app.post('/pods/:podId/approve', async (request) => {
     const { podId } = request.params as { podId: string };
-    const body = (request.body ?? {}) as { squash?: boolean };
-    await podManager.approveSession(podId, { squash: body.squash });
+    const body = (request.body ?? {}) as { squash?: boolean; reason?: string };
+    await podManager.approveSession(podId, { squash: body.squash, reason: body.reason });
     return { ok: true };
   });
 

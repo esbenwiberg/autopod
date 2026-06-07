@@ -5,6 +5,8 @@ import type {
   AgentEvent,
   PodCreatedEvent,
   Profile,
+  ReadinessReview,
+  ReadinessStatus,
   Runtime,
   RuntimeType,
   StackTemplate,
@@ -300,6 +302,38 @@ function makeValidationResult(overrides: Partial<ValidationResult> = {}): Valida
     overall: 'pass',
     duration: 5000,
     ...overrides,
+  };
+}
+
+function makeReadinessReview(status: ReadinessStatus, summary?: string): ReadinessReview {
+  return {
+    status,
+    summary: summary ?? `Readiness is ${status}.`,
+    computedAt: '2026-06-07T12:00:00.000Z',
+    scope: 'pod',
+    areas: [
+      {
+        area: 'validation',
+        status,
+        title: 'Validation',
+        summary: summary ?? `Validation area is ${status}.`,
+        sourceRefs: [{ kind: 'validation', label: 'Validation' }],
+      },
+    ],
+    findings:
+      status === 'ready'
+        ? []
+        : [
+            {
+              id: `${status}-finding`,
+              area: 'validation',
+              severity: status === 'risky' ? 'error' : 'warning',
+              title: `${status} finding`,
+              detail: summary ?? `Readiness is ${status}.`,
+              sourceRefs: [{ kind: 'validation', label: 'Validation' }],
+            },
+          ],
+    approval: null,
   };
 }
 
@@ -1235,6 +1269,196 @@ describe('PodManager', () => {
       const completedEvent = events.find((e: any) => e.type === 'pod.completed') as any;
       expect(completedEvent).toBeDefined();
       expect(completedEvent.finalStatus).toBe('complete');
+    });
+
+    it('readiness approval enforces manual reason rules and stores approval metadata', async () => {
+      const cases: Array<{
+        status: ReadinessStatus;
+        updates?: Parameters<TestContext['podRepo']['update']>[1];
+        reasonRequired: boolean;
+      }> = [
+        { status: 'ready', reasonRequired: false },
+        { status: 'needs_review', reasonRequired: false },
+        { status: 'risky', updates: { worktreeCompromised: true }, reasonRequired: true },
+        { status: 'waived', updates: { skipValidation: true }, reasonRequired: true },
+      ];
+
+      for (const testCase of cases) {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: `Approve ${testCase.status}` },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'validated',
+          lastValidationResult: makeValidationResult({ podId: pod.id }),
+          ...(testCase.updates ?? {}),
+        });
+        if (testCase.status === 'needs_review') {
+          ctx.eventBus.emit({
+            type: 'pod.firewall_denied',
+            timestamp: new Date().toISOString(),
+            podId: pod.id,
+            sni: 'example.com',
+            src: '127.0.0.1',
+          });
+        }
+
+        if (testCase.reasonRequired) {
+          await expect(manager.approveSession(pod.id, { reason: '   ' })).rejects.toMatchObject({
+            code: 'READINESS_REASON_REQUIRED',
+          });
+        }
+
+        const events: unknown[] = [];
+        ctx.eventBus.subscribe((event) => events.push(event));
+        const reason = testCase.reasonRequired ? `Accept ${testCase.status}` : undefined;
+        await manager.approveSession(pod.id, { reason });
+
+        const approved = manager.getSession(pod.id).readinessReview?.approval;
+        expect(approved).toMatchObject({
+          statusAtApproval: testCase.status,
+          scope: 'pod',
+          ...(reason ? { reason } : {}),
+        });
+        expect(approved?.approvedAt).toEqual(expect.any(String));
+
+        const readinessEvent = events.find(
+          (event) => (event as { type?: string }).type === 'pod.readiness_approved',
+        );
+        if (testCase.status === 'ready') {
+          expect(readinessEvent).toBeUndefined();
+        } else {
+          expect(readinessEvent).toMatchObject({
+            type: 'pod.readiness_approved',
+            podId: pod.id,
+            status: testCase.status,
+            scope: 'pod',
+            ...(reason ? { reason } : {}),
+          });
+        }
+      }
+    });
+
+    it('autoApprove readiness skips needs_review, risky, and waived pods', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const ready = manager.createSession({ profileName: 'test-profile', task: 'Ready' }, 'user-1');
+      const needsReview = manager.createSession(
+        { profileName: 'test-profile', task: 'Review' },
+        'user-1',
+      );
+      const risky = manager.createSession({ profileName: 'test-profile', task: 'Risky' }, 'user-1');
+      const waived = manager.createSession(
+        { profileName: 'test-profile', task: 'Waived' },
+        'user-1',
+      );
+
+      for (const pod of [ready, needsReview, risky, waived]) {
+        ctx.podRepo.update(pod.id, {
+          status: 'validated',
+          autoApprove: true,
+          lastValidationResult: makeValidationResult({ podId: pod.id }),
+        });
+      }
+      ctx.eventBus.emit({
+        type: 'pod.firewall_denied',
+        timestamp: new Date().toISOString(),
+        podId: needsReview.id,
+        sni: 'example.com',
+        src: '127.0.0.1',
+      });
+      ctx.podRepo.update(risky.id, { worktreeCompromised: true });
+      ctx.podRepo.update(waived.id, { skipValidation: true });
+
+      await manager.approveSession(ready.id, { automation: true });
+      await expect(
+        manager.approveSession(needsReview.id, { automation: true }),
+      ).rejects.toMatchObject({
+        code: 'READINESS_NOT_READY',
+      });
+      await expect(manager.approveSession(risky.id, { automation: true })).rejects.toMatchObject({
+        code: 'READINESS_NOT_READY',
+      });
+      await expect(manager.approveSession(waived.id, { automation: true })).rejects.toMatchObject({
+        code: 'READINESS_NOT_READY',
+      });
+
+      expect(manager.getSession(ready.id).status).toBe('complete');
+      expect(manager.getSession(needsReview.id).status).toBe('validated');
+      expect(manager.getSession(risky.id).status).toBe('validated');
+      expect(manager.getSession(waived.id).status).toBe('validated');
+
+      const bulk = await manager.approveAllValidated();
+      expect(bulk.approved).toEqual([]);
+      expect(bulk.skipped).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ podId: needsReview.id, status: 'needs_review' }),
+          expect.objectContaining({ podId: risky.id, status: 'risky' }),
+          expect.objectContaining({ podId: waived.id, status: 'waived' }),
+        ]),
+      );
+    });
+
+    it('single PR readiness approval uses series readiness for the PR-owning pod', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const seriesId = 'series-readiness';
+      const member = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Member with risk',
+          seriesId,
+          prMode: 'single',
+        },
+        'user-1',
+      );
+      const owner = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Final PR owner',
+          seriesId,
+          prMode: 'single',
+        },
+        'user-1',
+      );
+
+      ctx.podRepo.update(member.id, {
+        status: 'complete',
+        readinessReview: makeReadinessReview('risky', 'Member has a hard release risk.'),
+      });
+      ctx.podRepo.update(owner.id, {
+        status: 'validated',
+        prUrl: 'https://github.com/org/repo/pull/42',
+        lastValidationResult: makeValidationResult({ podId: owner.id }),
+        readinessReview: makeReadinessReview('ready'),
+      });
+
+      await expect(manager.approveSession(owner.id)).rejects.toMatchObject({
+        code: 'READINESS_REASON_REQUIRED',
+      });
+
+      const events: unknown[] = [];
+      ctx.eventBus.subscribe((event) => events.push(event));
+      await manager.approveSession(owner.id, { reason: 'Series risk accepted' });
+
+      expect(manager.getSession(owner.id).readinessReview?.approval).toMatchObject({
+        statusAtApproval: 'risky',
+        scope: 'series',
+        seriesId,
+        reason: 'Series risk accepted',
+      });
+      expect(
+        events.find((event) => (event as { type?: string }).type === 'pod.readiness_approved'),
+      ).toMatchObject({
+        type: 'pod.readiness_approved',
+        podId: owner.id,
+        status: 'risky',
+        scope: 'series',
+        seriesId,
+        reason: 'Series risk accepted',
+      });
     });
 
     it('merges PR when prUrl exists', async () => {
@@ -3243,7 +3467,7 @@ describe('PodManager', () => {
       ).toBe(true);
     });
 
-    it('approval completes while in-flight advisory QA keeps the container alive', async () => {
+    it('approval waits for advisory QA before applying readiness rules', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       const manager = createPodManager(ctx.deps);
       const advisory = deferred<NonNullable<ValidationResult['advisoryBrowserQa']>>();
@@ -3290,36 +3514,33 @@ describe('PodManager', () => {
       const approvalPromise = manager.approveSession(pod.id);
       await new Promise((resolve) => setImmediate(resolve));
 
-      await approvalPromise;
-
-      expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
-        expect.objectContaining({ prUrl: 'https://github.com/org/repo/pull/42' }),
-      );
-      expect(manager.getSession(pod.id).status).toBe('complete');
+      expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).status).toBe('validated');
       expect(manager.getSession(pod.id).readinessReview).toMatchObject({
         status: 'needs_review',
         findings: expect.arrayContaining([
           expect.objectContaining({ id: 'advisory-qa-in-flight' }),
         ]),
       });
-      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
-      expect(ctx.containerManager.stop).not.toHaveBeenCalled();
 
       advisory.resolve(advisoryResult);
+      await approvalPromise;
       await validationPromise;
-      await waitForAssertion(() => {
-        expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
-      });
-      expect(manager.getSession(pod.id).status).toBe('complete');
-      expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(
-        advisoryResult,
+
+      expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
+        expect.objectContaining({ prUrl: 'https://github.com/org/repo/pull/42' }),
       );
+      expect(manager.getSession(pod.id).status).toBe('complete');
       expect(manager.getSession(pod.id).readinessReview).toMatchObject({
         status: 'ready',
         areas: expect.arrayContaining([
           expect.objectContaining({ area: 'advisory_qa', status: 'ready' }),
         ]),
       });
+      expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
+      expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(
+        advisoryResult,
+      );
     });
 
     it('deferred advisory persistence does not clobber a newer validation result', async () => {

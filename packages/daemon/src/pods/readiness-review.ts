@@ -556,13 +556,13 @@ function deriveTopStatus(
   if (areaStatuses.includes('risky') || findings.some((item) => item.severity === 'error')) {
     return 'risky';
   }
+  if (areaStatuses.includes('waived')) return 'waived';
   if (
     areaStatuses.includes('needs_review') ||
     findings.some((item) => item.severity === 'warning')
   ) {
     return 'needs_review';
   }
-  if (areaStatuses.includes('waived')) return 'waived';
   return 'ready';
 }
 
