@@ -147,6 +147,12 @@ export interface WorktreeManager {
   create(config: WorktreeCreateConfig): Promise<WorktreeResult>;
   cleanup(worktreePath: string): Promise<void>;
   getDiffStats(worktreePath: string, baseBranch?: string, sinceCommit?: string): Promise<DiffStats>;
+  /**
+   * Strictly answer whether the current worktree differs from a base branch.
+   * Unlike getDiffStats(), this should throw on git/resolve errors so callers
+   * can choose the conservative path when emptiness is uncertain.
+   */
+  hasChangesAgainstBase?(worktreePath: string, baseBranch: string): Promise<boolean>;
   mergeBranch(config: MergeBranchConfig): Promise<void>;
   /** Get raw diff between current HEAD and a base branch (or a specific commit). */
   getDiff(

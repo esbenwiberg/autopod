@@ -7547,10 +7547,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Workspace pods are excluded — their human edits live in the container until
       // mergeBranch() runs container→host sync-back, so they MUST take the normal
       // merge path. Re-check stats from the worktree (cached pod.filesChanged is
-      // stale after force-approve / human-fix) and still push the branch so the
-      // user has a recoverable handle on origin if the "no changes" call is wrong.
+      // stale after force-approve / human-fix). A pod can have zero new changes
+      // since startCommitSha while still carrying older work on its branch after
+      // a failed/reworked run, so only suppress the branch push when the whole
+      // branch is proven empty against its base.
       if (!isWorkspacePod && pod.worktreePath && !pod.prUrl) {
         let trulyNoChanges = false;
+        let branchHasAccumulatedChanges: boolean | null = null;
         try {
           const profile = profileStore.get(pod.profileName);
           const defaultBranch = profile.defaultBranch ?? 'main';
@@ -7573,6 +7576,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             });
           }
           trulyNoChanges = stats.filesChanged === 0;
+          if (trulyNoChanges && worktreeManager.hasChangesAgainstBase) {
+            try {
+              branchHasAccumulatedChanges = await worktreeManager.hasChangesAgainstBase(
+                pod.worktreePath,
+                baseBranchForStats,
+              );
+            } catch (err) {
+              logger.warn(
+                { err, podId, baseBranch: baseBranchForStats },
+                'Failed to prove no-change branch is empty; preserving branch push',
+              );
+            }
+          }
         } catch (err) {
           logger.warn(
             { err, podId },
@@ -7582,8 +7598,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         if (trulyNoChanges) {
-          emitActivityStatus(podId, 'No changes to merge — pushing branch and completing pod');
-          if (pod.branch) {
+          const shouldPushBranch = branchHasAccumulatedChanges !== false;
+          emitActivityStatus(
+            podId,
+            shouldPushBranch
+              ? 'No new changes to merge — pushing existing branch and completing pod'
+              : 'No changes to merge — completing without branch push',
+          );
+          if (shouldPushBranch && pod.branch) {
             try {
               const useForce = forceWithLeaseAllowances.has(podId);
               if (useForce) {
@@ -7598,6 +7620,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 'Branch push failed in no-changes fast-path; continuing to complete',
               );
             }
+          } else {
+            forceWithLeaseAllowances.delete(podId);
           }
           const s1 = transition(pod, 'approved');
           persistReadinessApproval(podId, readiness, approvalReason);
@@ -7624,8 +7648,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             },
           });
           logger.info(
-            { podId },
-            'Pod approved with no changes — branch pushed, completed without PR',
+            { podId, branchPushed: shouldPushBranch },
+            'Pod approved with no changes — completed without PR',
           );
           maybeTriggerDependents(noChangePod);
           return;

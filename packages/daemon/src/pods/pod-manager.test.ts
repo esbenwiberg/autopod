@@ -234,6 +234,7 @@ function createMockWorktreeManager(): WorktreeManager {
     })),
     cleanup: vi.fn(async () => {}),
     getDiffStats: vi.fn(async () => ({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 })),
+    hasChangesAgainstBase: vi.fn(async () => true),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
     mergeBranch: vi.fn(async () => {}),
     commitFiles: vi.fn(async () => {}),
@@ -1886,11 +1887,11 @@ describe('PodManager', () => {
 
     // Regression: the no-changes fast-path used to trust the cached pod.filesChanged
     // (which goes stale after force-approve / human-fix) and skip both the branch
-    // push and container→host sync-back. Three pods (fast-crocodile, envious-platypus,
-    // yelling-skink) leaked work this way before we re-checked the worktree and
-    // pushed the branch even on the fast-path.
+    // push and container→host sync-back. Three pods leaked work this way before we
+    // re-checked the worktree and preserved the branch push when the branch still
+    // carries accumulated work from an earlier run.
     describe('no-changes fast-path', () => {
-      it('refreshes filesChanged from worktree and takes fast-path when actual diff is zero', async () => {
+      it('refreshes filesChanged from worktree and skips branch push when the whole branch is empty', async () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);
 
@@ -1912,6 +1913,9 @@ describe('PodManager', () => {
           linesAdded: 0,
           linesRemoved: 0,
         });
+        (ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(
+          false,
+        );
 
         await manager.approveSession(pod.id);
 
@@ -1921,8 +1925,8 @@ describe('PodManager', () => {
         expect(completed.filesChanged).toBe(0);
         expect(completed.linesAdded).toBe(0);
         expect(completed.linesRemoved).toBe(0);
-        // Fast-path push runs against the feature branch.
-        expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith('/tmp/wt', pod.branch);
+        // The branch has no accumulated work either, so do not mint an empty origin branch.
+        expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
         // No PR creation, no merge — fast-path completes directly.
         expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
         expect(ctx.prManager.createPr).not.toHaveBeenCalled();
@@ -2027,7 +2031,7 @@ describe('PodManager', () => {
         expect(manager.getSession(pod.id).status).toBe('complete');
       });
 
-      it('pushes branch on truly-no-changes fast-path before emitting pod.completed', async () => {
+      it('pushes branch with accumulated work before emitting pod.completed', async () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);
 
@@ -2046,6 +2050,9 @@ describe('PodManager', () => {
           linesAdded: 0,
           linesRemoved: 0,
         });
+        (ctx.worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(
+          true,
+        );
 
         // Track call ordering: pushBranch must run before pod.completed event fires
         // so the branch is durably on origin if the daemon dies between push and emit.

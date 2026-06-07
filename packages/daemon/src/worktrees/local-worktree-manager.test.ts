@@ -317,6 +317,61 @@ describe('LocalWorktreeManager', () => {
   });
 
   // -------------------------------------------------------------------------
+  // hasChangesAgainstBase
+  // -------------------------------------------------------------------------
+
+  describe('hasChangesAgainstBase', () => {
+    it('returns false when the worktree matches its base', async () => {
+      setupExecFileMock({
+        'merge-base HEAD main': { stdout: 'abc1234\n' },
+        'diff --quiet abc1234': { stdout: '' },
+      });
+
+      const result = await manager.hasChangesAgainstBase('/tmp/worktree/sess', 'main');
+
+      expect(result).toBe(false);
+    });
+
+    it('returns true when git diff reports changes', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('merge-base HEAD main')) {
+            cb(null, { stdout: 'abc1234\n', stderr: '' });
+          } else if (cmd.includes('diff --quiet abc1234')) {
+            cb(Object.assign(new Error('diff found changes'), { code: 1 }), {
+              stdout: '',
+              stderr: '',
+            });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      const result = await manager.hasChangesAgainstBase('/tmp/worktree/sess', 'main');
+
+      expect(result).toBe(true);
+    });
+
+    it('throws when the base cannot be resolved', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, _args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          cb(new Error('missing ref'), { stdout: '', stderr: '' });
+          return {} as ChildProcess;
+        },
+      );
+
+      await expect(manager.hasChangesAgainstBase('/tmp/worktree/sess', 'main')).rejects.toThrow(
+        "Could not resolve merge-base for 'main'",
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // getDiff
   // -------------------------------------------------------------------------
 

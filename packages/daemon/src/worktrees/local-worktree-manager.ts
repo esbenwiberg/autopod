@@ -613,6 +613,23 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
   }
 
+  async hasChangesAgainstBase(worktreePath: string, baseBranch: string): Promise<boolean> {
+    const base = await this.resolveMergeBase(worktreePath, baseBranch);
+    if (!base) {
+      throw new Error(`Could not resolve merge-base for '${baseBranch}'`);
+    }
+
+    try {
+      await git(['diff', '--quiet', base, ...DIFF_EXCLUDE_PATHSPECS], { cwd: worktreePath });
+      return false;
+    } catch (err) {
+      if ((err as { code?: unknown }).code === 1) {
+        return true;
+      }
+      throw sanitizeGitError(err);
+    }
+  }
+
   async getDiff(
     worktreePath: string,
     baseBranch: string,
