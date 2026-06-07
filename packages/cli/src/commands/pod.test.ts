@@ -16,6 +16,33 @@ vi.mock('ora', () => ({
 function createMockClient() {
   return {
     listSessions: vi.fn().mockResolvedValue([]),
+    getSession: vi.fn().mockResolvedValue({
+      id: 'abcd1234',
+      profileName: 'test',
+      task: 'do things',
+      status: 'validated',
+      model: 'opus',
+      runtime: 'claude',
+      branch: 'ap/abcd1234',
+      containerId: 'ctr1',
+      worktreePath: null,
+      validationAttempts: 1,
+      maxValidationAttempts: 3,
+      lastValidationResult: null,
+      pendingEscalation: null,
+      escalationCount: 0,
+      skipValidation: false,
+      createdAt: '2024-01-01T00:00:00Z',
+      startedAt: '2024-01-01T00:00:01Z',
+      completedAt: null,
+      updatedAt: '2024-01-01T00:00:01Z',
+      userId: 'user1',
+      filesChanged: 5,
+      linesAdded: 100,
+      linesRemoved: 20,
+      previewUrl: null,
+      readinessReview: null,
+    }),
     getSessionEvents: vi.fn().mockResolvedValue([
       {
         type: 'status',
@@ -139,6 +166,71 @@ describe('update-from-base command', () => {
     expect(logSpy.mock.calls.map((call) => call.join(' ')).join('\n')).toContain(
       'Creating worktree...',
     );
+    logSpy.mockRestore();
+  });
+
+  it('prints compact readiness when present', async () => {
+    (mockClient.getSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      id: 'abcd1234',
+      profileName: 'test',
+      task: 'do things',
+      status: 'validated',
+      model: 'opus',
+      runtime: 'claude',
+      branch: 'ap/abcd1234',
+      containerId: 'ctr1',
+      worktreePath: null,
+      validationAttempts: 1,
+      maxValidationAttempts: 3,
+      lastValidationResult: null,
+      pendingEscalation: null,
+      escalationCount: 0,
+      skipValidation: false,
+      createdAt: '2024-01-01T00:00:00Z',
+      startedAt: '2024-01-01T00:00:01Z',
+      completedAt: null,
+      updatedAt: '2024-01-01T00:00:01Z',
+      userId: 'user1',
+      filesChanged: 5,
+      linesAdded: 100,
+      linesRemoved: 20,
+      previewUrl: null,
+      readinessReview: {
+        status: 'needs_review',
+        summary: '2 findings before approval',
+        computedAt: '2026-06-07T12:00:00.000Z',
+        scope: 'pod',
+        areas: [],
+        findings: [
+          {
+            id: 'network-denied-egress',
+            area: 'network',
+            severity: 'warning',
+            title: 'Denied egress observed',
+            detail: 'Operator should inspect network events.',
+            sourceRefs: [{ kind: 'event', label: 'Network events' }],
+          },
+        ],
+      },
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await program.parseAsync(['node', 'ap', 'status', 'abcd1234']);
+
+    const output = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
+    expect(output).toContain('Readiness: needs_review - 2 findings before approval');
+    expect(output).not.toContain('Denied egress observed');
+    expect(output).not.toContain('Operator should inspect network events.');
+    logSpy.mockRestore();
+  });
+
+  it('prints readiness pending when missing', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await program.parseAsync(['node', 'ap', 'status', 'abcd1234']);
+
+    const output = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
+    expect(output).toContain('Readiness: pending/unavailable');
     logSpy.mockRestore();
   });
 });
