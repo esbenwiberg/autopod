@@ -4,7 +4,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import type { JwtPayload } from '@autopod/shared';
+import type { JwtPayload, ReadinessReview } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import pino from 'pino';
@@ -94,6 +94,7 @@ function insertPod(
     completedAt?: string;
     reworkCount?: number;
     outputMode?: string;
+    readinessReview?: ReadinessReview | null;
   } = {},
 ): string {
   const id = opts.id ?? `pod-${++podSeq}`;
@@ -102,12 +103,12 @@ function insertPod(
       id, profile_name, task, status, model, runtime, execution_target, branch,
       user_id, max_validation_attempts, skip_validation,
       output_mode, agent_mode, output_target, validate, promotable,
-      completed_at, rework_count
+      completed_at, rework_count, readiness_review
     ) VALUES (
       @id, 'test-profile', 'task', @status, 'claude-opus-4-7', 'claude', 'local', 'branch-1',
       'user-1', 3, 0,
       @outputMode, 'auto', 'pr', 1, 0,
-      @completedAt, @reworkCount
+      @completedAt, @reworkCount, @readinessReview
     )
   `).run({
     id,
@@ -115,9 +116,36 @@ function insertPod(
     outputMode: opts.outputMode ?? 'pr',
     completedAt: opts.completedAt ?? new Date().toISOString(),
     reworkCount: opts.reworkCount ?? 0,
+    readinessReview:
+      opts.readinessReview === undefined ? null : JSON.stringify(opts.readinessReview),
   });
   return id;
 }
+
+const readinessReview: ReadinessReview = {
+  status: 'ready',
+  summary: 'No readiness findings need review.',
+  computedAt: '2026-06-07T12:00:00.000Z',
+  scope: 'pod',
+  areas: [
+    {
+      area: 'validation',
+      status: 'ready',
+      title: 'Validation',
+      summary: 'Latest blocking validation passed.',
+      sourceRefs: [{ kind: 'validation', label: 'Validation', id: 'attempt-1' }],
+    },
+    {
+      area: 'advisory_qa',
+      status: 'not_applicable',
+      title: 'Advisory QA',
+      summary: 'Advisory QA was not configured.',
+      sourceRefs: [],
+    },
+  ],
+  findings: [],
+  approval: null,
+};
 
 // ── Test setup ────────────────────────────────────────────────────────────────
 
@@ -362,6 +390,31 @@ describe('GET /pods/analytics/reliability', () => {
     const body = res.json();
     expect(body.summary.totalPodsInWindow).toBe(1);
     expect(body.firstPassRate).toBe(1);
+  });
+
+  it('readiness exposes null and object snapshots in pod API responses', async () => {
+    const oldPodId = insertPod(db, { id: 'readiness-old' });
+    const readyPodId = insertPod(db, { id: 'readiness-ready', readinessReview });
+
+    const listRes = await app.inject({
+      method: 'GET',
+      url: '/pods',
+      headers: authHeaders,
+    });
+    expect(listRes.statusCode).toBe(200);
+    const listBody = listRes.json();
+    expect(listBody.find((pod: { id: string }) => pod.id === oldPodId).readinessReview).toBeNull();
+    expect(listBody.find((pod: { id: string }) => pod.id === readyPodId).readinessReview).toEqual(
+      readinessReview,
+    );
+
+    const detailRes = await app.inject({
+      method: 'GET',
+      url: `/pods/${readyPodId}`,
+      headers: authHeaders,
+    });
+    expect(detailRes.statusCode).toBe(200);
+    expect(detailRes.json().readinessReview).toEqual(readinessReview);
   });
 });
 
