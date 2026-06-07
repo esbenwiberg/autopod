@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createPodRequestSchema } from './pod.schema.js';
+import { createPodRequestSchema, podResponseSchema } from './pod.schema.js';
 
 describe('createPodRequestSchema', () => {
   it('rejects short Claude aliases in create-pod model overrides', () => {
@@ -85,5 +85,43 @@ describe('createPodRequestSchema', () => {
     expect(parsed.briefTitle).toBe('Contract brief');
     expect(parsed.touches).toEqual(['packages/desktop/Sources/App.swift']);
     expect(parsed.doesNotTouch).toEqual(['packages/daemon/src/pods/pod-manager.ts']);
+  });
+});
+
+describe('podResponseSchema', () => {
+  it('accepts readinessReview null for old pod responses', () => {
+    const parsed = podResponseSchema.parse({
+      id: 'pod-old',
+      readinessReview: null,
+    });
+
+    expect(parsed.readinessReview).toBeNull();
+  });
+
+  it('accepts compact readinessReview objects in pod responses', () => {
+    const readinessReview = {
+      status: 'ready',
+      summary: 'No readiness findings need review.',
+      computedAt: '2026-06-07T12:00:00.000Z',
+      scope: 'pod',
+      areas: [
+        {
+          area: 'validation',
+          status: 'ready',
+          title: 'Validation',
+          summary: 'Latest blocking validation passed.',
+          sourceRefs: [{ kind: 'validation', label: 'Validation', id: 'attempt-1' }],
+        },
+      ],
+      findings: [],
+      approval: null,
+    };
+
+    const parsed = podResponseSchema.parse({
+      id: 'pod-ready',
+      readinessReview,
+    });
+
+    expect(parsed.readinessReview).toEqual(readinessReview);
   });
 });

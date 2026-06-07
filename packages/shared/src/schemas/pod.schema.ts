@@ -241,6 +241,12 @@ export const readinessReviewSchema = z
 
 export const nullableReadinessReviewSchema = readinessReviewSchema.nullable().optional();
 
+export const podResponseSchema = z
+  .object({
+    readinessReview: nullableReadinessReviewSchema.default(null),
+  })
+  .passthrough();
+
 export const sendMessageSchema = z.object({
   message: z.string().min(1).max(50_000),
 });
