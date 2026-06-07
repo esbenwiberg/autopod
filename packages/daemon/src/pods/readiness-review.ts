@@ -14,7 +14,7 @@ import type { ScanRepository, StoredScan } from '../security/scan-repository.js'
 import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
-import type { ValidationRepository } from './validation-repository.js';
+import type { StoredValidation, ValidationRepository } from './validation-repository.js';
 
 const READINESS_STATUSES: ReadinessStatus[] = ['ready', 'needs_review', 'waived', 'risky'];
 const AREA_TITLES: Record<ReadinessArea, string> = {
@@ -99,8 +99,7 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
   ): ReadinessReview => {
     const pod = deps.podRepo.getOrThrow(podId);
     const validations = deps.validationRepo?.getForSession(podId) ?? [];
-    const latestValidation =
-      validations[validations.length - 1]?.result ?? pod.lastValidationResult;
+    const latestValidation = selectLatestValidation(pod, validations);
     const audit = deps.actionAuditRepo?.verifyAuditChain(podId);
     const actionSafety = deps.actionAuditRepo?.getSafetySummary(podId);
     return deriveReadinessReview({
@@ -138,6 +137,20 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
       return deriveSeriesReadiness(seriesId, deps.podRepo.getPodsBySeries(seriesId));
     },
   };
+}
+
+function selectLatestValidation(
+  pod: Pod,
+  validations: StoredValidation[],
+): ValidationResult | null {
+  const repoLatest = validations[validations.length - 1]?.result ?? null;
+  const podLatest = pod.lastValidationResult;
+  if (!repoLatest) return podLatest;
+  if (!podLatest) return repoLatest;
+  if (podLatest.attempt > repoLatest.attempt) return podLatest;
+  if (repoLatest.attempt > podLatest.attempt) return repoLatest;
+  if (podLatest.advisoryBrowserQa && !repoLatest.advisoryBrowserQa) return podLatest;
+  return repoLatest;
 }
 
 export function deriveReadinessReview(inputs: ReadinessInputs): ReadinessReview {
@@ -558,13 +571,13 @@ function worstSeriesStatus(
   findings: ReadinessFinding[],
 ): ReadinessStatus {
   if (statuses.includes('risky')) return 'risky';
-  if (statuses.includes('waived')) return 'waived';
   if (
     statuses.includes('needs_review') ||
     findings.some((findingItem) => findingItem.severity === 'warning')
   ) {
     return 'needs_review';
   }
+  if (statuses.includes('waived')) return 'waived';
   return statuses.length === 0 ? 'needs_review' : 'ready';
 }
 

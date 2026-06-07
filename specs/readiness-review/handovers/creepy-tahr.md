@@ -53,8 +53,11 @@
 ## Landmines
 
 - Passive missing optional evidence, such as no quality score or no optional repository,
-  does not make a pod `needs_review`. Explicit missing blocking validation and advisory
-  QA in flight do.
+  does not make a pod `needs_review`. Explicit missing blocking validation, advisory
+  QA in flight, and missing member snapshots in a series rollup do.
+- Series rollup status precedence is `risky`, then explicit review findings/member
+  `needs_review`, then `waived`, then `ready`. This keeps missing legacy member
+  snapshots visible as the top-level review state even if another member was waived.
 - `validationWaiver` and `skipValidation` make the validation area `waived`; a separate
   hard risk such as blocked PR or compromised worktree still makes the top-level status
   `risky`.

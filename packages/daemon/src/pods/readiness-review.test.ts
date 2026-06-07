@@ -1,11 +1,14 @@
 import type { Pod, ReadinessReview, ValidationResult } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import type { StoredScan } from '../security/scan-repository.js';
+import type { PodRepository } from './pod-repository.js';
 import {
   type ReadinessInputs,
+  createReadinessService,
   deriveReadinessReview,
   deriveSeriesReadiness,
 } from './readiness-review.js';
+import type { ValidationRepository } from './validation-repository.js';
 
 const NOW = '2026-06-07T00:00:00.000Z';
 
@@ -367,5 +370,73 @@ describe('deriveSeriesReadiness', () => {
       title: 'Member readiness unavailable',
       severity: 'warning',
     });
+  });
+
+  it('series rollup keeps missing member review ahead of waived members', () => {
+    const waivedReview = review({
+      pod: pod({
+        id: 'pod-waived',
+        validationWaiver: {
+          waivedAt: NOW,
+          waivedBy: 'human',
+          reason: 'accepted',
+          attempt: 1,
+          failedPhases: ['review'],
+          failedFactIds: [],
+        },
+      }),
+    });
+
+    const rollup = deriveSeriesReadiness(
+      'series-1',
+      [pod({ id: 'pod-waived', readinessReview: waivedReview }), pod({ id: 'pod-old' })],
+      NOW,
+    );
+
+    expect(rollup.status).toBe('needs_review');
+    expect(rollup.findings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'series:series-1:missing:pod-old' })]),
+    );
+  });
+});
+
+describe('createReadinessService', () => {
+  it('uses pod-row advisory QA when validation history lacks the deferred merge', () => {
+    const podWithAdvisory = pod({
+      lastValidationResult: validation({
+        advisoryBrowserQa: {
+          status: 'fail',
+          reasoning: 'Deferred advisory concern.',
+          observations: [],
+          screenshots: [],
+        },
+      }),
+    });
+    const podRepo = {
+      getOrThrow: () => podWithAdvisory,
+      update: () => undefined,
+      getPodsBySeries: () => [],
+    } as unknown as PodRepository;
+    const validationRepo = {
+      getForSession: () => [
+        {
+          id: 'validation-1',
+          podId: podWithAdvisory.id,
+          attempt: 1,
+          result: validation(),
+          createdAt: NOW,
+        },
+      ],
+    } as unknown as ValidationRepository;
+
+    const service = createReadinessService({ podRepo, validationRepo });
+    const result = service.computePodReadiness(podWithAdvisory.id);
+
+    expect(result.status).toBe('needs_review');
+    expect(result.areas).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ area: 'advisory_qa', status: 'needs_review' }),
+      ]),
+    );
   });
 });
