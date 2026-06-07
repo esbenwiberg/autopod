@@ -327,6 +327,21 @@ describe('deriveReadinessReview', () => {
       expect.arrayContaining([expect.objectContaining({ area: 'validation', status: 'waived' })]),
     );
   });
+
+  it('marks waived pods with advisory in flight as needs_review', () => {
+    const result = review({
+      pod: pod({ lastCorrectionMessage: '[FORCE APPROVED] accepted by operator' }),
+      advisoryQaInFlight: true,
+    });
+
+    expect(result.status).toBe('needs_review');
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'validation-waiver' }),
+        expect.objectContaining({ id: 'advisory-qa-in-flight' }),
+      ]),
+    );
+  });
 });
 
 describe('deriveSeriesReadiness', () => {
