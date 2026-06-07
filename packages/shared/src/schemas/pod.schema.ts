@@ -164,6 +164,83 @@ export const podStatusSchema = z.enum([
   'killed',
 ]);
 
+export const readinessStatusSchema = z.enum(['ready', 'needs_review', 'risky', 'waived']);
+
+export const readinessAreaStatusSchema = z.enum([
+  'ready',
+  'needs_review',
+  'risky',
+  'waived',
+  'not_applicable',
+  'not_available',
+]);
+
+export const readinessAreaSchema = z.enum([
+  'validation',
+  'security',
+  'actions',
+  'network',
+  'scope',
+  'quality',
+  'advisory_qa',
+  'pr',
+]);
+
+export const readinessSourceRefSchema = z
+  .object({
+    kind: z.enum(['validation', 'work', 'logs', 'diff', 'pr', 'evidence', 'quality', 'event']),
+    label: z.string().min(1).max(200),
+    id: z.string().min(1).max(200).optional(),
+    href: z.string().min(1).max(1000).optional(),
+  })
+  .passthrough();
+
+export const readinessAreaReviewSchema = z
+  .object({
+    area: readinessAreaSchema,
+    status: readinessAreaStatusSchema,
+    title: z.string().min(1).max(200),
+    summary: z.string().min(1).max(1000),
+    sourceRefs: z.array(readinessSourceRefSchema).max(20),
+  })
+  .passthrough();
+
+export const readinessFindingSchema = z
+  .object({
+    id: z.string().min(1).max(200),
+    area: readinessAreaSchema,
+    severity: z.enum(['info', 'warning', 'error']),
+    title: z.string().min(1).max(200),
+    detail: z.string().min(1).max(2000),
+    sourceRefs: z.array(readinessSourceRefSchema).max(20),
+  })
+  .passthrough();
+
+export const readinessApprovalSchema = z
+  .object({
+    approvedAt: z.string().min(1).max(64),
+    approvedBy: z.string().min(1).max(200).optional(),
+    statusAtApproval: readinessStatusSchema,
+    scope: z.enum(['pod', 'series']),
+    seriesId: z.string().min(1).max(128).optional(),
+    reason: z.string().min(1).max(2000).optional(),
+  })
+  .passthrough();
+
+export const readinessReviewSchema = z
+  .object({
+    status: readinessStatusSchema,
+    summary: z.string().min(1).max(1000),
+    computedAt: z.string().min(1).max(64),
+    scope: z.literal('pod'),
+    areas: z.array(readinessAreaReviewSchema).max(16),
+    findings: z.array(readinessFindingSchema).max(100),
+    approval: readinessApprovalSchema.nullable().optional(),
+  })
+  .passthrough();
+
+export const nullableReadinessReviewSchema = readinessReviewSchema.nullable().optional();
+
 export const sendMessageSchema = z.object({
   message: z.string().min(1).max(50_000),
 });

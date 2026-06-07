@@ -33,6 +33,19 @@ export type {
 } from './types/pod.js';
 
 export type {
+  ReadinessApproval,
+  ReadinessArea,
+  ReadinessAreaReview,
+  ReadinessAreaStatus,
+  ReadinessFinding,
+  ReadinessFindingSeverity,
+  ReadinessReview,
+  ReadinessSourceRef,
+  ReadinessSourceRefKind,
+  ReadinessStatus,
+} from './types/readiness.js';
+
+export type {
   Profile,
   PublicProfile,
   ProfileEditorPayload,
