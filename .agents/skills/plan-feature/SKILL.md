@@ -14,8 +14,10 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit, Agent, AskUserQuestion
 
 Turn a rough feature idea into a fully structured `specs/<name>/` folder that
 `ap series create specs/<name>/` (or `ap series create specs/<name>/briefs/`)
-can execute without any further clarification. Nothing is written until the
-exit checklist is fully green and the user has confirmed.
+can execute without any further clarification. No deliverable spec output is
+written until the exit checklist is fully green and the user has confirmed.
+The only allowed pre-greenlight writes are transient review/planning artifacts
+under `.autopod/review/`.
 
 ## When to use
 
@@ -29,7 +31,8 @@ If the task is clearly single-checkpoint (one module, a few files), recommend
 ## How this works
 
 A continuous interview-plus-research loop — not a fixed set of phases. The loop
-runs until the exit test passes. Then and only then does it write output.
+runs until the exit test passes. Then and only then does it write deliverable
+spec output.
 
 ```
 scan codebase → surface finding → ask ONE question → wait for answer →
@@ -51,6 +54,9 @@ scan codebase again → ask ONE question → wait → ... → exit test passes �
   evidence covers it.
 - Never draft `purpose.md`, `design.md`, briefs, or ADRs during the loop.
   Writing happens only after the exit test passes and the user has greenlit.
+- Maintain the planner state ledger throughout the loop. This is the narrow
+  exception to the write-nothing rule: it preserves interview state across
+  context compaction, but it is not a draft spec and not a deliverable.
 - **The coverage checklist is the only stop sign — not a question count.**
   A low question count is a symptom of skipping the interview, not a budget
   to spend.
@@ -62,9 +68,66 @@ scan codebase again → ask ONE question → wait → ... → exit test passes �
   user's original prompt is a question waiting to happen. Pin them down one
   at a time.
 
+### Planner state ledger (compaction guard)
+
+`/plan-feature` often spans enough turns to trigger context compaction. Persist
+the planner's working memory after every scan and every user answer so a resumed
+planner can continue without re-asking settled questions or silently dropping
+coverage.
+
+Write the ledger to:
+
+```
+.autopod/review/plan-feature/<feature-slug>/state.md
+```
+
+Rules:
+
+- Use a kebab-case `<feature-slug>` derived from the feature name. If the name is
+  still provisional, use a provisional slug and rename the ledger directory once
+  the feature name stabilizes.
+- At the start of every `/plan-feature` turn, look for an existing matching
+  ledger. If exactly one plausible ledger exists, read it before scanning. If
+  several plausible ledgers exist, ask one selection question before proceeding.
+- Treat the ledger as gitignored, transient, and overwriteable. It may be
+  rewritten on every turn.
+- Do not store secrets, credentials, full pasted source files, or large logs.
+  Store citations and summaries, not blobs.
+- Do not store full `purpose.md`, `design.md`, `brief.md`, `contract.yaml`, or
+  ADR draft files in the ledger. Store the structured facts needed to recreate
+  them later.
+
+The ledger must include:
+
+- Feature slug/title, current status, and last-updated timestamp.
+- User answers and planner proposals, each tied to the question/proposal that
+  produced it.
+- Coverage table for all 15 dimensions: status, source (`user`, `codebase`,
+  `ADR`, `convention`, `memory`, or `N/A`), citation, and any re-open notes.
+- Code, ADR, convention, memory, AGENTS.md, and README evidence actually read.
+- Glossary terms, non-goals, scope fences, open questions, and deferred
+  decisions.
+- Candidate seams and briefs: provisional id/title, dependencies, touches,
+  does-not-touch, contracts owned/consumed, required facts, and proof risks.
+- UX flow notes and wireframes with approval state when user-facing surfaces
+  are involved.
+- ADRs introduced or reused.
+- The next question candidate and why that question is now load-bearing.
+
+Update the ledger:
+
+1. After the opening scan, before asking the first question.
+2. After every user answer and follow-up codebase scan.
+3. After a dimension is re-opened or marked green.
+4. Before rendering the HTML show-back.
+
+The ledger cannot substitute for user greenlight. Final specs are still written
+only after the show-back is green and the user confirms.
+
 ### Opening move
 
-Before asking anything, scan for 3–5 minutes:
+Before asking anything, resolve and read the planner state ledger, then scan for
+3–5 minutes:
 
 1. What does existing code already handle in this area?
 2. Where are the seams — places where one module hands off to another?
@@ -88,6 +151,9 @@ Before asking anything, scan for 3–5 minutes:
    pre-answered questions.
 6. Are there AGENTS.md sections, READMEs, or pinned docs the executor will
    need? Note them; they go into `design.md` → Reference reading.
+
+Update the planner state ledger with the opening findings, initial coverage
+status, and first question candidate.
 
 Present a 3–5 bullet summary of findings. Ask the first question. Stop.
 
@@ -210,14 +276,20 @@ If any dimension is hand-waved ("probably fine", "we can figure it out",
 
 ### Per-turn discipline
 
-After each user answer, before forming the next question:
+After each user answer, before asking the next question:
 
-1. **Name the dimensions touched.** Briefly note which previously-green
+1. **Read the current planner state ledger.** If compaction happened, this is
+   the recovery point. If the ledger is missing, stale, or contradictory, rebuild
+   it from the current conversation and a fresh scan before asking more.
+2. **Name the dimensions touched.** Briefly note which previously-green
    dimensions this answer affects (often more than one). Re-validate them.
    If any are now red, mark them red and re-open them — do not let earlier
    coverage decay silently.
-2. **Re-scan the codebase** for anything the new answer opens up.
-3. Then form the next question.
+3. **Re-scan the codebase** for anything the new answer opens up.
+4. Form the next question from the remaining red/amber coverage.
+5. **Update the planner state ledger** with the answer, affected dimensions,
+   new evidence, changed brief candidates, and the exact next question.
+6. Ask the next question.
 
 #### When the user defers ("you decide" / "whatever you think")
 
@@ -267,9 +339,10 @@ invites click-and-engage. Render it as HTML.
 Process:
 
 1. Assess coverage internally (every dimension + every brief).
-2. Render a single self-contained HTML file the user opens in a browser.
-3. Print one line to the terminal pointing at the file.
-4. Wait for `green light` in the terminal before writing any spec output.
+2. Update the planner state ledger with the coverage assessment.
+3. Render a single self-contained HTML file the user opens in a browser.
+4. Print one line to the terminal pointing at the file.
+5. Wait for `green light` in the terminal before writing any spec output.
 
 #### 1. Coverage assessment (internal)
 
