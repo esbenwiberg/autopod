@@ -5,6 +5,8 @@ import type {
   AgentEvent,
   PodCreatedEvent,
   Profile,
+  ReadinessReview,
+  ReadinessStatus,
   Runtime,
   RuntimeType,
   StackTemplate,
@@ -300,6 +302,49 @@ function makeValidationResult(overrides: Partial<ValidationResult> = {}): Valida
     overall: 'pass',
     duration: 5000,
     ...overrides,
+  };
+}
+
+function makeReadinessReview(status: ReadinessStatus, summary?: string): ReadinessReview {
+  return {
+    status,
+    summary: summary ?? `Readiness is ${status}.`,
+    computedAt: '2026-06-07T12:00:00.000Z',
+    scope: 'pod',
+    areas: [
+      {
+        area: 'validation',
+        status,
+        title: 'Validation',
+        summary: summary ?? `Validation area is ${status}.`,
+        sourceRefs: [{ kind: 'validation', label: 'Validation' }],
+      },
+    ],
+    findings:
+      status === 'ready'
+        ? []
+        : [
+            {
+              id: `${status}-finding`,
+              area: 'validation',
+              severity: status === 'risky' ? 'error' : 'warning',
+              title: `${status} finding`,
+              detail: summary ?? `Readiness is ${status}.`,
+              sourceRefs: [{ kind: 'validation', label: 'Validation' }],
+            },
+          ],
+    approval: null,
+  };
+}
+
+function validatedPodUpdates(
+  podId: string,
+  updates: Parameters<TestContext['podRepo']['update']>[1] = {},
+): Parameters<TestContext['podRepo']['update']>[1] {
+  return {
+    status: 'validated',
+    lastValidationResult: makeValidationResult({ podId }),
+    ...updates,
   };
 }
 
@@ -1207,7 +1252,7 @@ describe('PodManager', () => {
       );
 
       // Move to validated state
-      ctx.podRepo.update(pod.id, { status: 'validated' });
+      ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
 
       await manager.approveSession(pod.id);
 
@@ -1224,7 +1269,7 @@ describe('PodManager', () => {
         { profileName: 'test-profile', task: 'Do stuff' },
         'user-1',
       );
-      ctx.podRepo.update(pod.id, { status: 'validated' });
+      ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
 
       const events: unknown[] = [];
       ctx.eventBus.subscribe((e) => events.push(e));
@@ -1237,6 +1282,187 @@ describe('PodManager', () => {
       expect(completedEvent.finalStatus).toBe('complete');
     });
 
+    it('readiness approval enforces manual reason rules and stores approval metadata', async () => {
+      const cases: Array<{
+        status: ReadinessStatus;
+        updates?: Parameters<TestContext['podRepo']['update']>[1];
+        reasonRequired: boolean;
+      }> = [
+        { status: 'ready', reasonRequired: false },
+        { status: 'needs_review', reasonRequired: false },
+        { status: 'risky', updates: { worktreeCompromised: true }, reasonRequired: true },
+        { status: 'waived', updates: { skipValidation: true }, reasonRequired: true },
+      ];
+
+      for (const testCase of cases) {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: `Approve ${testCase.status}` },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, testCase.updates ?? {}));
+        if (testCase.status === 'needs_review') {
+          ctx.eventBus.emit({
+            type: 'pod.firewall_denied',
+            timestamp: new Date().toISOString(),
+            podId: pod.id,
+            sni: 'example.com',
+            src: '127.0.0.1',
+          });
+        }
+
+        if (testCase.reasonRequired) {
+          await expect(manager.approveSession(pod.id, { reason: '   ' })).rejects.toMatchObject({
+            code: 'READINESS_REASON_REQUIRED',
+          });
+        }
+
+        const events: unknown[] = [];
+        ctx.eventBus.subscribe((event) => events.push(event));
+        const reason = testCase.reasonRequired ? `Accept ${testCase.status}` : undefined;
+        await manager.approveSession(pod.id, { reason });
+
+        const approved = manager.getSession(pod.id).readinessReview?.approval;
+        expect(approved).toMatchObject({
+          statusAtApproval: testCase.status,
+          scope: 'pod',
+          ...(reason ? { reason } : {}),
+        });
+        expect(approved?.approvedAt).toEqual(expect.any(String));
+
+        const readinessEvent = events.find(
+          (event) => (event as { type?: string }).type === 'pod.readiness_approved',
+        );
+        if (testCase.status === 'ready') {
+          expect(readinessEvent).toBeUndefined();
+        } else {
+          expect(readinessEvent).toMatchObject({
+            type: 'pod.readiness_approved',
+            podId: pod.id,
+            status: testCase.status,
+            scope: 'pod',
+            ...(reason ? { reason } : {}),
+          });
+        }
+      }
+    });
+
+    it('autoApprove readiness skips needs_review, risky, and waived pods', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const ready = manager.createSession({ profileName: 'test-profile', task: 'Ready' }, 'user-1');
+      const needsReview = manager.createSession(
+        { profileName: 'test-profile', task: 'Review' },
+        'user-1',
+      );
+      const risky = manager.createSession({ profileName: 'test-profile', task: 'Risky' }, 'user-1');
+      const waived = manager.createSession(
+        { profileName: 'test-profile', task: 'Waived' },
+        'user-1',
+      );
+
+      for (const pod of [ready, needsReview, risky, waived]) {
+        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id, { autoApprove: true }));
+      }
+      ctx.eventBus.emit({
+        type: 'pod.firewall_denied',
+        timestamp: new Date().toISOString(),
+        podId: needsReview.id,
+        sni: 'example.com',
+        src: '127.0.0.1',
+      });
+      ctx.podRepo.update(risky.id, { worktreeCompromised: true });
+      ctx.podRepo.update(waived.id, { skipValidation: true });
+
+      await manager.approveSession(ready.id, { automation: true });
+      await expect(
+        manager.approveSession(needsReview.id, { automation: true }),
+      ).rejects.toMatchObject({
+        code: 'READINESS_NOT_READY',
+      });
+      await expect(manager.approveSession(risky.id, { automation: true })).rejects.toMatchObject({
+        code: 'READINESS_NOT_READY',
+      });
+      await expect(manager.approveSession(waived.id, { automation: true })).rejects.toMatchObject({
+        code: 'READINESS_NOT_READY',
+      });
+
+      expect(manager.getSession(ready.id).status).toBe('complete');
+      expect(manager.getSession(needsReview.id).status).toBe('validated');
+      expect(manager.getSession(risky.id).status).toBe('validated');
+      expect(manager.getSession(waived.id).status).toBe('validated');
+
+      const bulk = await manager.approveAllValidated();
+      expect(bulk.approved).toEqual([]);
+      expect(bulk.skipped).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ podId: needsReview.id, status: 'needs_review' }),
+          expect.objectContaining({ podId: risky.id, status: 'risky' }),
+          expect.objectContaining({ podId: waived.id, status: 'waived' }),
+        ]),
+      );
+    });
+
+    it('single PR readiness approval uses series readiness for the PR-owning pod', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const seriesId = 'series-readiness';
+      const member = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Member with risk',
+          seriesId,
+          prMode: 'single',
+        },
+        'user-1',
+      );
+      const owner = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Final PR owner',
+          seriesId,
+          prMode: 'single',
+        },
+        'user-1',
+      );
+
+      ctx.podRepo.update(member.id, {
+        status: 'complete',
+        readinessReview: makeReadinessReview('risky', 'Member has a hard release risk.'),
+      });
+      ctx.podRepo.update(owner.id, {
+        ...validatedPodUpdates(owner.id),
+        prUrl: 'https://github.com/org/repo/pull/42',
+        readinessReview: makeReadinessReview('ready'),
+      });
+
+      await expect(manager.approveSession(owner.id)).rejects.toMatchObject({
+        code: 'READINESS_REASON_REQUIRED',
+      });
+
+      const events: unknown[] = [];
+      ctx.eventBus.subscribe((event) => events.push(event));
+      await manager.approveSession(owner.id, { reason: 'Series risk accepted' });
+
+      expect(manager.getSession(owner.id).readinessReview?.approval).toMatchObject({
+        statusAtApproval: 'risky',
+        scope: 'series',
+        seriesId,
+        reason: 'Series risk accepted',
+      });
+      expect(
+        events.find((event) => (event as { type?: string }).type === 'pod.readiness_approved'),
+      ).toMatchObject({
+        type: 'pod.readiness_approved',
+        podId: owner.id,
+        status: 'risky',
+        scope: 'series',
+        seriesId,
+        reason: 'Series risk accepted',
+      });
+    });
+
     it('merges PR when prUrl exists', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
@@ -1246,7 +1472,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         prUrl: 'https://github.com/org/repo/pull/42',
       });
@@ -1271,7 +1497,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         prUrl: 'https://github.com/org/repo/pull/42',
       });
@@ -1290,7 +1516,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         filesChanged: 1,
       });
@@ -1323,7 +1549,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         filesChanged: 1,
       });
@@ -1351,7 +1577,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         filesChanged: 1,
       });
@@ -1381,7 +1607,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         filesChanged: 1,
       });
@@ -1403,7 +1629,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         filesChanged: 1,
       });
@@ -1429,7 +1655,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         filesChanged: 1,
       });
@@ -1458,7 +1684,7 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.podRepo.update(pod.id, {
-        status: 'validated',
+        ...validatedPodUpdates(pod.id),
         worktreePath: '/tmp/wt',
         filesChanged: 1,
         prUrl: null,
@@ -1500,7 +1726,7 @@ describe('PodManager', () => {
       // Child must not be enqueued yet (waiting for parent)
       expect(ctx.enqueuedSessions).not.toContain(child.id);
 
-      ctx.podRepo.update(parent.id, { status: 'validated', branch: 'feature/parent' });
+      ctx.podRepo.update(parent.id, validatedPodUpdates(parent.id, { branch: 'feature/parent' }));
       await manager.approveSession(parent.id);
 
       expect(manager.getSession(parent.id).status).toBe('complete');
@@ -1527,7 +1753,7 @@ describe('PodManager', () => {
         'user-1',
       );
 
-      ctx.podRepo.update(parent.id, { status: 'validated' });
+      ctx.podRepo.update(parent.id, validatedPodUpdates(parent.id));
       ctx.enqueuedSessions.length = 0;
 
       manager.rehydrateDependentSessions();
@@ -1578,7 +1804,7 @@ describe('PodManager', () => {
       expect(ctx.enqueuedSessions).not.toContain(child.id);
       expect(manager.getSession(child.id).status).toBe('queued');
 
-      await manager.approveSession(parent.id);
+      await manager.approveSession(parent.id, { reason: 'Force-approved parent is acceptable' });
 
       expect(ctx.enqueuedSessions).toContain(child.id);
       expect(manager.getSession(child.id).baseBranch).toBe('release/2026-05');
@@ -1613,7 +1839,7 @@ describe('PodManager', () => {
       );
 
       ctx.db.prepare('UPDATE pods SET branch = ? WHERE id = ?').run('feature/child', child.id);
-      ctx.podRepo.update(parent.id, { status: 'validated' });
+      ctx.podRepo.update(parent.id, validatedPodUpdates(parent.id));
       ctx.enqueuedSessions.length = 0;
 
       manager.rehydrateDependentSessions();
@@ -1674,7 +1900,7 @@ describe('PodManager', () => {
         );
         // Stale cache says 5 files changed, but the worktree actually has zero.
         ctx.podRepo.update(pod.id, {
-          status: 'validated',
+          ...validatedPodUpdates(pod.id),
           worktreePath: '/tmp/wt',
           filesChanged: 5,
           linesAdded: 100,
@@ -1713,7 +1939,7 @@ describe('PodManager', () => {
         );
         // Cached zero — old bug would have taken the fast-path and dropped the branch.
         ctx.podRepo.update(pod.id, {
-          status: 'validated',
+          ...validatedPodUpdates(pod.id),
           worktreePath: '/tmp/wt',
           filesChanged: 0,
         });
@@ -1754,7 +1980,7 @@ describe('PodManager', () => {
           'user-1',
         );
         ctx.podRepo.update(pod.id, {
-          status: 'validated',
+          ...validatedPodUpdates(pod.id),
           worktreePath: '/tmp/wt',
           filesChanged: 0,
         });
@@ -1784,7 +2010,7 @@ describe('PodManager', () => {
           'user-1',
         );
         ctx.podRepo.update(pod.id, {
-          status: 'validated',
+          ...validatedPodUpdates(pod.id),
           worktreePath: '/tmp/wt',
           filesChanged: 0,
         });
@@ -1810,7 +2036,7 @@ describe('PodManager', () => {
           'user-1',
         );
         ctx.podRepo.update(pod.id, {
-          status: 'validated',
+          ...validatedPodUpdates(pod.id),
           worktreePath: '/tmp/wt',
           filesChanged: 0,
         });
@@ -3140,7 +3366,7 @@ describe('PodManager', () => {
       );
     });
 
-    it('normal validation creates the PR before advisory finishes', async () => {
+    it('readiness refresh updates after deferred advisory finishes', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       const manager = createPodManager(ctx.deps);
       const advisory = deferred<NonNullable<ValidationResult['advisoryBrowserQa']>>();
@@ -3195,6 +3421,15 @@ describe('PodManager', () => {
       });
       expect(ctx.validationRepo.getForSession(pod.id)).toHaveLength(1);
       expect(ctx.validationRepo.getForSession(pod.id)[0]?.result.advisoryBrowserQa).toBeUndefined();
+      expect(manager.getSession(pod.id).readinessReview).toMatchObject({
+        status: 'needs_review',
+        areas: expect.arrayContaining([
+          expect.objectContaining({ area: 'advisory_qa', status: 'not_available' }),
+        ]),
+        findings: expect.arrayContaining([
+          expect.objectContaining({ id: 'advisory-qa-in-flight' }),
+        ]),
+      });
 
       const completedBeforeAdvisory = events.filter(
         (event) => (event as { type?: string }).type === 'pod.validation_completed',
@@ -3208,6 +3443,13 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(
         advisoryResult,
       );
+      expect(manager.getSession(pod.id).readinessReview).toMatchObject({
+        status: 'needs_review',
+        areas: expect.arrayContaining([
+          expect.objectContaining({ area: 'advisory_qa', status: 'needs_review' }),
+        ]),
+        findings: expect.arrayContaining([expect.objectContaining({ id: 'advisory-qa-concern' })]),
+      });
       expect(manager.getSession(pod.id).phaseTokenUsage?.advisory).toEqual({
         inputTokens: 3000,
         cachedInputTokens: 2000,
@@ -3227,7 +3469,7 @@ describe('PodManager', () => {
       ).toBe(true);
     });
 
-    it('approval completes while in-flight advisory QA keeps the container alive', async () => {
+    it('approval waits for advisory QA before applying readiness rules', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       const manager = createPodManager(ctx.deps);
       const advisory = deferred<NonNullable<ValidationResult['advisoryBrowserQa']>>();
@@ -3274,21 +3516,30 @@ describe('PodManager', () => {
       const approvalPromise = manager.approveSession(pod.id);
       await new Promise((resolve) => setImmediate(resolve));
 
+      expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).status).toBe('validated');
+      expect(manager.getSession(pod.id).readinessReview).toMatchObject({
+        status: 'needs_review',
+        findings: expect.arrayContaining([
+          expect.objectContaining({ id: 'advisory-qa-in-flight' }),
+        ]),
+      });
+
+      advisory.resolve(advisoryResult);
       await approvalPromise;
+      await validationPromise;
 
       expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
         expect.objectContaining({ prUrl: 'https://github.com/org/repo/pull/42' }),
       );
       expect(manager.getSession(pod.id).status).toBe('complete');
-      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
-      expect(ctx.containerManager.stop).not.toHaveBeenCalled();
-
-      advisory.resolve(advisoryResult);
-      await validationPromise;
-      await waitForAssertion(() => {
-        expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
+      expect(manager.getSession(pod.id).readinessReview).toMatchObject({
+        status: 'ready',
+        areas: expect.arrayContaining([
+          expect.objectContaining({ area: 'advisory_qa', status: 'ready' }),
+        ]),
       });
-      expect(manager.getSession(pod.id).status).toBe('complete');
+      expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
       expect(manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(
         advisoryResult,
       );
@@ -7523,7 +7774,7 @@ describe('updateFromBase', () => {
     // Advance pod to validated with a PR so approveSession runs the pushBranch path
     ctx.podRepo.update(pod.id, { status: 'running' });
     ctx.podRepo.update(pod.id, { status: 'validating' });
-    ctx.podRepo.update(pod.id, { status: 'validated' });
+    ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
     ctx.podRepo.update(pod.id, { prUrl: 'https://github.com/org/repo/pull/42' });
 
     await manager.approveSession(pod.id);
@@ -7539,7 +7790,7 @@ describe('updateFromBase', () => {
     ctx.podRepo.update(pod.id, { status: 'provisioning' });
     ctx.podRepo.update(pod.id, { status: 'running' });
     ctx.podRepo.update(pod.id, { status: 'validating' });
-    ctx.podRepo.update(pod.id, { status: 'validated' });
+    ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
 
     await manager.approveSession(pod.id);
 

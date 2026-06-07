@@ -1,6 +1,7 @@
 import type { EscalationRequest, EscalationResponse } from './escalation.js';
 import type { MemoryCandidate, MemoryEntry } from './memory.js';
 import type { PodStatus, PodSummary } from './pod.js';
+import type { ReadinessApproval, ReadinessStatus } from './readiness.js';
 import type { AgentEvent } from './runtime.js';
 import type {
   AdvisoryBrowserQaResult,
@@ -52,6 +53,7 @@ export type SystemEvent =
   | IssueWatcherErrorEvent
   | PodWorktreeCompromisedEvent
   | PodPreflightOverlapEvent
+  | PodReadinessApprovedEvent
   | HostResumedEvent
   | FirewallDeniedEvent;
 
@@ -143,6 +145,17 @@ export interface PodCompletedEvent {
   podId: string;
   finalStatus: 'complete' | 'killed';
   summary: PodSummary;
+}
+
+export interface PodReadinessApprovedEvent {
+  type: 'pod.readiness_approved';
+  timestamp: string;
+  podId: string;
+  status: ReadinessStatus;
+  scope: ReadinessApproval['scope'];
+  seriesId?: string;
+  summary: string;
+  reason?: string;
 }
 
 export interface MemorySuggestionCreatedEvent {

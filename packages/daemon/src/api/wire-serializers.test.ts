@@ -174,9 +174,13 @@ describe('serializeValidationResult', () => {
 });
 
 describe('serializePodForWire', () => {
-  it('returns the pod unchanged when there is no validation result', () => {
+  it('normalizes readinessReview to null when there is no validation result', () => {
     const pod = { id: 'p1', lastValidationResult: null } as unknown as Pod;
-    expect(serializePodForWire(pod)).toBe(pod);
+    expect(serializePodForWire(pod)).toEqual({
+      id: 'p1',
+      lastValidationResult: null,
+      readinessReview: null,
+    });
   });
 
   it('rewrites lastValidationResult.smoke.pages[].screenshot to DTO shape', () => {

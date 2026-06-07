@@ -1,0 +1,94 @@
+contract_version: 1
+title: "Gate approval and automation on Readiness Review"
+depends_on:
+  - 02-daemon-computation-and-series-rollup
+scenarios:
+  - id: manual-approval-reason-rules
+    given:
+      - "a pod approval is requested manually"
+      - "the recomputed readiness status is ready, needs_review, risky, or waived"
+    when:
+      - "approveSession applies readiness approval rules"
+    then:
+      - "ready approval succeeds without a reason"
+      - "needs_review approval succeeds without a reason"
+      - "risky approval requires a non-empty reason"
+      - "waived approval requires a non-empty reason"
+  - id: approval-stores-readiness-decision
+    given:
+      - "a needs_review, risky, or waived pod is approved"
+    when:
+      - "the daemon completes approval"
+    then:
+      - "the latest readiness snapshot contains approval metadata"
+      - "the daemon emits a pod.readiness_approved event with status, scope, summary, and reason when supplied"
+  - id: approval-waits-for-advisory
+    given:
+      - "advisory browser QA is enabled and already in flight"
+      - "the operator approves the pod"
+    when:
+      - "approveSession runs"
+    then:
+      - "approval waits for advisory completion"
+      - "the advisory result is persisted through the existing history path"
+      - "readiness is recomputed before reason rules are applied"
+  - id: automation-only-approves-ready
+    given:
+      - "autoApprove or approve-all sees pods with ready, needs_review, risky, and waived readiness"
+    when:
+      - "automation attempts approval"
+    then:
+      - "only ready pods are approved"
+      - "needs_review, risky, and waived pods are skipped with reasons"
+  - id: single-pr-approval-uses-series-readiness
+    given:
+      - "a final pod owns a single PR for a series"
+      - "Series Readiness differs from the final pod's own readiness"
+    when:
+      - "the final pod is approved"
+    then:
+      - "approval uses Series Readiness"
+      - "the approval metadata is stored on the final pod with scope series"
+required_facts:
+  - id: fact-readiness-manual-approval-rules
+    proves:
+      - manual-approval-reason-rules
+      - approval-stores-readiness-decision
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts -t "readiness approval"
+  - id: fact-readiness-approval-advisory-wait
+    proves:
+      - approval-waits-for-advisory
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts -t "approval waits for advisory"
+  - id: fact-readiness-auto-approval-skip
+    proves:
+      - automation-only-approves-ready
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts -t "autoApprove readiness"
+  - id: fact-readiness-approve-all-route
+    proves:
+      - automation-only-approves-ready
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/api/routes/pods.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pods.test.ts -t "approve-all readiness"
+  - id: fact-readiness-single-pr-approval
+    proves:
+      - single-pr-approval-uses-series-readiness
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts -t "single PR readiness approval"
+human_review: []

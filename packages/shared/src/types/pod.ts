@@ -3,6 +3,7 @@ import type { SpecContract } from './contract.js';
 import type { EscalationRequest } from './escalation.js';
 import type { PodOptions } from './pod-options.js';
 import type { ExecutionTarget, NetworkPolicyMode, PimGroupConfig, Profile } from './profile.js';
+import type { ReadinessReview } from './readiness.js';
 import type { RuntimeType } from './runtime.js';
 import type { TaskSummary } from './task-summary.js';
 import type { ValidationFinding, ValidationOverride, ValidationResult } from './validation.js';
@@ -217,6 +218,7 @@ export interface Pod {
   preSubmitReview: PreSubmitReviewSnapshot | null;
   validationOverrides: ValidationOverride[] | null;
   validationWaiver: ValidationWaiver | null;
+  readinessReview?: ReadinessReview | null;
   pimGroups: PimGroupConfig[] | null;
   /** Snapshot of the resolved profile config at pod creation time (after inheritance). */
   profileSnapshot: Profile | null;

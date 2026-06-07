@@ -56,8 +56,13 @@ public actor DaemonAPI {
     try await request("POST", "/pods", body: try encode(body))
   }
 
-  public func approvePod(_ id: String, squash: Bool? = nil) async throws {
-    let body = try squash.map { try encode(ApproveBody(squash: $0)) }
+  public func approvePod(_ id: String, squash: Bool? = nil, reason: String? = nil) async throws {
+    let trimmedReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let body: Data? = if squash != nil || trimmedReason?.isEmpty == false {
+      try encode(ApproveBody(squash: squash, reason: trimmedReason?.isEmpty == false ? trimmedReason : nil))
+    } else {
+      nil
+    }
     let _: OkResponse = try await request("POST", "/pods/\(id)/approve", body: body)
   }
 
@@ -232,9 +237,8 @@ public actor DaemonAPI {
     let _: EmptyResponse = try await request("DELETE", "/pods/series/\(seriesId)")
   }
 
-  public func approveAllValidated() async throws -> [String] {
-    let results: [SessionSummaryResponse] = try await request("POST", "/pods/approve-all")
-    return results.map(\.id)
+  public func approveAllValidated() async throws -> ApproveAllResponse {
+    try await request("POST", "/pods/approve-all")
   }
 
   public func killAllFailed() async throws -> [String] {
@@ -859,6 +863,17 @@ struct EmptyResponse: Codable {
   func encode(to encoder: any Encoder) throws {}
 }
 
+public struct ApproveAllResponse: Codable, Sendable {
+  public let approved: [String]
+  public let skipped: [ApproveAllSkippedResponse]?
+}
+
+public struct ApproveAllSkippedResponse: Codable, Sendable {
+  public let podId: String
+  public let status: String
+  public let reason: String
+}
+
 struct HealthResponse: Codable {
   let status: String
 }
@@ -901,6 +916,7 @@ struct MessageBody: Codable {
 
 struct ApproveBody: Codable {
   let squash: Bool?
+  let reason: String?
 }
 
 struct RejectBody: Codable {

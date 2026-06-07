@@ -4,7 +4,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import type { JwtPayload } from '@autopod/shared';
+import type { JwtPayload, ReadinessReview } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import pino from 'pino';
@@ -94,6 +94,7 @@ function insertPod(
     completedAt?: string;
     reworkCount?: number;
     outputMode?: string;
+    readinessReview?: ReadinessReview | null;
   } = {},
 ): string {
   const id = opts.id ?? `pod-${++podSeq}`;
@@ -102,12 +103,12 @@ function insertPod(
       id, profile_name, task, status, model, runtime, execution_target, branch,
       user_id, max_validation_attempts, skip_validation,
       output_mode, agent_mode, output_target, validate, promotable,
-      completed_at, rework_count
+      completed_at, rework_count, readiness_review
     ) VALUES (
       @id, 'test-profile', 'task', @status, 'claude-opus-4-7', 'claude', 'local', 'branch-1',
       'user-1', 3, 0,
       @outputMode, 'auto', 'pr', 1, 0,
-      @completedAt, @reworkCount
+      @completedAt, @reworkCount, @readinessReview
     )
   `).run({
     id,
@@ -115,9 +116,36 @@ function insertPod(
     outputMode: opts.outputMode ?? 'pr',
     completedAt: opts.completedAt ?? new Date().toISOString(),
     reworkCount: opts.reworkCount ?? 0,
+    readinessReview:
+      opts.readinessReview === undefined ? null : JSON.stringify(opts.readinessReview),
   });
   return id;
 }
+
+const readinessReview: ReadinessReview = {
+  status: 'ready',
+  summary: 'No readiness findings need review.',
+  computedAt: '2026-06-07T12:00:00.000Z',
+  scope: 'pod',
+  areas: [
+    {
+      area: 'validation',
+      status: 'ready',
+      title: 'Validation',
+      summary: 'Latest blocking validation passed.',
+      sourceRefs: [{ kind: 'validation', label: 'Validation', id: 'attempt-1' }],
+    },
+    {
+      area: 'advisory_qa',
+      status: 'not_applicable',
+      title: 'Advisory QA',
+      summary: 'Advisory QA was not configured.',
+      sourceRefs: [],
+    },
+  ],
+  findings: [],
+  approval: null,
+};
 
 // ── Test setup ────────────────────────────────────────────────────────────────
 
@@ -362,6 +390,31 @@ describe('GET /pods/analytics/reliability', () => {
     const body = res.json();
     expect(body.summary.totalPodsInWindow).toBe(1);
     expect(body.firstPassRate).toBe(1);
+  });
+
+  it('readiness exposes null and object snapshots in pod API responses', async () => {
+    const oldPodId = insertPod(db, { id: 'readiness-old' });
+    const readyPodId = insertPod(db, { id: 'readiness-ready', readinessReview });
+
+    const listRes = await app.inject({
+      method: 'GET',
+      url: '/pods',
+      headers: authHeaders,
+    });
+    expect(listRes.statusCode).toBe(200);
+    const listBody = listRes.json();
+    expect(listBody.find((pod: { id: string }) => pod.id === oldPodId).readinessReview).toBeNull();
+    expect(listBody.find((pod: { id: string }) => pod.id === readyPodId).readinessReview).toEqual(
+      readinessReview,
+    );
+
+    const detailRes = await app.inject({
+      method: 'GET',
+      url: `/pods/${readyPodId}`,
+      headers: authHeaders,
+    });
+    expect(detailRes.statusCode).toBe(200);
+    expect(detailRes.json().readinessReview).toEqual(readinessReview);
   });
 });
 
@@ -2409,5 +2462,119 @@ describe('POST /pods/:podId/update-from-base', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ ok: true, action: 'queued_after_abort' });
+  });
+});
+
+describe('POST /pods approve routes', () => {
+  let db: Database.Database;
+  let app: FastifyInstance;
+  let podManager: {
+    approveSession: ReturnType<typeof vi.fn>;
+    approveAllValidated: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(async () => {
+    db = createTestDb();
+    const profileStore = createProfileStore(db);
+    const eventRepo = createEventRepository(db);
+    const eventBus = createEventBus(eventRepo, logger);
+    const authModule = createMockAuthModule();
+    podManager = {
+      approveSession: vi.fn().mockResolvedValue(undefined),
+      approveAllValidated: vi.fn().mockResolvedValue({
+        approved: ['ready-pod'],
+        skipped: [
+          {
+            podId: 'review-pod',
+            status: 'needs_review',
+            reason: 'Readiness Review is needs_review: Network finding.',
+          },
+        ],
+      }),
+    };
+    const podBridge = {
+      createEscalation: vi.fn(),
+      resolveEscalation: vi.fn(),
+      getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getMaxAiCalls: vi.fn().mockReturnValue(5),
+      getAutoPauseThreshold: vi.fn().mockReturnValue(3),
+      getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
+      getReviewerModel: vi.fn().mockReturnValue('sonnet'),
+      callReviewerModel: vi.fn().mockResolvedValue('ok'),
+      incrementEscalationCount: vi.fn(),
+      reportPlan: vi.fn(),
+      reportProgress: vi.fn(),
+      consumeMessages: vi.fn().mockReturnValue({ hasMessage: false }),
+      executeAction: vi.fn(),
+      getAvailableActions: vi.fn().mockReturnValue([]),
+      writeFileInContainer: vi.fn(),
+      execInContainer: vi.fn(),
+    };
+
+    app = await createServer({
+      authModule,
+      podManager: podManager as unknown as ReturnType<typeof createPodManager>,
+      profileStore,
+      eventBus,
+      eventRepo,
+      podBridge,
+      pendingRequestsByPod: new Map(),
+      db,
+      logLevel: 'silent',
+      prettyLog: false,
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+    db.close();
+  });
+
+  it('approve forwards optional squash and reason metadata', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/pods/pod-ready/approve',
+      headers: authHeaders,
+      payload: { squash: true, reason: 'Reviewed readiness findings' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+    expect(podManager.approveSession).toHaveBeenCalledWith('pod-ready', {
+      squash: true,
+      reason: 'Reviewed readiness findings',
+    });
+  });
+
+  it('approve rejects invalid approval metadata', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/pods/pod-ready/approve',
+      headers: authHeaders,
+      payload: { reason: 123 },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(podManager.approveSession).not.toHaveBeenCalled();
+  });
+
+  it('approve-all readiness returns approved and skipped pods', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/pods/approve-all',
+      headers: authHeaders,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      approved: ['ready-pod'],
+      skipped: [
+        {
+          podId: 'review-pod',
+          status: 'needs_review',
+          reason: 'Readiness Review is needs_review: Network finding.',
+        },
+      ],
+    });
   });
 });

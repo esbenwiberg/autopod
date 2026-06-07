@@ -209,6 +209,20 @@ describe('pod commands', () => {
     expect(mockClient.approveSession).toHaveBeenCalledWith('abcd1234', { squash: true });
   });
 
+  it('passes approve reason to the daemon client', async () => {
+    await program.parseAsync([
+      'node',
+      'ap',
+      'approve',
+      'abcd1234',
+      '--reason',
+      'accepted denied egress',
+    ]);
+    expect(mockClient.approveSession).toHaveBeenCalledWith('abcd1234', {
+      reason: 'accepted denied egress',
+    });
+  });
+
   it('registers reject command that calls rejectSession', async () => {
     await program.parseAsync(['node', 'ap', 'reject', 'abcd1234', 'needs work']);
     expect(mockClient.rejectSession).toHaveBeenCalledWith('abcd1234', 'needs work');
@@ -222,6 +236,36 @@ describe('pod commands', () => {
   it('registers approve --all-validated', async () => {
     await program.parseAsync(['node', 'ap', 'approve', '--all-validated']);
     expect(mockClient.approveAllValidated).toHaveBeenCalled();
+  });
+
+  it('prints approve all readiness skipped pods', async () => {
+    (mockClient.approveAllValidated as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      approved: ['abcd1234'],
+      skipped: [
+        {
+          podId: 'efgh5678',
+          status: 'needs_review',
+          reason: 'Advisory QA concern',
+        },
+        {
+          podId: 'ijkl9012',
+          status: 'risky',
+          reason: 'validation failed; pass --reason for manual approval',
+        },
+      ],
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await program.parseAsync(['node', 'ap', 'approve', '--all-validated']);
+
+    const output = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
+    expect(output).toContain('Approved: abcd1234');
+    expect(output).toContain('Skipped:');
+    expect(output).toContain('efgh5678 needs_review - Advisory QA concern');
+    expect(output).toContain(
+      'ijkl9012 risky - validation failed; pass --reason for manual approval',
+    );
+    logSpy.mockRestore();
   });
 
   it('registers kill --all-failed', async () => {

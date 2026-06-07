@@ -15,6 +15,7 @@ import type {
   PodStatus,
   Profile,
   PublicProfile,
+  ReadinessStatus,
   ScheduledJob,
   ScheduledJobTemplate,
   SpecContract,
@@ -59,6 +60,15 @@ export interface SeriesResponse {
   pods: Pod[];
   tokenUsageSummary: { inputTokens: number; outputTokens: number; costUsd: number };
   statusCounts: Record<string, number>;
+}
+
+export interface ApproveAllValidatedResponse {
+  approved: string[];
+  skipped?: Array<{
+    podId: string;
+    status: ReadinessStatus;
+    reason: string;
+  }>;
 }
 import { fetch } from 'undici';
 
@@ -132,7 +142,7 @@ export class AutopodClient {
     await this.request<void>('POST', `/pods/${id}/validate`);
   }
 
-  async approveSession(id: string, opts?: { squash?: boolean }): Promise<void> {
+  async approveSession(id: string, opts?: { squash?: boolean; reason?: string }): Promise<void> {
     await this.request<void>('POST', `/pods/${id}/approve`, opts);
   }
 
@@ -389,8 +399,8 @@ export class AutopodClient {
   }
 
   // Bulk
-  async approveAllValidated(): Promise<{ approved: string[] }> {
-    return this.request<{ approved: string[] }>('POST', '/pods/approve-all');
+  async approveAllValidated(): Promise<ApproveAllValidatedResponse> {
+    return this.request<ApproveAllValidatedResponse>('POST', '/pods/approve-all');
   }
 
   async killAllFailed(): Promise<{ killed: string[] }> {

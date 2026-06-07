@@ -1,0 +1,68 @@
+contract_version: 1
+title: "Add Desktop Readiness Review tab and approval flow"
+depends_on:
+  - 03-approval-and-automation-gates
+scenarios:
+  - id: desktop-decodes-readiness
+    given:
+      - "the daemon returns pods with readinessReview null, pod readiness, and series readiness data"
+    when:
+      - "Desktop decodes and maps the responses"
+    then:
+      - "null readiness is represented as pending or unavailable"
+      - "pod readiness areas, findings, source refs, and approval metadata map into UI models"
+      - "series readiness can be rendered for single-PR final pods"
+  - id: overview-stays-compact
+    given:
+      - "a selected pod has ready, needs_review, risky, waived, or missing readiness"
+    when:
+      - "Desktop renders the Overview tab"
+    then:
+      - "Overview shows only a compact Readiness card or pending line"
+      - "the card routes to the Readiness tab"
+      - "the Overview tab does not become a long review surface"
+  - id: readiness-tab-renders-areas-and-findings
+    given:
+      - "a readiness snapshot has green and non-green areas"
+    when:
+      - "Desktop renders the Readiness tab"
+    then:
+      - "green rows are compact"
+      - "non-green rows show the finding summary"
+      - "source refs route to existing Validation, Work, Logs, Diff, PR, or Evidence surfaces"
+  - id: desktop-approval-flow-follows-status
+    given:
+      - "a selected pod has ready, needs_review, risky, or waived readiness"
+    when:
+      - "the operator clicks approve"
+    then:
+      - "ready can approve directly"
+      - "needs_review routes to Readiness and can approve without a reason"
+      - "risky and waived route to Readiness and require a non-empty reason"
+      - "Desktop does not optimistically mark the pod approved before daemon acceptance"
+  - id: desktop-series-readiness-first
+    given:
+      - "a final pod owns a single PR for a series"
+    when:
+      - "Desktop renders Readiness for that pod"
+    then:
+      - "Series Readiness is shown before pod-level readiness"
+      - "member pod summaries are visible in the Readiness tab"
+      - "reason requirements follow the series rollup status"
+required_facts: []
+human_review:
+  - id: review-desktop-readiness-layout
+    covers:
+      - desktop-decodes-readiness
+      - overview-stays-compact
+      - readiness-tab-renders-areas-and-findings
+      - desktop-series-readiness-first
+      - desktop-approval-flow-follows-status
+    criterion: >-
+      On a macOS/Xcode-capable machine, verify readiness decoding and mapping,
+      inspect ready/needs_review/risky/waived and single-PR series states, and
+      confirm the Overview stays compact while approval routing and reason
+      requirements match the approved wireframes.
+    reason: >-
+      Autopod-self required facts run in a Linux pod, while Desktop Swift,
+      SwiftUI, and AppKit validation requires a macOS/Xcode-capable environment.

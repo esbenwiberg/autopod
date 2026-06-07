@@ -33,6 +33,19 @@ export type {
 } from './types/pod.js';
 
 export type {
+  ReadinessApproval,
+  ReadinessArea,
+  ReadinessAreaReview,
+  ReadinessAreaStatus,
+  ReadinessFinding,
+  ReadinessFindingSeverity,
+  ReadinessReview,
+  ReadinessSourceRef,
+  ReadinessSourceRefKind,
+  ReadinessStatus,
+} from './types/readiness.js';
+
+export type {
   Profile,
   PublicProfile,
   ProfileEditorPayload,
@@ -302,7 +315,17 @@ export {
 // Schemas (runtime values — Zod objects)
 export {
   createPodRequestSchema,
+  nullableReadinessReviewSchema,
+  podResponseSchema,
   podStatusSchema,
+  readinessAreaReviewSchema,
+  readinessAreaSchema,
+  readinessAreaStatusSchema,
+  readinessApprovalSchema,
+  readinessFindingSchema,
+  readinessReviewSchema,
+  readinessSourceRefSchema,
+  readinessStatusSchema,
   sendMessageSchema,
 } from './schemas/pod.schema.js';
 

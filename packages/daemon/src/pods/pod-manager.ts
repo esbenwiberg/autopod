@@ -28,6 +28,9 @@ import type {
   PodStatus,
   PrivateRegistry,
   Profile,
+  ReadinessApproval,
+  ReadinessReview,
+  ReadinessStatus,
   RequestCredentialPayload,
   ReviewFeedbackResponseItem,
   SastResult,
@@ -133,6 +136,8 @@ import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
 import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
+import type { QualityScoreRepository } from './quality-score-repository.js';
+import { createReadinessService } from './readiness-review.js';
 import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
 import { deriveReferenceRepos, resolveRefRepoPat } from './reference-repos.js';
 import {
@@ -976,6 +981,8 @@ export interface PodManagerDependencies {
   reviewInfrastructureRetryBackoffMs?: readonly number[];
   /** Safety events repository for writing per-pattern detection rows. */
   safetyEventsRepo?: import('../safety/safety-events-repository.js').SafetyEventsRepository;
+  /** Persisted behavioural quality scores used by Readiness Review when available. */
+  qualityScoreRepo?: QualityScoreRepository;
   logger: Logger;
 }
 
@@ -986,6 +993,18 @@ export interface PodCreator {
 }
 
 export type AgentRunOutcome = 'completed' | 'failed' | 'paused' | 'stopped';
+
+export interface ApproveSessionOptions {
+  squash?: boolean;
+  reason?: string;
+  automation?: boolean;
+}
+
+export interface ApproveAllSkippedPod {
+  podId: string;
+  status: ReadinessStatus;
+  reason: string;
+}
 
 export interface PodManager {
   createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod;
@@ -1000,9 +1019,9 @@ export interface PodManager {
   notifyEscalation(podId: string, escalation: EscalationRequest): void;
   touchHeartbeat(podId: string): void;
   getReviewerExecEnv(pod: Pod): Promise<Record<string, string> | undefined>;
-  approveSession(podId: string, options?: { squash?: boolean }): Promise<void>;
+  approveSession(podId: string, options?: ApproveSessionOptions): Promise<void>;
   rejectSession(podId: string, reason?: string): Promise<void>;
-  approveAllValidated(): Promise<{ approved: string[] }>;
+  approveAllValidated(): Promise<{ approved: string[]; skipped: ApproveAllSkippedPod[] }>;
   killAllFailed(): Promise<{ killed: string[] }>;
   extendAttempts(podId: string, additionalAttempts: number): Promise<void>;
   /** Apply queued overrides to the last validation result without re-running validation.
@@ -1381,6 +1400,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     screenshotStore,
     hostScreenshotDir,
     safetyEventsRepo,
+    qualityScoreRepo,
   } = deps;
   const reviewInfrastructureRetryBackoffMs =
     deps.reviewInfrastructureRetryBackoffMs ?? REVIEW_INFRA_RETRY_BACKOFF_MS;
@@ -1405,6 +1425,142 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    *  handle. */
   const haproxyDenyHandles = new Map<string, HaproxyDenyStreamHandle>();
   const maxCredentialLineageByPod = new Map<string, MaxCredentialLineage>();
+  const readinessService = createReadinessService({
+    podRepo,
+    validationRepo,
+    scanRepo,
+    actionAuditRepo: deps.actionAuditRepo,
+    eventRepo: deps.eventRepo,
+    qualityScoreRepo,
+  });
+
+  function refreshReadiness(podId: string, options: { advisoryQaInFlight?: boolean } = {}): void {
+    try {
+      const pod = podRepo.getOrThrow(podId);
+      const allowPostDecision = options.advisoryQaInFlight === false;
+      const refreshableStatuses = allowPostDecision
+        ? [
+            'validated',
+            'review_required',
+            'failed',
+            'approved',
+            'merging',
+            'merge_pending',
+            'complete',
+          ]
+        : ['validated', 'review_required', 'failed'];
+      if (!refreshableStatuses.includes(pod.status)) {
+        return;
+      }
+      readinessService.refreshPodReadiness(podId, options);
+    } catch (err) {
+      logger.warn({ err, podId }, 'Failed to refresh Readiness Review');
+    }
+  }
+
+  type ApprovalReadiness = {
+    status: ReadinessStatus;
+    summary: string;
+    scope: ReadinessApproval['scope'];
+    seriesId?: string;
+    podReview: ReadinessReview;
+  };
+
+  async function resolveApprovalReadiness(
+    pod: Pod,
+    options: { waitForAdvisory?: boolean } = {},
+  ): Promise<ApprovalReadiness> {
+    const advisoryRun = advisoryRuns.get(pod.id);
+    let podReview = readinessService.refreshPodReadiness(pod.id, {
+      advisoryQaInFlight: Boolean(advisoryRun),
+    });
+    if (options.waitForAdvisory && advisoryRun) {
+      emitActivityStatus(pod.id, 'Waiting for advisory browser QA before approval…');
+      await advisoryRun;
+      podReview = readinessService.refreshPodReadiness(pod.id, { advisoryQaInFlight: false });
+    }
+
+    if (isSinglePrSeriesPod(pod) && pod.prUrl && pod.seriesId) {
+      const seriesReview = readinessService.computeSeriesReadiness(pod.seriesId);
+      return {
+        status: seriesReview.status,
+        summary: seriesReview.summary,
+        scope: 'series',
+        seriesId: pod.seriesId,
+        podReview,
+      };
+    }
+
+    return {
+      status: podReview.status,
+      summary: podReview.summary,
+      scope: 'pod',
+      podReview,
+    };
+  }
+
+  function normalizeApprovalReason(reason?: string): string | undefined {
+    const trimmed = reason?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  function readinessSkipReason(readiness: Pick<ApprovalReadiness, 'status' | 'summary'>): string {
+    return readiness.status === 'ready'
+      ? 'Readiness Review is ready.'
+      : `Readiness Review is ${readiness.status}: ${readiness.summary}`;
+  }
+
+  function assertApprovalAllowed(
+    podId: string,
+    readiness: Pick<ApprovalReadiness, 'status' | 'summary'>,
+    options: ApproveSessionOptions = {},
+  ): string | undefined {
+    const reason = normalizeApprovalReason(options.reason);
+    if (options.automation && readiness.status !== 'ready') {
+      throw new AutopodError(readinessSkipReason(readiness), 'READINESS_NOT_READY', 409);
+    }
+    if ((readiness.status === 'risky' || readiness.status === 'waived') && !reason) {
+      throw new AutopodError(
+        `Approval reason is required for ${readiness.status} Readiness Review on pod ${podId}`,
+        'READINESS_REASON_REQUIRED',
+        400,
+      );
+    }
+    return reason;
+  }
+
+  function persistReadinessApproval(
+    podId: string,
+    readiness: ApprovalReadiness,
+    reason?: string,
+  ): void {
+    const approval: ReadinessApproval = {
+      approvedAt: new Date().toISOString(),
+      statusAtApproval: readiness.status,
+      scope: readiness.scope,
+      ...(readiness.seriesId ? { seriesId: readiness.seriesId } : {}),
+      ...(reason ? { reason } : {}),
+    };
+    podRepo.update(podId, {
+      readinessReview: {
+        ...readiness.podReview,
+        approval,
+      },
+    });
+
+    if (readiness.status !== 'ready') {
+      eventBus.emit({
+        type: 'pod.readiness_approved',
+        timestamp: approval.approvedAt,
+        podId,
+        status: readiness.status,
+        scope: readiness.scope,
+        summary: readiness.summary,
+        ...(readiness.seriesId ? { seriesId: readiness.seriesId } : {}),
+        ...(reason ? { reason } : {}),
+      });
+    }
+  }
 
   function rememberMaxCredentialLineage(podId: string, result: ProviderEnvResult): void {
     if (result.maxCredentialLineage) {
@@ -3762,6 +3918,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         advisoryBrowserQa: advisoryResult,
       };
       podRepo.update(podId, { lastValidationResult: mergedResult });
+      refreshReadiness(podId, { advisoryQaInFlight: false });
       return mergedResult;
     };
 
@@ -3842,6 +3999,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         advisoryBrowserQa: advisoryResult,
       };
       podRepo.update(podId, { lastValidationResult: mergedResult });
+      refreshReadiness(podId, { advisoryQaInFlight: false });
       return mergedResult;
     })();
 
@@ -4111,6 +4269,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       previousStatus,
       newStatus: to,
     });
+    if (to === 'validated' || to === 'review_required' || to === 'failed') {
+      refreshReadiness(pod.id);
+    }
     return podRepo.getOrThrow(pod.id);
   }
 
@@ -7217,7 +7378,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             if (validatedPod.autoApprove) {
               logger.info({ podId }, 'Auto-approving pod after host_push retry');
               setImmediate(() => {
-                this.approveSession(podId).catch((err) =>
+                this.approveSession(podId, { automation: true }).catch((err) =>
                   logger.warn({ err, podId }, 'Auto-approve after host_push retry failed'),
                 );
               });
@@ -7375,11 +7536,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     },
 
-    async approveSession(podId: string, options?: { squash?: boolean }): Promise<void> {
+    async approveSession(podId: string, options: ApproveSessionOptions = {}): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
-      if (advisoryRuns.has(podId)) {
-        emitActivityStatus(podId, 'Approval continuing while advisory browser QA runs…');
-      }
+      validateTransition(pod.id, pod.status, 'approved');
+      const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
+      const approvalReason = assertApprovalAllowed(podId, readiness, options);
       const isWorkspacePod = pod.options?.agentMode === 'interactive';
 
       // No-change fast-path: skip PR creation and complete directly.
@@ -7439,6 +7600,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           }
           const s1 = transition(pod, 'approved');
+          persistReadinessApproval(podId, readiness, approvalReason);
           const s2 = transition(s1, 'merging');
           await cleanupContainerAfterAdvisorySettles(pod, 'approve-no-changes');
           const noChangePod = transition(s2, 'complete', {
@@ -7472,6 +7634,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       emitActivityStatus(podId, 'Approved — merging changes…');
       const s1 = transition(pod, 'approved');
+      persistReadinessApproval(podId, readiness, approvalReason);
       const s2 = transition(s1, 'merging');
 
       // Merge the PR if one was created, otherwise fall back to branch push
@@ -9254,6 +9417,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // intent must not fire on a later revalidation for this pod.
           pendingUpdateFromBaseIntents.delete(podId);
           const validatedPod = transition(s2, 'validated', { prUrl });
+          refreshReadiness(podId, {
+            advisoryQaInFlight:
+              validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
+          });
           maybeTriggerDependents(validatedPod);
           await runAdvisoryAfterValidation(podId, validationConfig, result);
           const postAdvisoryPod = podRepo.getOrThrow(podId);
@@ -9285,7 +9452,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           if (postAdvisoryPod.autoApprove) {
             logger.info({ podId }, 'Auto-approving pod after validation');
             setImmediate(() => {
-              this.approveSession(podId).catch((err) =>
+              this.approveSession(podId, { automation: true }).catch((err) =>
                 logger.warn({ err, podId }, 'Auto-approve failed'),
               );
             });
@@ -9769,6 +9936,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
 
           const revalidatedPod = transition(s2, 'validated', { prUrl });
+          refreshReadiness(podId, {
+            advisoryQaInFlight:
+              validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
+          });
           maybeTriggerDependents(revalidatedPod);
           await runAdvisoryAfterValidation(podId, validationConfig, result);
           const postAdvisoryPod = podRepo.getOrThrow(podId);
@@ -9789,7 +9960,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           if (postAdvisoryPod.autoApprove) {
             logger.info({ podId }, 'Auto-approving pod after revalidation');
             setImmediate(() => {
-              this.approveSession(podId).catch((err) =>
+              this.approveSession(podId, { automation: true }).catch((err) =>
                 logger.warn({ err, podId }, 'Auto-approve failed after revalidation'),
               );
             });
@@ -10306,18 +10477,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return validationRepo?.getForSession(podId) ?? [];
     },
 
-    async approveAllValidated(): Promise<{ approved: string[] }> {
+    async approveAllValidated(): Promise<{ approved: string[]; skipped: ApproveAllSkippedPod[] }> {
       const validated = podRepo.list({ status: 'validated' });
       const approved: string[] = [];
+      const skipped: ApproveAllSkippedPod[] = [];
       for (const pod of validated) {
         try {
-          await this.approveSession(pod.id);
+          const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
+          if (readiness.status !== 'ready') {
+            skipped.push({
+              podId: pod.id,
+              status: readiness.status,
+              reason: readinessSkipReason(readiness),
+            });
+            continue;
+          }
+          await this.approveSession(pod.id, { automation: true });
           approved.push(pod.id);
         } catch (err) {
           logger.warn({ err, podId: pod.id }, 'Failed to approve pod in bulk');
         }
       }
-      return { approved };
+      return { approved, skipped };
     },
 
     async killAllFailed(): Promise<{ killed: string[] }> {
@@ -10965,7 +11146,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         logger.info({ podId, prUrl: newPrUrl }, 'Pod resumed via push + PR');
         if (validated.autoApprove) {
           setImmediate(() => {
-            this.approveSession(podId).catch((err) =>
+            this.approveSession(podId, { automation: true }).catch((err) =>
               logger.warn({ err, podId }, 'Auto-approve failed after resume'),
             );
           });

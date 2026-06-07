@@ -156,6 +156,242 @@ import AutopodUI
   #expect(pod.runningAt == nil)
 }
 
+@Test func decodesAndMapsReadinessReview() throws {
+  let json = """
+  {
+    "id": "pod-ready-1",
+    "profileName": "my-app",
+    "task": "Ship readiness",
+    "status": "validated",
+    "model": "gpt-5",
+    "runtime": "codex",
+    "executionTarget": "local",
+    "branch": "feature/readiness",
+    "containerId": null,
+    "worktreePath": "/tmp/worktree",
+    "validationAttempts": 1,
+    "maxValidationAttempts": 3,
+    "lastValidationResult": null,
+    "pendingEscalation": null,
+    "escalationCount": 0,
+    "skipValidation": false,
+    "createdAt": "2026-04-01T09:00:00Z",
+    "startedAt": "2026-04-01T09:00:05Z",
+    "runningAt": null,
+    "completedAt": null,
+    "updatedAt": "2026-04-01T09:05:00Z",
+    "userId": "user-1",
+    "filesChanged": 1,
+    "linesAdded": 2,
+    "linesRemoved": 0,
+    "previewUrl": null,
+    "prUrl": "https://example.test/pr/1",
+    "plan": null,
+    "progress": null,
+    "claudeSessionId": null,
+    "outputMode": "pr",
+    "options": {
+      "agentMode": "auto",
+      "output": "pr",
+      "validate": true,
+      "promotable": false
+    },
+    "baseBranch": null,
+    "recoveryWorktreePath": null,
+    "lastHeartbeatAt": null,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0,
+    "commitCount": 1,
+    "lastCommitAt": null,
+    "readinessReview": {
+      "status": "risky",
+      "summary": "Validation is blocked.",
+      "computedAt": "2026-04-01T10:00:00Z",
+      "scope": "pod",
+      "areas": [
+        {
+          "area": "validation",
+          "status": "risky",
+          "title": "Validation",
+          "summary": "Blocking validation failed.",
+          "sourceRefs": [{ "kind": "validation", "label": "Validation", "id": "latest" }]
+        },
+        {
+          "area": "security",
+          "status": "ready",
+          "title": "Security",
+          "summary": "No blocking findings.",
+          "sourceRefs": []
+        }
+      ],
+      "findings": [
+        {
+          "id": "validation-failed",
+          "area": "validation",
+          "severity": "error",
+          "title": "Validation failed",
+          "detail": "Tests failed in the latest blocking validation.",
+          "sourceRefs": [{ "kind": "validation", "label": "Validation", "id": "latest" }]
+        }
+      ],
+      "approval": {
+        "approvedAt": "2026-04-01T10:05:00Z",
+        "approvedBy": "operator",
+        "statusAtApproval": "risky",
+        "scope": "pod",
+        "seriesId": null,
+        "reason": "Known test harness issue."
+      }
+    }
+  }
+  """.data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+
+  #expect(pod.readinessReview?.status == .risky)
+  #expect(pod.readinessReview?.status.requiresApprovalReason == true)
+  #expect(pod.readinessReview?.areas.first?.area == .validation)
+  #expect(pod.readinessReview?.areas.first?.sourceRefs.first?.detailTab == .validation)
+  #expect(pod.readinessReview?.findings.first?.severity == .error)
+  #expect(pod.readinessReview?.approval?.reason == "Known test harness issue.")
+}
+
+@Test func seriesReadinessRollupUsesMemberSnapshots() {
+  let readyReview = ReadinessReview(
+    status: .ready,
+    summary: "Ready.",
+    computedAt: Date(timeIntervalSince1970: 10),
+    areas: [
+      ReadinessAreaReview(
+        area: .validation,
+        status: .ready,
+        title: "Validation",
+        summary: "Passed.",
+        sourceRefs: []
+      ),
+    ],
+    findings: []
+  )
+  let reviewFinding = ReadinessFinding(
+    id: "security-warning",
+    area: .security,
+    severity: .warning,
+    title: "Security warning",
+    detail: "Scanner reported a warning.",
+    sourceRefs: [ReadinessSourceRef(kind: .evidence, label: "Evidence")]
+  )
+  let needsReview = ReadinessReview(
+    status: .needsReview,
+    summary: "Security warning.",
+    computedAt: Date(timeIntervalSince1970: 20),
+    areas: [
+      ReadinessAreaReview(
+        area: .security,
+        status: .needsReview,
+        title: "Security",
+        summary: "Warning.",
+        sourceRefs: []
+      ),
+    ],
+    findings: [reviewFinding]
+  )
+  let owner = Pod(
+    id: "05-final",
+    status: .validated,
+    pod: PodConfig(agentMode: .auto, output: .pr),
+    branch: "feature/readiness",
+    profileName: "autopod-self",
+    model: "gpt-5",
+    startedAt: Date(timeIntervalSince1970: 30),
+    seriesId: "series-1",
+    readinessReview: readyReview
+  )
+  let member = Pod(
+    id: "01-backend",
+    status: .validated,
+    pod: PodConfig(agentMode: .auto, output: .branch),
+    branch: "feature/readiness-backend",
+    profileName: "autopod-self",
+    model: "gpt-5",
+    startedAt: Date(timeIntervalSince1970: 5),
+    seriesId: "series-1",
+    readinessReview: needsReview
+  )
+
+  let rollup = SeriesReadinessReview.rollup(for: owner, seriesPods: [member, owner])
+
+  #expect(rollup?.status == .needsReview)
+  #expect(rollup?.members.count == 2)
+  #expect(rollup?.findings.first?.title == "01-backend: Security warning")
+  #expect(rollup?.summary == "1 finding(s) across 1 of 2 pod(s).")
+}
+
+@Test func seriesReadinessUsesDaemonScopedSnapshotWithoutMembers() {
+  let seriesReview = ReadinessReview(
+    status: .waived,
+    summary: "Validation was waived across the series.",
+    computedAt: Date(timeIntervalSince1970: 40),
+    scope: .series,
+    areas: [
+      ReadinessAreaReview(
+        area: .validation,
+        status: .waived,
+        title: "Validation",
+        summary: "Waived.",
+        sourceRefs: [ReadinessSourceRef(kind: .validation, label: "Validation")]
+      ),
+    ],
+    findings: [
+      ReadinessFinding(
+        id: "validation-waiver",
+        area: .validation,
+        severity: .warning,
+        title: "Validation waiver recorded",
+        detail: "Operator accepted missing proof.",
+        sourceRefs: [ReadinessSourceRef(kind: .validation, label: "Validation")]
+      ),
+    ],
+    approval: ReadinessApproval(
+      approvedAt: Date(timeIntervalSince1970: 45),
+      approvedBy: "operator",
+      statusAtApproval: .waived,
+      scope: .series,
+      seriesId: "series-2",
+      reason: "Known external outage."
+    )
+  )
+  let owner = Pod(
+    id: "05-final",
+    status: .validated,
+    pod: PodConfig(agentMode: .auto, output: .pr),
+    branch: "feature/readiness",
+    profileName: "autopod-self",
+    model: "gpt-5",
+    startedAt: Date(timeIntervalSince1970: 30),
+    seriesId: "series-2",
+    readinessReview: seriesReview
+  )
+
+  let rollup = SeriesReadinessReview.rollup(for: owner, seriesPods: [])
+
+  #expect(rollup?.status == .waived)
+  #expect(rollup?.seriesId == "series-2")
+  #expect(rollup?.summary == "Validation was waived across the series.")
+  #expect(rollup?.members.first?.id == "05-final")
+  #expect(rollup?.members.first?.status == .waived)
+}
+
+@Test func readinessAvailabilityStatusesAreNotApprovable() {
+  #expect(ReadinessStatus.ready.canApproveFromReadinessTab == true)
+  #expect(ReadinessStatus.needsReview.canApproveFromReadinessTab == true)
+  #expect(ReadinessStatus.risky.canApproveFromReadinessTab == true)
+  #expect(ReadinessStatus.waived.canApproveFromReadinessTab == true)
+  #expect(ReadinessStatus.notAvailable.canApproveFromReadinessTab == false)
+  #expect(ReadinessStatus.notApplicable.canApproveFromReadinessTab == false)
+}
+
 @Test func mapsMissingRunningAt() throws {
   let json = """
   {

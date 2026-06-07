@@ -37,6 +37,38 @@ function truncate(str: string, max: number): string {
   return `${str.slice(0, max - 1)}…`;
 }
 
+function formatReadinessLine(pod: Pod): string {
+  if (!pod.readinessReview) {
+    return 'Readiness: pending/unavailable';
+  }
+  return `Readiness: ${pod.readinessReview.status} - ${pod.readinessReview.summary}`;
+}
+
+function printApproveAllResult(result: {
+  approved: string[];
+  skipped?: Array<{ podId: string; status: string; reason: string }>;
+}): void {
+  const skipped = result.skipped ?? [];
+  if (result.approved.length === 0 && skipped.length === 0) {
+    console.log(chalk.dim('No validated pods to approve.'));
+  } else if (result.approved.length === 1) {
+    console.log(chalk.green(`Approved: ${result.approved[0]}`));
+  } else if (result.approved.length === 0) {
+    console.log(chalk.dim('Approved: none'));
+  } else {
+    console.log(chalk.green(`Approved: ${result.approved.join(', ')}`));
+  }
+
+  if (skipped.length === 0) {
+    return;
+  }
+
+  console.log('Skipped:');
+  for (const skippedPod of skipped) {
+    console.log(`  ${skippedPod.podId} ${skippedPod.status} - ${skippedPod.reason}`);
+  }
+}
+
 // Commander collector for repeatable `--sidecar <name>` flags.
 function collectRepeatable(value: string, previous: string[]): string[] {
   return previous.concat(value);
@@ -322,6 +354,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       console.log(chalk.dim('─'.repeat(50)));
       console.log(`${chalk.bold('Profile:')}      ${s.profileName}`);
       console.log(`${chalk.bold('Status:')}       ${formatStatus(s.status)}`);
+      console.log(formatReadinessLine(s));
       console.log(`${chalk.bold('Task:')}         ${s.task}`);
       console.log(`${chalk.bold('Model:')}        ${s.model}`);
       console.log(`${chalk.bold('Runtime:')}      ${s.runtime}`);
@@ -542,35 +575,39 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .command('approve [id]')
     .description('Approve a validated pod for merge')
     .option('--squash', 'Squash commits on merge')
+    .option('--reason <reason>', 'Reason for approving readiness that needs review')
     .option('--all-validated', 'Approve all validated pods')
-    .action(async (id: string | undefined, opts: { squash?: boolean; allValidated?: boolean }) => {
-      const client = getClient();
+    .action(
+      async (
+        id: string | undefined,
+        opts: { squash?: boolean; reason?: string; allValidated?: boolean },
+      ) => {
+        const client = getClient();
 
-      if (opts.allValidated) {
-        const result = await withSpinner('Approving all validated pods...', () =>
-          client.approveAllValidated(),
-        );
-        if (result.approved.length === 0) {
-          console.log(chalk.dim('No validated pods to approve.'));
-        } else {
-          console.log(
-            chalk.green(`Approved ${result.approved.length} pod(s): ${result.approved.join(', ')}`),
+        if (opts.allValidated) {
+          const result = await withSpinner('Approving all validated pods...', () =>
+            client.approveAllValidated(),
           );
+          printApproveAllResult(result);
+          return;
         }
-        return;
-      }
 
-      if (!id) {
-        console.error(chalk.red('Provide a pod ID or use --all-validated'));
-        process.exit(1);
-      }
+        if (!id) {
+          console.error(chalk.red('Provide a pod ID or use --all-validated'));
+          process.exit(1);
+        }
 
-      const resolvedId = await resolvePodId(client, id);
-      await withSpinner('Approving pod...', () =>
-        client.approveSession(resolvedId, { squash: opts.squash }),
-      );
-      console.log(chalk.green(`Pod ${resolvedId} approved.`));
-    });
+        const resolvedId = await resolvePodId(client, id);
+        const approvalOptions = {
+          ...(opts.squash !== undefined ? { squash: opts.squash } : {}),
+          ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
+        };
+        await withSpinner('Approving pod...', () =>
+          client.approveSession(resolvedId, approvalOptions),
+        );
+        console.log(chalk.green(`Pod ${resolvedId} approved.`));
+      },
+    );
 
   // ap reject
   program

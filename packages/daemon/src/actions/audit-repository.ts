@@ -15,8 +15,17 @@ export interface ActionAuditRepository {
   insert(entry: Omit<ActionAuditEntry, 'id' | 'createdAt' | 'prevHash' | 'entryHash'>): void;
   listBySession(podId: string, limit?: number): ActionAuditEntry[];
   countBySession(podId: string): number;
+  getSafetySummary(podId: string): ActionAuditSafetySummary;
   /** Verify the hash chain for all rows of a pod in insertion order. */
   verifyAuditChain(podId: string): AuditChainVerifyResult;
+}
+
+export interface ActionAuditSafetySummary {
+  rowCount: number;
+  quarantineCount: number;
+  piiCount: number;
+  piiCategories: string[];
+  maxQuarantineScore: number;
 }
 
 function computeEntryHash(
@@ -113,6 +122,47 @@ export function createActionAuditRepository(db: Database.Database): ActionAuditR
         .prepare('SELECT COUNT(*) as count FROM action_audit WHERE pod_id = @podId')
         .get({ podId }) as { count: number };
       return row.count;
+    },
+
+    getSafetySummary(podId: string): ActionAuditSafetySummary {
+      const rows = db
+        .prepare(
+          `SELECT pii_detected, quarantine_score, pii_categories
+           FROM action_audit
+           WHERE pod_id = @podId`,
+        )
+        .all({ podId }) as Array<{
+        pii_detected: number;
+        quarantine_score: number;
+        pii_categories: string | null;
+      }>;
+      const piiCategories = new Set<string>();
+      let quarantineCount = 0;
+      let piiCount = 0;
+      let maxQuarantineScore = 0;
+
+      for (const row of rows) {
+        if (row.quarantine_score > 0) {
+          quarantineCount++;
+          maxQuarantineScore = Math.max(maxQuarantineScore, row.quarantine_score);
+        }
+        if (row.pii_detected === 1) {
+          piiCount++;
+        }
+        if (row.pii_categories) {
+          for (const category of JSON.parse(row.pii_categories) as string[]) {
+            piiCategories.add(category);
+          }
+        }
+      }
+
+      return {
+        rowCount: rows.length,
+        quarantineCount,
+        piiCount,
+        piiCategories: [...piiCategories].sort(),
+        maxQuarantineScore,
+      };
     },
 
     verifyAuditChain(podId: string): AuditChainVerifyResult {

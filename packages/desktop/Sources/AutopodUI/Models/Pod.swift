@@ -744,6 +744,10 @@ public struct Pod: Identifiable, Sendable {
     /// before the daemon's full validation runs.
     public var preSubmitReview: PreSubmitReviewSnapshot?
 
+    /// Latest compact Readiness Review snapshot. Nil means not yet computed or
+    /// unavailable from an older daemon/pod.
+    public var readinessReview: ReadinessReview?
+
     /// Iteration counter for the canonical fix pod. 0 for non-fix pods or the
     /// first round; increments each time the fix pod is re-enqueued for a new
     /// round of CI / review feedback.
@@ -855,6 +859,7 @@ public struct Pod: Identifiable, Sendable {
         skipValidation: Bool = false,
         validationWaiver: ValidationWaiver? = nil,
         preSubmitReview: PreSubmitReviewSnapshot? = nil,
+        readinessReview: ReadinessReview? = nil,
         fixIteration: Int = 0,
         queueLength: Int = 0,
         recentQueueMessages: [PodQueueMessage] = [],
@@ -892,6 +897,7 @@ public struct Pod: Identifiable, Sendable {
         self.skipValidation = skipValidation
         self.validationWaiver = validationWaiver
         self.preSubmitReview = preSubmitReview
+        self.readinessReview = readinessReview
         self.fixIteration = fixIteration
         self.queueLength = queueLength
         self.recentQueueMessages = recentQueueMessages

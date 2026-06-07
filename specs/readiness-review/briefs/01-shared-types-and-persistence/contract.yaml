@@ -1,0 +1,59 @@
+contract_version: 1
+title: "Add Readiness Review types and pod persistence"
+scenarios:
+  - id: readiness-types-model-compact-snapshot
+    given:
+      - >-
+        a Readiness Review snapshot has a top-level status, area rows, findings,
+        source refs, and optional approval metadata
+    when:
+      - "the shared package exports the readiness contracts"
+    then:
+      - "top-level status accepts ready, needs_review, risky, and waived"
+      - "area status additionally accepts not_applicable and not_available"
+      - >-
+        the snapshot shape has no fields for raw logs, screenshots, diffs,
+        action bundles, scan payloads, or PR check payloads
+  - id: pod-repository-roundtrips-readiness
+    given:
+      - "a pod has a compact readiness snapshot"
+    when:
+      - "the pod is inserted, updated, read, and listed through PodRepository"
+    then:
+      - "the readiness snapshot is returned with the same status, areas, findings, source refs, and approval metadata"
+      - "updating readinessReview to null clears the stored snapshot"
+  - id: api-exposes-nullable-readiness
+    given:
+      - "one pod has no readiness snapshot"
+      - "another pod has a stored readiness snapshot"
+    when:
+      - "the daemon serializes pod responses"
+    then:
+      - "the old pod response contains readinessReview null or omits it consistently with the shared contract"
+      - "the new pod response contains the compact readinessReview object"
+required_facts:
+  - id: fact-readiness-shared-types
+    proves:
+      - readiness-types-model-compact-snapshot
+    kind: unit-test
+    artifact:
+      path: packages/shared/src/types/readiness.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/shared test -- readiness.test.ts
+  - id: fact-readiness-pod-repository-roundtrip
+    proves:
+      - pod-repository-roundtrips-readiness
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-repository.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-repository.test.ts -t "readiness"
+  - id: fact-readiness-api-nullable-wire
+    proves:
+      - api-exposes-nullable-readiness
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/api/routes/pods.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pods.test.ts -t "readiness"
+human_review: []

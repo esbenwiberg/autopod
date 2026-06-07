@@ -389,6 +389,7 @@ public enum PodMapper {
       requireSidecars: response.requireSidecars ?? [],
       sidecarContainerIds: response.sidecarContainerIds ?? [:],
       testRunBranches: response.testRunBranches ?? [],
+      readinessReview: mapReadinessReview(response.readinessReview),
       runningAt: runningAt
     )
     result.worktreeCompromised = response.worktreeCompromised ?? false
@@ -433,6 +434,69 @@ public enum PodMapper {
       attempt: waiver.attempt,
       failedPhases: waiver.failedPhases,
       failedFactIds: waiver.failedFactIds
+    )
+  }
+
+  static func mapReadinessReview(_ review: ReadinessReviewResponse?) -> ReadinessReview? {
+    guard let review else { return nil }
+    return ReadinessReview(
+      status: ReadinessStatus(rawValue: review.status) ?? .notAvailable,
+      summary: review.summary,
+      computedAt: parseDate(review.computedAt),
+      scope: ReadinessScope(rawValue: review.scope) ?? .pod,
+      areas: review.areas.map(mapReadinessArea),
+      findings: review.findings.map(mapReadinessFinding),
+      approval: mapReadinessApproval(review.approval)
+    )
+  }
+
+  private static func mapReadinessArea(_ area: ReadinessAreaReviewResponse)
+    -> ReadinessAreaReview
+  {
+    ReadinessAreaReview(
+      area: ReadinessArea(rawValue: area.area) ?? .quality,
+      status: ReadinessStatus(rawValue: area.status) ?? .notAvailable,
+      title: area.title,
+      summary: area.summary,
+      sourceRefs: area.sourceRefs.map(mapReadinessSourceRef)
+    )
+  }
+
+  private static func mapReadinessFinding(_ finding: ReadinessFindingResponse)
+    -> ReadinessFinding
+  {
+    ReadinessFinding(
+      id: finding.id,
+      area: ReadinessArea(rawValue: finding.area) ?? .quality,
+      severity: ReadinessSeverity(rawValue: finding.severity) ?? .info,
+      title: finding.title,
+      detail: finding.detail,
+      sourceRefs: finding.sourceRefs.map(mapReadinessSourceRef)
+    )
+  }
+
+  private static func mapReadinessSourceRef(_ ref: ReadinessSourceRefResponse)
+    -> ReadinessSourceRef
+  {
+    ReadinessSourceRef(
+      kind: ReadinessSourceKind(rawValue: ref.kind) ?? .evidence,
+      label: ref.label,
+      anchor: ref.id,
+      href: ref.href.flatMap(URL.init(string:))
+    )
+  }
+
+  private static func mapReadinessApproval(_ approval: ReadinessApprovalResponse?)
+    -> ReadinessApproval?
+  {
+    guard let approval else { return nil }
+    return ReadinessApproval(
+      approvedAt: parseDate(approval.approvedAt),
+      approvedBy: approval.approvedBy,
+      statusAtApproval: ReadinessStatus(rawValue: approval.statusAtApproval) ?? .notAvailable,
+      scope: ReadinessScope(rawValue: approval.scope) ?? .pod,
+      seriesId: approval.seriesId,
+      reason: approval.reason
     )
   }
 
