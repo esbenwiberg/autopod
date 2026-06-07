@@ -34,3 +34,4 @@
 | `ADR-027` | ADR-027: Daemon-curated reviewer-model memory loop | Proposed | Autopod's memory system has oscillated between two bad states. When agents were encouraged to suggest memories directly, |
 | `ADR-028` | ADR-028: Canonical model ID input policy | Proposed | Autopod historically accepted short Claude model aliases such as `opus`, `sonnet`, |
 | `ADR-029` | ADR-029: Validation setup is a first-class blocking phase | Proposed | Some profiles need to install validation tooling before lint, SAST, build, or |
+| `ADR-030` | ADR-030: Readiness Review as the approval decision surface | Proposed | Autopod already stores release-relevant evidence across validation history, |
