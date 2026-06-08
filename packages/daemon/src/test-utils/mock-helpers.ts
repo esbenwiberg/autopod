@@ -375,6 +375,7 @@ export function insertTestScheduledJob(
     lastRunAt: overrides.lastRunAt ?? null,
     lastPodId: overrides.lastPodId ?? null,
     catchupPending: overrides.catchupPending ?? false,
+    fieldValues: overrides.fieldValues ?? {},
   });
 }
 

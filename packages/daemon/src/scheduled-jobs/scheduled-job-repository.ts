@@ -1,6 +1,7 @@
-import type { ScheduledJob } from '@autopod/shared';
+import type { ScheduledJob, ScheduledJobTemplateField } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { renderScheduledJobPrompt } from './scheduled-job-renderer.js';
 
 export interface ScheduledJobInsert {
   id: string;
@@ -14,6 +15,7 @@ export interface ScheduledJobInsert {
   catchupPending: boolean;
   name: string;
   task: string;
+  fieldValues?: Record<string, string>;
 }
 
 export interface ScheduledJobRepository {
@@ -31,10 +33,20 @@ export interface ScheduledJobRepository {
 function mapRow(row: Record<string, unknown>): ScheduledJob {
   const templateName = ((row.template_name as string) ?? (row.name as string)) as string;
   const templatePrompt = row.template_prompt as string | Buffer | null | undefined;
-  const task = Buffer.isBuffer(templatePrompt)
+  const prompt = Buffer.isBuffer(templatePrompt)
     ? templatePrompt.toString('utf8')
     : (templatePrompt ??
       (Buffer.isBuffer(row.task) ? (row.task as Buffer).toString('utf8') : (row.task as string)));
+  const templateFields = parseJsonArray(row.template_fields);
+  const fieldValues = parseStringRecord(row.field_values);
+  let task = prompt;
+  try {
+    task = renderScheduledJobPrompt(prompt, templateFields, fieldValues, {
+      allowMissingRequired: true,
+    });
+  } catch {
+    task = prompt;
+  }
 
   return {
     id: row.id as string,
@@ -43,6 +55,7 @@ function mapRow(row: Record<string, unknown>): ScheduledJob {
     templateName,
     profileName: row.profile_name as string,
     task,
+    fieldValues,
     cronExpression: row.cron_expression as string,
     enabled: Boolean(row.enabled),
     nextRunAt: row.next_run_at as string,
@@ -54,12 +67,47 @@ function mapRow(row: Record<string, unknown>): ScheduledJob {
   };
 }
 
+function parseJsonArray(value: unknown): ScheduledJobTemplateField[] {
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+      .map((item) => ({
+        key: typeof item.key === 'string' ? item.key : '',
+        label: typeof item.label === 'string' ? item.label : '',
+        required: item.required === true,
+        ...(typeof item.defaultValue === 'string' ? { defaultValue: item.defaultValue } : {}),
+      }))
+      .filter((field) => field.key !== '' && field.label !== '');
+  } catch {
+    return [];
+  }
+}
+
+function parseStringRecord(value: unknown): Record<string, string> {
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string',
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
 export function createScheduledJobRepository(db: Database.Database): ScheduledJobRepository {
   const selectWithTemplate = `
     SELECT
       sj.*,
       t.name AS template_name,
-      t.prompt AS template_prompt
+      t.prompt AS template_prompt,
+      t.fields AS template_fields
     FROM scheduled_jobs sj
     LEFT JOIN scheduled_job_templates t ON t.id = sj.template_id
   `;
@@ -69,10 +117,10 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
       db.prepare(`
         INSERT INTO scheduled_jobs (
           id, name, template_id, profile_name, task, cron_expression, enabled,
-          next_run_at, last_run_at, last_pod_id, catchup_pending
+          next_run_at, last_run_at, last_pod_id, catchup_pending, field_values
         ) VALUES (
           @id, @name, @templateId, @profileName, @task, @cronExpression, @enabled,
-          @nextRunAt, @lastRunAt, @lastPodId, @catchupPending
+          @nextRunAt, @lastRunAt, @lastPodId, @catchupPending, @fieldValues
         )
       `).run({
         id: job.id,
@@ -86,6 +134,7 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
         lastRunAt: job.lastRunAt ?? null,
         lastPodId: job.lastPodId ?? null,
         catchupPending: job.catchupPending ? 1 : 0,
+        fieldValues: JSON.stringify(job.fieldValues ?? {}),
       });
       return this.getOrThrow(job.id);
     },
@@ -130,6 +179,10 @@ export function createScheduledJobRepository(db: Database.Database): ScheduledJo
       if (changes.task !== undefined) {
         setClauses.push('task = @task');
         params.task = changes.task;
+      }
+      if (changes.fieldValues !== undefined) {
+        setClauses.push('field_values = @fieldValues');
+        params.fieldValues = JSON.stringify(changes.fieldValues);
       }
       if (changes.cronExpression !== undefined) {
         setClauses.push('cron_expression = @cronExpression');

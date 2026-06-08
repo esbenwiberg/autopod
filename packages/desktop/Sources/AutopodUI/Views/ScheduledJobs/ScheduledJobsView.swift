@@ -144,7 +144,8 @@ public struct ScheduledJobsView: View {
         onSave: { request in
           onEditTemplate?(template.id, UpdateScheduledJobTemplateRequest(
             name: request.name,
-            prompt: request.prompt
+            prompt: request.prompt,
+            fields: request.fields
           ))
         }
       )

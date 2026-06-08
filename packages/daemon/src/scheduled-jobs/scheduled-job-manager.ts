@@ -12,6 +12,14 @@ import cronParser from 'cron-parser';
 import type { Logger } from 'pino';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodManager } from '../pods/pod-manager.js';
+import {
+  filterFieldValuesForTemplate,
+  normalizeFieldValues,
+  normalizeTemplateFields,
+  renderScheduledJobPrompt,
+  validateFieldValuesForTemplate,
+  validateTemplatePrompt,
+} from './scheduled-job-renderer.js';
 import type { ScheduledJobRepository } from './scheduled-job-repository.js';
 import type { ScheduledJobTemplateRepository } from './scheduled-job-template-repository.js';
 
@@ -63,10 +71,12 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
   const { scheduledJobRepo, scheduledJobTemplateRepo, podManager, eventBus, logger } = deps;
 
   async function fireJob(job: ScheduledJob): Promise<Pod> {
+    const template = scheduledJobTemplateRepo.getOrThrow(job.templateId);
+    const task = renderScheduledJobPrompt(template.prompt, template.fields, job.fieldValues);
     return podManager.createSession(
       {
         profileName: job.profileName,
-        task: job.task,
+        task,
         scheduledJobId: job.id,
       },
       SCHEDULER_USER_ID,
@@ -75,10 +85,13 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
 
   return {
     createTemplate(req: CreateScheduledJobTemplateRequest): ScheduledJobTemplate {
+      const fields = normalizeTemplateFields(req.fields);
+      validateTemplatePrompt(req.prompt, fields);
       return scheduledJobTemplateRepo.insert({
         id: generateId(),
         name: req.name,
         prompt: req.prompt,
+        fields,
       });
     },
 
@@ -91,7 +104,15 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
     },
 
     updateTemplate(id: string, req: UpdateScheduledJobTemplateRequest): ScheduledJobTemplate {
-      return scheduledJobTemplateRepo.update(id, req);
+      const current = scheduledJobTemplateRepo.getOrThrow(id);
+      const fields =
+        req.fields !== undefined ? normalizeTemplateFields(req.fields) : current.fields;
+      const prompt = req.prompt ?? current.prompt;
+      validateTemplatePrompt(prompt, fields);
+      return scheduledJobTemplateRepo.update(id, {
+        ...req,
+        fields: req.fields !== undefined ? fields : undefined,
+      });
     },
 
     deleteTemplate(id: string): void {
@@ -106,6 +127,8 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
         req.templateId !== undefined
           ? scheduledJobTemplateRepo.getOrThrow(req.templateId)
           : createLegacyTemplate(req);
+      const fieldValues = normalizeFieldValues(req.fieldValues);
+      validateFieldValuesForTemplate(template.fields, fieldValues);
 
       return scheduledJobRepo.insert({
         id,
@@ -113,6 +136,7 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
         templateId: template.id,
         profileName: req.profileName,
         task: template.prompt,
+        fieldValues,
         cronExpression: req.cronExpression,
         enabled: req.enabled ?? true,
         nextRunAt,
@@ -139,6 +163,8 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
           : scheduledJobTemplateRepo.getOrThrow(job.templateId);
 
       if (req.name !== undefined || req.task !== undefined) {
+        const fields = template.fields;
+        validateTemplatePrompt(req.task ?? template.prompt, fields);
         template = scheduledJobTemplateRepo.update(template.id, {
           name: req.name,
           prompt: req.task,
@@ -152,6 +178,16 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
       } else if (req.name !== undefined || req.task !== undefined) {
         changes.name = template.name;
         changes.task = template.prompt;
+      }
+
+      if (req.fieldValues !== undefined) {
+        const fieldValues = normalizeFieldValues(req.fieldValues);
+        validateFieldValuesForTemplate(template.fields, fieldValues);
+        changes.fieldValues = fieldValues;
+      } else if (req.templateId !== undefined) {
+        const fieldValues = filterFieldValuesForTemplate(template.fields, job.fieldValues);
+        validateFieldValuesForTemplate(template.fields, fieldValues);
+        changes.fieldValues = fieldValues;
       }
 
       if (req.profileName !== undefined) changes.profileName = req.profileName;

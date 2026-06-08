@@ -1,17 +1,40 @@
-import type { ScheduledJobTemplate } from '@autopod/shared';
+import type { ScheduledJobTemplate, ScheduledJobTemplateField } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
 export interface ScheduledJobTemplateRepository {
-  insert(template: Omit<ScheduledJobTemplate, 'createdAt' | 'updatedAt'>): ScheduledJobTemplate;
+  insert(
+    template: Omit<ScheduledJobTemplate, 'createdAt' | 'updatedAt' | 'fields'> & {
+      fields?: ScheduledJobTemplateField[];
+    },
+  ): ScheduledJobTemplate;
   getOrThrow(id: string): ScheduledJobTemplate;
   list(): ScheduledJobTemplate[];
   update(
     id: string,
-    changes: Partial<Pick<ScheduledJobTemplate, 'name' | 'prompt'>>,
+    changes: Partial<Pick<ScheduledJobTemplate, 'name' | 'prompt' | 'fields'>>,
   ): ScheduledJobTemplate;
   delete(id: string): void;
   countLinkedJobs(id: string): number;
+}
+
+function parseFields(value: unknown): ScheduledJobTemplateField[] {
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+      .map((item) => ({
+        key: typeof item.key === 'string' ? item.key : '',
+        label: typeof item.label === 'string' ? item.label : '',
+        required: item.required === true,
+        ...(typeof item.defaultValue === 'string' ? { defaultValue: item.defaultValue } : {}),
+      }))
+      .filter((field) => field.key !== '' && field.label !== '');
+  } catch {
+    return [];
+  }
 }
 
 function mapRow(row: Record<string, unknown>): ScheduledJobTemplate {
@@ -21,6 +44,7 @@ function mapRow(row: Record<string, unknown>): ScheduledJobTemplate {
     prompt: Buffer.isBuffer(row.prompt)
       ? (row.prompt as Buffer).toString('utf8')
       : (row.prompt as string),
+    fields: parseFields(row.fields),
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -45,16 +69,21 @@ export function createScheduledJobTemplateRepository(
   db: Database.Database,
 ): ScheduledJobTemplateRepository {
   return {
-    insert(template: Omit<ScheduledJobTemplate, 'createdAt' | 'updatedAt'>): ScheduledJobTemplate {
+    insert(
+      template: Omit<ScheduledJobTemplate, 'createdAt' | 'updatedAt' | 'fields'> & {
+        fields?: ScheduledJobTemplateField[];
+      },
+    ): ScheduledJobTemplate {
       ensureUniqueName(db, template.name);
 
       db.prepare(`
-        INSERT INTO scheduled_job_templates (id, name, prompt)
-        VALUES (@id, @name, @prompt)
+        INSERT INTO scheduled_job_templates (id, name, prompt, fields)
+        VALUES (@id, @name, @prompt, @fields)
       `).run({
         id: template.id,
         name: template.name,
         prompt: template.prompt,
+        fields: JSON.stringify(template.fields ?? []),
       });
 
       return this.getOrThrow(template.id);
@@ -79,7 +108,7 @@ export function createScheduledJobTemplateRepository(
 
     update(
       id: string,
-      changes: Partial<Pick<ScheduledJobTemplate, 'name' | 'prompt'>>,
+      changes: Partial<Pick<ScheduledJobTemplate, 'name' | 'prompt' | 'fields'>>,
     ): ScheduledJobTemplate {
       this.getOrThrow(id);
 
@@ -94,6 +123,10 @@ export function createScheduledJobTemplateRepository(
       if (changes.prompt !== undefined) {
         setClauses.push('prompt = @prompt');
         params.prompt = changes.prompt;
+      }
+      if (changes.fields !== undefined) {
+        setClauses.push('fields = @fields');
+        params.fields = JSON.stringify(changes.fields);
       }
 
       db.prepare(`UPDATE scheduled_job_templates SET ${setClauses.join(', ')} WHERE id = @id`).run(

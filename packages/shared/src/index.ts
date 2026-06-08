@@ -236,6 +236,7 @@ export type { WatchedIssue, WatchedIssueStatus } from './types/issue-watcher.js'
 
 export type {
   ScheduledJob,
+  ScheduledJobTemplateField,
   ScheduledJobTemplate,
   CreateScheduledJobRequest,
   CreateScheduledJobTemplateRequest,

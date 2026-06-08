@@ -13,6 +13,7 @@ const mockJob = {
   templateName: 'Test Job',
   profileName: 'my-profile',
   task: 'Run the task',
+  fieldValues: {},
   cronExpression: '0 9 * * 1',
   enabled: true,
   nextRunAt: '2025-04-21T09:00:00.000Z',
@@ -27,6 +28,7 @@ const mockTemplate = {
   id: 'tmpl-123',
   name: 'Test Job',
   prompt: 'Run the task',
+  fields: [],
   createdAt: '2025-04-14T00:00:00.000Z',
   updatedAt: '2025-04-14T00:00:00.000Z',
 };
@@ -144,6 +146,24 @@ describe('scheduled-jobs routes', () => {
         templateId: 'tmpl-123',
       });
     });
+
+    it('accepts field override values', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/scheduled-jobs',
+        payload: {
+          templateId: 'tmpl-123',
+          profileName: 'my-profile',
+          fieldValues: { branch: 'main' },
+          cronExpression: '0 9 * * 1',
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(vi.mocked(manager.create).mock.calls.at(-1)?.[0]).toMatchObject({
+        fieldValues: { branch: 'main' },
+      });
+    });
   });
 
   describe('scheduled job template routes', () => {
@@ -151,11 +171,18 @@ describe('scheduled-jobs routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/scheduled-job-templates',
-        payload: { name: 'Template', prompt: 'Prompt' },
+        payload: {
+          name: 'Template',
+          prompt: 'Prompt for {{branch}}',
+          fields: [{ key: 'branch', label: 'Branch', required: true }],
+        },
       });
 
       expect(res.statusCode).toBe(201);
       expect(res.json()).toMatchObject({ id: 'tmpl-123' });
+      expect(vi.mocked(manager.createTemplate).mock.calls.at(-1)?.[0]).toMatchObject({
+        fields: [{ key: 'branch', label: 'Branch', required: true }],
+      });
     });
 
     it('lists templates', async () => {

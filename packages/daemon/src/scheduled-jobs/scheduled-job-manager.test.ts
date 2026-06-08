@@ -193,6 +193,64 @@ describe('ScheduledJobManager', () => {
       expect(job.name).toBe('Log triage');
       expect(job.task).toBe('Review logs and summarize actionable failures');
     });
+
+    it('creates a job with field overrides from an existing template', async () => {
+      const deps = makeDeps(db);
+      const manager = createScheduledJobManager(deps);
+      const template = manager.createTemplate({
+        name: 'Branch review',
+        prompt: 'Review {{branch}} for {{area}}',
+        fields: [
+          { key: 'branch', label: 'Branch', required: true },
+          { key: 'area', label: 'Area', required: false, defaultValue: 'regressions' },
+        ],
+      });
+
+      const job = manager.create({
+        templateId: template.id,
+        profileName: 'test-profile',
+        fieldValues: { branch: 'main' },
+        cronExpression: '0 9 * * 1',
+      });
+      await manager.trigger(job.id);
+
+      expect(job.task).toBe('Review main for regressions');
+      expect(deps.podManager.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ task: 'Review main for regressions' }),
+        SCHEDULER_USER_ID,
+      );
+    });
+
+    it('rejects creating a job when a required field value is missing', () => {
+      const deps = makeDeps(db);
+      const manager = createScheduledJobManager(deps);
+      const template = manager.createTemplate({
+        name: 'Branch review',
+        prompt: 'Review {{branch}}',
+        fields: [{ key: 'branch', label: 'Branch', required: true }],
+      });
+
+      expect(() =>
+        manager.create({
+          templateId: template.id,
+          profileName: 'test-profile',
+          cronExpression: '0 9 * * 1',
+        }),
+      ).toThrow(AutopodError);
+    });
+
+    it('rejects templates with placeholders that have no field definition', () => {
+      const deps = makeDeps(db);
+      const manager = createScheduledJobManager(deps);
+
+      expect(() =>
+        manager.createTemplate({
+          name: 'Bad template',
+          prompt: 'Review {{branch}}',
+          fields: [],
+        }),
+      ).toThrow(AutopodError);
+    });
   });
 
   describe('update', () => {
@@ -226,6 +284,28 @@ describe('ScheduledJobManager', () => {
         expect.objectContaining({ task: 'Updated prompt' }),
         SCHEDULER_USER_ID,
       );
+    });
+
+    it('blocks future fires when a template adds a required field without a job value', async () => {
+      const deps = makeDeps(db);
+      const manager = createScheduledJobManager(deps);
+      const template = manager.createTemplate({
+        name: 'Security scan',
+        prompt: 'Original prompt',
+      });
+      const job = manager.create({
+        templateId: template.id,
+        profileName: 'test-profile',
+        cronExpression: '0 9 * * 1',
+      });
+
+      manager.updateTemplate(template.id, {
+        prompt: 'Scan {{branch}}',
+        fields: [{ key: 'branch', label: 'Branch', required: true }],
+      });
+
+      await expect(manager.trigger(job.id)).rejects.toThrow(AutopodError);
+      expect(deps.podManager.createSession).not.toHaveBeenCalled();
     });
 
     it('recomputes nextRunAt when cronExpression changes', () => {

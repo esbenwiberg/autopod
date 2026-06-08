@@ -2,11 +2,21 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ScheduledJobManager } from '../../scheduled-jobs/scheduled-job-manager.js';
 
+const templateFieldSchema = z.object({
+  key: z.string().min(1),
+  label: z.string().min(1),
+  required: z.boolean(),
+  defaultValue: z.string().optional(),
+});
+
+const fieldValuesSchema = z.record(z.string());
+
 const createSchema = z.object({
   templateId: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
   profileName: z.string().min(1),
   task: z.string().min(1).optional(),
+  fieldValues: fieldValuesSchema.optional(),
   cronExpression: z.string().min(1),
   enabled: z.boolean().optional(),
 });
@@ -15,6 +25,7 @@ const updateSchema = z.object({
   templateId: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
   task: z.string().min(1).optional(),
+  fieldValues: fieldValuesSchema.optional(),
   profileName: z.string().min(1).optional(),
   cronExpression: z.string().min(1).optional(),
   enabled: z.boolean().optional(),
@@ -23,11 +34,13 @@ const updateSchema = z.object({
 const createTemplateSchema = z.object({
   name: z.string().min(1),
   prompt: z.string().min(1),
+  fields: z.array(templateFieldSchema).optional(),
 });
 
 const updateTemplateSchema = z.object({
   name: z.string().min(1).optional(),
   prompt: z.string().min(1).optional(),
+  fields: z.array(templateFieldSchema).optional(),
 });
 
 export function scheduledJobRoutes(

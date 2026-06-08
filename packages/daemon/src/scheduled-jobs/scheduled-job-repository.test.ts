@@ -74,6 +74,39 @@ describe('ScheduledJobRepository', () => {
     expect(fetched.task).toBe('Updated prompt');
   });
 
+  it('persists template fields and renders job field values into current prompt', () => {
+    const repo = createScheduledJobRepository(db);
+    const templateRepo = createScheduledJobTemplateRepository(db);
+    const template = templateRepo.insert({
+      id: 'tmpl-fields',
+      name: 'Branch scan',
+      prompt: 'Review branch {{branch}} for {{area}}',
+      fields: [
+        { key: 'branch', label: 'Branch', required: true },
+        { key: 'area', label: 'Area', required: false, defaultValue: 'regressions' },
+      ],
+    });
+
+    const job = repo.insert({
+      id: 'job-fields',
+      name: template.name,
+      templateId: template.id,
+      profileName: 'test-profile',
+      task: template.prompt,
+      fieldValues: { branch: 'main' },
+      cronExpression: '0 9 * * 1',
+      enabled: true,
+      nextRunAt: new Date(Date.now() + 60_000).toISOString(),
+      lastRunAt: null,
+      lastPodId: null,
+      catchupPending: false,
+    });
+
+    expect(template.fields).toHaveLength(2);
+    expect(job.fieldValues).toEqual({ branch: 'main' });
+    expect(job.task).toBe('Review branch main for regressions');
+  });
+
   it('blocks deleting a template used by a scheduled job', () => {
     const templateRepo = createScheduledJobTemplateRepository(db);
     const job = insertTestScheduledJob(db);

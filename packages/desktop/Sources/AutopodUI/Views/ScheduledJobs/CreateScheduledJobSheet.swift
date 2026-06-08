@@ -22,16 +22,24 @@ public struct CreateScheduledJobSheet: View {
 
   private var profiles: [String] { profileNames.isEmpty ? ["my-app"] : profileNames.sorted() }
   private var sortedTemplates: [ScheduledJobTemplate] { templates.sorted { $0.name < $1.name } }
+  private var selectedTemplate: ScheduledJobTemplate? {
+    sortedTemplates.first { $0.id == selectedTemplateId }
+  }
+  private var selectedFields: [ScheduledJobTemplateField] {
+    selectedTemplate?.fields ?? []
+  }
 
   @State private var selectedTemplateId = ""
   @State private var selectedProfile = ""
   @State private var cronExpression = ""
   @State private var enabled = true
+  @State private var fieldValues: [String: String] = [:]
 
   private var canCreate: Bool {
     !selectedTemplateId.isEmpty
       && !selectedProfile.isEmpty
       && isValidCron(cronExpression)
+      && hasRequiredFieldValues
   }
 
   public var body: some View {
@@ -85,6 +93,16 @@ public struct CreateScheduledJobSheet: View {
             }
           }
 
+          if !selectedFields.isEmpty {
+            formSection("Overrides") {
+              VStack(alignment: .leading, spacing: 8) {
+                ForEach(selectedFields, id: \.key) { field in
+                  overrideField(field)
+                }
+              }
+            }
+          }
+
           formSection("State") {
             Toggle("Enable immediately", isOn: $enabled)
               .toggleStyle(.switch)
@@ -106,6 +124,10 @@ public struct CreateScheduledJobSheet: View {
       if selectedProfile.isEmpty {
         selectedProfile = profiles.first ?? ""
       }
+      reconcileFieldValues()
+    }
+    .onChange(of: selectedTemplateId) { _, _ in
+      reconcileFieldValues()
     }
   }
 
@@ -137,6 +159,7 @@ public struct CreateScheduledJobSheet: View {
         let req = CreateScheduledJobRequest(
           templateId: selectedTemplateId,
           profileName: selectedProfile,
+          fieldValues: selectedFields.isEmpty ? nil : fieldValuesForSubmit(),
           cronExpression: cronExpression.trimmingCharacters(in: .whitespacesAndNewlines),
           enabled: enabled
         )
@@ -176,6 +199,51 @@ public struct CreateScheduledJobSheet: View {
       }
     }
     .buttonStyle(.borderless)
+  }
+
+  private var hasRequiredFieldValues: Bool {
+    selectedFields.allSatisfy { field in
+      let value = fieldValues[field.key] ?? field.defaultValue ?? ""
+      return !field.required || !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+  }
+
+  private func fieldValuesForSubmit() -> [String: String] {
+    Dictionary(uniqueKeysWithValues: selectedFields.map { field in
+      (field.key, fieldValues[field.key] ?? field.defaultValue ?? "")
+    })
+  }
+
+  private func reconcileFieldValues() {
+    var next: [String: String] = [:]
+    for field in selectedFields {
+      next[field.key] = fieldValues[field.key] ?? field.defaultValue ?? ""
+    }
+    fieldValues = next
+  }
+
+  private func overrideField(_ field: ScheduledJobTemplateField) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: 4) {
+        Text(field.label)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.secondary)
+        if field.required {
+          Text("required")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.orange)
+        }
+      }
+      TextField(field.key, text: Binding(
+        get: { fieldValues[field.key] ?? field.defaultValue ?? "" },
+        set: { fieldValues[field.key] = $0 }
+      ))
+      .textFieldStyle(.plain)
+      .font(.system(.callout, design: .monospaced))
+      .padding(8)
+      .background(Color(nsColor: .controlBackgroundColor))
+      .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
   }
 
   private func formSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

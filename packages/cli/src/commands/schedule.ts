@@ -1,5 +1,9 @@
 import { createInterface } from 'node:readline';
-import type { ScheduledJob, ScheduledJobTemplate } from '@autopod/shared';
+import type {
+  ScheduledJob,
+  ScheduledJobTemplate,
+  ScheduledJobTemplateField,
+} from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
@@ -58,8 +62,58 @@ const jobColumns: ColumnDef<ScheduledJob>[] = [
 const templateColumns: ColumnDef<ScheduledJobTemplate>[] = [
   { header: 'ID', formatter: (t) => t.id.slice(0, 10), width: 12 },
   { header: 'NAME', key: 'name', width: 28 },
+  { header: 'FIELDS', formatter: (t) => String(t.fields?.length ?? 0), width: 8 },
   { header: 'PROMPT', formatter: (t) => t.prompt.replace(/\s+/g, ' ').slice(0, 48), width: 50 },
 ];
+
+function collect(value: string, previous: string[] = []): string[] {
+  return [...previous, value];
+}
+
+function parseFields(value: string | undefined): ScheduledJobTemplateField[] | undefined {
+  if (value === undefined) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('--fields must be a JSON array');
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error('--fields must be a JSON array');
+  }
+  return parsed.map((item) => {
+    if (typeof item !== 'object' || item === null) {
+      throw new Error('--fields entries must be objects');
+    }
+    const field = item as Record<string, unknown>;
+    if (
+      typeof field.key !== 'string' ||
+      typeof field.label !== 'string' ||
+      typeof field.required !== 'boolean'
+    ) {
+      throw new Error('--fields entries need key, label, and required');
+    }
+    return {
+      key: field.key,
+      label: field.label,
+      required: field.required,
+      ...(typeof field.defaultValue === 'string' ? { defaultValue: field.defaultValue } : {}),
+    };
+  });
+}
+
+function parseFieldValues(values: string[] | undefined): Record<string, string> | undefined {
+  if (!values || values.length === 0) return undefined;
+  const result: Record<string, string> = {};
+  for (const item of values) {
+    const separator = item.indexOf('=');
+    if (separator <= 0) {
+      throw new Error('--set values must use key=value');
+    }
+    result[item.slice(0, separator)] = item.slice(separator + 1);
+  }
+  return result;
+}
 
 async function resolveTemplateId(client: AutopodClient, value: string): Promise<string> {
   const templates = await client.listScheduledJobTemplates();
@@ -90,11 +144,17 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
     .command('create <profile> [args...]')
     .description('Create a scheduled job')
     .option('-t, --template <idOrName>', 'Template ID or name to use')
+    .option('--set <keyValue>', 'Template override value (repeatable key=value)', collect, [])
     .option('--disabled', 'Create the scheduled job disabled')
     .action(
-      async (profile: string, args: string[], opts: { template?: string; disabled?: boolean }) => {
+      async (
+        profile: string,
+        args: string[],
+        opts: { template?: string; set?: string[]; disabled?: boolean },
+      ) => {
         const client = getClient();
         let job: ScheduledJob;
+        const fieldValues = parseFieldValues(opts.set);
 
         if (opts.template) {
           const [cron] = args;
@@ -105,10 +165,14 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
           job = await client.createScheduledJob({
             profileName: profile,
             templateId,
+            fieldValues,
             cronExpression: cron,
             enabled: !opts.disabled,
           });
         } else {
+          if (fieldValues) {
+            throw new Error('Template override values require --template');
+          }
           const [name, cron, task] = args;
           if (!name || !cron || !task) {
             throw new Error('Usage: ap schedule create <profile> <name> <cron> <task>');
@@ -135,9 +199,14 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
   template
     .command('create <name> <prompt>')
     .description('Create a scheduled job template')
-    .action(async (name: string, prompt: string) => {
+    .option('--fields <json>', 'JSON array of template field definitions')
+    .action(async (name: string, prompt: string, opts: { fields?: string }) => {
       const client = getClient();
-      const created = await client.createScheduledJobTemplate({ name, prompt });
+      const created = await client.createScheduledJobTemplate({
+        name,
+        prompt,
+        fields: parseFields(opts.fields),
+      });
       console.log(chalk.green(`Template ${chalk.bold(created.id.slice(0, 10))} created.`));
     });
 
@@ -167,6 +236,14 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
       const item = await client.getScheduledJobTemplate(id);
       console.log(`${chalk.bold('ID:')}     ${item.id}`);
       console.log(`${chalk.bold('Name:')}   ${item.name}`);
+      if ((item.fields?.length ?? 0) > 0) {
+        console.log(`${chalk.bold('Fields:')}`);
+        for (const field of item.fields) {
+          const required = field.required ? 'required' : 'optional';
+          const fallback = field.defaultValue ? ` default=${field.defaultValue}` : '';
+          console.log(`  ${field.key} (${field.label}, ${required}${fallback})`);
+        }
+      }
       console.log(`${chalk.bold('Prompt:')} ${item.prompt}`);
     });
 
@@ -175,14 +252,16 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
     .description('Edit a scheduled job template')
     .option('--name <name>', 'New template name')
     .option('--prompt <prompt>', 'New template prompt')
-    .action(async (id: string, opts: { name?: string; prompt?: string }) => {
-      if (opts.name === undefined && opts.prompt === undefined) {
-        throw new Error('Pass at least one of --name or --prompt');
+    .option('--fields <json>', 'JSON array of template field definitions')
+    .action(async (id: string, opts: { name?: string; prompt?: string; fields?: string }) => {
+      if (opts.name === undefined && opts.prompt === undefined && opts.fields === undefined) {
+        throw new Error('Pass at least one of --name, --prompt, or --fields');
       }
       const client = getClient();
       const updated = await client.updateScheduledJobTemplate(id, {
         name: opts.name,
         prompt: opts.prompt,
+        fields: parseFields(opts.fields),
       });
       console.log(chalk.green(`Template ${chalk.bold(updated.id.slice(0, 10))} updated.`));
     });
@@ -232,8 +311,66 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
       console.log(`${chalk.bold('Last run:')}     ${formatRelativeAgo(job.lastRunAt)}`);
       console.log(`${chalk.bold('Last pod:')} ${job.lastPodId ?? '-'}`);
       console.log(`${chalk.bold('Status:')}       ${formatJobStatus(job)}`);
+      if (Object.keys(job.fieldValues ?? {}).length > 0) {
+        console.log(`${chalk.bold('Overrides:')}`);
+        for (const [key, value] of Object.entries(job.fieldValues)) {
+          console.log(`  ${key}=${value}`);
+        }
+      }
       console.log(`${chalk.bold('Task:')}         ${job.task}`);
     });
+
+  schedule
+    .command('edit <id>')
+    .description('Edit a scheduled job')
+    .option('-t, --template <idOrName>', 'Template ID or name to use')
+    .option('--profile <profile>', 'Profile name')
+    .option('--cron <cron>', 'Cron expression')
+    .option('--set <keyValue>', 'Template override value (repeatable key=value)', collect, [])
+    .option('--enabled', 'Enable the scheduled job')
+    .option('--disabled', 'Disable the scheduled job')
+    .action(
+      async (
+        id: string,
+        opts: {
+          template?: string;
+          profile?: string;
+          cron?: string;
+          set?: string[];
+          enabled?: boolean;
+          disabled?: boolean;
+        },
+      ) => {
+        if (opts.enabled && opts.disabled) {
+          throw new Error('Pass only one of --enabled or --disabled');
+        }
+
+        const client = getClient();
+        const templateId = opts.template
+          ? await resolveTemplateId(client, opts.template)
+          : undefined;
+        const fieldValues = parseFieldValues(opts.set);
+        if (
+          templateId === undefined &&
+          opts.profile === undefined &&
+          opts.cron === undefined &&
+          fieldValues === undefined &&
+          opts.enabled === undefined &&
+          opts.disabled === undefined
+        ) {
+          throw new Error('Pass at least one schedule edit option');
+        }
+        const job = await client.updateScheduledJob(id, {
+          templateId,
+          profileName: opts.profile,
+          cronExpression: opts.cron,
+          fieldValues,
+          enabled: opts.enabled ? true : opts.disabled ? false : undefined,
+        });
+
+        console.log(chalk.green(`Schedule ${chalk.bold(job.id.slice(0, 10))} updated.`));
+      },
+    );
 
   // ap schedule enable <id>
   schedule
