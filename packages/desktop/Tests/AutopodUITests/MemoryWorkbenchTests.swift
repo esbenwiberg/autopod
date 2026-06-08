@@ -26,6 +26,22 @@ import Testing
     #expect(result.map(\.id) == ["profile"])
 }
 
+@Test func memoryWorkbenchMergesScopedActiveCacheWithApprovedEntries() {
+    let first = makeMemory(id: "mem-first", content: "Original first memory")
+    let second = makeMemory(id: "mem-second", content: "Second memory")
+    let refreshedFirst = makeMemory(id: "mem-first", content: "Refreshed first memory")
+
+    let result = MemoryManagementView.approvedEntries(
+        entries: [first, second],
+        activeMemories: [refreshedFirst],
+        scope: .profile,
+        query: ""
+    )
+
+    #expect(result.map(\.id) == ["mem-first", "mem-second"])
+    #expect(result.first?.content == "Refreshed first memory")
+}
+
 @Test func memoryWorkbenchPrefersCandidateSelectionThenKeepsValidSelection() {
     let candidate = makeCandidate(id: "cand-1")
     let memory = makeMemory(id: "mem-1")

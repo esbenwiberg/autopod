@@ -324,7 +324,7 @@ public final class MemoryStore {
         do {
             let candidate = try await api.approveMemoryCandidate(id)
             upsertCandidate(candidate)
-            await loadActiveMemories(scopeId: candidate.scopeId)
+            await loadMemories()
             await loadAnalytics(days: analytics?.days ?? 30)
         } catch {
             print("[MemoryStore] Failed to approve memory candidate \(id): \(error)")

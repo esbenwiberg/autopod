@@ -116,8 +116,12 @@ public struct MemoryManagementView: View {
 
     private var pending: [MemoryEntry] { filteredEntries.filter { !$0.approved } }
     private var approved: [MemoryEntry] {
-        let source = activeMemories.isEmpty ? entries.filter(\.approved) : activeMemories
-        return Self.filteredEntries(source, scope: displayedScope, query: searchText)
+        Self.approvedEntries(
+            entries: entries,
+            activeMemories: activeMemories,
+            scope: displayedScope,
+            query: searchText
+        )
     }
 
     private var candidates: [MemoryCandidate] {
@@ -1124,6 +1128,32 @@ public struct MemoryManagementView: View {
                 || ($0.rationale?.localizedCaseInsensitiveContains(q) ?? false)
                 || $0.tags.contains { $0.localizedCaseInsensitiveContains(q) }
         }
+    }
+
+    static func approvedEntries(
+        entries: [MemoryEntry],
+        activeMemories: [MemoryEntry],
+        scope: MemoryScope,
+        query: String
+    ) -> [MemoryEntry] {
+        let approvedEntries = entries.filter(\.approved)
+        let source = mergeEntries(approvedEntries, with: activeMemories)
+        return filteredEntries(source, scope: scope, query: query)
+    }
+
+    private static func mergeEntries(
+        _ existing: [MemoryEntry],
+        with incoming: [MemoryEntry]
+    ) -> [MemoryEntry] {
+        var merged = existing
+        for entry in incoming {
+            if let idx = merged.firstIndex(where: { $0.id == entry.id }) {
+                merged[idx] = entry
+            } else {
+                merged.append(entry)
+            }
+        }
+        return merged
     }
 
     static func filteredCandidates(
