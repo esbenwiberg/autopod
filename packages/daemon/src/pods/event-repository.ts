@@ -17,6 +17,7 @@ export interface EventRepository {
     podId: string,
     options?: {
       type?: string;
+      types?: string[];
       latest?: number;
     },
   ): StoredEvent[];
@@ -79,10 +80,17 @@ export function createEventRepository(db: Database.Database): EventRepository {
 
     getForSession(podId: string, options = {}): StoredEvent[] {
       const clauses = ['pod_id = @podId'];
-      const params: { podId: string; type?: string; latest?: number } = { podId };
+      const params: Record<string, string | number> = { podId };
       if (options.type) {
         clauses.push('type = @type');
         params.type = options.type;
+      } else if (options.types?.length) {
+        const typeParams = options.types.map((type, index) => {
+          const key = `type${index}`;
+          params[key] = type;
+          return `@${key}`;
+        });
+        clauses.push(`type IN (${typeParams.join(', ')})`);
       }
 
       const where = clauses.join(' AND ');

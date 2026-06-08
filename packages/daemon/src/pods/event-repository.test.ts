@@ -58,6 +58,16 @@ function agentActivity(message: string, podId = 'sess-001'): SystemEvent {
   };
 }
 
+function firewallDenied(sni: string, podId = 'sess-001'): SystemEvent {
+  return {
+    type: 'pod.firewall_denied',
+    timestamp: new Date().toISOString(),
+    podId,
+    sni,
+    src: '172.19.0.2',
+  };
+}
+
 describe('EventRepository', () => {
   let db: Database.Database;
   let repo: EventRepository;
@@ -300,6 +310,35 @@ describe('EventRepository', () => {
           return payload.event.type === 'status' ? payload.event.message : null;
         }),
       ).toEqual(['message-4', 'message-5', 'message-6']);
+      expect(events[0]?.id).toBeLessThan(events[1]?.id ?? 0);
+      expect(events[1]?.id).toBeLessThan(events[2]?.id ?? 0);
+    });
+
+    it('should return latest events matching any requested type in ascending order', () => {
+      const statusEvent: SystemEvent = {
+        type: 'pod.status_changed',
+        timestamp: new Date().toISOString(),
+        podId: 'sess-001',
+        previousStatus: 'queued',
+        newStatus: 'running',
+      };
+
+      repo.insert(agentActivity('first'));
+      repo.insert(statusEvent);
+      repo.insert(firewallDenied('blocked-one.example.com'));
+      repo.insert(agentActivity('second'));
+      repo.insert(firewallDenied('blocked-two.example.com'));
+
+      const events = repo.getForSession('sess-001', {
+        types: ['pod.agent_activity', 'pod.firewall_denied'],
+        latest: 3,
+      });
+
+      expect(events.map((event) => event.type)).toEqual([
+        'pod.firewall_denied',
+        'pod.agent_activity',
+        'pod.firewall_denied',
+      ]);
       expect(events[0]?.id).toBeLessThan(events[1]?.id ?? 0);
       expect(events[1]?.id).toBeLessThan(events[2]?.id ?? 0);
     });

@@ -79,6 +79,31 @@ describe('GET /pods/:podId/events', () => {
     ]);
   });
 
+  it('returns firewall denials as replayable log events', async () => {
+    const firstId = eventRepo.insert(agentActivity('first'));
+    const denialId = eventRepo.insert(firewallDenied('oraios-software.de'));
+    const secondId = eventRepo.insert(agentActivity('second'));
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/sess-001/events',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject([
+      { eventId: firstId, type: 'status', message: 'first' },
+      {
+        eventId: denialId,
+        type: 'firewall_denied',
+        message: 'Denied egress: oraios-software.de',
+        output: 'Source: 172.19.0.2',
+        sni: 'oraios-software.de',
+        src: '172.19.0.2',
+      },
+      { eventId: secondId, type: 'status', message: 'second' },
+    ]);
+  });
+
   it('returns stable event ids', async () => {
     const id = eventRepo.insert(agentActivity('stable'));
 
@@ -97,7 +122,7 @@ describe('GET /pods/:podId/events', () => {
     ]);
   });
 
-  it('returns the latest limited agent activity events in chronological order', async () => {
+  it('returns the latest limited log replay events in chronological order', async () => {
     const statusEvent: SystemEvent = {
       type: 'pod.status_changed',
       timestamp: new Date().toISOString(),
@@ -108,6 +133,9 @@ describe('GET /pods/:podId/events', () => {
 
     for (let i = 1; i <= 550; i++) {
       eventRepo.insert(agentActivity(`message-${i}`));
+      if (i === 549) {
+        eventRepo.insert(firewallDenied('blocked.example.com'));
+      }
       eventRepo.insert(statusEvent);
     }
 
@@ -119,7 +147,10 @@ describe('GET /pods/:podId/events', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as Array<{ message: string }>;
     expect(body).toHaveLength(500);
-    expect(body[0]?.message).toBe('message-51');
+    expect(body[0]?.message).toBe('message-52');
+    expect(body[496]?.message).toBe('message-548');
+    expect(body[497]?.message).toBe('message-549');
+    expect(body[498]?.message).toBe('Denied egress: blocked.example.com');
     expect(body[499]?.message).toBe('message-550');
   });
 

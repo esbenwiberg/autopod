@@ -50,6 +50,8 @@ function parsePositiveIntegerQueryParam(raw: unknown): number | null | undefined
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
+const LOG_REPLAY_EVENT_TYPES = ['pod.agent_activity', 'pod.firewall_denied'];
+
 export function podRoutes(
   app: FastifyInstance,
   podManager: PodManager,
@@ -230,19 +232,35 @@ export function podRoutes(
     podManager.getSession(podId);
     if (!eventRepo) return [];
     const stored = eventRepo.getForSession(podId, {
-      type: 'pod.agent_activity',
+      types: LOG_REPLAY_EVENT_TYPES,
       latest: limit,
     });
-    return stored.map((e) => {
-      const raw = (e.payload as unknown as { event: Record<string, unknown> }).event;
-      // Normalize legacy events where `output` was stored as a content-block array
-      // (produced before the claude-stream-parser fix in c97af9a).
-      if (raw && typeof raw === 'object' && Array.isArray(raw.output)) {
-        const joined = (raw.output as Array<{ text?: string }>).map((b) => b.text ?? '').join('\n');
-        return { ...raw, eventId: e.id, output: joined || undefined };
-      }
-      return { ...raw, eventId: e.id };
-    });
+    return stored
+      .map((e) => {
+        if (e.payload.type === 'pod.firewall_denied') {
+          return {
+            eventId: e.id,
+            type: 'firewall_denied',
+            timestamp: e.payload.timestamp,
+            message: `Denied egress: ${e.payload.sni}`,
+            output: `Source: ${e.payload.src}`,
+            sni: e.payload.sni,
+            src: e.payload.src,
+          };
+        }
+        if (e.payload.type !== 'pod.agent_activity') return null;
+        const raw = e.payload.event as unknown as Record<string, unknown>;
+        // Normalize legacy events where `output` was stored as a content-block array
+        // (produced before the claude-stream-parser fix in c97af9a).
+        if (Array.isArray(raw.output)) {
+          const joined = (raw.output as Array<{ text?: string }>)
+            .map((b) => b.text ?? '')
+            .join('\n');
+          return { ...raw, eventId: e.id, output: joined || undefined };
+        }
+        return { ...raw, eventId: e.id };
+      })
+      .filter((event): event is Record<string, unknown> => event !== null);
   });
 
   // GET /pods/:podId/firewall-denials — structured network-denial evidence
