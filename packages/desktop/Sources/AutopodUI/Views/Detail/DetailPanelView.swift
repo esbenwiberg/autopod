@@ -267,7 +267,8 @@ public struct DetailPanelView: View {
                     pod: pod,
                     loadFiles: loadFiles,
                     loadArtifacts: loadArtifacts,
-                    loadContent: loadContent
+                    loadContent: loadContent,
+                    loadFirewallDenials: loadFirewallDenials
                 )
                 case .terminal:   EmptyView()
                 case .series:

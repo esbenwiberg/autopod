@@ -480,6 +480,8 @@ public final class EventStream {
       case "progress": return response.description ?? "Phase progress"
       case "task_summary": return response.actualSummary ?? "Task summary reported"
       case "reasoning": return response.text ?? "Reasoning"
+      case "firewall_denied":
+        return response.message ?? response.sni.map { "Denied egress: \($0)" } ?? "Denied egress"
       case "error": return response.message ?? "Error"
       case "complete": return "Agent finished"
       default: return response.message ?? response.type
@@ -508,6 +510,9 @@ public final class EventStream {
   private static func detailForEvent(_ response: AgentEventResponse) -> String? {
     if let output = response.output, !output.isEmpty { return output }
     if let diff = response.diff, !diff.isEmpty { return diff }
+    if response.type == "firewall_denied" {
+      return response.output ?? response.src.map { "Source: \($0)" }
+    }
     if response.type == "escalation" {
       return escalationDetail(payload: response.payload)
     }

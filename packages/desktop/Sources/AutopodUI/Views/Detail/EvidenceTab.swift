@@ -8,25 +8,29 @@ public struct EvidenceTab: View {
   public var loadFiles: ((String) async throws -> [SessionFileEntry])?
   public var loadArtifacts: ((String) async throws -> [SessionFileEntry])?
   public var loadContent: ((String, String) async throws -> SessionFileContent)?
+  public var loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])?
 
   public init(
     pod: Pod,
     loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
     loadArtifacts: ((String) async throws -> [SessionFileEntry])? = nil,
-    loadContent: ((String, String) async throws -> SessionFileContent)? = nil
+    loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
+    loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])? = nil
   ) {
     self.pod = pod
     self.loadFiles = loadFiles
     self.loadArtifacts = loadArtifacts
     self.loadContent = loadContent
+    self.loadFirewallDenials = loadFirewallDenials
   }
 
   private enum Section: String, CaseIterable {
-    case screenshots, artifacts, markdown
+    case screenshots, network, artifacts, markdown
 
     var label: String {
       switch self {
       case .screenshots: "Screenshots"
+      case .network: "Network"
       case .artifacts: "Artifacts"
       case .markdown: "Markdown"
       }
@@ -35,6 +39,7 @@ public struct EvidenceTab: View {
     var icon: String {
       switch self {
       case .screenshots: "photo.on.rectangle.angled"
+      case .network: "exclamationmark.shield"
       case .artifacts: "doc.on.doc"
       case .markdown: "doc.richtext"
       }
@@ -45,11 +50,25 @@ public struct EvidenceTab: View {
   @State private var lightboxRefs: [ScreenshotRef] = []
   @State private var lightboxIndex: Int = 0
   @State private var isLightboxPresented: Bool = false
+  @State private var firewallDenials: [FirewallDenialResponse] = []
+  @State private var firewallDenialsError: String?
+  @State private var isLoadingFirewallDenials = false
 
   private var screenshotSet: [ScreenshotRef] {
     let pageShots = pod.validationChecks?.proofOfWorkScreenshots ?? []
     let reviewShots = pod.validationChecks?.taskReviewScreenshots ?? []
     return pageShots + reviewShots
+  }
+
+  private var hasNetworkEvidence: Bool {
+    pod.readinessReview?.findings.contains(where: { $0.id == "network-denied-egress" }) == true
+      || !firewallDenials.isEmpty
+  }
+
+  private var visibleSections: [Section] {
+    Section.allCases.filter { section in
+      section != .network || hasNetworkEvidence
+    }
   }
 
   public var body: some View {
@@ -83,7 +102,7 @@ public struct EvidenceTab: View {
         .padding(.horizontal, 12)
         .padding(.top, 12)
 
-      ForEach(Section.allCases, id: \.self) { section in
+      ForEach(visibleSections, id: \.self) { section in
         Button {
           selectedSection = section
         } label: {
@@ -95,8 +114,8 @@ public struct EvidenceTab: View {
               .font(.subheadline.weight(selectedSection == section ? .semibold : .regular))
               .lineLimit(1)
             Spacer(minLength: 0)
-            if section == .screenshots, !screenshotSet.isEmpty {
-              Text("\(screenshotSet.count)")
+            if let count = sectionBadgeCount(section) {
+              Text("\(count)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             }
@@ -124,10 +143,23 @@ public struct EvidenceTab: View {
     switch selectedSection {
     case .screenshots:
       screenshotsPane
+    case .network:
+      networkPane
     case .artifacts:
       ArtifactsTab(pod: pod, loadArtifacts: loadArtifacts, loadContent: loadContent)
     case .markdown:
       MarkdownTab(pod: pod, loadFiles: loadFiles, loadContent: loadContent)
+    }
+  }
+
+  private func sectionBadgeCount(_ section: Section) -> Int? {
+    switch section {
+    case .screenshots:
+      screenshotSet.isEmpty ? nil : screenshotSet.count
+    case .network:
+      firewallDenials.isEmpty ? nil : firewallDenials.count
+    case .artifacts, .markdown:
+      nil
     }
   }
 
@@ -212,6 +244,151 @@ public struct EvidenceTab: View {
     }
     .frame(maxWidth: .infinity)
     .padding(.vertical, 60)
+  }
+
+  private var networkPane: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.shield")
+              .foregroundStyle(.orange)
+            Text("Network Evidence")
+              .font(.title3.weight(.semibold))
+          }
+          Text("Denied outbound connection attempts blocked by policy.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+
+        if isLoadingFirewallDenials {
+          HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text("Loading firewall denials")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          .padding(.vertical, 8)
+        } else if let firewallDenialsError {
+          VStack(alignment: .leading, spacing: 8) {
+            Text(firewallDenialsError)
+              .font(.caption)
+              .foregroundStyle(.red)
+              .fixedSize(horizontal: false, vertical: true)
+            Button("Retry") {
+              Task { await refreshFirewallDenials() }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+          }
+        } else if firewallDenials.isEmpty {
+          emptyNetworkEvidence
+        } else {
+          firewallDenialList
+        }
+      }
+      .padding(20)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .task(id: "\(pod.id)-\(pod.readinessReview?.computedAt.timeIntervalSince1970 ?? 0)") {
+      await refreshFirewallDenials()
+    }
+  }
+
+  private var firewallDenialList: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("\(firewallDenials.count) denied egress event(s)")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+
+      VStack(spacing: 0) {
+        ForEach(Array(firewallDenials.prefix(20))) { denial in
+          firewallDenialRow(denial)
+          if denial.id != firewallDenials.prefix(20).last?.id {
+            Divider().padding(.leading, 132)
+          }
+        }
+      }
+      .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+      .clipShape(RoundedRectangle(cornerRadius: 8))
+      .overlay(
+        RoundedRectangle(cornerRadius: 8)
+          .stroke(Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 1)
+      )
+
+      if firewallDenials.count > 20 {
+        Text("+ \(firewallDenials.count - 20) more")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  private func firewallDenialRow(_ denial: FirewallDenialResponse) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: 10) {
+      Text(shortFirewallTimestamp(denial.timestamp))
+        .font(.system(.caption2, design: .monospaced))
+        .foregroundStyle(.secondary)
+        .frame(width: 116, alignment: .leading)
+      Text(denial.sni)
+        .font(.caption.weight(.semibold))
+        .lineLimit(1)
+        .truncationMode(.middle)
+      Spacer(minLength: 8)
+      Text(denial.src)
+        .font(.system(.caption2, design: .monospaced))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 7)
+  }
+
+  private var emptyNetworkEvidence: some View {
+    VStack(spacing: 10) {
+      Image(systemName: "checkmark.shield")
+        .font(.system(size: 32))
+        .foregroundStyle(.tertiary)
+      Text("No firewall denials recorded")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 60)
+  }
+
+  private func refreshFirewallDenials() async {
+    guard let loadFirewallDenials else { return }
+    isLoadingFirewallDenials = true
+    firewallDenialsError = nil
+    do {
+      firewallDenials = try await loadFirewallDenials(
+        pod.id,
+        pod.readinessReview.map { iso8601WithFractionalSeconds($0.computedAt) }
+      )
+    } catch {
+      firewallDenials = []
+      firewallDenialsError = error.localizedDescription
+    }
+    isLoadingFirewallDenials = false
+  }
+
+  private func shortFirewallTimestamp(_ timestamp: String) -> String {
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let plain = ISO8601DateFormatter()
+    guard let date = fractional.date(from: timestamp) ?? plain.date(from: timestamp) else {
+      return timestamp
+    }
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm:ss"
+    return formatter.string(from: date)
+  }
+
+  private func iso8601WithFractionalSeconds(_ date: Date) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter.string(from: date)
   }
 
   private func openLightbox(_ index: Int) {

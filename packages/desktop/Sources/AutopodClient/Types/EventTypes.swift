@@ -307,6 +307,10 @@ public struct AgentEventResponse: Codable, Sendable {
   public let text: String?
   public let isRaw: Bool?
 
+  // firewall_denied historical log replay
+  public let sni: String?
+  public let src: String?
+
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     eventId = try c.decodeIfPresent(Int.self, forKey: .eventId)
@@ -341,5 +345,7 @@ public struct AgentEventResponse: Codable, Sendable {
     )
     text = try c.decodeIfPresent(String.self, forKey: .text)
     isRaw = try c.decodeIfPresent(Bool.self, forKey: .isRaw)
+    sni = try c.decodeIfPresent(String.self, forKey: .sni)
+    src = try c.decodeIfPresent(String.self, forKey: .src)
   }
 }

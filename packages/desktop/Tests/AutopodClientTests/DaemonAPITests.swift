@@ -401,6 +401,27 @@ private func decodeProfileWithAdvisoryBrowserQa(
   #expect(event.message == "Creating worktree")
 }
 
+@Test func agentEventResponseDecodesFirewallReplayFields() throws {
+  let json = """
+  {
+    "eventId": 283824,
+    "type": "firewall_denied",
+    "timestamp": "2026-06-08T07:32:18.686Z",
+    "message": "Denied egress: oraios-software.de",
+    "output": "Source: 172.19.0.2",
+    "sni": "oraios-software.de",
+    "src": "172.19.0.2"
+  }
+  """.data(using: .utf8)!
+
+  let event = try JSONDecoder().decode(AgentEventResponse.self, from: json)
+
+  #expect(event.eventId == 283824)
+  #expect(event.type == "firewall_denied")
+  #expect(event.sni == "oraios-software.de")
+  #expect(event.src == "172.19.0.2")
+}
+
 @Test func createSessionRequestEncodes() throws {
   let contract = SpecContractResponse(
     contractVersion: 1,
