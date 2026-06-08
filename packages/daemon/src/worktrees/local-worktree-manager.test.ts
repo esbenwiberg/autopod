@@ -275,6 +275,44 @@ describe('LocalWorktreeManager', () => {
       expect(result).toEqual({ filesChanged: 1, linesAdded: 2, linesRemoved: 0 });
     });
 
+    it('ignores mode-only chmod sections when stat reports +0/-0 files', async () => {
+      const modeOnlyDiff = [
+        'diff --git a/.githooks/commit-msg b/.githooks/commit-msg',
+        'old mode 100755',
+        'new mode 100644',
+        'diff --git a/.githooks/pre-commit b/.githooks/pre-commit',
+        'old mode 100755',
+        'new mode 100644',
+        '',
+      ].join('\n');
+
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('merge-base')) {
+            cb(null, { stdout: 'abc1234\n', stderr: '' });
+          } else if (cmd.includes('diff --stat abc1234 HEAD')) {
+            cb(null, {
+              stdout:
+                ' .githooks/commit-msg | 0\n .githooks/pre-commit | 0\n 2 files changed, 0 insertions(+), 0 deletions(-)',
+              stderr: '',
+            });
+          } else if (cmd.includes('diff --no-color abc1234 HEAD')) {
+            cb(null, { stdout: modeOnlyDiff, stderr: '' });
+          } else if (cmd.includes('diff --stat HEAD')) {
+            cb(null, { stdout: '', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      const result = await manager.getDiffStats('/tmp/worktree/sess', 'main');
+      expect(result).toEqual({ filesChanged: 0, linesAdded: 0, linesRemoved: 0 });
+    });
+
     it('passes exclude pathspecs to stat diffs', async () => {
       const capturedArgs: string[][] = [];
       execFileMock.mockImplementation(
@@ -544,8 +582,8 @@ describe('LocalWorktreeManager', () => {
 
       const result = await manager.commitPendingChanges('/tmp/worktree/sess', 'test commit');
       expect(result).toBe(true);
-      // git add -A, diff --cached --quiet, diff --cached --diff-filter=D, commit
-      expect(execFileMock).toHaveBeenCalledTimes(4);
+      // git add -A, diff --cached --quiet, mode-only scan, deletion guard, commit
+      expect(execFileMock).toHaveBeenCalledTimes(5);
     });
 
     it('returns false when working tree is clean', async () => {
@@ -555,6 +593,46 @@ describe('LocalWorktreeManager', () => {
       expect(result).toBe(false);
       // Only git add -A and diff --cached --quiet (no commit, no deletion check)
       expect(execFileMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('discards mode-only staged changes and skips the auto-commit when nothing remains', async () => {
+      const modeOnlyDiff = [
+        'diff --git a/.githooks/pre-commit b/.githooks/pre-commit',
+        'old mode 100755',
+        'new mode 100644',
+        '',
+      ].join('\n');
+      let restoredModeOnlyPath = false;
+      const calls: string[][] = [];
+
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          calls.push([...args]);
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('diff --cached --quiet')) {
+            if (restoredModeOnlyPath) {
+              cb(null, { stdout: '', stderr: '' });
+            } else {
+              cb(new Error('changes exist'), { stdout: '', stderr: '' });
+            }
+          } else if (cmd.includes('diff --cached --no-color')) {
+            cb(null, { stdout: modeOnlyDiff, stderr: '' });
+          } else if (args[0] === 'checkout') {
+            restoredModeOnlyPath = true;
+            cb(null, { stdout: '', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      const result = await manager.commitPendingChanges('/tmp/worktree/sess', 'test commit');
+
+      expect(result).toBe(false);
+      expect(calls).toContainEqual(['checkout', 'HEAD', '--', '.githooks/pre-commit']);
+      expect(calls.some((args) => args[0] === 'commit')).toBe(false);
     });
 
     it('allows deletions under the default threshold', async () => {

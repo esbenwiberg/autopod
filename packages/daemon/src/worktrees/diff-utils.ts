@@ -6,19 +6,43 @@
  * importing the host-side worktree machinery.
  */
 
+function hasContentChanges(section: string): boolean {
+  return /^@@/m.test(section) || /^[+-](?![+-][+-])/m.test(section);
+}
+
+function isModeOnlySection(section: string): boolean {
+  return (
+    section.startsWith('diff --git ') &&
+    /^old mode \d+$/m.test(section) &&
+    /^new mode \d+$/m.test(section) &&
+    !hasContentChanges(section)
+  );
+}
+
+function parseDiffHeaderPath(section: string): string | null {
+  const header = section.match(/^diff --git a\/(.+) b\/(.+)$/m);
+  return header?.[2] ?? null;
+}
+
+/**
+ * Return repo-relative paths whose diff sections only change file mode (chmod).
+ * Git records these as "old mode / new mode" lines without any +/- content.
+ */
+export function modeOnlyChangedPaths(diff: string): string[] {
+  return diff
+    .split(/(?=^diff --git )/m)
+    .filter(isModeOnlySection)
+    .map(parseDiffHeaderPath)
+    .filter((path): path is string => path !== null);
+}
+
 /**
  * Remove diff sections that only change file mode (chmod) with no content hunks.
- * Git records these as "old mode / new mode" lines without any +/- content.
  * They are environment artifacts inside containers and add noise to the AI reviewer.
  */
 export function stripModeOnlyChanges(diff: string): string {
   const sections = diff.split(/(?=^diff --git )/m);
-  return sections
-    .filter((section) => {
-      if (!section.startsWith('diff --git ')) return true;
-      return /^@@/m.test(section) || /^[+-](?![+-][+-])/m.test(section);
-    })
-    .join('');
+  return sections.filter((section) => !isModeOnlySection(section)).join('');
 }
 
 export const DIFF_EXCLUDE_PATHSPECS: readonly string[] = [

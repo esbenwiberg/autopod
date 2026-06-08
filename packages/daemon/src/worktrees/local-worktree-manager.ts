@@ -25,6 +25,7 @@ import { KeyedPromiseQueue } from '../util/keyed-promise-queue.js';
 import { generateAutoCommitMessage } from './auto-commit-message.js';
 import {
   DIFF_EXCLUDE_PATHSPECS,
+  modeOnlyChangedPaths,
   stripModeOnlyChanges,
   truncateDiffAtFileBoundary,
 } from './diff-utils.js';
@@ -577,22 +578,10 @@ export class LocalWorktreeManager implements WorktreeManager {
         }
 
         // Committed changes: base..HEAD
-        const { stdout: committedStat } = await git(
-          ['diff', '--stat', base, 'HEAD', ...DIFF_EXCLUDE_PATHSPECS],
-          {
-            cwd: worktreePath,
-          },
-        );
-        const committed = this.parseDiffStats(committedStat);
+        const committed = await this.getNormalizedDiffStats(worktreePath, [base, 'HEAD']);
 
         // Uncommitted changes: working tree vs HEAD (staged + unstaged)
-        const { stdout: uncommittedStat } = await git(
-          ['diff', '--stat', 'HEAD', ...DIFF_EXCLUDE_PATHSPECS],
-          {
-            cwd: worktreePath,
-          },
-        );
-        const uncommitted = this.parseDiffStats(uncommittedStat);
+        const uncommitted = await this.getNormalizedDiffStats(worktreePath, ['HEAD']);
 
         return {
           filesChanged: committed.filesChanged + uncommitted.filesChanged,
@@ -602,11 +591,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       }
 
       // Fallback: uncommitted changes only (legacy behaviour)
-      const { stdout } = await git(['diff', '--stat', 'HEAD', ...DIFF_EXCLUDE_PATHSPECS], {
-        cwd: worktreePath,
-      });
-
-      return this.parseDiffStats(stdout);
+      return await this.getNormalizedDiffStats(worktreePath, ['HEAD']);
     } catch (err) {
       this.logger.error({ err, worktreePath }, 'getDiffStats failed — returning zeros');
       return { filesChanged: 0, linesAdded: 0, linesRemoved: 0 };
@@ -935,6 +920,17 @@ export class LocalWorktreeManager implements WorktreeManager {
       // Exit 0 → nothing staged
       return false;
     } catch {
+      // Exit non-zero → staged changes exist. Drop mode-only changes before
+      // deciding whether there is real content left to commit.
+    }
+
+    const discardedModeOnlyCount = await this.discardStagedModeOnlyChanges(worktreePath);
+    if (discardedModeOnlyCount === 0) return true;
+
+    try {
+      await git(['diff', '--cached', '--quiet'], { cwd: worktreePath });
+      return false;
+    } catch {
       return true;
     }
   }
@@ -980,6 +976,22 @@ export class LocalWorktreeManager implements WorktreeManager {
     await git(['commit', '-m', message], { cwd: worktreePath });
     this.logger.info({ worktreePath, deletionCount }, 'Auto-committed pending changes');
     return true;
+  }
+
+  private async discardStagedModeOnlyChanges(worktreePath: string): Promise<number> {
+    const { stdout } = await git(['diff', '--cached', '--no-color'], {
+      cwd: worktreePath,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const paths = modeOnlyChangedPaths(stdout);
+    if (paths.length === 0) return 0;
+
+    await git(['checkout', 'HEAD', '--', ...paths], { cwd: worktreePath });
+    this.logger.info(
+      { worktreePath, count: paths.length, paths: paths.slice(0, 20) },
+      'Discarded staged mode-only changes before auto-commit',
+    );
+    return paths.length;
   }
 
   private async getStagedDeletionCount(worktreePath: string): Promise<number> {
@@ -1709,6 +1721,46 @@ export class LocalWorktreeManager implements WorktreeManager {
       filesChanged: filesMatch?.[1] ? Number.parseInt(filesMatch[1], 10) : 0,
       linesAdded: addMatch?.[1] ? Number.parseInt(addMatch[1], 10) : 0,
       linesRemoved: delMatch?.[1] ? Number.parseInt(delMatch[1], 10) : 0,
+    };
+  }
+
+  private async getNormalizedDiffStats(
+    worktreePath: string,
+    diffArgs: string[],
+  ): Promise<DiffStats> {
+    const { stdout: stat } = await git(['diff', '--stat', ...diffArgs, ...DIFF_EXCLUDE_PATHSPECS], {
+      cwd: worktreePath,
+    });
+    const parsed = this.parseDiffStats(stat);
+    if (parsed.filesChanged === 0 || parsed.linesAdded > 0 || parsed.linesRemoved > 0) {
+      return parsed;
+    }
+
+    const { stdout: rawDiff } = await git(
+      ['diff', '--no-color', ...diffArgs, ...DIFF_EXCLUDE_PATHSPECS],
+      {
+        cwd: worktreePath,
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    );
+    return this.summarizeDiffStats(stripModeOnlyChanges(rawDiff));
+  }
+
+  private summarizeDiffStats(diff: string): DiffStats {
+    if (!diff.trim()) return { filesChanged: 0, linesAdded: 0, linesRemoved: 0 };
+
+    let linesAdded = 0;
+    let linesRemoved = 0;
+    for (const line of diff.split('\n')) {
+      if (line.startsWith('+++') || line.startsWith('---')) continue;
+      if (line.startsWith('+')) linesAdded++;
+      else if (line.startsWith('-')) linesRemoved++;
+    }
+
+    return {
+      filesChanged: (diff.match(/^diff --git /gm) ?? []).length,
+      linesAdded,
+      linesRemoved,
     };
   }
 }
