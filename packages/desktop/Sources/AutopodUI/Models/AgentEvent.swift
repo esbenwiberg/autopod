@@ -14,6 +14,7 @@ public enum AgentEventType: String, Sendable {
     case complete     // AgentCompleteEvent — task completion with token/cost info
     case taskSummary = "task_summary" // AgentTaskSummaryEvent — final task summary with deviations
     case reasoning    // AgentReasoningEvent — agent reasoning / thinking
+    case firewallDenied = "firewall_denied" // pod.firewall_denied — restricted network rejection
 
     public var label: String {
         switch self {
@@ -28,6 +29,7 @@ public enum AgentEventType: String, Sendable {
         case .complete:    "Done"
         case .taskSummary: "Summary"
         case .reasoning:   "Reasoning"
+        case .firewallDenied: "Firewall"
         }
     }
 
@@ -44,6 +46,7 @@ public enum AgentEventType: String, Sendable {
         case .complete:    "checkmark.circle"
         case .taskSummary: "doc.text.below.ecg"
         case .reasoning:   "text.quote"
+        case .firewallDenied: "exclamationmark.shield"
         }
     }
 
@@ -60,6 +63,7 @@ public enum AgentEventType: String, Sendable {
         case .complete:    .green
         case .taskSummary: .indigo
         case .reasoning:   .secondary
+        case .firewallDenied: .orange
         }
     }
 
@@ -73,7 +77,7 @@ public enum AgentEventType: String, Sendable {
         switch self {
         case .status, .fileChange, .escalation, .plan, .progress, .error, .complete, .taskSummary:
             return true
-        case .toolUse, .toolResult, .reasoning:
+        case .toolUse, .toolResult, .reasoning, .firewallDenied:
             return false
         }
     }

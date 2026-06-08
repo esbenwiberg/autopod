@@ -62,6 +62,10 @@ public struct RawSystemEvent: Codable, Sendable {
   public let jobId: String?
   public let jobName: String?
   public let lastRunAt: String?
+
+  // pod.firewall_denied
+  public let sni: String?
+  public let src: String?
 }
 
 // MARK: - ValidationPhase
@@ -145,6 +149,7 @@ public enum SystemEvent: Sendable {
   case validationOverrideQueued(podId: String, override: ValidationOverrideEntry)
   case scheduledJobCatchupRequested(jobId: String, jobName: String, lastRunAt: String?)
   case scheduledJobFired(jobId: String, jobName: String, podId: String)
+  case firewallDenied(podId: String, timestamp: String, sni: String, src: String)
 
   public var eventId: Int? { nil }  // Set externally from _eventId
 
@@ -225,6 +230,10 @@ public enum SystemEvent: Sendable {
         jobName: raw.jobName ?? jobId,
         podId: podId
       )
+
+    case "pod.firewall_denied":
+      guard let id = raw.podId, let sni = raw.sni, let src = raw.src else { return nil }
+      return .firewallDenied(podId: id, timestamp: raw.timestamp, sni: sni, src: src)
 
     default:
       return nil

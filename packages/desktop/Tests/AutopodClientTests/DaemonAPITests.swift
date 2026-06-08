@@ -342,6 +342,49 @@ private func decodeProfileWithAdvisoryBrowserQa(
   }
 }
 
+@Test func systemEventParsesFirewallDenied() throws {
+  let json = """
+  {
+    "type": "pod.firewall_denied",
+    "timestamp": "2026-06-08T07:32:18.686Z",
+    "_eventId": 283824,
+    "podId": "delightful-clownfish",
+    "sni": "oraios-software.de",
+    "src": "172.19.0.2"
+  }
+  """.data(using: .utf8)!
+
+  let raw = try JSONDecoder().decode(RawSystemEvent.self, from: json)
+  let event = SystemEvent.parse(raw)
+
+  switch event {
+  case .firewallDenied(let podId, let timestamp, let sni, let src):
+    #expect(podId == "delightful-clownfish")
+    #expect(timestamp == "2026-06-08T07:32:18.686Z")
+    #expect(sni == "oraios-software.de")
+    #expect(src == "172.19.0.2")
+  default:
+    Issue.record("Expected firewallDenied event")
+  }
+}
+
+@Test func firewallDenialResponseDecodes() throws {
+  let json = """
+  {
+    "eventId": 283824,
+    "timestamp": "2026-06-08T07:32:18.686Z",
+    "sni": "oraios-software.de",
+    "src": "172.19.0.2"
+  }
+  """.data(using: .utf8)!
+
+  let denial = try JSONDecoder().decode(FirewallDenialResponse.self, from: json)
+
+  #expect(denial.id == 283824)
+  #expect(denial.sni == "oraios-software.de")
+  #expect(denial.src == "172.19.0.2")
+}
+
 @Test func agentEventResponseDecodesEventId() throws {
   let json = """
   {

@@ -281,6 +281,9 @@ public final class EventStream {
     case .scheduledJobFired(let jobId, _, let podId):
       Task { await scheduledJobStore?.refreshJob(jobId) }
       Task { await podStore.refreshSession(podId) }
+
+    case .firewallDenied(let podId, let timestamp, let sni, let src):
+      handleFirewallDenied(podId: podId, timestamp: timestamp, sni: sni, src: src, eventId: raw._eventId)
     }
   }
 
@@ -366,6 +369,25 @@ public final class EventStream {
     default:
       break
     }
+  }
+
+  private func handleFirewallDenied(
+    podId: String,
+    timestamp: String,
+    sni: String,
+    src: String,
+    eventId: Int?
+  ) {
+    let uiEvent = AgentEvent(
+      id: eventId ?? nextLocalEventId(),
+      timestamp: PodMapper.parseDate(timestamp),
+      type: .firewallDenied,
+      summary: "Denied egress: \(sni)",
+      detail: "Source: \(src)"
+    )
+    pendingGlobalEvents.append(uiEvent)
+    pendingSessionEvents.append((podId, uiEvent))
+    scheduleFlush()
   }
 
   // MARK: - Throttled flush

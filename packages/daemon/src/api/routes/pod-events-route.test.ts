@@ -20,6 +20,20 @@ function agentActivity(message: string): SystemEvent {
   };
 }
 
+function firewallDenied(
+  sni: string,
+  src = '172.19.0.2',
+  timestamp = new Date().toISOString(),
+): SystemEvent {
+  return {
+    type: 'pod.firewall_denied',
+    timestamp,
+    podId: 'sess-001',
+    sni,
+    src,
+  };
+}
+
 describe('GET /pods/:podId/events', () => {
   let db: ReturnType<typeof createTestDb>;
   let eventRepo: EventRepository;
@@ -117,5 +131,112 @@ describe('GET /pods/:podId/events', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ code: 'invalid_limit' });
+  });
+});
+
+describe('GET /pods/:podId/firewall-denials', () => {
+  let db: ReturnType<typeof createTestDb>;
+  let eventRepo: EventRepository;
+  let app: ReturnType<typeof Fastify>;
+
+  beforeEach(async () => {
+    db = createTestDb();
+    insertTestProfile(db);
+    db.prepare(
+      `INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id)
+       VALUES ('sess-001', 'test-profile', 'test task', 'queued', 'opus', 'claude', 'main', 'user-1')`,
+    ).run();
+    eventRepo = createEventRepository(db);
+    app = Fastify();
+    podRoutes(
+      app,
+      {
+        getSession: () => ({ id: 'sess-001' }),
+      } as unknown as PodManager,
+      eventRepo,
+    );
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    db.close();
+  });
+
+  it('returns structured firewall-denial rows only', async () => {
+    eventRepo.insert(agentActivity('hidden'));
+    const firstId = eventRepo.insert(firewallDenied('oraios-software.de'));
+    const secondId = eventRepo.insert(firewallDenied('http-intake.logs.us5.datadoghq.com'));
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/sess-001/firewall-denials',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject([
+      {
+        eventId: firstId,
+        sni: 'oraios-software.de',
+        src: '172.19.0.2',
+      },
+      {
+        eventId: secondId,
+        sni: 'http-intake.logs.us5.datadoghq.com',
+        src: '172.19.0.2',
+      },
+    ]);
+  });
+
+  it('returns latest limited firewall denials in chronological order', async () => {
+    for (let i = 1; i <= 3; i++) {
+      eventRepo.insert(firewallDenied(`blocked-${i}.example.com`));
+    }
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/sess-001/firewall-denials?limit=2',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Array<{ sni: string }>;
+    expect(body.map((row) => row.sni)).toEqual(['blocked-2.example.com', 'blocked-3.example.com']);
+  });
+
+  it('can return rows visible at a readiness snapshot timestamp', async () => {
+    eventRepo.insert(firewallDenied('first.example.com', '172.19.0.2', '2026-06-08T07:32:18.686Z'));
+    eventRepo.insert(
+      firewallDenied('second.example.com', '172.19.0.2', '2026-06-08T07:32:18.694Z'),
+    );
+    eventRepo.insert(firewallDenied('later.example.com', '172.19.0.2', '2026-06-08T07:39:57.825Z'));
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/sess-001/firewall-denials?until=2026-06-08T07:33:09.324Z',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Array<{ sni: string }>;
+    expect(body.map((row) => row.sni)).toEqual(['first.example.com', 'second.example.com']);
+  });
+
+  it('rejects invalid firewall-denial limits', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/sess-001/firewall-denials?limit=0',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: 'invalid_limit' });
+  });
+
+  it('rejects invalid firewall-denial until timestamps', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/sess-001/firewall-denials?until=nope',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: 'invalid_until' });
   });
 });

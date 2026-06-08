@@ -50,6 +50,7 @@ function createMockClient() {
         message: 'Creating worktree...',
       },
     ]),
+    getFirewallDenials: vi.fn().mockResolvedValue([]),
     getSessionLogs: vi.fn().mockResolvedValue('build log output'),
     updateFromBase: vi.fn().mockResolvedValue({ ok: true, action: 'queued_after_abort' }),
   } as unknown as AutopodClient;
@@ -162,10 +163,31 @@ describe('update-from-base command', () => {
     await program.parseAsync(['node', 'ap', 'logs', 'abcd1234']);
 
     expect(mockClient.getSessionEvents).toHaveBeenCalledWith('abcd1234');
+    expect(mockClient.getFirewallDenials).toHaveBeenCalledWith('abcd1234');
     expect(mockClient.getSessionLogs).not.toHaveBeenCalled();
     expect(logSpy.mock.calls.map((call) => call.join(' ')).join('\n')).toContain(
       'Creating worktree...',
     );
+    logSpy.mockRestore();
+  });
+
+  it('prints non-follow firewall denials from persisted events', async () => {
+    (mockClient.getSessionEvents as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
+    (mockClient.getFirewallDenials as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        eventId: 283824,
+        timestamp: '2026-06-08T07:32:18.686Z',
+        sni: 'oraios-software.de',
+        src: '172.19.0.2',
+      },
+    ]);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await program.parseAsync(['node', 'ap', 'logs', 'abcd1234']);
+
+    const output = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
+    expect(output).toContain('[firewall denied]');
+    expect(output).toContain('oraios-software.de from 172.19.0.2');
     logSpy.mockRestore();
   });
 

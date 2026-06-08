@@ -52,6 +52,7 @@ public struct LogStreamView: View {
         var types: [LogEventFilter] = [
             .eventType(.status), .eventType(.toolUse), .mcp, .eventType(.fileChange),
             .eventType(.escalation), .eventType(.plan), .eventType(.progress), .eventType(.error),
+            .eventType(.firewallDenied),
         ]
         if showReasoning { types.append(.eventType(.reasoning)) }
         return types

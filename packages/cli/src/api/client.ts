@@ -62,6 +62,13 @@ export interface SeriesResponse {
   statusCounts: Record<string, number>;
 }
 
+export interface FirewallDenial {
+  eventId: number;
+  timestamp: string;
+  sni: string;
+  src: string;
+}
+
 export interface ApproveAllValidatedResponse {
   approved: string[];
   skipped?: Array<{
@@ -298,6 +305,14 @@ export class AutopodClient {
   async getSessionEvents(id: string, limit?: number): Promise<AgentEvent[]> {
     const params = limit ? `?limit=${encodeURIComponent(String(limit))}` : '';
     return this.request<AgentEvent[]>('GET', `/pods/${id}/events${params}`);
+  }
+
+  async getFirewallDenials(id: string, limit?: number, until?: string): Promise<FirewallDenial[]> {
+    const params = new URLSearchParams();
+    if (limit) params.set('limit', String(limit));
+    if (until) params.set('until', until);
+    const suffix = params.size > 0 ? `?${params.toString()}` : '';
+    return this.request<FirewallDenial[]>('GET', `/pods/${id}/firewall-denials${suffix}`);
   }
 
   async startPreview(id: string): Promise<{ previewUrl: string }> {

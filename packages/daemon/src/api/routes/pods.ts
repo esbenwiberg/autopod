@@ -1,5 +1,6 @@
 import {
   AutopodError,
+  type FirewallDeniedEvent,
   type PodStatus,
   collectPiiPatternNames,
   createPodRequestSchema,
@@ -242,6 +243,41 @@ export function podRoutes(
       }
       return { ...raw, eventId: e.id };
     });
+  });
+
+  // GET /pods/:podId/firewall-denials — structured network-denial evidence
+  app.get('/pods/:podId/firewall-denials', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    const query = request.query as { limit?: string; until?: string };
+    const limit = parsePositiveIntegerQueryParam(query.limit);
+    if (limit === null) {
+      reply.status(400);
+      return { error: 'limit must be a positive integer', code: 'invalid_limit' };
+    }
+    const until = query.until ? new Date(query.until) : null;
+    if (query.until && Number.isNaN(until?.getTime())) {
+      reply.status(400);
+      return { error: 'until must be an ISO timestamp', code: 'invalid_until' };
+    }
+    // Verify pod exists (throws 404 if not found)
+    podManager.getSession(podId);
+    if (!eventRepo) return [];
+    const stored = eventRepo.getForSession(podId, {
+      type: 'pod.firewall_denied',
+      latest: until ? undefined : limit,
+    });
+    const rows = stored
+      .map((e) => {
+        const payload = e.payload as FirewallDeniedEvent;
+        return {
+          eventId: e.id,
+          timestamp: payload.timestamp,
+          sni: payload.sni,
+          src: payload.src,
+        };
+      })
+      .filter((row) => !until || new Date(row.timestamp).getTime() <= until.getTime());
+    return limit ? rows.slice(-limit) : rows;
   });
 
   // GET /pods/:podId/quality — behavioural quality signals computed on the fly

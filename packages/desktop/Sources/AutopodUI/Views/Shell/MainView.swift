@@ -50,6 +50,7 @@ public struct MainView: View {
     public var loadCost: ((String) async throws -> PodCostBreakdownResponse)?
     public var loadPreviewStatus: ((String) async throws -> PreviewStatus)?
     public var loadValidationHistory: ((String) async throws -> [StoredValidationResponse])?
+    public var loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])?
     public var loadQualityScores: (() async throws -> [PodQualityScore])?
     public var loadCostAnalytics: (() async throws -> CostAnalyticsResponse)?
     public var loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)?
@@ -145,6 +146,7 @@ public struct MainView: View {
         loadCost: ((String) async throws -> PodCostBreakdownResponse)? = nil,
         loadPreviewStatus: ((String) async throws -> PreviewStatus)? = nil,
         loadValidationHistory: ((String) async throws -> [StoredValidationResponse])? = nil,
+        loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])? = nil,
         loadQualityScores: (() async throws -> [PodQualityScore])? = nil,
         loadCostAnalytics: (() async throws -> CostAnalyticsResponse)? = nil,
         loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
@@ -231,6 +233,7 @@ public struct MainView: View {
         self.loadCost = loadCost
         self.loadPreviewStatus = loadPreviewStatus
         self.loadValidationHistory = loadValidationHistory
+        self.loadFirewallDenials = loadFirewallDenials
         self.loadQualityScores = loadQualityScores
         self.loadCostAnalytics = loadCostAnalytics
         self.loadReliabilityAnalytics = loadReliabilityAnalytics
@@ -612,6 +615,7 @@ public struct MainView: View {
                     loadCost: loadCost,
                     loadPreviewStatus: loadPreviewStatus,
                     loadValidationHistory: loadValidationHistory,
+                    loadFirewallDenials: loadFirewallDenials,
                     isLoadingLogs: isLoadingLogs,
                     logsLoadError: logsLoadError,
                     limitedLogCount: limitedLogCount,

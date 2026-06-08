@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import type {
   AgentActivityEvent,
-  AgentEvent,
+  FirewallDeniedEvent,
   Pod,
   PodStatus,
   SpecFile,
@@ -502,9 +502,35 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       return;
     }
 
-    const events = await withSpinner('Fetching logs...', () => client.getSessionEvents(resolvedId));
-    for (const event of events) {
-      formatAgentLogEvent(resolvedId, event, { showReasoning: opts.showReasoning });
+    const logEvents = await withSpinner('Fetching logs...', async () => {
+      const [events, denials] = await Promise.all([
+        client.getSessionEvents(resolvedId),
+        client.getFirewallDenials(resolvedId),
+      ]);
+      return [
+        ...events.map(
+          (event) =>
+            ({
+              type: 'pod.agent_activity',
+              timestamp: event.timestamp,
+              podId: resolvedId,
+              event,
+            }) satisfies AgentActivityEvent,
+        ),
+        ...denials.map(
+          (denial) =>
+            ({
+              type: 'pod.firewall_denied',
+              timestamp: denial.timestamp,
+              podId: resolvedId,
+              sni: denial.sni,
+              src: denial.src,
+            }) satisfies FirewallDeniedEvent,
+        ),
+      ].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    });
+    for (const event of logEvents) {
+      formatLogEvent(event, { showReasoning: opts.showReasoning });
     }
   }
   program
@@ -905,6 +931,11 @@ function formatLogEvent(
       );
       break;
     }
+    case 'pod.firewall_denied': {
+      const fw = event as FirewallDeniedEvent;
+      console.log(`${ts} ${chalk.yellow('[firewall denied]')} ${fw.sni} from ${fw.src}`);
+      break;
+    }
     case 'pod.escalation_created': {
       const ec = event as import('@autopod/shared').EscalationCreatedEvent;
       const ep = ec.escalation.payload;
@@ -941,20 +972,4 @@ function formatLogEvent(
     default:
       console.log(`${ts} ${chalk.dim(JSON.stringify(event))}`);
   }
-}
-
-function formatAgentLogEvent(
-  podId: string,
-  event: AgentEvent,
-  opts: { showReasoning?: boolean } = {},
-): void {
-  formatLogEvent(
-    {
-      type: 'pod.agent_activity',
-      timestamp: event.timestamp,
-      podId,
-      event,
-    } as AgentActivityEvent,
-    opts,
-  );
 }

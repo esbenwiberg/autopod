@@ -1,13 +1,18 @@
 import AppKit
+import AutopodClient
 import SwiftUI
 
 struct ReadinessTab: View {
     let pod: Pod
     let seriesReadiness: SeriesReadinessReview?
     var actions: PodActions = .preview
+    var loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])?
     var onOpenTab: (DetailTab) -> Void = { _ in }
 
     @State private var approvalReason = ""
+    @State private var firewallDenials: [FirewallDenialResponse] = []
+    @State private var firewallDenialsError: String?
+    @State private var isLoadingFirewallDenials = false
 
     private var decisionStatus: ReadinessStatus? {
         seriesReadiness?.status ?? pod.readinessReview?.status
@@ -80,8 +85,12 @@ struct ReadinessTab: View {
             )
             areaSection(title: "Areas", areas: readiness.areas, findings: readiness.findings)
             findingsSection(readiness.findings)
+            firewallDenialsSection(readiness)
         }
         .readinessPanel()
+        .task(id: "\(pod.id)-\(readiness.computedAt.timeIntervalSince1970)") {
+            await refreshFirewallDenials(for: readiness)
+        }
     }
 
     private var pendingSection: some View {
@@ -262,6 +271,120 @@ struct ReadinessTab: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1))
         }
+    }
+
+    @ViewBuilder
+    private func firewallDenialsSection(_ readiness: ReadinessReview) -> some View {
+        if readiness.findings.contains(where: { $0.id == "network-denied-egress" }) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Label("Firewall denials", systemImage: "exclamationmark.shield")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    if !firewallDenials.isEmpty {
+                        Text("\(firewallDenials.count)")
+                            .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
+                }
+
+                if isLoadingFirewallDenials {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Loading firewall denials")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                } else if let firewallDenialsError {
+                    Text(firewallDenialsError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if firewallDenials.isEmpty {
+                    Text("No firewall denials found for this readiness snapshot.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(firewallDenials.prefix(8)) { denial in
+                            firewallDenialRow(denial)
+                            if denial.id != firewallDenials.prefix(8).last?.id {
+                                Divider().padding(.leading, 132)
+                            }
+                        }
+                    }
+                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 1))
+                    if firewallDenials.count > 8 {
+                        Text("+ \(firewallDenials.count - 8) more")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func firewallDenialRow(_ denial: FirewallDenialResponse) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(shortFirewallTimestamp(denial.timestamp))
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 116, alignment: .leading)
+            Text(denial.sni)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 8)
+            Text(denial.src)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+    }
+
+    private func refreshFirewallDenials(for readiness: ReadinessReview) async {
+        guard readiness.findings.contains(where: { $0.id == "network-denied-egress" }) else {
+            firewallDenials = []
+            firewallDenialsError = nil
+            return
+        }
+        guard let loadFirewallDenials else { return }
+        isLoadingFirewallDenials = true
+        firewallDenialsError = nil
+        do {
+            firewallDenials = try await loadFirewallDenials(
+                pod.id,
+                iso8601WithFractionalSeconds(readiness.computedAt)
+            )
+        } catch {
+            firewallDenials = []
+            firewallDenialsError = error.localizedDescription
+        }
+        isLoadingFirewallDenials = false
+    }
+
+    private func shortFirewallTimestamp(_ timestamp: String) -> String {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        guard let date = fractional.date(from: timestamp) ?? plain.date(from: timestamp) else {
+            return timestamp
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
+    }
+
+    private func iso8601WithFractionalSeconds(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 
     private var approvalSection: some View {

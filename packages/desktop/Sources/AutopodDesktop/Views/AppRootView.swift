@@ -178,6 +178,10 @@ public struct AppRootView: View {
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.getValidationHistory(id)
       },
+      loadFirewallDenials: { [connectionManager] (id: String, until: String?) in
+        guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
+        return try await api.getFirewallDenials(id, limit: 100, until: until)
+      },
       loadQualityScores: { [connectionManager] in
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.listQualityScores()

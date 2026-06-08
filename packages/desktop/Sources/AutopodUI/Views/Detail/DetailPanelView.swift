@@ -38,6 +38,7 @@ public struct DetailPanelView: View {
     public var loadCost: ((String) async throws -> PodCostBreakdownResponse)?
     public var loadPreviewStatus: ((String) async throws -> PreviewStatus)?
     public var loadValidationHistory: ((String) async throws -> [StoredValidationResponse])?
+    public var loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])?
     public var isLoadingLogs: Bool
     public var logsLoadError: String?
     public var limitedLogCount: Int?
@@ -72,6 +73,7 @@ public struct DetailPanelView: View {
         loadCost: ((String) async throws -> PodCostBreakdownResponse)? = nil,
         loadPreviewStatus: ((String) async throws -> PreviewStatus)? = nil,
         loadValidationHistory: ((String) async throws -> [StoredValidationResponse])? = nil,
+        loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])? = nil,
         isLoadingLogs: Bool = false,
         logsLoadError: String? = nil,
         limitedLogCount: Int? = nil,
@@ -102,6 +104,7 @@ public struct DetailPanelView: View {
         self.loadCost = loadCost
         self.loadPreviewStatus = loadPreviewStatus
         self.loadValidationHistory = loadValidationHistory
+        self.loadFirewallDenials = loadFirewallDenials
         self.isLoadingLogs = isLoadingLogs
         self.logsLoadError = logsLoadError
         self.limitedLogCount = limitedLogCount
@@ -257,6 +260,7 @@ public struct DetailPanelView: View {
                         pod: pod,
                         seriesReadiness: seriesReadiness,
                         actions: actions,
+                        loadFirewallDenials: loadFirewallDenials,
                         onOpenTab: { selectedTab = $0 }
                     )
                 case .evidence:   EvidenceTab(
