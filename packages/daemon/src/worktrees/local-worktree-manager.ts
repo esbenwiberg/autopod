@@ -802,7 +802,8 @@ export class LocalWorktreeManager implements WorktreeManager {
       );
     }
 
-    // Push using auth URL so the PAT is never stored in git config.
+    // Push using auth URL so the PAT is never stored in git config. Daemon validation already
+    // ran, so bypass repo-local hooks that may not be runnable from the host worktree.
     this.logger.info({ worktreePath, targetBranch }, 'Pushing branch to origin');
     const authUrl = await this.getAuthUrl(worktreePath);
     const { stdout: actualBranch } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
@@ -814,7 +815,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       );
     }
     try {
-      await git(['push', authUrl, `HEAD:refs/heads/${targetBranch}`], {
+      await git(['push', '--no-verify', authUrl, `HEAD:refs/heads/${targetBranch}`], {
         cwd: worktreePath,
       });
     } catch (err) {
@@ -1156,9 +1157,10 @@ export class LocalWorktreeManager implements WorktreeManager {
     // --force-with-lease (not --force) — refuses the push if origin/<branch> moved
     // since our last fetch. Protects against clobbering a teammate's commits when
     // pushing a rebased branch.
+    const refspec = `HEAD:refs/heads/${expectedBranch}`;
     const pushArgs = force
-      ? ['push', '--force-with-lease', authUrl, `HEAD:refs/heads/${expectedBranch}`]
-      : ['push', authUrl, `HEAD:refs/heads/${expectedBranch}`];
+      ? ['push', '--no-verify', '--force-with-lease', authUrl, refspec]
+      : ['push', '--no-verify', authUrl, refspec];
     try {
       await git(pushArgs, { cwd: worktreePath });
     } catch (err) {
@@ -1190,7 +1192,7 @@ export class LocalWorktreeManager implements WorktreeManager {
 
     try {
       await git(['rev-parse', '--verify', sourceRef], { cwd: worktreePath });
-      await git(['push', authUrl, `${sourceRef}:refs/heads/${branch}`], {
+      await git(['push', '--no-verify', authUrl, `${sourceRef}:refs/heads/${branch}`], {
         cwd: worktreePath,
       });
       this.logger.info({ worktreePath, branch, sourceRef }, 'Published local branch ref to origin');

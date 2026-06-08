@@ -1150,7 +1150,7 @@ describe('LocalWorktreeManager', () => {
             cb(null, { stdout: 'feat/security\n', stderr: '' });
           } else if (cmd.includes('rev-parse --git-common-dir')) {
             cb(null, { stdout: '.git\n', stderr: '' });
-          } else if (cmd.includes('config --get remote.origin.url')) {
+          } else if (cmd.includes('remote get-url origin')) {
             cb(null, { stdout: 'https://github.com/org/repo.git\n', stderr: '' });
           } else {
             pushedArgs.push(args);
@@ -1163,8 +1163,12 @@ describe('LocalWorktreeManager', () => {
       await manager.pushBranch('/tmp/worktree/sess', 'feat/security');
 
       const pushCall = pushedArgs.find((a) => a.includes('push'));
-      expect(pushCall).toBeDefined();
-      expect(pushCall).toContain('HEAD:refs/heads/feat/security');
+      expect(pushCall).toEqual([
+        'push',
+        '--no-verify',
+        'https://github.com/org/repo.git',
+        'HEAD:refs/heads/feat/security',
+      ]);
     });
   });
 
@@ -1233,6 +1237,7 @@ describe('LocalWorktreeManager', () => {
       expect(result).toEqual({ branch: 'feature/base', created: true });
       expect(pushCall).toEqual([
         'push',
+        '--no-verify',
         'https://x-access-token:ado-pat@dev.azure.com/org/project/_git/repo',
         'refs/heads/feature/base:refs/heads/feature/base',
       ]);
@@ -1300,6 +1305,42 @@ describe('LocalWorktreeManager', () => {
       await expect(
         manager.mergeBranch({ worktreePath: '/tmp/worktree/sess', targetBranch: 'feat/security' }),
       ).rejects.toThrow("Expected HEAD to be on branch 'feat/security' but it is on 'main'");
+    });
+
+    it('pushes with no-verify and explicit HEAD refspec when branch matches', async () => {
+      const calls: string[][] = [];
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          calls.push(args);
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('diff --cached --quiet')) {
+            cb(null, { stdout: '', stderr: '' });
+          } else if (cmd.includes('rev-parse HEAD')) {
+            cb(null, { stdout: 'abc1234\n', stderr: '' });
+          } else if (cmd.includes('remote get-url origin')) {
+            cb(null, { stdout: 'https://github.com/org/repo.git\n', stderr: '' });
+          } else if (cmd.includes('rev-parse --abbrev-ref HEAD')) {
+            cb(null, { stdout: 'feat/security\n', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await manager.mergeBranch({
+        worktreePath: '/tmp/worktree/sess',
+        targetBranch: 'feat/security',
+      });
+
+      const pushCall = calls.find((args) => args[0] === 'push');
+      expect(pushCall).toEqual([
+        'push',
+        '--no-verify',
+        'https://github.com/org/repo.git',
+        'HEAD:refs/heads/feat/security',
+      ]);
     });
   });
 
