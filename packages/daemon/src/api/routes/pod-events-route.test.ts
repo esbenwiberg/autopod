@@ -1,6 +1,7 @@
 import type { SystemEvent } from '@autopod/shared';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createActionAuditRepository } from '../../actions/audit-repository.js';
 import { createEventRepository } from '../../pods/event-repository.js';
 import type { EventRepository } from '../../pods/event-repository.js';
 import type { PodManager } from '../../pods/index.js';
@@ -269,5 +270,175 @@ describe('GET /pods/:podId/firewall-denials', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ code: 'invalid_until' });
+  });
+});
+
+describe('GET /pods/:podId/action-audit', () => {
+  let db: ReturnType<typeof createTestDb>;
+  let app: ReturnType<typeof Fastify>;
+  let actionAuditRepo: ReturnType<typeof createActionAuditRepository>;
+
+  beforeEach(async () => {
+    db = createTestDb();
+    insertTestProfile(db);
+    db.prepare(
+      `INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id)
+       VALUES ('sess-001', 'test-profile', 'test task', 'queued', 'opus', 'claude', 'main', 'user-1')`,
+    ).run();
+    actionAuditRepo = createActionAuditRepository(db);
+    app = Fastify();
+    podRoutes(
+      app,
+      {
+        getSession: () => ({ id: 'sess-001' }),
+      } as unknown as PodManager,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      actionAuditRepo,
+    );
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    db.close();
+  });
+
+  it('returns action audit rows with chain status', async () => {
+    actionAuditRepo.insert({
+      podId: 'sess-001',
+      actionName: 'azure.deploy',
+      params: { app: 'guardian', slot: 'staging' },
+      responseSummary: 'Deployment accepted.',
+      piiDetected: true,
+      quarantineScore: 0.2,
+      piiCategories: ['email'],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/sess-001/action-audit',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      rows: [
+        {
+          podId: 'sess-001',
+          actionName: 'azure.deploy',
+          params: { app: 'guardian', slot: 'staging' },
+          responseSummary: 'Deployment accepted.',
+          piiDetected: true,
+          quarantineScore: 0.2,
+          piiCategories: ['email'],
+        },
+      ],
+      chain: { valid: true, rowCount: 1 },
+    });
+  });
+
+  it('returns latest limited action audit rows', async () => {
+    for (let i = 1; i <= 3; i++) {
+      actionAuditRepo.insert({
+        podId: 'sess-001',
+        actionName: `action-${i}`,
+        params: {},
+        responseSummary: null,
+        piiDetected: false,
+        quarantineScore: 0,
+      });
+    }
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/sess-001/action-audit?limit=2',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { rows: Array<{ actionName: string }> };
+    expect(body.rows.map((row) => row.actionName)).toEqual(['action-3', 'action-2']);
+  });
+
+  it('can return rows visible at a readiness snapshot timestamp', async () => {
+    db.prepare(
+      `INSERT INTO action_audit
+         (pod_id, action_name, params, pii_detected, quarantine_score, created_at)
+       VALUES
+         (@podId, @actionName, '{}', 0, 0, @createdAt)`,
+    ).run({
+      podId: 'sess-001',
+      actionName: 'before',
+      createdAt: '2026-06-08 07:32:18',
+    });
+    db.prepare(
+      `INSERT INTO action_audit
+         (pod_id, action_name, params, pii_detected, quarantine_score, created_at)
+       VALUES
+         (@podId, @actionName, '{}', 0, 0, @createdAt)`,
+    ).run({
+      podId: 'sess-001',
+      actionName: 'later',
+      createdAt: '2026-06-08 07:39:57',
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/sess-001/action-audit?until=2026-06-08T07:33:09.324Z',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { rows: Array<{ actionName: string }> };
+    expect(body.rows.map((row) => row.actionName)).toEqual(['before']);
+  });
+
+  it('rejects invalid action-audit limits', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/sess-001/action-audit?limit=0',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: 'invalid_limit' });
+  });
+
+  it('rejects invalid action-audit until timestamps', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/sess-001/action-audit?until=nope',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: 'invalid_until' });
+  });
+
+  it('returns invalid chain details', async () => {
+    actionAuditRepo.insert({
+      podId: 'sess-001',
+      actionName: 'azure.deploy',
+      params: {},
+      responseSummary: null,
+      piiDetected: false,
+      quarantineScore: 0,
+    });
+    db.prepare('UPDATE action_audit SET entry_hash = @bad WHERE pod_id = @podId').run({
+      bad: 'deadbeef'.repeat(8),
+      podId: 'sess-001',
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/sess-001/action-audit',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      chain: { valid: false, rowCount: 1 },
+    });
   });
 });

@@ -13,7 +13,7 @@ export interface AuditChainVerifyResult {
 
 export interface ActionAuditRepository {
   insert(entry: Omit<ActionAuditEntry, 'id' | 'createdAt' | 'prevHash' | 'entryHash'>): void;
-  listBySession(podId: string, limit?: number): ActionAuditEntry[];
+  listBySession(podId: string, limit?: number, until?: Date): ActionAuditEntry[];
   countBySession(podId: string): number;
   getSafetySummary(podId: string): ActionAuditSafetySummary;
   /** Verify the hash chain for all rows of a pod in insertion order. */
@@ -110,10 +110,18 @@ export function createActionAuditRepository(db: Database.Database): ActionAuditR
       });
     },
 
-    listBySession(podId: string, limit = 50): ActionAuditEntry[] {
+    listBySession(podId: string, limit = 50, until?: Date): ActionAuditEntry[] {
+      const untilSql = until ? (until.toISOString().replace('T', ' ').split('.')[0] ?? null) : null;
       const rows = db
-        .prepare('SELECT * FROM action_audit WHERE pod_id = @podId ORDER BY id DESC LIMIT @limit')
-        .all({ podId, limit }) as Record<string, unknown>[];
+        .prepare(
+          `SELECT *
+           FROM action_audit
+           WHERE pod_id = @podId
+             AND (@until IS NULL OR created_at <= @until)
+           ORDER BY id DESC
+           LIMIT @limit`,
+        )
+        .all({ podId, limit, until: untilSql }) as Record<string, unknown>[];
       return rows.map(rowToAuditEntry);
     },
 

@@ -135,6 +135,19 @@ describe('ActionAuditRepository', () => {
     expect(results[2].actionName).toBe('first');
   });
 
+  it('listBySession applies until before limit', () => {
+    const stmt = db.prepare(`
+      INSERT INTO action_audit (pod_id, action_name, params, pii_detected, quarantine_score, created_at)
+      VALUES (@podId, @actionName, '{}', 0, 0, @createdAt)
+    `);
+    stmt.run({ podId: POD_ID, actionName: 'first', createdAt: '2026-01-01 00:00:00' });
+    stmt.run({ podId: POD_ID, actionName: 'second', createdAt: '2026-01-02 00:00:00' });
+    stmt.run({ podId: POD_ID, actionName: 'later', createdAt: '2026-01-03 00:00:00' });
+
+    const results = repo.listBySession(POD_ID, 1, new Date('2026-01-02T00:00:00Z'));
+    expect(results.map((row) => row.actionName)).toEqual(['second']);
+  });
+
   it('countBySession returns correct count', () => {
     repo.insert(makeEntry());
     repo.insert(makeEntry({ actionName: 'restart' }));

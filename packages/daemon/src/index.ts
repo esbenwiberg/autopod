@@ -698,6 +698,7 @@ const app = await createServer({
   maxConcurrency: MAX_CONCURRENCY,
   imageBuilder,
   actionRegistry,
+  actionAuditRepo,
   sessionTokenIssuer,
   memoryRepo,
   memoryCandidateRepo,

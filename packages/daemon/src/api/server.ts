@@ -8,6 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import pino from 'pino';
 import { build as buildPrettyStream } from 'pino-pretty';
 import type { ActionRegistry } from '../actions/action-registry.js';
+import type { ActionAuditRepository } from '../actions/audit-repository.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
 import type { ImageBuilder } from '../images/index.js';
 import type { AuthModule } from '../interfaces/index.js';
@@ -79,6 +80,7 @@ export interface ServerDependencies {
   maxConcurrency?: number;
   imageBuilder?: ImageBuilder;
   actionRegistry?: ActionRegistry;
+  actionAuditRepo?: ActionAuditRepository;
   sessionTokenIssuer?: PodTokenIssuer;
   memoryRepo?: MemoryRepository;
   memoryCandidateRepo?: MemoryCandidateRepository;
@@ -152,6 +154,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     deps.validationRepo,
     deps.db,
     deps.safetyEventsRepo,
+    deps.actionAuditRepo,
   );
   if (deps.worktreeManager) {
     seriesRoutes(app, deps.podManager, deps.profileStore, deps.worktreeManager);

@@ -31,7 +31,9 @@ const AREA_TITLES: Record<ReadinessArea, string> = {
 const SOURCE_REFS = {
   validation: [{ kind: 'validation', label: 'Validation' }] satisfies ReadinessSourceRef[],
   security: [{ kind: 'evidence', label: 'Security scan' }] satisfies ReadinessSourceRef[],
-  actions: [{ kind: 'evidence', label: 'Action audit' }] satisfies ReadinessSourceRef[],
+  actions: [
+    { kind: 'evidence', label: 'Action audit', id: 'actions' },
+  ] satisfies ReadinessSourceRef[],
   event: [{ kind: 'event', label: 'Pod events' }] satisfies ReadinessSourceRef[],
   quality: [{ kind: 'quality', label: 'Quality score' }] satisfies ReadinessSourceRef[],
   pr: [{ kind: 'pr', label: 'Pull request' }] satisfies ReadinessSourceRef[],

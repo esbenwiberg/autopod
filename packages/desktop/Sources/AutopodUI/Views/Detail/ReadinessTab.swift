@@ -8,6 +8,7 @@ struct ReadinessTab: View {
     var actions: PodActions = .preview
     var loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])?
     var onOpenTab: (DetailTab) -> Void = { _ in }
+    var onOpenEvidence: (String?) -> Void = { _ in }
 
     @State private var approvalReason = ""
     @State private var firewallDenials: [FirewallDenialResponse] = []
@@ -460,6 +461,10 @@ struct ReadinessTab: View {
     private func open(_ ref: ReadinessSourceRef) {
         if ref.kind == .pr, let href = ref.href {
             NSWorkspace.shared.open(href)
+            return
+        }
+        if ref.kind == .evidence {
+            onOpenEvidence(ref.anchor)
             return
         }
         if let tab = ref.detailTab {

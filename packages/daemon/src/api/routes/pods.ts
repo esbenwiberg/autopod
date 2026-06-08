@@ -11,6 +11,7 @@ import {
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { ActionAuditRepository } from '../../actions/audit-repository.js';
 import { aggregateCost, parseDays } from '../../pods/cost-aggregation.js';
 import type { EscalationRepository } from '../../pods/escalation-repository.js';
 import {
@@ -63,6 +64,7 @@ export function podRoutes(
   validationRepo?: ValidationRepository,
   db?: Database.Database,
   safetyEventsRepo?: SafetyEventsRepository,
+  actionAuditRepo?: ActionAuditRepository,
 ): void {
   // POST /pods — create a new pod
   app.post('/pods', async (request, reply) => {
@@ -296,6 +298,32 @@ export function podRoutes(
       })
       .filter((row) => !until || new Date(row.timestamp).getTime() <= until.getTime());
     return limit ? rows.slice(-limit) : rows;
+  });
+
+  // GET /pods/:podId/action-audit — structured action-control-plane evidence
+  app.get('/pods/:podId/action-audit', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    const query = request.query as { limit?: string; until?: string };
+    const limit = parsePositiveIntegerQueryParam(query.limit);
+    if (limit === null) {
+      reply.status(400);
+      return { error: 'limit must be a positive integer', code: 'invalid_limit' };
+    }
+    const until = query.until ? new Date(query.until) : undefined;
+    if (query.until && Number.isNaN(until?.getTime())) {
+      reply.status(400);
+      return { error: 'until must be an ISO timestamp', code: 'invalid_until' };
+    }
+    // Verify pod exists (throws 404 if not found)
+    podManager.getSession(podId);
+    if (!actionAuditRepo) {
+      reply.status(503);
+      return { error: 'Action audit unavailable — repository not wired' };
+    }
+    return {
+      rows: actionAuditRepo.listBySession(podId, limit ?? 100, until),
+      chain: actionAuditRepo.verifyAuditChain(podId),
+    };
   });
 
   // GET /pods/:podId/quality — behavioural quality signals computed on the fly

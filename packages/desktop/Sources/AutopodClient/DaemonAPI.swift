@@ -267,6 +267,17 @@ public actor DaemonAPI {
     return try await request("GET", "/pods/\(id)/firewall-denials", query: query)
   }
 
+  public func getActionAudit(
+    _ id: String,
+    limit: Int? = nil,
+    until: String? = nil
+  ) async throws -> ActionAuditResponse {
+    var query: [String: String] = [:]
+    if let limit { query["limit"] = "\(limit)" }
+    if let until { query["until"] = until }
+    return try await request("GET", "/pods/\(id)/action-audit", query: query)
+  }
+
   public func getPodQuality(_ id: String) async throws -> PodQualitySignals {
     try await request("GET", "/pods/\(id)/quality")
   }

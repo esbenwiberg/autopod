@@ -1,5 +1,30 @@
+import AppKit
 import AutopodClient
 import SwiftUI
+
+public enum EvidenceSection: String, CaseIterable {
+  case screenshots, network, actions, artifacts, markdown
+
+  var label: String {
+    switch self {
+    case .screenshots: "Screenshots"
+    case .network: "Network"
+    case .actions: "Actions"
+    case .artifacts: "Artifacts"
+    case .markdown: "Markdown"
+    }
+  }
+
+  var icon: String {
+    switch self {
+    case .screenshots: "photo.on.rectangle.angled"
+    case .network: "exclamationmark.shield"
+    case .actions: "rectangle.stack.badge.person.crop"
+    case .artifacts: "doc.on.doc"
+    case .markdown: "doc.richtext"
+    }
+  }
+}
 
 /// Evidence tab — proof screenshots, generated artifacts, and rendered markdown
 /// outputs in one place so the top-level detail nav stays calm.
@@ -9,50 +34,37 @@ public struct EvidenceTab: View {
   public var loadArtifacts: ((String) async throws -> [SessionFileEntry])?
   public var loadContent: ((String, String) async throws -> SessionFileContent)?
   public var loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])?
+  public var loadActionAudit: ((String, String?) async throws -> ActionAuditResponse)?
+  @Binding private var requestedSection: EvidenceSection?
 
   public init(
     pod: Pod,
     loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
     loadArtifacts: ((String) async throws -> [SessionFileEntry])? = nil,
     loadContent: ((String, String) async throws -> SessionFileContent)? = nil,
-    loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])? = nil
+    loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])? = nil,
+    loadActionAudit: ((String, String?) async throws -> ActionAuditResponse)? = nil,
+    requestedSection: Binding<EvidenceSection?> = .constant(nil)
   ) {
     self.pod = pod
     self.loadFiles = loadFiles
     self.loadArtifacts = loadArtifacts
     self.loadContent = loadContent
     self.loadFirewallDenials = loadFirewallDenials
+    self.loadActionAudit = loadActionAudit
+    self._requestedSection = requestedSection
   }
 
-  private enum Section: String, CaseIterable {
-    case screenshots, network, artifacts, markdown
-
-    var label: String {
-      switch self {
-      case .screenshots: "Screenshots"
-      case .network: "Network"
-      case .artifacts: "Artifacts"
-      case .markdown: "Markdown"
-      }
-    }
-
-    var icon: String {
-      switch self {
-      case .screenshots: "photo.on.rectangle.angled"
-      case .network: "exclamationmark.shield"
-      case .artifacts: "doc.on.doc"
-      case .markdown: "doc.richtext"
-      }
-    }
-  }
-
-  @State private var selectedSection: Section = .screenshots
+  @State private var selectedSection: EvidenceSection = .screenshots
   @State private var lightboxRefs: [ScreenshotRef] = []
   @State private var lightboxIndex: Int = 0
   @State private var isLightboxPresented: Bool = false
   @State private var firewallDenials: [FirewallDenialResponse] = []
   @State private var firewallDenialsError: String?
   @State private var isLoadingFirewallDenials = false
+  @State private var actionAudit: ActionAuditResponse?
+  @State private var actionAuditError: String?
+  @State private var isLoadingActionAudit = false
 
   private var screenshotSet: [ScreenshotRef] {
     let pageShots = pod.validationChecks?.proofOfWorkScreenshots ?? []
@@ -65,9 +77,18 @@ public struct EvidenceTab: View {
       || !firewallDenials.isEmpty
   }
 
-  private var visibleSections: [Section] {
-    Section.allCases.filter { section in
-      section != .network || hasNetworkEvidence
+  private var hasActionEvidence: Bool {
+    pod.readinessReview?.findings.contains(where: { $0.id.hasPrefix("actions-") }) == true
+      || !(actionAudit?.rows.isEmpty ?? true)
+  }
+
+  private var visibleSections: [EvidenceSection] {
+    EvidenceSection.allCases.filter { section in
+      switch section {
+      case .network: hasNetworkEvidence
+      case .actions: hasActionEvidence
+      case .screenshots, .artifacts, .markdown: true
+      }
     }
   }
 
@@ -90,6 +111,8 @@ public struct EvidenceTab: View {
       }
     }
     .animation(.easeInOut(duration: 0.18), value: isLightboxPresented)
+    .onAppear { consumeRequestedSection() }
+    .onChange(of: requestedSection) { _, _ in consumeRequestedSection() }
   }
 
   private var sectionRail: some View {
@@ -145,6 +168,8 @@ public struct EvidenceTab: View {
       screenshotsPane
     case .network:
       networkPane
+    case .actions:
+      actionsPane
     case .artifacts:
       ArtifactsTab(pod: pod, loadArtifacts: loadArtifacts, loadContent: loadContent)
     case .markdown:
@@ -152,12 +177,14 @@ public struct EvidenceTab: View {
     }
   }
 
-  private func sectionBadgeCount(_ section: Section) -> Int? {
+  private func sectionBadgeCount(_ section: EvidenceSection) -> Int? {
     switch section {
     case .screenshots:
       screenshotSet.isEmpty ? nil : screenshotSet.count
     case .network:
       firewallDenials.isEmpty ? nil : firewallDenials.count
+    case .actions:
+      actionAudit?.rows.isEmpty == false ? actionAudit?.rows.count : nil
     case .artifacts, .markdown:
       nil
     }
@@ -326,7 +353,7 @@ public struct EvidenceTab: View {
 
   private func firewallDenialRow(_ denial: FirewallDenialResponse) -> some View {
     HStack(alignment: .firstTextBaseline, spacing: 10) {
-      Text(shortFirewallTimestamp(denial.timestamp))
+      Text(shortEvidenceTimestamp(denial.timestamp))
         .font(.system(.caption2, design: .monospaced))
         .foregroundStyle(.secondary)
         .frame(width: 116, alignment: .leading)
@@ -357,6 +384,216 @@ public struct EvidenceTab: View {
     .padding(.vertical, 60)
   }
 
+  private var actionsPane: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 8) {
+            Image(systemName: "rectangle.stack.badge.person.crop")
+              .foregroundStyle(.orange)
+            Text("Action Evidence")
+              .font(.title3.weight(.semibold))
+          }
+          Text("Control-plane action audit rows and safety signals recorded for this pod.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+
+        if isLoadingActionAudit {
+          HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text("Loading action audit")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          .padding(.vertical, 8)
+        } else if let actionAuditError {
+          VStack(alignment: .leading, spacing: 8) {
+            Text(actionAuditError)
+              .font(.caption)
+              .foregroundStyle(.red)
+              .fixedSize(horizontal: false, vertical: true)
+            Button("Retry") {
+              Task { await refreshActionAudit() }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+          }
+        } else if let actionAudit, !actionAudit.rows.isEmpty {
+          actionAuditList(actionAudit)
+        } else {
+          emptyActionEvidence
+        }
+      }
+      .padding(20)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .task(id: "\(pod.id)-\(pod.readinessReview?.computedAt.timeIntervalSince1970 ?? 0)") {
+      await refreshActionAudit()
+    }
+  }
+
+  private func actionAuditList(_ response: ActionAuditResponse) -> some View {
+    let rows = response.rows
+    let piiRows = rows.filter(\.piiDetected)
+    let quarantineRows = rows.filter { $0.quarantineScore > 0 }
+    let categories = Array(Set(rows.flatMap { $0.piiCategories ?? [] })).sorted()
+    let maxQuarantineScore = quarantineRows.map(\.quarantineScore).max() ?? 0
+
+    return VStack(alignment: .leading, spacing: 10) {
+      actionAuditSummary(
+        rows: rows.count,
+        piiRows: piiRows.count,
+        categories: categories,
+        quarantineRows: quarantineRows.count,
+        maxQuarantineScore: maxQuarantineScore,
+        chain: response.chain
+      )
+
+      VStack(spacing: 0) {
+        ForEach(Array(rows.prefix(50))) { row in
+          actionAuditRow(row)
+          if row.id != rows.prefix(50).last?.id {
+            Divider().padding(.leading, 132)
+          }
+        }
+      }
+      .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+      .clipShape(RoundedRectangle(cornerRadius: 8))
+      .overlay(
+        RoundedRectangle(cornerRadius: 8)
+          .stroke(Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 1)
+      )
+
+      if rows.count > 50 {
+        Text("+ \(rows.count - 50) more")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  private func actionAuditSummary(
+    rows: Int,
+    piiRows: Int,
+    categories: [String],
+    quarantineRows: Int,
+    maxQuarantineScore: Double,
+    chain: ActionAuditChainResponse
+  ) -> some View {
+    FlowLayout(spacing: 6) {
+      evidencePill("\(rows) audit row(s)", color: .secondary)
+      evidencePill(chain.valid ? "chain valid" : "chain invalid", color: chain.valid ? .green : .red)
+      if piiRows > 0 {
+        evidencePill("\(piiRows) PII", color: .orange)
+      }
+      if !categories.isEmpty {
+        evidencePill("PII: \(categories.joined(separator: ", "))", color: .orange)
+      }
+      if quarantineRows > 0 {
+        evidencePill(
+          "\(quarantineRows) quarantine · max \(formatScore(maxQuarantineScore))",
+          color: .orange
+        )
+      }
+      if !chain.valid, let reason = chain.reason {
+        evidencePill(reason, color: .red)
+      }
+    }
+  }
+
+  private func actionAuditRow(_ row: ActionAuditEntryResponse) -> some View {
+    DisclosureGroup {
+      actionAuditDetails(row)
+    } label: {
+      HStack(alignment: .firstTextBaseline, spacing: 10) {
+        Text(shortEvidenceTimestamp(row.createdAt))
+          .font(.system(.caption2, design: .monospaced))
+          .foregroundStyle(.secondary)
+          .frame(width: 116, alignment: .leading)
+        Text(row.actionName)
+          .font(.caption.weight(.semibold))
+          .lineLimit(1)
+          .truncationMode(.middle)
+        actionSafetyBadges(row)
+        Spacer(minLength: 8)
+        if let responseSummary = row.responseSummary, !responseSummary.isEmpty {
+          Text(responseSummary)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+        }
+      }
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 7)
+  }
+
+  private func actionSafetyBadges(_ row: ActionAuditEntryResponse) -> some View {
+    HStack(spacing: 4) {
+      if row.piiDetected {
+        evidencePill("PII", color: .orange)
+      }
+      if row.quarantineScore > 0 {
+        evidencePill("Q \(formatScore(row.quarantineScore))", color: .orange)
+      }
+    }
+  }
+
+  private func actionAuditDetails(_ row: ActionAuditEntryResponse) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      labeledCodeBlock(title: "Params", value: prettyJson(row.params))
+      if let responseSummary = row.responseSummary, !responseSummary.isEmpty {
+        labeledCodeBlock(title: "Response summary", value: responseSummary)
+      }
+      if let categories = row.piiCategories, !categories.isEmpty {
+        labeledCodeBlock(title: "PII categories", value: categories.joined(separator: ", "))
+      }
+      labeledCodeBlock(title: "Entry hash", value: row.entryHash ?? "null")
+      labeledCodeBlock(title: "Previous hash", value: row.prevHash ?? "null")
+    }
+    .padding(.leading, 132)
+    .padding(.top, 6)
+  }
+
+  private func labeledCodeBlock(title: String, value: String) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: 6) {
+        Text(title)
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(.secondary)
+        Button {
+          copy(value)
+        } label: {
+          Image(systemName: "doc.on.doc")
+        }
+        .buttonStyle(.plain)
+        .help("Copy \(title)")
+        Spacer(minLength: 0)
+      }
+      Text(value)
+        .font(.system(.caption2, design: .monospaced))
+        .foregroundStyle(.secondary)
+        .textSelection(.enabled)
+        .lineLimit(8)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
+  private var emptyActionEvidence: some View {
+    VStack(spacing: 10) {
+      Image(systemName: "checkmark.shield")
+        .font(.system(size: 32))
+        .foregroundStyle(.tertiary)
+      Text("No action audit rows recorded")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 60)
+  }
+
   private func refreshFirewallDenials() async {
     guard let loadFirewallDenials else { return }
     isLoadingFirewallDenials = true
@@ -373,16 +610,80 @@ public struct EvidenceTab: View {
     isLoadingFirewallDenials = false
   }
 
-  private func shortFirewallTimestamp(_ timestamp: String) -> String {
+  private func refreshActionAudit() async {
+    guard let loadActionAudit else { return }
+    isLoadingActionAudit = true
+    actionAuditError = nil
+    do {
+      actionAudit = try await loadActionAudit(
+        pod.id,
+        pod.readinessReview.map { iso8601WithFractionalSeconds($0.computedAt) }
+      )
+    } catch {
+      actionAudit = nil
+      actionAuditError = error.localizedDescription
+    }
+    isLoadingActionAudit = false
+  }
+
+  private func shortEvidenceTimestamp(_ timestamp: String) -> String {
     let fractional = ISO8601DateFormatter()
     fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     let plain = ISO8601DateFormatter()
-    guard let date = fractional.date(from: timestamp) ?? plain.date(from: timestamp) else {
+    let sqlite = DateFormatter()
+    sqlite.locale = Locale(identifier: "en_US_POSIX")
+    sqlite.timeZone = TimeZone(secondsFromGMT: 0)
+    sqlite.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    guard
+      let date = fractional.date(from: timestamp)
+        ?? plain.date(from: timestamp)
+        ?? sqlite.date(from: timestamp)
+    else {
       return timestamp
     }
     let formatter = DateFormatter()
     formatter.dateFormat = "HH:mm:ss"
     return formatter.string(from: date)
+  }
+
+  private func evidencePill(_ text: String, color: Color) -> some View {
+    Text(text)
+      .font(.system(.caption2, design: .monospaced).weight(.semibold))
+      .foregroundStyle(color)
+      .lineLimit(1)
+      .padding(.horizontal, 6)
+      .padding(.vertical, 2)
+      .background(color.opacity(0.12), in: Capsule())
+      .overlay(Capsule().stroke(color.opacity(0.22), lineWidth: 1))
+  }
+
+  private func formatScore(_ score: Double) -> String {
+    String(format: "%.2f", score)
+  }
+
+  private func prettyJson(_ params: [String: AnyCodable]) -> String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    guard
+      let data = try? encoder.encode(params),
+      let text = String(data: data, encoding: .utf8)
+    else {
+      return params.sorted { $0.key < $1.key }
+        .map { "\($0.key): \($0.value.displayValue)" }
+        .joined(separator: "\n")
+    }
+    return text
+  }
+
+  private func copy(_ value: String) {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(value, forType: .string)
+  }
+
+  private func consumeRequestedSection() {
+    guard let requestedSection else { return }
+    selectedSection = requestedSection
+    self.requestedSection = nil
   }
 
   private func iso8601WithFractionalSeconds(_ date: Date) -> String {
@@ -395,6 +696,68 @@ public struct EvidenceTab: View {
     lightboxRefs = screenshotSet
     lightboxIndex = index
     isLightboxPresented = true
+  }
+}
+
+private struct FlowLayout: Layout {
+  let spacing: CGFloat
+
+  func sizeThatFits(
+    proposal: ProposedViewSize,
+    subviews: Subviews,
+    cache: inout ()
+  ) -> CGSize {
+    let maxWidth = proposal.width ?? subviews.reduce(CGFloat.zero) { width, subview in
+      width + subview.sizeThatFits(.unspecified).width + spacing
+    }
+    var currentX: CGFloat = 0
+    var currentRowHeight: CGFloat = 0
+    var totalHeight: CGFloat = 0
+    var widestRow: CGFloat = 0
+
+    for subview in subviews {
+      let size = subview.sizeThatFits(.unspecified)
+      let wraps = currentX > 0 && currentX + size.width > maxWidth
+      if wraps {
+        widestRow = max(widestRow, currentX - spacing)
+        totalHeight += currentRowHeight + spacing
+        currentX = 0
+        currentRowHeight = 0
+      }
+      currentX += size.width + spacing
+      currentRowHeight = max(currentRowHeight, size.height)
+    }
+
+    widestRow = max(widestRow, currentX > 0 ? currentX - spacing : 0)
+    totalHeight += currentRowHeight
+    return CGSize(width: min(maxWidth, widestRow), height: totalHeight)
+  }
+
+  func placeSubviews(
+    in bounds: CGRect,
+    proposal: ProposedViewSize,
+    subviews: Subviews,
+    cache: inout ()
+  ) {
+    var currentX = bounds.minX
+    var currentY = bounds.minY
+    var currentRowHeight: CGFloat = 0
+
+    for subview in subviews {
+      let size = subview.sizeThatFits(.unspecified)
+      let wraps = currentX > bounds.minX && currentX + size.width > bounds.maxX
+      if wraps {
+        currentX = bounds.minX
+        currentY += currentRowHeight + spacing
+        currentRowHeight = 0
+      }
+      subview.place(
+        at: CGPoint(x: currentX, y: currentY),
+        proposal: ProposedViewSize(width: size.width, height: size.height)
+      )
+      currentX += size.width + spacing
+      currentRowHeight = max(currentRowHeight, size.height)
+    }
   }
 }
 

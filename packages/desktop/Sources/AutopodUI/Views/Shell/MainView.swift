@@ -51,6 +51,7 @@ public struct MainView: View {
     public var loadPreviewStatus: ((String) async throws -> PreviewStatus)?
     public var loadValidationHistory: ((String) async throws -> [StoredValidationResponse])?
     public var loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])?
+    public var loadActionAudit: ((String, String?) async throws -> ActionAuditResponse)?
     public var loadQualityScores: (() async throws -> [PodQualityScore])?
     public var loadCostAnalytics: (() async throws -> CostAnalyticsResponse)?
     public var loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)?
@@ -147,6 +148,7 @@ public struct MainView: View {
         loadPreviewStatus: ((String) async throws -> PreviewStatus)? = nil,
         loadValidationHistory: ((String) async throws -> [StoredValidationResponse])? = nil,
         loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])? = nil,
+        loadActionAudit: ((String, String?) async throws -> ActionAuditResponse)? = nil,
         loadQualityScores: (() async throws -> [PodQualityScore])? = nil,
         loadCostAnalytics: (() async throws -> CostAnalyticsResponse)? = nil,
         loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
@@ -234,6 +236,7 @@ public struct MainView: View {
         self.loadPreviewStatus = loadPreviewStatus
         self.loadValidationHistory = loadValidationHistory
         self.loadFirewallDenials = loadFirewallDenials
+        self.loadActionAudit = loadActionAudit
         self.loadQualityScores = loadQualityScores
         self.loadCostAnalytics = loadCostAnalytics
         self.loadReliabilityAnalytics = loadReliabilityAnalytics
@@ -616,6 +619,7 @@ public struct MainView: View {
                     loadPreviewStatus: loadPreviewStatus,
                     loadValidationHistory: loadValidationHistory,
                     loadFirewallDenials: loadFirewallDenials,
+                    loadActionAudit: loadActionAudit,
                     isLoadingLogs: isLoadingLogs,
                     logsLoadError: logsLoadError,
                     limitedLogCount: limitedLogCount,

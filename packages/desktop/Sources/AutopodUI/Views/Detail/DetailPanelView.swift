@@ -39,6 +39,7 @@ public struct DetailPanelView: View {
     public var loadPreviewStatus: ((String) async throws -> PreviewStatus)?
     public var loadValidationHistory: ((String) async throws -> [StoredValidationResponse])?
     public var loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])?
+    public var loadActionAudit: ((String, String?) async throws -> ActionAuditResponse)?
     public var isLoadingLogs: Bool
     public var logsLoadError: String?
     public var limitedLogCount: Int?
@@ -74,6 +75,7 @@ public struct DetailPanelView: View {
         loadPreviewStatus: ((String) async throws -> PreviewStatus)? = nil,
         loadValidationHistory: ((String) async throws -> [StoredValidationResponse])? = nil,
         loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])? = nil,
+        loadActionAudit: ((String, String?) async throws -> ActionAuditResponse)? = nil,
         isLoadingLogs: Bool = false,
         logsLoadError: String? = nil,
         limitedLogCount: Int? = nil,
@@ -105,6 +107,7 @@ public struct DetailPanelView: View {
         self.loadPreviewStatus = loadPreviewStatus
         self.loadValidationHistory = loadValidationHistory
         self.loadFirewallDenials = loadFirewallDenials
+        self.loadActionAudit = loadActionAudit
         self.isLoadingLogs = isLoadingLogs
         self.logsLoadError = logsLoadError
         self.limitedLogCount = limitedLogCount
@@ -115,6 +118,7 @@ public struct DetailPanelView: View {
     }
 
     @State private var selectedTab: DetailTab = .overview
+    @State private var requestedEvidenceSection: EvidenceSection?
     @State private var didCopyName: Bool = false
     @State private var showRelatedEventsDebug: Bool = false
 
@@ -125,6 +129,9 @@ public struct DetailPanelView: View {
         || !(pod.validationChecks?.proofOfWorkScreenshots?.isEmpty ?? true)
         || !(pod.validationChecks?.taskReviewScreenshots?.isEmpty ?? true)
         || pod.artifactsPath != nil
+        || pod.readinessReview?.findings.contains(where: { finding in
+            finding.id.hasPrefix("actions-") || finding.id == "network-denied-egress"
+        }) == true
     }
     private var relatedEventReferences: [RelatedEventReference] {
         Self.relatedEventReferences(for: pod, seriesPods: seriesPods)
@@ -261,14 +268,21 @@ public struct DetailPanelView: View {
                         seriesReadiness: seriesReadiness,
                         actions: actions,
                         loadFirewallDenials: loadFirewallDenials,
-                        onOpenTab: { selectedTab = $0 }
+                        onOpenTab: { selectedTab = $0 },
+                        onOpenEvidence: { anchor in
+                            requestedEvidenceSection = anchor
+                                .flatMap(EvidenceSection.init(rawValue:)) ?? .screenshots
+                            selectedTab = .evidence
+                        }
                     )
                 case .evidence:   EvidenceTab(
                     pod: pod,
                     loadFiles: loadFiles,
                     loadArtifacts: loadArtifacts,
                     loadContent: loadContent,
-                    loadFirewallDenials: loadFirewallDenials
+                    loadFirewallDenials: loadFirewallDenials,
+                    loadActionAudit: loadActionAudit,
+                    requestedSection: $requestedEvidenceSection
                 )
                 case .terminal:   EmptyView()
                 case .series:
@@ -314,7 +328,10 @@ public struct DetailPanelView: View {
         .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { selectedTab = Self.defaultTab(for: pod) }
-        .onChange(of: pod.id) { _, _ in selectedTab = Self.defaultTab(for: pod) }
+        .onChange(of: pod.id) { _, _ in
+            selectedTab = Self.defaultTab(for: pod)
+            requestedEvidenceSection = nil
+        }
         .onChange(of: requestedTab) { _, tab in
             guard let tab else { return }
             guard tab != .terminal || isTerminalAvailable else { requestedTab = nil; return }
