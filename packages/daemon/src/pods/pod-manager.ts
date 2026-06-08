@@ -105,6 +105,7 @@ import type {
   ProviderEnvResult,
 } from '../providers/index.js';
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
+import { RUNTIME_TELEMETRY_OPT_OUT_ENV } from '../runtime-env.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import { cleanupClaudeState, ensureClaudeStateDir } from '../runtimes/claude-state-store.js';
 import { cleanupCodexState, ensureCodexStateDir } from '../runtimes/codex-state-store.js';
@@ -5385,6 +5386,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         const containerEnv: Record<string, string> = {
           POD_ID: podId,
+          ...RUNTIME_TELEMETRY_OPT_OUT_ENV,
           PORT: String(CONTAINER_APP_PORT),
           HOST: '0.0.0.0', // bind to all interfaces inside container for Docker port forwarding
           // Host-side preview URL — same value the daemon writes to pod.previewUrl.
@@ -7934,7 +7936,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             startMergePolling(podId);
             return;
           }
-          emitActivityStatus(podId, 'PR creation failed — pod returned to validated');
+          emitActivityStatus(podId, `PR creation failed: ${message} — pod returned to validated`);
           transition(s2, 'validated');
           return;
         }
@@ -7962,7 +7964,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         } catch (err) {
           logger.error({ err, podId }, 'Failed to push branch during approval');
           if (!handleDeletionGuardError(podId, err)) {
-            emitActivityStatus(podId, 'Branch push failed — pod still completing');
+            const message = err instanceof Error ? err.message : String(err);
+            emitActivityStatus(podId, `Branch push failed: ${message} — pod still completing`);
           }
         }
       }
@@ -9309,6 +9312,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 podModel: pod.model,
               });
             } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
               logger.warn({ err, podId }, 'Failed to push branch for PR');
               // Credential-class failures are recoverable: park the pod in
               // awaiting_input so the operator can update the PAT and resume,
@@ -9324,6 +9328,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 }
                 return;
               }
+              emitActivityStatus(podId, `Branch push failed: ${message}`);
               throw err;
             }
 
@@ -9428,8 +9433,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   emitActivityStatus(podId, `PR created: ${prUrl}`);
                 }
               } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
                 logger.warn({ err, podId }, 'Failed to create PR — pod still validated');
-                emitActivityStatus(podId, 'PR creation failed — pod still validated');
+                emitActivityStatus(podId, `PR creation failed: ${message} — pod still validated`);
               }
             } else {
               emitActivityStatus(podId, `Carrying forward existing PR: ${prUrl}`);
@@ -9951,8 +9957,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 }
                 if (prUrl) emitActivityStatus(podId, `PR created: ${prUrl}`);
               } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
                 logger.warn({ err, podId }, 'Failed to create PR — pod still validated');
-                emitActivityStatus(podId, 'PR creation failed — pod still validated');
+                emitActivityStatus(podId, `PR creation failed: ${message} — pod still validated`);
               }
             } else {
               emitActivityStatus(podId, `Carrying forward existing PR: ${prUrl}`);
@@ -10679,6 +10686,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         pod.lastValidationResult?.overall === 'fail'
           ? buildValidationWaiver(pod.lastValidationResult, reason)
           : null;
+      const forceApprovalMessage = validationWaiver
+        ? `Force approved with validation waiver — failed phases: ${validationWaiver.failedPhases.join(', ') || 'unknown'}`
+        : pod.lastValidationResult?.overall === 'pass'
+          ? 'Force approved — existing validation pass accepted by human'
+          : 'Force approved — validation bypassed by human';
       podRepo.update(podId, {
         lastCorrectionMessage: note,
         ...(validationWaiver ? { validationWaiver } : {}),
@@ -10696,12 +10708,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         updates.pendingEscalation = null;
       }
       const approvedPod = transition(pod, 'validated', updates);
-      emitActivityStatus(
-        podId,
-        validationWaiver
-          ? `Force approved with validation waiver — failed phases: ${validationWaiver.failedPhases.join(', ') || 'unknown'}`
-          : 'Force approved — validation bypassed by human',
-      );
+      emitActivityStatus(podId, forceApprovalMessage);
       logger.info(
         { podId, reason, validationWaiver },
         'Pod force-approved, transitioning to validated',

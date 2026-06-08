@@ -1,6 +1,7 @@
 import type { PrivateRegistry } from '@autopod/shared';
 
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import { withRuntimeTelemetryOptOutEnv } from '../runtime-env.js';
 
 export interface RegistryFile {
   /** Absolute path inside the container */
@@ -209,22 +210,23 @@ export function buildNuGetCredentialEnv(
 /**
  * Build the env map passed into validation phase execs (build/test/lint/sast).
  *
- * Merges two sources, with `buildEnv` winning on key collision so a profile
+ * Merges three sources, with `buildEnv` winning on key collision so a profile
  * author's explicit override beats inferred credentials:
- *  1) NuGet credential env (from `buildNuGetCredentialEnv`)
- *  2) `profile.buildEnv` — free-form user-supplied env (e.g.
+ *  1) Autopod's non-secret runtime/tool telemetry opt-outs
+ *  2) NuGet credential env (from `buildNuGetCredentialEnv`)
+ *  3) `profile.buildEnv` — free-form user-supplied env (e.g.
  *     `NODE_OPTIONS=--max-old-space-size=4096` for memory-heavy production
  *     bundles).
- *
- * Returns `undefined` when both sources are empty so callers can skip passing
- * an empty env object through the exec layer.
  */
 export function buildValidationExecEnv(
   registries: PrivateRegistry[],
   pat: string | null,
   buildEnv: Record<string, string> | null | undefined,
 ): Record<string, string> | undefined {
-  const merged = { ...buildNuGetCredentialEnv(registries, pat), ...(buildEnv ?? {}) };
+  const merged = withRuntimeTelemetryOptOutEnv({
+    ...buildNuGetCredentialEnv(registries, pat),
+    ...(buildEnv ?? {}),
+  });
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 

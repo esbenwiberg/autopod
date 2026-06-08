@@ -1,6 +1,7 @@
 import type { Pod, ReadinessReview, ValidationResult } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import type { StoredScan } from '../security/scan-repository.js';
+import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import {
   type ReadinessInputs,
@@ -246,6 +247,56 @@ describe('deriveReadinessReview', () => {
     );
   });
 
+  it('keeps known tool egress info-only when every denied host is non-blocking', () => {
+    const result = review({
+      deniedEgressCount: 3,
+      nonBlockingDeniedEgressCount: 3,
+    });
+
+    expect(result.status).toBe('ready');
+    expect(result.areas).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          area: 'network',
+          status: 'ready',
+          summary: '3 known tool egress event(s) blocked; no review needed.',
+        }),
+      ]),
+    );
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        id: 'network-known-tool-egress',
+        area: 'network',
+        severity: 'info',
+      }),
+    ]);
+  });
+
+  it('keeps known tool egress non-blocking but flags unknown denied egress', () => {
+    const result = review({
+      deniedEgressCount: 5,
+      nonBlockingDeniedEgressCount: 3,
+    });
+
+    expect(result.status).toBe('needs_review');
+    expect(result.summary).toBe('1 finding(s) need operator review.');
+    expect(result.areas).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          area: 'network',
+          status: 'needs_review',
+          summary: '2 denied egress event(s) need review; 3 known tool event(s) recorded.',
+        }),
+      ]),
+    );
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'network-denied-egress', severity: 'warning' }),
+        expect.objectContaining({ id: 'network-known-tool-egress', severity: 'info' }),
+      ]),
+    );
+  });
+
   it.each([
     ['failed validation', { latestValidation: validation({ overall: 'fail' }) }, 'validation'],
     ['unknown validation', { latestValidation: null }, 'validation'],
@@ -317,9 +368,10 @@ describe('deriveReadinessReview', () => {
     );
   });
 
-  it('marks force-approve paths as waived', () => {
+  it('marks force-approve paths without passing validation proof as waived', () => {
     const result = review({
       pod: pod({ lastCorrectionMessage: '[FORCE APPROVED] accepted by operator' }),
+      latestValidation: null,
     });
 
     expect(result.status).toBe('waived');
@@ -328,9 +380,25 @@ describe('deriveReadinessReview', () => {
     );
   });
 
+  it('does not mark force-approved pods as validation-waived when blocking validation passed', () => {
+    const result = review({
+      pod: pod({ lastCorrectionMessage: '[FORCE APPROVED] accepted by operator' }),
+      latestValidation: validation({ overall: 'pass' }),
+    });
+
+    expect(result.status).toBe('ready');
+    expect(result.areas).toEqual(
+      expect.arrayContaining([expect.objectContaining({ area: 'validation', status: 'ready' })]),
+    );
+    expect(result.findings).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'validation-waiver' })]),
+    );
+  });
+
   it('keeps waived pods waived with advisory in flight findings', () => {
     const result = review({
       pod: pod({ lastCorrectionMessage: '[FORCE APPROVED] accepted by operator' }),
+      latestValidation: null,
       advisoryQaInFlight: true,
     });
 
@@ -451,6 +519,56 @@ describe('createReadinessService', () => {
     expect(result.areas).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ area: 'advisory_qa', status: 'needs_review' }),
+      ]),
+    );
+  });
+
+  it('classifies known denied-egress hosts from stored firewall events as non-blocking', () => {
+    const podWithEvents = pod({ lastValidationResult: validation() });
+    const podRepo = {
+      getOrThrow: () => podWithEvents,
+      update: () => undefined,
+      getPodsBySeries: () => [],
+    } as unknown as PodRepository;
+    const eventRepo = {
+      countForSession: (_podId: string, type: string) => (type === 'pod.preflight_overlap' ? 0 : 0),
+      getForSession: () => [
+        {
+          id: 1,
+          podId: podWithEvents.id,
+          type: 'pod.firewall_denied',
+          payload: {
+            type: 'pod.firewall_denied',
+            timestamp: NOW,
+            podId: podWithEvents.id,
+            sni: 'telemetry.vercel.com',
+            src: '172.19.0.2',
+          },
+          createdAt: NOW,
+        },
+        {
+          id: 2,
+          podId: podWithEvents.id,
+          type: 'pod.firewall_denied',
+          payload: {
+            type: 'pod.firewall_denied',
+            timestamp: NOW,
+            podId: podWithEvents.id,
+            sni: 'ORAIOS-SOFTWARE.DE.',
+            src: '172.26.0.2',
+          },
+          createdAt: NOW,
+        },
+      ],
+    } as unknown as EventRepository;
+
+    const service = createReadinessService({ podRepo, eventRepo });
+    const result = service.computePodReadiness(podWithEvents.id);
+
+    expect(result.status).toBe('ready');
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'network-known-tool-egress', severity: 'info' }),
       ]),
     );
   });

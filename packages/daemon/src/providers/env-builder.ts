@@ -2,6 +2,7 @@ import { CONTAINER_HOME_DIR } from '@autopod/shared';
 import type { FoundryCredentials, Profile } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ProfileStore } from '../profiles/index.js';
+import { RUNTIME_TELEMETRY_OPT_OUT_ENV, withRuntimeTelemetryOptOutEnv } from '../runtime-env.js';
 import { getAzureToken } from './azure-token.js';
 import { refreshAndPersistMaxCredentials } from './credential-persistence.js';
 import { refreshOAuthToken } from './credential-refresh.js';
@@ -47,7 +48,7 @@ export function buildClaudeConfigFiles(): ContainerFile[] {
     {
       theme: 'dark',
       autoUpdaterStatus: 'disabled',
-      env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: '1' },
+      env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: '1', ...RUNTIME_TELEMETRY_OPT_OUT_ENV },
     },
     null,
     2,
@@ -106,7 +107,7 @@ const SECRET_DIR = '/run/autopod';
  * carries only the _FILE pointer so the raw key never appears in env dumps.
  */
 function buildAnthropicEnv(): ProviderEnvResult {
-  const env: Record<string, string> = {};
+  const env = withRuntimeTelemetryOptOutEnv();
   const secretFiles: ProviderEnvResult['secretFiles'] = [];
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -132,7 +133,7 @@ function buildOpenAiEnv(profile: Profile): ProviderEnvResult {
   const creds = profile.providerCredentials;
   if (creds?.provider === 'openai' && creds.authJson) {
     return {
-      env: {},
+      env: withRuntimeTelemetryOptOutEnv(),
       containerFiles: [
         ...buildClaudeConfigFiles(),
         { path: `${CONTAINER_HOME_DIR}/.codex/auth.json`, content: creds.authJson },
@@ -142,7 +143,7 @@ function buildOpenAiEnv(profile: Profile): ProviderEnvResult {
     };
   }
 
-  const env: Record<string, string> = {};
+  const env = withRuntimeTelemetryOptOutEnv();
   const secretFiles: ProviderEnvResult['secretFiles'] = [];
 
   const apiKey = process.env.OPENAI_API_KEY;
@@ -217,7 +218,7 @@ async function buildMaxEnv(
   const credPath = `${CONTAINER_HOME_DIR}/.claude/.credentials.json`;
 
   return {
-    env: {},
+    env: withRuntimeTelemetryOptOutEnv(),
     containerFiles: [{ path: credPath, content: credentialsFile }, ...buildClaudeConfigFiles()],
     secretFiles: [],
     requiresPostExecPersistence: true,
@@ -239,7 +240,7 @@ function buildCopilotEnv(profile: Profile): ProviderEnvResult {
   }
 
   const filePath = `${SECRET_DIR}/copilot-token`;
-  const env: Record<string, string> = { COPILOT_GITHUB_TOKEN_FILE: filePath };
+  const env = withRuntimeTelemetryOptOutEnv({ COPILOT_GITHUB_TOKEN_FILE: filePath });
   if (creds.model) env.COPILOT_MODEL = creds.model;
 
   return {
@@ -277,7 +278,7 @@ function buildOpenRouterEnv(profile: Profile): ProviderEnvResult {
     process.env.OPENROUTER_API_KEY;
 
   const filePath = `${SECRET_DIR}/openrouter-api-key`;
-  const env: Record<string, string> = { OPENAI_BASE_URL: baseUrl };
+  const env = withRuntimeTelemetryOptOutEnv({ OPENAI_BASE_URL: baseUrl });
   const secretFiles: ProviderEnvResult['secretFiles'] = [];
 
   if (apiKey) {
@@ -344,12 +345,12 @@ async function resolveFoundrySecret(creds: FoundryCredentials, logger: Logger): 
 
 function buildFoundryAnthropicEnv(creds: FoundryCredentials, secret: string): ProviderEnvResult {
   const filePath = `${SECRET_DIR}/foundry-api-key`;
-  const env: Record<string, string> = {
+  const env = withRuntimeTelemetryOptOutEnv({
     CLAUDE_CODE_USE_FOUNDRY: '1',
     ANTHROPIC_BASE_URL: creds.endpoint,
     CLAUDE_FOUNDRY_PROJECT: creds.projectId,
     ANTHROPIC_API_KEY_FILE: filePath,
-  };
+  });
 
   return {
     env,
@@ -361,13 +362,13 @@ function buildFoundryAnthropicEnv(creds: FoundryCredentials, secret: string): Pr
 
 function buildFoundryOpenAiEnv(creds: FoundryCredentials, secret: string): ProviderEnvResult {
   const filePath = `${SECRET_DIR}/foundry-openai-key`;
-  const env: Record<string, string> = {
+  const env = withRuntimeTelemetryOptOutEnv({
     OPENAI_BASE_URL: creds.endpoint,
     OPENAI_API_KEY_FILE: filePath,
     AZURE_OPENAI_ENDPOINT: creds.endpoint,
     AZURE_OPENAI_API_KEY_FILE: filePath,
     CLAUDE_FOUNDRY_PROJECT: creds.projectId,
-  };
+  });
   if (creds.apiVersion) {
     env.OPENAI_API_VERSION = creds.apiVersion;
     env.AZURE_OPENAI_API_VERSION = creds.apiVersion;

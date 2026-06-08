@@ -1,4 +1,5 @@
 import type {
+  FirewallDeniedEvent,
   Pod,
   ReadinessArea,
   ReadinessAreaReview,
@@ -40,6 +41,12 @@ const SOURCE_REFS = {
   work: [{ kind: 'work', label: 'Worktree' }] satisfies ReadinessSourceRef[],
 };
 
+const NON_BLOCKING_DENIED_EGRESS_SNIS = new Set([
+  'http-intake.logs.us5.datadoghq.com',
+  'telemetry.vercel.com',
+  'oraios-software.de',
+]);
+
 type FindingInput = Omit<ReadinessFinding, 'sourceRefs'> & {
   sourceRefs?: ReadinessSourceRef[];
 };
@@ -58,6 +65,7 @@ export interface ReadinessInputs {
     maxQuarantineScore: number;
   };
   deniedEgressCount?: number;
+  nonBlockingDeniedEgressCount?: number;
   preflightOverlapCount?: number;
   qualityScore?: number | null;
   advisoryQaInFlight?: boolean;
@@ -104,6 +112,9 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
     const latestValidation = selectLatestValidation(pod, validations);
     const audit = deps.actionAuditRepo?.verifyAuditChain(podId);
     const actionSafety = deps.actionAuditRepo?.getSafetySummary(podId);
+    const deniedEgress = summarizeDeniedEgressEvents(
+      deps.eventRepo?.getForSession(podId, { type: 'pod.firewall_denied' }) ?? [],
+    );
     return deriveReadinessReview({
       pod,
       latestValidation,
@@ -119,7 +130,8 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
             maxQuarantineScore: actionSafety?.maxQuarantineScore ?? 0,
           }
         : undefined,
-      deniedEgressCount: deps.eventRepo?.countForSession(podId, 'pod.firewall_denied') ?? 0,
+      deniedEgressCount: deniedEgress.total,
+      nonBlockingDeniedEgressCount: deniedEgress.nonBlocking,
       preflightOverlapCount: deps.eventRepo?.countForSession(podId, 'pod.preflight_overlap') ?? 0,
       qualityScore: deps.qualityScoreRepo?.get(podId)?.score ?? null,
       advisoryQaInFlight: options.advisoryQaInFlight,
@@ -246,7 +258,10 @@ function validationArea(inputs: ReadinessInputs): {
 } {
   const { pod, latestValidation } = inputs;
   const refs = SOURCE_REFS.validation;
-  if (pod.validationWaiver || pod.lastCorrectionMessage?.startsWith('[FORCE APPROVED]')) {
+  const forceApproved = pod.lastCorrectionMessage?.startsWith('[FORCE APPROVED]') === true;
+  const forceApprovedWithoutPassingValidation =
+    forceApproved && latestValidation?.overall !== 'pass';
+  if (pod.validationWaiver || forceApprovedWithoutPassingValidation) {
     return area('validation', 'waived', 'Validation was waived by an operator.', [
       finding({
         id: 'validation-waiver',
@@ -394,18 +409,53 @@ function networkArea(inputs: ReadinessInputs): {
   area: ReadinessAreaReview;
   findings: ReadinessFinding[];
 } {
-  const count = inputs.deniedEgressCount ?? 0;
-  if (count === 0) return area('network', 'ready', 'No denied egress events recorded.', []);
-  return area('network', 'needs_review', `${count} denied egress event(s) recorded.`, [
-    finding({
-      id: 'network-denied-egress',
-      area: 'network',
-      severity: 'warning',
-      title: 'Denied egress observed',
-      detail: `The pod recorded ${count} outbound connection attempt(s) blocked by policy.`,
-      sourceRefs: SOURCE_REFS.event,
-    }),
-  ]);
+  const total = inputs.deniedEgressCount ?? 0;
+  if (total === 0) return area('network', 'ready', 'No denied egress events recorded.', []);
+
+  const nonBlocking = Math.min(inputs.nonBlockingDeniedEgressCount ?? 0, total);
+  const reviewCount = total - nonBlocking;
+  const findings: ReadinessFinding[] = [];
+
+  if (reviewCount > 0) {
+    findings.push(
+      finding({
+        id: 'network-denied-egress',
+        area: 'network',
+        severity: 'warning',
+        title: 'Denied egress observed',
+        detail: `The pod recorded ${reviewCount} outbound connection attempt(s) blocked by policy.`,
+        sourceRefs: SOURCE_REFS.event,
+      }),
+    );
+  }
+
+  if (nonBlocking > 0) {
+    findings.push(
+      finding({
+        id: 'network-known-tool-egress',
+        area: 'network',
+        severity: 'info',
+        title: 'Known tool egress blocked',
+        detail: `${nonBlocking} blocked connection attempt(s) matched known runtime/tool telemetry or update endpoints.`,
+        sourceRefs: SOURCE_REFS.event,
+      }),
+    );
+  }
+
+  if (reviewCount === 0) {
+    return area(
+      'network',
+      'ready',
+      `${nonBlocking} known tool egress event(s) blocked; no review needed.`,
+      findings,
+    );
+  }
+
+  const summary =
+    nonBlocking > 0
+      ? `${reviewCount} denied egress event(s) need review; ${nonBlocking} known tool event(s) recorded.`
+      : `${reviewCount} denied egress event(s) recorded.`;
+  return area('network', 'needs_review', summary, findings);
 }
 
 function scopeArea(inputs: ReadinessInputs): {
@@ -590,7 +640,38 @@ function summarizePodReadiness(status: ReadinessStatus, findings: ReadinessFindi
     const count = findings.filter((findingItem) => findingItem.severity === 'error').length;
     return `${count || findings.length} risky finding(s) require a human decision.`;
   }
-  return `${findings.length} finding(s) need operator review.`;
+  const count = findings.filter((findingItem) => findingItem.severity === 'warning').length;
+  return `${count || findings.length} finding(s) need operator review.`;
+}
+
+function summarizeDeniedEgressEvents(events: Array<{ payload: unknown }>): {
+  total: number;
+  nonBlocking: number;
+} {
+  let total = 0;
+  let nonBlocking = 0;
+  for (const event of events) {
+    if (!isFirewallDeniedEvent(event.payload)) continue;
+    total += 1;
+    if (isNonBlockingDeniedEgressSni(event.payload.sni)) nonBlocking += 1;
+  }
+  return { total, nonBlocking };
+}
+
+function isFirewallDeniedEvent(payload: unknown): payload is FirewallDeniedEvent {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    (payload as { type?: unknown }).type === 'pod.firewall_denied'
+  );
+}
+
+function isNonBlockingDeniedEgressSni(sni: string): boolean {
+  return NON_BLOCKING_DENIED_EGRESS_SNIS.has(normalizeSni(sni));
+}
+
+function normalizeSni(sni: string): string {
+  return sni.trim().toLowerCase().replace(/\.$/, '');
 }
 
 function dedupeRefs(refs: ReadinessSourceRef[]): ReadinessSourceRef[] {

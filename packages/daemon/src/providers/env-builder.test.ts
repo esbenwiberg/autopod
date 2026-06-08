@@ -1,6 +1,7 @@
 import type { Profile } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RUNTIME_TELEMETRY_OPT_OUT_ENV } from '../runtime-env.js';
 import { clearAzureTokenCache } from './azure-token.js';
 import { buildProviderEnv } from './env-builder.js';
 
@@ -61,6 +62,12 @@ describe('buildProviderEnv', () => {
 
   afterEach(() => {
     process.env = originalEnv;
+  });
+
+  it('adds non-secret telemetry opt-outs to provider env', async () => {
+    const result = await buildProviderEnv(makeProfile(), 'pod-1', logger);
+
+    expect(result.env).toEqual(expect.objectContaining(RUNTIME_TELEMETRY_OPT_OUT_ENV));
   });
 
   describe('anthropic provider (default)', () => {
@@ -194,7 +201,10 @@ describe('buildProviderEnv', () => {
       expect(JSON.parse(settingsJson?.content ?? '{}')).toEqual({
         theme: 'dark',
         autoUpdaterStatus: 'disabled',
-        env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: '1' },
+        env: {
+          CLAUDE_CODE_DISABLE_1M_CONTEXT: '1',
+          ...RUNTIME_TELEMETRY_OPT_OUT_ENV,
+        },
       });
     });
 

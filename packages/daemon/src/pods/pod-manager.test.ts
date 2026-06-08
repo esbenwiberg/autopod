@@ -1566,6 +1566,22 @@ describe('PodManager', () => {
       expect(result.completedAt).toBeNull();
       expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
       expect(events).not.toContainEqual(expect.objectContaining({ type: 'pod.completed' }));
+      const messages = events.flatMap((event) => {
+        if (typeof event !== 'object' || event === null) return [];
+        const maybeActivity = event as {
+          type?: string;
+          event?: { type?: string; message?: string };
+        };
+        if (
+          maybeActivity.type === 'pod.agent_activity' &&
+          maybeActivity.event?.type === 'status' &&
+          maybeActivity.event.message
+        ) {
+          return [maybeActivity.event.message];
+        }
+        return [];
+      });
+      expect(messages).toContain('PR creation failed: gh auth failed — pod returned to validated');
     });
 
     it('falls back to branch push when no prUrl and no prManager', async () => {
@@ -5635,6 +5651,13 @@ describe('PodManager', () => {
       expect(result.status).toBe('failed');
       // Must NOT have created a PR or carried forward — the push didn't land.
       expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      const messages = ctx.eventRepo
+        .getForSession(pod.id, { type: 'pod.agent_activity' })
+        .map((event) => {
+          const payload = event.payload as { event?: { message?: unknown } };
+          return payload.event?.message;
+        });
+      expect(messages).toContain('Branch push failed: ssh: connection refused');
     });
 
     it('parks as failed on DeletionGuardError instead of validating compromised work', async () => {
@@ -6232,6 +6255,70 @@ describe('PodManager', () => {
         failedFactIds: ['fact-workpackages-page-v2'],
       });
       expect(refreshed.validationWaiver?.waivedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    });
+
+    it('describes force approval after a passing validation as accepting existing proof', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Recover post-validation push failure' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/worktree/abc',
+        containerId: 'container-xyz',
+        lastValidationResult: {
+          podId: pod.id,
+          attempt: 2,
+          timestamp: '2026-05-20T10:00:00.000Z',
+          smoke: {
+            status: 'pass',
+            build: { status: 'pass', output: '', duration: 42_000 },
+            health: {
+              status: 'pass',
+              url: 'http://127.0.0.1:3000/health',
+              responseCode: 200,
+              duration: 100,
+            },
+            pages: [],
+          },
+          factValidation: { status: 'pass', results: [] },
+          taskReview: null,
+          overall: 'pass',
+          duration: 63_000,
+        } satisfies ValidationResult,
+      });
+      ctx.podRepo.update(pod.id, { status: 'running' });
+      ctx.podRepo.update(pod.id, { status: 'validating' });
+      ctx.podRepo.update(pod.id, { status: 'failed' });
+      const events: unknown[] = [];
+      ctx.eventBus.subscribe((event) => events.push(event));
+
+      await manager.forceApprove(pod.id, 'post-validation push failed');
+
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('validated');
+      expect(refreshed.validationWaiver).toBeNull();
+      expect(refreshed.readinessReview?.areas).toEqual(
+        expect.arrayContaining([expect.objectContaining({ area: 'validation', status: 'ready' })]),
+      );
+      const messages = events.flatMap((event) => {
+        if (typeof event !== 'object' || event === null) return [];
+        const maybeActivity = event as {
+          type?: string;
+          event?: { type?: string; message?: string };
+        };
+        if (
+          maybeActivity.type === 'pod.agent_activity' &&
+          maybeActivity.event?.type === 'status' &&
+          maybeActivity.event.message
+        ) {
+          return [maybeActivity.event.message];
+        }
+        return [];
+      });
+      expect(messages).toContain('Force approved — existing validation pass accepted by human');
     });
   });
 

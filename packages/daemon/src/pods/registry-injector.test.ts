@@ -1,6 +1,7 @@
 import type { PrivateRegistry } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import { RUNTIME_TELEMETRY_OPT_OUT_ENV } from '../runtime-env.js';
 import {
   CREDENTIAL_GUARD_HOOK,
   NPM_RC_PATH,
@@ -319,22 +320,25 @@ describe('buildValidationExecEnv', () => {
     { type: 'nuget', url: 'https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json' },
   ];
 
-  it('returns undefined when no NuGet creds and no buildEnv', () => {
-    expect(buildValidationExecEnv([], null, null)).toBeUndefined();
-    expect(buildValidationExecEnv([], null, undefined)).toBeUndefined();
-    expect(buildValidationExecEnv([], null, {})).toBeUndefined();
+  it('returns telemetry opt-outs when no NuGet creds and no buildEnv', () => {
+    expect(buildValidationExecEnv([], null, null)).toEqual(RUNTIME_TELEMETRY_OPT_OUT_ENV);
+    expect(buildValidationExecEnv([], null, undefined)).toEqual(RUNTIME_TELEMETRY_OPT_OUT_ENV);
+    expect(buildValidationExecEnv([], null, {})).toEqual(RUNTIME_TELEMETRY_OPT_OUT_ENV);
   });
 
-  it('returns just NuGet env when buildEnv is null', () => {
+  it('returns telemetry opt-outs and NuGet env when buildEnv is null', () => {
     const env = buildValidationExecEnv(nugetRegs, 'my-pat', null);
     expect(env).toBeDefined();
+    expect(env).toEqual(expect.objectContaining(RUNTIME_TELEMETRY_OPT_OUT_ENV));
     expect(env).toHaveProperty('VSS_NUGET_EXTERNAL_FEED_ENDPOINTS');
-    expect(Object.keys(env ?? {})).toHaveLength(1);
   });
 
-  it('returns just buildEnv when no NuGet PAT', () => {
+  it('returns telemetry opt-outs and buildEnv when no NuGet PAT', () => {
     const env = buildValidationExecEnv([], null, { NODE_OPTIONS: '--max-old-space-size=4096' });
-    expect(env).toEqual({ NODE_OPTIONS: '--max-old-space-size=4096' });
+    expect(env).toEqual({
+      ...RUNTIME_TELEMETRY_OPT_OUT_ENV,
+      NODE_OPTIONS: '--max-old-space-size=4096',
+    });
   });
 
   it('merges NuGet env and buildEnv when both present', () => {
