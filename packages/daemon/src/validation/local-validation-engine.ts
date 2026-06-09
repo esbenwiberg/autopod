@@ -34,6 +34,12 @@ import { runToolUseReview } from './review-tool-runner.js';
 
 const execFileAsync = promisify(execFile);
 
+interface PackageJsonManifest {
+  scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+}
+
 /**
  * Reset the worktree to HEAD on both filesystems validation evaluates against:
  * the container's `/workspace` (build/lint/sast/test/health/pages all run
@@ -1235,14 +1241,22 @@ async function ensureHostBrowserFactDependencies(
   if (!looksLikePackageManagedBrowserFact(command)) return;
 
   const packageJsonPath = path.join(worktreePath, 'package.json');
-  if (!(await pathExists(packageJsonPath))) return;
+  const packageJson = await readPackageJsonManifest(packageJsonPath);
+  if (!packageJson) return;
 
   const nodeModulesPath = path.join(worktreePath, 'node_modules');
-  if (await pathExists(nodeModulesPath)) return;
+  if (await pathExists(nodeModulesPath)) {
+    const missingPackages = await missingDeclaredHostPackages(worktreePath, packageJson);
+    if (missingPackages.length === 0) return;
+    log?.info(
+      { worktreePath, missingPackages: missingPackages.slice(0, 20) },
+      'host browser-test dependencies are incomplete',
+    );
+  }
 
   const installCommand = await resolveHostDependencyInstallCommand(worktreePath);
   const shouldInstallChromium =
-    command.includes('playwright') || (await packageJsonMentionsPlaywright(packageJsonPath));
+    command.includes('playwright') || manifestMentionsPlaywright(packageJson);
   const fullCommand = shouldInstallChromium
     ? `${installCommand} && npx playwright install chromium`
     : installCommand;
@@ -1294,24 +1308,96 @@ async function resolveHostDependencyInstallCommand(worktreePath: string): Promis
     (await pathExists(path.join(worktreePath, 'package-lock.json'))) ||
     (await pathExists(path.join(worktreePath, 'npm-shrinkwrap.json')))
   ) {
-    return 'npm ci';
+    return 'npm ci --include=dev';
   }
   if (await pathExists(path.join(worktreePath, 'pnpm-lock.yaml'))) {
-    return 'npx pnpm install --frozen-lockfile';
+    return 'npx pnpm install --frozen-lockfile --prod=false';
   }
   if (await pathExists(path.join(worktreePath, 'yarn.lock'))) {
     return 'corepack yarn install --immutable';
   }
-  return 'npm install --package-lock=false';
+  return 'npm install --include=dev --package-lock=false';
 }
 
-async function packageJsonMentionsPlaywright(packageJsonPath: string): Promise<boolean> {
+async function readPackageJsonManifest(
+  packageJsonPath: string,
+): Promise<PackageJsonManifest | null> {
   try {
     const text = await readFile(packageJsonPath, 'utf8');
-    return /"(@playwright\/test|playwright)"/.test(text);
+    const parsed: unknown = JSON.parse(text);
+    if (!isRecord(parsed)) return {};
+    return {
+      scripts: readStringRecordField(parsed, 'scripts'),
+      dependencies: readStringRecordField(parsed, 'dependencies'),
+      devDependencies: readStringRecordField(parsed, 'devDependencies'),
+    };
   } catch {
-    return false;
+    return null;
   }
+}
+
+function readStringRecordField(
+  record: Record<string, unknown>,
+  field: string,
+): Record<string, string> | undefined {
+  const value = record[field];
+  if (!isRecord(value)) return undefined;
+  const entries = Object.entries(value).filter((entry): entry is [string, string] => {
+    const [, version] = entry;
+    return typeof version === 'string';
+  });
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function manifestMentionsPlaywright(packageJson: PackageJsonManifest): boolean {
+  return (
+    declaresPackage(packageJson, 'playwright') ||
+    declaresPackage(packageJson, '@playwright/test') ||
+    Object.values(packageJson.scripts ?? {}).some((script) => /\bplaywright\b/.test(script))
+  );
+}
+
+function declaresPackage(packageJson: PackageJsonManifest, packageName: string): boolean {
+  return Boolean(
+    packageJson.dependencies?.[packageName] ?? packageJson.devDependencies?.[packageName],
+  );
+}
+
+async function missingDeclaredHostPackages(
+  worktreePath: string,
+  packageJson: PackageJsonManifest,
+): Promise<string[]> {
+  const packageNames = new Set([
+    ...Object.keys(packageJson.dependencies ?? {}),
+    ...Object.keys(packageJson.devDependencies ?? {}),
+  ]);
+  const missing: string[] = [];
+  for (const packageName of packageNames) {
+    if (!(await hostPackageExists(worktreePath, packageName))) {
+      missing.push(packageName);
+    }
+  }
+  return missing;
+}
+
+async function hostPackageExists(worktreePath: string, packageName: string): Promise<boolean> {
+  const packagePath = packageNameToNodeModulesPath(packageName);
+  if (!packagePath) return false;
+  return pathExists(path.join(worktreePath, 'node_modules', ...packagePath, 'package.json'));
+}
+
+function packageNameToNodeModulesPath(packageName: string): string[] | null {
+  if (/^@[a-z0-9._~-]+\/[a-z0-9._~-]+$/i.test(packageName)) {
+    return packageName.split('/');
+  }
+  if (/^[a-z0-9._~-]+$/i.test(packageName)) {
+    return [packageName];
+  }
+  return null;
 }
 
 async function pathExists(filePath: string): Promise<boolean> {
