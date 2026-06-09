@@ -300,6 +300,7 @@ public struct MainView: View {
     @State private var searchText: String = ""
     @State private var selectedFeature: FeatureCategory?
     @State private var selectedAnalyticsCard: AnalyticsCardKind?
+    @State private var selectedDetailTab: DetailTab?
     @State private var requestedDetailTab: DetailTab?
 
     private var selectedSession: Pod? {
@@ -491,10 +492,7 @@ public struct MainView: View {
                 SeriesListView(
                     pods: pods,
                     selectedPodId: selectedSessionId,
-                    onSelectPod: { podId in
-                        selectedSessionId = podId
-                        requestedDetailTab = .overview
-                    },
+                    onSelectPod: { selectedSessionId = $0 },
                     actions: wiredActions
                 )
                 .frame(minWidth: 500)
@@ -626,6 +624,7 @@ public struct MainView: View {
                     onReloadLogs: onReloadLogs,
                     onLoadAllLogs: onLoadAllLogs,
                     onLaunchSeriesFromPod: { seriesFromPod = $0 },
+                    selectedTab: $selectedDetailTab,
                     requestedTab: $requestedDetailTab
                 )
                 .id(pod.id)

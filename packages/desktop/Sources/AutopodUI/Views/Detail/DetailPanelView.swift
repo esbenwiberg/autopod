@@ -49,6 +49,7 @@ public struct DetailPanelView: View {
     /// Available on workspace pods (interactive) — both running (mid-flight handoff)
     /// and complete (post-hoc spawn). Nil-safe — menu items are gated on this being set.
     public var onLaunchSeriesFromPod: ((Pod) -> Void)?
+    @Binding public var selectedTab: DetailTab?
     @Binding public var requestedTab: DetailTab?
 
     public init(
@@ -82,6 +83,7 @@ public struct DetailPanelView: View {
         onReloadLogs: (() -> Void)? = nil,
         onLoadAllLogs: (() -> Void)? = nil,
         onLaunchSeriesFromPod: ((Pod) -> Void)? = nil,
+        selectedTab: Binding<DetailTab?> = .constant(nil),
         requestedTab: Binding<DetailTab?> = .constant(nil)
     ) {
         self.pod = pod; self.events = events; self.actions = actions
@@ -114,15 +116,16 @@ public struct DetailPanelView: View {
         self.onReloadLogs = onReloadLogs
         self.onLoadAllLogs = onLoadAllLogs
         self.onLaunchSeriesFromPod = onLaunchSeriesFromPod
+        self._selectedTab = selectedTab
         self._requestedTab = requestedTab
     }
 
-    @State private var selectedTab: DetailTab = .overview
     @State private var requestedEvidenceSection: EvidenceSection?
     @State private var didCopyName: Bool = false
     @State private var showRelatedEventsDebug: Bool = false
 
     private var isTerminalAvailable: Bool { pod.pod.agentMode == .interactive }
+    private var activeTab: DetailTab { selectedTab ?? Self.defaultTab(for: pod) }
     private var isEvidenceAvailable: Bool {
         pod.hasWorktree
         || pod.pod.output == .artifact
@@ -150,12 +153,46 @@ public struct DetailPanelView: View {
     }
     @State private var showPromoteMenu: Bool = false
 
-    /// Artifact payload beats everything; for series pods the graph is the landing view;
-    /// otherwise Overview. Applied on first appear and when the selected pod changes.
-    static func defaultTab(for pod: Pod) -> DetailTab {
+    /// Artifact payload beats Overview; series membership does not change the landing tab.
+    /// Applied on first appear and as the fallback when the selected pod changes.
+    nonisolated static func defaultTab(for pod: Pod) -> DetailTab {
         if pod.pod.output == .artifact { return .evidence }
-        if pod.seriesId != nil { return .series }
         return .overview
+    }
+
+    nonisolated static func isTabSelectable(
+        _ tab: DetailTab,
+        for pod: Pod,
+        evidenceAvailable: Bool,
+        terminalAvailable: Bool
+    ) -> Bool {
+        switch tab {
+        case .series: return pod.seriesId != nil
+        case .evidence: return evidenceAvailable
+        case .terminal: return terminalAvailable
+        default: return true
+        }
+    }
+
+    nonisolated static func selectedTabAfterPodChange(
+        currentTab: DetailTab?,
+        pod: Pod,
+        evidenceAvailable: Bool,
+        terminalAvailable: Bool
+    ) -> DetailTab {
+        guard
+            let currentTab,
+            isTabSelectable(
+                currentTab,
+                for: pod,
+                evidenceAvailable: evidenceAvailable,
+                terminalAvailable: terminalAvailable
+            )
+        else {
+            return defaultTab(for: pod)
+        }
+
+        return currentTab
     }
 
     nonisolated static func relatedEventReferences(
@@ -223,6 +260,30 @@ public struct DetailPanelView: View {
         return .notLoaded
     }
 
+    private func resolveSelectedTabForCurrentPod() {
+        selectedTab = Self.selectedTabAfterPodChange(
+            currentTab: selectedTab,
+            pod: pod,
+            evidenceAvailable: isEvidenceAvailable,
+            terminalAvailable: isTerminalAvailable
+        )
+    }
+
+    private func consumeRequestedTab(_ tab: DetailTab?) {
+        guard let tab else { return }
+        guard Self.isTabSelectable(
+            tab,
+            for: pod,
+            evidenceAvailable: isEvidenceAvailable,
+            terminalAvailable: isTerminalAvailable
+        ) else {
+            requestedTab = nil
+            return
+        }
+        selectedTab = tab
+        requestedTab = nil
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             // Pod header
@@ -236,7 +297,7 @@ public struct DetailPanelView: View {
             // Tab content — terminal is kept alive across tab switches so the
             // SwiftTerm NSView (and its scrollback buffer) isn't destroyed.
             ZStack {
-                switch selectedTab {
+                switch activeTab {
                 case .overview:   OverviewTab(
                     pod: pod,
                     events: events,
@@ -314,10 +375,10 @@ public struct DetailPanelView: View {
                         onResize: onTerminalResize,
                         onConnect: onTerminalConnect,
                         onDisconnect: onTerminalDisconnect,
-                        isSelected: selectedTab == .terminal
+                        isSelected: activeTab == .terminal
                     )
-                    .opacity(selectedTab == .terminal ? 1 : 0)
-                    .allowsHitTesting(selectedTab == .terminal)
+                    .opacity(activeTab == .terminal ? 1 : 0)
+                    .allowsHitTesting(activeTab == .terminal)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -327,16 +388,16 @@ public struct DetailPanelView: View {
         // through NavigationSplitView and grow the whole window.
         .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { selectedTab = Self.defaultTab(for: pod) }
+        .onAppear {
+            resolveSelectedTabForCurrentPod()
+            consumeRequestedTab(requestedTab)
+        }
         .onChange(of: pod.id) { _, _ in
-            selectedTab = Self.defaultTab(for: pod)
+            resolveSelectedTabForCurrentPod()
             requestedEvidenceSection = nil
         }
         .onChange(of: requestedTab) { _, tab in
-            guard let tab else { return }
-            guard tab != .terminal || isTerminalAvailable else { requestedTab = nil; return }
-            selectedTab = tab
-            requestedTab = nil
+            consumeRequestedTab(tab)
         }
         .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
         .sheet(isPresented: $showNudgeInput) { nudgeSheet }
@@ -1589,7 +1650,7 @@ public struct DetailPanelView: View {
     }
 
     private func tabButton(_ tab: DetailTab, showLabel: Bool) -> some View {
-        let isSelected = selectedTab == tab
+        let isSelected = activeTab == tab
         let isDisabled = tab == .terminal && !isTerminalAvailable
         let disabledHelp: String = {
             if tab == .terminal && !isTerminalAvailable { return "Terminal is only available for workspace pods" }
@@ -1702,7 +1763,7 @@ struct WorktreeCompromisedBanner: View {
 
 // MARK: - Tab enum
 
-public enum DetailTab: CaseIterable {
+public enum DetailTab: CaseIterable, Sendable {
     case overview, work, validation, readiness, evidence, diff, logs, terminal, series
 
     var label: String {
