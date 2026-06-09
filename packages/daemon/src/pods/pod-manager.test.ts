@@ -2237,6 +2237,48 @@ describe('PodManager', () => {
       expect(processed.worktreePath).toBe('/tmp/worktree/abc');
     });
 
+    it('completes no-change pods directly without validation readiness', async () => {
+      const ctx = createTestContext();
+      (ctx.worktreeManager.getDiffStats as ReturnType<typeof vi.fn>).mockResolvedValue({
+        filesChanged: 0,
+        linesAdded: 0,
+        linesRemoved: 0,
+      });
+      const manager = createPodManager(ctx.deps);
+      const events: unknown[] = [];
+      ctx.eventBus.subscribe((event) => events.push(event));
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Deploy existing app', skipValidation: false },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      const processed = manager.getSession(pod.id);
+      expect(processed.status).toBe('complete');
+      expect(processed.completedAt).not.toBeNull();
+      expect(processed.readinessReview).toBeNull();
+      expect(processed.lastValidationResult).toBeNull();
+      expect(processed.filesChanged).toBe(0);
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ type: 'pod.status_changed', newStatus: 'validating' }),
+      );
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ type: 'pod.status_changed', newStatus: 'validated' }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'pod.completed',
+          podId: pod.id,
+          finalStatus: 'complete',
+          summary: expect.objectContaining({ filesChanged: 0 }),
+        }),
+      );
+    });
+
     it('prepares provider credentials and agent shim before automatic memory ranking', async () => {
       const ctx = createTestContext();
       const memoryRepo = createMemoryRepository(ctx.db);
@@ -3069,7 +3111,7 @@ describe('PodManager', () => {
         expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
       });
 
-      it('allows a scheduled rework run to finish cleanly without file changes', async () => {
+      it('completes a scheduled rework run cleanly without file changes', async () => {
         const ctx = createTestContext(undefined, {});
         setupExecFileMock({ gitLog: 'abc1234 Previous scan run' });
         (ctx.worktreeManager.getDiffStats as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -3112,7 +3154,9 @@ describe('PodManager', () => {
         await manager.processPod(pod.id);
 
         const updated = manager.getSession(pod.id);
-        expect(updated.status).toBe('validated');
+        expect(updated.status).toBe('complete');
+        expect(updated.completedAt).not.toBeNull();
+        expect(updated.readinessReview).toBeNull();
         expect(updated.lastCorrectionMessage).toBeNull();
         expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
       });

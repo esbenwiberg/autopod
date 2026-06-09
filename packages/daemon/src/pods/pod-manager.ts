@@ -4276,6 +4276,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return podRepo.getOrThrow(pod.id);
   }
 
+  function emitPodCompletedEvent(pod: Pod, filesChanged = pod.filesChanged): void {
+    eventBus.emit({
+      type: 'pod.completed',
+      timestamp: new Date().toISOString(),
+      podId: pod.id,
+      finalStatus: 'complete',
+      summary: {
+        id: pod.id,
+        profileName: pod.profileName,
+        task: pod.task,
+        status: 'complete',
+        model: pod.model,
+        runtime: pod.runtime,
+        duration: pod.startedAt ? Date.now() - new Date(pod.startedAt).getTime() : null,
+        filesChanged,
+        createdAt: pod.createdAt,
+      },
+    });
+  }
+
   function makeUnexpectedValidationFailureResult(
     podId: string,
     attempt: number,
@@ -7168,7 +7188,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       }
 
-      // Skip validation if requested or if agent made no changes.
+      // Finish or skip validation if requested or if agent made no changes.
       // Forked pods (linked or branched off a non-default branch) always validate —
       // the parent branch's changes need validation even when the forked agent adds nothing.
       const refreshed = podRepo.getOrThrow(podId);
@@ -7195,6 +7215,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         });
         return;
       }
+      if (noChanges && !isForkSession && !refreshed.skipValidation) {
+        logger.info({ podId }, 'Completing pod directly — no files changed');
+        emitActivityStatus(podId, 'No files changed — completing pod');
+        await cleanupContainer(refreshed, 'no-changes-complete');
+        const completedPod = transition(refreshed, 'complete', {
+          completedAt: new Date().toISOString(),
+          lastCorrectionMessage: null,
+        });
+        emitPodCompletedEvent(completedPod, 0);
+        maybeTriggerDependents(completedPod);
+        return;
+      }
+
       if (refreshed.skipValidation || (noChanges && !isForkSession)) {
         if (noChanges) {
           logger.info({ podId }, 'Skipping validation — no files changed');
