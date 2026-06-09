@@ -258,7 +258,7 @@ public enum SidebarItem: Hashable {
         case .workspaces: "Interactive"
         case .seriesAll: "Series"
         case .completed: "Completed"
-        case .all: "All Pods"
+        case .all: "Browse"
         case .analytics: "Analytics"
         case .history: "History"
         case .memory: "Memory"

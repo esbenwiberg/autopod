@@ -297,6 +297,7 @@ public struct MainView: View {
     @State private var viewMode: ViewMode = .cards
     @State private var cardDensity: CardDensity = .detailed
     @State private var sortOrder: SortOrder = .created
+    @State private var browseScope: BrowseScope = .recent
     @State private var searchText: String = ""
     @State private var selectedFeature: FeatureCategory?
     @State private var selectedAnalyticsCard: AnalyticsCardKind?
@@ -325,14 +326,14 @@ public struct MainView: View {
     }
 
     private var filteredSessions: [Pod] {
-        let filtered = Self.filterPods(pods, for: sidebarSelection)
-        let searched = Self.searchPods(filtered, query: searchText)
-        return searched.sorted { a, b in
-            switch sortOrder {
-            case .created:    a.startedAt > b.startedAt
-            case .lastActive: a.updatedAt > b.updatedAt
-            }
-        }
+        Self.visiblePods(
+            pods,
+            selection: sidebarSelection,
+            browseScope: browseScope,
+            query: searchText,
+            sortOrder: sortOrder,
+            selectedPodId: selectedSessionId
+        )
     }
 
     /// Filters pods by a free-text query. Matches against the pod's name (id),
@@ -347,6 +348,79 @@ public struct MainView: View {
                 || pod.task.localizedCaseInsensitiveContains(trimmed)
                 || pod.profileName.localizedCaseInsensitiveContains(trimmed)
                 || (pod.seriesName?.localizedCaseInsensitiveContains(trimmed) ?? false)
+        }
+    }
+
+    static let defaultBrowseRecentLimit = 50
+
+    /// Pods shown by the Browse sidebar item before search/sort is applied.
+    /// Recent mode keeps the default surface actionable and bounded, while
+    /// Archive mode and search both use the full loaded archive.
+    static func browsePods(
+        _ pods: [Pod],
+        scope: BrowseScope,
+        query: String = "",
+        selectedPodId: String? = nil,
+        limit: Int = defaultBrowseRecentLimit
+    ) -> [Pod] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard scope == .recent && trimmed.isEmpty else { return pods }
+
+        var result = recentBrowsePods(pods, limit: limit)
+        if let selectedPodId,
+           !result.contains(where: { $0.id == selectedPodId }),
+           let selected = pods.first(where: { $0.id == selectedPodId }) {
+            result.append(selected)
+        }
+        return result
+    }
+
+    static func visiblePods(
+        _ pods: [Pod],
+        selection: SidebarItem,
+        browseScope: BrowseScope = .recent,
+        query: String = "",
+        sortOrder: SortOrder = .created,
+        selectedPodId: String? = nil,
+        limit: Int = defaultBrowseRecentLimit
+    ) -> [Pod] {
+        let base = selection == .all
+            ? browsePods(
+                pods,
+                scope: browseScope,
+                query: query,
+                selectedPodId: selectedPodId,
+                limit: limit
+            )
+            : filterPods(pods, for: selection)
+        return sortPods(searchPods(base, query: query), by: sortOrder)
+    }
+
+    private static func recentBrowsePods(_ pods: [Pod], limit: Int) -> [Pod] {
+        let actionable = pods.filter { ($0.status.isActive || $0.status.needsAttention) && !$0.isWorkspace }
+        let actionableIds = Set(actionable.map(\.id))
+        let recentLimit = max(0, limit - actionable.count)
+        let recent = pods
+            .filter { !actionableIds.contains($0.id) }
+            .sorted { recentActivityDate($0) > recentActivityDate($1) }
+            .prefix(recentLimit)
+        return actionable + recent
+    }
+
+    private static func recentActivityDate(_ pod: Pod) -> Date {
+        var date = max(pod.startedAt, pod.updatedAt)
+        if let runningAt = pod.runningAt {
+            date = max(date, runningAt)
+        }
+        return date
+    }
+
+    private static func sortPods(_ pods: [Pod], by sortOrder: SortOrder) -> [Pod] {
+        pods.sorted { a, b in
+            switch sortOrder {
+            case .created:    a.startedAt > b.startedAt
+            case .lastActive: a.updatedAt > b.updatedAt
+            }
         }
     }
 
@@ -778,6 +852,9 @@ public struct MainView: View {
     @ViewBuilder
     private func toolbarControls(compact: Bool) -> some View {
         HStack(spacing: 8) {
+            if sidebarSelection == .all {
+                browseScopePicker(compact: compact)
+            }
             sortPicker(compact: compact)
             if viewMode == .cards {
                 densityPicker(compact: compact)
@@ -813,6 +890,33 @@ public struct MainView: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .frame(width: width)
         .frame(maxWidth: width == nil ? .infinity : nil)
+    }
+
+    @ViewBuilder
+    private func browseScopePicker(compact: Bool) -> some View {
+        if compact {
+            Menu {
+                Picker("Browse", selection: $browseScope) {
+                    ForEach(BrowseScope.allCases, id: \.self) { scope in
+                        Text(scope.rawValue).tag(scope)
+                    }
+                }
+            } label: {
+                Image(systemName: browseScope == .recent ? "clock" : "archivebox")
+                    .font(.system(size: 11))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Browse: \(browseScope.rawValue)")
+        } else {
+            Picker("", selection: $browseScope) {
+                ForEach(BrowseScope.allCases, id: \.self) { scope in
+                    Text(scope.rawValue).tag(scope)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 150)
+        }
     }
 
     @ViewBuilder
@@ -1003,13 +1107,14 @@ public struct MainView: View {
     }
 
     private var cardGrid: some View {
-        ScrollView {
+        let sessions = filteredSessions
+        return ScrollView {
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 260), spacing: 10)],
                 alignment: .leading,
                 spacing: 10
             ) {
-                ForEach(filteredSessions) { pod in
+                ForEach(sessions) { pod in
                     SessionCardFinal(
                         pod: pod,
                         actions: wiredActions,
@@ -1023,16 +1128,41 @@ public struct MainView: View {
                 }
             }
             .padding(16)
+            browseArchiveFooter(visibleCount: sessions.count)
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var sessionList: some View {
-        List(filteredSessions, selection: $selectedSessionId) { pod in
-            SessionListRow(pod: pod)
-                .tag(pod.id)
+        let sessions = filteredSessions
+        return List(selection: $selectedSessionId) {
+            ForEach(sessions) { pod in
+                SessionListRow(pod: pod)
+                    .tag(pod.id)
+            }
+            browseArchiveFooter(visibleCount: sessions.count)
         }
         .listStyle(.inset)
+    }
+
+    @ViewBuilder
+    private func browseArchiveFooter(visibleCount: Int) -> some View {
+        let queryIsEmpty = searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if sidebarSelection == .all && browseScope == .recent && queryIsEmpty && visibleCount < pods.count {
+            HStack(spacing: 8) {
+                Text("Showing \(visibleCount) of \(pods.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Archive") {
+                    browseScope = .archive
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+        }
     }
 
     // MARK: - Analytics wiring helpers (static so unit tests can call them)
@@ -1068,6 +1198,11 @@ public struct MainView: View {
 
 enum ViewMode: String {
     case cards, list
+}
+
+enum BrowseScope: String, CaseIterable {
+    case recent = "Recent"
+    case archive = "Archive"
 }
 
 // MARK: - Sort order
