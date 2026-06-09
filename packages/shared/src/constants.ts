@@ -70,7 +70,9 @@ export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   complete: ['queued'],
   // handoff re-enters orchestration: interactive pod has been stopped and
   // is being provisioned again with a new pod options (agentMode: 'auto').
-  handoff: ['provisioning', 'killing'],
+  // A handoff persistence failure parks in failed while preserving the live
+  // workspace container for recovery.
+  handoff: ['provisioning', 'killing', 'failed'],
   killing: ['killed'],
   killed: ['validating', 'queued'],
 };

@@ -974,6 +974,16 @@ public struct Pod: Identifiable, Sendable {
 }
 
 public extension Pod {
+    var isFixDeliveryFailure: Bool {
+        guard isPrFixPod else { return false }
+        switch status {
+        case .awaitingInput, .failed:
+            return latestActivity?.hasPrefix("Validated fix could not be pushed") == true
+        default:
+            return false
+        }
+    }
+
     var isPrFixPod: Bool {
         linkedSessionId != nil && !isWorkspace
     }

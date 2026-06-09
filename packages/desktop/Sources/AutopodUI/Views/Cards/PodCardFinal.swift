@@ -374,7 +374,10 @@ public struct SessionCardFinal: View {
                 }
             }
         case .awaitingInput:
-            Label("Needs your input", systemImage: "bubble.left.fill")
+            Label(
+                pod.isFixDeliveryFailure ? "Push failed" : "Needs your input",
+                systemImage: pod.isFixDeliveryFailure ? "arrow.up.circle.fill" : "bubble.left.fill"
+            )
                 .font(.caption)
                 .foregroundStyle(.orange)
         case .validated:
@@ -685,7 +688,22 @@ public struct SessionCardFinal: View {
 
         case .awaitingInput:
             VStack(alignment: .leading, spacing: 8) {
-                if let q = pod.escalationQuestion {
+                if pod.isFixDeliveryFailure {
+                    Text("Validated fix could not be pushed")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button {
+                        Task { await actions.resume(pod.id) }
+                    } label: {
+                        Label("Retry Push", systemImage: "arrow.up.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(.blue)
+                    .disabled(pod.worktreeCompromised || !pod.hasWorktree)
+                    .help("Retry pushing the already-validated fix branch. No agent rework.")
+                } else if let q = pod.escalationQuestion {
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: pod.escalationType == "action_approval" ? "shield.checkered" : "quote.opening")
                             .font(.system(size: 10))
@@ -696,7 +714,9 @@ public struct SessionCardFinal: View {
                             .lineLimit(3)
                     }
                 }
-                if pod.escalationType == "action_approval" {
+                if pod.isFixDeliveryFailure {
+                    EmptyView()
+                } else if pod.escalationType == "action_approval" {
                     HStack(spacing: 6) {
                         Button {
                             Task { await actions.reply(pod.id, "approved") }
@@ -869,26 +889,43 @@ public struct SessionCardFinal: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                HStack(spacing: 6) {
+                if pod.isFixDeliveryFailure {
+                    Text("Validated fix could not be pushed")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Button {
-                        Task { await actions.rework(pod.id) }
+                        Task { await actions.resume(pod.id) }
                     } label: {
-                        Label("Rework", systemImage: "arrow.clockwise")
+                        Label("Retry Push", systemImage: "arrow.up.circle")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .tint(.red)
-                    Button {
-                        Task { await actions.fixManually(pod.id) }
-                    } label: {
-                        Label("Fix", systemImage: "wrench.and.screwdriver")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    Button("Logs") {}
+                    .tint(.blue)
+                    .disabled(pod.worktreeCompromised || !pod.hasWorktree)
+                    .help("Retry pushing the already-validated fix branch. No agent rework.")
+                } else {
+                    HStack(spacing: 6) {
+                        Button {
+                            Task { await actions.rework(pod.id) }
+                        } label: {
+                            Label("Rework", systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(.red)
+                        Button {
+                            Task { await actions.fixManually(pod.id) }
+                        } label: {
+                            Label("Fix", systemImage: "wrench.and.screwdriver")
+                        }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        Button("Logs") {}
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
                 }
                 deleteButton
             }

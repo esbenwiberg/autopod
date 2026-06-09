@@ -153,6 +153,7 @@ struct OverviewTab: View {
 
     private var overviewStatusTitle: String {
         if pod.worktreeCompromised { return "Worktree needs recovery" }
+        if pod.isFixDeliveryFailure { return "Fix validated, push failed" }
         switch pod.status {
         case .failed: return "Pod failed"
         case .reviewRequired: return "Human review required"
@@ -170,6 +171,9 @@ struct OverviewTab: View {
         }
         if let err = pod.errorSummary, (pod.status == .failed || pod.status == .reviewRequired) {
             return err
+        }
+        if pod.isFixDeliveryFailure {
+            return pod.latestActivity ?? "Retry delivery to push the validated fix branch."
         }
         if let phase = pod.phase {
             return phase.description

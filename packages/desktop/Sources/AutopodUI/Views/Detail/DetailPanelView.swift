@@ -789,8 +789,25 @@ public struct DetailPanelView: View {
                 .tint(.red)
 
             case .awaitingInput:
-                // Reply is handled in OverviewTab inline
-                EmptyView()
+                if pod.isFixDeliveryFailure {
+                    Button {
+                        Task { await actions.resume(pod.id) }
+                    } label: {
+                        Label("Retry Push", systemImage: "arrow.up.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(.blue)
+                    .disabled(pod.worktreeCompromised || !pod.hasWorktree)
+                    .help(pod.worktreeCompromised
+                        ? "Worktree is compromised — recover it before retrying delivery."
+                        : !pod.hasWorktree
+                        ? "Pod has no worktree to push from."
+                        : "Retry pushing the already-validated fix branch. No agent rework.")
+                } else {
+                    // Reply is handled in OverviewTab inline
+                    EmptyView()
+                }
 
             case .validated:
                 if pod.validationChecks?.allPassed != false || pod.validationWaiver != nil {
@@ -908,7 +925,8 @@ public struct DetailPanelView: View {
                     Button {
                         Task { await actions.resume(pod.id) }
                     } label: {
-                        Label("Resume", systemImage: "arrow.uturn.forward")
+                        Label(pod.isFixDeliveryFailure ? "Retry Push" : "Resume",
+                              systemImage: pod.isFixDeliveryFailure ? "arrow.up.circle" : "arrow.uturn.forward")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
@@ -918,6 +936,8 @@ public struct DetailPanelView: View {
                         ? "Worktree is compromised — recover it before resuming."
                         : !pod.hasWorktree
                         ? "Pod has no worktree to resume from."
+                        : pod.isFixDeliveryFailure
+                        ? "Retry pushing the already-validated fix branch. No agent rework, no token spend."
                         : "Retry the cheapest recovery path — push + open PR if validation passed, otherwise re-run validation. No agent rework, no token spend.")
                     Button {
                         Task { await actions.rework(pod.id) }

@@ -1174,7 +1174,9 @@ export interface PodManager {
    * state — push + open PR if validation passed, re-validate if validation
    * failed on infra. Throws when the pod isn't in a recoverable state.
    */
-  resumePod(podId: string): Promise<{ action: 'retry-pr' | 'revalidate' }>;
+  resumePod(podId: string): Promise<{
+    action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery';
+  }>;
   /**
    * Operator admin override: force-transition a `failed` pod to `complete`,
    * skipping push, PR creation, and validation. Persists `forceCompletedAt`
@@ -2053,6 +2055,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (pod.pendingEscalation?.type !== 'request_credential') return false;
     const payload = pod.pendingEscalation.payload as RequestCredentialPayload;
     return payload.source === 'host_push';
+  }
+
+  function isRetryableFixDeliveryFailure(pod: Pod): boolean {
+    if (pod.status !== 'awaiting_input' && pod.status !== 'failed') return false;
+    return (
+      !!pod.linkedPodId &&
+      pod.lastValidationResult?.overall === 'pass' &&
+      pod.mergeBlockReason?.startsWith(FIX_DELIVERY_FAILED_PREFIX) === true
+    );
   }
 
   /**
@@ -4980,19 +4991,68 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // ever re-enqueues the pod.
         const profile = profileStore.get(pod.profileName);
 
-        // For handoff pods the interactive container is still running — sync the
-        // human's work back to the host worktree and stop the container here so
-        // the promote HTTP endpoint can return immediately without timing out.
+        // For handoff pods the interactive container is still running. Persist
+        // the human's work before stopping that container; if we cannot prove the
+        // work is durable, park the pod and keep the live workspace available.
         if (pod.status === 'handoff' && pod.containerId && pod.worktreePath) {
           const cm = containerManagerFactory.get(pod.executionTarget);
+          const interactiveRecoveryOptions: PodOptions = {
+            agentMode: 'interactive',
+            output: 'branch',
+            validate: false,
+            promotable: true,
+          };
+          const blockHandoff = (reason: string, err?: unknown): void => {
+            logger.warn({ err, podId }, `Workspace handoff blocked: ${reason}`);
+            emitStatus(`Workspace handoff blocked: ${reason}`);
+            const current = podRepo.getOrThrow(podId);
+            if (current.status === 'handoff') {
+              transition(current, 'failed', {
+                lastCorrectionMessage: `Workspace handoff failed: ${reason}`,
+                options: interactiveRecoveryOptions,
+                skipAgent: false,
+              });
+            }
+          };
+
           try {
             await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, pod.id);
           } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Failed to sync workspace back during handoff — agent may miss in-flight changes',
-            );
+            blockHandoff('could not sync the interactive workspace back to the host worktree', err);
+            return;
           }
+
+          let hasDurableHandoffDelta = false;
+          try {
+            const committed = await worktreeManager.commitPendingChanges(
+              pod.worktreePath,
+              'chore: sync human session',
+              { maxDeletions: 100 },
+            );
+            if (committed) {
+              logger.info({ podId }, 'Auto-committed human session changes during handoff');
+            }
+
+            const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
+            const stats = await worktreeManager.getDiffStats(
+              pod.worktreePath,
+              baseBranch,
+              pod.startCommitSha ?? undefined,
+            );
+            hasDurableHandoffDelta =
+              stats.filesChanged > 0 || stats.linesAdded > 0 || stats.linesRemoved > 0;
+          } catch (err) {
+            blockHandoff('could not commit or verify the synced workspace changes', err);
+            return;
+          }
+
+          const hasInstructions =
+            !!pod.handoffInstructions && pod.handoffInstructions.trim().length > 0;
+          if (!hasDurableHandoffDelta && (pod.skipAgent || !hasInstructions)) {
+            blockHandoff('no committed workspace changes were found after sync');
+            return;
+          }
+
           // Recover MAX/PRO OAuth tokens before tearing down the workspace
           // container. Claude CLI rotates refresh tokens during the human's
           // interactive session; if we stop the container without persisting,
@@ -5021,27 +5081,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
           podRepo.update(podId, { containerId: null });
           pod = podRepo.getOrThrow(podId);
-
-          // Commit any file-level changes the human left in the worktree.
-          // syncWorkspaceBack copies files at the FS level; even when the in-container
-          // git push succeeded (pushed=true), uncommitted edits remain unstaged on the
-          // host. Committing here while the sync is fresh guarantees the branch has at
-          // least one new commit before PR creation, avoiding GitHub 422s.
-          // Human work is unconditionally trusted — no deletion guard needed.
-          if (pod.worktreePath) {
-            try {
-              const committed = await worktreeManager.commitPendingChanges(
-                pod.worktreePath,
-                'chore: sync human session',
-                { maxDeletions: 100 },
-              );
-              if (committed) {
-                logger.info({ podId }, 'Auto-committed human session changes during handoff');
-              }
-            } catch (err) {
-              logger.warn({ err, podId }, 'Failed to auto-commit during handoff — proceeding');
-            }
-          }
 
           // Compose the agent-facing handoff context now that the worktree
           // reflects the human's in-flight work. Reads the human's typed
@@ -8378,7 +8417,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       if (skipAgent) {
-        podRepo.update(podId, { skipAgent: true });
+        podRepo.update(podId, { skipAgent: true, autoApprove: false });
       }
 
       // Swap to the worker profile if one is configured — this lets the
@@ -11228,8 +11267,41 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       logger.info({ podId, prUrl: newPrUrl }, 'PR created via retryCreatePr');
     },
 
-    async resumePod(podId: string): Promise<{ action: 'retry-pr' | 'revalidate' }> {
+    async resumePod(
+      podId: string,
+    ): Promise<{ action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery' }> {
       const pod = podRepo.getOrThrow(podId);
+      if (isRetryableFixDeliveryFailure(pod)) {
+        if (!pod.worktreePath) {
+          throw new AutopodError(
+            `Pod ${podId} has no worktree — cannot retry fix delivery`,
+            'INVALID_STATE',
+            409,
+          );
+        }
+        if (pod.worktreeCompromised) {
+          throw new AutopodError(
+            `Pod ${podId} worktree is marked compromised — recover the worktree before retrying fix delivery`,
+            'WORKTREE_COMPROMISED',
+            409,
+          );
+        }
+
+        const profile = profileStore.get(pod.profileName);
+        emitActivityStatus(podId, 'Resume: checking remote fix branch before retry…');
+        const validated = transition(pod, 'validated', { mergeBlockReason: null });
+        try {
+          await worktreeManager.pullBranch(pod.worktreePath, selectGitPat(profile));
+        } catch (err) {
+          parkFixPodDeliveryFailure(podRepo.getOrThrow(podId), err);
+          return { action: 'retry-fix-delivery' };
+        }
+
+        emitActivityStatus(podId, 'Resume: retrying validated fix delivery…');
+        await completeFixPodAfterPush(validated);
+        return { action: 'retry-fix-delivery' };
+      }
+
       if (pod.status !== 'failed') {
         throw new AutopodError(
           `Cannot resume pod ${podId} in status ${pod.status} — only failed pods can be resumed`,

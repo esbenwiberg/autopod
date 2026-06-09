@@ -4863,6 +4863,111 @@ describe('PodManager', () => {
       });
     });
 
+    describe('handoff persistence', () => {
+      function createRunningWorkspace(ctx: TestContext) {
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace pod',
+            outputMode: 'workspace',
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-workspace',
+          worktreePath: '/tmp/worktree/abc',
+          startedAt: new Date().toISOString(),
+        });
+        return { manager, pod };
+      }
+
+      it('blocks handoff when workspace sync fails and preserves the interactive container', async () => {
+        const ctx = createTestContext({ overall: 'pass' });
+        const { manager, pod } = createRunningWorkspace(ctx);
+        await manager.promoteToAuto(pod.id, 'pr', { skipAgent: true });
+        vi.mocked(ctx.containerManager.execInContainer).mockRejectedValue(
+          new Error('docker exec failed'),
+        );
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(
+          new Error('archive fallback failed'),
+        );
+
+        await manager.processPod(pod.id);
+
+        const result = manager.getSession(pod.id);
+        expect(result.status).toBe('failed');
+        expect(result.containerId).toBe('ctr-workspace');
+        expect(result.worktreePath).toBe('/tmp/worktree/abc');
+        expect(result.options.agentMode).toBe('interactive');
+        expect(result.skipAgent).toBe(false);
+        expect(result.lastCorrectionMessage).toContain('Workspace handoff failed');
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(ctx.worktreeManager.commitPendingChanges).not.toHaveBeenCalled();
+        expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+        expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      });
+
+      it('blocks handoff when auto-committing the synced workspace fails', async () => {
+        const ctx = createTestContext({ overall: 'pass' });
+        const { manager, pod } = createRunningWorkspace(ctx);
+        await manager.promoteToAuto(pod.id, 'pr', { skipAgent: true });
+        vi.mocked(ctx.worktreeManager.commitPendingChanges).mockRejectedValueOnce(
+          new Error('pre-commit failed'),
+        );
+
+        await manager.processPod(pod.id);
+
+        const result = manager.getSession(pod.id);
+        expect(result.status).toBe('failed');
+        expect(result.containerId).toBe('ctr-workspace');
+        expect(result.options.agentMode).toBe('interactive');
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+        expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      });
+
+      it('blocks submit-as-is handoff when no committed workspace changes are found', async () => {
+        const ctx = createTestContext({ overall: 'pass' });
+        const { manager, pod } = createRunningWorkspace(ctx);
+        await manager.promoteToAuto(pod.id, 'pr', { skipAgent: true });
+        vi.mocked(ctx.worktreeManager.commitPendingChanges).mockResolvedValueOnce(false);
+        vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValueOnce({
+          filesChanged: 0,
+          linesAdded: 0,
+          linesRemoved: 0,
+        });
+
+        await manager.processPod(pod.id);
+
+        const result = manager.getSession(pod.id);
+        expect(result.status).toBe('failed');
+        expect(result.lastCorrectionMessage).toContain('no committed workspace changes');
+        expect(result.containerId).toBe('ctr-workspace');
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+        expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      });
+
+      it('submit-as-is opens a PR after validation but does not auto-merge', async () => {
+        const ctx = createTestContext({ overall: 'pass' });
+        const { manager, pod } = createRunningWorkspace(ctx);
+        ctx.podRepo.update(pod.id, { autoApprove: true });
+
+        await manager.promoteToAuto(pod.id, 'pr', { skipAgent: true });
+        expect(manager.getSession(pod.id).autoApprove).toBe(false);
+
+        await manager.processPod(pod.id);
+
+        const result = manager.getSession(pod.id);
+        expect(result.status).toBe('validated');
+        expect(result.prUrl).toBe('https://github.com/org/repo/pull/42');
+        expect(ctx.prManager.createPr).toHaveBeenCalled();
+        expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      });
+    });
+
     describe('completeSession', () => {
       it('pushes branch and transitions running → complete', async () => {
         const ctx = createTestContext();
@@ -6090,6 +6195,124 @@ describe('PodManager', () => {
       ctx.podRepo.update(pod.id, { status: 'failed' });
       return { manager, pod };
     }
+
+    function setupParkedFixDeliveryFailure(
+      ctx: TestContext,
+      status: 'awaiting_input' | 'failed' = 'awaiting_input',
+    ) {
+      const manager = createPodManager(ctx.deps);
+      const parent = manager.createSession(
+        { profileName: 'test-profile', task: 'Original work' },
+        'user-1',
+      );
+      ctx.podRepo.update(parent.id, {
+        status: 'merge_pending',
+        prUrl: 'https://github.com/org/repo/pull/42',
+        worktreePath: '/tmp/worktree/parent',
+      });
+      const fix = manager.createSession(
+        { profileName: 'test-profile', task: '[PR FIX] Address review feedback' },
+        'user-1',
+      );
+      ctx.podRepo.update(fix.id, {
+        status,
+        linkedPodId: parent.id,
+        branch: parent.branch,
+        prUrl: parent.prUrl,
+        worktreePath: '/tmp/worktree/fix',
+        lastValidationResult: makeValidationResult({ podId: fix.id }),
+        mergeBlockReason: 'Validated fix could not be pushed: ssh: stale info',
+      });
+      ctx.podRepo.update(parent.id, { fixPodId: fix.id });
+      return { manager, parent, fix };
+    }
+
+    it('retries delivery for a validated fix pod parked in awaiting_input', async () => {
+      const ctx = createTestContext(undefined, { githubPat: 'test-pat' });
+      const { manager, fix } = setupParkedFixDeliveryFailure(ctx);
+
+      const result = await manager.resumePod(fix.id);
+
+      expect(result).toEqual({ action: 'retry-fix-delivery' });
+      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith('/tmp/worktree/fix', 'test-pat');
+      expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalledWith(
+        expect.objectContaining({
+          worktreePath: '/tmp/worktree/fix',
+          baseBranch: 'main',
+        }),
+      );
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+        '/tmp/worktree/fix',
+        fix.branch,
+        expect.objectContaining({ force: true }),
+      );
+      const refreshed = manager.getSession(fix.id);
+      expect(refreshed.status).toBe('complete');
+      expect(refreshed.mergeBlockReason).toBeNull();
+    });
+
+    it('retries delivery for an already-failed fix pod with the delivery marker', async () => {
+      const ctx = createTestContext();
+      const { manager, fix } = setupParkedFixDeliveryFailure(ctx, 'failed');
+
+      const result = await manager.resumePod(fix.id);
+
+      expect(result).toEqual({ action: 'retry-fix-delivery' });
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalled();
+      expect(manager.getSession(fix.id).status).toBe('complete');
+    });
+
+    it('parks without pushing when the remote fix branch has diverged', async () => {
+      const ctx = createTestContext();
+      const { manager, fix } = setupParkedFixDeliveryFailure(ctx);
+      (ctx.worktreeManager.pullBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('Not possible to fast-forward'),
+      );
+
+      const result = await manager.resumePod(fix.id);
+
+      expect(result).toEqual({ action: 'retry-fix-delivery' });
+      expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      const refreshed = manager.getSession(fix.id);
+      expect(refreshed.status).toBe('awaiting_input');
+      expect(refreshed.mergeBlockReason).toBe(
+        'Validated fix could not be pushed: Not possible to fast-forward',
+      );
+    });
+
+    it('re-parks a validated fix pod when retry delivery fails again', async () => {
+      const ctx = createTestContext();
+      const { manager, fix } = setupParkedFixDeliveryFailure(ctx);
+      (ctx.worktreeManager.pushBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('stale info'),
+      );
+
+      const result = await manager.resumePod(fix.id);
+
+      expect(result).toEqual({ action: 'retry-fix-delivery' });
+      const refreshed = manager.getSession(fix.id);
+      expect(refreshed.status).toBe('awaiting_input');
+      expect(refreshed.mergeBlockReason).toBe('Validated fix could not be pushed: stale info');
+    });
+
+    it('does not let ordinary awaiting_input pods use resume', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Needs human answer' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'awaiting_input',
+        worktreePath: '/tmp/worktree/abc',
+      });
+
+      await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+        code: 'INVALID_STATE',
+        statusCode: 409,
+      });
+    });
 
     it('Path 1: passed validation + no PR → pushes branch, opens PR, returns to validated', async () => {
       const ctx = createTestContext();

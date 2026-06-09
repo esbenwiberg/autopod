@@ -174,6 +174,7 @@ export interface PodUpdates {
   testRunBranches?: string[] | null;
   worktreeCompromised?: boolean;
   skipValidation?: boolean;
+  autoApprove?: boolean;
   forceCompletedAt?: string | null;
   forceCompletedReason?: string | null;
   lastAgentEventAt?: string | null;
@@ -772,6 +773,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.skipValidation !== undefined) {
         setClauses.push('skip_validation = @skipValidation');
         params.skipValidation = changes.skipValidation ? 1 : 0;
+      }
+      if (changes.autoApprove !== undefined) {
+        setClauses.push('auto_approve = @autoApprove');
+        params.autoApprove = changes.autoApprove ? 1 : 0;
       }
       if (changes.forceCompletedAt !== undefined) {
         setClauses.push('force_completed_at = @forceCompletedAt');

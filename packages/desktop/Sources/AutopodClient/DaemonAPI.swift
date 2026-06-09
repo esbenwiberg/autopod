@@ -993,7 +993,8 @@ struct ForceCompleteBody: Codable {
 
 public struct ResumeResponse: Codable, Sendable {
   public let ok: Bool?
-  /// Either "retry-pr" (Path 1: push + open PR) or "revalidate" (Path 2: re-run validation only).
+  /// "retry-pr" (push + open PR), "revalidate" (validation only), or
+  /// "retry-fix-delivery" (push an already-validated fix pod).
   public let action: String?
 }
 
