@@ -734,6 +734,10 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .description('Create a new pod (task inline or via --file)')
     .option('-f, --file <path>', 'read task from a file (mutually exclusive with inline task arg)')
     .option('--spec <folder>', 'read contract-based spec folder (brief.md + contract.yaml)')
+    .option(
+      '--include-specs',
+      'commit --spec folder files onto the pod branch before the agent starts',
+    )
     .option('-m, --model <model>', 'AI model to use')
     .option('-r, --runtime <runtime>', 'runtime (claude | codex)')
     .option('-b, --branch <branch>', 'target branch name')
@@ -754,6 +758,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         opts: {
           file?: string;
           spec?: string;
+          includeSpecs?: boolean;
           model?: string;
           runtime?: string;
           branch?: string;
@@ -766,6 +771,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       ) => {
         if ([opts.file, opts.spec, task].filter(Boolean).length > 1) {
           podGroup.error('provide only one of [task], --file, or --spec');
+        }
+        if (opts.includeSpecs && !opts.spec) {
+          podGroup.error('--include-specs requires --spec');
         }
 
         let resolvedTask: string;
@@ -790,7 +798,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           }
           resolvedTask = brief.task;
           contract = brief.contract;
-          specFiles = collectSpecFiles(specRoot);
+          specFiles = opts.includeSpecs ? collectSpecFiles(specRoot) : undefined;
         } else if (opts.file) {
           if (!existsSync(opts.file)) podGroup.error(`file not found: ${opts.file}`);
           resolvedTask = readFileSync(opts.file, 'utf8').trim();

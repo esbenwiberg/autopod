@@ -65,6 +65,7 @@ public struct CreateSeriesSheet: View {
     @State private var prMode: String = "single"
     @State private var autoApprove: Bool = false
     @State private var disableAskHuman: Bool = false
+    @State private var includeSpecFiles: Bool = false
     @State private var isInitialSyncing = false
     @State private var initialSyncWarning: String?
     @State private var initialSyncAttemptedPodId: String?
@@ -164,6 +165,7 @@ public struct CreateSeriesSheet: View {
             .disabled(isSubmitting)
             .onChange(of: briefSource) { _, _ in
                 preview = nil
+                includeSpecFiles = false
                 errorMessage = nil
             }
         }
@@ -302,6 +304,7 @@ public struct CreateSeriesSheet: View {
             return
         }
         preview = response
+        includeSpecFiles = false
         if seriesName.isEmpty { seriesName = response.seriesName }
     }
 
@@ -326,6 +329,25 @@ public struct CreateSeriesSheet: View {
 
             TextField("Series name", text: $seriesName)
                 .textFieldStyle(.roundedBorder)
+            let specFileCount = preview.specFiles?.count ?? 0
+            if briefSource == .onBranch || specFileCount > 0 {
+                Toggle(isOn: $includeSpecFiles) {
+                    HStack(spacing: 6) {
+                        Text("Include spec source in worktree")
+                        if specFileCount > 0 {
+                            Text("\(specFileCount)")
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+                .toggleStyle(.switch)
+                .disabled(isSubmitting)
+            }
         }
     }
 
@@ -521,9 +543,11 @@ public struct CreateSeriesSheet: View {
             seriesName: seriesName,
             briefs: preview.briefs,
             profile: selectedProfile,
-            startBranch: briefSource == .onBranch && !sourceBranch.isEmpty ? sourceBranch : nil,
+            startBranch: briefSource == .onBranch && includeSpecFiles && !sourceBranch.isEmpty
+                ? sourceBranch
+                : nil,
             baseBranch: baseBranch.isEmpty ? nil : baseBranch,
-            specFiles: preview.specFiles,
+            specFiles: includeSpecFiles ? preview.specFiles : nil,
             prMode: prMode,
             autoApprove: autoApprove ? true : nil,
             disableAskHuman: disableAskHuman ? true : nil,

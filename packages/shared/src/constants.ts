@@ -42,7 +42,10 @@ export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   awaiting_input: ['running', 'validating', 'validated', 'killing', 'failed'],
   paused: ['running', 'killing', 'failed'],
   validating: ['validated', 'running', 'failed', 'review_required', 'killing', 'awaiting_input'],
-  validated: ['approved', 'running', 'validating', 'killing', 'queued'],
+  // `awaiting_input` covers post-validation delivery failures (for example a
+  // fix pod validated, then the daemon could not push its branch). Park rather
+  // than spending another agent run.
+  validated: ['approved', 'running', 'validating', 'awaiting_input', 'killing', 'queued'],
   failed: [
     'running',
     'validating',

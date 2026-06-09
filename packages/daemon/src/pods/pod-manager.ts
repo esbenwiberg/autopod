@@ -2028,6 +2028,33 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const isFixPodRecyclable = (status: PodStatus): boolean =>
     isFixCycleTerminal(status) || status === 'merge_pending';
 
+  const FIX_DELIVERY_FAILED_PREFIX = 'Validated fix could not be pushed';
+
+  function parkFixPodDeliveryFailure(fixPod: Pod, err: unknown): void {
+    if (err instanceof GitCredentialError) {
+      parkOnCredentialFailure(fixPod.id, err);
+      return;
+    }
+
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn({ err, podId: fixPod.id }, 'Fix-pod post-validation push failed — parking');
+    emitActivityStatus(
+      fixPod.id,
+      `Fix branch push failed — awaiting operator retry; no AI retry started: ${message}`,
+    );
+    transition(fixPod, 'awaiting_input', {
+      mergeBlockReason: `${FIX_DELIVERY_FAILED_PREFIX}: ${message}`,
+    });
+  }
+
+  function isParkedHostPushRecovery(pod: Pod): boolean {
+    if (pod.status !== 'awaiting_input') return false;
+    if (pod.mergeBlockReason?.startsWith(FIX_DELIVERY_FAILED_PREFIX)) return true;
+    if (pod.pendingEscalation?.type !== 'request_credential') return false;
+    const payload = pod.pendingEscalation.payload as RequestCredentialPayload;
+    return payload.source === 'host_push';
+  }
+
   /**
    * Ensures the canonical fix pod for a parent PR is alive and queued.
    *
@@ -2077,6 +2104,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (parent.fixPodId) {
       try {
         const fix = podRepo.getOrThrow(parent.fixPodId);
+        if (
+          fix.status === 'awaiting_input' &&
+          fix.mergeBlockReason?.startsWith(FIX_DELIVERY_FAILED_PREFIX)
+        ) {
+          logger.info(
+            { podId: parentSessionId, fixPodId: fix.id, mergeBlockReason: fix.mergeBlockReason },
+            'Fix pod delivery failed — suppressing automatic AI retry',
+          );
+          emitActivityStatus(
+            parentSessionId,
+            `Fix pod ${fix.id} validated but could not push — awaiting operator retry`,
+          );
+          return;
+        }
         if (!isFixPodRecyclable(fix.status)) {
           logger.debug(
             { podId: parentSessionId, fixPodId: parent.fixPodId },
@@ -2364,8 +2405,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         });
       } catch (err) {
-        logger.warn({ err, podId }, 'Fix-pod post-validation push failed — completing anyway');
-        emitActivityStatus(podId, 'Fix branch push failed — pod still completing');
+        parkFixPodDeliveryFailure(podRepo.getOrThrow(podId), err);
+        return;
       }
     }
 
@@ -7395,6 +7436,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               prUrl: newPrUrl,
               lastCorrectionMessage: null,
             });
+
+            if (validatedPod.linkedPodId) {
+              await completeFixPodAfterPush(validatedPod);
+              return;
+            }
+
             maybeTriggerDependents(validatedPod);
 
             // Stop the container post-validation (mirrors the original push path).
@@ -9605,6 +9652,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       } catch (err) {
         logger.error({ err, podId }, 'Validation error');
         const s2 = podRepo.getOrThrow(podId);
+
+        if (isParkedHostPushRecovery(s2)) {
+          logger.info({ podId, status: s2.status }, 'Validation error already parked for retry');
+          return;
+        }
+        if (s2.status === 'validated' && s2.linkedPodId) {
+          parkFixPodDeliveryFailure(s2, err);
+          return;
+        }
 
         // Pod is still `validating`; runUpdateFromBaseAfterAbort handles status transitions.
         if (tryConsumeUpdateIntent()) return;

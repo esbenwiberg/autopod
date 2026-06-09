@@ -5349,6 +5349,92 @@ describe('PodManager', () => {
       expect(manager.getSession(root.id).prFixAttempts).toBe(2);
     });
 
+    it('does not recycle a fix pod parked after validated delivery failed', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
+
+      await manager.spawnFixSession(root.id, 'round one');
+      const firstFix = ctx.podRepo.list({}).find((p) => p.linkedPodId === root.id);
+      if (!firstFix) throw new Error('fix pod missing');
+
+      ctx.fixFeedbackRepo.drain(root.id);
+      ctx.podRepo.update(firstFix.id, {
+        status: 'awaiting_input',
+        mergeBlockReason: 'Validated fix could not be pushed: ssh: connection refused',
+      });
+
+      await manager.spawnFixSession(root.id, 'round two — same stale PR feedback');
+
+      const fixPods = ctx.podRepo.list({}).filter((p) => p.linkedPodId === root.id);
+      expect(fixPods, 'same parked fix pod — no second row').toHaveLength(1);
+      expect(fixPods[0]?.id).toBe(firstFix.id);
+      expect(fixPods[0]?.status).toBe('awaiting_input');
+      expect(fixPods[0]?.fixIteration).toBe(0);
+      expect(ctx.fixFeedbackRepo.count(root.id)).toBe(1);
+      expect(manager.getSession(root.id).prFixAttempts).toBe(1);
+      expect(ctx.enqueuedSessions.filter((id) => id === firstFix.id)).toHaveLength(1);
+    });
+
+    it('parks a validated fix pod when its final branch push fails', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
+
+      await manager.spawnFixSession(root.id, 'round one');
+      const fixPod = ctx.podRepo.list({}).find((p) => p.linkedPodId === root.id);
+      if (!fixPod) throw new Error('fix pod missing');
+
+      ctx.fixFeedbackRepo.drain(root.id);
+      ctx.podRepo.update(fixPod.id, {
+        status: 'running',
+        containerId: 'ctr-fix',
+        worktreePath: '/tmp/worktree/abc',
+        prUrl: root.prUrl,
+        branch: root.branch,
+        baseBranch: 'main',
+      });
+      (ctx.worktreeManager.pushBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('ssh: connection refused'),
+      );
+      const events: unknown[] = [];
+      ctx.eventBus.subscribe((event) => events.push(event));
+
+      await manager.triggerValidation(fixPod.id);
+
+      const refreshed = manager.getSession(fixPod.id);
+      expect(refreshed.status).toBe('awaiting_input');
+      expect(refreshed.mergeBlockReason).toBe(
+        'Validated fix could not be pushed: ssh: connection refused',
+      );
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalled();
+      expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ type: 'pod.completed', podId: fixPod.id }),
+      );
+      const messages = events.flatMap((event) => {
+        if (typeof event !== 'object' || event === null) return [];
+        const maybeActivity = event as {
+          type?: string;
+          podId?: string;
+          event?: { type?: string; message?: string };
+        };
+        if (
+          maybeActivity.type === 'pod.agent_activity' &&
+          maybeActivity.podId === fixPod.id &&
+          maybeActivity.event?.type === 'status' &&
+          maybeActivity.event.message
+        ) {
+          return [maybeActivity.event.message];
+        }
+        return [];
+      });
+      expect(messages).toContain(
+        'Fix branch push failed — awaiting operator retry; no AI retry started: ssh: connection refused',
+      );
+      expect(messages).not.toContain('Fix pod complete — parent poller owns the merge');
+    });
+
     it('fails the parent via requestFixSession when max PR fix attempts are exhausted', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);

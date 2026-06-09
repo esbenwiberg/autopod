@@ -1,5 +1,8 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Command } from 'commander';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
 import { registerPodCommands } from './pod.js';
 
@@ -85,9 +88,41 @@ function createMockClient() {
   } as unknown as AutopodClient;
 }
 
+const contractYaml = `contract_version: 1
+title: "Brief contract"
+depends_on: []
+scenarios:
+  - id: scenario-cli-spec
+    given:
+      - "a spec folder exists"
+    when:
+      - "ap pod create --spec parses it"
+    then:
+      - "the daemon request carries the contract"
+required_facts:
+  - id: fact-cli-spec
+    proves:
+      - scenario-cli-spec
+    kind: unit-test
+    artifact:
+      path: packages/cli/src/commands/session.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/cli test -- session.test.ts
+human_review: []
+`;
+
+function createSpecFolder(): string {
+  const root = mkdtempSync(join(tmpdir(), 'autopod-cli-spec-'));
+  writeFileSync(join(root, 'brief.md'), '## Task\nBuild from the spec.\n');
+  writeFileSync(join(root, 'contract.yaml'), contractYaml);
+  writeFileSync(join(root, 'notes.md'), 'Planning context.\n');
+  return root;
+}
+
 describe('pod commands', () => {
   let program: Command;
   let mockClient: AutopodClient;
+  const createdDirs: string[] = [];
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -95,6 +130,12 @@ describe('pod commands', () => {
     program.exitOverride(); // Throw instead of process.exit
     mockClient = createMockClient();
     registerPodCommands(program, () => mockClient);
+  });
+
+  afterEach(() => {
+    for (const dir of createdDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('registers run command that calls createSession', async () => {
@@ -172,6 +213,44 @@ describe('pod commands', () => {
     const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
       .calls[0][0] as Record<string, unknown>;
     expect(call).not.toHaveProperty('referenceRepoPat');
+  });
+
+  it('does not include local spec files for --spec pod creation by default', async () => {
+    const specRoot = createSpecFolder();
+    createdDirs.push(specRoot);
+
+    await program.parseAsync(['node', 'ap', 'pod', 'create', 'test-profile', '--spec', specRoot]);
+
+    const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
+      .calls[0][0] as Record<string, unknown>;
+    expect(call.task).toBe('## Task\nBuild from the spec.');
+    expect(call.contract).toEqual(expect.objectContaining({ title: 'Brief contract' }));
+    expect(call.specFiles).toBeUndefined();
+  });
+
+  it('includes local spec files for --spec pod creation when opted in', async () => {
+    const specRoot = createSpecFolder();
+    createdDirs.push(specRoot);
+
+    await program.parseAsync([
+      'node',
+      'ap',
+      'pod',
+      'create',
+      'test-profile',
+      '--spec',
+      specRoot,
+      '--include-specs',
+    ]);
+
+    const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
+      .calls[0][0] as Record<string, unknown>;
+    const outputRoot = `specs/${specRoot.split('/').at(-1)}`;
+    expect(call.specFiles).toEqual([
+      { path: `${outputRoot}/brief.md`, content: '## Task\nBuild from the spec.\n' },
+      { path: `${outputRoot}/contract.yaml`, content: contractYaml },
+      { path: `${outputRoot}/notes.md`, content: 'Planning context.\n' },
+    ]);
   });
 
   it('omits referenceRepos when no ref flags are passed', async () => {

@@ -101,6 +101,10 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
     )
     .option('--series-name <name>', 'Override series name (default: derived from folder name)')
     .option('--auto-approve', 'Auto-approve each pod once it reaches validated — no human gate')
+    .option(
+      '--include-specs',
+      'commit spec folder files onto root pod branches before agents start',
+    )
     .action(
       async (
         folder: string,
@@ -111,6 +115,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
           prMode: string;
           seriesName?: string;
           autoApprove?: boolean;
+          includeSpecs?: boolean;
         },
       ) => {
         const client = getClient();
@@ -155,7 +160,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
         // Shared spec docs live at the spec root (parent of briefs/).
         const seriesDescription = readMaybe(specRoot, 'purpose.md');
         const seriesDesign = readMaybe(specRoot, 'design.md');
-        const specFiles = collectSpecFiles(specRoot);
+        const specFiles = opts.includeSpecs ? collectSpecFiles(specRoot) : undefined;
 
         const seriesName = opts.seriesName ?? inferSeriesName(specRoot);
         const prMode = opts.prMode as 'single' | 'stacked' | 'none';

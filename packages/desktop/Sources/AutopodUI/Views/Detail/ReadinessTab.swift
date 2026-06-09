@@ -23,7 +23,12 @@ struct ReadinessTab: View {
         decisionStatus?.requiresApprovalReason ?? false
     }
 
+    private var isApprovalState: Bool {
+        pod.status == .validated
+    }
+
     private var canApprove: Bool {
+        guard isApprovalState else { return false }
         guard let decisionStatus, decisionStatus.canApproveFromReadinessTab else { return false }
         return !requiresReason || !approvalReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -423,6 +428,9 @@ struct ReadinessTab: View {
     }
 
     private var approvalHelp: String {
+        if !isApprovalState {
+            return "Approval is only available after validation."
+        }
         guard let decisionStatus else { return "Readiness is not available yet." }
         if decisionStatus.requiresApprovalReason {
             return "A reason is required for \(decisionStatus.label) readiness."

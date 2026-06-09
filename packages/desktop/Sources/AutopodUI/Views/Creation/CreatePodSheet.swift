@@ -42,6 +42,7 @@ public struct CreateSessionSheet: View {
     @State private var baseBranch = ""
     @State private var branchPrefix = ""
     @State private var pimGroups: [PimGroupRequest] = []
+    @State private var includeSpecFiles = false
     @State private var showAdvanced = false
     @State private var showInteractiveRefRepos = false
     @State private var refProfileNames: Set<String> = []
@@ -556,6 +557,7 @@ public struct CreateSessionSheet: View {
         let factCount = brief.contract?.requiredFacts.count ?? 0
         let reviewCount = brief.contract?.humanReview.count ?? 0
         let sidecarCount = brief.requireSidecars?.count ?? 0
+        let specFileCount = brief.specFiles?.count ?? 0
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -578,6 +580,25 @@ public struct CreateSessionSheet: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(3)
+            if taskSource == .onBranch || specFileCount > 0 {
+                Toggle(isOn: $includeSpecFiles) {
+                    HStack(spacing: 6) {
+                        Text("Include spec source in worktree")
+                            .font(.caption)
+                        if specFileCount > 0 {
+                            Text("\(specFileCount)")
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            }
         }
         .padding(10)
         .background(Color.secondary.opacity(0.08))
@@ -609,6 +630,7 @@ public struct CreateSessionSheet: View {
 
     private func clearBriefPreview() {
         briefPreview = nil
+        includeSpecFiles = false
         errorMessage = nil
     }
 
@@ -639,6 +661,7 @@ public struct CreateSessionSheet: View {
             return
         }
         briefPreview = response
+        includeSpecFiles = false
         task = response.task
     }
 
@@ -667,10 +690,10 @@ public struct CreateSessionSheet: View {
                 briefTitle: $0.title,
                 touches: $0.touches,
                 doesNotTouch: $0.doesNotTouch,
-                startBranch: taskSource == .onBranch && !trimmedSourceBranch.isEmpty
+                startBranch: taskSource == .onBranch && includeSpecFiles && !trimmedSourceBranch.isEmpty
                     ? trimmedSourceBranch
                     : nil,
-                specFiles: $0.specFiles
+                specFiles: includeSpecFiles ? $0.specFiles : nil
             )
         }
 
