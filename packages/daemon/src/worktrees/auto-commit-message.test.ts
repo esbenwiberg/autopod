@@ -75,6 +75,17 @@ function mockClientOk(model = 'claude-haiku-4-5') {
   });
 }
 
+function expectAnthropicCreateTimeoutOption(timeoutMs: number): void {
+  const call = anthropicCreateMock.mock.calls[0];
+  expect(call).toBeDefined();
+  if (!call) throw new Error('messages.create was not called');
+
+  const body = call[0] as Record<string, unknown>;
+  const options = call[1] as Record<string, unknown> | undefined;
+  expect(body).not.toHaveProperty('timeout');
+  expect(options).toEqual({ timeout: timeoutMs });
+}
+
 const SAMPLE_PROFILE = {
   name: 'test-profile',
   modelProvider: 'max',
@@ -112,6 +123,7 @@ describe('generateAutoCommitMessage', () => {
     expect(result.usedFallback).toBe(false);
     expect(result.fallbackReason).toBeUndefined();
     expect(anthropicCreateMock).toHaveBeenCalledOnce();
+    expectAnthropicCreateTimeoutOption(10_000);
   });
 
   it('falls back to heuristic when the API call throws (api_call_failed)', async () => {

@@ -116,18 +116,20 @@ export async function generateAutoCommitMessage(
 
   try {
     const taskLine = podTask ? `Pod task: ${podTask}\n\n` : '';
-    const response = await llm.client.messages.create({
-      model: llm.model,
-      max_tokens: 100,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: `${taskLine}Diff stat:\n${stat}\nDiff (truncated):\n${diff}`,
-        },
-      ],
-      timeout: API_TIMEOUT_MS,
-    });
+    const response = await llm.client.messages.create(
+      {
+        model: llm.model,
+        max_tokens: 100,
+        system: SYSTEM_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: `${taskLine}Diff stat:\n${stat}\nDiff (truncated):\n${diff}`,
+          },
+        ],
+      },
+      { timeout: API_TIMEOUT_MS },
+    );
 
     const text = response.content
       .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')

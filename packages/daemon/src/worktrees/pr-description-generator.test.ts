@@ -45,6 +45,17 @@ function mockClientOk(model = 'claude-haiku-4-5') {
   });
 }
 
+function expectAnthropicCreateTimeoutOption(timeoutMs: number): void {
+  const call = anthropicCreateMock.mock.calls[0];
+  expect(call).toBeDefined();
+  if (!call) throw new Error('messages.create was not called');
+
+  const body = call[0] as Record<string, unknown>;
+  const options = call[1] as Record<string, unknown> | undefined;
+  expect(body).not.toHaveProperty('timeout');
+  expect(options).toEqual({ timeout: timeoutMs });
+}
+
 const SAMPLE_DIFF = `diff --git a/src/auth/token-manager.ts b/src/auth/token-manager.ts
 +  async refreshToken() { ... }
 -  async getToken() { ... }
@@ -88,6 +99,7 @@ describe('generatePrTitle', () => {
     expect(result.usedFallback).toBe(false);
     expect(result.fallbackReason).toBeUndefined();
     expect(anthropicCreateMock).toHaveBeenCalledOnce();
+    expectAnthropicCreateTimeoutOption(15_000);
   });
 
   it('falls back when profile cannot back a daemon-side LLM call (no_anthropic_api_key)', async () => {
@@ -249,6 +261,7 @@ describe('generatePrNarrative', () => {
     expect(result.narrative.what).toContain('proactive token refresh');
     expect(result.narrative.how).toContain('acquireTokenSilent');
     expect(result.narrative.reviewFocus).toEqual(['packages/cli/src/auth/token-manager.ts']);
+    expectAnthropicCreateTimeoutOption(15_000);
   });
 
   it('falls back to plain taskSummary when the profile cannot back a daemon-side LLM call (no_anthropic_api_key)', async () => {

@@ -174,13 +174,15 @@ export async function generatePrTitle(
   const diff = await readBranchDiff(input.worktreePath, input.baseBranch, logger);
 
   try {
-    const response = await llm.client.messages.create({
-      model: llm.model,
-      max_tokens: 100,
-      system: TITLE_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: buildUserMessage(input, diff) }],
-      timeout: API_TIMEOUT_MS,
-    });
+    const response = await llm.client.messages.create(
+      {
+        model: llm.model,
+        max_tokens: 100,
+        system: TITLE_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: buildUserMessage(input, diff) }],
+      },
+      { timeout: API_TIMEOUT_MS },
+    );
 
     const text = response.content
       .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
@@ -259,13 +261,15 @@ export async function generatePrNarrative(
     : NARRATIVE_SYSTEM_PROMPT;
 
   try {
-    const response = await llm.client.messages.create({
-      model: llm.model,
-      max_tokens: compact ? 400 : 800,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: buildUserMessage(input, diff) }],
-      timeout: API_TIMEOUT_MS,
-    });
+    const response = await llm.client.messages.create(
+      {
+        model: llm.model,
+        max_tokens: compact ? 400 : 800,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: buildUserMessage(input, diff) }],
+      },
+      { timeout: API_TIMEOUT_MS },
+    );
 
     const raw = response.content
       .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
