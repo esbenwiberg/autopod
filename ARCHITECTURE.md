@@ -49,6 +49,10 @@ This document covers system design — how the pieces fit together and why they'
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+The mobile PWA is served by the daemon as static assets and uses the same REST
+and WebSocket contracts as the CLI and desktop app after pairing with a
+dev-token bearer credential.
+
 ---
 
 ## Packages
@@ -60,9 +64,10 @@ This document covers system design — how the pieces fit together and why they'
 | `@autopod/cli` | TypeScript | Commander CLI. Thin client — calls daemon REST API, streams WebSocket events. No local state. |
 | `@autopod/escalation-mcp` | TypeScript | MCP server injected into every agent container. Provides 13+ tools for structured agent ↔ human communication. |
 | `@autopod/validator` | TypeScript | Playwright script generation and result parsing. Execution happens inside containers managed by the daemon. |
+| `@autopod/mobile-web` | TypeScript/React | Phone PWA served by the daemon at `/mobile/*` for needs-me inbox, pod creation, escalation replies, validation summaries, and pod actions. |
 | `packages/desktop` | Swift | Native macOS app. HTTP + WebSocket client. Three-column layout, live terminal, diff viewer, analytics. |
 
-Dependency graph: `shared ← daemon, cli, validator, escalation-mcp`
+Dependency graph: `shared ← daemon, cli, validator, escalation-mcp, mobile-web`
 
 ---
 
@@ -102,9 +107,10 @@ Key invariants:
 1. **Provision** — clone bare repo, strip PAT from remote URL, start Docker container (or ACI instance)
 2. **Inject** — generate CLAUDE.md (task + profile sections + memories + skills), write escalation MCP config, apply network policy
 3. **Run runtime** — spawn Claude/Codex/Copilot, stream `AgentEvent`s, monitor escalations
-4. **Validate** — run lint → SAST → build → test → health → pages → AC → facts → review, then compute the overall decision
-5. **Retry or escalate** — on failure, send structured correction feedback and re-run agent; on exhausted retries, move to `review_required`
-6. **Merge** — create PR (GitHub or ADO), poll for merge, handle CI failures by spawning fix pods
+4. **Validate** — run setup → lint → SAST → build → test → health → pages → AC → facts → review, then compute the blocking decision
+5. **Collect advisory evidence** — optionally run screenshot-backed advisory browser QA without turning soft concerns into retry triggers
+6. **Retry or escalate** — on failure, send structured correction feedback and re-run agent; on exhausted retries, move to `review_required`
+7. **Review readiness and merge** — compute Readiness Review, create PR (GitHub or ADO), poll for merge, handle CI failures by spawning fix pods
 
 Fix pods share the parent's branch and receive the original task plus sanitized CI annotations and review comments. The ancestor chain is tracked via `linkedPodId` for UI drill-down.
 
@@ -132,22 +138,26 @@ The validation pipeline runs after the agent reports completion. Deterministic p
 
 | Phase | What runs | Configurable via |
 |-------|-----------|-----------------|
-| 1. Lint | Optional lint command | `lintCommand`, `lintTimeout` |
-| 2. SAST | Optional static/security analysis command | `sastCommand`, `sastTimeout` |
-| 3. Build | `profile.buildCommand` inside container | `buildCommand`, `buildTimeout`, `buildEnv` |
-| 4. Test | `profile.testCommand` inside container | `testCommand`, `testTimeout`, `buildEnv` |
-| 5. Health check | HTTP poll for 200 at `profile.healthPath` | `startCommand`, `healthPath`, `healthTimeout`, `hasWebUi` |
-| 6. Pages | Playwright scripts from `profile.smokePages` | `smokePages` |
-| 7. AC validation | Classifies ACs as web/API/cmd/none and executes what it can | `pod.acceptanceCriteria` |
-| 8. Required facts | Runs contract proof commands and checks declared artifacts | `pod.contract.requiredFacts` |
-| 9. AI task review | Reviewer model checks diff vs task + contract + prior findings | `reviewerModel`, `reviewDepth` |
-| 10. Overall | Pass only if required phases pass | `skipValidationPhases` |
+| 1. Setup | Optional validation-time tooling command | `validationSetupCommand`, `buildTimeout` |
+| 2. Lint | Optional lint command | `lintCommand`, `lintTimeout` |
+| 3. SAST | Optional static/security analysis command | `sastCommand`, `sastTimeout` |
+| 4. Build | `profile.buildCommand` inside container | `buildCommand`, `buildTimeout`, `buildEnv` |
+| 5. Test | `profile.testCommand` inside container | `testCommand`, `testTimeout`, `buildEnv` |
+| 6. Health check | HTTP poll for 200 at `profile.healthPath` | `startCommand`, `healthPath`, `healthTimeout`, `hasWebUi` |
+| 7. Pages | Playwright scripts from `profile.smokePages` | `smokePages` |
+| 8. AC validation | Classifies ACs as web/API/cmd/none and executes what it can | `pod.acceptanceCriteria` |
+| 9. Required facts | Runs contract proof commands and checks declared artifacts | `pod.contract.requiredFacts` |
+| 10. AI task review | Reviewer model checks diff vs task + contract + prior findings | `reviewerModel`, `reviewDepth` |
+| 11. Advisory browser QA | Optional screenshot-backed browser reviewer evidence | `pod.advisoryBrowserQaEnabled` |
+| 12. Overall | Pass only if required phases pass; advisory evidence feeds Readiness Review | `skipValidationPhases` |
 
-Profile-level `skipValidationPhases` supports `lint`, `sast`, `build`, `test`, `health`, `pages`, `ac`, and `review`. Contract facts are the durable proof layer and are not exposed as a profile skip in the public schema.
+Profile-level `skipValidationPhases` supports `setup`, `lint`, `sast`, `build`, `test`, `health`, `pages`, `facts`, `review`, and `advisory`. Contract facts remain the durable proof layer and should only be skipped deliberately.
 
 **Proof-of-work evidence** is captured at the browser/review phases as screenshot refs and at the facts phase as command/artifact evidence. Screenshots are stored on disk under `.autopod-data/screenshots/<podId>/` and served through authenticated `/pods/:podId/screenshots/:source/:filename` URLs. Fact evidence can be rendered as `/pods/:podId/validations/:attempt/evidence.yaml`.
 
-On failure, the agent receives tiered correction context: console errors, build output, screenshot diffs, AC failures, and AI reviewer notes. After `maxValidationAttempts`, the pod moves to `review_required`.
+On failure, the agent receives tiered correction context: setup output, console errors, build output, screenshot diffs, AC failures, fact deviations, and AI reviewer notes. After `maxValidationAttempts`, the pod moves to `review_required`.
+
+Readiness Review is computed from validation plus release-adjacent evidence (security scans, action audit, network denials, scope, quality, advisory QA, and PR state). Automation only approves `ready`; manual approval can proceed through `needs_review`, while `risky` and `waived` approvals require an operator reason.
 
 ---
 
@@ -157,9 +167,10 @@ Profiles are the central configuration object. They encode everything needed to 
 
 - **Stack template** (`node22`, `dotnet10`, `go124`, etc.) → base Dockerfile
 - **Execution target** (`local` Docker socket or `aci` Azure Container Instances)
-- **Model provider** (Anthropic API, MAX/PRO OAuth, Azure Foundry, Copilot)
+- **Model provider** (Anthropic API, MAX/PRO OAuth, OpenAI Codex, Azure Foundry, OpenRouter, Copilot)
 - **Network policy** (mode + allowlist)
-- **Build / test / health / smoke commands**
+- **Setup / lint / SAST / build / test / health / smoke commands**
+- **Advisory browser QA default and agent completion prompt**
 - **MCP servers, CLAUDE.md sections, skills** (injected at provisioning)
 - **Private registries** (npm/NuGet — credentials injected as `.npmrc`/`NuGet.config`)
 - **Escalation settings** (ask_human, ask_ai, auto-pause threshold)
@@ -177,7 +188,7 @@ All state lives in SQLite (`better-sqlite3`), at `DB_PATH` (default `./autopod.d
 
 Migrations live in `packages/daemon/src/db/migrations/` as sequenced `NNN_*.sql` files. The runner uses the numeric prefix as schema version — **two files sharing the same prefix is a silent bug** (second one is skipped forever). A pre-commit hook (`migration-prefix-check.sh`) blocks collisions locally.
 
-Key tables: `pods`, `events`, `validations`, `profiles`, `memories`, `escalations`, `action_audit`, `safety_events`, `pod_quality_scores`, `scheduled_jobs`, `issue_watcher`, and `series`. Large screenshot bytes live on disk, not in SQLite.
+Key tables: `pods` (including compact Readiness Review JSON), `events`, `validations`, `profiles`, `memories`, `memory_candidates`, `memory_usage`, `memory_extraction_attempts`, `escalations`, `action_audit`, `safety_events`, `pod_quality_scores`, `scheduled_jobs`, `scheduled_job_templates`, `issue_watcher`, and `series`. Large screenshot bytes live on disk, not in SQLite.
 
 ---
 
@@ -193,7 +204,7 @@ replay      { type: "replay",        lastEventId: 42  }
 
 The event bus persists events to `events`, sanitizes PII via `processContentDeep()` before broadcast, and tags wire events with monotonic `_eventId` values for replay. Replay is paged and capped at 10,000 events; clients that fall farther behind resync through REST. Heartbeat pings every 30s.
 
-System events are namespaced by source: pod lifecycle (`pod.created`, `pod.status_changed`, `pod.agent_activity`, validation phase start/complete, budgets, preflight/worktree warnings, firewall denies), escalations, memory suggestions, scheduled jobs, issue watcher events, and host wake/resume reconciliation.
+System events are namespaced by source: pod lifecycle (`pod.created`, `pod.status_changed`, `pod.agent_activity`, validation phase start/complete, budgets, preflight/worktree warnings, firewall denies, readiness approvals), escalations, memory suggestions, scheduled jobs, issue watcher events, and host wake/resume reconciliation.
 
 ---
 
@@ -229,7 +240,7 @@ Series decompose large features into dependency-ordered pods. The spec folder co
 
 ## Analytics
 
-Seven fleet dashboards, all queryable via `GET /pods/analytics/*?days=N`:
+Eight fleet dashboards, all queryable via `GET /pods/analytics/*?days=N`:
 
 | Dashboard | Key signals |
 |-----------|------------|
@@ -240,8 +251,13 @@ Seven fleet dashboards, all queryable via `GET /pods/analytics/*?days=N`:
 | **Quality** | Composite score (0–100) per pod: read:edit ratio, blind edits, validation pass, fix attempt count |
 | **Escalations** | Total by type and by profile, daily sparkline |
 | **Models** | Per-model leaderboard, runtime aggregates, failure-stage matrix, and what-if simulator inputs |
+| **Memory** | Memory effectiveness, selected/injected counts, helpful and stale/harmful evidence |
 
 All queries filter to a **terminal cohort**: non-workspace pods with final status (complete, killed, failed) that completed within the window.
+
+Per-pod cost attribution is available separately through `GET /pods/:podId/cost`,
+grouping spend into work, rework, validation, advisory, and unattributed
+buckets.
 
 ---
 
@@ -253,7 +269,7 @@ All queries filter to a **terminal cohort**: non-workspace pods with final statu
 - **Vitest** for all tests. Daemon tests use in-memory SQLite via `createTestDb()` — no Docker required.
 - **Bicep** for Azure IaC (`infra/`).
 
-Full validation pipeline: `./scripts/validate.sh` (install → lint → build → test).
+Full validation pipeline: `./scripts/validate.sh` (install → lint → build → typecheck → test → audit → secret-scan; optional smoke).
 
 ---
 

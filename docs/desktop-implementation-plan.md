@@ -13,9 +13,13 @@ Package.swift (AutopodDesktop)
   ├── AutopodDesktop   (library)     — @Observable stores, app wiring, scene config
   └── AutopodDesktopExe (executable) — @main entry point; depends on all three libraries
 
-External dependency: SwiftTerm (terminal emulator embedded in pod detail view)
+External dependencies:
+- SwiftTerm (terminal emulator embedded in pod detail view)
+- MarkdownUI (renders markdown task/detail content)
 
-Test target: AutopodClientTests — depends on AutopodClient, AutopodUI, AutopodDesktop
+Test targets:
+- AutopodClientTests — depends on AutopodClient, AutopodUI, AutopodDesktop
+- AutopodUITests — depends on AutopodUI, AutopodClient
 ```
 
 **AutopodUI** stays preview-friendly — no networking, no async actors. Pure SwiftUI views that accept data via init parameters.
@@ -80,7 +84,10 @@ GET  /pods/:id/validations                → StoredValidation[]
 GET  /pods/:id/validations/:attempt/evidence.yaml → YAML fact evidence
 GET  /pods/:id/events?limit=500           → AgentEvent[]
 GET  /pods/:id/quality                    → PodQualitySignals
+GET  /pods/:id/cost                       → per-pod work/rework/validation/advisory cost buckets
 GET  /pods/:id/diff                       → canonical, preview, uncommitted, and per-commit diffs
+GET  /pods/:id/firewall-denials           → structured restricted-egress denial evidence
+GET  /pods/:id/action-audit               → action audit rows + hash-chain verification
 
 GET  /profiles                            → Profile[]
 GET  /profiles/:name                      → Profile
@@ -90,9 +97,16 @@ PUT  /profiles/:name                      → Profile  (body: full profile)
 DEL  /profiles/:name                      → 204
 POST /profiles/:name/warm                 → { tag, digest, sizeMb, buildDuration }
 
-GET  /pods/analytics/{cost|reliability|quality|safety|throughput|escalations|models}
+GET  /pods/analytics/{cost|reliability|quality|safety|throughput|escalations|models|memory}
 GET  /memory                              → MemoryEntry[]
+POST /memory                              → MemoryEntry
+GET  /memory/candidates                   → MemoryCandidate[]
+PATCH /memory/candidates/:id              → MemoryCandidate
+GET  /memory/:id/{usage|source-evidence|stale-evidence|harmful-evidence}
 GET  /scheduled-jobs                      → ScheduledJob[]
+GET  /scheduled-job-templates             → ScheduledJobTemplate[]
+POST /scheduled-job-templates             → ScheduledJobTemplate
+PUT  /scheduled-job-templates/:id         → ScheduledJobTemplate
 GET  /issue-watcher                       → WatchedIssue[]
 ```
 
@@ -115,10 +129,13 @@ pod.validation_started         → { podId, attempt }
 pod.validation_phase_started   → { podId, phase }
 pod.validation_phase_completed → { podId, phase, phaseStatus, ...phaseResult }
 pod.validation_completed       → { podId, result: ValidationResult }
+pod.readiness_approved         → { podId, status, scope, summary, reason? }
 pod.escalation_created         → { podId, escalation: EscalationRequest }
 pod.escalation_resolved        → { podId, escalationId, response }
 pod.completed                  → { podId, finalStatus, summary }
 memory.suggestion_created      → { podId, memoryEntry }
+memory.candidate_created       → { podId, candidate }
+memory.candidate_updated       → { podId, candidate }
 validation.override_queued     → { podId, override }
 scheduled_job.*                → scheduled job lifecycle events
 issue_watcher.*                → issue watcher lifecycle events

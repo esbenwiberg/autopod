@@ -5,8 +5,37 @@ Tailscale. Think Codex mobile: see the "needs me" inbox, answer escalations,
 approve / reject / kill / nudge from your phone without opening the desktop
 app.
 
-> **Status**: walking skeleton. The pairing flow + token plumbing work end-to-end;
-> the pod inbox + per-pod actions ship in subsequent steps.
+> **Status**: usable operator companion. Pairing, live WebSocket updates,
+> needs-me/active inboxes, pod creation, pod details, escalation replies,
+> validation summaries, recent activity, and approve / reject / kill / nudge
+> actions are implemented.
+
+## What it can do
+
+- Show a **Needs me** inbox for pods awaiting input, review, or operator action.
+- Show active pods with live status updates over `/events`.
+- Create a new pod from a selected profile and task text.
+- Open pod details with progress, plan, task markdown, validation history, and
+  recent activity.
+- Answer pending escalations from the phone.
+- Run available pod actions: approve, reject, kill, nudge, pause/resume where
+  the pod state allows it.
+- Toggle skip-validation for eligible pods.
+- Show daemon health, token status, and re-pair affordances.
+
+## Build / serving path
+
+The app lives in `packages/mobile-web` and builds with Vite:
+
+```bash
+npx pnpm --filter @autopod/mobile-web build
+```
+
+The daemon serves `packages/mobile-web/dist` at `/mobile/*` when the bundle is
+present. `npx pnpm dev` builds the mobile bundle before starting workspace dev
+tasks, and the production Dockerfile copies the built bundle into the daemon
+image. Static `/mobile/*` files are public; API/WebSocket calls still require
+the paired bearer token.
 
 ## Prerequisites
 
@@ -16,9 +45,11 @@ app.
    you start the daemon. On first run it generates a random 32-byte token at
    `~/.autopod/dev-token` (chmod 600). This is what the phone uses to talk to
    the daemon.
-3. **Daemon listening on 127.0.0.1** (the default). Don't change `HOST` —
-   exposure is delegated to `tailscale serve` so the Fastify socket stays
-   loopback.
+3. **Daemon reachable on the laptop at `127.0.0.1:3100`**. The daemon binary
+   defaults to loopback; Docker Compose runs the daemon with `HOST=0.0.0.0`
+   inside the container but still publishes the host port locally. Public
+   phone exposure should go through `tailscale serve`, not a raw internet
+   listener.
 
 ## One-time setup
 
@@ -90,8 +121,9 @@ Android Chrome: prompts automatically after a couple of visits, or
 
 ## Security model
 
-- The daemon's network socket stays on `127.0.0.1`. Only `tailscaled` owns
-  the externally-reachable socket.
+- The phone path is exposed through Tailscale Serve. Avoid publishing the daemon
+  directly to the internet; when running outside Compose, prefer the daemon's
+  loopback default.
 - Tailscale ACLs gate which devices on the tailnet can reach the laptop.
   Scope them to just your phone's node if you want belt-and-braces.
 - The dev token is a 32-byte pre-shared key — strong against brute force,
