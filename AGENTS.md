@@ -6,7 +6,7 @@
 # Install (always use npx — pnpm is not globally installed)
 npx pnpm install
 
-# Full validation pipeline (install → lint → build → test)
+# Full validation pipeline (install → lint → build → typecheck → test → audit → secret-scan)
 ./scripts/validate.sh
 
 # Individual steps
@@ -32,7 +32,7 @@ npx pnpm --filter @autopod/validator test
 Monorepo with pnpm workspaces. Dependency graph:
 
 ```
-shared ← daemon, cli, validator, escalation-mcp
+shared ← daemon, cli, validator, escalation-mcp, mobile-web
 daemon ← validator, escalation-mcp
 ```
 
@@ -43,6 +43,7 @@ daemon ← validator, escalation-mcp
 | `cli` | Commander CLI |
 | `validator` | Playwright smoke test script generation + result parsing (types only — execution lives in daemon) |
 | `escalation-mcp` | MCP server injected into agent containers for escalation, actions, and browser self-validation |
+| `mobile-web` | React/Vite phone PWA served by the daemon at `/mobile/*` |
 | `desktop` | macOS native app (Swift/Xcode) for pod monitoring and management |
 
 ## Package Details
@@ -52,9 +53,10 @@ daemon ← validator, escalation-mcp
 Zero-dependency package providing the type backbone for the entire system.
 
 Types live in `src/types/` — one file per concern (pod, profile, runtime, actions,
-escalation, validation, events, injection, auth, model-provider, ac, analytics,
-history, issue-watcher, memory, notification, pod-options, scheduled-job,
-security-scan, session, sidecar, task-summary). Browse the dir; this list rots fast.
+escalation, validation, events, injection, auth, model-provider, analytics,
+history, issue-watcher, memory, notification, pod-options, readiness,
+scheduled-job, security-scan, session, sidecar, task-summary). Browse the dir;
+this list rots fast.
 
 **Key exports**:
 - `src/errors.ts` — `AutopodError`, `AuthError`, `PodNotFoundError`, etc.
@@ -96,7 +98,7 @@ for the per-subsystem deep dive — what follows is just the entry-point map.
 - `server.ts` — Fastify app factory (registers plugins + routes)
 - `routes/` — one file per resource: pods, profiles, health, diff, terminal,
   actions, files, history, issue-watcher, memory, memory-workspace,
-  scheduled-jobs, screenshots, series, skills
+  scheduled-jobs (including templates), screenshots, series, skills, mobile static
 - `mcp-handler.ts` — MCP server bridge for escalation tool calls
 - `websocket.ts` — WebSocket event streaming to CLI/desktop
 - `plugins/` — auth, cors, rate-limit, request-logger middleware
@@ -104,7 +106,7 @@ for the per-subsystem deep dive — what follows is just the entry-point map.
 **Database** (`src/db/`):
 - `connection.ts` — SQLite connection (better-sqlite3)
 - `migrate.ts` — migration runner (applies pending `.sql` files in filename order)
-- `migrations/` — sequenced `NNN_*.sql` files; latest prefix is in the high 090s
+- `migrations/` — sequenced `NNN_*.sql` files; latest prefix is in the high 110s
 
 **CRITICAL — migration numbering**: The runner uses the numeric prefix as the schema version. **Two files sharing the same prefix is a silent bug** — the runner applies the first one alphabetically and skips the second forever (same version number). A local `PreToolUse` hook (`.claude/hooks/migration-prefix-check.sh`) blocks Write/Edit on a colliding prefix; the cross-branch case still needs CI/manual rebase resolution. Check the highest existing prefix before creating one: `ls packages/daemon/src/db/migrations/ | tail -5`. Never reuse a number.
 
@@ -120,7 +122,7 @@ for the per-subsystem deep dive — what follows is just the entry-point map.
 - `pr-body-builder.ts` — Generates PR description from pod + validation data
 
 **Validation** (`src/validation/`):
-- `local-validation-engine.ts` — Orchestrates Playwright smoke tests inside containers
+- `local-validation-engine.ts` — Orchestrates setup/lint/SAST/build/test/health/pages/facts/review plus optional advisory browser QA
 
 **Security** (`src/crypto/`):
 - `credentials-cipher.ts` — AES-256 encryption for stored credentials
@@ -144,14 +146,16 @@ Commander-based CLI.
 **Commands** (`src/commands/`):
 - `auth.ts` — login/logout via MSAL (Azure AD)
 - `pod.ts` — create, list, inspect, kill pods (also `ap run`)
-- `profile.ts` — profile CRUD
+- `profile.ts` — profile CRUD, editor payloads, model-provider auth helpers
 - `daemon.ts` — health check + version
 - `workspace.ts` — workspace pod operations
 - `validate.ts` — trigger smoke test validation
 - `history.ts` — pod history queries
 - `research.ts` — research-pod workflows
-- `schedule.ts` — scheduled-job CRUD
+- `schedule.ts` — scheduled-job CRUD plus reusable prompt templates
 - `series.ts` — multi-pod series (consumed by `/plan-feature`)
+- `spec.ts` — local spec parser/checker
+- `mobile.ts` — Tailscale phone PWA pairing helpers
 - `watch.ts` — live event tail
 
 **Auth** (`src/auth/`):
@@ -181,11 +185,11 @@ MCP server injected into agent containers. Provides tools for agents to interact
 
 *Validation*
 - `validate_in_browser` — browser-based Playwright validation
-- `validate_locally` — local validation (build / test / lint)
+- `validate_locally` — local validation (setup / lint / SAST / build / test / health/pages/facts where requested)
 - `pre_submit_review` — pre-merge AI review of the agent's diff
 
 *Memory*
-- `memory_list`, `memory_read`, `memory_search`, `memory_suggest` — pod-scoped notes
+- `memory_list`, `memory_read`, `memory_search`, `memory_suggest` — pod-scoped memory tools; durable candidates are curated by the daemon/reviewer loop
 
 *Actions*
 - `execute_action` — control-plane actions (Azure, ADO, GitHub, HTTP)
@@ -280,7 +284,7 @@ Each runtime (`claude-runtime.ts`, `codex-runtime.ts`, `copilot-runtime.ts`) has
 | Variable | Default | Required | Notes |
 |----------|---------|----------|-------|
 | `PORT` | `3100` | no | HTTP bind port |
-| `HOST` | `0.0.0.0` | no | HTTP bind address |
+| `HOST` | `127.0.0.1` (daemon binary); `0.0.0.0` in `.env.example`/Compose | no | HTTP bind address |
 | `DB_PATH` | `./autopod.db` | no | SQLite file location |
 | `LOG_LEVEL` | `info` | no | pino log level |
 | `NODE_ENV` | — | yes (prod) | If `production`, auth is enforced |
@@ -295,6 +299,7 @@ Each runtime (`claude-runtime.ts`, `codex-runtime.ts`, `copilot-runtime.ts`) has
 | `ACR_USERNAME` | — | no | ACR credentials for ACI |
 | `ACR_PASSWORD` | — | no | ACR credentials for ACI |
 | `AUTOPOD_CONTAINER_HOST` | — | no | Override host for MCP base URL inside containers |
+| `AUTOPOD_MOBILE_DIST` | — | no | Override mobile PWA dist dir (default: `packages/mobile-web/dist`) |
 
 ## Environment Gotchas
 

@@ -17,12 +17,12 @@ src/
 ├── db/               # SQLite connection, migration runner, .sql files
 ├── images/           # Dockerfile generator, ACR client, image warming
 ├── worktrees/        # Git worktree ops, GitHub/ADO PR management
-├── providers/        # Multi-provider auth (Anthropic, MAX, Foundry)
+├── providers/        # Multi-provider auth/env (Anthropic, MAX, OpenAI, Foundry, Copilot, OpenRouter)
 ├── notifications/    # MS Teams webhook adapter + rate limiter
 ├── interfaces/       # Dependency-injection abstractions (ContainerManager, Runtime, etc.)
 ├── crypto/           # HMAC pod tokens, AES-256 credential encryption
 ├── safety/           # Fleet-wide safety event detection + storage
-├── scheduled-jobs/   # DB-driven scheduler for recurring pods
+├── scheduled-jobs/   # DB-driven scheduler + reusable templates for recurring pods
 ├── security/         # Per-pod security scans (secrets, deps)
 ├── issue-watcher/    # GitHub/ADO issue triage agents
 ├── history/          # Pod history queries + retention
@@ -67,13 +67,13 @@ calls `validateTransition` first.
 1. **Provisioning** — create/reuse git worktree, spawn container, write credential files
 2. **Skill resolution** — fetch custom slash-command content (local file or GitHub); failures are non-fatal and skipped
 3. **System instructions** — `system-instructions-generator.ts` builds the container's `CLAUDE.md` with:
-   task description, injected sections, MCP servers, actions, skills, build/start commands, smoke pages,
-   required facts, contract requirements, and custom instructions
-4. **Provider credentials** — inject model provider tokens (Anthropic/MAX/Foundry), write files into container
+   task description, injected sections, MCP servers, actions, skills, memories, build/start commands,
+   smoke pages, required facts, contract requirements, and custom instructions
+4. **Provider credentials** — inject model provider tokens (Anthropic/MAX/OpenAI/Foundry/Copilot/OpenRouter), write files into container
 5. **Agent spawn / resume** — start the runtime stream; Claude supports mid-stream recovery via `claude_session_id`
 6. **Event consumption** — process `AgentEvent` stream: tool-use, escalations, progress reports, completion
-7. **Validation** — multi-phase: lint → SAST → build → test → health → pages → facts → AI task review
-8. **Completion** — merge PR (if `autoMerge`) or push branch; transition to `complete`
+7. **Validation** — multi-phase: setup → lint → SAST → build → test → health → pages → facts → AI task review, with optional advisory browser QA
+8. **Readiness + completion** — compute Readiness Review, merge PR (if `autoMerge`) or push branch; transition to `complete`
 
 ### Retries and validation loops
 
@@ -123,10 +123,14 @@ prefix. Browse the dir for the canonical list; key reference points:
 - 002–021 — early waves: injection, execution_target, network_policy, validation,
   progress/resume, action policy + audit, model providers, ADO PR, skills, private
   registries, heartbeat, token usage, commit tracking
-- 022–097 — recent waves: safety events (ADR-018), audit chain (ADR-019),
+- 022–117 — recent waves: safety events (ADR-018), audit chain (ADR-019),
   network-policy snapshot (ADR-020), sleep recovery (ADR-021), legacy self-report,
   phase token usage (ADR-016), screenshot retention (ADR-017), watchdog/kick,
-  preflight conflict policy
+  preflight conflict policy, legacy AC removal, advisory browser QA defaults,
+  memory learning, spec-file carryover, canonical model migration,
+  `agentDonePrompt`, scheduled-job templates, validation setup command,
+  OpenRouter API key, pod Readiness Review, and scheduled-template field
+  overrides
 
 **To add a migration**: create `0NN_description.sql` in `src/db/migrations/`. Never
 modify existing files. Never reuse a prefix — the runner uses the prefix as the
@@ -151,9 +155,11 @@ Wraps Dockerode. Key responsibilities:
 Creates a dedicated Docker bridge network per pod and applies iptables egress rules:
 - `allow-all` — unrestricted outbound (default when no network_policy set)
 - `deny-all` — blocks all outbound traffic
-- `restricted` — allowlist of `host:port` pairs
+- `restricted` — hostname allowlist enforced through iptables + HAProxy SNI proxy
 
-Network and iptables rules are torn down in `cleanup()` — always call it in the pod's finally block.
+Denied restricted-egress attempts are emitted as `pod.firewall_denied` events
+and can be queried through `/pods/:podId/firewall-denials`. Network and iptables
+rules are torn down in `cleanup()` — always call it in the pod's finally block.
 
 ### ACI (`src/containers/aci-container-manager.ts`)
 
@@ -172,13 +178,22 @@ add test cases to the co-located `.test.ts` covering partial chunks, multi-event
 ## Validation Engine (`src/validation/local-validation-engine.ts`)
 
 Runs inside the pod container in phases:
-1. **Build** — runs `profile.buildCommand`; captures stdout/stderr
-2. **Health check** — polls `profile.healthPath` until 200 or timeout
-3. **Smoke** — `@autopod/validator` generates a Playwright script; executed inside container; results parsed
-4. **AI task review** — sends diff + task description to an AI model; returns pass/fail with notes
+1. **Setup** — optional `profile.validationSetupCommand`; uses `buildTimeout`
+2. **Lint** — optional `profile.lintCommand`
+3. **SAST** — optional `profile.sastCommand`
+4. **Build** — runs `profile.buildCommand`; captures stdout/stderr
+5. **Test** — optional `profile.testCommand`
+6. **Health check** — polls `profile.healthPath` until 200 or timeout
+7. **Smoke pages** — `@autopod/validator` generates a Playwright script; executed inside container; results parsed
+8. **Acceptance criteria** — runs executable AC checks where possible; reviewer owns non-executable checks
+9. **Required facts** — executes contract proof commands and records evidence YAML
+10. **AI task review** — sends diff + task description + contract context to reviewer model; returns pass/fail with notes
+11. **Advisory browser QA** — optional screenshot-backed browser reviewer evidence; does not change blocking validation outcome
 
 Each phase result is stored via `validationRepository`. The pod manager reads results to decide
-whether to retry or proceed to `validated`.
+whether to retry or proceed to `validated`. Advisory results are merged into
+validation history and Readiness Review; blocking retries are driven by the
+required validation phases.
 
 ## Profiles (`src/profiles/`)
 
@@ -186,8 +201,10 @@ whether to retry or proceed to `validated`.
 - `inheritance.ts` — resolves the `extends` chain (deep merge, child values win)
 - `profile-validator.ts` — Zod schema; call `validateProfile()` before persisting
 
-Profiles are the primary configuration surface — runtimes, network policy, MCP servers, skills,
-build commands, and more are all profile fields.
+Profiles are the primary configuration surface — runtimes, model providers,
+network policy, validation setup/lint/SAST/build/test commands, advisory
+browser QA defaults, agent completion prompts, MCP servers, skills, sidecars,
+private registries, and action policy are all profile fields.
 
 ## Actions System (`src/actions/`)
 
@@ -201,7 +218,10 @@ Agents call `execute_action` via the escalation MCP server. The daemon:
 
 Fastify app with:
 - **Plugins**: `cors`, `rate-limit`, `request-logger`, `auth` (stubbed in dev)
-- **Routes**: `/pods`, `/profiles`, `/health`, `/diff`, `/terminal` (WebSocket)
+- **Routes**: `/pods`, `/profiles`, `/health`, `/diff`, `/terminal` (WebSocket),
+  `/memory`, `/pods/memory-workspace`, `/scheduled-jobs`,
+  `/scheduled-job-templates`, `/issue-watcher`, `/actions`, `/skills`, `/files`,
+  `/screenshots`, `/pods/series`
 - **WebSocket**: `websocket.ts` streams `SystemEvent` payloads to connected clients
 - **MCP proxy**: `mcp-handler.ts` bridges HTTP POST requests from containers to the daemon's
   in-process MCP server, injecting auth and stripping PII from responses

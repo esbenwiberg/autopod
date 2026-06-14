@@ -16,7 +16,14 @@ import { withCanonicalModelIdPolicy } from './model.schema.js';
 // Model provider credentials schemas
 // ---------------------------------------------------------------------------
 
-export const modelProviderSchema = z.enum(['anthropic', 'max', 'openai', 'foundry', 'copilot']);
+export const modelProviderSchema = z.enum([
+  'anthropic',
+  'max',
+  'openai',
+  'foundry',
+  'copilot',
+  'openrouter',
+]);
 
 const anthropicCredentialsSchema = z.object({
   provider: z.literal('anthropic'),
@@ -45,6 +52,8 @@ const foundryCredentialsSchema = z.object({
   endpoint: z.string().url(),
   projectId: z.string().min(1),
   apiKey: z.string().optional(),
+  apiSurface: z.enum(['anthropic', 'openai']).optional(),
+  apiVersion: z.string().min(1).optional(),
 });
 
 const copilotCredentialsSchema = z.object({
@@ -53,12 +62,19 @@ const copilotCredentialsSchema = z.object({
   model: z.string().optional(),
 });
 
+const openRouterCredentialsSchema = z.object({
+  provider: z.literal('openrouter'),
+  apiKey: z.string().min(1),
+  baseUrl: z.string().url().optional(),
+});
+
 export const providerCredentialsSchema = z.discriminatedUnion('provider', [
   anthropicCredentialsSchema,
   openAiCredentialsSchema,
   maxCredentialsSchema,
   foundryCredentialsSchema,
   copilotCredentialsSchema,
+  openRouterCredentialsSchema,
 ]);
 
 const pageAssertionSchema = z.object({
@@ -344,6 +360,7 @@ const createProfileBaseSchema = z.object({
   adoPatExpiresAt: dateOnlySchema.nullable().default(null),
   githubPat: z.string().min(1).nullable().default(null),
   githubPatExpiresAt: dateOnlySchema.nullable().default(null),
+  openrouterApiKey: z.string().min(1).nullable().default(null),
   privateRegistries: z.array(privateRegistrySchema).nullable().default([]),
   registryPat: z.string().min(1).nullable().default(null),
   registryPatExpiresAt: dateOnlySchema.nullable().default(null),

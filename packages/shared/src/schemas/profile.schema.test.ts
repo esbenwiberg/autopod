@@ -112,20 +112,79 @@ describe('createProfileSchema model validation', () => {
     expect(defaulted.escalation?.askAi.model).toBe('claude-sonnet-4-6');
   });
 
+  it('accepts OpenRouter profile credentials and API key field', () => {
+    const parsed = createProfileSchema.parse({
+      name: 'openrouter',
+      modelProvider: 'openrouter',
+      defaultRuntime: 'codex',
+      defaultModel: 'anthropic/claude-sonnet-4',
+      openrouterApiKey: 'sk-or-test',
+      providerCredentials: {
+        provider: 'openrouter',
+        apiKey: 'sk-or-credential',
+        baseUrl: 'https://openrouter.ai/api/v1',
+      },
+    });
+
+    expect(parsed.modelProvider).toBe('openrouter');
+    expect(parsed.openrouterApiKey).toBe('sk-or-test');
+    expect(parsed.providerCredentials).toEqual({
+      provider: 'openrouter',
+      apiKey: 'sk-or-credential',
+      baseUrl: 'https://openrouter.ai/api/v1',
+    });
+
+    const updated = updateProfileSchema.parse({
+      modelProvider: 'openrouter',
+      openrouterApiKey: 'sk-or-updated',
+      providerCredentials: {
+        provider: 'openrouter',
+        apiKey: 'sk-or-updated',
+      },
+    });
+    expect(updated.modelProvider).toBe('openrouter');
+    expect(updated.openrouterApiKey).toBe('sk-or-updated');
+  });
+
+  it('accepts Foundry OpenAI-surface provider credentials', () => {
+    const parsed = createProfileSchema.parse({
+      name: 'foundry-openai',
+      modelProvider: 'foundry',
+      providerCredentials: {
+        provider: 'foundry',
+        endpoint: 'https://example-foundry.openai.azure.com',
+        projectId: 'project-a',
+        apiSurface: 'openai',
+        apiVersion: '2025-04-01-preview',
+      },
+    });
+
+    expect(parsed.providerCredentials).toEqual({
+      provider: 'foundry',
+      endpoint: 'https://example-foundry.openai.azure.com',
+      projectId: 'project-a',
+      apiSurface: 'openai',
+      apiVersion: '2025-04-01-preview',
+    });
+  });
+
   it('preserves null inheritance for model fields', () => {
     const derived = createProfileSchema.parse({ name: 'child', extends: 'parent' });
     expect(derived.defaultModel).toBeNull();
     expect(derived.reviewerModel).toBeNull();
     expect(derived.escalation).toBeNull();
+    expect(derived.openrouterApiKey).toBeNull();
 
     const updated = updateProfileSchema.parse({
       defaultModel: null,
       reviewerModel: null,
       escalation: null,
+      openrouterApiKey: null,
     });
     expect(updated.defaultModel).toBeNull();
     expect(updated.reviewerModel).toBeNull();
     expect(updated.escalation).toBeNull();
+    expect(updated.openrouterApiKey).toBeNull();
   });
 });
 
