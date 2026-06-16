@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { HAPROXY_LISTEN_PORT, HAPROXY_LOG_PORT, generateHaproxyConfig } from './haproxy-config.js';
+import {
+  HAPROXY_CONNECT_TIMEOUT,
+  HAPROXY_LISTEN_PORT,
+  HAPROXY_LOG_PORT,
+  HAPROXY_TCP_IDLE_TIMEOUT,
+  generateHaproxyConfig,
+} from './haproxy-config.js';
 
 describe('generateHaproxyConfig', () => {
   it('emits an -m str ACL for exact hosts', () => {
@@ -78,6 +84,15 @@ describe('generateHaproxyConfig', () => {
     const cfg = generateHaproxyConfig({ allowedHosts: ['api.anthropic.com'] });
     expect(cfg).toContain('user haproxy');
     expect(cfg).toContain('group haproxy');
+  });
+
+  it('keeps LLM streaming connections open across long quiet periods', () => {
+    const cfg = generateHaproxyConfig({ allowedHosts: ['api.anthropic.com'] });
+    expect(cfg).toContain(`timeout connect ${HAPROXY_CONNECT_TIMEOUT}`);
+    expect(cfg).toContain(`timeout client ${HAPROXY_TCP_IDLE_TIMEOUT}`);
+    expect(cfg).toContain(`timeout server ${HAPROXY_TCP_IDLE_TIMEOUT}`);
+    expect(cfg).not.toContain('timeout client 30s');
+    expect(cfg).not.toContain('timeout server 30s');
   });
 
   it('produces a config even with an empty allowlist (rejects everything)', () => {
