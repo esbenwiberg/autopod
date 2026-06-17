@@ -245,8 +245,9 @@ Sometimes neither the user nor the codebase can answer a dimension. Distinguish:
 - **Technical unknown** ("will this migration approach scale on the 50M-row
   table?", "does the ORM's bulk-insert support our type?") — make the
   first brief a **spike**: a research/exploration brief whose required facts
-  prove that the finding was captured as a handover artifact and that the
-  rest of the series is gated on it. Subsequent briefs depend on it.
+  prove that the finding is captured in `report_task_summary` for daemon-injected
+  downstream handoff context and that the rest of the series is gated on it.
+  Subsequent briefs depend on it.
 
 Ask explicitly when unsure: "is this a product unknown or a technical
 unknown?"
@@ -605,7 +606,6 @@ specs/<feature-name>/
 │   │   ├── brief.md
 │   │   └── contract.yaml
 │   └── ...
-└── handovers/       ← runtime artifact; pods write here, not /plan-feature
 
 docs/decisions/      ← REPO-LEVEL, one file per ADR, numbered globally
 ├── ADR-001-<slug>.md
@@ -953,16 +953,16 @@ wrap-up step. Required facts remain about observable outcomes only.
   `design.md` (auto-injected as `## Design`).
 - Full ADR text → cite the ADR ID; canonical text lives in
   `docs/decisions/`.
-- Other briefs' work → that's what handovers are for.
+- Other briefs' work → parent `report_task_summary` output is injected into
+  downstream pods as `## Handoff`.
 
-### handovers/ — runtime, not authored
+### Series handoff — runtime, not authored
 
-`/plan-feature` does NOT write any files in `handovers/`. The daemon's
-system instructions tell each pod to read its parent(s)' handover files
-from `specs/<feature>/handovers/<parentPodId>.md` before starting and to
-write its own to `specs/<feature>/handovers/<thisPodId>.md` before
-finishing. Filenames are pod-id-keyed, so parallel siblings produce
-distinct files and the next pod reads each parent it depends on.
+`/plan-feature` does NOT write any handoff files. Pods communicate downstream
+context through `report_task_summary`; the daemon synthesizes each dependent
+pod's `## Handoff` section from its parent pod summaries. Do not create
+`specs/<feature>/handovers/` or `.capsules/handovers/` directories for series
+communication.
 
 ---
 
