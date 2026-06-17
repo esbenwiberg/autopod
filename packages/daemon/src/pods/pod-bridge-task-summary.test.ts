@@ -216,3 +216,82 @@ describe('PodBridge.reportTaskSummary — lock-on-first-write', () => {
     expect(emit).not.toHaveBeenCalled();
   });
 });
+
+describe('PodBridge.reportProgress — plan alignment', () => {
+  it('persists aligned progress when a plan exists', () => {
+    const { bridge, podRepo, podId, emit } = buildBridge();
+    podRepo.update(podId, {
+      plan: { summary: 'Do three things', steps: ['One', 'Two', 'Three'] },
+    });
+
+    bridge.reportProgress(podId, 'Two', 'Working on step two', 2, 3);
+
+    expect(podRepo.getOrThrow(podId).progress).toEqual({
+      phase: 'Two',
+      description: 'Working on step two',
+      currentPhase: 2,
+      totalPhases: 3,
+    });
+    expect(emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'progress',
+          currentPhase: 2,
+          totalPhases: 3,
+        }),
+      }),
+    );
+  });
+
+  it('rejects progress whose total does not match the plan step count', () => {
+    const { bridge, podRepo, podId, emit } = buildBridge();
+    podRepo.update(podId, {
+      plan: { summary: 'Do ten things', steps: Array.from({ length: 10 }, (_, i) => `Step ${i}`) },
+    });
+
+    expect(() => bridge.reportProgress(podId, 'Three', 'Working', 3, 4)).toThrow(
+      /must equal the reported plan step count \(10\)/,
+    );
+
+    expect(podRepo.getOrThrow(podId).progress).toBeNull();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('rejects progress whose current phase is outside the plan steps', () => {
+    const { bridge, podRepo, podId, emit } = buildBridge();
+    podRepo.update(podId, {
+      plan: { summary: 'Do ten things', steps: Array.from({ length: 10 }, (_, i) => `Step ${i}`) },
+    });
+
+    expect(() => bridge.reportProgress(podId, 'Eleven', 'Working', 11, 10)).toThrow(
+      /cannot exceed totalPhases/,
+    );
+
+    expect(podRepo.getOrThrow(podId).progress).toBeNull();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('accepts normal progress before a plan exists', () => {
+    const { bridge, podRepo, podId } = buildBridge();
+
+    bridge.reportProgress(podId, 'Explore', 'Reading the repo', 1, 3);
+
+    expect(podRepo.getOrThrow(podId).progress).toEqual({
+      phase: 'Explore',
+      description: 'Reading the repo',
+      currentPhase: 1,
+      totalPhases: 3,
+    });
+  });
+
+  it('rejects impossible progress before a plan exists', () => {
+    const { bridge, podRepo, podId, emit } = buildBridge();
+
+    expect(() => bridge.reportProgress(podId, 'Explore', 'Reading the repo', 4, 3)).toThrow(
+      /currentPhase \(4\) cannot exceed totalPhases \(3\)/,
+    );
+
+    expect(podRepo.getOrThrow(podId).progress).toBeNull();
+    expect(emit).not.toHaveBeenCalled();
+  });
+});

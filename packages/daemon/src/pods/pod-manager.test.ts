@@ -1750,6 +1750,67 @@ describe('PodManager', () => {
       expect(ctx.enqueuedSessions).toContain(child.id);
     });
 
+    it('injects parent task summary handoff when a series dependent is enqueued', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const parent = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Parent task',
+          briefTitle: 'Parent brief',
+          seriesId: 'series-summary',
+          seriesName: 'Summary series',
+        },
+        'user-1',
+      );
+      const child = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Child task',
+          dependsOnPodIds: [parent.id],
+          seriesId: 'series-summary',
+          seriesName: 'Summary series',
+        },
+        'user-1',
+      );
+
+      ctx.podRepo.update(parent.id, {
+        ...validatedPodUpdates(parent.id, { branch: 'feature/parent' }),
+        taskSummary: {
+          actualSummary: 'Moved profile schema reads into code constants.',
+          how: 'Adapters now ignore table names from profile config.',
+          deviations: [
+            {
+              step: 'Tests',
+              planned: 'Only update adapter tests',
+              actual: 'Added one boot fallback test too',
+              reason: 'The fallback contract crossed the pod boundary',
+            },
+          ],
+          factEvidence: [
+            {
+              factId: 'fact-schema-from-code',
+              artifactPath: 'tests/adapters/schemaFromCode.spec.ts',
+              command: 'npm test -- schemaFromCode',
+              result: 'passed',
+            },
+          ],
+        },
+      });
+
+      await manager.approveSession(parent.id);
+
+      const refreshed = manager.getSession(child.id);
+      expect(ctx.enqueuedSessions).toContain(child.id);
+      expect(refreshed.handoffContext).toContain('Summary series');
+      expect(refreshed.handoffContext).toContain(`Parent ${parent.id} — Parent brief`);
+      expect(refreshed.handoffContext).toContain('Moved profile schema reads into code constants.');
+      expect(refreshed.handoffContext).toContain('Adapters now ignore table names');
+      expect(refreshed.handoffContext).toContain('fact-schema-from-code');
+      expect(refreshed.handoffContext).not.toContain('handover file');
+    });
+
     it('rehydrate defers shared-branch child until parent reaches complete', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
@@ -1780,6 +1841,43 @@ describe('PodManager', () => {
       ctx.podRepo.update(parent.id, { status: 'complete' });
       manager.rehydrateDependentSessions();
       expect(ctx.enqueuedSessions).toContain(child.id);
+    });
+
+    it('rehydrate injects placeholder handoff context when parent summary is missing', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const parent = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Parent task',
+          seriesId: 'series-summary',
+          seriesName: 'Summary series',
+        },
+        'user-1',
+      );
+      const child = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Child task',
+          dependsOnPodIds: [parent.id],
+          seriesId: 'series-summary',
+          seriesName: 'Summary series',
+        },
+        'user-1',
+      );
+
+      ctx.podRepo.update(parent.id, { status: 'complete' });
+      ctx.enqueuedSessions.length = 0;
+
+      manager.rehydrateDependentSessions();
+
+      const refreshed = manager.getSession(child.id);
+      expect(ctx.enqueuedSessions).toContain(child.id);
+      expect(refreshed.handoffContext).toContain('Summary series');
+      expect(refreshed.handoffContext).toContain(`Parent ${parent.id}`);
+      expect(refreshed.handoffContext).toContain('No task summary was reported');
+      expect(refreshed.handoffContext).not.toContain('handover file');
     });
 
     it('does not start single-PR dependents on force-approved validated parents', async () => {

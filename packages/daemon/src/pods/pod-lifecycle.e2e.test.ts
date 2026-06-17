@@ -549,6 +549,7 @@ describe('Pod Lifecycle E2E', () => {
 
       const ctx = createTestContext({ runtime });
       const manager = createPodManager(ctx.deps);
+      const events = collectEvents(ctx);
 
       const pod = manager.createSession(
         { profileName: 'test-profile', task: 'Dark mode', skipValidation: true },
@@ -568,6 +569,52 @@ describe('Pod Lifecycle E2E', () => {
         currentPhase: 1,
         totalPhases: 3,
       });
+    });
+
+    it('rejects runtime progress events that do not match the reported plan steps', async () => {
+      const runtime = createMockRuntime({
+        spawn: vi.fn(async function* () {
+          yield {
+            type: 'plan' as const,
+            timestamp: new Date().toISOString(),
+            summary: 'Add dark mode with 3 steps',
+            steps: ['1. Add CSS variables', '2. Add toggle', '3. Persist preference'],
+          };
+          yield {
+            type: 'progress' as const,
+            timestamp: new Date().toISOString(),
+            phase: 'CSS Variables',
+            description: 'Adding color scheme variables',
+            currentPhase: 1,
+            totalPhases: 2,
+          };
+          yield completeEvent('Done');
+        } as () => AsyncIterable<AgentEvent>),
+      });
+
+      const ctx = createTestContext({ runtime });
+      const manager = createPodManager(ctx.deps);
+      const events = collectEvents(ctx);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Dark mode', skipValidation: true },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      const result = manager.getSession(pod.id);
+      expect(result.plan).toEqual({
+        summary: 'Add dark mode with 3 steps',
+        steps: ['1. Add CSS variables', '2. Add toggle', '3. Persist preference'],
+      });
+      expect(result.progress).toBeNull();
+      expect(result.status).toBe('failed');
+      expect(
+        events.some(
+          (event) => event.type === 'pod.agent_activity' && event.event.type === 'progress',
+        ),
+      ).toBe(false);
     });
 
     it('persists Claude pod ID from status event sessionId field', async () => {

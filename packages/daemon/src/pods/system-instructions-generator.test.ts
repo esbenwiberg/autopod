@@ -111,6 +111,19 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('report_blocker');
   });
 
+  it('requires progress reports to align with reported plan steps', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/abc12345',
+    );
+
+    expect(md).toContain('Use the reported plan steps as your progress phases');
+    expect(md).toContain('`totalPhases` equal to the number of plan steps');
+    expect(md).toContain('`currentPhase` equal to the 1-based current plan step');
+    expect(md).not.toContain('Break your work into 3-6 phases');
+  });
+
   it('includes profile finish prompt before report_task_summary when configured', () => {
     const md = generateSystemInstructions(
       makeProfile({
@@ -371,6 +384,27 @@ describe('generateSystemInstructions', () => {
     expect(md).not.toContain('<!-- BEGIN HANDOFF CONTEXT -->');
   });
 
+  it('uses task-summary based series handoff instead of repo handover files', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        seriesId: 'profile-config-simplification',
+        seriesName: 'Profile config simplification',
+        dependsOnPodIds: ['parent-a', 'parent-b'],
+      }),
+      'http://localhost:8080/mcp/x',
+    );
+
+    expect(md).toContain('## Series Handoff');
+    expect(md).toContain('Parent pod summaries are injected');
+    expect(md).toContain('parent-a');
+    expect(md).toContain('parent-b');
+    expect(md).toContain('put downstream handoff notes in `report_task_summary`');
+    expect(md).toContain('do not create or commit handover markdown files');
+    expect(md).not.toContain('specs/profile-config-simplification/handovers');
+    expect(md).not.toContain('read your handover file');
+  });
+
   it('includes validate_in_browser tool in MCP tools list', () => {
     const md = generateSystemInstructions(
       makeProfile(),
@@ -450,6 +484,17 @@ describe('generateSystemInstructions', () => {
     );
 
     expect(md).toContain('pre_submit_review');
+  });
+
+  it('mentions validate_semantics in guidelines', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+
+    expect(md).toContain('validate_semantics');
+    expect(md).toContain('health, pages, required facts, and AI review');
   });
 
   it('includes advisor section when advisor is enabled', () => {

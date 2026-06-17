@@ -2,6 +2,8 @@ import type {
   PodBridge,
   PreSubmitReviewInput,
   PreSubmitReviewToolResult,
+  SemanticValidationInput,
+  SemanticValidationResult,
   ValidationPhaseName,
   ValidationPhaseResult,
 } from '@autopod/escalation-mcp';
@@ -47,6 +49,7 @@ import { computePodDiff, summarizeDiff } from './pod-diff-fetcher.js';
 import type { ContainerManagerFactory, PodManager } from './pod-manager.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
+import { validatePlanAlignedProgress } from './progress-validation.js';
 import { buildValidationExecEnv } from './registry-injector.js';
 import { resolveReviewerModel, resolveReviewerProvider } from './runtime-resolver.js';
 
@@ -310,6 +313,8 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     ): void {
       assertAgentWriteAllowed(podId, 'report_progress');
       podManager.touchHeartbeat(podId);
+      const pod = podRepo.getOrThrow(podId);
+      validatePlanAlignedProgress(pod.plan, { currentPhase, totalPhases });
       logger.info({ podId, phase, currentPhase, totalPhases }, 'Agent reported progress');
       podRepo.update(podId, {
         progress: { phase, description, currentPhase, totalPhases },
@@ -689,6 +694,14 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
       logger.info({ linkedPodId }, 'Triggering revalidation of linked worker pod');
       return podManager.revalidateSession(linkedPodId);
+    },
+
+    async runSemanticValidation(
+      podId: string,
+      input: SemanticValidationInput,
+    ): Promise<SemanticValidationResult> {
+      podManager.touchHeartbeat(podId);
+      return podManager.runSemanticValidation(podId, input);
     },
 
     listMemories(podId: string, scope: MemoryScope): MemoryEntry[] {

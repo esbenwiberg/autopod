@@ -4,7 +4,13 @@ import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { PendingRequests } from '@autopod/escalation-mcp';
+import type {
+  PendingRequests,
+  SemanticValidationInput,
+  SemanticValidationPhaseName,
+  SemanticValidationPhaseResult,
+  SemanticValidationResult,
+} from '@autopod/escalation-mcp';
 import type {
   AgentEvent,
   BuildResult,
@@ -54,6 +60,7 @@ import {
   CONTAINER_HOME_DIR,
   DEFAULT_CONTAINER_MEMORY_GB,
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
+  MAX_DIFF_LENGTH,
   generateId,
   generatePodId,
   outputModeFromPodOptions,
@@ -121,10 +128,11 @@ import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import { DeletionGuardError, GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
-import { buildCorrectionMessage } from './correction-context.js';
+import { buildCorrectionMessage, isCapsuleCoverageFailure } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
+import { compactText } from './feedback-compactor.js';
 import { formatFeedback } from './feedback-formatter.js';
 import type { FixFeedbackRepository } from './fix-feedback-repository.js';
 import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
@@ -133,10 +141,16 @@ import type { MemoryRepository } from './memory-repository.js';
 import { prefilterMemories, selectRelevantMemories } from './memory-selector.js';
 import type { MemoryUsageRepository } from './memory-usage-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
+import {
+  computePodDiff,
+  computePodUncommittedDiff,
+  computePodUntrackedPreview,
+} from './pod-diff-fetcher.js';
 import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
 import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
+import { validatePlanAlignedProgress } from './progress-validation.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import { createReadinessService } from './readiness-review.js';
 import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
@@ -170,6 +184,10 @@ import {
   validateTransition,
 } from './state-machine.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
+import {
+  type ValidationFailureClassification,
+  classifyValidationFailure,
+} from './validation-failure-classifier.js';
 import type { ValidationRepository } from './validation-repository.js';
 import {
   buildBashrcHintBlock,
@@ -207,6 +225,242 @@ function summarizeValidationPhases(result: ValidationResult): string {
     `tests: ${testStatus}, health: ${healthStatus}, pages: ${pagesStatus}, ` +
     `facts: ${factsStatus}, review: ${reviewStatus}`
   );
+}
+
+const SEMANTIC_VALIDATION_PHASES: readonly SemanticValidationPhaseName[] = [
+  'health',
+  'pages',
+  'facts',
+  'review',
+];
+const SYNTACTIC_VALIDATION_PHASES: readonly ValidationPhase[] = [
+  'setup',
+  'lint',
+  'sast',
+  'build',
+  'test',
+];
+const SEMANTIC_VALIDATION_OUTPUT_BUDGET = 4_000;
+
+function normalizeSemanticPhases(
+  phases: readonly SemanticValidationPhaseName[] | undefined,
+): SemanticValidationPhaseName[] {
+  const requested = phases?.length ? phases : SEMANTIC_VALIDATION_PHASES;
+  const normalized = SEMANTIC_VALIDATION_PHASES.filter((phase) => requested.includes(phase));
+  if (normalized.includes('pages') && !normalized.includes('health')) {
+    return ['health', ...normalized];
+  }
+  return normalized;
+}
+
+function buildSemanticTaskSummary(
+  existing: TaskSummary | null | undefined,
+  input: SemanticValidationInput,
+): TaskSummary | undefined {
+  if (!input.plannedSummary && !input.plannedDeviations) return existing ?? undefined;
+  return {
+    actualSummary:
+      input.plannedSummary ??
+      existing?.actualSummary ??
+      'Pre-completion semantic validation preview',
+    how: existing?.how,
+    deviations: input.plannedDeviations ?? existing?.deviations ?? [],
+    factEvidence: existing?.factEvidence,
+    factDeviations: existing?.factDeviations,
+    memoryOutcomes: existing?.memoryOutcomes,
+    reviewFeedbackResponses: existing?.reviewFeedbackResponses,
+  };
+}
+
+function summarizeSemanticValidation(
+  result: ValidationResult,
+  phases: readonly SemanticValidationPhaseName[],
+  profile: Profile,
+  contract: Pod['contract'] | null | undefined,
+): SemanticValidationResult {
+  const results = phases.map((phase) => summarizeSemanticPhase(result, phase, profile, contract));
+  return {
+    passed: results.some((phase) => phase.configured) && results.every((phase) => phase.passed),
+    results,
+  };
+}
+
+function summarizeSemanticPhase(
+  result: ValidationResult,
+  phase: SemanticValidationPhaseName,
+  profile: Profile,
+  contract: Pod['contract'] | null | undefined,
+): SemanticValidationPhaseResult {
+  switch (phase) {
+    case 'health':
+      return summarizeSemanticHealth(result, profile);
+    case 'pages':
+      return summarizeSemanticPages(result, profile);
+    case 'facts':
+      return summarizeSemanticFacts(result, contract);
+    case 'review':
+      return summarizeSemanticReview(result);
+  }
+}
+
+function summarizeSemanticHealth(
+  result: ValidationResult,
+  profile: Profile,
+): SemanticValidationPhaseResult {
+  const health = result.smoke.health;
+  const configured = profile.hasWebUi !== false;
+  const output = [
+    health.url ? `URL: ${health.url}` : null,
+    health.responseCode !== null ? `Response: ${health.responseCode}` : null,
+    health.responseBody ? `Response body:\n${health.responseBody}` : null,
+    health.startOutput ? `Start output:\n${health.startOutput}` : null,
+    !profile.startCommand && configured
+      ? 'No start command configured; health treated as pass.'
+      : null,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  return {
+    phase: 'health',
+    configured,
+    status: health.status,
+    passed: !configured || health.status === 'pass' || health.status === 'skip',
+    durationMs: health.duration,
+    output: compactText(output, { maxChars: SEMANTIC_VALIDATION_OUTPUT_BUDGET }),
+  };
+}
+
+function summarizeSemanticPages(
+  result: ValidationResult,
+  profile: Profile,
+): SemanticValidationPhaseResult {
+  const configured = profile.hasWebUi !== false && profile.smokePages.length > 0;
+  const status: SemanticValidationPhaseResult['status'] =
+    !configured || result.smoke.health.status !== 'pass'
+      ? 'skip'
+      : result.smoke.pages.every((page) => page.status === 'pass')
+        ? 'pass'
+        : 'fail';
+  const output =
+    result.smoke.pages.length > 0
+      ? result.smoke.pages
+          .map((page) => {
+            const failedAssertions = page.assertions
+              .filter((assertion) => !assertion.passed)
+              .map(
+                (assertion) =>
+                  `${assertion.selector} ${assertion.type}: expected ${assertion.expected ?? '(none)'}, got ${assertion.actual ?? '(none)'}`,
+              );
+            return [
+              `${page.path}: ${page.status}`,
+              page.consoleErrors.length ? `Console errors: ${page.consoleErrors.join('\n')}` : null,
+              failedAssertions.length ? `Failed assertions:\n${failedAssertions.join('\n')}` : null,
+              page.screenshotPath ? `Screenshot: ${page.screenshotPath}` : null,
+            ]
+              .filter(Boolean)
+              .join('\n');
+          })
+          .join('\n\n')
+      : configured
+        ? result.smoke.health.status === 'pass'
+          ? 'No page results were produced.'
+          : 'Pages skipped because health did not pass.'
+        : 'No smoke pages configured.';
+  return {
+    phase: 'pages',
+    configured,
+    status,
+    passed: !configured || status === 'pass',
+    durationMs: result.smoke.pages.reduce((total, page) => total + page.loadTime, 0),
+    output: compactText(output, { maxChars: SEMANTIC_VALIDATION_OUTPUT_BUDGET }),
+  };
+}
+
+function summarizeSemanticFacts(
+  result: ValidationResult,
+  contract: Pod['contract'] | null | undefined,
+): SemanticValidationPhaseResult {
+  const facts = result.factValidation;
+  const configured = (contract?.requiredFacts.length ?? 0) > 0 || (facts?.results.length ?? 0) > 0;
+  const status = facts?.status ?? 'skip';
+  const notableFacts =
+    facts?.results.filter((fact) => fact.status !== 'pass' && fact.status !== 'waived') ?? [];
+  const output =
+    notableFacts.length > 0
+      ? notableFacts
+          .map((fact) =>
+            [
+              `${fact.factId}: ${fact.status ?? (fact.passed ? 'pass' : 'fail')}`,
+              `Command: ${fact.command}`,
+              fact.reasoning ? `Reasoning: ${fact.reasoning}` : null,
+              fact.stdout ? `stdout:\n${fact.stdout}` : null,
+              fact.stderr ? `stderr:\n${fact.stderr}` : null,
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          )
+          .join('\n\n')
+      : configured
+        ? 'All required facts passed.'
+        : 'No required facts configured.';
+  return {
+    phase: 'facts',
+    configured,
+    status,
+    passed: !configured || status === 'pass',
+    durationMs: facts?.results.reduce((total, fact) => total + (fact.durationMs ?? 0), 0),
+    output: compactText(output, { maxChars: SEMANTIC_VALIDATION_OUTPUT_BUDGET }),
+  };
+}
+
+function summarizeSemanticReview(result: ValidationResult): SemanticValidationPhaseResult {
+  const review = result.taskReview;
+  const status: SemanticValidationPhaseResult['status'] =
+    review === null
+      ? result.reviewSkipKind === 'review-failed' || result.reviewSkipKind === 'review-timeout'
+        ? 'fail'
+        : 'skip'
+      : review.status === 'fail'
+        ? 'fail'
+        : review.status === 'pass'
+          ? 'pass'
+          : 'fail';
+  const configured = result.reviewSkipKind !== 'profile-skip';
+  const output = review
+    ? [review.reasoning, review.issues.length ? `Issues:\n${review.issues.join('\n')}` : null]
+        .filter(Boolean)
+        .join('\n\n')
+    : (result.reviewSkipReason ?? 'Review skipped.');
+  return {
+    phase: 'review',
+    configured,
+    status,
+    passed:
+      !configured ||
+      status === 'pass' ||
+      (status === 'skip' &&
+        (result.reviewSkipKind === 'no-changes' || result.reviewSkipKind === 'profile-skip')),
+    output: compactText(output, { maxChars: SEMANTIC_VALIDATION_OUTPUT_BUDGET }),
+    issues: review?.issues ?? [],
+  };
+}
+
+function semanticValidationGuardFailure(
+  phases: readonly SemanticValidationPhaseName[],
+  output: string,
+): SemanticValidationResult {
+  return {
+    passed: false,
+    results: [
+      {
+        phase: phases[0] ?? 'review',
+        configured: true,
+        status: 'fail',
+        passed: false,
+        output: compactText(output, { maxChars: SEMANTIC_VALIDATION_OUTPUT_BUDGET }),
+      },
+    ],
+  };
 }
 
 function formatRetryDelay(delayMs: number): string {
@@ -865,6 +1119,61 @@ function isSinglePrSeriesPod(pod: Pick<Pod, 'prMode' | 'seriesId'>): boolean {
   return pod.prMode === 'single' && Boolean(pod.seriesId);
 }
 
+function formatSeriesParentHandoff(parent: Pod): string {
+  const title = parent.briefTitle ? ` — ${parent.briefTitle}` : '';
+  const lines = [`### Parent ${parent.id}${title}`];
+  const summary = parent.taskSummary;
+  if (!summary) {
+    lines.push('');
+    lines.push('No task summary was reported for this parent pod.');
+    return lines.join('\n');
+  }
+
+  lines.push('');
+  lines.push(`What changed: ${summary.actualSummary}`);
+  if (summary.how) {
+    lines.push('');
+    lines.push(`Technical notes: ${summary.how}`);
+  }
+  if (summary.deviations.length > 0) {
+    lines.push('');
+    lines.push('Reported deviations:');
+    for (const deviation of summary.deviations) {
+      lines.push(
+        `- ${deviation.step}: planned "${deviation.planned}" -> actual "${deviation.actual}" (${deviation.reason})`,
+      );
+    }
+  }
+  if (summary.factEvidence?.length) {
+    lines.push('');
+    lines.push('Fact evidence:');
+    for (const fact of summary.factEvidence) {
+      lines.push(`- ${fact.factId}: ${fact.result} via \`${fact.command}\` (${fact.artifactPath})`);
+    }
+  }
+  if (summary.reviewFeedbackResponses?.length) {
+    lines.push('');
+    lines.push('Review feedback responses:');
+    for (const response of summary.reviewFeedbackResponses) {
+      lines.push(`- ${response.feedbackId}: ${response.outcome} — ${response.response}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function buildSeriesHandoffContext(child: Pod, parents: Pod[]): string | null {
+  if (!child.seriesId || parents.length === 0) return null;
+
+  return [
+    `You're continuing Autopod series **${child.seriesName ?? child.seriesId}**.`,
+    'Parent pod summaries are injected by the daemon; do not look for or create repo handoff documents.',
+    'Use this context to understand upstream contracts, landmines, and files to treat carefully.',
+    '',
+    ...parents.map(formatSeriesParentHandoff),
+  ].join('\n');
+}
+
 /** Merge new overrides into existing ones, deduplicating by findingId (latest wins). */
 function mergeOverrides(
   existing: ValidationOverride[],
@@ -1075,6 +1384,11 @@ export interface PodManager {
     targetOutput: 'pr' | 'branch' | 'artifact' | 'none',
     options?: { instructions?: string; skipAgent?: boolean },
   ): Promise<void>;
+  /** Run semantic validation phases for an in-flight pod without mutating pod lifecycle state. */
+  runSemanticValidation(
+    podId: string,
+    input: SemanticValidationInput,
+  ): Promise<SemanticValidationResult>;
   triggerValidation(podId: string, options?: { force?: boolean }): Promise<void>;
   /** Pull latest from remote branch and re-run validation without agent rework on failure.
    *  Used after human fixes via a linked workspace pod.
@@ -4487,6 +4801,59 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
   }
 
+  async function parkOnValidationInfrastructureFailure(
+    pod: Pod,
+    classification: ValidationFailureClassification,
+  ): Promise<void> {
+    const description = `Validation infrastructure failure in ${classification.phase}: ${classification.signature}`;
+    const needs =
+      'Fix the validation environment or dependency installation, then re-run validation. Do not spend an agent rework attempt on this failure.';
+    const escalation: EscalationRequest = {
+      id: generateId(12),
+      podId: pod.id,
+      type: 'report_blocker',
+      timestamp: new Date().toISOString(),
+      payload: {
+        description,
+        attempted: [`Validation phase: ${classification.phase}`, classification.reason],
+        needs,
+      },
+      response: null,
+    };
+    escalationRepo.insert(escalation);
+
+    const message = `${description}. ${needs}`;
+    emitActivityStatus(pod.id, message);
+    logger.warn(
+      {
+        podId: pod.id,
+        phase: classification.phase,
+        signature: classification.signature,
+        reason: classification.reason,
+      },
+      'Validation failure classified as infrastructure; parking without agent rework',
+    );
+
+    transition(pod, 'review_required', {
+      lastCorrectionMessage: message,
+      pendingEscalation: escalation,
+      escalationCount: pod.escalationCount + 1,
+    });
+
+    if (pod.containerId) {
+      try {
+        const cm = containerManagerFactory.get(pod.executionTarget);
+        await cm.stop(pod.containerId);
+        logger.info({ podId: pod.id }, 'Container stopped after validation infrastructure failure');
+      } catch (stopErr) {
+        logger.warn(
+          { err: stopErr, podId: pod.id },
+          'Failed to stop container after validation infrastructure failure',
+        );
+      }
+    }
+  }
+
   function recordNotReportedMemoryUsage(podId: string): void {
     deps.memoryUsageRepo?.recordNotReportedForPod(podId);
   }
@@ -4498,7 +4865,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    *
    * The dependent pod stacks on its first parent's branch — this matches the
    * linear-chain mental model. Commits from other parents reach the child via
-   * handover files or the eventual PR merge, not the worktree.
+   * daemon-injected parent summaries or the eventual PR merge, not the worktree.
    */
   function maybeTriggerDependents(completedPod: Pod): void {
     const dependents = podRepo.getPodsDependingOn(completedPod.id);
@@ -4563,6 +4930,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         continue;
       }
 
+      const parents = parentIds.map((pid) =>
+        pid === completedPod.id ? completedPod : podRepo.getOrThrow(pid),
+      );
+
       // Determine base branch for the dependent pod:
       // - Single-PR series, even if an older row has the wrong child branch:
       //   keep pointing at the real base so the final PR targets main/default.
@@ -4570,12 +4941,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // - Stacked with waitForMerge: parent branch is deleted post-merge; use parent's
       //   baseBranch (main) so the dependent starts from the freshly-merged main.
       // - Stacked without waitForMerge: stack directly on parent's branch (classic stacking).
-      const firstParentId = parentIds[0];
-      const firstParent = firstParentId
-        ? firstParentId === completedPod.id
-          ? completedPod
-          : podRepo.getOrThrow(firstParentId)
-        : completedPod;
+      const firstParent = parents[0] ?? completedPod;
       const isSharedBranch = dep.branch === firstParent.branch;
       let baseBranch: string;
       if (isSinglePrSeriesPod(dep) || isSharedBranch || dep.waitForMerge) {
@@ -4601,6 +4967,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podRepo.update(dep.id, {
         baseBranch,
         dependencyStartedAt: new Date().toISOString(),
+        handoffContext: buildSeriesHandoffContext(dep, parents),
       });
       enqueueSession(dep.id);
       logger.info({ podId: dep.id, parentIds, baseBranch }, 'Series: dependent pod enqueued');
@@ -6868,6 +7235,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             seenCompleteEvents.add(completeKey);
           }
 
+          if (event.type === 'progress') {
+            const currentPod = podRepo.getOrThrow(podId);
+            validatePlanAlignedProgress(currentPod.plan, {
+              currentPhase: event.currentPhase,
+              totalPhases: event.totalPhases,
+            });
+          }
+
           eventBus.emit({
             type: 'pod.agent_activity',
             timestamp: event.timestamp,
@@ -8777,6 +9152,150 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     },
 
+    async runSemanticValidation(
+      podId: string,
+      input: SemanticValidationInput,
+    ): Promise<SemanticValidationResult> {
+      const pod = podRepo.getOrThrow(podId);
+      const phases = normalizeSemanticPhases(input.phases);
+      if (!pod.containerId) {
+        return semanticValidationGuardFailure(
+          phases,
+          `Pod ${podId} has no container. Semantic validation requires a live pod container.`,
+        );
+      }
+
+      const profile = profileStore.get(pod.profileName);
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      const containerStatus = await cm.getStatus(pod.containerId);
+      if (containerStatus !== 'running') {
+        return semanticValidationGuardFailure(
+          phases,
+          `Pod container is not running (status: ${containerStatus}). Start or recover the pod before running semantic validation.`,
+        );
+      }
+
+      const defaultBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
+      const diffSlice = {
+        containerId: pod.containerId,
+        worktreePath: pod.worktreePath ?? null,
+        startCommitSha: pod.startCommitSha ?? null,
+      };
+      const [uncommittedDiff, untrackedPreview] = await Promise.all([
+        computePodUncommittedDiff({
+          pod: diffSlice,
+          defaultBranch,
+          containerManager: cm,
+          worktreeManager,
+          logger,
+        }),
+        computePodUntrackedPreview({
+          pod: diffSlice,
+          defaultBranch,
+          containerManager: cm,
+          worktreeManager,
+          logger,
+        }),
+      ]);
+      if (uncommittedDiff.diff.trim() || untrackedPreview.files.length > 0) {
+        const untrackedFiles = untrackedPreview.files.map((file) => file.path).slice(0, 20);
+        return semanticValidationGuardFailure(
+          phases,
+          [
+            'validate_semantics requires committed changes because daemon semantic validation resets the worktree to HEAD and removes untracked files.',
+            'Commit or stash your changes, then re-run validate_semantics.',
+            uncommittedDiff.diff.trim()
+              ? `Uncommitted diff source: ${uncommittedDiff.source}\n${uncommittedDiff.diff}`
+              : null,
+            untrackedFiles.length
+              ? `Untracked files (${untrackedPreview.source}): ${untrackedFiles.join(', ')}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join('\n\n'),
+        );
+      }
+
+      const { diff, source: diffSource } = await computePodDiff({
+        pod: diffSlice,
+        defaultBranch,
+        containerManager: cm,
+        worktreeManager,
+        maxLength: MAX_DIFF_LENGTH,
+        logger,
+      });
+      const codeReviewSkill = pod.worktreePath
+        ? await loadCodeReviewSkill(pod.worktreePath, logger)
+        : undefined;
+      const reviewerExecEnv = await getResumeEnv(pod);
+      const semanticSkips = SEMANTIC_VALIDATION_PHASES.filter(
+        (phase) => !phases.includes(phase),
+      ) as ValidationPhase[];
+      const skipPhases = Array.from(
+        new Set<ValidationPhase>([
+          ...(profile.skipValidationPhases ?? []),
+          ...SYNTACTIC_VALIDATION_PHASES,
+          ...semanticSkips,
+        ]),
+      );
+      const validationConfig: Parameters<ValidationEngine['validate']>[0] = {
+        podId,
+        containerId: pod.containerId,
+        previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
+        containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
+        validationSetupCommand: profile.validationSetupCommand ?? undefined,
+        buildCommand: profile.buildCommand ?? '',
+        startCommand: profile.startCommand ?? '',
+        buildWorkDir: profile.buildWorkDir ?? undefined,
+        healthPath: profile.healthPath ?? '/',
+        healthTimeout: profile.healthTimeout ?? 120,
+        smokePages: profile.smokePages,
+        attempt: Math.max(1, pod.validationAttempts + 1),
+        task: pod.task,
+        diff,
+        testCommand: profile.testCommand,
+        buildTimeout: (profile.buildTimeout ?? 300) * 1_000,
+        testTimeout: (profile.testTimeout ?? 600) * 1_000,
+        lintCommand: profile.lintCommand ?? undefined,
+        lintTimeout: (profile.lintTimeout ?? 120) * 1_000,
+        sastCommand: profile.sastCommand ?? undefined,
+        sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
+        reviewerModel: resolveReviewerModel(profile, logger),
+        reviewerProvider: resolveReviewerProvider(profile),
+        reviewerProviderCredentials: profile.providerCredentials,
+        ...(reviewerExecEnv ? { reviewerExecEnv } : {}),
+        contract: pod.contract ?? undefined,
+        codeReviewSkill,
+        plan: pod.plan ?? undefined,
+        taskSummary: buildSemanticTaskSummary(pod.taskSummary, input),
+        briefTouches: pod.touches ?? undefined,
+        briefDoesNotTouch: pod.doesNotTouch ?? undefined,
+        worktreePath: diffSource === 'worktree' ? (pod.worktreePath ?? undefined) : undefined,
+        startCommitSha: pod.startCommitSha ?? undefined,
+        overrides: pod.validationOverrides?.length ? pod.validationOverrides : undefined,
+        hasWebUi: profile.hasWebUi ?? true,
+        advisoryBrowserQaEnabled: false,
+        reviewerApiKey: process.env.ANTHROPIC_API_KEY,
+        extraExecEnv: buildValidationExecEnv(
+          profile.privateRegistries,
+          profile.registryPat ?? profile.adoPat ?? null,
+          profile.buildEnv,
+        ),
+        preSubmitReview: pod.preSubmitReview ?? undefined,
+        skipPhases,
+      };
+
+      logger.info({ podId, phases, diffSource }, 'Running semantic validation from MCP tool');
+      const validationController = new AbortController();
+      const result = await validateWithReviewInfraRetries(
+        validationConfig,
+        validationController,
+        undefined,
+        'Semantic validation engine threw unexpectedly',
+      );
+      return summarizeSemanticValidation(result, phases, profile, pod.contract);
+    },
+
     async triggerValidation(podId: string, options?: { force?: boolean }): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
       const force = options?.force ?? false;
@@ -9388,6 +9907,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           return;
         }
 
+        const infraClassification = classifyValidationFailure(effectiveResult);
+        if (infraClassification?.kind === 'infra') {
+          if (tryConsumeUpdateIntent()) return;
+          await parkOnValidationInfrastructureFailure(s2, infraClassification);
+          return;
+        }
+
         if (effectiveResult.overall === 'pass') {
           emitActivityStatus(podId, `Validation passed (attempt ${attempt})`);
           const passDefaultBranch = profile.defaultBranch ?? 'main';
@@ -9606,7 +10132,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               );
             });
           }
-        } else if (force || attempt < s2.maxValidationAttempts) {
+        } else if (
+          force ||
+          attempt < s2.maxValidationAttempts ||
+          (isCapsuleCoverageFailure(effectiveResult) &&
+            !s2.lastCorrectionMessage?.includes('### Capsule Coverage Guidance'))
+        ) {
           if (tryConsumeUpdateIntent()) return;
 
           emitActivityStatus(
@@ -10147,6 +10678,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           return { newCommits, result: 'fail' };
         }
 
+        const infraClassification = classifyValidationFailure(result);
+        if (infraClassification?.kind === 'infra') {
+          await parkOnValidationInfrastructureFailure(s2, infraClassification);
+          return { newCommits, result: 'fail' };
+        }
+
         // Validation failed — stay in failed state, no agent rework
         emitActivityStatus(podId, `Revalidation fail — ${summarizeValidationPhases(result)}`);
         if (result.taskReview && result.taskReview.status !== 'pass') {
@@ -10592,7 +11129,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const firstParentId = parentIds[0];
         if (!firstParentId) continue;
         try {
-          const firstParent = podRepo.getOrThrow(firstParentId);
+          const parents = parentIds.map((pid) => podRepo.getOrThrow(pid));
+          const firstParent = parents[0];
+          if (!firstParent) continue;
           const baseBranch =
             isSinglePrSeriesPod(dep) || dep.waitForMerge || dep.branch === firstParent.branch
               ? (firstParent.baseBranch ?? 'main')
@@ -10600,6 +11139,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           podRepo.update(dep.id, {
             baseBranch,
             dependencyStartedAt: new Date().toISOString(),
+            handoffContext: buildSeriesHandoffContext(dep, parents),
           });
           enqueueSession(dep.id);
           logger.info(

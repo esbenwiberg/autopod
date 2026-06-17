@@ -464,14 +464,14 @@ Fatal and non-fatal errors from agent execution.
 | timestamp | TEXT | ISO timestamp |
 
 ### progress_events
-Agent-reported phase transitions.
+Agent-reported plan-step progress updates.
 | Column | Type | Description |
 |--------|------|-------------|
 | pod_id | TEXT | Links to pods.id |
-| phase | TEXT | Phase name |
+| phase | TEXT | Plan step or phase name |
 | description | TEXT | What the agent is doing |
-| current_phase | INT | Current phase number |
-| total_phases | INT | Total phases planned |
+| current_phase | INT | Current plan step or phase number |
+| total_phases | INT | Total plan steps or phases |
 
 ## Example Queries
 

@@ -19,6 +19,7 @@ import { reportTaskSummary } from './tools/report-task-summary.js';
 import { requestCredential } from './tools/request-credential.js';
 import { validateInBrowser } from './tools/validate-in-browser.js';
 import { validateLocally } from './tools/validate-locally.js';
+import { validateSemantics } from './tools/validate-semantics.js';
 
 export interface EscalationMcpDeps {
   podId: string;
@@ -116,12 +117,16 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'report_progress',
-    'Report a phase transition in your work. Fire-and-forget — does not block.',
+    'Report a transition to the current plan step. Fire-and-forget — does not block.',
     {
-      phase: z.string().describe('Name of the current phase (e.g., "Implementation", "Testing")'),
-      description: z.string().describe('Brief description of what you are doing in this phase'),
-      currentPhase: z.number().int().min(1).describe('Current phase number (1-based)'),
-      totalPhases: z.number().int().min(1).describe('Total number of phases'),
+      phase: z.string().describe('Name of the current plan step or work phase'),
+      description: z.string().describe('Brief description of what you are doing in this step'),
+      currentPhase: z
+        .number()
+        .int()
+        .min(1)
+        .describe('Current plan step number (1-based) after report_plan'),
+      totalPhases: z.number().int().min(1).describe('Total plan step count after report_plan'),
     },
     async (input) => {
       const response = await reportProgress(podId, input, bridge);
@@ -316,6 +321,40 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     },
     async (input) => {
       const response = await validateLocally(podId, input, bridge);
+      return { content: [{ type: 'text' as const, text: response }] };
+    },
+  );
+
+  server.tool(
+    'validate_semantics',
+    'Run the daemon semantic validation phases against your committed work: health, pages, required facts, and AI review. Call after `validate_locally` succeeds and after committing your changes, before `report_task_summary`, when your task has web behavior, required facts, or review-sensitive scope. This uses the same daemon pipeline as post-completion validation but does not change pod lifecycle state. It refuses uncommitted changes because daemon validation resets the worktree to HEAD.',
+    {
+      phases: z
+        .array(z.enum(['health', 'pages', 'facts', 'review']))
+        .optional()
+        .describe(
+          'Subset of semantic phases to run. Omit to run all semantic phases. Useful for re-running just facts or review after a targeted fix.',
+        ),
+      plannedSummary: z
+        .string()
+        .optional()
+        .describe(
+          'Preview of the `actualSummary` you intend to pass to `report_task_summary`. Used by the review phase.',
+        ),
+      plannedDeviations: z
+        .array(
+          z.object({
+            step: z.string(),
+            planned: z.string(),
+            actual: z.string(),
+            reason: z.string(),
+          }),
+        )
+        .optional()
+        .describe('Preview of the `deviations` array you intend to disclose. Optional.'),
+    },
+    async (input) => {
+      const response = await validateSemantics(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
   );

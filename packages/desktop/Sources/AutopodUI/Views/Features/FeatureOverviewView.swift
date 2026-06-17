@@ -534,7 +534,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
                 "ask_ai — Rate-limited: calls reviewer model, max N calls per pod",
                 "report_blocker — Conditionally blocking: auto-pauses after threshold escalations",
                 "report_plan — Fire-and-forget: submits plan summary + steps",
-                "report_progress — Fire-and-forget: reports phase transitions (currentPhase/totalPhases)",
+                "report_progress — Fire-and-forget: reports plan-step progress (currentPhase/totalPhases)",
                 "report_task_summary — Fire-and-forget: captures actual work vs plan deviations",
                 "check_messages — Non-blocking: polls for pending nudge/tell messages without pausing",
                 "validate_in_browser — Blocking: LLM generates Playwright script → executes on host → returns screenshot evidence",

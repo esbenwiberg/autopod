@@ -1,4 +1,5 @@
 import type { EscalationResponse, ValidationResult } from '@autopod/shared';
+import { compactText } from './feedback-compactor.js';
 
 export interface FeedbackOptions {
   task: string;
@@ -25,6 +26,10 @@ export interface EscalationFeedback {
 
 export type FeedbackInput = ValidationFeedback | RejectionFeedback | EscalationFeedback;
 
+const COMMAND_OUTPUT_BUDGET = 6_000;
+const REVIEW_TEXT_BUDGET = 4_000;
+const ORIGINAL_TASK_BUDGET = 4_000;
+
 export function formatFeedback(input: FeedbackInput): string {
   switch (input.type) {
     case 'validation_failure':
@@ -50,7 +55,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
     lines.push('### Setup Errors');
     if (result.setup.output) {
       lines.push('```');
-      lines.push(result.setup.output.slice(0, 10_000));
+      lines.push(compactText(result.setup.output, { maxChars: COMMAND_OUTPUT_BUDGET }));
       lines.push('```');
     }
     lines.push('');
@@ -60,8 +65,12 @@ function formatValidationFailure(input: ValidationFeedback): string {
   if (result.smoke.build.status === 'fail') {
     lines.push('### Build Errors');
     lines.push('```');
-    lines.push(result.smoke.build.output);
+    lines.push(compactText(result.smoke.build.output, { maxChars: COMMAND_OUTPUT_BUDGET }));
     lines.push('```');
+    lines.push('');
+    lines.push(
+      'After fixing, re-run the build phase with `validate_locally({ "phases": ["build"] })`.',
+    );
     lines.push('');
   }
 
@@ -76,7 +85,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
       lines.push('');
       lines.push('**Start command output** (from the process that should have started your app):');
       lines.push('```');
-      lines.push(result.smoke.health.startOutput);
+      lines.push(compactText(result.smoke.health.startOutput, { maxChars: COMMAND_OUTPUT_BUDGET }));
       lines.push('```');
     }
 
@@ -101,9 +110,12 @@ function formatValidationFailure(input: ValidationFeedback): string {
     const testOutput = [result.test.stdout, result.test.stderr].filter(Boolean).join('\n').trim();
     if (testOutput) {
       lines.push('```');
-      lines.push(testOutput.slice(0, 10_000));
+      lines.push(compactText(testOutput, { maxChars: COMMAND_OUTPUT_BUDGET }));
       lines.push('```');
     }
+    lines.push(
+      'After fixing, re-run the test phase with `validate_locally({ "phases": ["tests"] })`.',
+    );
     lines.push('');
   }
 
@@ -112,9 +124,12 @@ function formatValidationFailure(input: ValidationFeedback): string {
     lines.push('### Lint Failures');
     if (result.lint.output) {
       lines.push('```');
-      lines.push(result.lint.output.slice(0, 10_000));
+      lines.push(compactText(result.lint.output, { maxChars: COMMAND_OUTPUT_BUDGET }));
       lines.push('```');
     }
+    lines.push(
+      'After fixing, re-run the lint phase with `validate_locally({ "phases": ["lint"] })`.',
+    );
     lines.push('');
   }
 
@@ -123,7 +138,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
     lines.push('### Security Scan Failures');
     if (result.sast.output) {
       lines.push('```');
-      lines.push(result.sast.output.slice(0, 10_000));
+      lines.push(compactText(result.sast.output, { maxChars: COMMAND_OUTPUT_BUDGET }));
       lines.push('```');
     }
     lines.push('');
@@ -138,7 +153,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
       if (page.consoleErrors.length > 0) {
         lines.push('Console errors:');
         for (const err of page.consoleErrors) {
-          lines.push(`- ${err}`);
+          lines.push(`- ${compactText(err, { maxChars: 1_000 })}`);
         }
       }
       const failedAssertions = page.assertions.filter((a) => !a.passed);
@@ -165,7 +180,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
       lines.push('');
       for (const check of unavailableFacts) {
         lines.push(`**${check.factId}** (\`${check.artifactPath}\`):`);
-        lines.push(`- ${check.reasoning}`);
+        lines.push(`- ${compactText(check.reasoning, { maxChars: 1_000 })}`);
         lines.push('- Suggested `factDeviations` entry:');
         lines.push('```json');
         lines.push(
@@ -192,7 +207,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
       lines.push('### Required Fact Failures');
       for (const check of failed) {
         lines.push(`**${check.factId}** (\`${check.artifactPath}\`):`);
-        lines.push(`- ${check.reasoning}`);
+        lines.push(`- ${compactText(check.reasoning, { maxChars: 1_000 })}`);
         const commandOutput = formatFactCommandOutput(check.stdout, check.stderr, 5_000);
         if (commandOutput) {
           lines.push('```');
@@ -212,7 +227,11 @@ function formatValidationFailure(input: ValidationFeedback): string {
       lines.push('The following requirements were not met according to the code reviewer:');
       for (const item of unmetRequirements) {
         lines.push(`**${item.criterion}**:`);
-        lines.push(`- ${item.note ?? 'Not implemented or evidence absent in the diff'}`);
+        lines.push(
+          `- ${compactText(item.note ?? 'Not implemented or evidence absent in the diff', {
+            maxChars: 1_000,
+          })}`,
+        );
       }
       lines.push('');
     }
@@ -221,12 +240,15 @@ function formatValidationFailure(input: ValidationFeedback): string {
   // Task review issues
   if (result.taskReview && result.taskReview.status !== 'pass') {
     lines.push('### Task Review Issues');
-    lines.push(result.taskReview.reasoning);
+    lines.push(compactText(result.taskReview.reasoning, { maxChars: REVIEW_TEXT_BUDGET }));
     if (result.taskReview.issues.length > 0) {
       lines.push('');
       lines.push('Specific issues:');
-      for (const issue of result.taskReview.issues) {
-        lines.push(`- ${issue}`);
+      for (const issue of result.taskReview.issues.slice(0, 25)) {
+        lines.push(`- ${compactText(issue, { maxChars: 1_000 })}`);
+      }
+      if (result.taskReview.issues.length > 25) {
+        lines.push(`- ... ${result.taskReview.issues.length - 25} more issue(s) omitted`);
       }
     }
     lines.push('');
@@ -238,7 +260,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
     result.reviewSkipReason
   ) {
     lines.push('### Review Execution Failure');
-    lines.push(result.reviewSkipReason);
+    lines.push(compactText(result.reviewSkipReason, { maxChars: REVIEW_TEXT_BUDGET }));
     lines.push('');
     lines.push(
       'This is a validation infrastructure failure, not an actionable code-review finding. Do not change unrelated code for this reviewer execution failure.',
@@ -261,7 +283,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
 
   // Reminder of original task
   lines.push('### Original Task');
-  lines.push(task);
+  lines.push(compactText(task, { maxChars: ORIGINAL_TASK_BUDGET }));
 
   return lines.join('\n');
 }
@@ -281,10 +303,12 @@ function formatFactCommandOutput(
   const trimmedStderr = stderr?.trim();
 
   if (trimmedStdout && trimmedStderr) {
-    return [`stderr:\n${trimmedStderr}`, `stdout:\n${trimmedStdout}`].join('\n\n').slice(0, limit);
+    return compactText([`stderr:\n${trimmedStderr}`, `stdout:\n${trimmedStdout}`].join('\n\n'), {
+      maxChars: limit,
+    });
   }
 
-  return (trimmedStderr || trimmedStdout || '').slice(0, limit);
+  return compactText(trimmedStderr || trimmedStdout || '', { maxChars: limit });
 }
 
 function formatHumanRejection(input: RejectionFeedback): string {

@@ -1,6 +1,7 @@
 import type { Pod, Profile, ValidationResult } from '@autopod/shared';
 import { MAX_DIFF_LENGTH } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/index.js';
+import { compactText } from './feedback-compactor.js';
 import { formatFeedback } from './feedback-formatter.js';
 
 export interface CorrectionContext {
@@ -22,6 +23,9 @@ export interface CorrectionContext {
   attempt: number;
   maxAttempts: number;
 }
+
+const REWORK_DIFF_BUDGET = 12_000;
+const CUSTOM_INSTRUCTIONS_BUDGET = 6_000;
 
 export async function buildCorrectionContext(
   pod: Pod,
@@ -135,6 +139,23 @@ export function truncateDiff(diff: string, maxLength: number): string {
   return `${diff.slice(0, maxLength)}\n... (truncated)`;
 }
 
+function changedFilesFromDiff(diff: string): string[] {
+  const files = new Set<string>();
+  for (const line of diff.split('\n')) {
+    if (!line.startsWith('+++ b/') && !line.startsWith('--- a/')) continue;
+    const file = line.slice('+++ b/'.length).trim();
+    if (file && file !== '/dev/null') files.add(file);
+  }
+  return [...files].sort();
+}
+
+export function isCapsuleCoverageFailure(validationResult: ValidationResult): boolean {
+  const output = validationResult.lint?.output ?? '';
+  return /capsule check failed|non-capsule commits not covered|changed source\/context files need a capsule/i.test(
+    output,
+  );
+}
+
 export async function buildCorrectionMessage(
   pod: Pod,
   profile: Profile,
@@ -153,12 +174,35 @@ export async function buildCorrectionMessage(
 
   const lines: string[] = [feedback];
 
+  if (isCapsuleCoverageFailure(validationResult)) {
+    lines.push('');
+    lines.push('### Capsule Coverage Guidance');
+    lines.push(
+      'Fix the capsule metadata for the final branch state. Extend the relevant capsule `commit_range` so it covers every commit through current `HEAD`, then re-run the same capsule check command.',
+    );
+    lines.push(
+      'Do not archive, move, or rename parent/previous capsules just to satisfy a single-active-capsule check. In a single-PR series, multiple pod capsules may be legitimate; use the repo-supported multi-capsule path when available, or update the shared series capsule.',
+    );
+  }
+
   // Add diff context so agent knows what it already changed
   if (context.previousDiff) {
     lines.push('');
     lines.push('### Your Changes So Far');
+    const changedFiles = changedFilesFromDiff(context.previousDiff);
+    if (changedFiles.length > 0) {
+      lines.push('Changed files:');
+      for (const file of changedFiles.slice(0, 50)) {
+        lines.push(`- ${file}`);
+      }
+      if (changedFiles.length > 50) {
+        lines.push(`- ... ${changedFiles.length - 50} more file(s) omitted`);
+      }
+      lines.push('');
+    }
+    lines.push('Compact diff excerpt:');
     lines.push('```diff');
-    lines.push(context.previousDiff);
+    lines.push(compactText(context.previousDiff, { maxChars: REWORK_DIFF_BUDGET }));
     lines.push('```');
   }
 
@@ -166,7 +210,7 @@ export async function buildCorrectionMessage(
   if (context.customInstructions) {
     lines.push('');
     lines.push('### Project Instructions (reminder)');
-    lines.push(context.customInstructions);
+    lines.push(compactText(context.customInstructions, { maxChars: CUSTOM_INSTRUCTIONS_BUDGET }));
   }
 
   return lines.join('\n');

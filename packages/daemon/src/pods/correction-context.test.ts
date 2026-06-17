@@ -5,6 +5,7 @@ import {
   buildCorrectionContext,
   buildCorrectionMessage,
   determineFailedStep,
+  isCapsuleCoverageFailure,
   truncateDiff,
 } from './correction-context.js';
 
@@ -260,6 +261,24 @@ describe('truncateDiff', () => {
   });
 });
 
+describe('isCapsuleCoverageFailure', () => {
+  it('detects capsule coverage lint output', () => {
+    const result = mockValidationResult({ lintFailed: true });
+    result.lint = {
+      status: 'fail',
+      output:
+        'capsule check failed\nnon-capsule commits not covered by capsule commit_range: abc123',
+      duration: 50,
+    };
+
+    expect(isCapsuleCoverageFailure(result)).toBe(true);
+  });
+
+  it('ignores ordinary lint failures', () => {
+    expect(isCapsuleCoverageFailure(mockValidationResult({ lintFailed: true }))).toBe(false);
+  });
+});
+
 describe('buildCorrectionContext', () => {
   it('includes previous diff from container', async () => {
     const cm = mockContainerManager('+added line\n-removed line');
@@ -372,6 +391,23 @@ describe('buildCorrectionMessage', () => {
     );
     expect(message).toContain('Project Instructions (reminder)');
     expect(message).toContain('TypeScript strict mode');
+  });
+
+  it('adds targeted guidance for capsule coverage lint failures', async () => {
+    const cm = mockContainerManager('');
+    const result = mockValidationResult({ lintFailed: true });
+    result.lint = {
+      status: 'fail',
+      output:
+        'capsule check failed\nnon-capsule commits not covered by capsule commit_range: abc123',
+      duration: 50,
+    };
+
+    const message = await buildCorrectionMessage(mockSession(), mockProfile(), result, cm);
+
+    expect(message).toContain('Capsule Coverage Guidance');
+    expect(message).toContain('Extend the relevant capsule `commit_range`');
+    expect(message).toContain('Do not archive, move, or rename parent/previous capsules');
   });
 
   it('omits diff section when diff is empty', async () => {

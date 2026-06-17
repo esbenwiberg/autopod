@@ -3,6 +3,10 @@ export { PendingRequests } from './pending-requests.js';
 export type {
   MemoryPlanIntentItem,
   PodBridge,
+  SemanticValidationInput,
+  SemanticValidationPhaseName,
+  SemanticValidationPhaseResult,
+  SemanticValidationResult,
   ValidationPhaseName,
   ValidationPhaseResult,
   PreSubmitReviewInput,
@@ -24,6 +28,11 @@ export {
   type ValidateLocallyResult,
   type ValidateLocallyPhaseResult,
 } from './tools/validate-locally.js';
+export {
+  validateSemantics,
+  type ValidateSemanticsInput,
+  type ValidateSemanticsResult,
+} from './tools/validate-semantics.js';
 export { preSubmitReview } from './tools/pre-submit-review.js';
 
 export const ESCALATION_MCP_VERSION = '0.0.1';

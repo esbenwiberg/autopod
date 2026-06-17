@@ -102,6 +102,23 @@ describe('formatFeedback', () => {
       expect(result).toContain('attempt 1/3');
     });
 
+    it('compacts very long build output', () => {
+      const validation = mockValidationResult({ buildFailed: true });
+      validation.smoke.build.output = `${'first-line\n'.repeat(800)}final compiler error`;
+
+      const result = formatFeedback({
+        type: 'validation_failure',
+        result: validation,
+        task: 'Add a contact page',
+        attempt: 1,
+        maxAttempts: 3,
+      });
+
+      expect(result).toContain('... [truncated ');
+      expect(result).toContain('final compiler error');
+      expect(result.length).toBeLessThan(8_000);
+    });
+
     it('formats health check failure', () => {
       const result = formatFeedback({
         type: 'validation_failure',

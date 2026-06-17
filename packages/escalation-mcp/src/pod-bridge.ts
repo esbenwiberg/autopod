@@ -219,9 +219,21 @@ export interface PodBridge {
     podId: string,
     input: PreSubmitReviewInput,
   ): Promise<PreSubmitReviewToolResult>;
+
+  /**
+   * Run semantic validation phases (health, pages, facts, review) against the
+   * current committed work, using the same daemon validation pipeline that runs
+   * after report_task_summary. This does not mutate pod lifecycle state.
+   */
+  runSemanticValidation(
+    podId: string,
+    input: SemanticValidationInput,
+  ): Promise<SemanticValidationResult>;
 }
 
 export type ValidationPhaseName = 'setup' | 'lint' | 'build' | 'tests';
+
+export type SemanticValidationPhaseName = 'health' | 'pages' | 'facts' | 'review';
 
 export interface PreSubmitReviewInput {
   /** Optional preview of the agent's planned task summary. */
@@ -265,6 +277,40 @@ export interface PreSubmitReviewToolResult {
     linesRemoved?: number;
     startCommitSha?: string | null;
   };
+}
+
+export interface SemanticValidationInput {
+  /** Subset of semantic phases to run. Defaults to health, pages, facts, review. */
+  phases?: SemanticValidationPhaseName[];
+  /** Optional preview of the agent's planned task summary for the review phase. */
+  plannedSummary?: string;
+  /** Optional preview of deviations the agent intends to disclose. */
+  plannedDeviations?: Array<{
+    step: string;
+    planned: string;
+    actual: string;
+    reason: string;
+  }>;
+}
+
+export interface SemanticValidationPhaseResult {
+  phase: SemanticValidationPhaseName;
+  configured: boolean;
+  status: 'pass' | 'fail' | 'skip' | 'pending_human';
+  passed: boolean;
+  durationMs?: number;
+  output?: string;
+  issues?: string[];
+}
+
+export interface SemanticValidationResult {
+  /**
+   * True only when every requested, configured semantic phase passed or was
+   * legitimately skipped. False for failures, pending human decisions, and
+   * guardrails such as uncommitted work.
+   */
+  passed: boolean;
+  results: SemanticValidationPhaseResult[];
 }
 
 export interface ValidationPhaseResult {
