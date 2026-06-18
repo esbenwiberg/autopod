@@ -1,4 +1,4 @@
-import type { ScreenshotRef } from '@autopod/shared';
+import { CHROMIUM_LAUNCH_ARGS, type ScreenshotRef } from '@autopod/shared';
 import type { PodBridge } from '../pod-bridge.js';
 
 export interface ValidateInBrowserInput {
@@ -178,7 +178,7 @@ ${checkList}
 
 Requirements:
 - Use \`import { chromium } from 'playwright';\`
-- Launch with \`{ headless: true, args: ['--no-sandbox'] }\`
+- Launch with \`{ headless: true, args: ${JSON.stringify([...CHROMIUM_LAUNCH_ARGS])} }\` (the extra flags stop Chromium phoning home to google.com on startup, which the pod firewall denies)
 - Create browser context with \`{ locale: 'en-US' }\` to avoid container locale issues
 - For each check: navigate to the appropriate URL, perform the validation, take a screenshot
 - Save screenshots as ${screenshotDir}/check-{index}.png (0-indexed)

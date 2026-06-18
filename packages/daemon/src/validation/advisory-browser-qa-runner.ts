@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ContentBlock, ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.js';
+import { CHROMIUM_LAUNCH_ARGS } from '@autopod/shared';
 import type {
   AdvisoryBrowserQaObservation,
   AdvisoryBrowserQaResult,
@@ -890,7 +891,7 @@ const targets = ${JSON.stringify(input.targets)};
 const actionsByTarget = ${JSON.stringify(input.actionsByTarget ?? {})};
 
 await mkdir(screenshotDir, { recursive: true });
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, args: ${JSON.stringify([...CHROMIUM_LAUNCH_ARGS])} });
 const results = [];
 const viewport = { width: 1280, height: 900 };
 
