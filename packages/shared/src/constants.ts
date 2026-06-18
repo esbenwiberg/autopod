@@ -14,6 +14,26 @@ export const EVENT_LOG_RETENTION_DAYS = 30;
 export const DEFAULT_CONTAINER_MEMORY_GB = 10;
 
 /**
+ * Chromium launch flags for Playwright runs inside agent containers.
+ *
+ * The `--*-sandbox` / `--disable-dev-shm-usage` flags are container hygiene.
+ * The remainder disable Chrome's startup background networking — without them
+ * Chromium phones home to `www.google.com` (variations/connectivity check) and
+ * `accounts.google.com` (GAIA/sync probe) on every launch, which a `restricted`
+ * network policy denies and surfaces as noisy firewall-denial findings.
+ */
+export const CHROMIUM_LAUNCH_ARGS = [
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-background-networking',
+  '--disable-component-update',
+  '--disable-sync',
+  '--no-default-browser-check',
+  '--metrics-recording-only',
+] as const;
+
+/**
  * Container user identity — all agent containers run as this non-root user.
  * Dockerfiles create this user at uid/gid 1000.
  */
