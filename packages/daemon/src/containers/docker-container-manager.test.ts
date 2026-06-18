@@ -177,6 +177,16 @@ describe('DockerContainerManager', () => {
       expect(createCall.HostConfig.Binds).toEqual(['/tmp/worktree/abc:/workspace']);
     });
 
+    it('configures read-only volume binds', async () => {
+      await manager.spawn({
+        ...baseConfig,
+        volumes: [{ host: '/tmp/spec/abc', container: '/autopod/spec', readOnly: true }],
+      });
+
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
+      expect(createCall.HostConfig.Binds).toEqual(['/tmp/spec/abc:/autopod/spec:ro']);
+    });
+
     it('skips volume config when no volumes provided', async () => {
       await manager.spawn(baseConfig);
 

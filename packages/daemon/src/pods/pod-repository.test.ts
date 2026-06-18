@@ -144,6 +144,19 @@ describe('PodRepository', () => {
       expect(pod.skipValidation).toBe(false);
     });
 
+    it('round-trips runtime-only spec context files', () => {
+      repo.insert({
+        ...validSession,
+        specContextFiles: [{ path: 'specs/demo/research.md', content: '# Research\n' }],
+      });
+
+      const pod = repo.getOrThrow('sess-001');
+      expect(pod.specContextFiles).toEqual([
+        { path: 'specs/demo/research.md', content: '# Research\n' },
+      ]);
+      expect(pod.specFiles).toBeNull();
+    });
+
     it('should set defaults for optional DB columns', () => {
       repo.insert(validSession);
       const pod = repo.getOrThrow('sess-001');

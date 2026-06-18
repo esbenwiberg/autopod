@@ -67,6 +67,15 @@ export function generateSystemInstructions(
     lines.push('');
   }
 
+  if (pod.specContextFiles && pod.specContextFiles.length > 0) {
+    lines.push('## Spec Context');
+    lines.push('');
+    lines.push(
+      'Reference-only spec files are available at `/autopod/spec/`. Read them when they add useful context, but do not copy or commit them unless the brief explicitly asks for durable repo docs.',
+    );
+    lines.push('');
+  }
+
   // Wrap the user-supplied task in explicit boundary markers so the LLM can distinguish
   // it from system instructions. This is a prompt-injection mitigation: even if the task
   // text contains adversarial instructions they are clearly scoped as user-provided data.
@@ -362,7 +371,7 @@ export function generateSystemInstructions(
     lines.push('## Series Handover Protocol');
     lines.push('');
     lines.push(
-      `This pod is part of series **${pod.seriesName ?? pod.seriesId}**. The next pod in the series will stack its branch on top of yours and read your handover file.`,
+      `This pod is part of series **${pod.seriesName ?? pod.seriesId}**. Runtime handovers live outside the git worktree under \`/autopod/artifacts/handovers/\`.`,
     );
     lines.push('');
 
@@ -376,7 +385,7 @@ export function generateSystemInstructions(
     if (parentIds.length === 1) {
       const [parentId] = parentIds;
       lines.push(
-        `Before starting, read the handover file from your parent pod: \`specs/${pod.seriesId}/handovers/${parentId}.md\`.`,
+        `Before starting, read the handover file from your parent pod: \`/autopod/artifacts/handovers/${parentId}.md\`.`,
       );
       lines.push('');
     } else if (parentIds.length > 1) {
@@ -384,13 +393,13 @@ export function generateSystemInstructions(
         'Before starting, read the handover file from EACH of your parent pods (one per dependency):',
       );
       for (const parentId of parentIds) {
-        lines.push(`- \`specs/${pod.seriesId}/handovers/${parentId}.md\``);
+        lines.push(`- \`/autopod/artifacts/handovers/${parentId}.md\``);
       }
       lines.push('');
     }
 
     lines.push(
-      `Before finishing, write a handover summary to \`specs/${pod.seriesId}/handovers/${pod.id}.md\` and commit it. Include:`,
+      `Before finishing, write a handover summary to \`/autopod/artifacts/handovers/${pod.id}.md\`. Do not commit runtime handovers. Include:`,
     );
     lines.push('- What you built and any deviations from the brief');
     lines.push('- Interfaces or contracts you changed that downstream pods must know about');

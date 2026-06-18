@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -300,6 +300,53 @@ function resolveSpecFilePath(worktreePath: string, filePath: string): string {
     );
   }
   return resolved;
+}
+
+const SPEC_CONTEXT_CONTAINER_DIR = '/autopod/spec';
+const POD_ARTIFACTS_CONTAINER_DIR = '/autopod/artifacts';
+
+function dataDir(): string {
+  return process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
+}
+
+function safeFsSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/g, '_') || 'unknown';
+}
+
+async function materializeSpecContextFiles(
+  podId: string,
+  specContextFiles: readonly SpecFile[] | null | undefined,
+  logger: Logger,
+): Promise<string | null> {
+  if (!specContextFiles || specContextFiles.length === 0) return null;
+
+  const contextRoot = path.join(dataDir(), 'spec-context', safeFsSegment(podId));
+  await rm(contextRoot, { recursive: true, force: true });
+  await mkdir(contextRoot, { recursive: true });
+
+  for (const file of specContextFiles) {
+    const targetPath = resolveSpecFilePath(contextRoot, file.path);
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, file.content, 'utf8');
+  }
+
+  logger.info(
+    { podId, contextRoot, fileCount: specContextFiles.length },
+    'Spec context files materialized',
+  );
+  return contextRoot;
+}
+
+async function ensureSeriesArtifactsDir(pod: Pod, logger: Logger): Promise<string | null> {
+  if (!pod.seriesId) return null;
+
+  const artifactsRoot = path.join(dataDir(), 'pod-artifacts', safeFsSegment(pod.seriesId));
+  const handoversRoot = path.join(artifactsRoot, 'handovers');
+  await mkdir(handoversRoot, { recursive: true });
+  await chmod(artifactsRoot, 0o777).catch(() => {});
+  await chmod(handoversRoot, 0o777).catch(() => {});
+  logger.debug({ podId: pod.id, seriesId: pod.seriesId, artifactsRoot }, 'Series artifacts ready');
+  return artifactsRoot;
 }
 
 async function materializeSpecFiles(
@@ -4791,6 +4838,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             startBranch: effectiveStartBranch !== effectiveBaseBranch ? effectiveStartBranch : null,
             baseBranch: effectiveBaseBranch,
             specFiles: request.specFiles && request.specFiles.length > 0 ? request.specFiles : null,
+            specContextFiles:
+              request.specContextFiles && request.specContextFiles.length > 0
+                ? request.specContextFiles
+                : null,
             linkedPodId: request.linkedPodId ?? null,
             pimGroups: (() => {
               if (request.pimGroups != null) return request.pimGroups;
@@ -5532,6 +5583,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
+        const specContextHostPath = await materializeSpecContextFiles(
+          podId,
+          pod.specContextFiles,
+          logger,
+        );
+        const seriesArtifactsHostPath = await ensureSeriesArtifactsDir(pod, logger);
+
         let containerId: string;
         try {
           containerId = await containerManager.spawn({
@@ -5542,6 +5600,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             volumes: [
               ...(worktreePath ? [{ host: worktreePath, container: '/mnt/worktree' }] : []),
               ...(bareRepoPath ? [{ host: bareRepoPath, container: bareRepoPath }] : []),
+              ...(specContextHostPath
+                ? [
+                    {
+                      host: specContextHostPath,
+                      container: SPEC_CONTEXT_CONTAINER_DIR,
+                      readOnly: true,
+                    },
+                  ]
+                : []),
+              ...(seriesArtifactsHostPath
+                ? [{ host: seriesArtifactsHostPath, container: POD_ARTIFACTS_CONTAINER_DIR }]
+                : []),
               ...(claudeStateDir
                 ? [{ host: claudeStateDir, container: `${CONTAINER_HOME_DIR}/.claude/projects` }]
                 : []),

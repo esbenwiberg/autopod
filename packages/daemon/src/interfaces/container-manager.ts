@@ -5,7 +5,7 @@ export interface ContainerSpawnConfig {
   podId: string;
   env: Record<string, string>;
   ports?: { container: number; host: number }[];
-  volumes?: { host: string; container: string }[];
+  volumes?: { host: string; container: string; readOnly?: boolean }[];
   /** Docker network name for network isolation */
   networkName?: string;
   /** Firewall script to execute after container start (iptables rules) */

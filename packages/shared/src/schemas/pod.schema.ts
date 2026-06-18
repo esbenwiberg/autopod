@@ -130,6 +130,7 @@ export const createPodRequestSchema = z
     startBranch: branchNameSchema.optional(),
     baseBranch: branchNameSchema.optional(),
     specFiles: z.array(specFileSchema).max(200).optional(),
+    specContextFiles: z.array(specFileSchema).max(200).optional(),
     linkedPodId: z.string().min(1).max(64).optional(),
     dependsOnPodId: z.string().min(1).max(64).optional(),
     dependsOnPodIds: z.array(z.string().min(1).max(64)).max(32).optional(),

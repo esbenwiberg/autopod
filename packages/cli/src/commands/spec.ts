@@ -12,10 +12,20 @@ function isDirectory(path: string): boolean {
   }
 }
 
-function readContract(path: string): string {
-  if (!existsSync(path)) {
-    throw new Error(`contract.yaml not found: ${path}`);
+function resolveContractPath(dir: string): string {
+  const yamlPath = join(dir, 'contract.yaml');
+  const ymlPath = join(dir, 'contract.yml');
+  const hasYaml = existsSync(yamlPath);
+  const hasYml = existsSync(ymlPath);
+  if (hasYaml && hasYml) {
+    throw new Error(`both contract.yaml and contract.yml found in ${dir}`);
   }
+  if (hasYaml) return yamlPath;
+  if (hasYml) return ymlPath;
+  throw new Error(`contract.yaml or contract.yml not found in ${dir}`);
+}
+
+function readContract(path: string): string {
   return readFileSync(path, 'utf-8');
 }
 
@@ -51,7 +61,7 @@ function readSeriesBriefFiles(folderPath: string): BriefFile[] {
 
   return briefDirs.map((dirname) => {
     const dir = join(briefsDir, dirname);
-    const contractPath = join(dir, 'contract.yaml');
+    const contractPath = resolveContractPath(dir);
     parseContractAt(contractPath);
     return {
       filename: dirname,
@@ -76,9 +86,15 @@ export function registerSpecCommands(program: Command): void {
 
       try {
         const directBriefPath = join(root, 'brief.md');
-        const directContractPath = join(root, 'contract.yaml');
+        let directContractPath = '';
+        let directContractError: Error | null = null;
+        try {
+          directContractPath = resolveContractPath(root);
+        } catch (err) {
+          directContractError = err instanceof Error ? err : new Error(String(err));
+        }
         const hasDirectBrief = existsSync(directBriefPath);
-        const hasDirectContract = existsSync(directContractPath);
+        const hasDirectContract = directContractPath !== '';
 
         if (hasDirectBrief && hasDirectContract) {
           const [brief] = parseBriefs([
@@ -99,8 +115,11 @@ export function registerSpecCommands(program: Command): void {
 
         if (hasDirectContract) {
           parseContractAt(directContractPath);
-          console.log(chalk.green('Spec OK: contract.yaml'));
+          console.log(chalk.green(`Spec OK: ${basename(directContractPath)}`));
           return;
+        }
+        if (hasDirectBrief && directContractError) {
+          throw directContractError;
         }
 
         const briefs = parseBriefs(readSeriesBriefFiles(root));

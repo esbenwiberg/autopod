@@ -111,6 +111,39 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('report_blocker');
   });
 
+  it('includes runtime-only spec context instructions when specContextFiles exist', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        specContextFiles: [{ path: 'specs/demo/plan.md', content: '# Plan\n' }],
+      }),
+      'http://localhost:8080/mcp/abc12345',
+    );
+
+    expect(md).toContain('## Spec Context');
+    expect(md).toContain('`/autopod/spec/`');
+    expect(md).toContain('do not copy or commit');
+  });
+
+  it('uses ephemeral artifact handovers for series pods', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        id: 'child-1',
+        seriesId: 'demo-series',
+        seriesName: 'Demo Series',
+        dependsOnPodIds: ['parent-a', 'parent-b'],
+      }),
+      'http://localhost:8080/mcp/child-1',
+    );
+
+    expect(md).toContain('/autopod/artifacts/handovers/parent-a.md');
+    expect(md).toContain('/autopod/artifacts/handovers/parent-b.md');
+    expect(md).toContain('/autopod/artifacts/handovers/child-1.md');
+    expect(md).toContain('Do not commit runtime handovers');
+    expect(md).not.toContain('specs/demo-series/handovers');
+  });
+
   it('includes profile finish prompt before report_task_summary when configured', () => {
     const md = generateSystemInstructions(
       makeProfile({

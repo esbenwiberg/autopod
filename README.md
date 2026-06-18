@@ -479,12 +479,16 @@ ap stats                                    # Aggregate counts by status, avg du
 ```bash
 ap spec check specs/my-feature              # Validate a spec folder locally
 ap pod create <profile> --spec specs/task   # Create one pod from brief.md + contract.yaml
+                                             # Spec files are available at /autopod/spec
 ap pod create <profile> --spec specs/task --include-specs
                                              # Also commit spec files onto the pod branch
 ```
 
-`ap series create` has the same `--include-specs` flag for root pods when the
-agent should carry the local spec folder into its branch.
+`contract.yml` is accepted as an alias for `contract.yaml`; if both exist in the
+same spec folder, Autopod errors instead of guessing. `ap series create` exposes
+the spec folder as runtime context for every pod by default and has the same
+`--include-specs` flag for root pods when the agent should carry the local spec
+folder into its branch.
 
 ### Mobile Control
 
@@ -602,7 +606,7 @@ required_facts:
 human_review: []
 ```
 
-Add `purpose.md` and `design.md` at the spec root for context injected into every pod's CLAUDE.md. Brief frontmatter `acceptance_criteria` and markdown `## Acceptance Criteria` sections are no longer accepted for runnable specs; use `contract.yaml` scenarios, required facts, and human review items instead.
+Add `purpose.md` and `design.md` at the spec root for context injected into every pod's CLAUDE.md. The full spec folder is also mounted read-only at `/autopod/spec`, while series handovers live at `/autopod/artifacts/handovers`. Brief frontmatter `acceptance_criteria` and markdown `## Acceptance Criteria` sections are no longer accepted for runnable specs; use `contract.yaml` scenarios, required facts, and human review items instead.
 
 ### Scheduled Jobs
 

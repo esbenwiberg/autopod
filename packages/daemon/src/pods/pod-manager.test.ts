@@ -802,6 +802,24 @@ describe('PodManager', () => {
       expect(pod.specFiles).toEqual([{ path: 'specs/help-modal/brief.md', content: '# Brief\n' }]);
     });
 
+    it('persists runtime-only spec context files', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Implement from local spec',
+          specContextFiles: [{ path: 'specs/help-modal/plan.md', content: '# Plan\n' }],
+        },
+        'user-1',
+      );
+
+      expect(pod.specContextFiles).toEqual([
+        { path: 'specs/help-modal/plan.md', content: '# Plan\n' },
+      ]);
+    });
+
     it('enqueues the pod for processing', () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
@@ -2442,6 +2460,56 @@ describe('PodManager', () => {
         ['specs/help-modal/brief.md'],
         'docs(spec): add pod spec files',
       );
+    });
+
+    it('mounts runtime-only spec context and series artifacts outside the worktree', async () => {
+      const ctx = createTestContext();
+      const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-spec-context-'));
+      const previousDataDir = process.env.DATA_DIR;
+      process.env.DATA_DIR = dataDir;
+      const manager = createPodManager(ctx.deps);
+
+      try {
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Add feature from local spec',
+            specContextFiles: [{ path: 'specs/help-modal/plan.md', content: '# Plan\n' }],
+            seriesId: 'help-modal',
+            seriesName: 'Help modal',
+            skipValidation: true,
+          },
+          'user-1',
+        );
+
+        await manager.processPod(pod.id);
+
+        const mountedContextPath = path.join(dataDir, 'spec-context', pod.id);
+        expect(
+          fs.readFileSync(path.join(mountedContextPath, 'specs/help-modal/plan.md'), 'utf8'),
+        ).toBe('# Plan\n');
+        const spawnCall = vi.mocked(ctx.containerManager.spawn).mock.calls.at(-1)?.[0];
+        expect(spawnCall?.volumes).toEqual(
+          expect.arrayContaining([
+            {
+              host: mountedContextPath,
+              container: '/autopod/spec',
+              readOnly: true,
+            },
+            {
+              host: path.join(dataDir, 'pod-artifacts', 'help-modal'),
+              container: '/autopod/artifacts',
+            },
+          ]),
+        );
+      } finally {
+        if (previousDataDir === undefined) {
+          process.env.DATA_DIR = undefined;
+        } else {
+          process.env.DATA_DIR = previousDataDir;
+        }
+        fs.rmSync(dataDir, { recursive: true, force: true });
+      }
     });
 
     it('fails when the agent reports an execution-environment blocker on completion', async () => {

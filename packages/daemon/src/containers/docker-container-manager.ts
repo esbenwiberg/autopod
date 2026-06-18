@@ -255,7 +255,7 @@ export class DockerContainerManager implements ContainerManager {
     const binds: string[] = [];
     if (config.volumes) {
       for (const v of config.volumes) {
-        binds.push(`${v.host}:${v.container}`);
+        binds.push(`${v.host}:${v.container}${v.readOnly ? ':ro' : ''}`);
       }
     }
 

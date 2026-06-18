@@ -93,12 +93,15 @@ export function serializeValidationResult(result: ValidationResult): unknown {
  */
 export function serializePodForWire(pod: Pod): unknown {
   const hasSpecFilesField = Object.prototype.hasOwnProperty.call(pod, 'specFiles');
-  if (!pod.lastValidationResult && !hasSpecFilesField) {
+  const hasSpecContextFilesField = Object.prototype.hasOwnProperty.call(pod, 'specContextFiles');
+  if (!pod.lastValidationResult && !hasSpecFilesField && !hasSpecContextFilesField) {
     return { ...pod, readinessReview: pod.readinessReview ?? null };
   }
 
   const wirePod = {
-    ...(hasSpecFilesField ? { ...pod, specFiles: undefined } : { ...pod }),
+    ...(hasSpecFilesField || hasSpecContextFilesField
+      ? { ...pod, specFiles: undefined, specContextFiles: undefined }
+      : { ...pod }),
     readinessReview: pod.readinessReview ?? null,
   };
   if (!wirePod.lastValidationResult) return wirePod;
