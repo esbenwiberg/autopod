@@ -1080,15 +1080,18 @@ async function runFactValidation(
       commandPassed ? null : `command exited ${commandResult.exitCode}`,
     ].filter((reason): reason is string => reason !== null);
     const unavailableReason = detectUnavailableFactCommand(commandResult);
-    const factStatus = passed ? 'pass' : unavailableReason ? 'pending_human' : 'fail';
+    const browserInfrastructureReason =
+      fact.kind === 'browser-test' ? detectBrowserFactInfrastructureFailure(commandResult) : null;
+    const pendingHumanReason = unavailableReason ?? browserInfrastructureReason;
+    const factStatus = passed ? 'pass' : pendingHumanReason ? 'pending_human' : 'fail';
     const executionNote =
       !passed && fact.kind === 'browser-test' && config.worktreePath
         ? ` Browser-test fact executed on daemon host worktree (${config.worktreePath}), not inside the agent container.`
         : '';
     const reasoning = passed
       ? `Fact ${fact.id} passed: ${artifactPath} exists, satisfies ${fact.artifact.change}, and command exited 0.`
-      : unavailableReason
-        ? `Fact ${fact.id} needs human decision: ${unavailableReason}`
+      : pendingHumanReason
+        ? `Fact ${fact.id} needs human decision: ${pendingHumanReason}`
         : `Fact ${fact.id} failed: ${failedReasons.join('; ')}.${executionNote}${commandError ? ` ${commandError}` : ''}`;
 
     results.push({
@@ -1149,6 +1152,84 @@ function detectUnavailableFactCommand(result: {
     '(exit 127). This is an environment/spec issue, not a code failure;',
     'install the toolchain, change the profile/template, or approve a waive/replace decision.',
   ].join(' ');
+}
+
+function detectBrowserFactInfrastructureFailure(result: {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}): string | null {
+  if (result.exitCode === 0) return null;
+
+  const combined = `${result.stderr}\n${result.stdout}`;
+  const normalized = combined.replace(/\s+/g, ' ').trim();
+  const detail = normalized.length > 0 ? ` Diagnostic: ${normalized.slice(0, 700)}` : '';
+
+  if (
+    /Host Playwright is not available for browser-test fact execution/i.test(combined) ||
+    /daemon was not wired with a host browser runner/i.test(combined)
+  ) {
+    return [
+      'browser-test could not run in this validation environment because host Playwright is unavailable.',
+      'This is an Autopod/browser infrastructure issue, not evidence that the app behavior failed.',
+      'Refresh the validation browser environment or approve a waive/replace decision.',
+      detail,
+    ].join(' ');
+  }
+
+  if (
+    /Executable doesn't exist at .*?(chromium|chrome|headless_shell)/i.test(combined) ||
+    /chromium_headless_shell-\d+/i.test(combined) ||
+    /Looks like Playwright(?: Test)? or Playwright was just installed or updated/i.test(combined) ||
+    /Please run .*playwright install/i.test(combined) ||
+    /browser (?:revision|build).*?(?:not found|missing|mismatch)/i.test(combined) ||
+    /browser version mismatch/i.test(combined) ||
+    /needs browser \d+.*only (?:have|has) \d+ installed/i.test(combined)
+  ) {
+    return [
+      'browser-test could not run in this validation environment: Playwright browser executable is missing or mismatched.',
+      'This usually means the project Playwright package expects a different cached browser build than Autopod has installed.',
+      'Refresh the validation image/browser cache or approve a waive/replace decision.',
+      detail,
+    ].join(' ');
+  }
+
+  if (
+    /Denied egress: .*?(cdn\.playwright\.dev|playwright\.download\.prss\.microsoft\.com)/i.test(
+      combined,
+    ) ||
+    /firewall_denied/i.test(combined) ||
+    /Download failed:.*?(cdn\.playwright\.dev|playwright\.download\.prss\.microsoft\.com)/i.test(
+      combined,
+    ) ||
+    /playwright install.*?(cdn\.playwright\.dev|playwright\.download\.prss\.microsoft\.com)/i.test(
+      combined,
+    ) ||
+    /Network access for downloads is restricted/i.test(combined)
+  ) {
+    return [
+      'browser-test could not run in this validation environment because Playwright browser download was blocked.',
+      'This is an Autopod egress/browser-cache issue, not evidence that the app behavior failed.',
+      'Prewarm the required browser build in the validation image or approve a waive/replace decision.',
+      detail,
+    ].join(' ');
+  }
+
+  if (
+    /ERR_CONNECTION_CLOSED/i.test(combined) &&
+    /\b(page\.goto|browserType\.launch|chromium|playwright|CDP|DevTools protocol|Target page|browser has been closed)\b/i.test(
+      combined,
+    )
+  ) {
+    return [
+      'browser-test could not run in this validation environment because the Playwright browser connection closed before assertions completed.',
+      'This often indicates browser/CDP drift in the validation environment rather than an app assertion failure.',
+      'Refresh the validation browser environment or approve a waive/replace decision.',
+      detail,
+    ].join(' ');
+  }
+
+  return null;
 }
 
 async function runBrowserFactOnHost(
@@ -1254,12 +1335,7 @@ async function ensureHostBrowserFactDependencies(
     );
   }
 
-  const installCommand = await resolveHostDependencyInstallCommand(worktreePath);
-  const shouldInstallChromium =
-    command.includes('playwright') || manifestMentionsPlaywright(packageJson);
-  const fullCommand = shouldInstallChromium
-    ? `${installCommand} && npx playwright install chromium`
-    : installCommand;
+  const fullCommand = await resolveHostDependencyInstallCommand(worktreePath);
 
   log?.info(
     { worktreePath, command: fullCommand },
@@ -1351,20 +1427,6 @@ function readStringRecordField(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function manifestMentionsPlaywright(packageJson: PackageJsonManifest): boolean {
-  return (
-    declaresPackage(packageJson, 'playwright') ||
-    declaresPackage(packageJson, '@playwright/test') ||
-    Object.values(packageJson.scripts ?? {}).some((script) => /\bplaywright\b/.test(script))
-  );
-}
-
-function declaresPackage(packageJson: PackageJsonManifest, packageName: string): boolean {
-  return Boolean(
-    packageJson.dependencies?.[packageName] ?? packageJson.devDependencies?.[packageName],
-  );
 }
 
 async function missingDeclaredHostPackages(

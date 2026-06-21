@@ -4670,6 +4670,19 @@ describe('PodManager', () => {
         worktreePath: '/tmp/worktrees/test-branch',
         claudeSessionId: 'claude-ses-old',
         validationAttempts: 3,
+        lastValidationResult: makeValidationResult({
+          podId: pod.id,
+          attempt: 3,
+          overall: 'fail',
+          taskReview: {
+            status: 'fail',
+            reasoning: 'Review found actionable issues',
+            issues: ['Hardcoded color in overview.css'],
+            model: 'gpt-5',
+            screenshots: [],
+            diff: '+changed',
+          },
+        }),
       });
 
       await manager.triggerValidation(pod.id, { force: true });
@@ -4684,6 +4697,8 @@ describe('PodManager', () => {
       expect(result.claudeSessionId).toBeNull();
       // reworkReason should be set to signal rework (not crash recovery)
       expect(result.reworkReason).toBeTruthy();
+      expect(result.reworkReason).toContain('Validation Failed');
+      expect(result.reworkReason).toContain('Hardcoded color in overview.css');
       expect(ctx.enqueuedSessions).toContain(pod.id);
       // Old container should be killed
       expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');

@@ -104,6 +104,7 @@ describe('required fact execution', () => {
         throw new Error(`unexpected container command: ${shell}`);
       }),
     } as unknown as ContainerManager;
+    const command = options.command ?? 'printf host-fact';
     const engine = createLocalValidationEngine(
       containerManager,
       undefined,
@@ -147,7 +148,7 @@ required_facts:
     artifact:
       path: Client/tests/facts.spec.ts
       change: create
-    command: ${options.command ?? 'printf host-fact'}
+    command: ${JSON.stringify(command)}
 human_review: []
 `),
       });
@@ -275,6 +276,46 @@ human_review: []
     expect(result.factValidation?.results[0]?.stdout).toBe('host-fact');
   });
 
+  it('does not download Playwright browsers during browser-test dependency prep', async () => {
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: true,
+        cached: false,
+        checkedAt: '2026-05-20T00:00:00.000Z',
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      })),
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+      readScreenshot: vi.fn(async () => ''),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp/autopod/screenshots'),
+    };
+
+    const { result } = await validateBrowserFact({
+      hostBrowserRunner,
+      command: 'npm run --silent fact',
+      setupWorktree: async (worktreePath) => {
+        await fs.writeFile(
+          path.join(worktreePath, 'package.json'),
+          JSON.stringify({
+            name: 'fact-host',
+            version: '1.0.0',
+            scripts: {
+              fact: 'printf host-fact',
+              smoke: 'playwright test',
+            },
+          }),
+        );
+      },
+    });
+
+    expect(result.factValidation?.status).toBe('pass');
+    expect(result.factValidation?.results[0]?.stdout).toBe('host-fact');
+  });
+
   it('collects browser-test fact attachments written on the host', async () => {
     const hostBrowserRunner: HostBrowserRunner = {
       getAvailability: vi.fn(async () => ({
@@ -305,7 +346,7 @@ human_review: []
     });
   });
 
-  it('fails browser-test facts with host diagnostics when host Playwright is unavailable', async () => {
+  it('blocks browser-test facts as pending_human when host Playwright is unavailable', async () => {
     const hostBrowserRunner: HostBrowserRunner = {
       getAvailability: vi.fn(async () => ({
         available: false,
@@ -330,21 +371,156 @@ human_review: []
       command: 'printf should-not-run',
     });
 
-    expect(result.factValidation?.status).toBe('fail');
+    expect(result.factValidation?.status).toBe('pending_human');
+    expect(result.factValidation?.results[0]?.status).toBe('pending_human');
     expect(result.factValidation?.results[0]?.stderr).toContain('chromium probe failed');
     expect(result.factValidation?.results[0]?.stderr).toContain(
       'playwright=/repo/node_modules/playwright/index.js',
     );
     expect(result.factValidation?.results[0]?.stderr).toContain('stderr=browser missing');
+    expect(result.factValidation?.results[0]?.reasoning).toContain(
+      'browser-test could not run in this validation environment',
+    );
     expect(execCommands).not.toContain('printf should-not-run');
   });
 
-  it('keeps browser-test facts host-only when no host runner is wired', async () => {
+  it('blocks browser-test facts as pending_human when Playwright closes the CDP connection', async () => {
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: true,
+        cached: false,
+        checkedAt: '2026-05-20T00:00:00.000Z',
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      })),
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+      readScreenshot: vi.fn(async () => ''),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp/autopod/screenshots'),
+    };
+
+    const { result } = await validateBrowserFact({
+      hostBrowserRunner,
+      command:
+        "printf '%s' 'page.goto: net::ERR_CONNECTION_CLOSED at http://127.0.0.1:3000/' >&2; exit 1",
+    });
+
+    expect(result.factValidation?.status).toBe('pending_human');
+    expect(result.factValidation?.results[0]).toMatchObject({
+      status: 'pending_human',
+      exitCode: 1,
+    });
+    expect(result.factValidation?.results[0]?.reasoning).toContain(
+      'browser-test could not run in this validation environment',
+    );
+  });
+
+  it('blocks browser-test facts as pending_human when Playwright expects a missing browser build', async () => {
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: true,
+        cached: false,
+        checkedAt: '2026-05-20T00:00:00.000Z',
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      })),
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+      readScreenshot: vi.fn(async () => ''),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp/autopod/screenshots'),
+    };
+
+    const missingBrowser = [
+      "browserType.launch: Executable doesn't exist at /opt/pw-browsers/chromium_headless_shell-1223/chrome-linux/headless_shell",
+      'Looks like Playwright Test or Playwright was just installed or updated.',
+      'Please run the following command to download new browsers:',
+      '    npx playwright install',
+    ].join('\n');
+
+    const { result } = await validateBrowserFact({
+      hostBrowserRunner,
+      command: `printf '%s' ${JSON.stringify(missingBrowser)} >&2; exit 1`,
+    });
+
+    expect(result.factValidation?.status).toBe('pending_human');
+    expect(result.factValidation?.results[0]?.reasoning).toContain(
+      'Playwright browser executable is missing or mismatched',
+    );
+  });
+
+  it('blocks browser-test facts as pending_human when Playwright browser download is blocked', async () => {
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: true,
+        cached: false,
+        checkedAt: '2026-05-20T00:00:00.000Z',
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      })),
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+      readScreenshot: vi.fn(async () => ''),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp/autopod/screenshots'),
+    };
+
+    const { result } = await validateBrowserFact({
+      hostBrowserRunner,
+      command:
+        "printf '%s' 'Denied egress: cdn.playwright.dev while running npx playwright install chromium' >&2; exit 1",
+    });
+
+    expect(result.factValidation?.status).toBe('pending_human');
+    expect(result.factValidation?.results[0]?.reasoning).toContain(
+      'Playwright browser download was blocked',
+    );
+  });
+
+  it('keeps browser-test assertion failures as ordinary failed facts', async () => {
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: true,
+        cached: false,
+        checkedAt: '2026-05-20T00:00:00.000Z',
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      })),
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+      readScreenshot: vi.fn(async () => ''),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp/autopod/screenshots'),
+    };
+
+    const { result } = await validateBrowserFact({
+      hostBrowserRunner,
+      command: "printf '%s' 'Error: expect(locator).toBeVisible() failed' >&2; exit 1",
+    });
+
+    expect(result.factValidation?.status).toBe('fail');
+    expect(result.factValidation?.results[0]).toMatchObject({
+      status: 'fail',
+      exitCode: 1,
+    });
+  });
+
+  it('blocks browser-test facts as pending_human when no host runner is wired', async () => {
     const { result, execCommands } = await validateBrowserFact({
       command: 'printf should-not-run',
     });
 
-    expect(result.factValidation?.status).toBe('fail');
+    expect(result.factValidation?.status).toBe('pending_human');
+    expect(result.factValidation?.results[0]?.status).toBe('pending_human');
     expect(result.factValidation?.results[0]?.stderr).toContain(
       'daemon was not wired with a host browser runner',
     );

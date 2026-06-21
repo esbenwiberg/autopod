@@ -238,6 +238,37 @@ function failedFactIds(result: ValidationResult | null): string[] {
 
 const REWORK_IN_PROGRESS_PREFIX = '[REWORK IN PROGRESS]';
 
+function buildManualReworkReason(pod: Pod): string {
+  const fallback =
+    pod.status === 'failed'
+      ? 'Your previous attempt failed. Review what went wrong and try again.'
+      : pod.status === 'review_required'
+        ? 'Your previous attempt exhausted its validation attempts. Review what went wrong and try again with extended attempts.'
+        : pod.status === 'killed'
+          ? 'Your previous pod was killed. Start the task fresh.'
+          : 'Your previous work needs revision. Review and improve it.';
+
+  if (!pod.lastValidationResult || pod.lastValidationResult.overall !== 'fail') {
+    return fallback;
+  }
+
+  const feedback = formatFeedback({
+    type: 'validation_failure',
+    result: pod.lastValidationResult,
+    task: pod.task,
+    attempt: pod.lastValidationResult.attempt ?? pod.validationAttempts,
+    maxAttempts: pod.maxValidationAttempts,
+  });
+
+  return [
+    pod.status === 'review_required'
+      ? 'Manual rework after validation attempts were exhausted. Fix the failed validation and review items below.'
+      : 'Manual rework after validation failure. Fix the failed validation and review items below.',
+    '',
+    feedback,
+  ].join('\n');
+}
+
 function summarizeAgentCompletionBlocker(result: string): string | null {
   const normalized = result.toLowerCase();
   if (normalized.includes('bwrap: no permissions to create a new namespace')) {
@@ -8915,15 +8946,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // a stale/broken pod context. Set reworkReason so processPod builds
         // a rework-specific prompt instead of the generic "you were interrupted" recovery prompt.
         // Interactive pods don't need a rework prompt — they get a fresh container.
-        const reworkReason = isInteractive
-          ? null
-          : pod.status === 'failed'
-            ? 'Your previous attempt failed. Review what went wrong and try again.'
-            : pod.status === 'review_required'
-              ? 'Your previous attempt exhausted its validation attempts. Review what went wrong and try again with extended attempts.'
-              : pod.status === 'killed'
-                ? 'Your previous pod was killed. Start the task fresh.'
-                : 'Your previous work needs revision. Review and improve it.';
+        const reworkReason = isInteractive ? null : buildManualReworkReason(pod);
         const runtime = resolvePodRuntime(profile, pod.runtime, logger);
         const model = resolvePodModel(profile, pod.model, runtime, logger);
         podRepo.update(podId, {
