@@ -6,6 +6,7 @@ import type {
   RequestCredentialPayload,
   ValidationOverridePayload,
 } from '@autopod/shared';
+import type { JSX } from 'react';
 import { useState } from 'react';
 import { ApiError, AuthRequiredError, apiFetch } from '../lib/api.js';
 

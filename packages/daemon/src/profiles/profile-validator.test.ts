@@ -191,41 +191,32 @@ describe('ProfileValidator', () => {
     expect(result.errors.length).toBeGreaterThanOrEqual(7);
   });
 
-  describe('ACI + network policy guard (fix 2.4)', () => {
-    it('rejects ACI profile with restricted network policy', () => {
+  describe('Sandbox + network policy (egress supported natively)', () => {
+    // Unlike the removed ACI backend, the Sandbox execution target supports all
+    // network_policy modes via its per-sandbox egress policy, so none are rejected.
+    it('accepts sandbox profile with restricted network policy', () => {
       const result = validateProfile({
         ...validInput,
-        executionTarget: 'aci',
+        executionTarget: 'sandbox',
         networkPolicy: { enabled: true, mode: 'restricted' },
-      });
-      expect(result.valid).toBe(false);
-      expect(result.errors.some((e) => e.includes("'restricted'") && e.includes('ACI'))).toBe(true);
-    });
-
-    it('rejects ACI profile with deny-all network policy', () => {
-      const result = validateProfile({
-        ...validInput,
-        executionTarget: 'aci',
-        networkPolicy: { enabled: true, mode: 'deny-all' },
-      });
-      expect(result.valid).toBe(false);
-      expect(result.errors.some((e) => e.includes("'deny-all'") && e.includes('ACI'))).toBe(true);
-    });
-
-    it('accepts ACI profile with allow-all network policy', () => {
-      const result = validateProfile({
-        ...validInput,
-        executionTarget: 'aci',
-        networkPolicy: { enabled: true, mode: 'allow-all' },
       });
       expect(result.valid).toBe(true);
     });
 
-    it('accepts ACI profile with network policy disabled', () => {
+    it('accepts sandbox profile with deny-all network policy', () => {
       const result = validateProfile({
         ...validInput,
-        executionTarget: 'aci',
-        networkPolicy: { enabled: false, mode: 'restricted' },
+        executionTarget: 'sandbox',
+        networkPolicy: { enabled: true, mode: 'deny-all' },
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('accepts sandbox profile with allow-all network policy', () => {
+      const result = validateProfile({
+        ...validInput,
+        executionTarget: 'sandbox',
+        networkPolicy: { enabled: true, mode: 'allow-all' },
       });
       expect(result.valid).toBe(true);
     });

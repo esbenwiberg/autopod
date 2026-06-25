@@ -1,4 +1,4 @@
-import type { MemoryEntry, Pod, Profile } from '@autopod/shared';
+import { type MemoryEntry, type Pod, type Profile, parseSpecContract } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import { generateSystemInstructions } from './system-instructions-generator.js';
 
@@ -98,6 +98,18 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('<!-- BEGIN USER TASK -->');
   });
 
+  it('tells agents to reference hyphenated pod ids without shortening them', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({ id: 'coloured-eagle' }),
+      'http://localhost:8080/mcp/coloured-eagle',
+    );
+
+    expect(md).toContain('Pod ID: coloured-eagle');
+    expect(md).toContain('use the exact full Pod ID `coloured-eagle`');
+    expect(md).toContain('Include every hyphen-separated part');
+  });
+
   it('includes MCP server URL', () => {
     const md = generateSystemInstructions(
       makeProfile(),
@@ -109,6 +121,39 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('ask_human');
     expect(md).toContain('ask_ai');
     expect(md).toContain('report_blocker');
+  });
+
+  it('includes runtime-only spec context instructions when specContextFiles exist', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        specContextFiles: [{ path: 'specs/demo/plan.md', content: '# Plan\n' }],
+      }),
+      'http://localhost:8080/mcp/abc12345',
+    );
+
+    expect(md).toContain('## Spec Context');
+    expect(md).toContain('`/autopod/spec/`');
+    expect(md).toContain('do not copy or commit');
+  });
+
+  it('uses ephemeral artifact handovers for series pods', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        id: 'child-1',
+        seriesId: 'demo-series',
+        seriesName: 'Demo Series',
+        dependsOnPodIds: ['parent-a', 'parent-b'],
+      }),
+      'http://localhost:8080/mcp/child-1',
+    );
+
+    expect(md).toContain('/autopod/artifacts/handovers/parent-a.md');
+    expect(md).toContain('/autopod/artifacts/handovers/parent-b.md');
+    expect(md).toContain('/autopod/artifacts/handovers/child-1.md');
+    expect(md).toContain('Do not commit runtime handovers');
+    expect(md).not.toContain('specs/demo-series/handovers');
   });
 
   it('includes profile finish prompt before report_task_summary when configured', () => {
@@ -170,6 +215,36 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('  - exists: .header');
     expect(md).toContain('  - text_contains: .title = "Dashboard"');
     expect(md).toContain('- /settings');
+  });
+
+  it('tells contract pods to use the diff-scoped validation base ref', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        contract: parseSpecContract(`contract_version: 1
+title: Base-sensitive fact
+depends_on: []
+scenarios:
+  - id: capsule-gate
+    given: ["a capsule-covered change"]
+    when: ["validation runs"]
+    then: ["the capsule gate uses the pod's own base"]
+required_facts:
+  - id: fact-capsule-gate
+    proves: [capsule-gate]
+    kind: unit-test
+    artifact:
+      path: tools/check-capsules.mjs
+      change: update
+    command: capsule check --base "$AUTOPOD_VALIDATION_BASE_REF"
+human_review: []
+`),
+      }),
+      'http://localhost:8080/mcp/x',
+    );
+
+    expect(md).toContain('$AUTOPOD_VALIDATION_BASE_REF');
+    expect(md).toContain('$AUTOPOD_PR_BASE_REF');
   });
 
   it('emits a ToolSearch select line when an injected MCP server has toolNames', () => {

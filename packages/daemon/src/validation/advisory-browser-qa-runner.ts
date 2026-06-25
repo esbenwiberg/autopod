@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ContentBlock, ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.js';
+import { CHROMIUM_LAUNCH_ARGS } from '@autopod/shared';
 import type {
   AdvisoryBrowserQaObservation,
   AdvisoryBrowserQaResult,
@@ -890,7 +891,7 @@ const targets = ${JSON.stringify(input.targets)};
 const actionsByTarget = ${JSON.stringify(input.actionsByTarget ?? {})};
 
 await mkdir(screenshotDir, { recursive: true });
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, args: ${JSON.stringify([...CHROMIUM_LAUNCH_ARGS])} });
 const results = [];
 const viewport = { width: 1280, height: 900 };
 
@@ -989,12 +990,150 @@ async function collectAccessibility(page) {
   }
 }
 
+async function waitForCaptureReady(page) {
+  const notes = [];
+  const startedAt = Date.now();
+  const timeoutMs = 2500;
+  const remaining = () => Math.max(1, timeoutMs - (Date.now() - startedAt));
+
+  try {
+    await page.waitForFunction(
+      () => document.readyState === 'interactive' || document.readyState === 'complete',
+      undefined,
+      { timeout: Math.min(1000, remaining()) },
+    );
+  } catch (err) {
+    notes.push(
+      'Document readiness wait timed out: ' + (err instanceof Error ? err.message : String(err)),
+    );
+  }
+
+  try {
+    await page.evaluate(async () => {
+      const fonts = document.fonts;
+      if (!fonts || !fonts.ready) return;
+      await Promise.race([fonts.ready, new Promise((resolve) => setTimeout(resolve, 750))]);
+    });
+  } catch (err) {
+    notes.push(
+      'Font readiness wait failed: ' + (err instanceof Error ? err.message : String(err)),
+    );
+  }
+
+  try {
+    await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+        }),
+    );
+  } catch (err) {
+    notes.push('Paint wait failed: ' + (err instanceof Error ? err.message : String(err)));
+  }
+
+  try {
+    await page.waitForFunction(
+      () => {
+        function isVisible(el) {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return (
+            rect.width > 0 &&
+            rect.height > 0 &&
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            Number(style.opacity || '1') > 0
+          );
+        }
+        const body = document.body;
+        const bodyText = String(body?.innerText || body?.textContent || '')
+          .replace(/\\s+/g, ' ')
+          .trim();
+        if (body && isVisible(body) && bodyText.length > 0) return true;
+
+        const controls = Array.from(
+          document.querySelectorAll(
+            'button,[role="button"],a[href],input,select,textarea,[aria-label],[title]',
+          ),
+        );
+        if (
+          controls.some(
+            (el) =>
+              isVisible(el) &&
+              !el.hasAttribute('disabled') &&
+              el.getAttribute('aria-disabled') !== 'true',
+          )
+        ) {
+          return true;
+        }
+
+        const roots = Array.from(
+          document.querySelectorAll('#root,#app,main,[role="main"],[data-testid]'),
+        );
+        return roots.some((el) => {
+          const text = String(el.textContent || '').replace(/\\s+/g, ' ').trim();
+          return isVisible(el) && text.length > 0;
+        });
+      },
+      undefined,
+      { timeout: Math.min(1500, remaining()) },
+    );
+  } catch (err) {
+    notes.push(
+      'Advisory capture readiness timed out: meaningful visible UI was not detected before screenshot. ' +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
+
+  try {
+    await page.waitForFunction(
+      () =>
+        new Promise((resolve) => {
+          function snapshot() {
+            const el =
+              document.querySelector('#root,#app,main,[role="main"]') ||
+              document.body ||
+              document.documentElement;
+            const rect = el.getBoundingClientRect();
+            return {
+              x: Math.round(rect.x),
+              y: Math.round(rect.y),
+              width: Math.round(rect.width),
+              height: Math.round(rect.height),
+            };
+          }
+          const first = snapshot();
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              const second = snapshot();
+              resolve(
+                Math.abs(first.x - second.x) <= 1 &&
+                  Math.abs(first.y - second.y) <= 1 &&
+                  Math.abs(first.width - second.width) <= 1 &&
+                  Math.abs(first.height - second.height) <= 1,
+              );
+            });
+          });
+        }),
+      undefined,
+      { timeout: Math.min(750, remaining()) },
+    );
+  } catch (err) {
+    notes.push(
+      'Layout stability wait timed out: ' + (err instanceof Error ? err.message : String(err)),
+    );
+  }
+
+  return notes;
+}
+
 async function captureFrame(page, targetId, frameIndex, label, action) {
   const screenshotPath = join(
     screenshotDir,
     safeFilePart(targetId) + '-' + String(frameIndex).padStart(2, '0') + '.png',
   );
-  const notes = [];
+  const readinessNotes = await waitForCaptureReady(page);
+  const notes = [...readinessNotes];
   let bodyText = '';
   try {
     bodyText = await page.locator('body').innerText({ timeout: 5000 });
@@ -1060,7 +1199,6 @@ async function performAction(page, action, controls) {
         throw new Error('click action requires controlIndex, selector, role/name, text, or coordinates');
       }
       await page.waitForLoadState('networkidle', { timeout: 2000 }).catch(() => {});
-      await page.waitForTimeout(250);
       return { status: 'pass', action, summary: action.reason || 'Clicked control' };
     }
     return { status: 'skip', action, summary: 'Unsupported action type' };

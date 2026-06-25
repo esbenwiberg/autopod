@@ -40,6 +40,8 @@ interface CreateSeriesRequest {
   baseBranch?: string;
   /** Local spec files to commit onto root pod branches before agents start. */
   specFiles?: SpecFile[];
+  /** Local spec files to expose as runtime-only context under /autopod/spec. */
+  specContextFiles?: SpecFile[];
   prMode?: 'single' | 'stacked' | 'none';
   /** Auto-approve each pod once it reaches validated — no human gate needed. */
   autoApprove?: boolean;
@@ -135,6 +137,27 @@ function readSpecFiles(specRoot: string): SpecFile[] {
   return files;
 }
 
+function resolveContractPath(specRoot: string): string {
+  const yamlPath = join(specRoot, 'contract.yaml');
+  const ymlPath = join(specRoot, 'contract.yml');
+  const hasYaml = existsSync(yamlPath);
+  const hasYml = existsSync(ymlPath);
+  if (hasYaml && hasYml) {
+    throw new AutopodError(
+      `both contract.yaml and contract.yml found in ${specRoot}`,
+      'DUPLICATE_CONTRACT',
+      400,
+    );
+  }
+  if (hasYaml) return yamlPath;
+  if (hasYml) return ymlPath;
+  throw new AutopodError(
+    `contract.yaml or contract.yml not found in ${specRoot}`,
+    'CONTRACT_NOT_FOUND',
+    404,
+  );
+}
+
 function readBriefFiles(briefsDir: string): Array<{
   filename: string;
   content: string;
@@ -151,7 +174,7 @@ function readBriefFiles(briefsDir: string): Array<{
     return briefDirs.map((dirname) => ({
       filename: dirname,
       content: readFileSync(join(briefsDir, dirname, 'brief.md'), 'utf-8'),
-      contractContent: readFileSync(join(briefsDir, dirname, 'contract.yaml'), 'utf-8'),
+      contractContent: readFileSync(resolveContractPath(join(briefsDir, dirname)), 'utf-8'),
     }));
   }
   return entries
@@ -169,15 +192,26 @@ function readSingleBriefFiles(specRoot: string): Array<{
   contractContent?: string;
 }> {
   const briefPath = join(specRoot, 'brief.md');
-  const contractPath = join(specRoot, 'contract.yaml');
+  let contractPath = '';
+  let contractError: Error | null = null;
+  try {
+    contractPath = resolveContractPath(specRoot);
+  } catch (err) {
+    contractError = err instanceof Error ? err : new Error(String(err));
+  }
   const hasDirectBrief = existsSync(briefPath);
-  const hasDirectContract = existsSync(contractPath);
+  const hasDirectContract = contractPath !== '';
   if (hasDirectBrief || hasDirectContract) {
     if (!hasDirectBrief) {
       throw new AutopodError(`brief.md not found in ${specRoot}`, 'BRIEF_NOT_FOUND', 404);
     }
     if (!hasDirectContract) {
-      throw new AutopodError(`contract.yaml not found in ${specRoot}`, 'CONTRACT_NOT_FOUND', 404);
+      if (contractError) throw contractError;
+      throw new AutopodError(
+        `contract.yaml or contract.yml not found in ${specRoot}`,
+        'CONTRACT_NOT_FOUND',
+        404,
+      );
     }
     return [
       {
@@ -308,6 +342,7 @@ export function seriesRoutes(
             startBranch: isRoot ? body.startBranch : undefined,
             baseBranch: isRoot ? (body.baseBranch ?? undefined) : undefined,
             specFiles: isRoot && body.specFiles?.length ? body.specFiles : undefined,
+            specContextFiles: body.specContextFiles?.length ? body.specContextFiles : undefined,
             dependsOnPodIds: dependsOnPodIds.length > 0 ? dependsOnPodIds : undefined,
             // Single mode: non-root pods reuse the root's branch so all commits
             // land on one branch and the final pod creates a single PR.
@@ -435,6 +470,7 @@ export function seriesRoutes(
       seriesName,
       briefs,
       specFiles,
+      specContextFiles: specFiles,
       seriesDescription: seriesDescription || undefined,
       seriesDesign: seriesDesign || undefined,
     };
@@ -483,7 +519,8 @@ export function seriesRoutes(
         sourceDescription: folderPath,
         loadContextFile,
       });
-      return { ...brief, specFiles: readSpecFiles(folderPath) };
+      const specFiles = readSpecFiles(folderPath);
+      return { ...brief, specFiles, specContextFiles: specFiles };
     } catch (err) {
       if (err instanceof AutopodError) {
         reply.status(err.statusCode ?? 400);

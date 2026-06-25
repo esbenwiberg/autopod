@@ -1,4 +1,5 @@
 import type { Pod, Profile } from '@autopod/shared';
+import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiError, AuthRequiredError, apiFetch } from '../lib/api.js';

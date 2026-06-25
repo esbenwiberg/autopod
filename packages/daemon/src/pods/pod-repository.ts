@@ -56,6 +56,8 @@ export interface NewPod {
   baseBranch?: string | null;
   /** Local spec files to materialize before the agent starts. */
   specFiles?: SpecFile[] | null;
+  /** Local spec files to expose as runtime-only context under /autopod/spec. */
+  specContextFiles?: SpecFile[] | null;
   linkedPodId?: string | null;
   pimGroups?: PimGroupConfig[] | null;
   /** Existing PR URL (set at creation for fix pods to skip PR creation) */
@@ -323,6 +325,9 @@ function rowToSession(row: Record<string, unknown>): Pod {
     startBranch: (row.start_branch as string) ?? null,
     baseBranch: (row.base_branch as string) ?? null,
     specFiles: row.spec_files ? (JSON.parse(row.spec_files as string) as SpecFile[]) : null,
+    specContextFiles: row.spec_context_files
+      ? (JSON.parse(row.spec_context_files as string) as SpecFile[])
+      : null,
     recoveryWorktreePath: (row.recovery_worktree_path as string) ?? null,
     reworkReason: (row.rework_reason as string) ?? null,
     reworkCount: (row.rework_count as number) ?? 0,
@@ -430,7 +435,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, creator_email, creator_name, max_validation_attempts, skip_validation, contract,
           output_mode, agent_mode, output_target, validate, advisory_browser_qa_enabled, promotable,
-          start_branch, base_branch, spec_files, linked_pod_id, pim_groups, pr_url,
+          start_branch, base_branch, spec_files, spec_context_files, linked_pod_id, pim_groups, pr_url,
           token_budget, reference_repos, scheduled_job_id,
           depends_on_pod_id, depends_on_pod_ids, series_id, series_name, series_description,
           series_design, brief_title, touches, does_not_touch, pr_mode, wait_for_merge,
@@ -439,7 +444,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @creatorEmail, @creatorName, @maxValidationAttempts, @skipValidation, @contract,
           @outputMode, @agentMode, @outputTarget, @validate, @advisoryBrowserQaEnabled, @promotable,
-          @startBranch, @baseBranch, @specFiles, @linkedPodId, @pimGroups, @prUrl,
+          @startBranch, @baseBranch, @specFiles, @specContextFiles, @linkedPodId, @pimGroups, @prUrl,
           @tokenBudget, @referenceRepos, @scheduledJobId,
           @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName, @seriesDescription,
           @seriesDesign, @briefTitle, @touches, @doesNotTouch, @prMode, @waitForMerge,
@@ -469,6 +474,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         startBranch: pod.startBranch ?? null,
         baseBranch: pod.baseBranch ?? null,
         specFiles: pod.specFiles ? JSON.stringify(pod.specFiles) : null,
+        specContextFiles: pod.specContextFiles ? JSON.stringify(pod.specContextFiles) : null,
         linkedPodId: pod.linkedPodId ?? null,
         pimGroups: pod.pimGroups ? JSON.stringify(pod.pimGroups) : null,
         prUrl: pod.prUrl ?? null,

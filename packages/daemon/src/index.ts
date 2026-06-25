@@ -414,52 +414,45 @@ const podQueue = createPodQueue(
   logger,
 );
 
-// ACI container manager (opt-in via env vars)
-const ACI_SUBSCRIPTION_ID = process.env.AZURE_SUBSCRIPTION_ID;
-const ACI_RESOURCE_GROUP = process.env.AZURE_RESOURCE_GROUP;
-const ACI_LOCATION = process.env.AZURE_LOCATION ?? 'westeurope';
-const ACI_ACR_USERNAME = process.env.ACR_USERNAME;
-const ACI_ACR_PASSWORD = process.env.ACR_PASSWORD;
+// Azure Container Apps Sandboxes manager (opt-in via env vars).
+// SCAFFOLD: the backend is not yet wired (preview SDK unconfirmed) — see
+// containers/sandbox-container-manager.ts. It activates when the Azure env is
+// present so a profile can opt into executionTarget:'sandbox' and get a clear
+// not-wired error rather than silently running on Docker.
+const SANDBOX_SUBSCRIPTION_ID = process.env.AZURE_SUBSCRIPTION_ID;
+const SANDBOX_RESOURCE_GROUP = process.env.AZURE_RESOURCE_GROUP;
+const SANDBOX_LOCATION = process.env.AZURE_LOCATION ?? 'westeurope';
 
-let aciContainerManager:
-  | import('./containers/aci-container-manager.js').AciContainerManager
+let sandboxContainerManager:
+  | import('./containers/sandbox-container-manager.js').SandboxContainerManager
   | undefined;
-if (
-  ACI_SUBSCRIPTION_ID &&
-  ACI_RESOURCE_GROUP &&
-  ACR_REGISTRY_URL &&
-  ACI_ACR_USERNAME &&
-  ACI_ACR_PASSWORD
-) {
-  const { AciContainerManager } = await import('./containers/aci-container-manager.js');
-  aciContainerManager = new AciContainerManager(
+if (SANDBOX_SUBSCRIPTION_ID && SANDBOX_RESOURCE_GROUP) {
+  const { SandboxContainerManager } = await import('./containers/sandbox-container-manager.js');
+  sandboxContainerManager = new SandboxContainerManager(
     {
-      subscriptionId: ACI_SUBSCRIPTION_ID,
-      resourceGroup: ACI_RESOURCE_GROUP,
-      acrRegistryUrl: ACR_REGISTRY_URL,
-      acrUsername: ACI_ACR_USERNAME,
-      acrPassword: ACI_ACR_PASSWORD,
-      location: ACI_LOCATION,
+      subscriptionId: SANDBOX_SUBSCRIPTION_ID,
+      resourceGroup: SANDBOX_RESOURCE_GROUP,
+      location: SANDBOX_LOCATION,
     },
     logger,
   );
   logger.info(
-    { subscriptionId: ACI_SUBSCRIPTION_ID, resourceGroup: ACI_RESOURCE_GROUP },
-    'ACI execution target enabled',
+    { subscriptionId: SANDBOX_SUBSCRIPTION_ID, resourceGroup: SANDBOX_RESOURCE_GROUP },
+    'Sandbox execution target enabled (scaffold — not yet wired)',
   );
 }
 
-// Container manager factory — routes to Docker (local) or ACI based on execution target
+// Container manager factory — routes to Docker (local) or Sandboxes by execution target
 const containerManagerFactory = {
   get(target: import('@autopod/shared').ExecutionTarget) {
-    if (target === 'aci') {
-      if (!aciContainerManager) {
+    if (target === 'sandbox') {
+      if (!sandboxContainerManager) {
         throw new Error(
-          'ACI execution target requested but not configured. ' +
-            'Set AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, ACR_REGISTRY_URL, ACR_USERNAME, ACR_PASSWORD.',
+          'Sandbox execution target requested but not configured. ' +
+            'Set AZURE_SUBSCRIPTION_ID and AZURE_RESOURCE_GROUP.',
         );
       }
-      return aciContainerManager;
+      return sandboxContainerManager;
     }
     return containerManager;
   },
@@ -753,20 +746,20 @@ screenshotRetention.start();
 // Start scheduled job scheduler AFTER server is listening
 scheduledJobScheduler.start();
 
-// Reconcile ACI pods after startup (non-blocking — errors are logged, not fatal)
-if (aciContainerManager) {
-  const { reconcileAciSessions } = await import('./pods/reconciler.js');
-  reconcileAciSessions({
+// Reconcile sandbox pods after startup (non-blocking — errors are logged, not fatal)
+if (sandboxContainerManager) {
+  const { reconcileSandboxSessions } = await import('./pods/reconciler.js');
+  reconcileSandboxSessions({
     podRepo,
     eventBus,
-    aciContainerManager,
+    sandboxContainerManager,
     onReconnected: async (podId, _containerId) => {
       // Re-trigger completion handling for reconnected pods
       await podManager.handleCompletion(podId);
     },
     logger,
   }).catch((err) => {
-    logger.error({ err }, 'ACI pod reconciliation failed');
+    logger.error({ err }, 'Sandbox pod reconciliation failed');
   });
 }
 

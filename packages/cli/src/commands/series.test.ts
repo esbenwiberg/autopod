@@ -38,14 +38,14 @@ required_facts:
 human_review: []
 `;
 
-function createSeriesSpecFolder(): string {
+function createSeriesSpecFolder(contractName = 'contract.yaml'): string {
   const root = mkdtempSync(join(tmpdir(), 'autopod-cli-series-'));
   const briefDir = join(root, 'briefs', '01-first');
   mkdirSync(briefDir, { recursive: true });
   writeFileSync(join(root, 'purpose.md'), 'Ship a small feature.\n');
   writeFileSync(join(root, 'design.md'), 'Keep the design scoped.\n');
   writeFileSync(join(briefDir, 'brief.md'), '## Task\nBuild the first piece.\n');
-  writeFileSync(join(briefDir, 'contract.yaml'), contractYaml);
+  writeFileSync(join(briefDir, contractName), contractYaml);
   return root;
 }
 
@@ -86,7 +86,7 @@ describe('series commands', () => {
     }
   });
 
-  it('does not include local spec files for series creation by default', async () => {
+  it('exposes local spec files as runtime context for series creation by default', async () => {
     const specRoot = createSeriesSpecFolder();
     createdDirs.push(specRoot);
 
@@ -96,6 +96,27 @@ describe('series commands', () => {
       .calls[0][0] as Record<string, unknown>;
     expect(call.briefs).toHaveLength(1);
     expect(call.specFiles).toBeUndefined();
+    const outputRoot = `specs/${specRoot.split('/').at(-1)}`;
+    expect(call.specContextFiles).toEqual([
+      {
+        path: `${outputRoot}/briefs/01-first/brief.md`,
+        content: '## Task\nBuild the first piece.\n',
+      },
+      { path: `${outputRoot}/briefs/01-first/contract.yaml`, content: contractYaml },
+      { path: `${outputRoot}/design.md`, content: 'Keep the design scoped.\n' },
+      { path: `${outputRoot}/purpose.md`, content: 'Ship a small feature.\n' },
+    ]);
+  });
+
+  it('accepts contract.yml for series creation', async () => {
+    const specRoot = createSeriesSpecFolder('contract.yml');
+    createdDirs.push(specRoot);
+
+    await program.parseAsync(['node', 'ap', 'series', 'create', specRoot, '--profile', 'test']);
+
+    const call = (mockClient.createSeries as unknown as { mock: { calls: [unknown][] } }).mock
+      .calls[0][0] as Record<string, unknown>;
+    expect(call.briefs).toHaveLength(1);
   });
 
   it('includes local spec files for series creation when opted in', async () => {
@@ -125,5 +146,27 @@ describe('series commands', () => {
       { path: `${outputRoot}/design.md`, content: 'Keep the design scoped.\n' },
       { path: `${outputRoot}/purpose.md`, content: 'Ship a small feature.\n' },
     ]);
+    expect(call.specContextFiles).toEqual(call.specFiles);
+  });
+
+  it('can disable runtime spec context for series creation', async () => {
+    const specRoot = createSeriesSpecFolder();
+    createdDirs.push(specRoot);
+
+    await program.parseAsync([
+      'node',
+      'ap',
+      'series',
+      'create',
+      specRoot,
+      '--profile',
+      'test',
+      '--no-spec-context',
+    ]);
+
+    const call = (mockClient.createSeries as unknown as { mock: { calls: [unknown][] } }).mock
+      .calls[0][0] as Record<string, unknown>;
+    expect(call.specFiles).toBeUndefined();
+    expect(call.specContextFiles).toBeUndefined();
   });
 });

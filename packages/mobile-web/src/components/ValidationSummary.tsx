@@ -1,4 +1,5 @@
 import type { ValidationResult } from '@autopod/shared';
+import type { JSX } from 'react';
 import { useState } from 'react';
 
 export interface StoredValidation {

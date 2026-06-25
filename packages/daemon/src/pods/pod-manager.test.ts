@@ -802,6 +802,24 @@ describe('PodManager', () => {
       expect(pod.specFiles).toEqual([{ path: 'specs/help-modal/brief.md', content: '# Brief\n' }]);
     });
 
+    it('persists runtime-only spec context files', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Implement from local spec',
+          specContextFiles: [{ path: 'specs/help-modal/plan.md', content: '# Plan\n' }],
+        },
+        'user-1',
+      );
+
+      expect(pod.specContextFiles).toEqual([
+        { path: 'specs/help-modal/plan.md', content: '# Plan\n' },
+      ]);
+    });
+
     it('enqueues the pod for processing', () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
@@ -2345,6 +2363,9 @@ describe('PodManager', () => {
         .mocked(ctx.containerManager.writeFile)
         .mock.calls.find((call) => call[1] === AGENT_ENV_PATH);
       expect(String(envFileWrite?.[2])).toContain(`export POD_ID='${pod.id}'`);
+      expect(String(envFileWrite?.[2])).toContain(
+        "export AUTOPOD_VALIDATION_BASE_REF='abc1234567890abcdef1234567890abcdef1234'",
+      );
       expect(reviewer.generateText).toHaveBeenCalledTimes(1);
     });
 
@@ -2444,6 +2465,56 @@ describe('PodManager', () => {
       );
     });
 
+    it('mounts runtime-only spec context and series artifacts outside the worktree', async () => {
+      const ctx = createTestContext();
+      const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-spec-context-'));
+      const previousDataDir = process.env.DATA_DIR;
+      process.env.DATA_DIR = dataDir;
+      const manager = createPodManager(ctx.deps);
+
+      try {
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Add feature from local spec',
+            specContextFiles: [{ path: 'specs/help-modal/plan.md', content: '# Plan\n' }],
+            seriesId: 'help-modal',
+            seriesName: 'Help modal',
+            skipValidation: true,
+          },
+          'user-1',
+        );
+
+        await manager.processPod(pod.id);
+
+        const mountedContextPath = path.join(dataDir, 'spec-context', pod.id);
+        expect(
+          fs.readFileSync(path.join(mountedContextPath, 'specs/help-modal/plan.md'), 'utf8'),
+        ).toBe('# Plan\n');
+        const spawnCall = vi.mocked(ctx.containerManager.spawn).mock.calls.at(-1)?.[0];
+        expect(spawnCall?.volumes).toEqual(
+          expect.arrayContaining([
+            {
+              host: mountedContextPath,
+              container: '/autopod/spec',
+              readOnly: true,
+            },
+            {
+              host: path.join(dataDir, 'pod-artifacts', 'help-modal'),
+              container: '/autopod/artifacts',
+            },
+          ]),
+        );
+      } finally {
+        if (previousDataDir === undefined) {
+          process.env.DATA_DIR = undefined;
+        } else {
+          process.env.DATA_DIR = previousDataDir;
+        }
+        fs.rmSync(dataDir, { recursive: true, force: true });
+      }
+    });
+
     it('fails when the agent reports an execution-environment blocker on completion', async () => {
       const ctx = createTestContext();
       (ctx.runtime.spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(
@@ -2486,6 +2557,26 @@ describe('PodManager', () => {
       expect(ctx.containerManager.spawn).toHaveBeenCalled();
       expect(ctx.worktreeManager.create).toHaveBeenCalled();
       expect(ctx.containerManager.writeFile).toHaveBeenCalled();
+      expect(vi.mocked(ctx.containerManager.spawn).mock.calls[0]?.[0].env).toMatchObject({
+        AUTOPOD_POD_ID: pod.id,
+        AUTOPOD_HEAD_BRANCH: pod.branch,
+        AUTOPOD_BASE_BRANCH: 'main',
+        AUTOPOD_PR_BASE_REF: 'origin/main',
+        AUTOPOD_VALIDATION_BASE_REF: 'abc1234567890abcdef1234567890abcdef1234',
+        AUTOPOD_START_COMMIT_SHA: 'abc1234567890abcdef1234567890abcdef1234',
+      });
+      expect(ctx.runtime.spawn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          env: expect.objectContaining({
+            AUTOPOD_POD_ID: pod.id,
+            AUTOPOD_HEAD_BRANCH: pod.branch,
+            AUTOPOD_BASE_BRANCH: 'main',
+            AUTOPOD_PR_BASE_REF: 'origin/main',
+            AUTOPOD_VALIDATION_BASE_REF: 'abc1234567890abcdef1234567890abcdef1234',
+            AUTOPOD_START_COMMIT_SHA: 'abc1234567890abcdef1234567890abcdef1234',
+          }),
+        }),
+      );
     });
 
     it('spawns from profile.warmImageTag when set, falling back to base image otherwise', async () => {
@@ -3431,6 +3522,34 @@ describe('PodManager', () => {
         expect.any(AbortSignal),
         expect.any(Object),
       );
+    });
+
+    it('passes diff-scoped validation base context to validation commands', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        startCommitSha: 'parent-tip-sha',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const validateConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[0]?.[0];
+      expect(validateConfig?.extraExecEnv).toMatchObject({
+        AUTOPOD_POD_ID: pod.id,
+        AUTOPOD_HEAD_BRANCH: pod.branch,
+        AUTOPOD_BASE_BRANCH: 'main',
+        AUTOPOD_PR_BASE_REF: 'origin/main',
+        AUTOPOD_VALIDATION_BASE_REF: 'parent-tip-sha',
+        AUTOPOD_START_COMMIT_SHA: 'parent-tip-sha',
+      });
     });
 
     it('readiness refresh updates after deferred advisory finishes', async () => {
@@ -4602,6 +4721,19 @@ describe('PodManager', () => {
         worktreePath: '/tmp/worktrees/test-branch',
         claudeSessionId: 'claude-ses-old',
         validationAttempts: 3,
+        lastValidationResult: makeValidationResult({
+          podId: pod.id,
+          attempt: 3,
+          overall: 'fail',
+          taskReview: {
+            status: 'fail',
+            reasoning: 'Review found actionable issues',
+            issues: ['Hardcoded color in overview.css'],
+            model: 'gpt-5',
+            screenshots: [],
+            diff: '+changed',
+          },
+        }),
       });
 
       await manager.triggerValidation(pod.id, { force: true });
@@ -4616,6 +4748,8 @@ describe('PodManager', () => {
       expect(result.claudeSessionId).toBeNull();
       // reworkReason should be set to signal rework (not crash recovery)
       expect(result.reworkReason).toBeTruthy();
+      expect(result.reworkReason).toContain('Validation Failed');
+      expect(result.reworkReason).toContain('Hardcoded color in overview.css');
       expect(ctx.enqueuedSessions).toContain(pod.id);
       // Old container should be killed
       expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
@@ -7176,13 +7310,13 @@ describe('PodManager', () => {
           startedAt: stale,
         });
         ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: stale });
-        // Mark as 'aci' so the wake-recovery reconciler (which only processes
+        // Mark as 'sandbox' so the wake-recovery reconciler (which only processes
         // 'local' pods) doesn't touch this pod and interfere with the status.
-        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('aci', pod.id);
+        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('sandbox', pod.id);
 
         manager.startStuckPodWatchdog({ intervalMs: 200, thresholdMs: 30 * 60 * 1000 });
 
-        // Emit host.resumed at T=0 — sets lastWakeAt; reconciler skips 'aci' pod.
+        // Emit host.resumed at T=0 — sets lastWakeAt; reconciler skips 'sandbox' pod.
         ctx.eventBus.emit({
           type: 'host.resumed',
           timestamp: new Date().toISOString(),
@@ -7221,11 +7355,11 @@ describe('PodManager', () => {
           startedAt: stale,
         });
         ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: stale });
-        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('aci', pod.id);
+        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('sandbox', pod.id);
 
         manager.startStuckPodWatchdog({ intervalMs: 200, thresholdMs: 30 * 60 * 1000 });
 
-        // Emit wake at T=0 — reconciler skips 'aci' pod.
+        // Emit wake at T=0 — reconciler skips 'sandbox' pod.
         ctx.eventBus.emit({
           type: 'host.resumed',
           timestamp: new Date().toISOString(),
@@ -7260,7 +7394,7 @@ describe('PodManager', () => {
           startedAt: stale,
         });
         ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: stale });
-        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('aci', pod.id);
+        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('sandbox', pod.id);
 
         manager.startStuckPodWatchdog({ intervalMs: 200, thresholdMs: 30 * 60 * 1000 });
 

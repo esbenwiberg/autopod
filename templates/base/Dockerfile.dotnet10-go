@@ -147,6 +147,8 @@ ENV TURBO_CACHE_DIR=/tmp/.turbo
 # Point node-gyp at local Node headers so native addon rebuilds work offline
 # (nodesource installs headers under /usr/include/node/).
 ENV npm_config_nodedir=/usr
+# Fail base-image builds when the cached Playwright browser cannot launch as the runtime user.
+RUN node -e "const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); await browser.close(); })().catch((err) => { console.error(err); process.exit(1); });"
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:${PORT:-3000}/health || exit 1

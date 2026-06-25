@@ -479,12 +479,16 @@ ap stats                                    # Aggregate counts by status, avg du
 ```bash
 ap spec check specs/my-feature              # Validate a spec folder locally
 ap pod create <profile> --spec specs/task   # Create one pod from brief.md + contract.yaml
+                                             # Spec files are available at /autopod/spec
 ap pod create <profile> --spec specs/task --include-specs
                                              # Also commit spec files onto the pod branch
 ```
 
-`ap series create` has the same `--include-specs` flag for root pods when the
-agent should carry the local spec folder into its branch.
+`contract.yml` is accepted as an alias for `contract.yaml`; if both exist in the
+same spec folder, Autopod errors instead of guessing. `ap series create` exposes
+the spec folder as runtime context for every pod by default and has the same
+`--include-specs` flag for root pods when the agent should carry the local spec
+folder into its branch.
 
 ### Mobile Control
 
@@ -602,7 +606,7 @@ required_facts:
 human_review: []
 ```
 
-Add `purpose.md` and `design.md` at the spec root for context injected into every pod's CLAUDE.md. Brief frontmatter `acceptance_criteria` and markdown `## Acceptance Criteria` sections are no longer accepted for runnable specs; use `contract.yaml` scenarios, required facts, and human review items instead.
+Add `purpose.md` and `design.md` at the spec root for context injected into every pod's CLAUDE.md. The full spec folder is also mounted read-only at `/autopod/spec`, while series handovers live at `/autopod/artifacts/handovers`. Brief frontmatter `acceptance_criteria` and markdown `## Acceptance Criteria` sections are no longer accepted for runnable specs; use `contract.yaml` scenarios, required facts, and human review items instead.
 
 ### Scheduled Jobs
 
@@ -681,7 +685,7 @@ skipValidationPhases: [] # setup|lint|sast|build|test|health|pages|facts|review|
 hasWebUi: true
 agentDonePrompt: null
 branchPrefix: autopod/
-executionTarget: local # local|aci
+executionTarget: local # local|sandbox
 workerProfile: my-app
 pod:
   advisoryBrowserQaEnabled: false
@@ -1093,18 +1097,23 @@ PIM groups are activated automatically when the workspace starts and deactivated
 ```yaml
 executionTarget: local   # Run containers on the local Docker socket (default)
 # or
-executionTarget: aci     # Run containers in Azure Container Instances
+executionTarget: sandbox # Run containers in Azure Container Apps Sandboxes (scaffold — not yet wired)
 ```
 
-| | Local | ACI |
+| | Local | Sandbox (Azure Container Apps) |
 |--|--|--|
-| Setup | Docker socket | Azure subscription + ACR |
-| Cost | Host resources | Pay-per-second |
-| Isolation | Docker bridge per pod | Per ACI container group |
+| Setup | Docker socket | Azure subscription + preview enrollment |
+| Cost | Host resources | Scale-to-zero (pay nothing when idle) |
+| Isolation | Docker bridge per pod | Per-sandbox microVM |
+| Egress control | iptables + HAProxy | Native per-sandbox egress policy (all modes) |
 | Scale | Host CPU/memory | Azure quota |
-| Cold start | Fast (cached image) | ~30s (pull from ACR) |
+| Cold start | Fast (cached image) | Sub-second (prewarmed pools) |
 
-For ACI, set `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZURE_LOCATION`, `ACR_USERNAME`, `ACR_PASSWORD` and run `ap profile warm <name>` to push the image to ACR before your first pod.
+> **Status:** the `sandbox` target is **scaffolded but not yet wired** — selecting it
+> surfaces a clear `NOT_IMPLEMENTED` error. The preview SDK must first be confirmed via
+> `spikes/aca-sandbox/probe.py` against an enrolled Entra tenant. It replaces the former
+> ACI backend. To enable it once implemented, set `AZURE_SUBSCRIPTION_ID`,
+> `AZURE_RESOURCE_GROUP`, and `AZURE_LOCATION`.
 
 ### Profile Versioning
 

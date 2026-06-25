@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { useEffect } from 'react';
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { readStoredToken, readTokenFromHash } from './lib/token.js';

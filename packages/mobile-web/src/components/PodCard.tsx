@@ -1,4 +1,5 @@
 import type { Pod } from '@autopod/shared';
+import type { JSX } from 'react';
 import { Link } from 'react-router-dom';
 import {
   planLabel,

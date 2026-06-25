@@ -111,10 +111,10 @@ required_facts:
 human_review: []
 `;
 
-function createSpecFolder(): string {
+function createSpecFolder(contractName = 'contract.yaml'): string {
   const root = mkdtempSync(join(tmpdir(), 'autopod-cli-spec-'));
   writeFileSync(join(root, 'brief.md'), '## Task\nBuild from the spec.\n');
-  writeFileSync(join(root, 'contract.yaml'), contractYaml);
+  writeFileSync(join(root, contractName), contractYaml);
   writeFileSync(join(root, 'notes.md'), 'Planning context.\n');
   return root;
 }
@@ -215,7 +215,7 @@ describe('pod commands', () => {
     expect(call).not.toHaveProperty('referenceRepoPat');
   });
 
-  it('does not include local spec files for --spec pod creation by default', async () => {
+  it('exposes local spec files as runtime context for --spec pod creation by default', async () => {
     const specRoot = createSpecFolder();
     createdDirs.push(specRoot);
 
@@ -226,6 +226,23 @@ describe('pod commands', () => {
     expect(call.task).toBe('## Task\nBuild from the spec.');
     expect(call.contract).toEqual(expect.objectContaining({ title: 'Brief contract' }));
     expect(call.specFiles).toBeUndefined();
+    const outputRoot = `specs/${specRoot.split('/').at(-1)}`;
+    expect(call.specContextFiles).toEqual([
+      { path: `${outputRoot}/brief.md`, content: '## Task\nBuild from the spec.\n' },
+      { path: `${outputRoot}/contract.yaml`, content: contractYaml },
+      { path: `${outputRoot}/notes.md`, content: 'Planning context.\n' },
+    ]);
+  });
+
+  it('accepts contract.yml for --spec pod creation', async () => {
+    const specRoot = createSpecFolder('contract.yml');
+    createdDirs.push(specRoot);
+
+    await program.parseAsync(['node', 'ap', 'pod', 'create', 'test-profile', '--spec', specRoot]);
+
+    const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
+      .calls[0][0] as Record<string, unknown>;
+    expect(call.contract).toEqual(expect.objectContaining({ title: 'Brief contract' }));
   });
 
   it('includes local spec files for --spec pod creation when opted in', async () => {
@@ -251,6 +268,28 @@ describe('pod commands', () => {
       { path: `${outputRoot}/contract.yaml`, content: contractYaml },
       { path: `${outputRoot}/notes.md`, content: 'Planning context.\n' },
     ]);
+    expect(call.specContextFiles).toEqual(call.specFiles);
+  });
+
+  it('can disable runtime spec context for --spec pod creation', async () => {
+    const specRoot = createSpecFolder();
+    createdDirs.push(specRoot);
+
+    await program.parseAsync([
+      'node',
+      'ap',
+      'pod',
+      'create',
+      'test-profile',
+      '--spec',
+      specRoot,
+      '--no-spec-context',
+    ]);
+
+    const call = (mockClient.createSession as unknown as { mock: { calls: [unknown][] } }).mock
+      .calls[0][0] as Record<string, unknown>;
+    expect(call.specFiles).toBeUndefined();
+    expect(call.specContextFiles).toBeUndefined();
   });
 
   it('omits referenceRepos when no ref flags are passed', async () => {

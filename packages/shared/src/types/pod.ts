@@ -196,6 +196,11 @@ export interface Pod {
    * Stripped from API wire responses because contents can be large.
    */
   specFiles: SpecFile[] | null;
+  /**
+   * Local spec files to expose as runtime-only context. These are never
+   * committed to the pod branch and are stripped from API wire responses.
+   */
+  specContextFiles: SpecFile[] | null;
   recoveryWorktreePath: string | null;
   reworkReason: string | null;
   reworkCount: number;
@@ -440,6 +445,8 @@ export interface CreatePodRequest {
   baseBranch?: string;
   /** Local spec files to materialize onto the pod branch before the agent starts. */
   specFiles?: SpecFile[];
+  /** Local spec files to expose as runtime-only context under /autopod/spec. */
+  specContextFiles?: SpecFile[];
   linkedPodId?: string;
   /** PIM groups to activate for the duration of this pod */
   pimGroups?: PimGroupConfig[];

@@ -5,7 +5,7 @@ export interface ContainerSpawnConfig {
   podId: string;
   env: Record<string, string>;
   ports?: { container: number; host: number }[];
-  volumes?: { host: string; container: string }[];
+  volumes?: { host: string; container: string; readOnly?: boolean }[];
   /** Docker network name for network isolation */
   networkName?: string;
   /** Firewall script to execute after container start (iptables rules) */
@@ -20,6 +20,11 @@ export interface ContainerSpawnConfig {
   networkPolicyMode?: 'allow-all' | 'deny-all' | 'restricted';
   /** Hard memory limit in bytes. Omit for no limit. */
   memoryBytes?: number;
+  /**
+   * Hard CPU limit in NanoCpus (billionths of a core, Docker's `HostConfig.NanoCpus`
+   * unit). E.g. `2 * 1e9` caps the container at 2 cores. Omit for no limit.
+   */
+  nanoCpus?: number;
 }
 
 export interface ExecResult {

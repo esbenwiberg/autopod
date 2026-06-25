@@ -109,6 +109,28 @@ export interface SafetyAnalyticsResponse {
   /** Per-source breakdown. */
   bySource: Array<{ source: SafetyEventSource; count: number }>;
 
+  /** Firewall denials observed from restricted-mode pods.
+   *  Source: persisted `pod.firewall_denied` events emitted by the HAProxy deny receiver. */
+  firewallDenials: {
+    total: number;
+    affectedPods: number;
+    topHosts: Array<{ sni: string; count: number; lastDeniedAt: string }>;
+    recent: Array<{ podId: string; sni: string; src: string; deniedAt: string }>;
+  };
+
+  /** Host-worktree safety incidents.
+   *  Source: `pods.worktree_compromised` plus persisted `pod.worktree_compromised` events. */
+  worktreeSafety: {
+    currentCompromisedPods: number;
+    totalIncidents: number;
+    recentIncidents: Array<{
+      podId: string;
+      deletionCount: number;
+      threshold: number;
+      detectedAt: string;
+    }>;
+  };
+
   /** Quarantine score histogram, 10 buckets [0.0..0.1, 0.1..0.2, ..., 0.9..1.0].
    *  Empty buckets emit count=0. Source: action_audit.quarantine_score. */
   quarantineHistogram: Array<{ bucket: string; count: number }>;

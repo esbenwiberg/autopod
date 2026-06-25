@@ -1,6 +1,6 @@
 ---
 name: triage
-description: Route Autopod work to the right workflow before planning or execution. Use when a request is ambiguous between fixing directly, /investigate-bug, /prep, /plan-feature, /code-council, /arch-council, /premortem, or a repo-specific checklist skill; also use when the user asks which skill or planning path to use.
+description: Route Autopod work to the right workflow before planning or execution. Use when a request is ambiguous between fixing directly, /investigate-bug, /prep, /plan-feature, /podsitter, /code-council, /arch-council, /premortem, or a repo-specific checklist skill; also use when the user asks which skill or planning path to use.
 ---
 
 # Triage
@@ -29,6 +29,7 @@ If the user only asked "which skill?", stop after the recommendation. If the use
 | Broken behavior, unclear root cause, repro/regression needed | `/investigate-bug` |
 | Single concern, 1-2 packages, no new cross-module contract, one validation checkpoint | `/prep` |
 | 3+ modules, >4 hours, multiple pods/checkpoints, new shared contract, or ADR likely | `/plan-feature` |
+| User asks to watch, babysit, unstick, rescue, approve, or operate recent pods | `/podsitter` |
 | User asks "should we build this?" or "is this a good idea?" | `/code-council` |
 | User compares viable architecture/tooling options | `/arch-council` |
 | User wants blind spots, risk, failure modes, or stress testing | `/premortem` |

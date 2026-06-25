@@ -27,7 +27,7 @@ This document covers system design — how the pieces fit together and why they'
 │  ┌──────▼───────┐  ┌──────────────┐  ┌──────────────────────┐  │
 │  │  Container   │  │  Runtimes    │  │  Validation engine   │  │
 │  │  manager     │  │  Claude      │  │  (gated phases,      │  │
-│  │  (Docker/ACI)│  │  Codex       │  │   Playwright,        │  │
+│  │  (Docker/ACA)│  │  Codex       │  │   Playwright,        │  │
 │  └──────────────┘  │  Copilot     │  │   AI review)         │  │
 │                    └──────────────┘  └──────────────────────┘  │
 │                                                                 │
@@ -38,7 +38,7 @@ This document covers system design — how the pieces fit together and why they'
 └─────────────────────────────────────────┬───────────────────────┘
                                           │ spawn
 ┌─────────────────────────────────────────▼───────────────────────┐
-│  Agent containers (Docker or ACI)                               │
+│  Agent containers (Docker or ACA)                               │
 │                                                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
 │  │  AI runtime  │  │  Escalation  │  │  HAProxy (SNI proxy) │  │
@@ -104,7 +104,7 @@ Key invariants:
 
 `pod-manager.ts:processPod()` is the main orchestration entry point. For a standard pod:
 
-1. **Provision** — clone bare repo, strip PAT from remote URL, start Docker container (or ACI instance)
+1. **Provision** — clone bare repo, strip PAT from remote URL, start Docker container (or ACA sandbox)
 2. **Inject** — generate CLAUDE.md (task + profile sections + memories + skills), write escalation MCP config, apply network policy
 3. **Run runtime** — spawn Claude/Codex/Copilot, stream `AgentEvent`s, monitor escalations
 4. **Validate** — run setup → lint → SAST → build → test → health → pages → AC → facts → review, then compute the blocking decision
@@ -166,7 +166,7 @@ Readiness Review is computed from validation plus release-adjacent evidence (sec
 Profiles are the central configuration object. They encode everything needed to run a pod reproducibly:
 
 - **Stack template** (`node22`, `dotnet10`, `go124`, etc.) → base Dockerfile
-- **Execution target** (`local` Docker socket or `aci` Azure Container Instances)
+- **Execution target** (`local` Docker socket or `sandbox` Azure Container Apps Sandboxes — scaffold)
 - **Model provider** (Anthropic API, MAX/PRO OAuth, OpenAI Codex, Azure Foundry, OpenRouter, Copilot)
 - **Network policy** (mode + allowlist)
 - **Setup / lint / SAST / build / test / health / smoke commands**

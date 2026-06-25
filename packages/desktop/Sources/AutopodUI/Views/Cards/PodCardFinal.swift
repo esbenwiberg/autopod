@@ -61,6 +61,15 @@ public struct SessionCardFinal: View {
         pod.validationProgress?.advisory.status == .running
     }
 
+    private var shouldFixReviewFindings: Bool {
+        guard let checks = pod.validationChecks, checks.review == false else { return false }
+        return checks.reviewSkipKind != "review-failed" && checks.reviewSkipKind != "review-timeout"
+    }
+
+    private var reworkActionTitle: String {
+        shouldFixReviewFindings ? "Fix Review" : "Rework"
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Accent stripe
@@ -791,7 +800,7 @@ public struct SessionCardFinal: View {
                         Button {
                             Task { await actions.rework(pod.id) }
                         } label: {
-                            Label("Rework", systemImage: "arrow.clockwise")
+                            Label(reworkActionTitle, systemImage: "arrow.clockwise")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
@@ -846,7 +855,10 @@ public struct SessionCardFinal: View {
                     Button {
                         Task { await actions.extendAttempts(pod.id, 2) }
                     } label: {
-                        Label("Extend Attempts", systemImage: "arrow.clockwise")
+                        Label(
+                            shouldFixReviewFindings ? "Fix Review" : "Extend Attempts",
+                            systemImage: "arrow.clockwise"
+                        )
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -909,7 +921,7 @@ public struct SessionCardFinal: View {
                         Button {
                             Task { await actions.rework(pod.id) }
                         } label: {
-                            Label("Rework", systemImage: "arrow.clockwise")
+                            Label(reworkActionTitle, systemImage: "arrow.clockwise")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)

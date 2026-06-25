@@ -810,18 +810,18 @@ describe('reconcileLocalSessions', () => {
     expect(result.skipped).toHaveLength(0);
   });
 
-  it('ignores ACI (non-local) pods', async () => {
+  it('ignores sandbox (non-local) pods', async () => {
     const { deps, podRepo } = createReconcilerDeps();
 
     podRepo.insert({
-      id: 'aci-1',
+      id: 'sandbox-1',
       profileName: 'test-profile',
-      task: 'ACI task',
+      task: 'Sandbox task',
       status: 'running',
       model: 'opus',
       runtime: 'claude',
-      executionTarget: 'aci',
-      branch: 'autopod/aci-1',
+      executionTarget: 'sandbox',
+      branch: 'autopod/sandbox-1',
       userId: 'user-1',
       maxValidationAttempts: 3,
       skipValidation: false,
@@ -829,17 +829,17 @@ describe('reconcileLocalSessions', () => {
       baseBranch: null,
     });
 
-    // Even though worktree "exists", ACI pods should be ignored
+    // Even though worktree "exists", sandbox pods should be ignored
     mockedAccess.mockResolvedValue(undefined);
 
     const result = await reconcileLocalSessions(deps);
 
-    expect(result.recovered).not.toContain('aci-1');
-    expect(result.killed).not.toContain('aci-1');
-    expect(result.skipped).not.toContain('aci-1');
+    expect(result.recovered).not.toContain('sandbox-1');
+    expect(result.killed).not.toContain('sandbox-1');
+    expect(result.skipped).not.toContain('sandbox-1');
 
     // Pod should be untouched
-    const pod = podRepo.getOrThrow('aci-1');
+    const pod = podRepo.getOrThrow('sandbox-1');
     expect(pod.status).toBe('running');
   });
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Podsitter"
+  short_description: "Watch and rescue Autopod pods overnight"
+  default_prompt: "Use $podsitter to watch recent Autopod pods and apply bounded rescue actions."
