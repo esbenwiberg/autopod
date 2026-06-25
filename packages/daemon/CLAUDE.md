@@ -1,7 +1,7 @@
 # @autopod/daemon — Developer Guide
 
 The daemon is the backend server: a Fastify HTTP/WebSocket process that orchestrates AI agent pods
-inside Docker (or ACI) containers, manages their lifecycle, runs validation, and exposes a REST API.
+inside Docker (or Azure Container Apps Sandboxes) containers, manages their lifecycle, runs validation, and exposes a REST API.
 
 ## Directory Structure
 
@@ -9,7 +9,7 @@ inside Docker (or ACI) containers, manages their lifecycle, runs validation, and
 src/
 ├── pods/             # Core pod orchestration (state machine, manager, repositories)
 ├── api/              # Fastify server, routes, plugins, WebSocket, MCP proxy
-├── containers/       # Docker + ACI container managers, network isolation
+├── containers/       # Docker + Sandboxes container managers, network isolation
 ├── runtimes/         # Claude / Codex / Copilot stream parsers
 ├── validation/       # Multi-phase validation engine (lint/SAST/build/test/pages/facts/review)
 ├── profiles/         # Profile store, inheritance resolution, Zod validation
@@ -161,10 +161,18 @@ Denied restricted-egress attempts are emitted as `pod.firewall_denied` events
 and can be queried through `/pods/:podId/firewall-denials`. Network and iptables
 rules are torn down in `cleanup()` — always call it in the pod's finally block.
 
-### ACI (`src/containers/aci-container-manager.ts`)
+### Sandboxes (`src/containers/sandbox-container-manager.ts`)
 
-Drop-in replacement for `DockerContainerManager` implementing the same `ContainerManager` interface.
-Selected when `profile.executionTarget === 'aci'`. Requires `AZURE_*` env vars.
+Azure Container Apps **Sandboxes** backend — the replacement for the former ACI manager.
+Implements the same `ContainerManager` interface and is selected when
+`profile.executionTarget === 'sandbox'`. Activates when `AZURE_SUBSCRIPTION_ID` +
+`AZURE_RESOURCE_GROUP` are set.
+
+⚠️ **Scaffold only — not yet wired.** The preview SDK is unconfirmed, so every method
+throws `NOT_IMPLEMENTED`. Run `spikes/aca-sandbox/probe.py` against an enrolled Entra
+tenant to confirm the API, then implement. Unlike ACI, Sandboxes supports all
+`network_policy` modes (allow-all / deny-all / restricted) via its native per-sandbox
+egress policy, so the profile-validator does not reject any mode for this target.
 
 ## Runtimes
 

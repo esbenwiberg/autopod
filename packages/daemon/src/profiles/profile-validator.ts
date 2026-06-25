@@ -292,23 +292,9 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
   validateDateOnlyField(input, 'adoPatExpiresAt', errors);
   validateDateOnlyField(input, 'registryPatExpiresAt', errors);
 
-  // ACI backend does not support iptables-based network isolation.
-  // Reject restricted/deny-all network policies for ACI profiles at write time
-  // so operators get a clear error instead of a silently open container.
-  const executionTarget = input.executionTarget;
-  const networkPolicy = input.networkPolicy as
-    | { mode?: string; enabled?: boolean }
-    | null
-    | undefined;
-  if (
-    executionTarget === 'aci' &&
-    networkPolicy?.enabled === true &&
-    (networkPolicy.mode === 'restricted' || networkPolicy.mode === 'deny-all')
-  ) {
-    errors.push(
-      `network_policy mode '${networkPolicy.mode}' is not supported on the ACI execution target — iptables-based isolation requires the Docker backend`,
-    );
-  }
+  // Note: unlike the removed ACI backend, the Sandbox execution target supports
+  // all network_policy modes (allow-all / deny-all / restricted) via its native
+  // per-sandbox egress policy, so no execution-target-specific rejection is needed here.
 
   // Code intelligence config
   const codeIntelligence = input.codeIntelligence;

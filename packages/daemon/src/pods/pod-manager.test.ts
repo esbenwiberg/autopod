@@ -7310,13 +7310,13 @@ describe('PodManager', () => {
           startedAt: stale,
         });
         ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: stale });
-        // Mark as 'aci' so the wake-recovery reconciler (which only processes
+        // Mark as 'sandbox' so the wake-recovery reconciler (which only processes
         // 'local' pods) doesn't touch this pod and interfere with the status.
-        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('aci', pod.id);
+        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('sandbox', pod.id);
 
         manager.startStuckPodWatchdog({ intervalMs: 200, thresholdMs: 30 * 60 * 1000 });
 
-        // Emit host.resumed at T=0 — sets lastWakeAt; reconciler skips 'aci' pod.
+        // Emit host.resumed at T=0 — sets lastWakeAt; reconciler skips 'sandbox' pod.
         ctx.eventBus.emit({
           type: 'host.resumed',
           timestamp: new Date().toISOString(),
@@ -7355,11 +7355,11 @@ describe('PodManager', () => {
           startedAt: stale,
         });
         ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: stale });
-        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('aci', pod.id);
+        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('sandbox', pod.id);
 
         manager.startStuckPodWatchdog({ intervalMs: 200, thresholdMs: 30 * 60 * 1000 });
 
-        // Emit wake at T=0 — reconciler skips 'aci' pod.
+        // Emit wake at T=0 — reconciler skips 'sandbox' pod.
         ctx.eventBus.emit({
           type: 'host.resumed',
           timestamp: new Date().toISOString(),
@@ -7394,7 +7394,7 @@ describe('PodManager', () => {
           startedAt: stale,
         });
         ctx.podRepo.update(pod.id, { status: 'running', lastAgentEventAt: stale });
-        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('aci', pod.id);
+        ctx.db.prepare('UPDATE pods SET execution_target = ? WHERE id = ?').run('sandbox', pod.id);
 
         manager.startStuckPodWatchdog({ intervalMs: 200, thresholdMs: 30 * 60 * 1000 });
 
