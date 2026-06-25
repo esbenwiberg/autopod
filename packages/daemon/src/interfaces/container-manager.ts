@@ -18,6 +18,12 @@ export interface ContainerSpawnConfig {
    * of fail-closed and allow degraded spawn for isolated pods.
    */
   networkPolicyMode?: 'allow-all' | 'deny-all' | 'restricted';
+  /**
+   * Allowlisted egress hosts for `restricted` mode. The Docker backend encodes
+   * these in `firewallScript` (iptables/HAProxy); the Sandboxes backend consumes
+   * them directly to build its native per-sandbox egress policy.
+   */
+  allowedHosts?: string[];
   /** Hard memory limit in bytes. Omit for no limit. */
   memoryBytes?: number;
   /**

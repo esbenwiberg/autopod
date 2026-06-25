@@ -168,11 +168,22 @@ Implements the same `ContainerManager` interface and is selected when
 `profile.executionTarget === 'sandbox'`. Activates when `AZURE_SUBSCRIPTION_ID` +
 `AZURE_RESOURCE_GROUP` are set.
 
-⚠️ **Scaffold only — not yet wired.** The preview SDK is unconfirmed, so every method
-throws `NOT_IMPLEMENTED`. Run `spikes/aca-sandbox/probe.py` against an enrolled Entra
-tenant to confirm the API, then implement. Unlike ACI, Sandboxes supports all
-`network_policy` modes (allow-all / deny-all / restricted) via its native per-sandbox
-egress policy, so the profile-validator does not reject any mode for this target.
+The manager logic is **implemented and unit-tested** against a `SandboxApiClient` seam
+(`sandbox-api-client.ts`) — the TS mirror of `spikes/aca-sandbox/sandbox_client.py`. It owns
+all the mapping between the `ContainerManager` contract and the Sandboxes data-plane: tier
+selection from `memoryBytes` (`pickSandboxTier`), egress-policy translation from
+`networkPolicyMode` + `allowedHosts` (`egressPolicyForMode`), exec/file I/O, tar-based
+`extractDirectoryFromContainer` (something ACI couldn't do), `stop`/`start` → suspend/resume,
+and an `execStreaming` native-or-buffered fallback. Unlike ACI, Sandboxes supports all
+`network_policy` modes (allow-all / deny-all / restricted) via its native per-sandbox egress
+policy, so the profile-validator does not reject any mode for this target.
+
+⚠️ **One surface remains unwired:** `AzureSandboxApiClient` (`azure-sandbox-api-client.ts`),
+the concrete adapter over the preview SDK, throws `NOT_IMPLEMENTED` on every call because the
+SDK surface is unconfirmed (docs 403 without an enrolled Entra login). To finish: run
+`spikes/aca-sandbox/probe.py` against an enrolled tenant, reconcile the `# VERIFY:` calls in
+`spikes/aca-sandbox/sandbox_client.py`, then implement the adapter. Nothing else needs to
+change — `SandboxContainerManager.withAzureClient()` is already the daemon's wiring entry point.
 
 ## Runtimes
 

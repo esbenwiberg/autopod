@@ -428,7 +428,7 @@ let sandboxContainerManager:
   | undefined;
 if (SANDBOX_SUBSCRIPTION_ID && SANDBOX_RESOURCE_GROUP) {
   const { SandboxContainerManager } = await import('./containers/sandbox-container-manager.js');
-  sandboxContainerManager = new SandboxContainerManager(
+  sandboxContainerManager = SandboxContainerManager.withAzureClient(
     {
       subscriptionId: SANDBOX_SUBSCRIPTION_ID,
       resourceGroup: SANDBOX_RESOURCE_GROUP,
@@ -438,7 +438,7 @@ if (SANDBOX_SUBSCRIPTION_ID && SANDBOX_RESOURCE_GROUP) {
   );
   logger.info(
     { subscriptionId: SANDBOX_SUBSCRIPTION_ID, resourceGroup: SANDBOX_RESOURCE_GROUP },
-    'Sandbox execution target enabled (scaffold — not yet wired)',
+    'Sandbox execution target enabled (manager wired; Azure data-plane adapter pending preview SDK)',
   );
 }
 
