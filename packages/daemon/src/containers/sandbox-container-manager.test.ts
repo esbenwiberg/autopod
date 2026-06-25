@@ -1,11 +1,8 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
-import { gzipSync } from 'node:zlib';
-import { AutopodError } from '@autopod/shared';
 import pino from 'pino';
-import * as tar from 'tar-stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ContainerSpawnConfig } from '../interfaces/container-manager.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
@@ -18,7 +15,10 @@ import type {
   SandboxExecResult,
   SandboxStatus,
 } from './sandbox-api-client.js';
-import { EXTRACT_TAR_PATH, SandboxContainerManager } from './sandbox-container-manager.js';
+import {
+  SandboxContainerManager,
+  sandboxEgressRefreshPayload,
+} from './sandbox-container-manager.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -37,6 +37,7 @@ class FakeSandboxApiClient implements SandboxApiClient {
   readonly created: CreateSandboxOptions[] = [];
   readonly execCalls: Array<{ id: string; command: string[]; options?: SandboxExecOptions }> = [];
   readonly egressUpdates: Array<{ id: string; policy: SandboxEgressPolicy }> = [];
+  readonly mkdirCalls: Array<{ id: string; path: string }> = [];
   readonly sandboxes = new Map<string, FakeSandbox>();
   private counter = 0;
 
@@ -71,6 +72,11 @@ class FakeSandboxApiClient implements SandboxApiClient {
     const file = this.sandboxes.get(sandboxId)?.files.get(path);
     if (!file) throw new Error(`no such file: ${path}`);
     return file;
+  }
+
+  async mkdir(sandboxId: string, path: string): Promise<void> {
+    this.sandbox(sandboxId);
+    this.mkdirCalls.push({ id: sandboxId, path });
   }
 
   async updateEgress(sandboxId: string, policy: SandboxEgressPolicy): Promise<void> {
@@ -119,26 +125,6 @@ function readStream(stream: Readable): Promise<string> {
   });
 }
 
-function buildGzippedTar(
-  entries: Array<{ name: string; content?: string; dir?: boolean }>,
-): Promise<Buffer> {
-  const pack = tar.pack();
-  for (const e of entries) {
-    if (e.dir) {
-      pack.entry({ name: e.name, type: 'directory' });
-    } else {
-      pack.entry({ name: e.name }, e.content ?? '');
-    }
-  }
-  pack.finalize();
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    pack.on('data', (c: Buffer) => chunks.push(Buffer.from(c)));
-    pack.on('end', () => resolve(gzipSync(Buffer.concat(chunks))));
-    pack.on('error', reject);
-  });
-}
-
 const baseConfig: ContainerSpawnConfig = { image: 'autopod-node22', podId: 'pod-1', env: {} };
 
 describe('SandboxContainerManager', () => {
@@ -181,14 +167,46 @@ describe('SandboxContainerManager', () => {
       });
       expect(client.created[0]?.egressPolicy).toEqual({
         defaultAction: 'Deny',
-        rules: [{ match: { host: 'api.github.com' }, action: 'Allow' }],
+        hostRules: [{ pattern: 'api.github.com', action: 'Allow' }],
       });
     });
 
     it('defaults to an allow-all egress policy', async () => {
       const client = new FakeSandboxApiClient();
       await new SandboxContainerManager(client, logger).spawn(baseConfig);
-      expect(client.created[0]?.egressPolicy).toEqual({ defaultAction: 'Allow', rules: [] });
+      expect(client.created[0]?.egressPolicy).toEqual({ defaultAction: 'Allow', hostRules: [] });
+    });
+
+    it('uploads host volumes because sandboxes have no bind mounts', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-upload-'));
+      try {
+        mkdirSync(join(hostDir, 'src'));
+        mkdirSync(join(hostDir, 'node_modules'));
+        writeFileSync(join(hostDir, 'README.md'), 'hello');
+        writeFileSync(join(hostDir, 'src', 'index.ts'), 'console.log("hi");');
+        writeFileSync(join(hostDir, 'node_modules', 'left-pad.js'), 'skip');
+        symlinkSync('README.md', join(hostDir, 'README-link'));
+
+        const client = new FakeSandboxApiClient();
+        const id = await new SandboxContainerManager(client, logger).spawn({
+          ...baseConfig,
+          volumes: [{ host: hostDir, container: '/mnt/worktree' }],
+        });
+
+        const files = client.sandboxes.get(id)?.files;
+        expect(files?.get('/mnt/worktree/README.md')?.toString('utf-8')).toBe('hello');
+        expect(files?.get('/mnt/worktree/src/index.ts')?.toString('utf-8')).toBe(
+          'console.log("hi");',
+        );
+        expect(files?.get('/mnt/worktree/README-link')?.toString('utf-8')).toBe('README.md');
+        expect(files?.has('/mnt/worktree/node_modules/left-pad.js')).toBe(false);
+        expect(client.mkdirCalls.map((call) => call.path)).toEqual([
+          '/mnt/worktree',
+          '/mnt/worktree/src',
+        ]);
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
     });
   });
 
@@ -217,12 +235,44 @@ describe('SandboxContainerManager', () => {
       expect(await mgr.getStatus('nope')).toBe('unknown');
     });
 
-    it('refreshFirewall is a no-op (egress applied at spawn)', async () => {
+    it('refreshFirewall reapplies the last known policy by default', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn({
+        ...baseConfig,
+        networkPolicyMode: 'restricted',
+        allowedHosts: ['api.github.com'],
+      });
+      await expect(mgr.refreshFirewall(id, '#!/bin/sh\niptables ...')).resolves.toBeUndefined();
+      expect(client.egressUpdates).toEqual([
+        {
+          id,
+          policy: {
+            defaultAction: 'Deny',
+            hostRules: [{ pattern: 'api.github.com', action: 'Allow' }],
+          },
+        },
+      ]);
+    });
+
+    it('refreshFirewall accepts a sandbox egress refresh payload', async () => {
       const client = new FakeSandboxApiClient();
       const mgr = new SandboxContainerManager(client, logger);
       const id = await mgr.spawn(baseConfig);
-      await expect(mgr.refreshFirewall(id, '#!/bin/sh\niptables ...')).resolves.toBeUndefined();
-      expect(client.egressUpdates).toHaveLength(0);
+      await mgr.refreshFirewall(
+        id,
+        sandboxEgressRefreshPayload('restricted', ['api.github.com', 'pypi.org']),
+      );
+      expect(client.egressUpdates.at(-1)).toEqual({
+        id,
+        policy: {
+          defaultAction: 'Deny',
+          hostRules: [
+            { pattern: 'api.github.com', action: 'Allow' },
+            { pattern: 'pypi.org', action: 'Allow' },
+          ],
+        },
+      });
     });
   });
 
@@ -302,72 +352,28 @@ describe('SandboxContainerManager', () => {
   });
 
   describe('extractDirectoryFromContainer', () => {
-    let hostDir: string;
-
-    beforeEach(() => {
-      hostDir = mkdtempSync(join(tmpdir(), 'sandbox-extract-'));
-    });
-    afterEach(() => {
-      rmSync(hostDir, { recursive: true, force: true });
-    });
-
-    it('tars in the sandbox, downloads, and extracts honouring excludes', async () => {
-      const tarball = await buildGzippedTar([
-        { name: './a.txt', content: 'A' },
-        { name: './sub', dir: true },
-        { name: './sub/b.txt', content: 'B' },
-        { name: './node_modules', dir: true },
-        { name: './node_modules/junk.txt', content: 'junk' },
-      ]);
-
-      const client = new FakeSandboxApiClient((_id, command) => {
-        // The tar command should target the requested container path.
-        expect(command[0]).toBe('sh');
-        expect(command[2]).toContain('tar czf');
-        expect(command[2]).toContain("-C '/work'");
-        return { stdout: '', stderr: '', exitCode: 0 };
-      });
+    it('throws a clear unsupported error', async () => {
+      const client = new FakeSandboxApiClient();
       const mgr = new SandboxContainerManager(client, logger);
       const id = await mgr.spawn(baseConfig);
-      client.seedFile(id, EXTRACT_TAR_PATH, tarball);
-
-      await mgr.extractDirectoryFromContainer(id, '/work', hostDir, ['node_modules']);
-
-      expect(readFileSync(join(hostDir, 'a.txt'), 'utf-8')).toBe('A');
-      expect(readFileSync(join(hostDir, 'sub', 'b.txt'), 'utf-8')).toBe('B');
-      expect(existsSync(join(hostDir, 'node_modules'))).toBe(false);
-    });
-
-    it('throws when the in-sandbox tar fails', async () => {
-      const client = new FakeSandboxApiClient(() => ({
-        stdout: '',
-        stderr: 'tar: permission denied',
-        exitCode: 2,
-      }));
-      const mgr = new SandboxContainerManager(client, logger);
-      const id = await mgr.spawn(baseConfig);
-      await expect(mgr.extractDirectoryFromContainer(id, '/work', hostDir)).rejects.toThrow(
-        /permission denied/,
+      await expect(mgr.extractDirectoryFromContainer(id, '/work', '/tmp/out')).rejects.toThrow(
+        /unsupported for Azure Container Apps Sandboxes/,
       );
     });
   });
 
-  describe('withAzureClient (stub wiring)', () => {
-    it('surfaces NOT_IMPLEMENTED from the unwired Azure adapter', async () => {
+  describe('withAzureClient', () => {
+    it('constructs a manager backed by the Azure adapter', () => {
       const mgr = SandboxContainerManager.withAzureClient(
-        { subscriptionId: 'sub', resourceGroup: 'rg', location: 'westeurope' },
+        { subscriptionId: 'sub', resourceGroup: 'rg', location: 'swedencentral' },
         logger,
       );
-      await expect(mgr.spawn(baseConfig)).rejects.toMatchObject({
-        code: 'NOT_IMPLEMENTED',
-        statusCode: 501,
-      });
-      await expect(mgr.spawn(baseConfig)).rejects.toBeInstanceOf(AutopodError);
+      expect(mgr).toBeInstanceOf(SandboxContainerManager);
     });
 
     it('exposes the AzureSandboxApiClient as the default backend', () => {
       const client = new AzureSandboxApiClient(
-        { subscriptionId: 'sub', resourceGroup: 'rg', location: 'westeurope' },
+        { subscriptionId: 'sub', resourceGroup: 'rg', location: 'swedencentral' },
         logger,
       );
       expect(client).toBeInstanceOf(AzureSandboxApiClient);

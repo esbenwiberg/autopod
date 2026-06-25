@@ -18,18 +18,18 @@
 export type SandboxResourceTier = 'XS' | 'S' | 'M' | 'L';
 
 export interface SandboxEgressRule {
-  match: { host: string };
+  pattern: string;
   action: 'Allow' | 'Deny';
 }
 
 /**
- * Per-sandbox egress policy. `defaultAction` is the fallthrough; `rules` are
+ * Per-sandbox egress policy. `defaultAction` is the fallthrough; `hostRules` are
  * evaluated in order. The native equivalent of the Docker backend's
  * iptables/HAProxy machinery — no proxy needed.
  */
 export interface SandboxEgressPolicy {
   defaultAction: 'Allow' | 'Deny';
-  rules: SandboxEgressRule[];
+  hostRules: SandboxEgressRule[];
 }
 
 export interface CreateSandboxOptions {
@@ -86,6 +86,7 @@ export interface SandboxApiClient {
   ): AsyncIterable<SandboxExecChunk>;
   writeFile(sandboxId: string, path: string, content: Buffer): Promise<void>;
   readFile(sandboxId: string, path: string): Promise<Buffer>;
+  mkdir?(sandboxId: string, path: string): Promise<void>;
   /** Replace the sandbox's egress policy at runtime. */
   updateEgress(sandboxId: string, policy: SandboxEgressPolicy): Promise<void>;
   /** Snapshot-suspend the sandbox (maps to ContainerManager.stop). */
@@ -137,13 +138,13 @@ export function egressPolicyForMode(
 ): SandboxEgressPolicy {
   switch (mode) {
     case 'deny-all':
-      return { defaultAction: 'Deny', rules: [] };
+      return { defaultAction: 'Deny', hostRules: [] };
     case 'restricted':
       return {
         defaultAction: 'Deny',
-        rules: allowedHosts.map((host) => ({ match: { host }, action: 'Allow' as const })),
+        hostRules: allowedHosts.map((host) => ({ pattern: host, action: 'Allow' as const })),
       };
     default:
-      return { defaultAction: 'Allow', rules: [] };
+      return { defaultAction: 'Allow', hostRules: [] };
   }
 }

@@ -56,9 +56,16 @@ only fix things in one place.
 2. **Preview enrollment + feature flags.** Sandboxes is public preview; VNet and
    managed identity are behind feature flags. Personal Microsoft accounts are
    **not** supported — must be an Entra (org) identity.
-3. **Role assignment.** The dynamic-sessions equivalent needs the
-   *"Azure ContainerApps Session Executor"* role on the resource. Confirm the
-   sandbox equivalent in the quickstart and grant it to your identity.
+3. **Role assignment.** Sandboxes do **not** use the dynamic-sessions
+   *"Azure ContainerApps Session Executor"* role. The Python SDK quickstart and
+   role definition use *"Container Apps SandboxGroup Data Owner"* for data-plane
+   operations on `Microsoft.App/sandboxGroups/*`.
+   - If this spike should create/read the sandbox group, the identity also needs
+     control-plane rights on `Microsoft.App/sandboxGroups` (for example,
+     resource-group `Contributor`), because the data-owner role has only
+     `dataActions`.
+   - If an admin pre-creates the sandbox group and grants only data-plane access,
+     set `SANDBOX_ASSUME_GROUP_EXISTS=1` to skip the ARM group read/create.
 4. **An OCI image** to boot. Default below is a stock image; swap in one of our
    base images (e.g. an ACR `autopod-node22`) once basic exec works.
 5. Python 3.10+.
@@ -76,12 +83,64 @@ All config is env vars (see top of `probe.py`):
 ```bash
 export AZURE_SUBSCRIPTION_ID=...
 export AZURE_RESOURCE_GROUP=autopod-spike-rg
-export AZURE_LOCATION=westeurope          # confirm Sandboxes is available in-region
+export AZURE_LOCATION=northeurope         # confirm Sandboxes is available in-region
+export SANDBOX_GROUP=autopod-spike
 export SANDBOX_IMAGE=mcr.microsoft.com/cbl-mariner/base/core:2.0   # or an ACR base image
 export SANDBOX_TIER=L                       # XS | S | M | L  — L = 2 cores / 4 GB / 40 GB
 export SANDBOX_ALLOWED_HOST=api.github.com  # host the egress test will allow
 export SANDBOX_DENIED_HOST=example.com      # host the egress test expects to be blocked
 ```
+
+As of the 2026-06-25 run against subscription `06bb959b-...`, the provider
+registration listed `swedencentral` and `northeurope`, but **not** `westeurope` for
+`Microsoft.App/sandboxGroups`.
+
+## Confirmed SDK surface
+
+Installed package: `azure-containerapps-sandbox==0.1.0b3`.
+
+- Control plane: `SandboxGroupManagementClient(credential, subscription_id, resource_group)`
+  with `get_group()`, `begin_create_group()`, `begin_delete_group()`.
+- Data plane: `SandboxGroupClient(endpoint_for_region(region), credential,
+  subscription_id, resource_group, sandbox_group)`.
+- Create an OCI-backed sandbox in two steps:
+  `begin_create_disk_image(base_image).result()`, then
+  `begin_create_sandbox(disk_id=..., cpu=..., memory=..., disk_size=...,
+  egress_policy=...).result()`.
+- Sandbox exec is `SandboxClient.exec(command)` and currently returns buffered
+  `ExecResult(stdout, stderr, exit_code)`; no streaming exec method is exposed in
+  `0.1.0b3`.
+- File APIs are `write_file(path, content)`, `read_file(path)`, `list_files()`,
+  `stat_file()`, `mkdir()`, and `delete_file()`.
+- Egress policy is `EgressPolicy(default_action="Deny", host_rules=[
+  EgressHostRule(pattern=host, action="Allow")])`; the wire keys are
+  `defaultAction` and `hostRules`.
+- Lifecycle maps to `begin_stop()` / `begin_resume()`; there is no separate
+  `suspend()` method name in this SDK.
+
+## 2026-06-25 Sweden Central run
+
+Configuration: `AZURE_RESOURCE_GROUP=ewi-sandboxes`,
+`AZURE_LOCATION=swedencentral`, `SANDBOX_GROUP=autopod-spike`,
+`SANDBOX_TIER=L`, stock Mariner image.
+
+Results:
+
+- Sandbox group creation succeeded once RG `Owner` PIM was active.
+- Provision from OCI image via disk-image build + sandbox create took `10198 ms`.
+- Exec works but is buffered; the SDK exposes `exec(command)` returning
+  `ExecResult(stdout, stderr, exit_code)` and no streaming exec method.
+- Tier `L` reported `2` CPUs and a `40G` root disk. The stock image did not
+  include `free`, so memory was not printed by this run.
+- File write/read works for binary payloads.
+- Directory extraction through tar + file download was unsupported in this image
+  because the downloaded tarball path produced no bytes.
+- Default-deny egress returned `403` for `example.com`; after runtime policy
+  mutation to allow the host, the same curl returned `200`.
+- Stop/resume worked: stop took `6889 ms`, resume took `387 ms`, and post-resume
+  exec returned `alive`.
+- Teardown removed the sandbox and disk image; a follow-up data-plane list showed
+  no remaining sandboxes or disk images in `autopod-spike`.
 
 ## Run
 

@@ -66,11 +66,15 @@ import type { Logger } from 'pino';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
 import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
 import { isExpectedDockerError } from '../containers/docker-helpers.js';
-import { networkNameForPod } from '../containers/docker-network-manager.js';
+import {
+  computeNetworkPolicyAllowlist,
+  networkNameForPod,
+} from '../containers/docker-network-manager.js';
 import {
   type HaproxyDenyStreamHandle,
   streamHaproxyDenials,
 } from '../containers/haproxy-deny-stream.js';
+import { sandboxEgressRefreshPayload } from '../containers/sandbox-container-manager.js';
 import type { SidecarManager } from '../containers/sidecar-manager.js';
 import {
   getAutoAttachedSidecars,
@@ -5422,13 +5426,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         let firewallScript: string | undefined;
         let initialMergedMcpServers: import('@autopod/shared').InjectedMcpServer[] | undefined;
         let daemonGatewayIp: string | undefined;
+        let sandboxAllowedHosts: string[] | undefined;
         const runtimeNetworkPolicy = addRuntimeNetworkDefaults(
           profile.networkPolicy,
           profile,
           pod.runtime,
         );
-        if (networkManager && pod.executionTarget === 'local' && runtimeNetworkPolicy?.enabled) {
+        const runtimeNetworkPolicyMode = runtimeNetworkPolicy?.enabled
+          ? (runtimeNetworkPolicy.mode ?? 'restricted')
+          : undefined;
+        if (pod.executionTarget === 'sandbox' && runtimeNetworkPolicy?.enabled) {
           initialMergedMcpServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
+          sandboxAllowedHosts = computeNetworkPolicyAllowlist(
+            runtimeNetworkPolicy,
+            initialMergedMcpServers,
+            hostnameFromUrl(mcpBaseUrl),
+            profile.privateRegistries,
+          );
+        }
+        if (networkManager && pod.executionTarget === 'local' && runtimeNetworkPolicy?.enabled) {
+          initialMergedMcpServers ??= mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
           daemonGatewayIp = await networkManager.getGatewayIp(podId);
           const netConfig = await networkManager.buildNetworkConfig(
             runtimeNetworkPolicy,
@@ -5660,7 +5677,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             ],
             networkName,
             firewallScript,
-            networkPolicyMode: profile.networkPolicy?.mode,
+            networkPolicyMode: runtimeNetworkPolicyMode,
+            allowedHosts: sandboxAllowedHosts,
             memoryBytes:
               (profile.containerMemoryGb ?? DEFAULT_CONTAINER_MEMORY_GB) * 1024 * 1024 * 1024,
             nanoCpus: resolveContainerNanoCpus(process.env.CONTAINER_CPUS),
@@ -11137,8 +11155,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     async refreshNetworkPolicy(profileName: string): Promise<void> {
-      if (!networkManager) return;
-
       const profile = profileStore.get(profileName);
       if (!profile.networkPolicy?.enabled) return;
 
@@ -11146,13 +11162,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         .list({ status: 'running' })
         .filter(
           (s) =>
-            s.profileName === profileName && s.executionTarget === 'local' && s.containerId != null,
+            s.profileName === profileName &&
+            (s.executionTarget === 'local' || s.executionTarget === 'sandbox') &&
+            s.containerId != null,
         );
 
       if (runningSessions.length === 0) return;
 
       const mergedServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
-      const cm = containerManagerFactory.get('local');
 
       // Resolve the current bridge IP of each sidecar for a given pod. With
       // per-pod networks each pod has its own `autopod-<podId>` bridge, and
@@ -11174,24 +11191,45 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       await Promise.all(
         runningSessions.map(async (pod) => {
           try {
-            const gatewayIp = await networkManager.getGatewayIp(pod.id);
-            const sidecarIps = await collectSidecarIps(pod);
             const runtimeNetworkPolicy = addRuntimeNetworkDefaults(
               profile.networkPolicy,
               profile,
               pod.runtime,
             );
-            const netConfig = await networkManager.buildNetworkConfig(
-              runtimeNetworkPolicy,
-              mergedServers,
-              gatewayIp,
-              profile.privateRegistries,
-              pod.id,
-              sidecarIps,
-            );
-            if (!netConfig) return;
             // biome-ignore lint/style/noNonNullAssertion: runningSessions always have a containerId
-            await cm.refreshFirewall(pod.containerId!, netConfig.firewallScript);
+            const containerId = pod.containerId!;
+            if (pod.executionTarget === 'sandbox') {
+              if (!runtimeNetworkPolicy?.enabled) return;
+              const allowedHosts = computeNetworkPolicyAllowlist(
+                runtimeNetworkPolicy,
+                mergedServers,
+                hostnameFromUrl(mcpBaseUrl),
+                profile.privateRegistries,
+              );
+              const cm = containerManagerFactory.get('sandbox');
+              await cm.refreshFirewall(
+                containerId,
+                sandboxEgressRefreshPayload(
+                  runtimeNetworkPolicy.mode ?? 'restricted',
+                  allowedHosts,
+                ),
+              );
+            } else {
+              if (!networkManager) return;
+              const gatewayIp = await networkManager.getGatewayIp(pod.id);
+              const sidecarIps = await collectSidecarIps(pod);
+              const netConfig = await networkManager.buildNetworkConfig(
+                runtimeNetworkPolicy,
+                mergedServers,
+                gatewayIp,
+                profile.privateRegistries,
+                pod.id,
+                sidecarIps,
+              );
+              if (!netConfig) return;
+              const cm = containerManagerFactory.get('local');
+              await cm.refreshFirewall(containerId, netConfig.firewallScript);
+            }
             logger.info(
               { podId: pod.id, profileName },
               'Network policy refreshed on running container',
@@ -11803,6 +11841,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return { recovered: true, message: restored.reason };
     },
   };
+}
+
+function hostnameFromUrl(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return 'host.docker.internal';
+  }
 }
 
 /**

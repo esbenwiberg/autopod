@@ -169,21 +169,26 @@ Implements the same `ContainerManager` interface and is selected when
 `AZURE_RESOURCE_GROUP` are set.
 
 The manager logic is **implemented and unit-tested** against a `SandboxApiClient` seam
-(`sandbox-api-client.ts`) — the TS mirror of `spikes/aca-sandbox/sandbox_client.py`. It owns
-all the mapping between the `ContainerManager` contract and the Sandboxes data-plane: tier
-selection from `memoryBytes` (`pickSandboxTier`), egress-policy translation from
-`networkPolicyMode` + `allowedHosts` (`egressPolicyForMode`), exec/file I/O, tar-based
-`extractDirectoryFromContainer` (something ACI couldn't do), `stop`/`start` → suspend/resume,
-and an `execStreaming` native-or-buffered fallback. Unlike ACI, Sandboxes supports all
-`network_policy` modes (allow-all / deny-all / restricted) via its native per-sandbox egress
-policy, so the profile-validator does not reject any mode for this target.
+(`sandbox-api-client.ts`) and a concrete Azure adapter (`azure-sandbox-api-client.ts`). It owns
+the mapping between the `ContainerManager` contract and the Sandboxes data plane: tier selection
+from `memoryBytes` (`pickSandboxTier`), egress-policy translation from `networkPolicyMode` +
+`allowedHosts` (`egressPolicyForMode`), buffered exec/file I/O, host-volume upload at spawn,
+`stop`/`start` → `begin_stop`/`begin_resume`, and an `execStreaming` native-or-buffered fallback.
+Unlike ACI, Sandboxes supports all `network_policy` modes (allow-all / deny-all / restricted) via
+its native per-sandbox egress policy, so the profile-validator does not reject any mode for this
+target.
 
-⚠️ **One surface remains unwired:** `AzureSandboxApiClient` (`azure-sandbox-api-client.ts`),
-the concrete adapter over the preview SDK, throws `NOT_IMPLEMENTED` on every call because the
-SDK surface is unconfirmed (docs 403 without an enrolled Entra login). To finish: run
-`spikes/aca-sandbox/probe.py` against an enrolled tenant, reconcile the `# VERIFY:` calls in
-`spikes/aca-sandbox/sandbox_client.py`, then implement the adapter. Nothing else needs to
-change — `SandboxContainerManager.withAzureClient()` is already the daemon's wiring entry point.
+Current preview caveats:
+- Region: the 2026-06-25 spike confirmed `swedencentral` and `northeurope`; `westeurope` was not
+  listed for `Microsoft.App/sandboxGroups`. The daemon defaults to `swedencentral`.
+- RBAC: `Container Apps SandboxGroup Data Owner` is data-plane only. Creating or reading the
+  sandbox group also needs control-plane rights such as resource-group `Contributor`/`Owner`, or
+  set `AZURE_SANDBOX_ASSUME_GROUP_EXISTS=1` for a pre-created group.
+- Exec is buffered in `azure-containerapps-sandbox==0.1.0b3`; no native streaming method was
+  exposed by the spike.
+- Sandboxes do not support Docker bind mounts. The prototype uploads configured host volumes at
+  spawn, but sync-back is not production-ready.
+- `extractDirectoryFromContainer` intentionally throws until a durable sync-back strategy exists.
 
 ## Runtimes
 

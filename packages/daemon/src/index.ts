@@ -361,6 +361,13 @@ if (sidecarManager) {
   );
 }
 
+function parseSandboxTier(value: string | undefined): SandboxResourceTier | undefined {
+  if (!value) return undefined;
+  if (value === 'XS' || value === 'S' || value === 'M' || value === 'L') return value;
+  logger.warn({ value }, 'Ignoring invalid sandbox tier; expected XS, S, M, or L');
+  return undefined;
+}
+
 let imageBuilder: import('./images/index.js').ImageBuilder | undefined;
 if (docker) {
   const { ImageBuilder } = await import('./images/image-builder.js');
@@ -415,13 +422,21 @@ const podQueue = createPodQueue(
 );
 
 // Azure Container Apps Sandboxes manager (opt-in via env vars).
-// SCAFFOLD: the backend is not yet wired (preview SDK unconfirmed) — see
-// containers/sandbox-container-manager.ts. It activates when the Azure env is
-// present so a profile can opt into executionTarget:'sandbox' and get a clear
-// not-wired error rather than silently running on Docker.
+// Activates when the Azure env is present so a profile can opt into
+// executionTarget:'sandbox'. Sweden Central is the default because the
+// 2026-06-25 spike confirmed Microsoft.App/sandboxGroups there; West Europe
+// was not listed for the preview.
 const SANDBOX_SUBSCRIPTION_ID = process.env.AZURE_SUBSCRIPTION_ID;
 const SANDBOX_RESOURCE_GROUP = process.env.AZURE_RESOURCE_GROUP;
-const SANDBOX_LOCATION = process.env.AZURE_LOCATION ?? 'westeurope';
+const SANDBOX_LOCATION =
+  process.env.AZURE_SANDBOX_LOCATION ?? process.env.AZURE_LOCATION ?? 'swedencentral';
+const SANDBOX_GROUP =
+  process.env.AZURE_SANDBOX_GROUP ?? process.env.SANDBOX_GROUP ?? 'autopod-spike';
+const SANDBOX_ASSUME_GROUP_EXISTS =
+  process.env.AZURE_SANDBOX_ASSUME_GROUP_EXISTS === '1' ||
+  process.env.SANDBOX_ASSUME_GROUP_EXISTS === '1';
+type SandboxResourceTier = import('./containers/sandbox-api-client.js').SandboxResourceTier;
+const SANDBOX_TIER = parseSandboxTier(process.env.AZURE_SANDBOX_TIER ?? process.env.SANDBOX_TIER);
 
 let sandboxContainerManager:
   | import('./containers/sandbox-container-manager.js').SandboxContainerManager
@@ -433,12 +448,22 @@ if (SANDBOX_SUBSCRIPTION_ID && SANDBOX_RESOURCE_GROUP) {
       subscriptionId: SANDBOX_SUBSCRIPTION_ID,
       resourceGroup: SANDBOX_RESOURCE_GROUP,
       location: SANDBOX_LOCATION,
+      sandboxGroup: SANDBOX_GROUP,
+      assumeGroupExists: SANDBOX_ASSUME_GROUP_EXISTS,
+      tier: SANDBOX_TIER,
     },
     logger,
   );
   logger.info(
-    { subscriptionId: SANDBOX_SUBSCRIPTION_ID, resourceGroup: SANDBOX_RESOURCE_GROUP },
-    'Sandbox execution target enabled (manager wired; Azure data-plane adapter pending preview SDK)',
+    {
+      subscriptionId: SANDBOX_SUBSCRIPTION_ID,
+      resourceGroup: SANDBOX_RESOURCE_GROUP,
+      location: SANDBOX_LOCATION,
+      sandboxGroup: SANDBOX_GROUP,
+      assumeGroupExists: SANDBOX_ASSUME_GROUP_EXISTS,
+      tier: SANDBOX_TIER ?? 'L',
+    },
+    'Sandbox execution target enabled',
   );
 }
 

@@ -1,9 +1,8 @@
-import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, lstatSync, readdirSync, readlinkSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import { gunzipSync } from 'node:zlib';
 import type { Logger } from 'pino';
-import * as tar from 'tar-stream';
 import type {
   ContainerManager,
   ContainerSpawnConfig,
@@ -20,9 +19,6 @@ import {
   pickSandboxTier,
 } from './sandbox-api-client.js';
 
-/** Temp path inside the sandbox used to stage a tarball for directory extraction. */
-export const EXTRACT_TAR_PATH = '/tmp/.autopod-sandbox-extract.tar.gz';
-
 export interface SandboxContainerManagerOptions {
   /** Tier used when a spawn carries no `memoryBytes` hint (default: 'L'). */
   defaultTier?: SandboxResourceTier;
@@ -33,8 +29,12 @@ export interface SandboxContainerManagerConfig {
   subscriptionId: string;
   /** Resource group hosting the SandboxGroup (Microsoft.App/SandboxGroups). */
   resourceGroup: string;
-  /** Azure region for sandbox placement (e.g. "westeurope"). */
+  /** Azure region for sandbox placement (e.g. "swedencentral"). */
   location: string;
+  /** Sandbox group name. Defaults to `autopod-spike` for the prototype. */
+  sandboxGroup?: string;
+  /** Skip ARM group read/create; use when the group is managed out-of-band. */
+  assumeGroupExists?: boolean;
   /** Resource tier per sandbox (default: 'L' — the largest preview tier). */
   tier?: SandboxResourceTier;
 }
@@ -49,19 +49,22 @@ export interface SandboxContainerManagerConfig {
  *   - `ContainerSpawnConfig` → create args (image, tier from `memoryBytes`,
  *     initial egress policy from `networkPolicyMode` + `allowedHosts`)
  *   - `stop()`/`start()` → snapshot suspend/resume
- *   - `extractDirectoryFromContainer` → tar-in-sandbox + download + host untar
- *     (something ACI could not do)
+ *   - host bind mounts → best-effort upload at spawn (Sandboxes have no bind mounts)
+ *   - `extractDirectoryFromContainer` → explicit unsupported error until a durable
+ *     sync-back strategy exists
  *   - `execStreaming` → native streaming when the client exposes it, else a
  *     buffered `exec()` surfaced through one-shot streams
  *
- * The single unconfirmed surface is the injected client. {@link AzureSandboxApiClient}
- * is a stub that throws `NOT_IMPLEMENTED` until the preview SDK is confirmed via
- * `spikes/aca-sandbox/probe.py`; wire a real client in and this manager is live.
+ * The Azure adapter uses the preview data-plane shape confirmed by
+ * `spikes/aca-sandbox/probe.py`: buffered exec, file read/write, host-rule egress,
+ * and stop/resume lifecycle. Directory extraction stays intentionally unsupported
+ * until a durable sync-back strategy exists.
  */
 export class SandboxContainerManager implements ContainerManager {
   private readonly client: SandboxApiClient;
   private readonly logger: Logger;
   private readonly defaultTier: SandboxResourceTier;
+  private readonly egressPolicies = new Map<string, ReturnType<typeof egressPolicyForMode>>();
 
   constructor(
     client: SandboxApiClient,
@@ -74,7 +77,7 @@ export class SandboxContainerManager implements ContainerManager {
   }
 
   /**
-   * Build a manager backed by the (stub) Azure adapter — the wiring entry point
+   * Build a manager backed by the Azure adapter — the wiring entry point
    * used by the daemon. Equivalent to
    * `new SandboxContainerManager(new AzureSandboxApiClient(config, logger), logger, ...)`.
    */
@@ -87,6 +90,8 @@ export class SandboxContainerManager implements ContainerManager {
         subscriptionId: config.subscriptionId,
         resourceGroup: config.resourceGroup,
         location: config.location,
+        sandboxGroup: config.sandboxGroup,
+        assumeGroupExists: config.assumeGroupExists,
       },
       logger,
     );
@@ -94,15 +99,6 @@ export class SandboxContainerManager implements ContainerManager {
   }
 
   async spawn(config: ContainerSpawnConfig): Promise<string> {
-    if (config.volumes?.length) {
-      // Sandboxes have no host bind mounts; worktree files are pushed in via
-      // writeFile and pulled back out via extractDirectoryFromContainer.
-      this.logger.debug(
-        { podId: config.podId, volumes: config.volumes.length },
-        'Sandbox spawn ignores host volume mounts (no bind mounts in Sandboxes)',
-      );
-    }
-
     const tier = pickSandboxTier(config.memoryBytes, this.defaultTier);
     const egressPolicy = egressPolicyForMode(config.networkPolicyMode, config.allowedHosts ?? []);
 
@@ -112,6 +108,11 @@ export class SandboxContainerManager implements ContainerManager {
       egressPolicy,
       env: config.env,
     });
+    this.egressPolicies.set(sandboxId, egressPolicy);
+
+    if (config.volumes?.length) {
+      await this.uploadVolumes(sandboxId, config.volumes);
+    }
 
     this.logger.info(
       {
@@ -120,7 +121,7 @@ export class SandboxContainerManager implements ContainerManager {
         tier,
         networkPolicyMode: config.networkPolicyMode ?? 'allow-all',
         egressDefault: egressPolicy.defaultAction,
-        egressRules: egressPolicy.rules.length,
+        egressRules: egressPolicy.hostRules.length,
       },
       'Sandbox spawned',
     );
@@ -129,19 +130,25 @@ export class SandboxContainerManager implements ContainerManager {
 
   async kill(containerId: string): Promise<void> {
     await this.client.destroy(containerId);
+    this.egressPolicies.delete(containerId);
   }
 
-  /**
-   * The Sandboxes egress policy is set at spawn from `networkPolicyMode` +
-   * `allowedHosts`; it does not consume an iptables/HAProxy script the way the
-   * Docker backend does. There is no SNI-proxy to live-refresh, so this is a
-   * no-op. A typed runtime egress-update path (host add/remove via
-   * `SandboxApiClient.updateEgress`) is a follow-up once the data-plane is wired.
-   */
-  async refreshFirewall(containerId: string, _script: string): Promise<void> {
+  async refreshFirewall(containerId: string, script: string): Promise<void> {
+    const policy = parseSandboxEgressRefresh(script) ?? this.egressPolicies.get(containerId);
+    if (!policy) {
+      throw new Error(
+        `No sandbox egress policy available for ${containerId}; pass a sandbox egress refresh payload`,
+      );
+    }
+    await this.client.updateEgress(containerId, policy);
+    this.egressPolicies.set(containerId, policy);
     this.logger.debug(
-      { sandboxId: containerId },
-      'refreshFirewall is a no-op for the sandbox backend (egress applied at spawn)',
+      {
+        sandboxId: containerId,
+        defaultAction: policy.defaultAction,
+        rules: policy.hostRules.length,
+      },
+      'Sandbox egress policy refreshed',
     );
   }
 
@@ -167,34 +174,15 @@ export class SandboxContainerManager implements ContainerManager {
     return this.client.readFile(containerId, path);
   }
 
-  /**
-   * Tar the directory inside the sandbox, download the tarball, and extract it to
-   * `hostPath` honouring `excludes`. `hostPath` is created if missing and its
-   * existing (non-excluded) contents are cleared first, matching the Docker
-   * backend's contract.
-   */
   async extractDirectoryFromContainer(
-    containerId: string,
+    _containerId: string,
     containerPath: string,
-    hostPath: string,
-    excludes?: string[],
+    _hostPath: string,
+    _excludes?: string[],
   ): Promise<void> {
-    const quoted = shellSingleQuote(containerPath);
-    const result = await this.client.exec(containerId, [
-      'sh',
-      '-c',
-      `tar czf ${shellSingleQuote(EXTRACT_TAR_PATH)} -C ${quoted} .`,
-    ]);
-    if (result.exitCode !== 0) {
-      throw new Error(
-        `Failed to tar ${containerPath} in sandbox ${containerId} (exit ${result.exitCode}): ${result.stderr.trim()}`,
-      );
-    }
-
-    const tarball = await this.client.readFile(containerId, EXTRACT_TAR_PATH);
-    mkdirSync(hostPath, { recursive: true });
-    clearDirectory(hostPath, excludes);
-    await extractTarballToHost(gunzipSync(tarball), hostPath, excludes, this.logger);
+    throw new Error(
+      `extractDirectoryFromContainer is unsupported for Azure Container Apps Sandboxes (${containerPath}). Use Docker/local until sandbox sync-back is implemented.`,
+    );
   }
 
   async getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'> {
@@ -300,6 +288,48 @@ export class SandboxContainerManager implements ContainerManager {
       kill: async () => {},
     };
   }
+
+  private async uploadVolumes(
+    sandboxId: string,
+    volumes: NonNullable<ContainerSpawnConfig['volumes']>,
+  ): Promise<void> {
+    for (const volume of volumes) {
+      if (!existsSync(volume.host)) {
+        this.logger.debug(
+          { sandboxId, hostPath: volume.host, containerPath: volume.container },
+          'Skipping missing sandbox volume source',
+        );
+        continue;
+      }
+      await this.uploadPath(sandboxId, volume.host, volume.container);
+    }
+  }
+
+  private async uploadPath(
+    sandboxId: string,
+    hostPath: string,
+    containerPath: string,
+  ): Promise<void> {
+    const stat = lstatSync(hostPath);
+    if (stat.isDirectory()) {
+      if (this.client.mkdir) {
+        await this.client.mkdir(sandboxId, containerPath);
+      }
+      for (const entry of readdirSync(hostPath)) {
+        if (shouldSkipUploadedVolumeEntry(entry)) continue;
+        await this.uploadPath(sandboxId, join(hostPath, entry), `${containerPath}/${entry}`);
+      }
+      return;
+    }
+    if (stat.isSymbolicLink()) {
+      const target = readlinkSync(hostPath);
+      await this.client.writeFile(sandboxId, containerPath, Buffer.from(target, 'utf-8'));
+      return;
+    }
+    if (stat.isFile()) {
+      await this.client.writeFile(sandboxId, containerPath, await readFile(hostPath));
+    }
+  }
 }
 
 function toSandboxExecOptions(options?: ExecOptions): SandboxExecOptions | undefined {
@@ -312,116 +342,34 @@ function toSandboxExecOptions(options?: ExecOptions): SandboxExecOptions | undef
   };
 }
 
-function shellSingleQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
+export function sandboxEgressRefreshPayload(
+  mode: ContainerSpawnConfig['networkPolicyMode'],
+  allowedHosts: string[] = [],
+): string {
+  return JSON.stringify({ sandboxEgressPolicy: egressPolicyForMode(mode, allowedHosts) });
 }
 
-// ---------------------------------------------------------------------------
-// Host-side tar extraction + exclude filtering. Mirrors the Docker backend's
-// `isExcludedPath` semantics: a bare exclude (no slash) matches any path
-// segment; an exclude with a slash matches that relative path and its
-// descendants.
-// ---------------------------------------------------------------------------
-
-function normalizeExtractPath(pathname: string): string {
-  return pathname.replace(/^\.\//, '').replace(/^\/+/, '').replace(/\/+$/, '');
-}
-
-export function isExcludedPath(relPath: string, excludes?: string[]): boolean {
-  if (!excludes?.length) return false;
-  const normalizedRel = normalizeExtractPath(relPath);
-  if (!normalizedRel) return false;
-  const segments = normalizedRel.split('/');
-  return excludes.some((exclude) => {
-    const normalizedExclude = normalizeExtractPath(exclude);
-    if (!normalizedExclude) return false;
-    if (!normalizedExclude.includes('/')) {
-      return segments.includes(normalizedExclude);
+function parseSandboxEgressRefresh(script: string): ReturnType<typeof egressPolicyForMode> | null {
+  try {
+    const parsed = JSON.parse(script) as { sandboxEgressPolicy?: unknown };
+    const policy = parsed.sandboxEgressPolicy as ReturnType<typeof egressPolicyForMode> | undefined;
+    if (
+      policy &&
+      (policy.defaultAction === 'Allow' || policy.defaultAction === 'Deny') &&
+      Array.isArray(policy.hostRules)
+    ) {
+      return policy;
     }
-    return normalizedRel === normalizedExclude || normalizedRel.startsWith(`${normalizedExclude}/`);
-  });
-}
-
-/** Remove the existing (non-excluded) contents of `hostPath`. */
-function clearDirectory(hostPath: string, excludes?: string[]): void {
-  for (const entry of readdirSync(hostPath)) {
-    if (isExcludedPath(entry, excludes)) continue;
-    rmSync(join(hostPath, entry), { recursive: true, force: true });
+  } catch {
+    // Docker firewall scripts are not JSON; fall back to the last known policy.
   }
+  return null;
 }
 
-function extractTarballToHost(
-  tarball: Buffer,
-  hostPath: string,
-  excludes: string[] | undefined,
-  logger: Logger,
-): Promise<void> {
-  const extract = tar.extract();
-  const pendingHardlinks: Array<{ fullPath: string; targetPath: string }> = [];
-
-  return new Promise<void>((resolve, reject) => {
-    extract.on('entry', (header, stream, next) => {
-      const rel = normalizeExtractPath(header.name);
-      if (!rel || isExcludedPath(rel, excludes)) {
-        stream.resume();
-        stream.on('end', next);
-        return;
-      }
-
-      const fullPath = join(hostPath, rel);
-
-      if (header.type === 'directory') {
-        mkdirSync(fullPath, { recursive: true });
-        stream.resume();
-        stream.on('end', next);
-      } else if (header.type === 'symlink') {
-        mkdirSync(dirname(fullPath), { recursive: true });
-        try {
-          symlinkSync(header.linkname ?? '', fullPath);
-        } catch (err) {
-          logger.debug({ err, fullPath }, 'Skipping unextractable symlink');
-        }
-        stream.resume();
-        stream.on('end', next);
-      } else if (header.type === 'link') {
-        const targetRel = normalizeExtractPath(header.linkname ?? '');
-        pendingHardlinks.push({ fullPath, targetPath: join(hostPath, targetRel) });
-        stream.resume();
-        stream.on('end', next);
-      } else {
-        mkdirSync(dirname(fullPath), { recursive: true });
-        const chunks: Buffer[] = [];
-        stream.on('data', (chunk: Buffer) => chunks.push(chunk));
-        stream.on('end', () => {
-          try {
-            writeFileSync(fullPath, Buffer.concat(chunks));
-            next();
-          } catch (err) {
-            reject(err);
-          }
-        });
-        stream.on('error', reject);
-      }
-    });
-
-    extract.on('finish', () => {
-      for (const { fullPath, targetPath } of pendingHardlinks) {
-        if (!existsSync(targetPath)) {
-          logger.warn({ fullPath, targetPath }, 'Skipping archive hardlink with missing target');
-          continue;
-        }
-        try {
-          symlinkSync(targetPath, fullPath);
-        } catch (err) {
-          logger.debug({ err, fullPath }, 'Skipping unextractable hardlink');
-        }
-      }
-      resolve();
-    });
-
-    extract.on('error', reject);
-    // Wrap in an array so the whole buffer is emitted as a single chunk rather
-    // than Readable.from iterating it byte-by-byte.
-    Readable.from([tarball]).pipe(extract);
-  });
+function shouldSkipUploadedVolumeEntry(entry: string): boolean {
+  return (
+    entry === 'node_modules' ||
+    entry.startsWith('.autopod-sync-') ||
+    entry.startsWith('.autopod-extract-')
+  );
 }

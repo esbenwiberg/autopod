@@ -57,6 +57,78 @@ export const DEFAULT_ALLOWED_HOSTS = [
   'githubcopilot.com',
 ];
 
+export function computeNetworkPolicyAllowlist(
+  policy: NetworkPolicy,
+  mcpServers: InjectedMcpServer[],
+  daemonGatewayHost: string,
+  registries: PrivateRegistry[] = [],
+): string[] {
+  const hosts = new Set<string>();
+
+  // Start with defaults (unless explicitly replaced)
+  if (!policy.replaceDefaults) {
+    for (const h of DEFAULT_ALLOWED_HOSTS) {
+      hosts.add(h);
+    }
+  }
+
+  // Add profile-specified hosts (wildcards preserved)
+  for (const h of policy.allowedHosts) {
+    hosts.add(h);
+  }
+
+  // Add daemon gateway so the container can reach the daemon's MCP endpoint
+  hosts.add(daemonGatewayHost);
+  // Also add host.docker.internal as a common alternative
+  hosts.add('host.docker.internal');
+
+  // Extract hostnames from MCP server URLs
+  for (const server of mcpServers) {
+    try {
+      const url = new URL(server.url);
+      hosts.add(url.hostname);
+    } catch {
+      // Malformed URL — skip
+    }
+  }
+
+  // Extract hostnames from private package registries (npm/NuGet feeds)
+  for (const reg of registries) {
+    try {
+      const url = new URL(reg.url);
+      hosts.add(url.hostname);
+    } catch {
+      // Malformed URL — skip
+    }
+  }
+
+  // Auto-allow common package manager registries when the flag is set
+  if (policy.allowPackageManagers) {
+    const PACKAGE_MANAGER_HOSTS = [
+      'registry.npmjs.org',
+      'registry.yarnpkg.com',
+      'dl.yarnpkg.com',
+      'pypi.org',
+      'files.pythonhosted.org',
+      'crates.io',
+      'static.crates.io',
+      'deb.debian.org',
+      'security.debian.org',
+      'nuget.org',
+      'api.nuget.org',
+      'proxy.golang.org',
+      'sum.golang.org',
+      'rubygems.org',
+      'api.rubygems.org',
+    ];
+    for (const h of PACKAGE_MANAGER_HOSTS) {
+      hosts.add(h);
+    }
+  }
+
+  return [...hosts];
+}
+
 interface DockerNetworkManagerOptions {
   docker: Dockerode;
   logger: Logger;
@@ -248,70 +320,7 @@ export class DockerNetworkManager {
     daemonGatewayIp: string,
     registries: PrivateRegistry[] = [],
   ): string[] {
-    const hosts = new Set<string>();
-
-    // Start with defaults (unless explicitly replaced)
-    if (!policy.replaceDefaults) {
-      for (const h of DEFAULT_ALLOWED_HOSTS) {
-        hosts.add(h);
-      }
-    }
-
-    // Add profile-specified hosts (wildcards preserved)
-    for (const h of policy.allowedHosts) {
-      hosts.add(h);
-    }
-
-    // Add daemon gateway so the container can reach the daemon's MCP endpoint
-    hosts.add(daemonGatewayIp);
-    // Also add host.docker.internal as a common alternative
-    hosts.add('host.docker.internal');
-
-    // Extract hostnames from MCP server URLs
-    for (const server of mcpServers) {
-      try {
-        const url = new URL(server.url);
-        hosts.add(url.hostname);
-      } catch {
-        // Malformed URL — skip
-      }
-    }
-
-    // Extract hostnames from private package registries (npm/NuGet feeds)
-    for (const reg of registries) {
-      try {
-        const url = new URL(reg.url);
-        hosts.add(url.hostname);
-      } catch {
-        // Malformed URL — skip
-      }
-    }
-
-    // Auto-allow common package manager registries when the flag is set
-    if (policy.allowPackageManagers) {
-      const PACKAGE_MANAGER_HOSTS = [
-        'registry.npmjs.org',
-        'registry.yarnpkg.com',
-        'dl.yarnpkg.com',
-        'pypi.org',
-        'files.pythonhosted.org',
-        'crates.io',
-        'static.crates.io',
-        'deb.debian.org',
-        'security.debian.org',
-        'nuget.org',
-        'api.nuget.org',
-        'proxy.golang.org',
-        'sum.golang.org',
-        'rubygems.org',
-        'api.rubygems.org',
-      ];
-      for (const h of PACKAGE_MANAGER_HOSTS) {
-        hosts.add(h);
-      }
-    }
-
-    return [...hosts];
+    return computeNetworkPolicyAllowlist(policy, mcpServers, daemonGatewayIp, registries);
   }
 
   /**

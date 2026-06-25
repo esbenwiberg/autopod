@@ -47,10 +47,14 @@ class SandboxClient:
         subscription_id: str,
         resource_group: str,
         location: str,
+        sandbox_group: str | None = None,
     ) -> None:
         self.subscription_id = subscription_id
         self.resource_group = resource_group
         self.location = location
+        self.sandbox_group = sandbox_group or env("SANDBOX_GROUP", "autopod-spike")
+        self.assume_group_exists = _truthy(env("SANDBOX_ASSUME_GROUP_EXISTS", ""))
+        self._disk_images_by_sandbox: dict[str, str] = {}
         self._client = self._build_client()
 
     # ----- construction -----------------------------------------------------
@@ -64,25 +68,39 @@ class SandboxClient:
             ) from e
 
         try:
-            # VERIFY: package + client class name. Search indicates the package is
-            # `azure-containerapps-sandbox`; the client class name is unconfirmed.
-            from azure.containerapps.sandbox import SandboxClient as _SdkClient  # type: ignore
+            from azure.containerapps.sandbox import (
+                SandboxGroupClient,
+                SandboxGroupManagementClient,
+                endpoint_for_region,
+            )
+            from azure.core.exceptions import ResourceNotFoundError
         except ImportError as e:
             raise RuntimeError(
                 "Could not import the Sandboxes SDK.\n"
-                "  Expected: `pip install azure-containerapps-sandbox`\n"
-                "  VERIFY the import path against https://sandboxes.azure.com quickstart.\n"
-                "  If the SDK is not yet published for your tenant, fall back to the raw\n"
-                "  data-plane REST API (see README) — the dynamic-sessions execute call\n"
-                "  is the closest documented analogue."
+                "  Expected: `pip install azure-containerapps-sandbox`."
             ) from e
 
         cred = DefaultAzureCredential()
-        # VERIFY: constructor signature.
-        return _SdkClient(
-            credential=cred,
+        if self.assume_group_exists:
+            print(f"Assuming sandbox group {self.sandbox_group!r} already exists.")
+        else:
+            mgmt = SandboxGroupManagementClient(
+                cred,
+                subscription_id=self.subscription_id,
+                resource_group=self.resource_group,
+            )
+            try:
+                mgmt.get_group(self.sandbox_group)
+            except ResourceNotFoundError:
+                print(f"Creating sandbox group {self.sandbox_group!r} in {self.location}...")
+                mgmt.begin_create_group(self.sandbox_group, self.location).result()
+
+        return SandboxGroupClient(
+            endpoint_for_region(self.location),
+            cred,
             subscription_id=self.subscription_id,
             resource_group=self.resource_group,
+            sandbox_group=self.sandbox_group,
         )
 
     # ----- unknown 0: provision ---------------------------------------------
@@ -93,19 +111,32 @@ class SandboxClient:
         Returns a handle and the wall-clock provision time (the 'sub-second' claim).
         """
         t0 = time.monotonic()
-        # VERIFY: method name + kwargs. Blog posts reference `create_session(agent_id,
-        # policy=, config=)`; the raw SDK may instead expose `create_sandbox` on a
-        # SandboxGroups operations object. The resource type is Microsoft.App/SandboxGroups.
-        raw = self._call(
-            self._client,
-            ["create_sandbox", "create_session", "begin_create"],
-            location=self.location,
-            image=image,
-            resource_tier=tier,  # VERIFY: 'XS'|'S'|'M'|'L' vs an explicit cpu/memory object
-            egress_policy=egress_policy,
-        )
+        disk_image_id = ""
+        try:
+            disk_image = self._client.begin_create_disk_image(
+                image,
+                name=f"autopod-spike-{int(time.time())}",
+                polling_timeout=900,
+            ).result()
+            disk_image_id = disk_image.id
+            raw = self._client.begin_create_sandbox(
+                disk_id=disk_image.id,
+                egress_policy=egress_policy,
+                labels={"purpose": "autopod-sandbox-spike"},
+                auto_suspend_seconds=900,
+                **_resources_for_tier(tier),
+            ).result()
+        except Exception:
+            if disk_image_id:
+                try:
+                    self._client.begin_delete_disk_image(disk_image_id).result()
+                except Exception:
+                    pass
+            raise
         provision_ms = int((time.monotonic() - t0) * 1000)
-        sandbox_id = getattr(raw, "id", None) or getattr(raw, "session_id", "unknown")
+        sandbox_id = getattr(raw, "sandbox_id", None) or getattr(raw, "id", None) or "unknown"
+        if disk_image_id:
+            self._disk_images_by_sandbox[str(sandbox_id)] = disk_image_id
         return SandboxHandle(id=str(sandbox_id), raw=raw, provision_ms=provision_ms)
 
     # ----- unknown 1: exec (buffered vs streamed) ---------------------------
@@ -188,20 +219,15 @@ class SandboxClient:
     # ----- unknown 4: runtime-mutable egress --------------------------------
 
     def update_egress(self, handle: SandboxHandle, egress_policy: dict) -> None:
-        # VERIFY: the runtime-update method. Docs say the policy is mutable at runtime and
-        # "subsequent requests are evaluated against the updated policy" — but the method
-        # name was not in any loadable doc.
-        self._call(
-            handle.raw,
-            ["update_egress_policy", "set_egress_policy", "update_network_policy"],
-            egress_policy=egress_policy,
-        )
+        handle.raw.set_egress_policy(egress_policy)
 
     # ----- maps to stop()/start() -------------------------------------------
 
     def suspend(self, handle: SandboxHandle, *, mode: str = "memory") -> int:
         t0 = time.monotonic()
-        self._call(handle.raw, ["suspend", "begin_suspend"], mode=mode)  # 'memory' | 'disk'
+        # The SDK names this operation stop/resume; the sandbox lifecycle policy controls
+        # whether suspend state is memory- or disk-backed.
+        self._call(handle.raw, ["begin_stop", "stop"], mode=mode)  # 'memory' | 'disk'
         return int((time.monotonic() - t0) * 1000)
 
     def resume(self, handle: SandboxHandle) -> int:
@@ -210,7 +236,10 @@ class SandboxClient:
         return int((time.monotonic() - t0) * 1000)
 
     def destroy(self, handle: SandboxHandle) -> None:
-        self._call(handle.raw, ["delete", "destroy", "destroy_session", "begin_delete"])
+        self._call(handle.raw, ["begin_delete", "delete", "destroy", "destroy_session"])
+        disk_image_id = self._disk_images_by_sandbox.pop(handle.id, "")
+        if disk_image_id:
+            self._client.begin_delete_disk_image(disk_image_id).result()
 
     # ----- internals: forgiving SDK dispatch --------------------------------
 
@@ -251,23 +280,44 @@ class SandboxClient:
         return iter([maybe_iter])
 
 
-# ----- egress policy helpers (shape per the egress-policies doc) -------------
-# default_action: "Allow" | "Deny"; rules matched in order on (host, path, method).
-# VERIFY the exact JSON keys against the quickstart.
+# ----- egress policy helpers -------------------------------------------------
+# SDK/wire shape: EgressPolicy(default_action) serializes to
+# { defaultAction, hostRules: [{ pattern, action }], rules: [...] }.
 
-def allow_all_policy() -> dict:
-    return {"default_action": "Allow", "rules": []}
+def allow_all_policy():
+    from azure.containerapps.sandbox import EgressPolicy
 
-
-def deny_all_policy() -> dict:
-    return {"default_action": "Deny", "rules": []}
+    return EgressPolicy(default_action="Allow")
 
 
-def restricted_policy(allowed_hosts: list[str]) -> dict:
-    return {
-        "default_action": "Deny",
-        "rules": [{"match": {"host": h}, "action": "Allow"} for h in allowed_hosts],
+def deny_all_policy():
+    from azure.containerapps.sandbox import EgressPolicy
+
+    return EgressPolicy(default_action="Deny")
+
+
+def restricted_policy(allowed_hosts: list[str]):
+    from azure.containerapps.sandbox import EgressHostRule, EgressPolicy
+
+    return EgressPolicy(
+        default_action="Deny",
+        host_rules=[EgressHostRule(pattern=h, action="Allow") for h in allowed_hosts],
+    )
+
+
+def _resources_for_tier(tier: str) -> dict[str, str]:
+    # The current SDK takes explicit cpu/memory/disk quantities rather than
+    # XS/S/M/L strings. Keep the README's tier knob as a convenience for the spike.
+    tiers = {
+        "XS": {"cpu": "250m", "memory": "512Mi", "disk_size": "5Gi"},
+        "S": {"cpu": "500m", "memory": "1024Mi", "disk_size": "10Gi"},
+        "M": {"cpu": "1000m", "memory": "2048Mi", "disk_size": "20Gi"},
+        "L": {"cpu": "2000m", "memory": "4096Mi", "disk_size": "40Gi"},
     }
+    key = tier.upper()
+    if key not in tiers:
+        raise ValueError(f"Unknown SANDBOX_TIER {tier!r}; expected one of {sorted(tiers)}")
+    return tiers[key]
 
 
 def env(name: str, default: str | None = None, *, required: bool = False) -> str:
@@ -275,3 +325,7 @@ def env(name: str, default: str | None = None, *, required: bool = False) -> str
     if required and not val:
         raise SystemExit(f"Missing required env var: {name}")
     return val or ""
+
+
+def _truthy(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}

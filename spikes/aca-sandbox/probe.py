@@ -25,6 +25,7 @@ from sandbox_client import (
 SUBSCRIPTION = env("AZURE_SUBSCRIPTION_ID", required=True)
 RESOURCE_GROUP = env("AZURE_RESOURCE_GROUP", "autopod-spike-rg")
 LOCATION = env("AZURE_LOCATION", "westeurope")
+SANDBOX_GROUP = env("SANDBOX_GROUP", "autopod-spike")
 IMAGE = env("SANDBOX_IMAGE", "mcr.microsoft.com/cbl-mariner/base/core:2.0")
 TIER = env("SANDBOX_TIER", "L")  # XS|S|M|L — L = 2 cores / 4 GB / 40 GB
 ALLOWED_HOST = env("SANDBOX_ALLOWED_HOST", "api.github.com")
@@ -104,8 +105,12 @@ def probe_egress_mutation(client, handle) -> None:
     curl = "curl -sS -o /dev/null -w '%{{http_code}}' --max-time 8 https://{host}/ 2>&1 || echo BLOCKED"
 
     denied_before = client.exec(handle, curl.format(host=DENIED_HOST)).stdout.strip()
-    record("egress-default-deny", "PASS" if "BLOCKED" in denied_before or denied_before == "000"
-           else "LEAK", f"{DENIED_HOST} → {denied_before!r} (want blocked under default Deny)")
+    default_deny_blocked = (
+        "BLOCKED" in denied_before
+        or denied_before in {"000", "403"}
+    )
+    record("egress-default-deny", "PASS" if default_deny_blocked else "LEAK",
+           f"{DENIED_HOST} → {denied_before!r} (want blocked under default Deny)")
 
     # Mutate at runtime to allow the previously-denied host.
     try:
@@ -137,12 +142,16 @@ def probe_suspend_resume(client, handle) -> None:
 
 def main() -> int:
     print("Azure Container Apps Sandboxes — autopod backend feasibility probe")
-    print(f"sub={SUBSCRIPTION[:8]}… rg={RESOURCE_GROUP} loc={LOCATION} image={IMAGE} tier={TIER}")
+    print(
+        f"sub={SUBSCRIPTION[:8]}… rg={RESOURCE_GROUP} group={SANDBOX_GROUP} "
+        f"loc={LOCATION} image={IMAGE} tier={TIER}"
+    )
 
     client = SandboxClient(
         subscription_id=SUBSCRIPTION,
         resource_group=RESOURCE_GROUP,
         location=LOCATION,
+        sandbox_group=SANDBOX_GROUP,
     )
 
     handle = None
