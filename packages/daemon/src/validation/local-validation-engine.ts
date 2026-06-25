@@ -176,7 +176,11 @@ export function createLocalValidationEngine(
             setupExecResult = await containerManager.execInContainer(
               config.containerId,
               ['sh', '-c', config.validationSetupCommand],
-              { cwd: '/workspace', timeout: config.buildTimeout ?? 300_000 },
+              {
+                cwd: '/workspace',
+                timeout: config.buildTimeout ?? 300_000,
+                ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
+              },
             );
           } catch (err) {
             const duration = Date.now() - setupStart;

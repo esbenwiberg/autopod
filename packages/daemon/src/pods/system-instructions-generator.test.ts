@@ -1,4 +1,4 @@
-import type { MemoryEntry, Pod, Profile } from '@autopod/shared';
+import { type MemoryEntry, type Pod, type Profile, parseSpecContract } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import { generateSystemInstructions } from './system-instructions-generator.js';
 
@@ -203,6 +203,36 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('  - exists: .header');
     expect(md).toContain('  - text_contains: .title = "Dashboard"');
     expect(md).toContain('- /settings');
+  });
+
+  it('tells contract pods to use the diff-scoped validation base ref', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        contract: parseSpecContract(`contract_version: 1
+title: Base-sensitive fact
+depends_on: []
+scenarios:
+  - id: capsule-gate
+    given: ["a capsule-covered change"]
+    when: ["validation runs"]
+    then: ["the capsule gate uses the pod's own base"]
+required_facts:
+  - id: fact-capsule-gate
+    proves: [capsule-gate]
+    kind: unit-test
+    artifact:
+      path: tools/check-capsules.mjs
+      change: update
+    command: capsule check --base "$AUTOPOD_VALIDATION_BASE_REF"
+human_review: []
+`),
+      }),
+      'http://localhost:8080/mcp/x',
+    );
+
+    expect(md).toContain('$AUTOPOD_VALIDATION_BASE_REF');
+    expect(md).toContain('$AUTOPOD_PR_BASE_REF');
   });
 
   it('emits a ToolSearch select line when an injected MCP server has toolNames', () => {

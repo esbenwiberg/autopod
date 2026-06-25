@@ -2363,6 +2363,9 @@ describe('PodManager', () => {
         .mocked(ctx.containerManager.writeFile)
         .mock.calls.find((call) => call[1] === AGENT_ENV_PATH);
       expect(String(envFileWrite?.[2])).toContain(`export POD_ID='${pod.id}'`);
+      expect(String(envFileWrite?.[2])).toContain(
+        "export AUTOPOD_VALIDATION_BASE_REF='abc1234567890abcdef1234567890abcdef1234'",
+      );
       expect(reviewer.generateText).toHaveBeenCalledTimes(1);
     });
 
@@ -2554,6 +2557,26 @@ describe('PodManager', () => {
       expect(ctx.containerManager.spawn).toHaveBeenCalled();
       expect(ctx.worktreeManager.create).toHaveBeenCalled();
       expect(ctx.containerManager.writeFile).toHaveBeenCalled();
+      expect(vi.mocked(ctx.containerManager.spawn).mock.calls[0]?.[0].env).toMatchObject({
+        AUTOPOD_POD_ID: pod.id,
+        AUTOPOD_HEAD_BRANCH: pod.branch,
+        AUTOPOD_BASE_BRANCH: 'main',
+        AUTOPOD_PR_BASE_REF: 'origin/main',
+        AUTOPOD_VALIDATION_BASE_REF: 'abc1234567890abcdef1234567890abcdef1234',
+        AUTOPOD_START_COMMIT_SHA: 'abc1234567890abcdef1234567890abcdef1234',
+      });
+      expect(ctx.runtime.spawn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          env: expect.objectContaining({
+            AUTOPOD_POD_ID: pod.id,
+            AUTOPOD_HEAD_BRANCH: pod.branch,
+            AUTOPOD_BASE_BRANCH: 'main',
+            AUTOPOD_PR_BASE_REF: 'origin/main',
+            AUTOPOD_VALIDATION_BASE_REF: 'abc1234567890abcdef1234567890abcdef1234',
+            AUTOPOD_START_COMMIT_SHA: 'abc1234567890abcdef1234567890abcdef1234',
+          }),
+        }),
+      );
     });
 
     it('spawns from profile.warmImageTag when set, falling back to base image otherwise', async () => {
@@ -3499,6 +3522,34 @@ describe('PodManager', () => {
         expect.any(AbortSignal),
         expect.any(Object),
       );
+    });
+
+    it('passes diff-scoped validation base context to validation commands', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        startCommitSha: 'parent-tip-sha',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const validateConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[0]?.[0];
+      expect(validateConfig?.extraExecEnv).toMatchObject({
+        AUTOPOD_POD_ID: pod.id,
+        AUTOPOD_HEAD_BRANCH: pod.branch,
+        AUTOPOD_BASE_BRANCH: 'main',
+        AUTOPOD_PR_BASE_REF: 'origin/main',
+        AUTOPOD_VALIDATION_BASE_REF: 'parent-tip-sha',
+        AUTOPOD_START_COMMIT_SHA: 'parent-tip-sha',
+      });
     });
 
     it('readiness refresh updates after deferred advisory finishes', async () => {

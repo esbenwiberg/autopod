@@ -866,14 +866,20 @@ describe('validate() — hasWebUi gating', () => {
       setupExitCode?: number;
       buildTimeout?: number;
     } = {},
-  ): { cm: ContainerManager; commands: string[]; timeouts: Array<number | undefined> } {
+  ): {
+    cm: ContainerManager;
+    commands: string[];
+    timeouts: Array<number | undefined>;
+    envs: Array<Record<string, string> | undefined>;
+  } {
     const commands: string[] = [];
     const timeouts: Array<number | undefined> = [];
+    const envs: Array<Record<string, string> | undefined> = [];
     const execInContainer = vi.fn(
       async (
         _containerId: string,
         command: string[],
-        execOptions?: { timeout?: number },
+        execOptions?: { timeout?: number; env?: Record<string, string> },
       ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
         const shell = command[2] ?? '';
         if (shell.includes('git reset --hard HEAD') && shell.includes('git clean')) {
@@ -885,6 +891,7 @@ describe('validate() — hasWebUi gating', () => {
 
         commands.push(shell);
         timeouts.push(execOptions?.timeout);
+        envs.push(execOptions?.env);
         if (shell === 'setup-command') {
           return {
             stdout: options.setupExitCode === 1 ? 'setup stdout' : 'setup ok',
@@ -900,6 +907,7 @@ describe('validate() — hasWebUi gating', () => {
       cm: { ...stubContainerManager(), execInContainer } as unknown as ContainerManager,
       commands,
       timeouts,
+      envs,
     };
   }
 
@@ -965,6 +973,32 @@ describe('validate() — hasWebUi gating', () => {
     const setupIndex = commands.indexOf('setup-command');
     expect(setupIndex).toBeGreaterThanOrEqual(0);
     expect(timeouts[setupIndex]).toBe(12_345);
+  });
+
+  it('passes validation env through to setup command execution', async () => {
+    const { cm, commands, envs } = commandTrackingContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    await engine.validate(
+      baseConfig({
+        validationSetupCommand: 'setup-command',
+        extraExecEnv: {
+          AUTOPOD_VALIDATION_BASE_REF: 'abc123',
+          AUTOPOD_PR_BASE_REF: 'origin/main',
+        },
+        startCommand: '',
+        smokePages: [],
+        hasWebUi: false,
+        skipPhases: ['facts', 'review'],
+      }),
+    );
+
+    const setupIndex = commands.indexOf('setup-command');
+    expect(setupIndex).toBeGreaterThanOrEqual(0);
+    expect(envs[setupIndex]).toMatchObject({
+      AUTOPOD_VALIDATION_BASE_REF: 'abc123',
+      AUTOPOD_PR_BASE_REF: 'origin/main',
+    });
   });
 
   it('treats missing or profile-skipped setup as neutral', async () => {

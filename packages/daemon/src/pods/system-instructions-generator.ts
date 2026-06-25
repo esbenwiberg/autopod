@@ -348,6 +348,9 @@ export function generateSystemInstructions(
       lines.push(
         'You must create or update these artifacts and make their commands pass. The validator re-runs each command independently after merge-work validation starts.',
       );
+      lines.push(
+        "For any diff/base-sensitive command, use `$AUTOPOD_VALIDATION_BASE_REF` as the base for this pod's own work. Use `$AUTOPOD_PR_BASE_REF` only when you intentionally need the eventual PR target branch.",
+      );
       lines.push('');
       for (const fact of pod.contract.requiredFacts) {
         lines.push(`- \`${fact.id}\` proves ${fact.proves.join(', ')}`);

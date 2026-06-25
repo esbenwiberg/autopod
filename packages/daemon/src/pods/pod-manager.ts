@@ -117,6 +117,7 @@ import {
   collectFactScreenshots,
   collectScreenshots,
 } from '../validation/screenshot-collector.js';
+import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import { DeletionGuardError, GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
@@ -5569,6 +5570,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const containerEnv: Record<string, string> = {
           POD_ID: podId,
           ...RUNTIME_TELEMETRY_OPT_OUT_ENV,
+          ...buildValidationContextEnv({
+            podId,
+            headBranch: pod.branch,
+            baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
+            startCommitSha: pod.startCommitSha,
+          }),
           PORT: String(CONTAINER_APP_PORT),
           HOST: '0.0.0.0', // bind to all interfaces inside container for Docker port forwarding
           // Host-side preview URL — same value the daemon writes to pod.previewUrl.
@@ -6468,6 +6475,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const secretEnv: Record<string, string> = {
           POD_ID: podId,
           ...providerResult.env,
+          ...buildValidationContextEnv({
+            podId,
+            headBranch: pod.branch,
+            baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
+            startCommitSha: pod.startCommitSha,
+          }),
         };
 
         // Codex runtime: write OPENAI_API_KEY to a secret file, pass file path in env.
@@ -9071,6 +9084,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, 'Computing diff…');
         const diffSinceCommit = pod.startCommitSha ?? undefined;
         const validationDefaultBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
+        const validationExecEnv = {
+          ...(buildValidationExecEnv(
+            profile.privateRegistries,
+            profile.registryPat ?? profile.adoPat ?? null,
+            profile.buildEnv,
+          ) ?? {}),
+          ...buildValidationContextEnv({
+            podId,
+            headBranch: pod.branch,
+            baseBranch: validationDefaultBranch,
+            startCommitSha: pod.startCommitSha,
+          }),
+        };
         const [diff, commitLog] = pod.worktreePath
           ? await Promise.all([
               worktreeManager.getDiff(
@@ -9143,11 +9169,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           hasWebUi: profile.hasWebUi ?? true,
           advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
           reviewerApiKey: process.env.ANTHROPIC_API_KEY,
-          extraExecEnv: buildValidationExecEnv(
-            profile.privateRegistries,
-            profile.registryPat ?? profile.adoPat ?? null,
-            profile.buildEnv,
-          ),
+          extraExecEnv: validationExecEnv,
           preSubmitReview: pod.preSubmitReview ?? undefined,
           skipPhases: profile.skipValidationPhases ?? undefined,
         };
