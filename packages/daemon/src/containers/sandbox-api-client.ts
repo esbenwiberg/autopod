@@ -1,0 +1,149 @@
+/**
+ * Seam over the Azure Container Apps **Sandboxes** preview data-plane.
+ *
+ * Every preview-SDK touchpoint lives behind this interface so that
+ * `SandboxContainerManager` — which holds all the mapping logic (tier selection,
+ * egress-policy translation, exec/file/extract semantics, streaming fallback,
+ * suspend/resume) — is fully unit-testable without Azure. The only thing the
+ * feasibility spike needs to finalize is a single adapter class
+ * (`AzureSandboxApiClient`) that implements this interface.
+ *
+ * This is the TypeScript mirror of `spikes/aca-sandbox/sandbox_client.py`. It is
+ * intentionally **id-based** (not handle-based) so a daemon restart can operate
+ * on a sandbox purely by its id, with no in-memory handle to rehydrate (see
+ * `pods/reconciler.ts`).
+ */
+
+/** Resource tier, mapping to the preview product's published tiers. */
+export type SandboxResourceTier = 'XS' | 'S' | 'M' | 'L';
+
+export interface SandboxEgressRule {
+  match: { host: string };
+  action: 'Allow' | 'Deny';
+}
+
+/**
+ * Per-sandbox egress policy. `defaultAction` is the fallthrough; `rules` are
+ * evaluated in order. The native equivalent of the Docker backend's
+ * iptables/HAProxy machinery — no proxy needed.
+ */
+export interface SandboxEgressPolicy {
+  defaultAction: 'Allow' | 'Deny';
+  rules: SandboxEgressRule[];
+}
+
+export interface CreateSandboxOptions {
+  image: string;
+  tier: SandboxResourceTier;
+  egressPolicy: SandboxEgressPolicy;
+  /** Environment for the sandbox's main process. */
+  env?: Record<string, string>;
+}
+
+export interface SandboxExecOptions {
+  cwd?: string;
+  timeoutMs?: number;
+  /** Run the command as this user inside the sandbox (e.g. 'root'). */
+  user?: string;
+  /** Extra env vars for this exec, in addition to the sandbox's main-process env. */
+  env?: Record<string, string>;
+}
+
+export interface SandboxExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+export interface SandboxExecChunk {
+  stdout?: string;
+  stderr?: string;
+  /** Present on the final chunk only. */
+  exitCode?: number;
+}
+
+export type SandboxStatus = 'running' | 'stopped' | 'unknown';
+
+export interface SandboxApiClient {
+  /** Provision a sandbox from an OCI image with an initial egress policy. Returns its id. */
+  createSandbox(options: CreateSandboxOptions): Promise<string>;
+  /** Delete a sandbox. Should be idempotent — a missing sandbox is treated as already destroyed. */
+  destroy(sandboxId: string): Promise<void>;
+  /** Run a command to completion and return buffered output. */
+  exec(
+    sandboxId: string,
+    command: string[],
+    options?: SandboxExecOptions,
+  ): Promise<SandboxExecResult>;
+  /**
+   * Native streaming exec. Optional: when omitted, the manager falls back to a
+   * buffered `exec()` surfaced through one-shot streams.
+   */
+  execStream?(
+    sandboxId: string,
+    command: string[],
+    options?: SandboxExecOptions,
+  ): AsyncIterable<SandboxExecChunk>;
+  writeFile(sandboxId: string, path: string, content: Buffer): Promise<void>;
+  readFile(sandboxId: string, path: string): Promise<Buffer>;
+  /** Replace the sandbox's egress policy at runtime. */
+  updateEgress(sandboxId: string, policy: SandboxEgressPolicy): Promise<void>;
+  /** Snapshot-suspend the sandbox (maps to ContainerManager.stop). */
+  suspend(sandboxId: string, mode?: 'memory' | 'disk'): Promise<void>;
+  /** Resume a suspended sandbox (maps to ContainerManager.start). */
+  resume(sandboxId: string): Promise<void>;
+  getStatus(sandboxId: string): Promise<SandboxStatus>;
+}
+
+// ---------------------------------------------------------------------------
+// Pure mapping helpers — no Azure, no SDK. Unit-tested in sandbox-api-client.test.ts.
+// ---------------------------------------------------------------------------
+
+/** Published memory ceiling per tier, in bytes. */
+const TIER_MEMORY_BYTES: Record<SandboxResourceTier, number> = {
+  XS: 512 * 1024 * 1024, // 0.5 GB
+  S: 1024 * 1024 * 1024, // 1 GB
+  M: 2 * 1024 * 1024 * 1024, // 2 GB
+  L: 4 * 1024 * 1024 * 1024, // 4 GB
+};
+
+const TIER_ORDER: readonly SandboxResourceTier[] = ['XS', 'S', 'M', 'L'];
+
+/**
+ * Pick the smallest tier whose memory ceiling satisfies `memoryBytes`. Falls back
+ * to `defaultTier` when no memory hint is given, and to the largest tier (`L`)
+ * when the request exceeds every published tier.
+ */
+export function pickSandboxTier(
+  memoryBytes: number | undefined,
+  defaultTier: SandboxResourceTier,
+): SandboxResourceTier {
+  if (!memoryBytes || memoryBytes <= 0) return defaultTier;
+  for (const tier of TIER_ORDER) {
+    if (TIER_MEMORY_BYTES[tier] >= memoryBytes) return tier;
+  }
+  return 'L';
+}
+
+/**
+ * Translate a network-policy mode + host allowlist into a sandbox egress policy:
+ *   - `allow-all`  → default Allow, no rules
+ *   - `deny-all`   → default Deny, no rules
+ *   - `restricted` → default Deny + one Allow rule per allowed host
+ */
+export function egressPolicyForMode(
+  mode: 'allow-all' | 'deny-all' | 'restricted' | undefined,
+  allowedHosts: string[] = [],
+): SandboxEgressPolicy {
+  switch (mode) {
+    case 'deny-all':
+      return { defaultAction: 'Deny', rules: [] };
+    case 'restricted':
+      return {
+        defaultAction: 'Deny',
+        rules: allowedHosts.map((host) => ({ match: { host }, action: 'Allow' as const })),
+      };
+    default:
+      return { defaultAction: 'Allow', rules: [] };
+  }
+}
