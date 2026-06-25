@@ -6,6 +6,8 @@ public struct SafetyAnalyticsResponse: Decodable, Equatable, Sendable {
     public let summary: SafetyAnalyticsSummary
     public let byPattern: [SafetyPatternCount]
     public let bySource: [SafetySourceCount]
+    public let firewallDenials: SafetyFirewallDenials
+    public let worktreeSafety: SafetyWorktreeSafety
     public let quarantineHistogram: [SafetyHistogramBucket]
     public let byPod: [SafetyPodEntry]
     public let networkPolicy: [SafetyNetworkPolicyCount]
@@ -70,6 +72,47 @@ public enum SafetyEventSource: String, Decodable, CaseIterable, Sendable {
 public struct SafetySourceCount: Decodable, Equatable, Sendable {
     public let source: SafetyEventSource
     public let count: Int
+}
+
+// MARK: - Firewall denials
+
+public struct SafetyFirewallDenials: Decodable, Equatable, Sendable {
+    public let total: Int
+    public let affectedPods: Int
+    public let topHosts: [SafetyFirewallHost]
+    public let recent: [SafetyFirewallDenial]
+}
+
+public struct SafetyFirewallHost: Decodable, Equatable, Sendable {
+    public let sni: String
+    public let count: Int
+    public let lastDeniedAt: String
+}
+
+public struct SafetyFirewallDenial: Decodable, Equatable, Identifiable, Sendable {
+    public let podId: String
+    public let sni: String
+    public let src: String
+    public let deniedAt: String
+
+    public var id: String { "\(podId)|\(sni)|\(src)|\(deniedAt)" }
+}
+
+// MARK: - Worktree safety
+
+public struct SafetyWorktreeSafety: Decodable, Equatable, Sendable {
+    public let currentCompromisedPods: Int
+    public let totalIncidents: Int
+    public let recentIncidents: [SafetyWorktreeIncident]
+}
+
+public struct SafetyWorktreeIncident: Decodable, Equatable, Identifiable, Sendable {
+    public let podId: String
+    public let deletionCount: Int
+    public let threshold: Int
+    public let detectedAt: String
+
+    public var id: String { "\(podId)|\(deletionCount)|\(threshold)|\(detectedAt)" }
 }
 
 // MARK: - Quarantine histogram
