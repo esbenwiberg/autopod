@@ -36,8 +36,7 @@ export function generateSystemInstructions(
   lines.push(`Pod ID: ${pod.id}`);
   lines.push(`Profile: ${pod.profileName}`);
   lines.push(
-    `Pod command references: use the exact full Pod ID \`${pod.id}\` in CLI commands, ` +
-      'status notes, tracking hints, handovers, and summaries.',
+    `Pod command references: use the exact full Pod ID \`${pod.id}\` in CLI commands, status notes, tracking hints, handovers, and summaries.`,
   );
   lines.push('Include every hyphen-separated part; do not shorten it to the first word.');
   lines.push('');
