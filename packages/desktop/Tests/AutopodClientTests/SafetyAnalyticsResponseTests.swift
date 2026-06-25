@@ -32,6 +32,17 @@ import Testing
     #expect(response.bySource[0].source == .actionResponse)
     #expect(response.bySource[0].count == 80)
 
+    // firewallDenials
+    #expect(response.firewallDenials.total == 12)
+    #expect(response.firewallDenials.affectedPods == 3)
+    #expect(response.firewallDenials.topHosts[0].sni == "blocked.example.com")
+    #expect(response.firewallDenials.recent[0].podId == "abc12345")
+
+    // worktreeSafety
+    #expect(response.worktreeSafety.currentCompromisedPods == 1)
+    #expect(response.worktreeSafety.totalIncidents == 2)
+    #expect(response.worktreeSafety.recentIncidents[0].deletionCount == 42)
+
     // quarantineHistogram — 10 buckets
     #expect(response.quarantineHistogram.count == 10)
     #expect(response.quarantineHistogram[0].bucket == "0.0-0.1")
@@ -167,6 +178,45 @@ import Testing
     }
 }
 
+// MARK: - Added security stats decode
+
+@Test func safetyFirewallDenialsDecodeEmptyPayload() throws {
+    let json = """
+    {
+      "total": 0,
+      "affectedPods": 0,
+      "topHosts": [],
+      "recent": []
+    }
+    """.data(using: .utf8)!
+    let response = try JSONDecoder().decode(SafetyFirewallDenials.self, from: json)
+    #expect(response.total == 0)
+    #expect(response.affectedPods == 0)
+    #expect(response.topHosts.isEmpty)
+    #expect(response.recent.isEmpty)
+}
+
+@Test func safetyWorktreeSafetyDecodesIncidentPayload() throws {
+    let json = """
+    {
+      "currentCompromisedPods": 1,
+      "totalIncidents": 1,
+      "recentIncidents": [
+        {
+          "podId": "abc12345",
+          "deletionCount": 42,
+          "threshold": 10,
+          "detectedAt": "2026-05-01T12:00:00Z"
+        }
+      ]
+    }
+    """.data(using: .utf8)!
+    let response = try JSONDecoder().decode(SafetyWorktreeSafety.self, from: json)
+    #expect(response.currentCompromisedPods == 1)
+    #expect(response.totalIncidents == 1)
+    #expect(response.recentIncidents[0].threshold == 10)
+}
+
 // MARK: - AuditChainVerifyResponse decodes
 
 @Test func auditChainVerifyResponseDecodesFullPayload() throws {
@@ -242,6 +292,34 @@ private func makeFullSafetyFixtureJSON() -> String {
         { "source": "action_response", "count": 80 },
         { "source": "mcp_proxy",       "count": 47 }
       ],
+      "firewallDenials": {
+        "total": 12,
+        "affectedPods": 3,
+        "topHosts": [
+          { "sni": "blocked.example.com", "count": 8, "lastDeniedAt": "2026-05-01T12:00:00Z" },
+          { "sni": "other.example.com",   "count": 4, "lastDeniedAt": "2026-05-01T11:00:00Z" }
+        ],
+        "recent": [
+          {
+            "podId": "abc12345",
+            "sni": "blocked.example.com",
+            "src": "127.0.0.1",
+            "deniedAt": "2026-05-01T12:00:00Z"
+          }
+        ]
+      },
+      "worktreeSafety": {
+        "currentCompromisedPods": 1,
+        "totalIncidents": 2,
+        "recentIncidents": [
+          {
+            "podId": "abc12345",
+            "deletionCount": 42,
+            "threshold": 10,
+            "detectedAt": "2026-05-01T12:00:00Z"
+          }
+        ]
+      },
       "quarantineHistogram": [
         { "bucket": "0.0-0.1", "count": 100 },
         { "bucket": "0.1-0.2", "count": 20  },

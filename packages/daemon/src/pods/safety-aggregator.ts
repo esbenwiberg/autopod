@@ -250,6 +250,109 @@ export function computeSafetyAnalytics(
     .countBySourceInWindow(days)
     .map((r) => ({ source: r.source as SafetyEventSource, count: r.count }));
 
+  // ── firewallDenials ─────────────────────────────────────────────────────────
+  const firewallSummary = db
+    .prepare(
+      `SELECT
+         COUNT(*) AS total,
+         COUNT(DISTINCT pod_id) AS affected_pods
+       FROM events
+       WHERE type = 'pod.firewall_denied'
+         AND created_at >= datetime('now', '-' || @days || ' days')`,
+    )
+    .get({ days }) as { total: number; affected_pods: number };
+
+  const firewallTopHosts = db
+    .prepare(
+      `SELECT
+         COALESCE(NULLIF(json_extract(payload, '$.sni'), ''), 'unknown') AS sni,
+         COUNT(*) AS count,
+         MAX(COALESCE(json_extract(payload, '$.timestamp'), created_at)) AS last_denied_at
+       FROM events
+       WHERE type = 'pod.firewall_denied'
+         AND created_at >= datetime('now', '-' || @days || ' days')
+       GROUP BY sni
+       ORDER BY count DESC, last_denied_at DESC
+       LIMIT 10`,
+    )
+    .all({ days }) as Array<{ sni: string; count: number; last_denied_at: string }>;
+
+  const firewallRecentRows = db
+    .prepare(
+      `SELECT
+         COALESCE(pod_id, json_extract(payload, '$.podId'), 'unknown') AS pod_id,
+         COALESCE(NULLIF(json_extract(payload, '$.sni'), ''), 'unknown') AS sni,
+         COALESCE(NULLIF(json_extract(payload, '$.src'), ''), 'unknown') AS src,
+         COALESCE(json_extract(payload, '$.timestamp'), created_at) AS denied_at
+       FROM events
+       WHERE type = 'pod.firewall_denied'
+         AND created_at >= datetime('now', '-' || @days || ' days')
+       ORDER BY created_at DESC, id DESC
+       LIMIT 20`,
+    )
+    .all({ days }) as Array<{ pod_id: string; sni: string; src: string; denied_at: string }>;
+
+  const firewallDenials: SafetyAnalyticsResponse['firewallDenials'] = {
+    total: firewallSummary.total,
+    affectedPods: firewallSummary.affected_pods,
+    topHosts: firewallTopHosts.map((row) => ({
+      sni: row.sni,
+      count: row.count,
+      lastDeniedAt: row.last_denied_at,
+    })),
+    recent: firewallRecentRows.map((row) => ({
+      podId: row.pod_id,
+      sni: row.sni,
+      src: row.src,
+      deniedAt: row.denied_at,
+    })),
+  };
+
+  // ── worktreeSafety ──────────────────────────────────────────────────────────
+  const currentCompromisedRow = db
+    .prepare('SELECT COUNT(*) AS count FROM pods WHERE worktree_compromised = 1')
+    .get() as { count: number };
+
+  const worktreeIncidentRow = db
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM events
+       WHERE type = 'pod.worktree_compromised'
+         AND created_at >= datetime('now', '-' || @days || ' days')`,
+    )
+    .get({ days }) as { count: number };
+
+  const worktreeRecentRows = db
+    .prepare(
+      `SELECT
+         COALESCE(pod_id, json_extract(payload, '$.podId'), 'unknown') AS pod_id,
+         COALESCE(json_extract(payload, '$.deletionCount'), 0) AS deletion_count,
+         COALESCE(json_extract(payload, '$.threshold'), 0) AS threshold,
+         COALESCE(json_extract(payload, '$.timestamp'), created_at) AS detected_at
+       FROM events
+       WHERE type = 'pod.worktree_compromised'
+         AND created_at >= datetime('now', '-' || @days || ' days')
+       ORDER BY created_at DESC, id DESC
+       LIMIT 20`,
+    )
+    .all({ days }) as Array<{
+    pod_id: string;
+    deletion_count: number;
+    threshold: number;
+    detected_at: string;
+  }>;
+
+  const worktreeSafety: SafetyAnalyticsResponse['worktreeSafety'] = {
+    currentCompromisedPods: currentCompromisedRow.count,
+    totalIncidents: worktreeIncidentRow.count,
+    recentIncidents: worktreeRecentRows.map((row) => ({
+      podId: row.pod_id,
+      deletionCount: row.deletion_count,
+      threshold: row.threshold,
+      detectedAt: row.detected_at,
+    })),
+  };
+
   // ── quarantineHistogram ──────────────────────────────────────────────────────
   const quarantineScoreRows = db
     .prepare(
@@ -370,6 +473,8 @@ export function computeSafetyAnalytics(
     },
     byPattern,
     bySource,
+    firewallDenials,
+    worktreeSafety,
     quarantineHistogram,
     byPod,
     networkPolicy,
