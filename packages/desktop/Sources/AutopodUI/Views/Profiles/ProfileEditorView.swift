@@ -110,7 +110,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .escalation:
             ["escalation", "ask human", "ai consultation", "advisor", "auto pause", "guardrails", "human response timeout", "token budget", "budget", "soft", "hard", "warn at", "extensions", "limit"]
         case .container:
-            ["execution target", "docker", "aci", "azure container instances", "memory", "memory limit", "warm image"]
+            ["execution target", "docker", "sandbox", "azure container apps", "sandboxes", "memory", "memory limit", "warm image"]
         case .network:
             ["network", "isolation", "firewall", "allow all", "deny all", "restricted", "allowed hosts", "package managers", "egress"]
         case .sandbox:
@@ -1449,7 +1449,7 @@ public struct ProfileEditorView: View {
     @ViewBuilder
     private var containerFields: some View {
         HStack(spacing: 24) {
-            fieldRow("Run Environment", help: "Where containers are created. Local uses Docker on the host machine; ACI runs in Azure cloud.") {
+            fieldRow("Run Environment", help: "Where containers are created. Local uses Docker on the host machine; Sandbox runs in Azure Container Apps Sandboxes.") {
                 Picker("", selection: $profile.executionTarget) {
                     ForEach(ExecutionTarget.allCases, id: \.self) { t in
                         Text(t.label).tag(t)

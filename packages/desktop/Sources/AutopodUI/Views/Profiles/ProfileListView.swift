@@ -467,8 +467,8 @@ struct ProfileCard: View {
                         .background(.blue.opacity(0.08))
                         .foregroundStyle(.blue)
                         .clipShape(RoundedRectangle(cornerRadius: 3))
-                    if profile.executionTarget == .aci {
-                        Text("ACI")
+                    if profile.executionTarget == .sandbox {
+                        Text("Sandbox")
                             .font(.caption2)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
