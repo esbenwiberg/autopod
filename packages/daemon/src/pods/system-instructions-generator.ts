@@ -34,6 +34,9 @@ export function generateSystemInstructions(
   lines.push('# Autopod Pod');
   lines.push('');
   lines.push(`Pod ID: ${pod.id}`);
+  lines.push(
+    `When referring to this pod in CLI commands, status notes, handovers, or summaries, use the exact full pod ID \`${pod.id}\` including every hyphen-separated part.`,
+  );
   lines.push(`Profile: ${pod.profileName}`);
   lines.push('');
 

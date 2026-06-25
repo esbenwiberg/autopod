@@ -98,6 +98,18 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('<!-- BEGIN USER TASK -->');
   });
 
+  it('tells agents to preserve full hyphenated pod ids in references', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({ id: 'coloured-eagle' }),
+      'http://localhost:8080/mcp/coloured-eagle',
+    );
+
+    expect(md).toContain('Pod ID: coloured-eagle');
+    expect(md).toContain('use the exact full pod ID `coloured-eagle`');
+    expect(md).toContain('including every hyphen-separated part');
+  });
+
   it('includes MCP server URL', () => {
     const md = generateSystemInstructions(
       makeProfile(),
