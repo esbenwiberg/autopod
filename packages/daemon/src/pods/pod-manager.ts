@@ -59,6 +59,7 @@ import {
   outputModeFromPodOptions,
   podOptionsFromOutputMode,
   processContent,
+  resolveContainerNanoCpus,
   resolvePodOptions,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
@@ -5662,6 +5663,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             networkPolicyMode: profile.networkPolicy?.mode,
             memoryBytes:
               (profile.containerMemoryGb ?? DEFAULT_CONTAINER_MEMORY_GB) * 1024 * 1024 * 1024,
+            nanoCpus: resolveContainerNanoCpus(process.env.CONTAINER_CPUS),
           });
         } catch (err) {
           // Pod container failed to spawn — tear down sidecars we already

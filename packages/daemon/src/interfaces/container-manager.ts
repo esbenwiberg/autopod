@@ -20,6 +20,11 @@ export interface ContainerSpawnConfig {
   networkPolicyMode?: 'allow-all' | 'deny-all' | 'restricted';
   /** Hard memory limit in bytes. Omit for no limit. */
   memoryBytes?: number;
+  /**
+   * Hard CPU limit in NanoCpus (billionths of a core, Docker's `HostConfig.NanoCpus`
+   * unit). E.g. `2 * 1e9` caps the container at 2 cores. Omit for no limit.
+   */
+  nanoCpus?: number;
 }
 
 export interface ExecResult {
