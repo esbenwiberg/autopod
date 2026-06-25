@@ -42,11 +42,17 @@ struct SafetyDrillView: View {
                 } else {
                     piiHistogramSection
                     Divider()
+                    sourceBreakdownSection
+                    Divider()
                     quarantineHistogramSection
                     Divider()
                     injectionTableSection
                     Divider()
+                    firewallDenialsSection
+                    Divider()
                     auditChainSection
+                    Divider()
+                    worktreeSafetySection
                     Divider()
                     networkPolicySection
                 }
@@ -111,6 +117,47 @@ struct SafetyDrillView: View {
                 }
                 .frame(height: CGFloat(sorted.count) * 32 + 20)
             }
+        }
+    }
+
+    // MARK: - Section 1b: Safety event sources
+
+    private var sourceBreakdownSection: some View {
+        let sources = (response?.bySource ?? []).sorted { $0.count > $1.count }
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Safety Event Sources")
+                .font(.headline)
+            if sources.isEmpty {
+                Text("No safety event source data in last \(days) days.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Chart(sources, id: \.source) { row in
+                    BarMark(
+                        x: .value("Count", row.count),
+                        y: .value("Source", safetySourceLabel(row.source))
+                    )
+                    .foregroundStyle(Color.purple.opacity(0.65))
+                    .annotation(position: .trailing, alignment: .leading) {
+                        Text("\(row.count)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(height: CGFloat(sources.count) * 28 + 20)
+            }
+        }
+    }
+
+    private func safetySourceLabel(_ source: SafetyEventSource) -> String {
+        switch source {
+        case .actionResponse: return "action response"
+        case .mcpProxy: return "mcp proxy"
+        case .issueBody: return "issue body"
+        case .claudeMdSection: return "claude.md"
+        case .skillContent: return "skill content"
+        case .podInput: return "pod input"
+        case .eventPayload: return "event payload"
         }
     }
 
@@ -244,6 +291,110 @@ struct SafetyDrillView: View {
         }.sorted { $0.createdAt > $1.createdAt }
     }
 
+    // MARK: - Section 3b: Firewall denials
+
+    private var firewallDenialsSection: some View {
+        let denials = response?.firewallDenials
+        let total = denials?.total ?? 0
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Firewall Blocks")
+                .font(.headline)
+            if total == 0 {
+                Text("No blocked outbound attempts in last \(days) days.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 12) {
+                    safetyMetricTile(
+                        title: "Blocks",
+                        value: "\(total)",
+                        tint: .red
+                    )
+                    safetyMetricTile(
+                        title: "Pods",
+                        value: "\(denials?.affectedPods ?? 0)",
+                        tint: .orange
+                    )
+                    if let top = denials?.topHosts.first {
+                        safetyMetricTile(
+                            title: "Top host",
+                            value: top.sni,
+                            tint: .blue
+                        )
+                    }
+                }
+
+                firewallTopHostsView(denials?.topHosts ?? [])
+                firewallRecentTable(denials?.recent ?? [])
+            }
+        }
+    }
+
+    private func firewallTopHostsView(_ hosts: [SafetyFirewallHost]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Top Blocked Hosts")
+                .font(.subheadline.weight(.medium))
+            ForEach(hosts.prefix(5), id: \.sni) { host in
+                HStack(spacing: 8) {
+                    Text(host.sni)
+                        .font(.system(.caption, design: .monospaced))
+                        .lineLimit(1)
+                    Spacer()
+                    Text("\(host.count)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Text(analyticsRelativeDate(host.lastDeniedAt))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.vertical, 3)
+            }
+        }
+    }
+
+    private func firewallRecentTable(_ rows: [SafetyFirewallDenial]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Recent Blocks")
+                .font(.subheadline.weight(.medium))
+            Table(Array(rows.prefix(8))) {
+                TableColumn("When") { r in
+                    Text(analyticsRelativeDate(r.deniedAt))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .width(min: 90, ideal: 110)
+
+                TableColumn("Host") { r in
+                    Text(r.sni)
+                        .font(.system(.caption, design: .monospaced))
+                        .lineLimit(1)
+                }
+                .width(min: 160, ideal: 260)
+
+                TableColumn("Pod") { r in
+                    Button {
+                        onSelectPod?(r.podId)
+                    } label: {
+                        Text(String(r.podId.suffix(8)))
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open pod \(r.podId)")
+                }
+                .width(min: 80, ideal: 100)
+
+                TableColumn("Source") { r in
+                    Text(r.src)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .width(min: 80, ideal: 110)
+            }
+            .frame(minHeight: 160)
+        }
+    }
+
     // MARK: - Section 4: Audit-chain integrity
 
     private var auditChainSection: some View {
@@ -332,6 +483,90 @@ struct SafetyDrillView: View {
         } catch {
             verifyError = error.localizedDescription
         }
+    }
+
+    // MARK: - Section 4b: Worktree safety
+
+    private var worktreeSafetySection: some View {
+        let safety = response?.worktreeSafety
+        let incidents = safety?.recentIncidents ?? []
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Host Worktree Safety")
+                .font(.headline)
+            HStack(spacing: 12) {
+                safetyMetricTile(
+                    title: "Current",
+                    value: "\(safety?.currentCompromisedPods ?? 0)",
+                    tint: (safety?.currentCompromisedPods ?? 0) > 0 ? .red : .green
+                )
+                safetyMetricTile(
+                    title: "Incidents",
+                    value: "\(safety?.totalIncidents ?? 0)",
+                    tint: (safety?.totalIncidents ?? 0) > 0 ? .orange : .secondary
+                )
+            }
+            Text("Pods cannot see arbitrary laptop paths unless the daemon bind-mounts them. This tracks writable worktree incidents and deletion-guard trips.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if incidents.isEmpty {
+                Text("No worktree safety incidents in last \(days) days.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Table(Array(incidents.prefix(8))) {
+                    TableColumn("When") { r in
+                        Text(analyticsRelativeDate(r.detectedAt))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .width(min: 90, ideal: 110)
+
+                    TableColumn("Pod") { r in
+                        Button {
+                            onSelectPod?(r.podId)
+                        } label: {
+                            Text(String(r.podId.suffix(8)))
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.blue)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open pod \(r.podId)")
+                    }
+                    .width(min: 80, ideal: 100)
+
+                    TableColumn("Deletions") { r in
+                        Text("\(r.deletionCount)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(r.deletionCount > r.threshold ? .red : .primary)
+                    }
+                    .width(min: 70, ideal: 90)
+
+                    TableColumn("Threshold") { r in
+                        Text("\(r.threshold)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .width(min: 70, ideal: 90)
+                }
+                .frame(minHeight: 140)
+            }
+        }
+    }
+
+    private func safetyMetricTile(title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .padding(10)
+        .frame(minWidth: 100, maxWidth: 180, alignment: .leading)
+        .background(tint.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Section 5: Network-policy distribution

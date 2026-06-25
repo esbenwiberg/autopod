@@ -45,6 +45,10 @@ const NON_BLOCKING_DENIED_EGRESS_SNIS = new Set([
   'http-intake.logs.us5.datadoghq.com',
   'telemetry.vercel.com',
   'oraios-software.de',
+  // Chromium startup probes (variations/connectivity + GAIA/sync). Benign and
+  // launch-flag-suppressed, but downgrade any that slip through to info.
+  'www.google.com',
+  'accounts.google.com',
 ]);
 
 type FindingInput = Omit<ReadinessFinding, 'sourceRefs'> & {

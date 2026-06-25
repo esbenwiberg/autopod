@@ -57,4 +57,20 @@ describe('spec command', () => {
 
     expect(logSpy).toHaveBeenCalledWith('Spec OK: 1 briefs, 1 facts');
   });
+
+  it('accepts contract.yml in a single-pod spec folder', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'autopod-spec-'));
+    created.push(root);
+    writeFileSync(join(root, 'brief.md'), '## Task\nCheck the parser.');
+    writeFileSync(join(root, 'contract.yml'), contractYaml);
+
+    const program = new Command();
+    program.exitOverride();
+    registerSpecCommands(program);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await program.parseAsync(['node', 'ap', 'spec', 'check', root]);
+
+    expect(logSpy).toHaveBeenCalledWith('Spec OK: 1 brief, 1 facts');
+  });
 });

@@ -318,7 +318,7 @@ const createProfileBaseSchema = z.object({
   /** Optional reviewer model for task review. Falls back to defaultModel when null. */
   reviewerModel: canonicalModelIdSchema.nullable().default(null),
   defaultRuntime: z.enum(['claude', 'codex', 'copilot']).nullable().default('claude'),
-  executionTarget: z.enum(['local', 'aci']).nullable().default('local'),
+  executionTarget: z.enum(['local', 'sandbox']).nullable().default('local'),
   customInstructions: z.string().max(50_000).nullable().default(null),
   agentDonePrompt: z.string().max(50_000).nullable().default(null),
   escalation: escalationConfigSchema.nullable().default({}),

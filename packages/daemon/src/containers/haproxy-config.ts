@@ -29,6 +29,10 @@ export const HAPROXY_LISTEN_PORT = 8443;
  */
 export const HAPROXY_LOG_PORT = 5514;
 
+export const HAPROXY_CONNECT_TIMEOUT = '5s';
+
+export const HAPROXY_TCP_IDLE_TIMEOUT = '15m';
+
 export interface HaproxyConfigInput {
   /**
    * Host allowlist. Exact entries match the full SNI; entries starting
@@ -84,9 +88,11 @@ defaults
   mode tcp
   log global
   option dontlognull
-  timeout connect 5s
-  timeout client 30s
-  timeout server 30s
+  timeout connect ${HAPROXY_CONNECT_TIMEOUT}
+  # LLM APIs can leave streaming HTTPS connections quiet while the model
+  # thinks. Keep restricted-egress TCP tunnels open for those long turns.
+  timeout client ${HAPROXY_TCP_IDLE_TIMEOUT}
+  timeout server ${HAPROXY_TCP_IDLE_TIMEOUT}
 
 resolvers system
   parse-resolv-conf

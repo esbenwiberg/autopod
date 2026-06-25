@@ -255,7 +255,7 @@ export class DockerContainerManager implements ContainerManager {
     const binds: string[] = [];
     if (config.volumes) {
       for (const v of config.volumes) {
-        binds.push(`${v.host}:${v.container}`);
+        binds.push(`${v.host}:${v.container}${v.readOnly ? ':ro' : ''}`);
       }
     }
 
@@ -285,6 +285,11 @@ export class DockerContainerManager implements ContainerManager {
       // the host's shared swap pool, OOM-killing siblings on tightly-allocated
       // hosts (notably Docker Desktop's small Linux VM).
       MemorySwap: alignedMemory,
+      // Hard CPU cap — without it a single pod's `npm install` / build can
+      // saturate every host core, and MAX_CONCURRENCY pods at once melt the
+      // host. NanoCpus is billionths of a core (e.g. 2e9 == 2 cores). Omitted
+      // when undefined (unbounded, the old behaviour).
+      NanoCpus: config.nanoCpus,
       // Drop ALL capabilities — re-add only what is needed per use-case.
       CapDrop: ['ALL'],
       SecurityOpt: securityOpt,

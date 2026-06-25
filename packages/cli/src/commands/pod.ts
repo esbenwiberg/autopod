@@ -105,6 +105,19 @@ function collectSpecFiles(specRoot: string): SpecFile[] {
   return files;
 }
 
+function resolveContractPath(specRoot: string): string {
+  const yamlPath = join(specRoot, 'contract.yaml');
+  const ymlPath = join(specRoot, 'contract.yml');
+  const hasYaml = existsSync(yamlPath);
+  const hasYml = existsSync(ymlPath);
+  if (hasYaml && hasYml) {
+    throw new Error(`both contract.yaml and contract.yml found in ${specRoot}`);
+  }
+  if (hasYaml) return yamlPath;
+  if (hasYml) return ymlPath;
+  throw new Error(`contract not found: ${yamlPath} or ${ymlPath}`);
+}
+
 export function registerPodCommands(program: Command, getClient: () => AutopodClient): void {
   // ap run
   program
@@ -738,6 +751,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       '--include-specs',
       'commit --spec folder files onto the pod branch before the agent starts',
     )
+    .option('--no-spec-context', 'do not expose --spec folder files as runtime-only context')
     .option('-m, --model <model>', 'AI model to use')
     .option('-r, --runtime <runtime>', 'runtime (claude | codex)')
     .option('-b, --branch <branch>', 'target branch name')
@@ -759,6 +773,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           file?: string;
           spec?: string;
           includeSpecs?: boolean;
+          specContext?: boolean;
           model?: string;
           runtime?: string;
           branch?: string;
@@ -779,12 +794,18 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         let resolvedTask: string;
         let contract: import('@autopod/shared').SpecContract | undefined;
         let specFiles: SpecFile[] | undefined;
+        let specContextFiles: SpecFile[] | undefined;
         if (opts.spec) {
           const specRoot = resolve(opts.spec);
           const briefPath = join(specRoot, 'brief.md');
-          const contractPath = join(specRoot, 'contract.yaml');
           if (!existsSync(briefPath)) podGroup.error(`brief not found: ${briefPath}`);
-          if (!existsSync(contractPath)) podGroup.error(`contract not found: ${contractPath}`);
+          let contractPath: string;
+          try {
+            contractPath = resolveContractPath(specRoot);
+          } catch (err) {
+            podGroup.error(err instanceof Error ? err.message : String(err));
+            return;
+          }
           const [brief] = parseBriefs([
             {
               filename: basename(specRoot),
@@ -798,7 +819,9 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           }
           resolvedTask = brief.task;
           contract = brief.contract;
-          specFiles = opts.includeSpecs ? collectSpecFiles(specRoot) : undefined;
+          const collectedSpecFiles = collectSpecFiles(specRoot);
+          specFiles = opts.includeSpecs ? collectedSpecFiles : undefined;
+          specContextFiles = opts.specContext === false ? undefined : collectedSpecFiles;
         } else if (opts.file) {
           if (!existsSync(opts.file)) podGroup.error(`file not found: ${opts.file}`);
           resolvedTask = readFileSync(opts.file, 'utf8').trim();
@@ -823,6 +846,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             startBranch: opts.startBranch,
             baseBranch: opts.baseBranch,
             specFiles,
+            specContextFiles,
             skipValidation: opts.skipValidation,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
           }),

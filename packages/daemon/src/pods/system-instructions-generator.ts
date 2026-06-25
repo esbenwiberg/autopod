@@ -35,6 +35,10 @@ export function generateSystemInstructions(
   lines.push('');
   lines.push(`Pod ID: ${pod.id}`);
   lines.push(`Profile: ${pod.profileName}`);
+  lines.push(
+    `Pod command references: use the exact full Pod ID \`${pod.id}\` in CLI commands, status notes, tracking hints, handovers, and summaries.`,
+  );
+  lines.push('Include every hyphen-separated part; do not shorten it to the first word.');
   lines.push('');
 
   // Series-level shared docs come BEFORE the per-brief task so the agent reads
@@ -64,6 +68,15 @@ export function generateSystemInstructions(
     lines.push('<!-- BEGIN SPEC DESIGN -->');
     lines.push(pod.seriesDesign);
     lines.push('<!-- END SPEC DESIGN -->');
+    lines.push('');
+  }
+
+  if (pod.specContextFiles && pod.specContextFiles.length > 0) {
+    lines.push('## Spec Context');
+    lines.push('');
+    lines.push(
+      'Reference-only spec files are available at `/autopod/spec/`. Read them when they add useful context, but do not copy or commit them unless the brief explicitly asks for durable repo docs.',
+    );
     lines.push('');
   }
 
@@ -339,6 +352,9 @@ export function generateSystemInstructions(
       lines.push(
         'You must create or update these artifacts and make their commands pass. The validator re-runs each command independently after merge-work validation starts.',
       );
+      lines.push(
+        "For any diff/base-sensitive command, use `$AUTOPOD_VALIDATION_BASE_REF` as the base for this pod's own work. Use `$AUTOPOD_PR_BASE_REF` only when you intentionally need the eventual PR target branch.",
+      );
       lines.push('');
       for (const fact of pod.contract.requiredFacts) {
         lines.push(`- \`${fact.id}\` proves ${fact.proves.join(', ')}`);
@@ -362,7 +378,7 @@ export function generateSystemInstructions(
     lines.push('## Series Handover Protocol');
     lines.push('');
     lines.push(
-      `This pod is part of series **${pod.seriesName ?? pod.seriesId}**. The next pod in the series will stack its branch on top of yours and read your handover file.`,
+      `This pod is part of series **${pod.seriesName ?? pod.seriesId}**. Runtime handovers live outside the git worktree under \`/autopod/artifacts/handovers/\`.`,
     );
     lines.push('');
 
@@ -376,7 +392,7 @@ export function generateSystemInstructions(
     if (parentIds.length === 1) {
       const [parentId] = parentIds;
       lines.push(
-        `Before starting, read the handover file from your parent pod: \`specs/${pod.seriesId}/handovers/${parentId}.md\`.`,
+        `Before starting, read the handover file from your parent pod: \`/autopod/artifacts/handovers/${parentId}.md\`.`,
       );
       lines.push('');
     } else if (parentIds.length > 1) {
@@ -384,13 +400,13 @@ export function generateSystemInstructions(
         'Before starting, read the handover file from EACH of your parent pods (one per dependency):',
       );
       for (const parentId of parentIds) {
-        lines.push(`- \`specs/${pod.seriesId}/handovers/${parentId}.md\``);
+        lines.push(`- \`/autopod/artifacts/handovers/${parentId}.md\``);
       }
       lines.push('');
     }
 
     lines.push(
-      `Before finishing, write a handover summary to \`specs/${pod.seriesId}/handovers/${pod.id}.md\` and commit it. Include:`,
+      `Before finishing, write a handover summary to \`/autopod/artifacts/handovers/${pod.id}.md\`. Do not commit runtime handovers. Include:`,
     );
     lines.push('- What you built and any deviations from the brief');
     lines.push('- Interfaces or contracts you changed that downstream pods must know about');

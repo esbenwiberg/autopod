@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -59,6 +59,7 @@ import {
   outputModeFromPodOptions,
   podOptionsFromOutputMode,
   processContent,
+  resolveContainerNanoCpus,
   resolvePodOptions,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
@@ -117,6 +118,7 @@ import {
   collectFactScreenshots,
   collectScreenshots,
 } from '../validation/screenshot-collector.js';
+import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import { DeletionGuardError, GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
@@ -238,6 +240,37 @@ function failedFactIds(result: ValidationResult | null): string[] {
 
 const REWORK_IN_PROGRESS_PREFIX = '[REWORK IN PROGRESS]';
 
+function buildManualReworkReason(pod: Pod): string {
+  const fallback =
+    pod.status === 'failed'
+      ? 'Your previous attempt failed. Review what went wrong and try again.'
+      : pod.status === 'review_required'
+        ? 'Your previous attempt exhausted its validation attempts. Review what went wrong and try again with extended attempts.'
+        : pod.status === 'killed'
+          ? 'Your previous pod was killed. Start the task fresh.'
+          : 'Your previous work needs revision. Review and improve it.';
+
+  if (!pod.lastValidationResult || pod.lastValidationResult.overall !== 'fail') {
+    return fallback;
+  }
+
+  const feedback = formatFeedback({
+    type: 'validation_failure',
+    result: pod.lastValidationResult,
+    task: pod.task,
+    attempt: pod.lastValidationResult.attempt ?? pod.validationAttempts,
+    maxAttempts: pod.maxValidationAttempts,
+  });
+
+  return [
+    pod.status === 'review_required'
+      ? 'Manual rework after validation attempts were exhausted. Fix the failed validation and review items below.'
+      : 'Manual rework after validation failure. Fix the failed validation and review items below.',
+    '',
+    feedback,
+  ].join('\n');
+}
+
 function summarizeAgentCompletionBlocker(result: string): string | null {
   const normalized = result.toLowerCase();
   if (normalized.includes('bwrap: no permissions to create a new namespace')) {
@@ -300,6 +333,53 @@ function resolveSpecFilePath(worktreePath: string, filePath: string): string {
     );
   }
   return resolved;
+}
+
+const SPEC_CONTEXT_CONTAINER_DIR = '/autopod/spec';
+const POD_ARTIFACTS_CONTAINER_DIR = '/autopod/artifacts';
+
+function dataDir(): string {
+  return process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
+}
+
+function safeFsSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/g, '_') || 'unknown';
+}
+
+async function materializeSpecContextFiles(
+  podId: string,
+  specContextFiles: readonly SpecFile[] | null | undefined,
+  logger: Logger,
+): Promise<string | null> {
+  if (!specContextFiles || specContextFiles.length === 0) return null;
+
+  const contextRoot = path.join(dataDir(), 'spec-context', safeFsSegment(podId));
+  await rm(contextRoot, { recursive: true, force: true });
+  await mkdir(contextRoot, { recursive: true });
+
+  for (const file of specContextFiles) {
+    const targetPath = resolveSpecFilePath(contextRoot, file.path);
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, file.content, 'utf8');
+  }
+
+  logger.info(
+    { podId, contextRoot, fileCount: specContextFiles.length },
+    'Spec context files materialized',
+  );
+  return contextRoot;
+}
+
+async function ensureSeriesArtifactsDir(pod: Pod, logger: Logger): Promise<string | null> {
+  if (!pod.seriesId) return null;
+
+  const artifactsRoot = path.join(dataDir(), 'pod-artifacts', safeFsSegment(pod.seriesId));
+  const handoversRoot = path.join(artifactsRoot, 'handovers');
+  await mkdir(handoversRoot, { recursive: true });
+  await chmod(artifactsRoot, 0o777).catch(() => {});
+  await chmod(handoversRoot, 0o777).catch(() => {});
+  logger.debug({ podId: pod.id, seriesId: pod.seriesId, artifactsRoot }, 'Series artifacts ready');
+  return artifactsRoot;
 }
 
 async function materializeSpecFiles(
@@ -4791,6 +4871,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             startBranch: effectiveStartBranch !== effectiveBaseBranch ? effectiveStartBranch : null,
             baseBranch: effectiveBaseBranch,
             specFiles: request.specFiles && request.specFiles.length > 0 ? request.specFiles : null,
+            specContextFiles:
+              request.specContextFiles && request.specContextFiles.length > 0
+                ? request.specContextFiles
+                : null,
             linkedPodId: request.linkedPodId ?? null,
             pimGroups: (() => {
               if (request.pimGroups != null) return request.pimGroups;
@@ -5487,6 +5571,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const containerEnv: Record<string, string> = {
           POD_ID: podId,
           ...RUNTIME_TELEMETRY_OPT_OUT_ENV,
+          ...buildValidationContextEnv({
+            podId,
+            headBranch: pod.branch,
+            baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
+            startCommitSha: pod.startCommitSha,
+          }),
           PORT: String(CONTAINER_APP_PORT),
           HOST: '0.0.0.0', // bind to all interfaces inside container for Docker port forwarding
           // Host-side preview URL — same value the daemon writes to pod.previewUrl.
@@ -5532,6 +5622,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
+        const specContextHostPath = await materializeSpecContextFiles(
+          podId,
+          pod.specContextFiles,
+          logger,
+        );
+        const seriesArtifactsHostPath = await ensureSeriesArtifactsDir(pod, logger);
+
         let containerId: string;
         try {
           containerId = await containerManager.spawn({
@@ -5542,6 +5639,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             volumes: [
               ...(worktreePath ? [{ host: worktreePath, container: '/mnt/worktree' }] : []),
               ...(bareRepoPath ? [{ host: bareRepoPath, container: bareRepoPath }] : []),
+              ...(specContextHostPath
+                ? [
+                    {
+                      host: specContextHostPath,
+                      container: SPEC_CONTEXT_CONTAINER_DIR,
+                      readOnly: true,
+                    },
+                  ]
+                : []),
+              ...(seriesArtifactsHostPath
+                ? [{ host: seriesArtifactsHostPath, container: POD_ARTIFACTS_CONTAINER_DIR }]
+                : []),
               ...(claudeStateDir
                 ? [{ host: claudeStateDir, container: `${CONTAINER_HOME_DIR}/.claude/projects` }]
                 : []),
@@ -5554,6 +5663,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             networkPolicyMode: profile.networkPolicy?.mode,
             memoryBytes:
               (profile.containerMemoryGb ?? DEFAULT_CONTAINER_MEMORY_GB) * 1024 * 1024 * 1024,
+            nanoCpus: resolveContainerNanoCpus(process.env.CONTAINER_CPUS),
           });
         } catch (err) {
           // Pod container failed to spawn — tear down sidecars we already
@@ -6367,6 +6477,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const secretEnv: Record<string, string> = {
           POD_ID: podId,
           ...providerResult.env,
+          ...buildValidationContextEnv({
+            podId,
+            headBranch: pod.branch,
+            baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
+            startCommitSha: pod.startCommitSha,
+          }),
         };
 
         // Codex runtime: write OPENAI_API_KEY to a secret file, pass file path in env.
@@ -8845,15 +8961,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // a stale/broken pod context. Set reworkReason so processPod builds
         // a rework-specific prompt instead of the generic "you were interrupted" recovery prompt.
         // Interactive pods don't need a rework prompt — they get a fresh container.
-        const reworkReason = isInteractive
-          ? null
-          : pod.status === 'failed'
-            ? 'Your previous attempt failed. Review what went wrong and try again.'
-            : pod.status === 'review_required'
-              ? 'Your previous attempt exhausted its validation attempts. Review what went wrong and try again with extended attempts.'
-              : pod.status === 'killed'
-                ? 'Your previous pod was killed. Start the task fresh.'
-                : 'Your previous work needs revision. Review and improve it.';
+        const reworkReason = isInteractive ? null : buildManualReworkReason(pod);
         const runtime = resolvePodRuntime(profile, pod.runtime, logger);
         const model = resolvePodModel(profile, pod.model, runtime, logger);
         podRepo.update(podId, {
@@ -8978,6 +9086,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, 'Computing diff…');
         const diffSinceCommit = pod.startCommitSha ?? undefined;
         const validationDefaultBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
+        const validationExecEnv = {
+          ...(buildValidationExecEnv(
+            profile.privateRegistries,
+            profile.registryPat ?? profile.adoPat ?? null,
+            profile.buildEnv,
+          ) ?? {}),
+          ...buildValidationContextEnv({
+            podId,
+            headBranch: pod.branch,
+            baseBranch: validationDefaultBranch,
+            startCommitSha: pod.startCommitSha,
+          }),
+        };
         const [diff, commitLog] = pod.worktreePath
           ? await Promise.all([
               worktreeManager.getDiff(
@@ -9050,11 +9171,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           hasWebUi: profile.hasWebUi ?? true,
           advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
           reviewerApiKey: process.env.ANTHROPIC_API_KEY,
-          extraExecEnv: buildValidationExecEnv(
-            profile.privateRegistries,
-            profile.registryPat ?? profile.adoPat ?? null,
-            profile.buildEnv,
-          ),
+          extraExecEnv: validationExecEnv,
           preSubmitReview: pod.preSubmitReview ?? undefined,
           skipPhases: profile.skipValidationPhases ?? undefined,
         };

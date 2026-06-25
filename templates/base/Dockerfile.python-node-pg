@@ -73,6 +73,7 @@ ENV PATH="/usr/lib/postgresql/17/bin:$PATH"
 ENV PATH="/home/autopod/.local/bin:$PATH"
 ENV PGDATA=/tmp/pgdata
 
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 # Allow bare imports of globally installed packages (e.g. playwright in validation
 # scripts). Debian's apt-packaged nodejs lives at /usr/lib/node_modules with
 # headers under /usr/include/node — NOT /usr/local/* like the upstream node:slim
@@ -81,6 +82,8 @@ ENV NODE_PATH=/usr/lib/node_modules
 ENV TURBO_CACHE_DIR=/tmp/.turbo
 ENV npm_config_nodedir=/usr
 RUN echo "nodedir=/usr" >> /home/autopod/.npmrc
+# Fail base-image builds when the cached Playwright browser cannot launch as the runtime user.
+RUN node -e "const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); await browser.close(); })().catch((err) => { console.error(err); process.exit(1); });"
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:${PORT:-3000}/health || exit 1
