@@ -1,4 +1,5 @@
 import type { Pod } from '@autopod/shared';
+import type { JSX } from 'react';
 import { useState } from 'react';
 import { ApiError, AuthRequiredError } from '../lib/api.js';
 import { toggleSkipValidation } from '../lib/pod-actions.js';

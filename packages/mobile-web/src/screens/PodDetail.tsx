@@ -1,4 +1,5 @@
 import type { AgentEvent, Pod } from '@autopod/shared';
+import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ActionBar } from '../components/ActionBar.js';

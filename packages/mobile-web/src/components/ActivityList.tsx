@@ -1,4 +1,5 @@
 import type { AgentEvent } from '@autopod/shared';
+import type { JSX } from 'react';
 import { formatActivity, shortTime } from '../lib/activity-format.js';
 
 interface Props {

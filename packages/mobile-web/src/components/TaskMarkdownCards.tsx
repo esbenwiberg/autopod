@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties, JSX, ReactNode } from 'react';
 import {
   type TaskMarkdownSection,
   type TaskMarkdownSectionKind,
