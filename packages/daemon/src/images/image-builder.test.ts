@@ -67,6 +67,7 @@ function createMockDeps() {
     push: vi.fn().mockResolvedValue('sha256:abc123'),
     pull: vi.fn().mockResolvedValue(undefined),
     exists: vi.fn().mockResolvedValue(true),
+    resolveTag: vi.fn((tag: string) => `ewiacr.azurecr.io/${tag}`),
   } as unknown as AcrClient;
 
   const mockProfileStore = {
@@ -94,7 +95,7 @@ describe('ImageBuilder', () => {
     const profile = mockProfile();
     const result = await builder.buildWarmImage(profile);
 
-    expect(result.tag).toBe('autopod/test-app:latest');
+    expect(result.tag).toBe('ewiacr.azurecr.io/autopod/test-app:latest');
     expect(result.digest).toBe('sha256:abc123');
     expect(result.size).toBe(512 * 1_048_576);
     expect(result.buildDuration).toBeGreaterThanOrEqual(0);
@@ -106,8 +107,46 @@ describe('ImageBuilder', () => {
     // Should update profile in DB
     expect(mockProfileStore.setWarmImage).toHaveBeenCalledWith(
       'test-app',
+      'ewiacr.azurecr.io/autopod/test-app:latest',
+      expect.any(String),
+    );
+  });
+
+  it('stores local tags when ACR is not configured', async () => {
+    const { mockDocker, mockProfileStore } = createMockDeps();
+    const builder = new ImageBuilder({
+      docker: mockDocker,
+      acr: null,
+      profileStore: mockProfileStore,
+    });
+
+    const result = await builder.buildWarmImage(mockProfile());
+
+    expect(result.tag).toBe('autopod/test-app:latest');
+    expect(mockProfileStore.setWarmImage).toHaveBeenCalledWith(
+      'test-app',
       'autopod/test-app:latest',
       expect.any(String),
+    );
+    expect(mockDocker.buildImage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ platform: undefined }),
+    );
+  });
+
+  it('builds ACR warm images for the sandbox amd64 platform', async () => {
+    const { mockDocker, mockAcr, mockProfileStore } = createMockDeps();
+    const builder = new ImageBuilder({
+      docker: mockDocker,
+      acr: mockAcr,
+      profileStore: mockProfileStore,
+    });
+
+    await builder.buildWarmImage(mockProfile());
+
+    expect(mockDocker.buildImage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ platform: 'linux/amd64' }),
     );
   });
 

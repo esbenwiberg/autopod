@@ -22,7 +22,10 @@ const credential = {
   },
 };
 
-function makeClient(responses: MockHttpResponse[]): {
+function makeClient(
+  responses: MockHttpResponse[],
+  config: Partial<ConstructorParameters<typeof AzureSandboxApiClient>[0]> = {},
+): {
   client: AzureSandboxApiClient;
   requests: CapturedRequest[];
 } {
@@ -54,6 +57,7 @@ function makeClient(responses: MockHttpResponse[]): {
         credential,
         fetch,
         pollIntervalMs: 0,
+        ...config,
       },
       logger,
     ),
@@ -109,6 +113,69 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
+  it('attaches and uses a managed identity for private image pulls', async () => {
+    const identityId =
+      '/subscriptions/sub-1/resourceGroups/rg-1/providers/Microsoft.ManagedIdentity/userAssignedIdentities/sandbox-acr-pull';
+    const { client, requests } = makeClient(
+      [
+        { status: 404, body: {} },
+        { status: 201, body: {} },
+        { status: 200, body: { id: 'group-1' } },
+        { status: 200, body: { id: 'disk-1', status: { state: 'Ready' } } },
+        { status: 200, body: { id: 'disk-1', status: { state: 'Ready' } } },
+        { status: 200, body: { id: 'sbx-1', state: 'Running' } },
+        { status: 200, body: { id: 'sbx-1', state: 'Running' } },
+      ],
+      { imagePullIdentityResourceId: identityId },
+    );
+
+    await client.createSandbox({
+      image: 'ewiacr.azurecr.io/autopod/test-app:latest',
+      tier: 'L',
+      env: {},
+      egressPolicy: { defaultAction: 'Allow', hostRules: [] },
+    });
+
+    expect(jsonBody(requests[1] ?? failRequest())).toMatchObject({
+      identity: {
+        type: 'UserAssigned',
+        userAssignedIdentities: { [identityId]: {} },
+      },
+    });
+    expect(jsonBody(requests[3] ?? failRequest())).toMatchObject({
+      image: { base: 'ewiacr.azurecr.io/autopod/test-app:latest' },
+      managedIdentityResourceId: identityId,
+    });
+  });
+
+  it('passes transient registry credentials for disk-image creation', async () => {
+    const { client, requests } = makeClient(
+      [
+        { status: 200, body: { id: 'disk-1', status: { state: 'Ready' } } },
+        { status: 200, body: { id: 'disk-1', status: { state: 'Ready' } } },
+        { status: 200, body: { id: 'sbx-1', state: 'Running' } },
+        { status: 200, body: { id: 'sbx-1', state: 'Running' } },
+      ],
+      {
+        assumeGroupExists: true,
+        registryCredentials: { username: 'token-user', token: 'secret-token' },
+      },
+    );
+
+    await client.createSandbox({
+      image: 'ewiacr.azurecr.io/autopod/test-app:latest',
+      tier: 'L',
+      env: {},
+      egressPolicy: { defaultAction: 'Allow', hostRules: [] },
+    });
+
+    expect(requests[0]?.url).toContain('/diskimages');
+    expect(jsonBody(requests[0] ?? failRequest())).toMatchObject({
+      image: { base: 'ewiacr.azurecr.io/autopod/test-app:latest' },
+      registryCredentials: { username: 'token-user', token: 'secret-token' },
+    });
+  });
+
   it('executes buffered shell commands and maps the response', async () => {
     const { client, requests } = makeClient([
       { status: 200, body: { stdout: 'out', stderr: 'err', exitCode: 7 } },
@@ -128,15 +195,28 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
-  it('writes files, reads files, and updates egress policy through the data plane', async () => {
+  it('writes, reads, lists, stats files, and updates egress policy through the data plane', async () => {
     const { client, requests } = makeClient([
       { status: 204 },
       { status: 200, rawText: 'hello' },
+      {
+        status: 200,
+        body: {
+          path: '/tmp',
+          entries: [{ name: 'hello.txt', path: '/tmp/hello.txt', isDirectory: false, size: 5 }],
+        },
+      },
+      {
+        status: 200,
+        body: { name: 'hello.txt', path: '/tmp/hello.txt', isDirectory: false, size: 5 },
+      },
       { status: 204 },
     ]);
 
     await client.writeFile('sbx-1', '/tmp/hello.txt', Buffer.from('hello'));
     const read = await client.readFile('sbx-1', '/tmp/hello.txt');
+    const list = await client.listFiles('sbx-1', '/tmp');
+    const stat = await client.statFile('sbx-1', '/tmp/hello.txt');
     await client.updateEgress('sbx-1', {
       defaultAction: 'Deny',
       hostRules: [{ pattern: 'api.github.com', action: 'Allow' }],
@@ -146,8 +226,14 @@ describe('AzureSandboxApiClient', () => {
     expect(requests[0]?.url).toContain('path=%2Ftmp%2Fhello.txt');
     expect(requests[0]?.url).toContain('createDirs=true');
     expect(read.toString('utf-8')).toBe('hello');
-    expect(requests[2]?.url).toContain('/sandboxes/sbx-1/egresspolicy');
-    expect(jsonBody(requests[2] ?? failRequest())).toEqual({
+    expect(list.entries[0]?.path).toBe('/tmp/hello.txt');
+    expect(stat.path).toBe('/tmp/hello.txt');
+    expect(requests[2]?.url).toContain('/sandboxes/sbx-1/files/list');
+    expect(requests[2]?.url).toContain('path=%2Ftmp');
+    expect(requests[3]?.url).toContain('/sandboxes/sbx-1/files/stat');
+    expect(requests[3]?.url).toContain('path=%2Ftmp%2Fhello.txt');
+    expect(requests[4]?.url).toContain('/sandboxes/sbx-1/egresspolicy');
+    expect(jsonBody(requests[4] ?? failRequest())).toEqual({
       defaultAction: 'Deny',
       hostRules: [{ pattern: 'api.github.com', action: 'Allow' }],
     });

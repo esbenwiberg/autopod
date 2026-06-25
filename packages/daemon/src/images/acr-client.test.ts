@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Mock Azure SDK modules — must be before import
 const mockGetToken = vi.fn().mockResolvedValue({ token: 'mock-token-xyz' });
 const mockGetManifestProperties = vi.fn().mockResolvedValue({ digest: 'sha256:abc' });
+const mockGetArtifact = vi.fn().mockReturnValue({
+  getManifestProperties: mockGetManifestProperties,
+});
+const mockFetch = vi.fn();
 
 vi.mock('@azure/identity', () => ({
   DefaultAzureCredential: class {
@@ -12,9 +16,7 @@ vi.mock('@azure/identity', () => ({
 
 vi.mock('@azure/container-registry', () => ({
   ContainerRegistryClient: class {
-    getArtifact = vi.fn().mockReturnValue({
-      getManifestProperties: mockGetManifestProperties,
-    });
+    getArtifact = mockGetArtifact;
   },
 }));
 
@@ -49,8 +51,16 @@ function createMockDocker() {
 describe('AcrClient', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetToken.mockResolvedValue({ token: 'mock-token-xyz' });
+    mockGetToken.mockResolvedValue({ token: tokenWithTenant('tenant-123') });
     mockGetManifestProperties.mockResolvedValue({ digest: 'sha256:abc' });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: vi.fn().mockResolvedValue({ refresh_token: 'mock-refresh-token' }),
+      text: vi.fn().mockResolvedValue(''),
+    });
+    vi.stubGlobal('fetch', mockFetch);
   });
 
   it('pushes image to ACR', async () => {
@@ -63,7 +73,7 @@ describe('AcrClient', () => {
     expect(mockDocker.checkAuth).toHaveBeenCalledWith(
       expect.objectContaining({
         username: '00000000-0000-0000-0000-000000000000',
-        password: 'mock-token-xyz',
+        password: 'mock-refresh-token',
         serveraddress: 'myregistry.azurecr.io',
       }),
     );
@@ -87,7 +97,11 @@ describe('AcrClient', () => {
     expect(mockDocker.pull).toHaveBeenCalledWith(
       'myregistry.azurecr.io/autopod/test-app:latest',
       expect.objectContaining({
-        authconfig: { serveraddress: 'myregistry.azurecr.io' },
+        authconfig: expect.objectContaining({
+          password: 'mock-refresh-token',
+          serveraddress: 'myregistry.azurecr.io',
+          username: '00000000-0000-0000-0000-000000000000',
+        }),
       }),
     );
   });
@@ -98,6 +112,16 @@ describe('AcrClient', () => {
 
     const exists = await client.exists('autopod/test-app:latest');
     expect(exists).toBe(true);
+    expect(mockGetArtifact).toHaveBeenCalledWith('autopod/test-app', 'latest');
+  });
+
+  it('checks fully qualified ACR image references', async () => {
+    const mockDocker = createMockDocker();
+    const client = new AcrClient({ registryUrl: 'myregistry.azurecr.io' }, mockDocker);
+
+    const exists = await client.exists('myregistry.azurecr.io/autopod/test-app:stable');
+    expect(exists).toBe(true);
+    expect(mockGetArtifact).toHaveBeenCalledWith('autopod/test-app', 'stable');
   });
 
   it('returns false when image does not exist', async () => {
@@ -121,4 +145,52 @@ describe('AcrClient', () => {
     const getImageCall = mockDocker.getImage.mock.invocationCallOrder[0];
     expect(authCall).toBeLessThan(getImageCall);
   });
+
+  it('requests an Azure Container Registry data-plane token for Docker auth', async () => {
+    const mockDocker = createMockDocker();
+    const client = new AcrClient({ registryUrl: 'myregistry.azurecr.io' }, mockDocker);
+
+    await client.push('autopod/test-app:latest');
+
+    expect(mockGetToken).toHaveBeenCalledWith('https://containerregistry.azure.net/.default');
+  });
+
+  it('exchanges the Azure token for an ACR refresh token before Docker auth', async () => {
+    const aadToken = tokenWithTenant('tenant-from-token');
+    mockGetToken.mockResolvedValueOnce({ token: aadToken });
+    const mockDocker = createMockDocker();
+    const client = new AcrClient({ registryUrl: 'myregistry.azurecr.io' }, mockDocker);
+
+    await client.push('autopod/test-app:latest');
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://myregistry.azurecr.io/oauth2/exchange',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      }),
+    );
+    const [, options] = mockFetch.mock.calls[0] as [string, { body: URLSearchParams }];
+    expect(options.body.get('grant_type')).toBe('access_token');
+    expect(options.body.get('service')).toBe('myregistry.azurecr.io');
+    expect(options.body.get('tenant')).toBe('tenant-from-token');
+    expect(options.body.get('access_token')).toBe(aadToken);
+  });
+
+  it('resolves local tags to fully qualified ACR references', () => {
+    const mockDocker = createMockDocker();
+    const client = new AcrClient({ registryUrl: 'myregistry.azurecr.io' }, mockDocker);
+
+    expect(client.resolveTag('autopod/test-app:latest')).toBe(
+      'myregistry.azurecr.io/autopod/test-app:latest',
+    );
+    expect(client.resolveTag('myregistry.azurecr.io/autopod/test-app:latest')).toBe(
+      'myregistry.azurecr.io/autopod/test-app:latest',
+    );
+  });
 });
+
+function tokenWithTenant(tenantId: string): string {
+  const payload = Buffer.from(JSON.stringify({ tid: tenantId })).toString('base64url');
+  return `header.${payload}.signature`;
+}

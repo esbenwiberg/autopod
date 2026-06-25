@@ -1,6 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join, posix } from 'node:path';
 import type { Readable } from 'node:stream';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -9,10 +17,12 @@ import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
 import type {
   CreateSandboxOptions,
   SandboxApiClient,
+  SandboxDirListing,
   SandboxEgressPolicy,
   SandboxExecChunk,
   SandboxExecOptions,
   SandboxExecResult,
+  SandboxFileInfo,
   SandboxStatus,
 } from './sandbox-api-client.js';
 import {
@@ -24,6 +34,7 @@ const logger = pino({ level: 'silent' });
 
 interface FakeSandbox {
   status: SandboxStatus;
+  dirs: Set<string>;
   files: Map<string, Buffer>;
 }
 
@@ -46,7 +57,7 @@ class FakeSandboxApiClient implements SandboxApiClient {
   async createSandbox(options: CreateSandboxOptions): Promise<string> {
     this.created.push(options);
     const id = `sbx-${++this.counter}`;
-    this.sandboxes.set(id, { status: 'running', files: new Map() });
+    this.sandboxes.set(id, { status: 'running', dirs: new Set(['/']), files: new Map() });
     return id;
   }
 
@@ -65,7 +76,9 @@ class FakeSandboxApiClient implements SandboxApiClient {
   }
 
   async writeFile(sandboxId: string, path: string, content: Buffer): Promise<void> {
-    this.sandbox(sandboxId).files.set(path, content);
+    const sandbox = this.sandbox(sandboxId);
+    this.ensureDir(sandbox, dirname(path));
+    sandbox.files.set(normalizeSandboxPath(path), content);
   }
 
   async readFile(sandboxId: string, path: string): Promise<Buffer> {
@@ -75,8 +88,41 @@ class FakeSandboxApiClient implements SandboxApiClient {
   }
 
   async mkdir(sandboxId: string, path: string): Promise<void> {
-    this.sandbox(sandboxId);
+    this.ensureDir(this.sandbox(sandboxId), path);
     this.mkdirCalls.push({ id: sandboxId, path });
+  }
+
+  async listFiles(sandboxId: string, path: string): Promise<SandboxDirListing> {
+    const sandbox = this.sandbox(sandboxId);
+    const dir = normalizeSandboxPath(path);
+    if (!sandbox.dirs.has(dir)) throw new Error(`no such directory: ${path}`);
+
+    const entries = new Map<string, SandboxFileInfo>();
+    for (const candidate of sandbox.dirs) {
+      if (candidate === dir) continue;
+      const rel = relativeSandboxPath(dir, candidate);
+      if (!rel || rel.includes('/')) continue;
+      entries.set(rel, {
+        name: rel,
+        path: candidate,
+        isDirectory: true,
+      });
+    }
+    for (const [candidate, content] of sandbox.files) {
+      const rel = relativeSandboxPath(dir, candidate);
+      if (!rel || rel.includes('/')) continue;
+      entries.set(rel, {
+        name: rel,
+        path: candidate,
+        size: content.byteLength,
+        isDirectory: false,
+      });
+    }
+
+    return {
+      path: dir,
+      entries: [...entries.values()].sort((a, b) => a.path.localeCompare(b.path)),
+    };
   }
 
   async updateEgress(sandboxId: string, policy: SandboxEgressPolicy): Promise<void> {
@@ -96,13 +142,25 @@ class FakeSandboxApiClient implements SandboxApiClient {
   }
 
   seedFile(sandboxId: string, path: string, content: Buffer): void {
-    this.sandbox(sandboxId).files.set(path, content);
+    const sandbox = this.sandbox(sandboxId);
+    this.ensureDir(sandbox, dirname(path));
+    sandbox.files.set(normalizeSandboxPath(path), content);
   }
 
   private sandbox(id: string): FakeSandbox {
     const s = this.sandboxes.get(id);
     if (!s) throw new Error(`unknown sandbox: ${id}`);
     return s;
+  }
+
+  private ensureDir(sandbox: FakeSandbox, path: string): void {
+    const normalized = normalizeSandboxPath(path);
+    sandbox.dirs.add('/');
+    let current = '';
+    for (const segment of normalized.split('/').filter(Boolean)) {
+      current += `/${segment}`;
+      sandbox.dirs.add(current);
+    }
   }
 }
 
@@ -125,7 +183,11 @@ function readStream(stream: Readable): Promise<string> {
   });
 }
 
-const baseConfig: ContainerSpawnConfig = { image: 'autopod-node22', podId: 'pod-1', env: {} };
+const baseConfig: ContainerSpawnConfig = {
+  image: 'ewiacr.azurecr.io/autopod-node22:latest',
+  podId: 'pod-1',
+  env: {},
+};
 
 describe('SandboxContainerManager', () => {
   describe('spawn', () => {
@@ -135,8 +197,17 @@ describe('SandboxContainerManager', () => {
       const id = await mgr.spawn(baseConfig);
       expect(id).toBe('sbx-1');
       expect(client.created).toHaveLength(1);
-      expect(client.created[0]?.image).toBe('autopod-node22');
+      expect(client.created[0]?.image).toBe('ewiacr.azurecr.io/autopod-node22:latest');
       expect(client.created[0]?.env).toEqual({});
+    });
+
+    it('rejects local-only warm image tags before calling Azure', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      await expect(mgr.spawn({ ...baseConfig, image: 'autopod/test-app:latest' })).rejects.toThrow(
+        /registry-qualified OCI image/,
+      );
+      expect(client.created).toHaveLength(0);
     });
 
     it('uses the default tier when no memory hint is given', async () => {
@@ -204,6 +275,30 @@ describe('SandboxContainerManager', () => {
           '/mnt/worktree',
           '/mnt/worktree/src',
         ]);
+        expect(client.execCalls).toEqual([]);
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
+
+    it('cleans up the sandbox when volume upload fails', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-upload-fail-'));
+      try {
+        writeFileSync(join(hostDir, 'README.md'), 'hello');
+        class FailingWriteClient extends FakeSandboxApiClient {
+          override async writeFile(): Promise<void> {
+            throw new Error('write failed');
+          }
+        }
+        const client = new FailingWriteClient();
+        await expect(
+          new SandboxContainerManager(client, logger).spawn({
+            ...baseConfig,
+            volumes: [{ host: hostDir, container: '/mnt/worktree' }],
+          }),
+        ).rejects.toThrow('write failed');
+        expect(client.created).toHaveLength(1);
+        expect(client.sandboxes.size).toBe(0);
       } finally {
         rmSync(hostDir, { recursive: true, force: true });
       }
@@ -352,13 +447,33 @@ describe('SandboxContainerManager', () => {
   });
 
   describe('extractDirectoryFromContainer', () => {
-    it('throws a clear unsupported error', async () => {
+    it('mirrors a sandbox directory back to the host through list/read', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-extract-'));
       const client = new FakeSandboxApiClient();
       const mgr = new SandboxContainerManager(client, logger);
       const id = await mgr.spawn(baseConfig);
-      await expect(mgr.extractDirectoryFromContainer(id, '/work', '/tmp/out')).rejects.toThrow(
-        /unsupported for Azure Container Apps Sandboxes/,
-      );
+
+      try {
+        writeFileSync(join(hostDir, 'stale.txt'), 'delete me');
+        mkdirSync(join(hostDir, 'node_modules'));
+        writeFileSync(join(hostDir, 'node_modules', 'local-cache.txt'), 'keep excluded');
+
+        client.seedFile(id, '/mnt/worktree/README.md', Buffer.from('hello'));
+        client.seedFile(id, '/mnt/worktree/src/index.ts', Buffer.from('console.log("hi");'));
+        client.seedFile(id, '/mnt/worktree/node_modules/left-pad.js', Buffer.from('skip'));
+
+        await mgr.extractDirectoryFromContainer(id, '/mnt/worktree', hostDir, ['node_modules']);
+
+        expect(readFileSync(join(hostDir, 'README.md'), 'utf-8')).toBe('hello');
+        expect(readFileSync(join(hostDir, 'src', 'index.ts'), 'utf-8')).toBe('console.log("hi");');
+        expect(existsSync(join(hostDir, 'stale.txt'))).toBe(false);
+        expect(existsSync(join(hostDir, 'node_modules', 'left-pad.js'))).toBe(false);
+        expect(readFileSync(join(hostDir, 'node_modules', 'local-cache.txt'), 'utf-8')).toBe(
+          'keep excluded',
+        );
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
     });
   });
 
@@ -380,3 +495,13 @@ describe('SandboxContainerManager', () => {
     });
   });
 });
+
+function normalizeSandboxPath(pathname: string): string {
+  const normalized = pathname.split('/').filter(Boolean).join('/');
+  return normalized ? `/${normalized}` : '/';
+}
+
+function relativeSandboxPath(parent: string, child: string): string {
+  const relative = posix.relative(normalizeSandboxPath(parent), normalizeSandboxPath(child));
+  return relative && !relative.startsWith('..') ? relative : '';
+}

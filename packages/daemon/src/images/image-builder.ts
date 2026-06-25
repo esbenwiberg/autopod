@@ -46,7 +46,8 @@ export class ImageBuilder {
     profile: Profile,
     options: { rebuild?: boolean; gitPat?: string; registryPat?: string } = {},
   ): Promise<ImageBuildResult> {
-    const tag = `autopod/${profile.name}:latest`;
+    const localTag = `autopod/${profile.name}:latest`;
+    const publishedTag = this.acr ? this.acr.resolveTag(localTag) : localTag;
     const timestampTag = `autopod/${profile.name}:${Date.now()}`;
 
     // Check if warm image exists and isn't stale
@@ -78,11 +79,13 @@ export class ImageBuilder {
       const nugetEnv = buildNuGetCredentialEnv(profile.privateRegistries, options.registryPat);
       Object.assign(buildArgs, nugetEnv);
     }
-    await this.buildFromDockerfile(dockerfile, tag, buildArgs);
+    await this.buildFromDockerfile(dockerfile, localTag, buildArgs, {
+      platform: this.acr ? 'linux/amd64' : undefined,
+    });
     const buildDuration = (Date.now() - startTime) / 1000;
 
     // 3. Tag with timestamp for rollback
-    const image = this.docker.getImage(tag);
+    const image = this.docker.getImage(localTag);
     const [repo = '', tsTag = 'latest'] = timestampTag.split(':');
     await image.tag({ repo, tag: tsTag });
 
@@ -92,11 +95,11 @@ export class ImageBuilder {
     // up by tag.
     let digest: string;
     if (this.acr) {
-      logger.info({ tag }, 'Pushing to ACR');
-      digest = await this.acr.push(tag);
+      logger.info({ localTag, publishedTag }, 'Pushing warm image to ACR');
+      digest = await this.acr.push(localTag);
       await this.acr.push(timestampTag);
     } else {
-      logger.info({ tag }, 'ACR not configured — keeping warm image local-only');
+      logger.info({ tag: localTag }, 'ACR not configured — keeping warm image local-only');
       const localInspect = await image.inspect();
       digest = localInspect.Id ?? '';
     }
@@ -106,14 +109,19 @@ export class ImageBuilder {
     const size = inspectInfo.Size ?? 0;
 
     // 6. Update profile in database
-    this.profileStore.setWarmImage(profile.name, tag, new Date().toISOString());
+    this.profileStore.setWarmImage(profile.name, publishedTag, new Date().toISOString());
 
     logger.info(
-      { tag, sizeMb: Math.floor(size / 1_048_576), buildDuration: buildDuration.toFixed(1) },
+      {
+        tag: publishedTag,
+        localTag,
+        sizeMb: Math.floor(size / 1_048_576),
+        buildDuration: buildDuration.toFixed(1),
+      },
       'Warm image built successfully',
     );
 
-    return { tag, digest, size, buildDuration };
+    return { tag: publishedTag, digest, size, buildDuration };
   }
 
   /** Check if a profile's warm image is stale. */
@@ -131,6 +139,7 @@ export class ImageBuilder {
     dockerfileContent: string,
     tag: string,
     buildArgs: Record<string, string> = {},
+    options: { platform?: string } = {},
   ): Promise<void> {
     // Create an in-memory tar archive containing just the Dockerfile
     const pack = tarPack();
@@ -140,6 +149,7 @@ export class ImageBuilder {
     const buildStream = await this.docker.buildImage(pack as unknown as NodeJS.ReadableStream, {
       t: tag,
       buildargs: Object.keys(buildArgs).length > 0 ? buildArgs : undefined,
+      platform: options.platform,
     });
 
     // Wait for build to complete

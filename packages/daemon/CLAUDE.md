@@ -173,7 +173,8 @@ The manager logic is **implemented and unit-tested** against a `SandboxApiClient
 the mapping between the `ContainerManager` contract and the Sandboxes data plane: tier selection
 from `memoryBytes` (`pickSandboxTier`), egress-policy translation from `networkPolicyMode` +
 `allowedHosts` (`egressPolicyForMode`), buffered exec/file I/O, host-volume upload at spawn,
-`stop`/`start` → `begin_stop`/`begin_resume`, and an `execStreaming` native-or-buffered fallback.
+directory sync-back through file list/read, `stop`/`start` → `begin_stop`/`begin_resume`, and an
+`execStreaming` native-or-buffered fallback.
 Unlike ACI, Sandboxes supports all `network_policy` modes (allow-all / deny-all / restricted) via
 its native per-sandbox egress policy, so the profile-validator does not reject any mode for this
 target.
@@ -181,14 +182,27 @@ target.
 Current preview caveats:
 - Region: the 2026-06-25 spike confirmed `swedencentral` and `northeurope`; `westeurope` was not
   listed for `Microsoft.App/sandboxGroups`. The daemon defaults to `swedencentral`.
+- Warm images: sandbox pods require `profile.warmImageTag` and it must be an ACR-qualified tag.
+  Missing/local-only tags fail before provisioning. With `ACR_REGISTRY_URL`, the daemon also checks
+  that the tag exists in ACR before creating the sandbox.
+- ACR auth: private image pulls use `AZURE_SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID`, a
+  user-assigned identity attached to the sandbox group and granted `AcrPull` on the registry.
+  `AZURE_SANDBOX_REGISTRY_USERNAME` + `AZURE_SANDBOX_REGISTRY_TOKEN` are supported only for
+  short-lived smoke/diagnostic tokens.
 - RBAC: `Container Apps SandboxGroup Data Owner` is data-plane only. Creating or reading the
   sandbox group also needs control-plane rights such as resource-group `Contributor`/`Owner`, or
   set `AZURE_SANDBOX_ASSUME_GROUP_EXISTS=1` for a pre-created group.
 - Exec is buffered in `azure-containerapps-sandbox==0.1.0b3`; no native streaming method was
   exposed by the spike.
-- Sandboxes do not support Docker bind mounts. The prototype uploads configured host volumes at
-  spawn, but sync-back is not production-ready.
-- `extractDirectoryFromContainer` intentionally throws until a durable sync-back strategy exists.
+- Sandboxes do not support Docker bind mounts. The supported workspace model is snapshot upload at
+  spawn, pod provisioning copies `/mnt/worktree` staging into writable `/workspace`, and sync-back
+  extracts `/workspace` through `extractDirectoryFromContainer`. Host edits after spawn are not
+  live-mounted into the sandbox.
+- `AUTOPOD_CONTAINER_HOST` must be reachable from Azure sandboxes for MCP. Do not rely on
+  `host.docker.internal` outside Docker; use a Tailscale/private/public route and make sure
+  restricted network policy allowlists the derived MCP host.
+
+Operator setup and smoke commands live in `docs/azure-container-apps-sandboxes.md`.
 
 ## Runtimes
 

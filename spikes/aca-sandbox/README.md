@@ -4,6 +4,9 @@
 > **not** a `ContainerManager` implementation. Its only job is to answer "should we
 > build an `executionTarget: 'sandbox'` backend?" by exercising the preview product
 > against the four unknowns we flagged.
+>
+> Production operator setup now lives in `docs/azure-container-apps-sandboxes.md`.
+> Use that doc for warm-image, ACR, RBAC, and smoke-test commands.
 
 ## Why this exists
 
@@ -160,8 +163,9 @@ The output maps 1:1 onto the decision:
   `EXIT_CODE=N` fallback for `execStreaming`. Annoying but already-solved pattern.
 - **Unknown 2 — L tier too small** → biggest blocker. If `dotnet`/`node` builds OOM
   at 4 GB, Sandboxes is out for heavy profiles until larger tiers ship.
-- **Unknown 3 extraction unsupported** → mirror ACI (`extractDirectoryFromContainer`
-  throws) or route through a Blob volume.
+- **Unknown 3 tar extraction unsupported** → the production adapter uses file
+  list/read recursion for `extractDirectoryFromContainer` instead of the empty
+  tar download path observed in the spike.
 - **Unknown 4 runtime mutation works** → the headline win; `restricted` mode +
   `refreshFirewall()` are feasible without the HAProxy/iptables machinery.
 

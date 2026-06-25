@@ -1,9 +1,12 @@
+import { Buffer } from 'node:buffer';
 import { ContainerRegistryClient } from '@azure/container-registry';
 import { DefaultAzureCredential } from '@azure/identity';
 import type Dockerode from 'dockerode';
 import pino from 'pino';
 
 const logger = pino({ name: 'autopod' }).child({ component: 'acr-client' });
+const ACR_TOKEN_SCOPE = 'https://containerregistry.azure.net/.default';
+const ACR_DOCKER_USERNAME = '00000000-0000-0000-0000-000000000000';
 
 export interface AcrConfig {
   registryUrl: string; // e.g. "myregistry.azurecr.io"
@@ -26,21 +29,21 @@ export class AcrClient {
 
   /** Push a local Docker image to ACR. Returns the image digest. */
   async push(tag: string): Promise<string> {
-    const token = await this.getAccessToken();
-    await this.dockerLogin(token);
+    const refreshToken = await this.getRegistryRefreshToken();
+    const authconfig = this.getDockerAuthConfig(refreshToken);
+    await this.docker.checkAuth(authconfig);
 
-    // Tag image for ACR
-    const acrRepo = `${this.config.registryUrl}/${tag.split(':')[0]}`;
-    const acrVersion = tag.split(':')[1] || 'latest';
-    const acrTag = `${acrRepo}:${acrVersion}`;
+    const { version } = splitImageTag(tag);
+    const acrTag = this.resolveTag(tag);
+    const acrRepo = acrTag.slice(0, acrTag.length - `:${version}`.length);
 
     const image = this.docker.getImage(tag);
-    await image.tag({ repo: acrRepo, tag: acrVersion });
+    await image.tag({ repo: acrRepo, tag: version });
 
     // Push
     const acrImage = this.docker.getImage(acrTag);
     const pushStream = await acrImage.push({
-      authconfig: { serveraddress: this.config.registryUrl },
+      authconfig,
     });
 
     const digest = await new Promise<string>((resolve, reject) => {
@@ -65,13 +68,14 @@ export class AcrClient {
 
   /** Pull an image from ACR. */
   async pull(tag: string): Promise<void> {
-    const token = await this.getAccessToken();
-    await this.dockerLogin(token);
+    const refreshToken = await this.getRegistryRefreshToken();
+    const authconfig = this.getDockerAuthConfig(refreshToken);
+    await this.docker.checkAuth(authconfig);
 
-    const acrTag = `${this.config.registryUrl}/${tag}`;
+    const acrTag = this.resolveTag(tag);
 
     const pullStream = await this.docker.pull(acrTag, {
-      authconfig: { serveraddress: this.config.registryUrl },
+      authconfig,
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -86,7 +90,7 @@ export class AcrClient {
   /** Check if an image exists in ACR. */
   async exists(tag: string): Promise<boolean> {
     try {
-      const [repo = '', version] = tag.split(':');
+      const { repo, version } = splitImageTag(this.stripRegistryPrefix(tag));
       const artifact = this.registryClient.getArtifact(repo, version || 'latest');
       await artifact.getManifestProperties();
       return true;
@@ -95,18 +99,82 @@ export class AcrClient {
     }
   }
 
-  private async getAccessToken(): Promise<string> {
-    const tokenResponse = await this.credential.getToken(
-      `https://${this.config.registryUrl}/.default`,
-    );
-    return tokenResponse.token;
+  private async getRegistryRefreshToken(): Promise<string> {
+    const tokenResponse = await this.credential.getToken(ACR_TOKEN_SCOPE);
+    const form = new URLSearchParams({
+      grant_type: 'access_token',
+      service: this.config.registryUrl,
+      access_token: tokenResponse.token,
+    });
+    const tenantId = extractTenantId(tokenResponse.token);
+    if (tenantId) {
+      form.set('tenant', tenantId);
+    }
+
+    const response = await fetch(`https://${this.config.registryUrl}/oauth2/exchange`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form,
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `ACR token exchange failed (${response.status} ${response.statusText}): ${body.slice(
+          0,
+          300,
+        )}`,
+      );
+    }
+
+    const body = (await response.json()) as { refresh_token?: unknown };
+    if (typeof body.refresh_token !== 'string' || body.refresh_token.length === 0) {
+      throw new Error('ACR token exchange did not return a refresh token');
+    }
+    return body.refresh_token;
   }
 
-  private async dockerLogin(token: string): Promise<void> {
-    await this.docker.checkAuth({
-      username: '00000000-0000-0000-0000-000000000000',
-      password: token,
+  private getDockerAuthConfig(refreshToken: string): Dockerode.AuthConfig {
+    return {
+      username: ACR_DOCKER_USERNAME,
+      password: refreshToken,
       serveraddress: this.config.registryUrl,
-    });
+    };
+  }
+
+  /** Resolve a local repository tag to the ACR-qualified image reference. */
+  resolveTag(tag: string): string {
+    const stripped = this.stripRegistryPrefix(tag);
+    const { repo, version } = splitImageTag(stripped);
+    return `${this.config.registryUrl}/${repo}:${version}`;
+  }
+
+  private stripRegistryPrefix(tag: string): string {
+    const prefix = `${this.config.registryUrl}/`;
+    return tag.startsWith(prefix) ? tag.slice(prefix.length) : tag;
+  }
+}
+
+function splitImageTag(image: string): { repo: string; version: string } {
+  const lastSlash = image.lastIndexOf('/');
+  const lastColon = image.lastIndexOf(':');
+  if (lastColon > lastSlash) {
+    return { repo: image.slice(0, lastColon), version: image.slice(lastColon + 1) || 'latest' };
+  }
+  return { repo: image, version: 'latest' };
+}
+
+function extractTenantId(token: string): string | undefined {
+  const payload = token.split('.')[1];
+  if (!payload) {
+    return undefined;
+  }
+
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+      tid?: unknown;
+    };
+    return typeof decoded.tid === 'string' ? decoded.tid : undefined;
+  } catch {
+    return undefined;
   }
 }

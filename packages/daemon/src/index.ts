@@ -368,10 +368,23 @@ function parseSandboxTier(value: string | undefined): SandboxResourceTier | unde
   return undefined;
 }
 
+function parseSandboxRegistryCredentials(): { username: string; token: string } | undefined {
+  const username =
+    process.env.AZURE_SANDBOX_REGISTRY_USERNAME ?? process.env.SANDBOX_REGISTRY_USERNAME;
+  const token = process.env.AZURE_SANDBOX_REGISTRY_TOKEN ?? process.env.SANDBOX_REGISTRY_TOKEN;
+  if (!username && !token) return undefined;
+  if (!username || !token) {
+    throw new Error(
+      'Both AZURE_SANDBOX_REGISTRY_USERNAME and AZURE_SANDBOX_REGISTRY_TOKEN must be set when using sandbox registry credentials.',
+    );
+  }
+  return { username, token };
+}
+
 let imageBuilder: import('./images/index.js').ImageBuilder | undefined;
+let acr: import('./images/acr-client.js').AcrClient | null = null;
 if (docker) {
   const { ImageBuilder } = await import('./images/image-builder.js');
-  let acr: import('./images/acr-client.js').AcrClient | null = null;
   if (ACR_REGISTRY_URL) {
     const { AcrClient } = await import('./images/acr-client.js');
     acr = new AcrClient({ registryUrl: ACR_REGISTRY_URL }, docker);
@@ -435,6 +448,10 @@ const SANDBOX_GROUP =
 const SANDBOX_ASSUME_GROUP_EXISTS =
   process.env.AZURE_SANDBOX_ASSUME_GROUP_EXISTS === '1' ||
   process.env.SANDBOX_ASSUME_GROUP_EXISTS === '1';
+const SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID =
+  process.env.AZURE_SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID ??
+  process.env.SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID;
+const SANDBOX_REGISTRY_CREDENTIALS = parseSandboxRegistryCredentials();
 type SandboxResourceTier = import('./containers/sandbox-api-client.js').SandboxResourceTier;
 const SANDBOX_TIER = parseSandboxTier(process.env.AZURE_SANDBOX_TIER ?? process.env.SANDBOX_TIER);
 
@@ -450,6 +467,8 @@ if (SANDBOX_SUBSCRIPTION_ID && SANDBOX_RESOURCE_GROUP) {
       location: SANDBOX_LOCATION,
       sandboxGroup: SANDBOX_GROUP,
       assumeGroupExists: SANDBOX_ASSUME_GROUP_EXISTS,
+      imagePullIdentityResourceId: SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID,
+      registryCredentials: SANDBOX_REGISTRY_CREDENTIALS,
       tier: SANDBOX_TIER,
     },
     logger,
@@ -461,10 +480,17 @@ if (SANDBOX_SUBSCRIPTION_ID && SANDBOX_RESOURCE_GROUP) {
       location: SANDBOX_LOCATION,
       sandboxGroup: SANDBOX_GROUP,
       assumeGroupExists: SANDBOX_ASSUME_GROUP_EXISTS,
+      imagePullIdentityConfigured: Boolean(SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID),
+      registryCredentialsConfigured: Boolean(SANDBOX_REGISTRY_CREDENTIALS),
       tier: SANDBOX_TIER ?? 'L',
     },
     'Sandbox execution target enabled',
   );
+  if (!ACR_REGISTRY_URL) {
+    logger.warn(
+      'Sandbox execution target enabled without ACR_REGISTRY_URL. Warm-image builds will store local Docker tags, and sandbox pods require an ACR-qualified profile.warmImageTag.',
+    );
+  }
 }
 
 // Container manager factory — routes to Docker (local) or Sandboxes by execution target
@@ -565,6 +591,7 @@ podManager = createPodManager({
   beforeContainerCleanup: (podId) => preCleanupMemoryExtraction(podId),
   pendingOverrideRepo,
   getSecret: (ref: string) => process.env[ref],
+  warmImageExists: acr ? (tag: string) => acr.exists(tag) : undefined,
   repoScanner,
   scanRepo,
   qualityScoreRepo,

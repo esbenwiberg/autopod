@@ -4,9 +4,12 @@ import type { Logger } from 'pino';
 import type {
   CreateSandboxOptions,
   SandboxApiClient,
+  SandboxDirListing,
   SandboxEgressPolicy,
   SandboxExecOptions,
   SandboxExecResult,
+  SandboxFileInfo,
+  SandboxRegistryCredentials,
   SandboxStatus,
 } from './sandbox-api-client.js';
 
@@ -35,6 +38,10 @@ export interface AzureSandboxApiClientConfig {
   sandboxGroup?: string;
   /** Skip ARM group read/create; use when the identity has data-plane-only RBAC. */
   assumeGroupExists?: boolean;
+  /** User-assigned managed identity used by the sandbox group to pull private ACR images. */
+  imagePullIdentityResourceId?: string;
+  /** Transient registry credentials used for disk-image creation. Prefer managed identity. */
+  registryCredentials?: SandboxRegistryCredentials;
   /** Test seam. Defaults to DefaultAzureCredential. */
   credential?: TokenCredentialLike;
   /** Test seam. Defaults to global fetch. */
@@ -68,7 +75,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       AzureSandboxApiClientConfig,
       'subscriptionId' | 'resourceGroup' | 'location' | 'sandboxGroup' | 'assumeGroupExists'
     >
-  >;
+  > & {
+    imagePullIdentityResourceId?: string;
+    registryCredentials?: SandboxRegistryCredentials;
+  };
   private readonly logger: Logger;
   private readonly credential: TokenCredentialLike;
   private readonly fetchFn: FetchLike;
@@ -84,6 +94,8 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       location: config.location,
       sandboxGroup: config.sandboxGroup ?? 'autopod-spike',
       assumeGroupExists: config.assumeGroupExists ?? false,
+      imagePullIdentityResourceId: config.imagePullIdentityResourceId,
+      registryCredentials: config.registryCredentials,
     };
     this.logger = logger.child({ component: 'azure-sandbox-api-client' });
     this.credential = config.credential ?? new DefaultAzureCredential();
@@ -97,6 +109,8 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         location: this.config.location,
         sandboxGroup: this.config.sandboxGroup,
         assumeGroupExists: this.config.assumeGroupExists,
+        imagePullIdentityConfigured: Boolean(this.config.imagePullIdentityResourceId),
+        registryCredentialsConfigured: Boolean(this.config.registryCredentials),
       },
       'Azure Sandbox API client configured',
     );
@@ -174,6 +188,18 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     });
   }
 
+  async listFiles(sandboxId: string, path: string): Promise<SandboxDirListing> {
+    return this.requestData<SandboxDirListing>('GET', `${this.sandboxPath(sandboxId)}/files/list`, {
+      params: { path },
+    });
+  }
+
+  async statFile(sandboxId: string, path: string): Promise<SandboxFileInfo> {
+    return this.requestData<SandboxFileInfo>('GET', `${this.sandboxPath(sandboxId)}/files/stat`, {
+      params: { path },
+    });
+  }
+
   async mkdir(sandboxId: string, path: string): Promise<void> {
     await this.requestData('POST', `${this.sandboxPath(sandboxId)}/files/mkdir`, {
       json: { path },
@@ -237,7 +263,12 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       'Creating Azure sandbox group',
     );
     const created = await this.requestArm('PUT', path, {
-      json: { location: this.config.location },
+      json: {
+        location: this.config.location,
+        ...(this.config.imagePullIdentityResourceId
+          ? { identity: userAssignedIdentity(this.config.imagePullIdentityResourceId) }
+          : {}),
+      },
       okStatuses: [200, 201, 202],
       raw: true,
     });
@@ -251,6 +282,12 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       {
         json: {
           image: { base: baseImage },
+          ...(this.config.imagePullIdentityResourceId
+            ? { managedIdentityResourceId: this.config.imagePullIdentityResourceId }
+            : {}),
+          ...(this.config.registryCredentials
+            ? { registryCredentials: this.config.registryCredentials }
+            : {}),
           labels: { name: `autopod-${Date.now()}` },
         },
       },
@@ -505,6 +542,16 @@ function resourcesForTier(tier: CreateSandboxOptions['tier']): {
     L: { cpu: '2000m', memory: '4096Mi', disk: '40Gi' },
   };
   return tiers[tier];
+}
+
+function userAssignedIdentity(resourceId: string): {
+  type: 'UserAssigned';
+  userAssignedIdentities: Record<string, Record<string, never>>;
+} {
+  return {
+    type: 'UserAssigned',
+    userAssignedIdentities: { [resourceId]: {} },
+  };
 }
 
 function toWireEgressPolicy(policy: SandboxEgressPolicy): {

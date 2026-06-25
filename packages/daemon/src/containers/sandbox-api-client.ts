@@ -32,6 +32,11 @@ export interface SandboxEgressPolicy {
   hostRules: SandboxEgressRule[];
 }
 
+export interface SandboxRegistryCredentials {
+  username: string;
+  token: string;
+}
+
 export interface CreateSandboxOptions {
   image: string;
   tier: SandboxResourceTier;
@@ -62,6 +67,20 @@ export interface SandboxExecChunk {
   exitCode?: number;
 }
 
+export interface SandboxFileInfo {
+  name: string;
+  path: string;
+  size?: number;
+  isDirectory: boolean;
+  modifiedAt?: string;
+  mode?: string;
+}
+
+export interface SandboxDirListing {
+  path: string;
+  entries: SandboxFileInfo[];
+}
+
 export type SandboxStatus = 'running' | 'stopped' | 'unknown';
 
 export interface SandboxApiClient {
@@ -86,6 +105,8 @@ export interface SandboxApiClient {
   ): AsyncIterable<SandboxExecChunk>;
   writeFile(sandboxId: string, path: string, content: Buffer): Promise<void>;
   readFile(sandboxId: string, path: string): Promise<Buffer>;
+  listFiles(sandboxId: string, path: string): Promise<SandboxDirListing>;
+  statFile?(sandboxId: string, path: string): Promise<SandboxFileInfo>;
   mkdir?(sandboxId: string, path: string): Promise<void>;
   /** Replace the sandbox's egress policy at runtime. */
   updateEgress(sandboxId: string, policy: SandboxEgressPolicy): Promise<void>;

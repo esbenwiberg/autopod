@@ -1,6 +1,15 @@
-import { existsSync, lstatSync, readdirSync, readlinkSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readlinkSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { Readable } from 'node:stream';
 import type { Logger } from 'pino';
 import type {
@@ -14,6 +23,7 @@ import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
 import {
   type SandboxApiClient,
   type SandboxExecOptions,
+  type SandboxRegistryCredentials,
   type SandboxResourceTier,
   egressPolicyForMode,
   pickSandboxTier,
@@ -35,6 +45,10 @@ export interface SandboxContainerManagerConfig {
   sandboxGroup?: string;
   /** Skip ARM group read/create; use when the group is managed out-of-band. */
   assumeGroupExists?: boolean;
+  /** User-assigned managed identity used by the sandbox group to pull private ACR images. */
+  imagePullIdentityResourceId?: string;
+  /** Transient registry credentials used for disk-image creation. Prefer managed identity. */
+  registryCredentials?: SandboxRegistryCredentials;
   /** Resource tier per sandbox (default: 'L' — the largest preview tier). */
   tier?: SandboxResourceTier;
 }
@@ -50,15 +64,14 @@ export interface SandboxContainerManagerConfig {
  *     initial egress policy from `networkPolicyMode` + `allowedHosts`)
  *   - `stop()`/`start()` → snapshot suspend/resume
  *   - host bind mounts → best-effort upload at spawn (Sandboxes have no bind mounts)
- *   - `extractDirectoryFromContainer` → explicit unsupported error until a durable
- *     sync-back strategy exists
+ *   - `extractDirectoryFromContainer` → list/read recursively into the same
+ *     staging-and-mirror sync-back strategy as Docker
  *   - `execStreaming` → native streaming when the client exposes it, else a
  *     buffered `exec()` surfaced through one-shot streams
  *
  * The Azure adapter uses the preview data-plane shape confirmed by
  * `spikes/aca-sandbox/probe.py`: buffered exec, file read/write, host-rule egress,
- * and stop/resume lifecycle. Directory extraction stays intentionally unsupported
- * until a durable sync-back strategy exists.
+ * directory list/read extraction, and stop/resume lifecycle.
  */
 export class SandboxContainerManager implements ContainerManager {
   private readonly client: SandboxApiClient;
@@ -92,6 +105,8 @@ export class SandboxContainerManager implements ContainerManager {
         location: config.location,
         sandboxGroup: config.sandboxGroup,
         assumeGroupExists: config.assumeGroupExists,
+        imagePullIdentityResourceId: config.imagePullIdentityResourceId,
+        registryCredentials: config.registryCredentials,
       },
       logger,
     );
@@ -99,6 +114,8 @@ export class SandboxContainerManager implements ContainerManager {
   }
 
   async spawn(config: ContainerSpawnConfig): Promise<string> {
+    assertRegistryQualifiedImage(config.image);
+
     const tier = pickSandboxTier(config.memoryBytes, this.defaultTier);
     const egressPolicy = egressPolicyForMode(config.networkPolicyMode, config.allowedHosts ?? []);
 
@@ -110,8 +127,15 @@ export class SandboxContainerManager implements ContainerManager {
     });
     this.egressPolicies.set(sandboxId, egressPolicy);
 
-    if (config.volumes?.length) {
-      await this.uploadVolumes(sandboxId, config.volumes);
+    try {
+      if (config.volumes?.length) {
+        await this.uploadVolumes(sandboxId, config.volumes);
+      }
+    } catch (err) {
+      await this.kill(sandboxId).catch((deleteErr) => {
+        this.logger.warn({ err: deleteErr, sandboxId }, 'Failed to clean up sandbox after upload');
+      });
+      throw err;
     }
 
     this.logger.info(
@@ -175,14 +199,25 @@ export class SandboxContainerManager implements ContainerManager {
   }
 
   async extractDirectoryFromContainer(
-    _containerId: string,
+    containerId: string,
     containerPath: string,
-    _hostPath: string,
-    _excludes?: string[],
+    hostPath: string,
+    excludes?: string[],
   ): Promise<void> {
-    throw new Error(
-      `extractDirectoryFromContainer is unsupported for Azure Container Apps Sandboxes (${containerPath}). Use Docker/local until sandbox sync-back is implemented.`,
-    );
+    mkdirSync(hostPath, { recursive: true });
+    removeStaleSyncStagingDirs(hostPath);
+
+    const rootPath = normalizeSandboxPath(containerPath);
+    const stagingBase = `.autopod-extract-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const stagingPath = join(hostPath, stagingBase);
+    mkdirSync(stagingPath, { recursive: true });
+
+    try {
+      await this.extractSandboxPath(containerId, rootPath, rootPath, stagingPath, excludes);
+      mirrorStagedDirectory(stagingPath, hostPath, excludes, stagingBase);
+    } finally {
+      rmSync(stagingPath, { recursive: true, force: true });
+    }
   }
 
   async getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'> {
@@ -330,6 +365,44 @@ export class SandboxContainerManager implements ContainerManager {
       await this.client.writeFile(sandboxId, containerPath, await readFile(hostPath));
     }
   }
+
+  private async extractSandboxPath(
+    sandboxId: string,
+    rootPath: string,
+    currentPath: string,
+    stagingPath: string,
+    excludes?: string[],
+  ): Promise<void> {
+    const listing = await this.client.listFiles(sandboxId, currentPath);
+
+    for (const entry of listing.entries) {
+      const entryPath = normalizeSandboxPath(entry.path || posix.join(currentPath, entry.name));
+      const relPath = normalizeExtractPath(posix.relative(rootPath, entryPath));
+      if (!relPath || isExcludedPath(relPath, excludes)) continue;
+
+      const target = join(stagingPath, ...relPath.split('/'));
+      if (entry.isDirectory) {
+        mkdirSync(target, { recursive: true });
+        await this.extractSandboxPath(sandboxId, rootPath, entryPath, stagingPath, excludes);
+        continue;
+      }
+
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, await this.client.readFile(sandboxId, entryPath));
+    }
+  }
+}
+
+function assertRegistryQualifiedImage(image: string): void {
+  if (isRegistryQualifiedImage(image)) return;
+  throw new Error(
+    `Sandbox execution requires a registry-qualified OCI image, got "${image}". Build and push a warm image to ACR, then store the ACR tag in profile.warmImageTag.`,
+  );
+}
+
+function isRegistryQualifiedImage(image: string): boolean {
+  const [firstComponent = ''] = image.split('/');
+  return image.includes('/') && (firstComponent.includes('.') || firstComponent.includes(':'));
 }
 
 function toSandboxExecOptions(options?: ExecOptions): SandboxExecOptions | undefined {
@@ -372,4 +445,97 @@ function shouldSkipUploadedVolumeEntry(entry: string): boolean {
     entry.startsWith('.autopod-sync-') ||
     entry.startsWith('.autopod-extract-')
   );
+}
+
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeExtractPath(pathname: string): string {
+  return pathname.split('/').filter(Boolean).join('/');
+}
+
+function normalizeSandboxPath(pathname: string): string {
+  const normalized = pathname.split('/').filter(Boolean).join('/');
+  return normalized ? `/${normalized}` : '/';
+}
+
+function isExcludedPath(relPath: string, excludes?: string[]): boolean {
+  if (!excludes?.length) return false;
+  const normalizedRel = normalizeExtractPath(relPath);
+  const segments = normalizedRel.split('/');
+  return excludes.some((exclude) => {
+    const normalizedExclude = normalizeExtractPath(exclude);
+    if (!normalizedExclude) return false;
+    if (!normalizedExclude.includes('/')) {
+      return segments.includes(normalizedExclude);
+    }
+    return normalizedRel === normalizedExclude || normalizedRel.startsWith(`${normalizedExclude}/`);
+  });
+}
+
+function removeStaleSyncStagingDirs(hostPath: string): void {
+  for (const entry of readdirSync(hostPath)) {
+    if (entry.startsWith('.autopod-sync-') || entry.startsWith('.autopod-extract-')) {
+      rmSync(join(hostPath, entry), { recursive: true, force: true });
+    }
+  }
+}
+
+function collectRelativeEntries(
+  root: string,
+  excludes?: string[],
+  skipTopLevel?: string,
+): string[] {
+  const entries: string[] = [];
+
+  function walk(relativeDir: string): void {
+    const absoluteDir = relativeDir ? join(root, relativeDir) : root;
+    for (const dirent of readdirSync(absoluteDir, { withFileTypes: true })) {
+      const relPath = relativeDir ? `${relativeDir}/${dirent.name}` : dirent.name;
+      const topLevel = relPath.split('/')[0];
+      if (topLevel === skipTopLevel || isExcludedPath(relPath, excludes)) {
+        continue;
+      }
+      entries.push(relPath);
+      if (dirent.isDirectory() && !dirent.isSymbolicLink()) {
+        walk(relPath);
+      }
+    }
+  }
+
+  walk('');
+  return entries;
+}
+
+function mirrorStagedDirectory(
+  stagingPath: string,
+  hostPath: string,
+  excludes?: string[],
+  stagingBase?: string,
+): void {
+  for (const entry of readdirSync(stagingPath)) {
+    cpSync(join(stagingPath, entry), join(hostPath, entry), {
+      recursive: true,
+      force: true,
+      errorOnExist: false,
+      dereference: false,
+      verbatimSymlinks: true,
+      preserveTimestamps: true,
+    });
+  }
+
+  const hostEntries = collectRelativeEntries(hostPath, excludes, stagingBase).sort(
+    (a, b) => b.length - a.length,
+  );
+  for (const relPath of hostEntries) {
+    if (!pathExists(join(stagingPath, relPath))) {
+      rmSync(join(hostPath, relPath), { recursive: true, force: true });
+    }
+  }
 }

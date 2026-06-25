@@ -945,6 +945,67 @@ function resolvePrBaseBranch(pod: Pod, profile: Profile): string {
   return pod.branch === 'main' ? candidate : 'main';
 }
 
+function resolvePodSpawnImage(
+  profile: Profile,
+  template: string,
+  executionTarget: ExecutionTarget,
+): string {
+  if (executionTarget !== 'sandbox') {
+    return profile.warmImageTag ?? getBaseImage(template);
+  }
+
+  if (!profile.warmImageTag) {
+    throw new AutopodError(
+      `Sandbox execution for profile "${profile.name}" requires a warm image. Run \`ap profile warm <profile> --rebuild\` with ACR_REGISTRY_URL configured first.`,
+      'SANDBOX_WARM_IMAGE_REQUIRED',
+      400,
+    );
+  }
+
+  if (!isAcrQualifiedImage(profile.warmImageTag)) {
+    throw new AutopodError(
+      `Sandbox warm image for profile "${profile.name}" must be an ACR-qualified image tag, got "${profile.warmImageTag}". Rebuild the warm image with ACR_REGISTRY_URL so profile.warmImageTag is stored as <registry>.azurecr.io/...`,
+      'SANDBOX_WARM_IMAGE_REQUIRED',
+      400,
+    );
+  }
+
+  return profile.warmImageTag;
+}
+
+function isAcrQualifiedImage(image: string): boolean {
+  const [registry = ''] = image.split('/');
+  return image.includes('/') && registry.endsWith('.azurecr.io');
+}
+
+async function verifySandboxWarmImageAccess(
+  profile: Profile,
+  image: string,
+  warmImageExists?: (tag: string) => Promise<boolean>,
+): Promise<void> {
+  if (!warmImageExists) return;
+
+  let exists = false;
+  try {
+    exists = await warmImageExists(image);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new AutopodError(
+      `Could not verify sandbox warm image "${image}" for profile "${profile.name}" in ACR: ${detail}`,
+      'SANDBOX_WARM_IMAGE_INACCESSIBLE',
+      400,
+    );
+  }
+
+  if (!exists) {
+    throw new AutopodError(
+      `Sandbox warm image "${image}" for profile "${profile.name}" was not found in the configured ACR or is not accessible to the daemon identity.`,
+      'SANDBOX_WARM_IMAGE_INACCESSIBLE',
+      400,
+    );
+  }
+}
+
 function isSinglePrSeriesPod(pod: Pick<Pod, 'prMode' | 'seriesId'>): boolean {
   return pod.prMode === 'single' && Boolean(pod.seriesId);
 }
@@ -1054,6 +1115,8 @@ export interface PodManagerDependencies {
   sessionTokenIssuer?: PodTokenIssuer;
   /** Resolve environment variable or secret by name (e.g. AZURE_GRAPH_TOKEN). */
   getSecret: (ref: string) => string | undefined;
+  /** Optional ACR manifest preflight for sandbox warm images. */
+  warmImageExists?: (tag: string) => Promise<boolean>;
   /** Optional repo content scanner — runs at provisioning to flag secrets/PII/injection. */
   repoScanner?: import('../security/index.js').RepoScanner;
   /** Optional scan repository — used to query the latest push scan when building PR bodies. */
@@ -5578,7 +5641,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Prefer the per-profile warm image when one has been built — that's
         // where customisations like Serena / roslyn-codelens-mcp live. Fall
         // back to the bare base image only when no warm image exists.
-        const spawnImage = profile.warmImageTag ?? getBaseImage(template);
+        const spawnImage = resolvePodSpawnImage(profile, template, pod.executionTarget);
+        if (pod.executionTarget === 'sandbox') {
+          await verifySandboxWarmImageAccess(profile, spawnImage, deps.warmImageExists);
+        }
         emitStatus(`Spawning container (${profile.template})…`);
         logger.info(
           { podId, image: spawnImage, warm: Boolean(profile.warmImageTag) },

@@ -1097,23 +1097,22 @@ PIM groups are activated automatically when the workspace starts and deactivated
 ```yaml
 executionTarget: local   # Run containers on the local Docker socket (default)
 # or
-executionTarget: sandbox # Run containers in Azure Container Apps Sandboxes (scaffold — not yet wired)
+executionTarget: sandbox # Run containers in Azure Container Apps Sandboxes
 ```
 
 | | Local | Sandbox (Azure Container Apps) |
 |--|--|--|
-| Setup | Docker socket | Azure subscription + preview enrollment |
+| Setup | Docker socket | Azure subscription + preview enrollment + ACR warm image |
 | Cost | Host resources | Scale-to-zero (pay nothing when idle) |
 | Isolation | Docker bridge per pod | Per-sandbox microVM |
 | Egress control | iptables + HAProxy | Native per-sandbox egress policy (all modes) |
 | Scale | Host CPU/memory | Azure quota |
-| Cold start | Fast (cached image) | Sub-second (prewarmed pools) |
+| Cold start | Fast (cached image) | Warm-image disk creation + sandbox start |
 
-> **Status:** the `sandbox` target is **scaffolded but not yet wired** — selecting it
-> surfaces a clear `NOT_IMPLEMENTED` error. The preview SDK must first be confirmed via
-> `spikes/aca-sandbox/probe.py` against an enrolled Entra tenant. It replaces the former
-> ACI backend. To enable it once implemented, set `AZURE_SUBSCRIPTION_ID`,
-> `AZURE_RESOURCE_GROUP`, and `AZURE_LOCATION`.
+> **Status:** the `sandbox` target is wired behind Azure Container Apps Sandboxes. It requires
+> an ACR-published `profile.warmImageTag`, SandboxGroup data-plane RBAC, an ACR pull identity,
+> and a daemon MCP host reachable from Azure. See `docs/azure-container-apps-sandboxes.md` for
+> the exact env vars, RBAC model, and smoke command.
 
 ### Profile Versioning
 

@@ -1,8 +1,8 @@
-# ADR-031: Azure Container Apps Sandboxes backend prototype
+# ADR-031: Azure Container Apps Sandboxes backend
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -30,7 +30,8 @@ The spike confirmed:
   native streaming method was exposed.
 - File write/read works for binary payloads.
 - Directory extraction through tar + download did not produce bytes in the
-  stock image and should be treated as unsupported for the prototype.
+  stock image, but the SDK exposes file list/read APIs that can support a
+  durable sync-back path.
 - Native egress policy is runtime mutable. Default-deny blocked `example.com`
   with `403`; after policy mutation the same request returned `200`.
 - Stop/resume works and maps to `begin_stop()` / `begin_resume()`.
@@ -51,18 +52,34 @@ The daemon activates the backend only when `AZURE_SUBSCRIPTION_ID` and
 
 `SandboxContainerManager` remains the `ContainerManager` implementation and
 keeps Azure-specific HTTP behind `SandboxApiClient`. It supports spawn, kill,
-buffered exec, streaming fallback, read/write file APIs, stop/start, and
-`refreshFirewall()` through native egress-policy replacement.
+buffered exec, streaming fallback, read/write/list file APIs, directory
+sync-back, stop/start, and `refreshFirewall()` through native egress-policy
+replacement.
+
+Sandbox pods must run from Autopod warm images published to ACR. Docker keeps
+the previous behavior of using `profile.warmImageTag` when present and falling
+back to a base image otherwise. Sandboxes reject missing or local-only warm
+image tags before provisioning, and when `ACR_REGISTRY_URL` is configured the
+daemon checks the ACR manifest before creating the sandbox. Private ACR pulls
+use a user-assigned managed identity configured by
+`AZURE_SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID`, attached to the sandbox group
+and granted `AcrPull`. For short-lived diagnostics only, the adapter can pass
+the Sandbox SDK's `registryCredentials` field from
+`AZURE_SANDBOX_REGISTRY_USERNAME` and `AZURE_SANDBOX_REGISTRY_TOKEN`.
 
 For restricted network policy, reuse Autopod's existing allowlist calculation
 including defaults, profile hosts, MCP server hosts, private registries, and the
 daemon MCP host from `mcpBaseUrl`. Docker continues to enforce the same policy
 with iptables/HAProxy; Sandboxes uses native `defaultAction` + `hostRules`.
 
-Because Sandboxes do not support Docker bind mounts, the prototype uploads
-configured host volumes at spawn. Sync-back is explicitly not solved in this
-ADR. `extractDirectoryFromContainer` throws a clear unsupported error until a
-durable sync-back design exists.
+Because Sandboxes do not support Docker bind mounts, the supported workspace
+model is snapshot sync-in plus sync-back. The manager uploads configured host
+volumes at spawn as source snapshots. Pod provisioning copies `/mnt/worktree`
+staging into writable `/workspace`; agents mutate `/workspace`, not the
+uploaded staging tree. `extractDirectoryFromContainer` then recursively lists
+and reads runtime sandbox files, writes them into a staging directory, and
+mirrors staging back to the host with the same exclude semantics used by Docker
+extraction.
 
 ## Consequences
 
@@ -78,9 +95,12 @@ Harder:
 
 - Exec is buffered, so live terminal UX is weaker than Docker until the preview
   SDK adds streaming.
-- Volume upload at spawn can be expensive and does not handle sync-back.
+- Volume upload at spawn can be expensive, and both sync-in and sync-back are
+  snapshot based rather than live mounts.
 - The daemon needs a reachable `AUTOPOD_CONTAINER_HOST` for cloud sandboxes to
   call the MCP endpoint.
+- Private ACR pulls require managed-identity setup on the sandbox group plus
+  `AcrPull` on the registry.
 - Preview API shape may drift; the adapter must stay covered by request-shape
   tests and live smoke checks.
 
@@ -88,8 +108,8 @@ Committed to:
 
 - No automatic rerouting from Docker to Sandboxes.
 - No desktop polish in the backend prototype.
-- No claim of production sync-back until directory extraction or another
-  durable workspace return path exists.
+- Sandbox production support is tied to ACR warm images; stock-image smoke paths
+  are not enough.
 - Treat `westeurope` as unsupported unless provider registration later lists it.
 
 ## Alternatives rejected
@@ -102,4 +122,5 @@ Committed to:
 - **Pretend bind mounts exist.** They do not. Upload-at-spawn is honest for a
   prototype; sync-back needs a separate design.
 - **Mark extraction as best-effort.** The live spike showed no usable bytes from
-  the tar download path, so the container manager should fail explicitly.
+  the tar download path, so production sync-back uses the native file list/read
+  API instead.
