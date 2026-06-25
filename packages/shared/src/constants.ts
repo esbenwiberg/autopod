@@ -14,6 +14,40 @@ export const EVENT_LOG_RETENTION_DAYS = 30;
 export const DEFAULT_CONTAINER_MEMORY_GB = 10;
 
 /**
+ * Default per-pod CPU cap, in fractional cores. Agent pods spawn unbounded by
+ * default, so a single `npm install` / build can saturate every host core —
+ * and with `MAX_CONCURRENCY` pods running at once the host melts. This caps
+ * each pod so concurrent pods stay civil. Override with the `CONTAINER_CPUS`
+ * env var; set it to `0` (or negative) for unbounded (the old behaviour).
+ */
+export const DEFAULT_CONTAINER_CPUS = 2;
+
+/**
+ * Resolve the per-pod CPU cap (in NanoCpus — billionths of a core, the unit
+ * Docker's `HostConfig.NanoCpus` expects) from a raw `CONTAINER_CPUS` env value.
+ *
+ * - unset / empty / unparseable → {@link DEFAULT_CONTAINER_CPUS}
+ * - `<= 0` → `undefined` (no cap; container may use all host cores)
+ * - otherwise → the value in cores, converted to NanoCpus
+ */
+export function resolveContainerNanoCpus(
+  rawEnvValue: string | undefined,
+  defaultCpus: number = DEFAULT_CONTAINER_CPUS,
+): number | undefined {
+  let cpus = defaultCpus;
+  if (rawEnvValue !== undefined && rawEnvValue.trim() !== '') {
+    const parsed = Number.parseFloat(rawEnvValue);
+    if (Number.isFinite(parsed)) {
+      cpus = parsed;
+    }
+  }
+  if (cpus <= 0) {
+    return undefined;
+  }
+  return Math.floor(cpus * 1e9);
+}
+
+/**
  * Chromium launch flags for Playwright runs inside agent containers.
  *
  * The `--*-sandbox` / `--disable-dev-shm-usage` flags are container hygiene.
