@@ -45,6 +45,7 @@ export interface CreateSeriesRequest {
   startBranch?: string;
   baseBranch?: string;
   specFiles?: SpecFile[];
+  specContextFiles?: SpecFile[];
   prMode?: 'single' | 'stacked' | 'none';
   /** Auto-approve each pod once it reaches `validated` — no human gate. */
   autoApprove?: boolean;

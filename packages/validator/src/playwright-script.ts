@@ -1,4 +1,4 @@
-import type { SmokePage } from '@autopod/shared';
+import { CHROMIUM_LAUNCH_ARGS, type SmokePage } from '@autopod/shared';
 
 export interface PlaywrightScriptConfig {
   baseUrl: string;
@@ -42,7 +42,7 @@ async function run() {
   mkdirSync(CONFIG.screenshotDir, { recursive: true });
 
   const browser = await chromium.launch({
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    args: ${JSON.stringify([...CHROMIUM_LAUNCH_ARGS])},
   });
 
   const results = [];

@@ -7,7 +7,7 @@ import type { RuntimeType } from './runtime.js';
 import type { SecurityScanPolicy } from './security-scan.js';
 import type { SidecarsConfig } from './sidecar.js';
 
-export type ExecutionTarget = 'local' | 'aci';
+export type ExecutionTarget = 'local' | 'sandbox';
 
 /**
  * Fields whose inheritance behavior can be switched from merge (the default —

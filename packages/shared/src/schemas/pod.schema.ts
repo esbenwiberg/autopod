@@ -114,7 +114,7 @@ export const createPodRequestSchema = z
     task: z.string().max(50_000),
     model: canonicalModelIdSchema.optional(),
     runtime: z.enum(['claude', 'codex']).optional(),
-    executionTarget: z.enum(['local', 'aci']).optional(),
+    executionTarget: z.enum(['local', 'sandbox']).optional(),
     branch: branchNameSchema.optional(),
     branchPrefix: z
       .string()
@@ -130,6 +130,7 @@ export const createPodRequestSchema = z
     startBranch: branchNameSchema.optional(),
     baseBranch: branchNameSchema.optional(),
     specFiles: z.array(specFileSchema).max(200).optional(),
+    specContextFiles: z.array(specFileSchema).max(200).optional(),
     linkedPodId: z.string().min(1).max(64).optional(),
     dependsOnPodId: z.string().min(1).max(64).optional(),
     dependsOnPodIds: z.array(z.string().min(1).max(64)).max(32).optional(),

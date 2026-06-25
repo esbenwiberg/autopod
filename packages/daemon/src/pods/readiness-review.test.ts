@@ -572,4 +572,45 @@ describe('createReadinessService', () => {
       ]),
     );
   });
+
+  it('treats Chromium google.com startup probes as non-blocking denied egress', () => {
+    const podWithEvents = pod({ lastValidationResult: validation() });
+    const podRepo = {
+      getOrThrow: () => podWithEvents,
+      update: () => undefined,
+      getPodsBySeries: () => [],
+    } as unknown as PodRepository;
+    const eventRepo = {
+      countForSession: () => 0,
+      getForSession: () =>
+        ['www.google.com', 'accounts.google.com', 'www.google.com'].map((sni, index) => ({
+          id: index + 1,
+          podId: podWithEvents.id,
+          type: 'pod.firewall_denied',
+          payload: {
+            type: 'pod.firewall_denied',
+            timestamp: NOW,
+            podId: podWithEvents.id,
+            sni,
+            src: '172.24.0.2',
+          },
+          createdAt: NOW,
+        })),
+    } as unknown as EventRepository;
+
+    const service = createReadinessService({ podRepo, eventRepo });
+    const result = service.computePodReadiness(podWithEvents.id);
+
+    expect(result.status).toBe('ready');
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'network-known-tool-egress', severity: 'info' }),
+      ]),
+    );
+    expect(result.findings).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'network-denied-egress', severity: 'warning' }),
+      ]),
+    );
+  });
 });

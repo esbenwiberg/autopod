@@ -620,6 +620,21 @@ public struct DetailPanelView: View {
         return "\(result.message)\n\nBlocking paths:\n\(preview)\(suffix)"
     }
 
+    private var shouldFixReviewFindings: Bool {
+        guard let checks = pod.validationChecks, checks.review == false else { return false }
+        return checks.reviewSkipKind != "review-failed" && checks.reviewSkipKind != "review-timeout"
+    }
+
+    private var reworkActionTitle: String {
+        shouldFixReviewFindings ? "Fix Review Findings" : "Rework"
+    }
+
+    private var reworkActionHelp: String {
+        shouldFixReviewFindings
+        ? "Re-run the agent with the failed review findings as feedback. Spends tokens."
+        : "Re-run the agent from scratch with feedback. Spends tokens."
+    }
+
 
     @ViewBuilder
     private var headerActions: some View {
@@ -830,11 +845,12 @@ public struct DetailPanelView: View {
                     Button {
                         Task { await actions.rework(pod.id) }
                     } label: {
-                        Label("Rework", systemImage: "arrow.clockwise")
+                        Label(reworkActionTitle, systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .tint(.orange)
+                    .help(reworkActionHelp)
                     Button {
                         Task { await actions.fixManually(pod.id) }
                     } label: {
@@ -856,11 +872,17 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.extendAttempts(pod.id, 2) }
                 } label: {
-                    Label("Extend Attempts", systemImage: "arrow.clockwise")
+                    Label(
+                        shouldFixReviewFindings ? "Fix Review Findings" : "Extend Attempts",
+                        systemImage: "arrow.clockwise"
+                    )
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .tint(.orange)
+                .help(shouldFixReviewFindings
+                    ? "Add retry budget and re-run the agent with the failed review findings as feedback."
+                    : "Add retry budget and re-run validation.")
                 Button {
                     Task { await actions.fixManually(pod.id) }
                 } label: {
@@ -942,12 +964,12 @@ public struct DetailPanelView: View {
                     Button {
                         Task { await actions.rework(pod.id) }
                     } label: {
-                        Label("Rework", systemImage: "arrow.clockwise")
+                        Label(reworkActionTitle, systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .tint(.orange)
-                    .help("Re-run the agent from scratch with feedback. Spends tokens.")
+                    .help(reworkActionHelp)
                 }
                 Button {
                     Task { await actions.fixManually(pod.id) }

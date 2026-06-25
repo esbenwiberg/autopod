@@ -1,0 +1,4 @@
+# Azure Container Apps Sandboxes feasibility spike.
+# The sandbox SDK is preview/early-access — pin/verify against https://sandboxes.azure.com.
+azure-identity>=1.16
+azure-containerapps-sandbox  # VERIFY: package name + availability for your tenant (preview)

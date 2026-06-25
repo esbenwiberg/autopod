@@ -316,7 +316,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .sessionOrchestration:
             "Full lifecycle management across 15 states — from task queuing through provisioning, agent execution, validation, human review, and merge. Automatic retries, fix pods on CI failure, review_required escalation, and state machine enforcement."
         case .containerSecurity:
-            "Every pod runs in an isolated Docker container (or ACI) with per-container iptables firewall rules and an HAProxy SNI proxy for HTTPS egress. Network policies support allow-all, deny-all, restricted, or package-manager shorthand."
+            "Every pod runs in an isolated Docker container (or Azure Container Apps Sandbox) with per-container iptables firewall rules and an HAProxy SNI proxy for HTTPS egress. Network policies support allow-all, deny-all, restricted, or package-manager shorthand."
         case .multiRuntime:
             "Pluggable runtime architecture supporting Anthropic Claude, OpenAI Codex, and GitHub Copilot. Each runtime streams structured agent events with dedicated parsers."
         case .actionControlPlane:
@@ -326,7 +326,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .validationPipeline:
             "Nine gated validation checks: setup -> lint -> SAST -> build -> test -> health -> Playwright pages -> required facts -> AI review. Supports interrupt, per-finding overrides, proof-of-work evidence, review_required state, and tiered correction feedback."
         case .profileManagement:
-            "Profiles define stack templates, credentials, network policies, registries, skills, and MCP servers. Versioned, inheritable, snapshotted at pod creation. Supports local Docker or ACI execution."
+            "Profiles define stack templates, credentials, network policies, registries, skills, and MCP servers. Versioned, inheritable, snapshotted at pod creation. Supports local Docker or Azure Container Apps Sandboxes execution."
         case .realTimeMonitoring:
             "WebSocket event streaming delivers namespaced pod, validation, escalation, memory, scheduler, watcher, wake, and firewall events to desktop, CLI, and menu bar. Persisted replay, PII-safe broadcast, and monotonic event IDs keep clients in sync."
         case .memoryStore:
@@ -363,12 +363,12 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
     public var subtitle: String {
         switch self {
         case .sessionOrchestration: "15-state machine, fix pods on CI/review failures, review_required, merge_pending, token/cost tracking"
-        case .containerSecurity:    "HAProxy SNI proxy + iptables, seccomp, non-root, git isolation, content scanning + local/ACI targets"
+        case .containerSecurity:    "HAProxy SNI proxy + iptables, seccomp, non-root, git isolation, content scanning + local/Sandbox targets"
         case .multiRuntime:         "Pluggable runtimes with streaming parsers and pod persistence"
         case .actionControlPlane:   "8 groups, 22 actions — gated with injection detection, PII redaction, and PIM support"
         case .escalationSystem:     "13+ MCP tools: human escalation, AI consultation, memory, browser self-validation"
         case .validationPipeline:   "9 validation gates: setup, lint, SAST, build, test, health, pages, facts, AI review + interrupt + overrides + proof-of-work evidence"
-        case .profileManagement:    "Versioned + snapshotted profiles, 11 stacks, 4 providers, local/ACI, inheritance + injection"
+        case .profileManagement:    "Versioned + snapshotted profiles, 11 stacks, 4 providers, local/Sandbox, inheritance + injection"
         case .realTimeMonitoring:   "Namespaced system events, persisted replay, PII-safe broadcast"
         case .memoryStore:          "3-scoped persistent knowledge: suggest → approve → inject into CLAUDE.md"
         case .seriesWorkflows:      "Contract-backed briefs, DAG dependency resolution, fan-in, 3 PR modes"
@@ -491,7 +491,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
             ]
         case .containerSecurity:
             [
-                "Execution targets: local (Docker socket) or aci (Azure Container Instances)",
+                "Execution targets: local (Docker socket) or sandbox (Azure Container Apps Sandboxes)",
                 "Network: autopod-net bridge with ICC disabled, iptables OUTPUT chain per container",
                 "allow-all: loopback + established/related, no DROP (trusted environments)",
                 "deny-all: DNS only (UDP/TCP 53), everything else DROPped",
@@ -570,7 +570,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
                 "11 stack templates: node22, node22-pw, dotnet9, dotnet10, dotnet10-go, python312, python-node, python-node-pg, go124, go124-pw, custom",
                 "3 output modes: pr (full pipeline), artifact (research-output.md), workspace (interactive)",
                 "5 model providers: Anthropic (API key), MAX/PRO (OAuth + token refresh), OpenAI (API key), Foundry (Azure endpoint), Copilot (GitHub token)",
-                "Execution targets: local (Docker socket) or aci (Azure Container Instances)",
+                "Execution targets: local (Docker socket) or sandbox (Azure Container Apps Sandboxes)",
                 "profile.version: auto-incrementing integer on every profile update",
                 "Profile snapshot: full resolved profile (incl. inherited values) stored with pod at creation",
                 "branchPrefix: custom prefix for auto-generated pod branch names",

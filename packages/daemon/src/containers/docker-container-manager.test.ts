@@ -177,6 +177,30 @@ describe('DockerContainerManager', () => {
       expect(createCall.HostConfig.Binds).toEqual(['/tmp/worktree/abc:/workspace']);
     });
 
+    it('configures read-only volume binds', async () => {
+      await manager.spawn({
+        ...baseConfig,
+        volumes: [{ host: '/tmp/spec/abc', container: '/autopod/spec', readOnly: true }],
+      });
+
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
+      expect(createCall.HostConfig.Binds).toEqual(['/tmp/spec/abc:/autopod/spec:ro']);
+    });
+
+    it('applies the CPU cap when nanoCpus provided', async () => {
+      await manager.spawn({ ...baseConfig, nanoCpus: 2 * 1e9 });
+
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
+      expect(createCall.HostConfig.NanoCpus).toBe(2 * 1e9);
+    });
+
+    it('leaves CPU unbounded when nanoCpus omitted', async () => {
+      await manager.spawn(baseConfig);
+
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
+      expect(createCall.HostConfig.NanoCpus).toBeUndefined();
+    });
+
     it('skips volume config when no volumes provided', async () => {
       await manager.spawn(baseConfig);
 

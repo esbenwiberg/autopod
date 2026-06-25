@@ -685,7 +685,6 @@ specs/<feature-name>/
 │   │   ├── brief.md
 │   │   └── contract.yaml
 │   └── ...
-└── handovers/       ← runtime artifact; pods write here, not /plan-feature
 
 docs/decisions/      ← REPO-LEVEL, one file per ADR, numbered globally
 ├── ADR-001-<slug>.md
@@ -698,7 +697,10 @@ Run order: `ap series create specs/<feature-name>/` (or
 
 Both `purpose.md` and `design.md` are auto-loaded by the daemon and
 rendered as `## Purpose` and `## Design` sections in every pod's AGENTS.md.
-Briefs do NOT need to list them via `context_files` — they're injected.
+Briefs do NOT need to list them via `context_files` — they're injected. The
+full spec folder is also available to each pod as read-only runtime context at
+`/autopod/spec/`; `--include-specs` is only needed when the spec files should be
+committed onto the pod branch.
 
 ### purpose.md
 
@@ -1039,10 +1041,11 @@ wrap-up step. Required facts remain about observable outcomes only.
 
 `/plan-feature` does NOT write any files in `handovers/`. The daemon's
 system instructions tell each pod to read its parent(s)' handover files
-from `specs/<feature>/handovers/<parentPodId>.md` before starting and to
-write its own to `specs/<feature>/handovers/<thisPodId>.md` before
-finishing. Filenames are pod-id-keyed, so parallel siblings produce
-distinct files and the next pod reads each parent it depends on.
+from `/autopod/artifacts/handovers/<parentPodId>.md` before starting and to
+write its own to `/autopod/artifacts/handovers/<thisPodId>.md` before
+finishing. These are runtime artifacts, not git-tracked spec files. Filenames
+are pod-id-keyed, so parallel siblings produce distinct files and the next pod
+reads each parent it depends on.
 
 ---
 

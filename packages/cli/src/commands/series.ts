@@ -79,6 +79,19 @@ function collectSpecFiles(specRoot: string): SpecFile[] {
   return files;
 }
 
+function resolveContractPath(specRoot: string): string {
+  const yamlPath = join(specRoot, 'contract.yaml');
+  const ymlPath = join(specRoot, 'contract.yml');
+  const hasYaml = existsSync(yamlPath);
+  const hasYml = existsSync(ymlPath);
+  if (hasYaml && hasYml) {
+    throw new Error(`both contract.yaml and contract.yml found in ${specRoot}`);
+  }
+  if (hasYaml) return yamlPath;
+  if (hasYml) return ymlPath;
+  throw new Error(`contract not found: ${yamlPath} or ${ymlPath}`);
+}
+
 export function registerSeriesCommands(program: Command, getClient: () => AutopodClient): void {
   const series = program.command('series').description('Manage series of pods');
 
@@ -105,6 +118,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
       '--include-specs',
       'commit spec folder files onto root pod branches before agents start',
     )
+    .option('--no-spec-context', 'do not expose spec folder files as runtime-only context')
     .action(
       async (
         folder: string,
@@ -116,6 +130,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
           seriesName?: string;
           autoApprove?: boolean;
           includeSpecs?: boolean;
+          specContext?: boolean;
         },
       ) => {
         const client = getClient();
@@ -136,7 +151,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
             briefFiles = briefDirs.map((dirname) => ({
               filename: dirname,
               content: readFileSync(join(briefsDir, dirname, 'brief.md'), 'utf-8'),
-              contractContent: readFileSync(join(briefsDir, dirname, 'contract.yaml'), 'utf-8'),
+              contractContent: readFileSync(resolveContractPath(join(briefsDir, dirname)), 'utf-8'),
             }));
           } else {
             briefFiles = entries
@@ -160,7 +175,9 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
         // Shared spec docs live at the spec root (parent of briefs/).
         const seriesDescription = readMaybe(specRoot, 'purpose.md');
         const seriesDesign = readMaybe(specRoot, 'design.md');
-        const specFiles = opts.includeSpecs ? collectSpecFiles(specRoot) : undefined;
+        const collectedSpecFiles = collectSpecFiles(specRoot);
+        const specFiles = opts.includeSpecs ? collectedSpecFiles : undefined;
+        const specContextFiles = opts.specContext === false ? undefined : collectedSpecFiles;
 
         const seriesName = opts.seriesName ?? inferSeriesName(specRoot);
         const prMode = opts.prMode as 'single' | 'stacked' | 'none';
@@ -182,6 +199,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
             startBranch: opts.startBranch,
             baseBranch: opts.baseBranch,
             specFiles,
+            specContextFiles,
             prMode,
             autoApprove: opts.autoApprove ?? false,
             seriesDescription: seriesDescription || undefined,

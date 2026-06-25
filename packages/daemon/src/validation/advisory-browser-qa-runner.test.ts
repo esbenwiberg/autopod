@@ -250,8 +250,16 @@ describe('runAdvisoryBrowserQa', () => {
     expect(result.status).toBe('pass');
     const script = vi.mocked(hostBrowserRunner.runScript).mock.calls[0]?.[0];
     expect(script).toContain('viewport = { width: 1280, height: 900 }');
+    expect(script).toContain('async function waitForCaptureReady(page)');
+    expect(script).toContain('waitForCaptureReady(page)');
+    expect(script).toContain('Advisory capture readiness timed out:');
     expect(script).toContain('fullPage: false');
     expect(script).toContain("scale: 'css'");
+    const captureFrameStart = script?.indexOf('async function captureFrame') ?? -1;
+    const readinessCall = script?.indexOf('const readinessNotes = await waitForCaptureReady(page)');
+    const screenshotCall = script?.indexOf('await page.screenshot', captureFrameStart);
+    expect(readinessCall).toBeGreaterThan(captureFrameStart);
+    expect(screenshotCall).toBeGreaterThan(readinessCall ?? -1);
     expect(result.screenshots[0]?.relativePath).toBe('screenshots/pod-1/advisory/advisory-0.png');
     expect(result.observations[0]).toMatchObject({
       id: 'dashboard-ok',
@@ -1620,6 +1628,8 @@ human_review: []
 
     const actionScript = vi.mocked(hostBrowserRunner.runScript).mock.calls[1]?.[0] as string;
     expect(hostBrowserRunner.runScript).toHaveBeenCalledTimes(2);
+    expect(actionScript).toContain('const readinessNotes = await waitForCaptureReady(page)');
+    expect(actionScript).not.toContain('waitForTimeout(250)');
     expect(actionScript).toContain('"scenario:dashboard"');
     expect(actionScript).not.toContain('scenario:old-pod');
   });

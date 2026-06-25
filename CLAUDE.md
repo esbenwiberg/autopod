@@ -39,7 +39,7 @@ daemon ← validator, escalation-mcp
 | Package | Purpose |
 |---------|---------|
 | `shared` | Types, errors, constants, sanitization. Zero heavy deps. |
-| `daemon` | Fastify server, pod orchestration, SQLite, Docker/ACI container management |
+| `daemon` | Fastify server, pod orchestration, SQLite, Docker/Sandboxes container management |
 | `cli` | Commander CLI |
 | `validator` | Playwright smoke test script generation + result parsing (types only — execution lives in daemon) |
 | `escalation-mcp` | MCP server injected into agent containers for escalation, actions, and browser self-validation |
@@ -80,7 +80,7 @@ for the per-subsystem deep dive — what follows is just the entry-point map.
 **Container Management** (`src/containers/`):
 - `docker-container-manager.ts` — Dockerode wrapper: spawn, kill, exec, file I/O, log streaming
 - `docker-network-manager.ts` — Network isolation + iptables firewall (allow-all/deny-all/restricted modes)
-- `aci-container-manager.ts` — Azure Container Instances backend (alternative to Docker)
+- `sandbox-container-manager.ts` — Azure Container Apps Sandboxes backend (scaffold — alternative to Docker; not yet wired)
 
 **Runtimes** (`src/runtimes/`):
 - `claude-runtime.ts` — Anthropic Claude via API, streams `AgentEvent` from SSE
@@ -293,11 +293,9 @@ Each runtime (`claude-runtime.ts`, `codex-runtime.ts`, `copilot-runtime.ts`) has
 | `MAX_CONCURRENCY` | `3` | no | Pod queue concurrency |
 | `TEAMS_WEBHOOK_URL` | — | no | Teams notification webhook |
 | `ACR_REGISTRY_URL` | — | no | Azure Container Registry for image warming |
-| `AZURE_SUBSCRIPTION_ID` | — | no | Required for ACI execution target |
-| `AZURE_RESOURCE_GROUP` | — | no | Required for ACI |
-| `AZURE_LOCATION` | — | no | Required for ACI |
-| `ACR_USERNAME` | — | no | ACR credentials for ACI |
-| `ACR_PASSWORD` | — | no | ACR credentials for ACI |
+| `AZURE_SUBSCRIPTION_ID` | — | no | Enables the Sandbox execution target (scaffold — not yet wired) |
+| `AZURE_RESOURCE_GROUP` | — | no | Required for Sandbox execution target |
+| `AZURE_LOCATION` | `westeurope` | no | Region for Sandbox placement |
 | `AUTOPOD_CONTAINER_HOST` | — | no | Override host for MCP base URL inside containers |
 | `AUTOPOD_MOBILE_DIST` | — | no | Override mobile PWA dist dir (default: `packages/mobile-web/dist`). See `docs/mobile.md`. |
 

@@ -533,11 +533,11 @@ public enum RuntimeType: String, CaseIterable, Sendable {
 }
 
 public enum ExecutionTarget: String, CaseIterable, Sendable {
-    case local, aci
+    case local, sandbox
     public var label: String {
         switch self {
-        case .local: "Local (Docker)"
-        case .aci:   "Azure Container Instances"
+        case .local:   "Local (Docker)"
+        case .sandbox: "Azure Container Apps Sandboxes"
         }
     }
 }

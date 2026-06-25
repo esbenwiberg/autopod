@@ -16,6 +16,9 @@ Turn a rough single-pod task into one autopod-compatible spec folder at
 `specs/<task>/` with `brief.md` and `contract.yaml`. The brief carries task
 context; the contract carries scenarios and durable required facts, so
 `ap pod create --spec specs/<task>/` runs it without further clarification.
+Autopod exposes the spec folder to the pod at `/autopod/spec/` by default;
+`--include-specs` is only needed when the spec files should be committed onto
+the pod branch.
 
 Nothing is written until the coverage checklist is green and the user has
 greenlit.
@@ -399,7 +402,7 @@ wrap-up step. Required facts remain about observable outcomes only.
 
 When this skill finishes, the output must be complete enough that:
 
-- `ap pod create specs/<task>/brief.md` runs without clarifying questions.
+- `ap pod create <profile> --spec specs/<task>/` runs without clarifying questions.
 - The pod agent executes the brief without asking the user anything.
 - A reviewer reading only the brief understands what's being changed and why.
 

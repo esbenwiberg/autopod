@@ -900,7 +900,7 @@ describe('Integration', () => {
       expect(pod.status).toBe('queued');
     });
 
-    it('POST /pods rejects workspace + ACI execution target', async () => {
+    it('POST /pods rejects workspace + sandbox execution target', async () => {
       await app.inject({
         method: 'POST',
         url: '/profiles',
@@ -916,7 +916,7 @@ describe('Integration', () => {
           profileName: 'test-app',
           task: 'Workspace pod',
           outputMode: 'workspace',
-          executionTarget: 'aci',
+          executionTarget: 'sandbox',
         },
       });
 

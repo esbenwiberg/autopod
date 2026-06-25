@@ -1,73 +1,75 @@
 import type { Pod } from '@autopod/shared';
 import type { Logger } from 'pino';
-import type { AciContainerManager } from '../containers/aci-container-manager.js';
+import type { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
 import type { EventBus } from './event-bus.js';
 import type { PodRepository } from './pod-repository.js';
 
 export interface ReconcilerDependencies {
   podRepo: PodRepository;
   eventBus: EventBus;
-  aciContainerManager: AciContainerManager;
+  sandboxContainerManager: SandboxContainerManager;
   onReconnected: (podId: string, containerId: string) => Promise<void>;
   logger: Logger;
 }
 
 /**
- * Reconciles ACI pods on daemon restart.
+ * Reconciles sandbox pods on daemon restart.
  *
- * Finds pods with status='running' and executionTarget='aci',
- * checks their container state, and either reconnects or marks them failed.
+ * Finds pods with status='running' and executionTarget='sandbox',
+ * checks their sandbox state, and either reconnects or marks them failed.
  */
-export async function reconcileAciSessions(deps: ReconcilerDependencies): Promise<void> {
+export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Promise<void> {
   const { podRepo, eventBus, logger } = deps;
 
-  // Find all running ACI pods
+  // Find all running sandbox pods
   const runningSessions = podRepo.list({ status: 'running' });
-  const aciSessions = runningSessions.filter((s) => s.executionTarget === 'aci' && s.containerId);
+  const sandboxSessions = runningSessions.filter(
+    (s) => s.executionTarget === 'sandbox' && s.containerId,
+  );
 
-  if (aciSessions.length === 0) {
-    logger.info('No ACI pods to reconcile');
+  if (sandboxSessions.length === 0) {
+    logger.info('No sandbox pods to reconcile');
     return;
   }
 
-  logger.info({ count: aciSessions.length }, 'Reconciling ACI pods');
+  logger.info({ count: sandboxSessions.length }, 'Reconciling sandbox pods');
 
-  for (const pod of aciSessions) {
+  for (const pod of sandboxSessions) {
     try {
       await reconcileSession(pod, deps);
     } catch (err) {
-      logger.error({ err, podId: pod.id }, 'Failed to reconcile ACI pod');
+      logger.error({ err, podId: pod.id }, 'Failed to reconcile sandbox pod');
       markSessionFailed(pod, podRepo, eventBus, logger);
     }
   }
 }
 
 async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise<void> {
-  const { aciContainerManager, podRepo, eventBus, onReconnected, logger } = deps;
+  const { sandboxContainerManager, podRepo, eventBus, onReconnected, logger } = deps;
   if (!pod.containerId) return;
   const containerId = pod.containerId;
 
-  const status = await aciContainerManager.getStatus(containerId);
+  const status = await sandboxContainerManager.getStatus(containerId);
 
   switch (status) {
     case 'running': {
-      // Container still running — reconnect log stream and resume event consumption
-      logger.info({ podId: pod.id, containerId }, 'ACI container still running, reconnecting');
+      // Sandbox still running — reconnect and resume event consumption
+      logger.info({ podId: pod.id, containerId }, 'Sandbox still running, reconnecting');
       await onReconnected(pod.id, containerId);
       break;
     }
 
     case 'stopped': {
-      // Container finished — trigger completion handling
-      logger.info({ podId: pod.id, containerId }, 'ACI container stopped, triggering completion');
+      // Sandbox finished — trigger completion handling
+      logger.info({ podId: pod.id, containerId }, 'Sandbox stopped, triggering completion');
       // Mark as completing — the pod manager's handleCompletion will take over
       await onReconnected(pod.id, containerId);
       break;
     }
 
     case 'unknown': {
-      // Container gone — mark pod as failed
-      logger.warn({ podId: pod.id, containerId }, 'ACI container not found, marking pod failed');
+      // Sandbox gone — mark pod as failed
+      logger.warn({ podId: pod.id, containerId }, 'Sandbox not found, marking pod failed');
       markSessionFailed(pod, podRepo, eventBus, logger);
       break;
     }
@@ -114,8 +116,8 @@ function markSessionFailed(
       },
     });
 
-    logger.info({ podId: pod.id }, 'ACI pod marked as killed after reconciliation');
+    logger.info({ podId: pod.id }, 'Sandbox pod marked as killed after reconciliation');
   } catch (err) {
-    logger.error({ err, podId: pod.id }, 'Failed to mark ACI pod as failed');
+    logger.error({ err, podId: pod.id }, 'Failed to mark sandbox pod as failed');
   }
 }
