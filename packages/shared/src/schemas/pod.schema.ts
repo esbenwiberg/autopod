@@ -114,7 +114,7 @@ export const createPodRequestSchema = z
     task: z.string().max(50_000),
     model: canonicalModelIdSchema.optional(),
     runtime: z.enum(['claude', 'codex']).optional(),
-    executionTarget: z.enum(['local', 'aci']).optional(),
+    executionTarget: z.enum(['local', 'sandbox']).optional(),
     branch: branchNameSchema.optional(),
     branchPrefix: z
       .string()
