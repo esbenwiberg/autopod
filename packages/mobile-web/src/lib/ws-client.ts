@@ -21,9 +21,20 @@ export interface WsClientCallbacks {
 
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 
-function buildUrl(token: string): string {
+function buildUrl(): string {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${proto}://${window.location.host}/events?token=${encodeURIComponent(token)}`;
+  return `${proto}://${window.location.host}/events`;
+}
+
+function encodeBase64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/u, '');
+}
+
+function buildProtocols(token: string): string[] {
+  return ['autopod', `autopod.bearer.${encodeBase64Url(token)}`];
 }
 
 export class WsClient {
@@ -54,7 +65,7 @@ export class WsClient {
     const token = readStoredToken();
     if (!token) return;
 
-    const socket = new WebSocket(buildUrl(token));
+    const socket = new WebSocket(buildUrl(), buildProtocols(token));
     this.socket = socket;
 
     socket.addEventListener('open', () => {

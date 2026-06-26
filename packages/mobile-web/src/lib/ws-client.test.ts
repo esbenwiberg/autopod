@@ -18,11 +18,13 @@ class MockSocket {
   static instances: MockSocket[] = [];
   readyState = 0;
   url: string;
+  protocols: string | string[] | undefined;
   sent: string[] = [];
   listeners = new Map<string, ((ev: unknown) => void)[]>();
 
-  constructor(url: string) {
+  constructor(url: string, protocols?: string | string[]) {
     this.url = url;
+    this.protocols = protocols;
     MockSocket.instances.push(this);
   }
   addEventListener(name: string, fn: (ev: unknown) => void): void {
@@ -64,7 +66,9 @@ describe('WsClient', () => {
     client.start();
 
     const socket = lastSocket();
-    expect(socket.url).toContain('/events?token=tok');
+    expect(socket.url).toContain('/events');
+    expect(socket.url).not.toContain('token=');
+    expect(socket.protocols).toEqual(['autopod', 'autopod.bearer.dG9r']);
 
     socket.trigger('open', {});
     expect(socket.sent).toContain(JSON.stringify({ type: 'subscribe_all' }));

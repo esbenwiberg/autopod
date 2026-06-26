@@ -156,7 +156,8 @@ Configure these rules on the target repositories that Autopod will open PRs agai
   curl -s -o /dev/null -w '%{http_code}' http://localhost:3100/api/pods
   # Should return 401 (no valid Entra token)
   ```
-- [ ] Query-string token auth (`?token=`) is disabled — Bearer header only.
+- [ ] Query-string token auth (`?token=`) is disabled; use Bearer headers, or the
+  WebSocket subprotocol token only where browser APIs cannot set headers.
 - [ ] Rate limiting is active (default Fastify rate-limit plugin — 100 req/min per IP).
 - [ ] CORS is configured with an explicit `origin` allowlist, not `*`.
 

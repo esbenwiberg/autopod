@@ -82,9 +82,8 @@ public actor EventSocket {
   // MARK: - Internal
 
   private func doConnect() async {
-    // Build WebSocket URL: ws(s)://host:port/events?token=xxx
+    // Build WebSocket URL: ws(s)://host:port/events
     var components = URLComponents(url: baseURL.appendingPathComponent("events"), resolvingAgainstBaseURL: false)!
-    components.queryItems = [URLQueryItem(name: "token", value: await currentToken())]
     // Switch scheme to ws/wss
     if components.scheme == "http" { components.scheme = "ws" }
     else if components.scheme == "https" { components.scheme = "wss" }
@@ -94,7 +93,9 @@ public actor EventSocket {
       return
     }
 
-    let ws = pod.webSocketTask(with: url)
+    var request = URLRequest(url: url)
+    request.setValue("Bearer \(await currentToken())", forHTTPHeaderField: "Authorization")
+    let ws = pod.webSocketTask(with: request)
     webSocketTask = ws
     ws.resume()
 

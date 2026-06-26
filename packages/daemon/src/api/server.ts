@@ -116,6 +116,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     : { level: deps.logLevel ?? 'info' };
 
   const app = Fastify({
+    disableRequestLogging: true,
     ...(deps.prettyLog
       ? { loggerInstance: fastifyLogger as import('pino').Logger }
       : { logger: fastifyLogger }),

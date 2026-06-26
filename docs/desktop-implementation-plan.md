@@ -110,7 +110,11 @@ PUT  /scheduled-job-templates/:id         → ScheduledJobTemplate
 GET  /issue-watcher                       → WatchedIssue[]
 ```
 
-### WebSocket — `/events?token=<token>`
+### WebSocket — `/events`
+
+Authenticate with `Authorization: Bearer <token>` for native/CLI clients. Browser
+clients use `Sec-WebSocket-Protocol: autopod, autopod.bearer.<base64url-token>`
+because the browser WebSocket API cannot set custom headers.
 
 Client sends:
 ```json

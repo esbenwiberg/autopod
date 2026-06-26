@@ -515,8 +515,10 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     if (opts.follow) {
       const WebSocket = (await import('ws')).default;
       const token = await client.fetchToken();
-      const wsUrl = client.getWebSocketUrl(`/events?token=${encodeURIComponent(token)}`);
-      const ws = new WebSocket(wsUrl);
+      const wsUrl = client.getWebSocketUrl('/events');
+      const ws = new WebSocket(wsUrl, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
       ws.on('open', () => {
         ws.send(JSON.stringify({ type: 'subscribe', podId: resolvedId }));

@@ -83,7 +83,6 @@ public actor TerminalSocket {
       resolvingAgainstBaseURL: false
     )!
     components.queryItems = [
-      URLQueryItem(name: "token", value: await currentToken()),
       URLQueryItem(name: "cols", value: "\(cols)"),
       URLQueryItem(name: "rows", value: "\(rows)"),
     ]
@@ -95,7 +94,9 @@ public actor TerminalSocket {
       return
     }
 
-    let ws = pod.webSocketTask(with: url)
+    var request = URLRequest(url: url)
+    request.setValue("Bearer \(await currentToken())", forHTTPHeaderField: "Authorization")
+    let ws = pod.webSocketTask(with: request)
     webSocketTask = ws
     ws.resume()
 

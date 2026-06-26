@@ -4,13 +4,14 @@ import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { AuthModule } from '../../interfaces/index.js';
 import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
+import { extractWebSocketBearerToken } from '../websocket-auth.js';
 
 /**
  * WebSocket terminal endpoint — interactive shell into running containers.
  *
- * WS /pods/:podId/terminal?token=<token>&cols=80&rows=24
+ * WS /pods/:podId/terminal?cols=80&rows=24
  *
- * - Auth via token query param (same as /events)
+ * - Auth via Authorization: Bearer or browser WebSocket subprotocol
  * - Creates Docker exec with Tty: true, AttachStdin: true
  * - Bidirectional binary frames for stdin/stdout
  * - JSON control frames for resize: { "type": "resize", "cols": N, "rows": N }
@@ -34,7 +35,7 @@ export function terminalRoutes(
     async (socket: WebSocket, request) => {
       const { podId } = request.params as { podId: string };
       const url = new URL(request.url, 'http://localhost');
-      const token = url.searchParams.get('token');
+      const token = extractWebSocketBearerToken(request);
       const cols = Number.parseInt(url.searchParams.get('cols') ?? '80', 10);
       const rows = Number.parseInt(url.searchParams.get('rows') ?? '24', 10);
 

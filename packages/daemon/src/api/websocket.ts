@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { AuthModule } from '../interfaces/index.js';
 import type { EventBus, EventRepository } from '../pods/index.js';
+import { extractWebSocketBearerToken } from './websocket-auth.js';
 import { serializeSystemEventForWire } from './wire-serializers.js';
 
 // Replay is paged so a long-disconnected client can't block the daemon's event
@@ -85,9 +86,7 @@ export function websocketHandler(
   const clients = new Set<WsClient>();
 
   app.get('/events', { websocket: true, config: { auth: false } }, async (socket, request) => {
-    // Auth via query param
-    const url = new URL(request.url, 'http://localhost');
-    const token = url.searchParams.get('token');
+    const token = extractWebSocketBearerToken(request);
 
     if (!token) {
       socket.close(4001, 'Missing token');
