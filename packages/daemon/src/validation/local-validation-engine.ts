@@ -286,7 +286,7 @@ export function createLocalValidationEngine(
               ? await runHealthCheck(containerManager, config, log)
               : {
                   status: 'fail',
-                  url: config.previewUrl + config.healthPath,
+                  url: getHealthCheckUrl(config),
                   responseCode: null,
                   duration: 0,
                 };
@@ -297,13 +297,20 @@ export function createLocalValidationEngine(
         // If the app goes down during smoke/review-adjacent phases, abort validation with a
         // clear "app crashed" message rather than a cryptic ERR_CONNECTION_REFUSED.
         if (healthResult.status === 'pass' && config.startCommand) {
-          stopMonitor = startAppStabilityMonitor(config.previewUrl + config.healthPath, () => {
-            log?.warn(
-              { podId: config.podId, url: config.previewUrl + config.healthPath },
-              'App became unreachable after health check passed — aborting validation',
-            );
-            crashController.abort();
-          });
+          const healthUrl = getHealthCheckUrl(config);
+          stopMonitor = startAppStabilityMonitor(
+            async () => {
+              const probe = await probeHealthEndpoint(containerManager, config, 3_000);
+              return isHealthyStatus(probe.responseCode);
+            },
+            () => {
+              log?.warn(
+                { podId: config.podId, url: healthUrl, probeMode: config.webProbeMode ?? 'host' },
+                'App became unreachable after health check passed — aborting validation',
+              );
+              crashController.abort();
+            },
+          );
         }
 
         // ── Phase 6: Page validation ───────────────────────────────────
@@ -585,7 +592,7 @@ function makeSetupFailedResult(
       build: { status: 'skip', output: '', duration: 0 },
       health: {
         status: 'skip',
-        url: config.previewUrl + config.healthPath,
+        url: getHealthCheckUrl(config),
         responseCode: null,
         duration: 0,
       },
@@ -618,7 +625,7 @@ function makeInterruptedResult(
       build: { status: 'skip', output: '', duration: 0 },
       health: {
         status: 'fail',
-        url: config.previewUrl + config.healthPath,
+        url: getHealthCheckUrl(config),
         responseCode: null,
         duration: 0,
       },
@@ -655,17 +662,39 @@ function shouldRunAdvisoryBrowserQa(
   );
 }
 
+function getHealthCheckUrl(config: ValidationEngineConfig): string {
+  const base =
+    config.webProbeMode === 'container'
+      ? (config.containerBaseUrl ?? config.previewUrl)
+      : config.previewUrl;
+  return base + config.healthPath;
+}
+
+function isHealthyStatus(responseCode: number | null): boolean {
+  return responseCode !== null && responseCode >= 200 && responseCode < 300;
+}
+
 /**
  * Poll the health URL every 5 seconds after the app passes its initial health check.
  * If the app becomes unreachable (2 consecutive failures), fires `onCrash` once.
  * Returns a stop function — call it when validation finishes.
  */
 /** @internal Exported for testing. */
-export function startAppStabilityMonitor(url: string, onCrash: () => void): () => void {
+export function startAppStabilityMonitor(
+  probe: string | (() => Promise<boolean>),
+  onCrash: () => void,
+): () => void {
   let stopped = false;
   let consecutiveFailures = 0;
   const POLL_INTERVAL_MS = 5_000;
   const FAILURE_THRESHOLD = 2;
+  const probeOnce =
+    typeof probe === 'string'
+      ? async () => {
+          const response = await fetch(probe, { signal: AbortSignal.timeout(3_000) });
+          return response.status >= 200 && response.status < 300;
+        }
+      : probe;
 
   const poll = async () => {
     // Initial delay — give the app a moment to settle after health check
@@ -673,8 +702,7 @@ export function startAppStabilityMonitor(url: string, onCrash: () => void): () =
 
     while (!stopped) {
       try {
-        const response = await fetch(url, { signal: AbortSignal.timeout(3_000) });
-        if (response.status >= 200 && response.status < 300) {
+        if (await probeOnce()) {
           consecutiveFailures = 0;
         } else {
           consecutiveFailures++;
@@ -1766,6 +1794,102 @@ async function runSast(
 
 // ── Health check phase ──────────────────────────────────────────────────────
 
+interface HealthProbeResult {
+  responseCode: number | null;
+  responseBody?: string;
+  error?: string;
+}
+
+async function probeHealthEndpoint(
+  containerManager: ContainerManager,
+  config: ValidationEngineConfig,
+  timeoutMs: number,
+): Promise<HealthProbeResult> {
+  const url = getHealthCheckUrl(config);
+  if (config.webProbeMode === 'container') {
+    return probeHealthEndpointInContainer(containerManager, config.containerId, url, timeoutMs);
+  }
+
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const rawBody = isHealthyStatus(response.status) ? await response.text().catch(() => '') : '';
+    return {
+      responseCode: response.status,
+      responseBody: rawBody.slice(0, 2_000) || undefined,
+    };
+  } catch (err) {
+    return { responseCode: null, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function probeHealthEndpointInContainer(
+  containerManager: ContainerManager,
+  containerId: string,
+  url: string,
+  timeoutMs: number,
+): Promise<HealthProbeResult> {
+  const curlTimeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1_000));
+  const bodyPath = `/tmp/autopod-health-body-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+  const statusPath = `${bodyPath}.status`;
+  const errorPath = `${bodyPath}.error`;
+  const script = [
+    `body=${shellQuote(bodyPath)}`,
+    `status=${shellQuote(statusPath)}`,
+    `err=${shellQuote(errorPath)}`,
+    `curl -sS -L -m ${curlTimeoutSeconds} -o "$body" -w '%{http_code}' ${shellQuote(
+      url,
+    )} > "$status" 2> "$err"`,
+    'rc=$?',
+    "printf '__AUTOPOD_STATUS__'",
+    'cat "$status" 2>/dev/null || printf 000',
+    "printf '\\n__AUTOPOD_BODY__\\n'",
+    'head -c 2000 "$body" 2>/dev/null || true',
+    "printf '\\n__AUTOPOD_ERROR__\\n'",
+    'head -c 1000 "$err" 2>/dev/null || true',
+    'rm -f "$body" "$status" "$err"',
+    'exit "$rc"',
+  ].join('\n');
+
+  try {
+    const result = await containerManager.execInContainer(containerId, ['sh', '-c', script], {
+      cwd: '/workspace',
+      timeout: timeoutMs + 2_000,
+    });
+    const statusMatch = result.stdout.match(/__AUTOPOD_STATUS__(\d{3})/);
+    const rawStatus = statusMatch?.[1] ?? null;
+    const responseCode = rawStatus && rawStatus !== '000' ? Number(rawStatus) : null;
+    const responseBody = extractMarkerSection(
+      result.stdout,
+      '__AUTOPOD_BODY__',
+      '__AUTOPOD_ERROR__',
+    );
+    const curlError = extractMarkerSection(result.stdout, '__AUTOPOD_ERROR__');
+    const error = [curlError, result.stderr].filter(Boolean).join('\n').trim() || undefined;
+
+    return {
+      responseCode,
+      responseBody: isHealthyStatus(responseCode)
+        ? responseBody.slice(0, 2_000) || undefined
+        : undefined,
+      error: result.exitCode === 0 ? undefined : error,
+    };
+  } catch (err) {
+    return { responseCode: null, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+function extractMarkerSection(stdout: string, startMarker: string, endMarker?: string): string {
+  const start = stdout.indexOf(startMarker);
+  if (start === -1) return '';
+  const contentStart = start + startMarker.length;
+  const end = endMarker ? stdout.indexOf(endMarker, contentStart) : -1;
+  return stdout.slice(contentStart, end === -1 ? undefined : end).trim();
+}
+
 /** @internal Exported for testing. */
 export async function runHealthCheck(
   containerManager: ContainerManager,
@@ -1776,17 +1900,20 @@ export async function runHealthCheck(
     log?.info('no start command configured, skipping health check');
     return {
       status: 'pass' as const,
-      url: config.previewUrl + config.healthPath,
+      url: getHealthCheckUrl(config),
       responseCode: null,
       duration: 0,
     };
   }
 
   const healthStart = Date.now();
-  const url = config.previewUrl + config.healthPath;
+  const url = getHealthCheckUrl(config);
   const timeoutMs = config.healthTimeout * 1_000;
 
-  log?.info({ startCommand: config.startCommand, url, timeoutMs }, 'starting app for health check');
+  log?.info(
+    { startCommand: config.startCommand, url, timeoutMs, probeMode: config.webProbeMode ?? 'host' },
+    'starting app for health check',
+  );
 
   // Start the app under the supervisor (never-give-up restarter) so crashes
   // during the health-poll window and later browser checks are recovered
@@ -1812,29 +1939,25 @@ export async function runHealthCheck(
   let lastResponseCode: number | null = null;
 
   while (Date.now() - healthStart < timeoutMs) {
-    try {
-      const response = await fetch(url, {
-        signal: AbortSignal.timeout(5_000),
-      });
-      lastResponseCode = response.status;
+    const probe = await probeHealthEndpoint(containerManager, config, 5_000);
+    lastResponseCode = probe.responseCode;
 
-      if (response.status >= 200 && response.status < 300) {
-        const duration = Date.now() - healthStart;
-        log?.info({ url, status: response.status, duration }, 'health check passed');
-        const rawBody = await response.text().catch(() => '');
-        const responseBody = rawBody.slice(0, 2_000) || undefined;
-        return {
-          status: 'pass' as const,
-          url,
-          responseCode: response.status,
-          duration,
-          responseBody,
-        };
-      }
+    if (isHealthyStatus(probe.responseCode)) {
+      const duration = Date.now() - healthStart;
+      log?.info({ url, status: probe.responseCode, duration }, 'health check passed');
+      return {
+        status: 'pass' as const,
+        url,
+        responseCode: probe.responseCode,
+        duration,
+        responseBody: probe.responseBody,
+      };
+    }
 
-      log?.debug({ url, status: response.status }, 'health check got non-2xx, retrying');
-    } catch {
-      log?.debug({ url }, 'health check fetch failed, retrying');
+    if (probe.responseCode !== null) {
+      log?.debug({ url, status: probe.responseCode }, 'health check got non-2xx, retrying');
+    } else {
+      log?.debug({ url, error: probe.error }, 'health check probe failed, retrying');
     }
 
     // Wait before next poll, but don't overshoot the timeout
@@ -1880,7 +2003,11 @@ async function runPageValidation(
 
   // Try host-side execution first — external resources (CDN, fonts, client APIs)
   // are reachable from the host but may be blocked inside network-restricted containers.
-  if (hostBrowserRunner && (await hostBrowserRunner.isAvailable())) {
+  if (
+    config.webProbeMode !== 'container' &&
+    hostBrowserRunner &&
+    (await hostBrowserRunner.isAvailable())
+  ) {
     const hostResult = await runPageValidationOnHost(hostBrowserRunner, config, log);
     if (hostResult) return hostResult;
     log?.info('host-side page validation returned null, falling back to container');

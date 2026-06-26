@@ -1162,6 +1162,87 @@ describe('validate() — hasWebUi gating', () => {
     expect(pagesEvent?.status).toBe('skip');
   });
 
+  it('uses container-local health and page probes when webProbeMode is container', async () => {
+    const commands: string[] = [];
+    const writtenScripts: string[] = [];
+    const cm = {
+      ...stubContainerManager(),
+      writeFile: vi.fn(async (_containerId: string, _path: string, content: string | Buffer) => {
+        writtenScripts.push(String(content));
+      }),
+      execInContainer: vi.fn(
+        async (
+          _containerId: string,
+          command: string[],
+        ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+          const shell = command[2] ?? command.join(' ');
+          commands.push(shell);
+          if (shell.includes('git reset --hard HEAD') && shell.includes('git clean')) {
+            return { stdout: '', stderr: '', exitCode: 0 };
+          }
+          if (shell.includes('export START_COMMAND')) {
+            return { stdout: '', stderr: '', exitCode: 0 };
+          }
+          if (shell.includes('__AUTOPOD_STATUS__')) {
+            return {
+              stdout: '__AUTOPOD_STATUS__200\n__AUTOPOD_BODY__\nok\n__AUTOPOD_ERROR__\n',
+              stderr: '',
+              exitCode: 0,
+            };
+          }
+          if (shell.includes('/tmp/autopod-page-validation.mjs')) {
+            return {
+              stdout: `__AUTOPOD_PAGE_RESULTS_START__
+[{"path":"/","status":"pass","screenshotPath":"/workspace/.autopod/screenshots/root.png","consoleErrors":[],"assertions":[],"loadTime":42}]
+__AUTOPOD_PAGE_RESULTS_END__`,
+              stderr: '',
+              exitCode: 0,
+            };
+          }
+          throw new Error(`unexpected exec: ${JSON.stringify(command)}`);
+        },
+      ),
+    } as unknown as ContainerManager;
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: true,
+        cached: false,
+        checkedAt: '2026-06-26T00:00:00.000Z',
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      })),
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+      readScreenshot: vi.fn(async () => ''),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp/autopod/screenshots'),
+    };
+    const engine = createLocalValidationEngine(cm, undefined, hostBrowserRunner);
+
+    const result = await engine.validate(
+      baseConfig({
+        previewUrl: 'http://127.0.0.1:32541',
+        containerBaseUrl: 'http://127.0.0.1:3000',
+        webProbeMode: 'container',
+        startCommand: 'pnpm dev',
+        healthPath: '/health',
+        smokePages: [{ path: '/' }],
+        skipPhases: ['facts', 'review'],
+      }),
+    );
+
+    expect(result.smoke.health.status).toBe('pass');
+    expect(result.smoke.health.url).toBe('http://127.0.0.1:3000/health');
+    expect(result.smoke.pages).toHaveLength(1);
+    expect(result.smoke.pages[0]?.status).toBe('pass');
+    expect(hostBrowserRunner.isAvailable).not.toHaveBeenCalled();
+    expect(hostBrowserRunner.runScript).not.toHaveBeenCalled();
+    expect(writtenScripts[0]).toContain('"baseUrl":"http://127.0.0.1:3000"');
+    expect(commands.some((command) => command.includes('http://127.0.0.1:3000/health'))).toBe(true);
+  });
+
   it('blocking validation does not run advisory inline', async () => {
     const cm = stubContainerManager();
     const hostBrowserRunner = {
@@ -2465,6 +2546,45 @@ describe('runHealthCheck — supervisor spawn', () => {
       (c) => c.includes('kill -9') && c.includes('autopod-supervisor.pid'),
     );
     expect(killCalls).toHaveLength(0);
+  });
+
+  it('probes containerBaseUrl through container exec in container probe mode', async () => {
+    const execCalls: string[] = [];
+    const cm = {
+      execInContainer: vi.fn(async (_id: string, cmd: string[]) => {
+        const shell = cmd[2] ?? cmd.join(' ');
+        execCalls.push(shell);
+        if (shell.includes('export START_COMMAND')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('__AUTOPOD_STATUS__')) {
+          return {
+            stdout: '__AUTOPOD_STATUS__204\n__AUTOPOD_BODY__\n\n__AUTOPOD_ERROR__\n',
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        throw new Error(`unexpected exec: ${JSON.stringify(cmd)}`);
+      }),
+    } as unknown as ContainerManager;
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('host URL should not be used')));
+
+    const result = await runHealthCheck(
+      cm,
+      makeConfig({
+        previewUrl: 'http://127.0.0.1:32541',
+        containerBaseUrl: 'http://127.0.0.1:3000',
+        webProbeMode: 'container',
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'pass',
+      url: 'http://127.0.0.1:3000/health',
+      responseCode: 204,
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(execCalls.some((call) => call.includes('http://127.0.0.1:3000/health'))).toBe(true);
   });
 
   it('skips supervisor spawn when no startCommand is configured', async () => {

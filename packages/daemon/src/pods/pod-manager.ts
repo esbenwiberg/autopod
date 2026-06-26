@@ -9330,6 +9330,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           containerId: pod.containerId,
           previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
           containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
+          webProbeMode:
+            pod.executionTarget === 'sandbox' ? ('container' as const) : ('host' as const),
           validationSetupCommand: profile.validationSetupCommand ?? undefined,
           buildCommand: profile.buildCommand ?? '',
           startCommand: profile.startCommand ?? '',
@@ -10193,6 +10195,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           containerId: pod.containerId,
           previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
           containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
+          webProbeMode:
+            pod.executionTarget === 'sandbox' ? ('container' as const) : ('host' as const),
           validationSetupCommand: profile.validationSetupCommand ?? undefined,
           buildCommand: profile.buildCommand ?? '',
           startCommand: profile.startCommand ?? '',
