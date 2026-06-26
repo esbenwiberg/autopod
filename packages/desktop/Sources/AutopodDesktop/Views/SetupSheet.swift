@@ -109,10 +109,12 @@ public struct SetupSheet: View {
                   .foregroundStyle(.red)
                 Text(msg)
                   .foregroundStyle(.red)
-                  .lineLimit(1)
+                  .lineLimit(3)
+                  .fixedSize(horizontal: false, vertical: true)
               }
             }
             .font(.caption)
+            .frame(maxWidth: 220, alignment: .leading)
           }
         }
       }

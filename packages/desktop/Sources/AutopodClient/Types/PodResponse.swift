@@ -665,17 +665,32 @@ public struct PimGroupRequest: Codable, Sendable, Identifiable {
 // MARK: - Stats response
 
 public struct SessionStatsResponse: Codable, Sendable {
-  // Daemon returns a dynamic object like { "running": 3, "queued": 1 }
-  // Decode as dictionary
+  // Daemon versions have returned both a bare status map and a richer wrapper:
+  // { "running": 3 } and { "total": 3, "byStatus": { "running": 3 } }.
   public let counts: [String: Int]
 
   public init(from decoder: any Decoder) throws {
     let container = try decoder.singleValueContainer()
-    counts = try container.decode([String: Int].self)
+    if let bareCounts = try? container.decode([String: Int].self) {
+      counts = bareCounts
+      return
+    }
+
+    let keyed = try decoder.container(keyedBy: CodingKeys.self)
+    if let byStatus = try keyed.decodeIfPresent([String: Int].self, forKey: .byStatus) {
+      counts = byStatus
+      return
+    }
+    counts = try keyed.decode([String: Int].self, forKey: .counts)
   }
 
   public func encode(to encoder: any Encoder) throws {
     var container = encoder.singleValueContainer()
     try container.encode(counts)
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case byStatus
+    case counts
   }
 }
