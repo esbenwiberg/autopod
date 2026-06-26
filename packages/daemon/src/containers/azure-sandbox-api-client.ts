@@ -205,7 +205,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   async mkdir(sandboxId: string, path: string): Promise<void> {
     await this.requestData('POST', `${this.sandboxPath(sandboxId)}/files/mkdir`, {
       json: { path },
-      okStatuses: [200, 201, 204],
+      okStatuses: [200, 201, 204, 409],
     });
   }
 
