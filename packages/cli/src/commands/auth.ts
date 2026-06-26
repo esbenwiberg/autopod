@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import chalk from 'chalk';
 import type { Command } from 'commander';
-import { clear, getCurrentUser, getMsalClient } from '../auth/token-manager.js';
+import { clear, getCurrentUser, getMsalClient, getToken } from '../auth/token-manager.js';
 import { writeCredentials } from '../config/credential-store.js';
 import { withSpinner } from '../output/spinner.js';
 
@@ -39,18 +39,21 @@ export function registerAuthCommands(program: Command): void {
 
   program
     .command('token')
-    .description('Print the current Entra access token')
+    .description('Print the daemon access token')
     .option('--copy', 'Copy the token to the clipboard instead of printing it')
     .action(async (opts: { copy?: boolean }) => {
-      const user = getCurrentUser();
-      if (!user?.accessToken) {
-        console.error(chalk.red('Not authenticated. Run: ap login'));
+      let accessToken: string;
+      try {
+        accessToken = await getToken();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Not authenticated. Run: ap login';
+        console.error(chalk.red(message));
         process.exit(2);
       }
 
       if (opts.copy) {
         try {
-          await copyTextToClipboard(user.accessToken);
+          await copyTextToClipboard(accessToken);
           console.log(chalk.green('Access token copied to clipboard.'));
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -60,7 +63,7 @@ export function registerAuthCommands(program: Command): void {
         return;
       }
 
-      process.stdout.write(`${user.accessToken}\n`);
+      process.stdout.write(`${accessToken}\n`);
     });
 
   program
