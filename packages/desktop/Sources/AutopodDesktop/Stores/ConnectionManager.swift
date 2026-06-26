@@ -104,6 +104,46 @@ public final class ConnectionManager {
     }
   }
 
+  /// Switch to an existing saved connection after proving it is reachable.
+  public func connect(to id: UUID) async throws {
+    let connections = ConnectionStore.loadAll()
+    guard let conn = connections.first(where: { $0.id == id }) else {
+      throw DaemonError.notFound("connection")
+    }
+
+    let token: String? = if conn.isLocal {
+      DaemonConnection.readLocalDevToken()
+        ?? KeychainHelper.load(for: conn.id)
+        ?? ConnectionStore.loadToken(for: conn.id)
+    } else {
+      KeychainHelper.load(for: conn.id) ?? ConnectionStore.loadToken(for: conn.id)
+    }
+    guard let token, !token.isEmpty else {
+      throw DaemonError.unauthorized("Missing saved token")
+    }
+
+    let previousState = state
+    let testApi = DaemonAPI(baseURL: conn.url, token: token)
+    state = .connecting
+
+    do {
+      _ = try await testApi.healthCheck()
+      healthTask?.cancel()
+      healthTask = nil
+      connection = conn
+      activeToken = token
+      api = testApi
+      ConnectionStore.setActiveConnectionId(conn.id)
+      try? KeychainHelper.save(token: token, for: conn.id)
+      ConnectionStore.saveToken(token, for: conn.id)
+      state = .connected
+      startHealthPolling()
+    } catch {
+      state = previousState
+      throw error
+    }
+  }
+
   /// Disconnect and clear state.
   public func disconnect() {
     healthTask?.cancel()

@@ -88,6 +88,9 @@ public struct SettingsView: View {
     }
 
     @State private var selectedSection: SettingsSection = .profiles
+    @State private var showAddConnection = false
+    @State private var switchingConnectionId: UUID?
+    @State private var connectionError: String?
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -127,6 +130,9 @@ public struct SettingsView: View {
             if name != nil {
                 selectedSection = .profiles
             }
+        }
+        .sheet(isPresented: $showAddConnection) {
+            SetupSheet(isPresented: $showAddConnection, connectionManager: connectionManager)
         }
     }
 
@@ -189,13 +195,39 @@ public struct SettingsView: View {
 
     private var connectionsContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Connections")
-                .font(.title3.weight(.semibold))
+            HStack {
+                Text("Connections")
+                    .font(.title3.weight(.semibold))
+                Spacer()
+                Button {
+                    connectionError = nil
+                    showAddConnection = true
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                }
+                .buttonStyle(.borderless)
+                .help("Add daemon connection")
+            }
             Text("Saved daemon connections.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
             let connections = ConnectionStore.loadAll()
+
+            if let connectionError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.yellow)
+                    Text(connectionError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    Spacer()
+                }
+                .padding(8)
+                .background(Color.red.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
 
             if connections.isEmpty {
                 Spacer()
@@ -224,8 +256,24 @@ public struct SettingsView: View {
                                     Text("Active")
                                         .font(.caption2)
                                         .foregroundStyle(.green)
+                                } else {
+                                    Button {
+                                        Task { await connect(to: conn) }
+                                    } label: {
+                                        if switchingConnectionId == conn.id {
+                                            ProgressView()
+                                                .scaleEffect(0.6)
+                                                .frame(width: 14, height: 14)
+                                        } else {
+                                            Image(systemName: "checkmark.circle")
+                                        }
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .disabled(switchingConnectionId != nil)
+                                    .help("Set active connection")
                                 }
                                 Button {
+                                    connectionError = nil
                                     connectionManager.removeConnection(conn.id)
                                 } label: {
                                     Image(systemName: "trash")
@@ -243,6 +291,17 @@ public struct SettingsView: View {
             }
         }
         .padding(20)
+    }
+
+    private func connect(to connection: DaemonConnection) async {
+        switchingConnectionId = connection.id
+        connectionError = nil
+        do {
+            try await connectionManager.connect(to: connection.id)
+        } catch {
+            connectionError = error.localizedDescription
+        }
+        switchingConnectionId = nil
     }
 
     // MARK: - Profiles
