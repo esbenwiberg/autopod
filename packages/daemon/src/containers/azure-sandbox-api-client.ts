@@ -180,8 +180,11 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     options?: SandboxExecOptions,
   ): Promise<SandboxExecResult> {
     const commandText = commandToShell(command, options?.env);
-    const body: { command: string; workingDirectory?: string } = { command: commandText };
+    const body: { command: string; workingDirectory?: string; user?: string } = {
+      command: commandText,
+    };
     if (options?.cwd) body.workingDirectory = options.cwd;
+    if (options?.user) body.user = options.user;
     const response = await this.requestData<ExecResponse>(
       'POST',
       `${this.sandboxPath(sandboxId)}/executeShellCommand`,

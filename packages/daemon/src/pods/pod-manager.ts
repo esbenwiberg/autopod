@@ -536,6 +536,46 @@ function buildAgentEnvFile(env: Record<string, string>): string {
     .join('\n')}\n`;
 }
 
+const SANDBOX_AGENT_HOME_DIRS = ['.claude', '.autopod', '.codex', '.config'].map(
+  (dir) => `${CONTAINER_HOME_DIR}/${dir}`,
+);
+
+const SANDBOX_AGENT_HOME_FILES = [`${CONTAINER_HOME_DIR}/.claude.json`];
+
+async function repairSandboxAgentHomeOwnership(
+  containerManager: ContainerManager,
+  containerId: string,
+  executionTarget: ExecutionTarget,
+): Promise<void> {
+  if (executionTarget !== 'sandbox') return;
+
+  const quotedDirs = SANDBOX_AGENT_HOME_DIRS.map(shellQuote).join(' ');
+  const quotedFiles = SANDBOX_AGENT_HOME_FILES.map(shellQuote).join(' ');
+  const script = [
+    'set -eu',
+    `mkdir -p ${quotedDirs}`,
+    `chown -R autopod:autopod ${quotedDirs}`,
+    `for f in ${quotedFiles}; do [ ! -e "$f" ] || chown autopod:autopod "$f"; done`,
+  ].join(' && ');
+
+  let result: { stdout: string; stderr: string; exitCode: number };
+  try {
+    result = await containerManager.execInContainer(containerId, ['sh', '-c', script], {
+      timeout: 10_000,
+      user: 'root',
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`Sandbox startup could not repair agent home ownership: ${detail}`);
+  }
+
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `Sandbox startup could not repair agent home ownership (exit ${result.exitCode}): ${result.stderr.slice(0, 500)}`,
+    );
+  }
+}
+
 /**
  * Build the task string for a PR fix pod, injecting CI failure details and
  * review comments so the agent knows exactly what to fix.
@@ -3445,6 +3485,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             'Bare repo path from container does not match daemon-derived path — skipping in-container push',
           );
         } else {
+          for (const safeDirectory of ['/workspace', bareRepoPath]) {
+            const safeDirectoryResult = await cm.execInContainer(
+              containerId,
+              ['git', 'config', '--global', '--add', 'safe.directory', safeDirectory],
+              { timeout: 5_000 },
+            );
+            if (safeDirectoryResult.exitCode !== 0) {
+              logger.warn(
+                {
+                  podId,
+                  safeDirectory,
+                  stderr: safeDirectoryResult.stderr.slice(0, 500),
+                },
+                'Failed to persist git safe.directory before sync-back push',
+              );
+            }
+          }
+
           // Push via per-pod staging ref then promote — a direct push to refs/heads/<branch>
           // is refused by the bare's `receive.denyCurrentBranch` because the host worktree
           // (a linked worktree of the bare) has that branch checked out.
@@ -6633,6 +6691,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             'Wrote provider credential file to container',
           );
         }
+        await repairSandboxAgentHomeOwnership(containerManager, containerId, pod.executionTarget);
 
         // Write secret files (API keys, tokens) to /run/autopod/ with restrictive modes.
         // The sandbox file API currently materializes uploads as root-owned files even
