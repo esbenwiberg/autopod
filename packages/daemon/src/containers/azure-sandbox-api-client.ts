@@ -19,6 +19,7 @@ const DATA_SCOPE = 'https://dynamicsessions.io/.default';
 const ACR_TOKEN_SCOPE = 'https://containerregistry.azure.net/.default';
 const ACR_DOCKER_USERNAME = '00000000-0000-0000-0000-000000000000';
 const ACR_EXCHANGE_TIMEOUT_MS = 30_000;
+const AZURE_TOKEN_TIMEOUT_MS = 30_000;
 const CREATE_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 
 interface AccessToken {
@@ -317,14 +318,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     }
 
     this.logger.info({ registry }, 'Minting ACR refresh token for Azure sandbox image pull');
-    const token = await this.credential.getToken(ACR_TOKEN_SCOPE);
-    if (!token) {
-      throw new AutopodError(
-        'Azure credential did not return an ACR access token',
-        'AZURE_AUTH',
-        401,
-      );
-    }
+    const token = await this.getAzureToken(ACR_TOKEN_SCOPE, 'ACR access token', 'AZURE_ACR_AUTH');
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), ACR_EXCHANGE_TIMEOUT_MS);
@@ -498,10 +492,11 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     baseUrl: string,
     options: RequestOptions,
   ): Promise<Response> {
-    const token = await this.credential.getToken(plane === 'arm' ? ARM_SCOPE : DATA_SCOPE);
-    if (!token) {
-      throw new AutopodError('Azure credential did not return an access token', 'AZURE_AUTH', 401);
-    }
+    const token = await this.getAzureToken(
+      plane === 'arm' ? ARM_SCOPE : DATA_SCOPE,
+      `${plane} access token`,
+      'AZURE_AUTH',
+    );
 
     const url = withQuery(baseUrl, options.params);
     const headers = new Headers(options.headers);
@@ -533,6 +528,31 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         );
       }
       throw err;
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+
+  private async getAzureToken(scope: string, label: string, code: string): Promise<AccessToken> {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => {
+        reject(
+          new AutopodError(
+            `Azure credential timed out while acquiring ${label} after ${AZURE_TOKEN_TIMEOUT_MS}ms`,
+            code,
+            504,
+          ),
+        );
+      }, AZURE_TOKEN_TIMEOUT_MS);
+    });
+
+    try {
+      const token = await Promise.race([this.credential.getToken(scope), timedOut]);
+      if (!token) {
+        throw new AutopodError(`Azure credential did not return ${label}`, code, 401);
+      }
+      return token;
     } finally {
       if (timeout) clearTimeout(timeout);
     }
