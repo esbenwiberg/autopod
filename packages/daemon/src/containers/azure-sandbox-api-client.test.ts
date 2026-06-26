@@ -202,6 +202,7 @@ describe('AzureSandboxApiClient', () => {
       cwd: '/workspace',
       env: { FOO: "a'b" },
       timeoutMs: 5000,
+      user: 'root',
     });
 
     expect(result).toEqual({ stdout: 'out', stderr: 'err', exitCode: 7 });
@@ -209,6 +210,7 @@ describe('AzureSandboxApiClient', () => {
     expect(jsonBody(requests[0] ?? failRequest())).toEqual({
       command: "env FOO='a'\\''b' sh -lc 'echo \"$FOO\"'",
       workingDirectory: '/workspace',
+      user: 'root',
     });
   });
 

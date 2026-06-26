@@ -2453,6 +2453,13 @@ describe('PodManager', () => {
         ['chmod', '0555', AGENT_SHIM_PATH],
         { timeout: 5_000 },
       );
+      const repairCall = ctx.containerManager.execInContainer.mock.calls.find(
+        ([, command, options]) => command[0] === 'sh' && options?.user === 'root',
+      );
+      expect(repairCall?.[2]).toEqual({ timeout: 10_000, user: 'root' });
+      expect(repairCall?.[1][2]).toContain(
+        "chown -R autopod:autopod '/home/autopod/.claude' '/home/autopod/.autopod'",
+      );
     });
 
     it('emits pod activity when memory ranking uses deterministic fallback', async () => {
@@ -6431,6 +6438,16 @@ describe('PodManager', () => {
 
       await manager.handleCompletion(pod.id);
 
+      expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+        'ctr-1',
+        ['git', 'config', '--global', '--add', 'safe.directory', '/workspace'],
+        { timeout: 5_000 },
+      );
+      expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+        'ctr-1',
+        ['git', 'config', '--global', '--add', 'safe.directory', bareRepoPath],
+        { timeout: 5_000 },
+      );
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'ctr-1',
         [
