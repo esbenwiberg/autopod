@@ -256,6 +256,17 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
+  it('treats existing directories as successful mkdirs', async () => {
+    const { client, requests } = makeClient([
+      { status: 409, body: { title: 'FileAlreadyExists', detail: 'directory already exists' } },
+    ]);
+
+    await expect(client.mkdir('sbx-1', '/mnt')).resolves.toBeUndefined();
+
+    expect(requests[0]?.url).toContain('/sandboxes/sbx-1/files/mkdir');
+    expect(jsonBody(requests[0] ?? failRequest())).toEqual({ path: '/mnt' });
+  });
+
   it('destroys sandbox and associated disk image idempotently', async () => {
     const { client, requests } = makeClient([
       { status: 200, body: { id: 'sbx-1', sourcesRef: { diskImage: { id: 'disk-1' } } } },
