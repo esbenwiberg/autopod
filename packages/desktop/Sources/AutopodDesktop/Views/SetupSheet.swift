@@ -64,7 +64,7 @@ public struct SetupSheet: View {
 
         field("Auth Token") {
           HStack(spacing: 6) {
-            SecureField("Bearer token", text: $token)
+            SecureField("Access token", text: $token)
               .textFieldStyle(.roundedBorder)
               .font(.system(.callout, design: .monospaced))
             if isLocalUrl {
