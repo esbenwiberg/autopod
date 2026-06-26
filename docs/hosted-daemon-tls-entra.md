@@ -161,6 +161,17 @@ sudo systemctl restart caddy
 
 ## Verification
 
+Run the consolidated hosted-daemon gate check from the repo root:
+
+```bash
+node scripts/check-hosted-daemon-tls-entra.mjs
+```
+
+It verifies HTTPS health, authenticated `/pods/stats`, native redirect
+registration, Azure resource-group access, and that direct public `:3100` is no
+longer reachable from the current client. During staged setup, use
+`--skip-auth` or `--skip-azure` to check only the network gates.
+
 External health over HTTPS:
 
 ```bash
