@@ -6625,7 +6625,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           );
         }
 
-        // Write secret files (API keys, tokens) to /run/autopod/ with mode 0400.
+        // Write secret files (API keys, tokens) to /run/autopod/ with restrictive modes.
+        // The sandbox file API currently materializes uploads as root-owned files even
+        // when the warm image runs as the non-root autopod user, so sandbox shims need
+        // owner-neutral read/execute bits.
+        const secretFileMode = pod.executionTarget === 'sandbox' ? '0444' : '0400';
+        const shimMode = pod.executionTarget === 'sandbox' ? '0555' : '0500';
         // These are referenced by *_FILE env vars in secretEnv — the exec shim reads
         // them and sets the real env var before starting the agent process.
         await containerManager.execInContainer(containerId, ['mkdir', '-p', '/run/autopod'], {
@@ -6633,20 +6638,27 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         });
         for (const sf of providerResult.secretFiles) {
           await containerManager.writeFile(containerId, sf.path, sf.content);
-          await containerManager.execInContainer(containerId, ['chmod', '0400', sf.path], {
+          await containerManager.execInContainer(containerId, ['chmod', secretFileMode, sf.path], {
             timeout: 5_000,
           });
-          logger.info({ podId, path: sf.path }, 'Wrote secret file to container (mode 0400)');
+          logger.info(
+            { podId, path: sf.path, mode: secretFileMode },
+            'Wrote secret file to container',
+          );
         }
         // Write the agent shim that reads *_FILE env vars and sets the real env var
         // before exec-ing the runtime. SDKs that don't support the _FILE convention
         // get the value via this shim so the raw secret is never in the exec's initial env.
         await containerManager.writeFile(containerId, AGENT_ENV_PATH, buildAgentEnvFile(secretEnv));
-        await containerManager.execInContainer(containerId, ['chmod', '0400', AGENT_ENV_PATH], {
-          timeout: 5_000,
-        });
+        await containerManager.execInContainer(
+          containerId,
+          ['chmod', secretFileMode, AGENT_ENV_PATH],
+          {
+            timeout: 5_000,
+          },
+        );
         await containerManager.writeFile(containerId, AGENT_SHIM_PATH, AGENT_SHIM_SCRIPT);
-        await containerManager.execInContainer(containerId, ['chmod', '0500', AGENT_SHIM_PATH], {
+        await containerManager.execInContainer(containerId, ['chmod', shimMode, AGENT_SHIM_PATH], {
           timeout: 5_000,
         });
 
