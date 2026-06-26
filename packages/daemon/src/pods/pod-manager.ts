@@ -3452,7 +3452,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             async (args) => {
               const r = await cm.execInContainer(
                 containerId,
-                ['git', '-C', '/workspace', ...args],
+                [
+                  'git',
+                  '-c',
+                  'safe.directory=/workspace',
+                  '-c',
+                  `safe.directory=${bareRepoPath}`,
+                  '-C',
+                  '/workspace',
+                  ...args,
+                ],
                 { timeout: 30_000 },
               );
               return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode };

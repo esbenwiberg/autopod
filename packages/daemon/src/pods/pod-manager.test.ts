@@ -6431,6 +6431,22 @@ describe('PodManager', () => {
 
       await manager.handleCompletion(pod.id);
 
+      expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+        'ctr-1',
+        [
+          'git',
+          '-c',
+          'safe.directory=/workspace',
+          '-c',
+          `safe.directory=${bareRepoPath}`,
+          '-C',
+          '/workspace',
+          'rev-parse',
+          '--abbrev-ref',
+          'HEAD',
+        ],
+        expect.objectContaining({ timeout: 30_000 }),
+      );
       expect(resetCalls).toContainEqual([
         'git',
         ['reset', '--mixed', 'HEAD'],
