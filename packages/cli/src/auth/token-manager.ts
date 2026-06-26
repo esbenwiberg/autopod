@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { AuthError } from '@autopod/shared';
 import type { AuthToken } from '@autopod/shared';
+import * as configStore from '../config/config-store.js';
 import {
   deleteCredentials,
   readCredentials,
@@ -35,9 +36,10 @@ export function getMsalClient(): MsalClient {
 }
 
 export async function getToken(): Promise<string> {
-  // Dev token takes priority — it's the daemon's actual auth token in dev mode
+  // Dev tokens are only valid for local dev daemons. When connected to a
+  // remote/prod daemon, prefer the Entra credentials written by `ap login`.
   const devToken = readDevToken();
-  if (devToken) return devToken;
+  if (devToken && shouldUseDevTokenForDaemonUrl(configStore.get('daemon'))) return devToken;
 
   const creds = readCredentials();
   if (!creds) {
@@ -58,6 +60,16 @@ export async function getToken(): Promise<string> {
   }
 
   throw new AuthError('Token expired and refresh failed. Run: ap login');
+}
+
+export function shouldUseDevTokenForDaemonUrl(daemonUrl: string | undefined): boolean {
+  if (!daemonUrl) return true;
+  try {
+    const url = new URL(daemonUrl);
+    return ['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0'].includes(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 export async function refresh(): Promise<AuthToken | null> {
