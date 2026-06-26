@@ -237,12 +237,13 @@ export interface Profile {
 
 export type PublicProfile = Omit<
   Profile,
-  'adoPat' | 'githubPat' | 'registryPat' | 'openrouterApiKey'
+  'adoPat' | 'githubPat' | 'registryPat' | 'openrouterApiKey' | 'providerCredentials'
 > & {
   adoPat: null;
   githubPat: null;
   registryPat: null;
   openrouterApiKey: null;
+  providerCredentials: Pick<ProviderCredentials, 'provider'> | null;
   hasAdoPat: boolean;
   hasGithubPat: boolean;
   hasRegistryPat: boolean;

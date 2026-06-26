@@ -1,20 +1,9 @@
 import { AutopodError } from '@autopod/shared';
-import type { Profile, ProfileEditorPayload, PublicProfile } from '@autopod/shared';
+import type { ProfileEditorPayload } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ImageBuilder } from '../../images/index.js';
 import { type ProfileStore, buildSourceMap } from '../../profiles/index.js';
-
-function redactProfileSecrets(profile: Profile): PublicProfile {
-  return {
-    ...profile,
-    adoPat: null,
-    githubPat: null,
-    registryPat: null,
-    hasAdoPat: profile.adoPat !== null,
-    hasGithubPat: profile.githubPat !== null,
-    hasRegistryPat: profile.registryPat !== null,
-  };
-}
+import { redactProfileSecrets } from '../profile-redaction.js';
 
 export function profileRoutes(
   app: FastifyInstance,

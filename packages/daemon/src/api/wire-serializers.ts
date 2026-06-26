@@ -9,6 +9,7 @@ import type {
   TaskReviewResult,
   ValidationResult,
 } from '@autopod/shared';
+import { redactProfileSecrets } from './profile-redaction.js';
 
 export interface ScreenshotRefDto {
   url: string;
@@ -94,15 +95,19 @@ export function serializeValidationResult(result: ValidationResult): unknown {
 export function serializePodForWire(pod: Pod): unknown {
   const hasSpecFilesField = Object.prototype.hasOwnProperty.call(pod, 'specFiles');
   const hasSpecContextFilesField = Object.prototype.hasOwnProperty.call(pod, 'specContextFiles');
+  const basePod = {
+    ...pod,
+    profileSnapshot: pod.profileSnapshot ? redactProfileSecrets(pod.profileSnapshot) : null,
+    readinessReview: pod.readinessReview ?? null,
+  };
   if (!pod.lastValidationResult && !hasSpecFilesField && !hasSpecContextFilesField) {
-    return { ...pod, readinessReview: pod.readinessReview ?? null };
+    return basePod;
   }
 
   const wirePod = {
     ...(hasSpecFilesField || hasSpecContextFilesField
-      ? { ...pod, specFiles: undefined, specContextFiles: undefined }
-      : { ...pod }),
-    readinessReview: pod.readinessReview ?? null,
+      ? { ...basePod, specFiles: undefined, specContextFiles: undefined }
+      : { ...basePod }),
   };
   if (!wirePod.lastValidationResult) return wirePod;
   return {

@@ -95,6 +95,7 @@ function insertPod(
     reworkCount?: number;
     outputMode?: string;
     readinessReview?: ReadinessReview | null;
+    profileSnapshot?: Record<string, unknown> | null;
   } = {},
 ): string {
   const id = opts.id ?? `pod-${++podSeq}`;
@@ -103,12 +104,12 @@ function insertPod(
       id, profile_name, task, status, model, runtime, execution_target, branch,
       user_id, max_validation_attempts, skip_validation,
       output_mode, agent_mode, output_target, validate, promotable,
-      completed_at, rework_count, readiness_review
+      completed_at, rework_count, readiness_review, profile_snapshot
     ) VALUES (
       @id, 'test-profile', 'task', @status, 'claude-opus-4-7', 'claude', 'local', 'branch-1',
       'user-1', 3, 0,
       @outputMode, 'auto', 'pr', 1, 0,
-      @completedAt, @reworkCount, @readinessReview
+      @completedAt, @reworkCount, @readinessReview, @profileSnapshot
     )
   `).run({
     id,
@@ -118,6 +119,10 @@ function insertPod(
     reworkCount: opts.reworkCount ?? 0,
     readinessReview:
       opts.readinessReview === undefined ? null : JSON.stringify(opts.readinessReview),
+    profileSnapshot:
+      opts.profileSnapshot === undefined || opts.profileSnapshot === null
+        ? null
+        : JSON.stringify(opts.profileSnapshot),
   });
   return id;
 }
@@ -415,6 +420,107 @@ describe('GET /pods/analytics/reliability', () => {
     });
     expect(detailRes.statusCode).toBe(200);
     expect(detailRes.json().readinessReview).toEqual(readinessReview);
+  });
+
+  it('redacts profile credentials from profile API responses', async () => {
+    const secretFields = {
+      providerCredentials: {
+        provider: 'max',
+        accessToken: 'max-access-secret',
+        refreshToken: 'max-refresh-secret',
+        expiresAt: '2026-07-01T00:00:00.000Z',
+      },
+      githubPat: 'github-secret',
+      adoPat: 'ado-secret',
+      registryPat: 'registry-secret',
+      openrouterApiKey: 'openrouter-secret',
+    };
+
+    const updateRes = await app.inject({
+      method: 'PATCH',
+      url: '/profiles/test-profile',
+      headers: authHeaders,
+      payload: secretFields,
+    });
+    expect(updateRes.statusCode).toBe(200);
+
+    for (const response of [
+      updateRes,
+      await app.inject({ method: 'GET', url: '/profiles/test-profile', headers: authHeaders }),
+      await app.inject({ method: 'GET', url: '/profiles', headers: authHeaders }),
+      await app.inject({
+        method: 'GET',
+        url: '/profiles/test-profile/editor',
+        headers: authHeaders,
+      }),
+    ]) {
+      expect(response.statusCode).toBe(200);
+      const bodyText = response.body;
+      expect(bodyText).not.toContain('max-access-secret');
+      expect(bodyText).not.toContain('max-refresh-secret');
+      expect(bodyText).not.toContain('github-secret');
+      expect(bodyText).not.toContain('ado-secret');
+      expect(bodyText).not.toContain('registry-secret');
+      expect(bodyText).not.toContain('openrouter-secret');
+    }
+
+    const profile = updateRes.json();
+    expect(profile.providerCredentials).toEqual({ provider: 'max' });
+    expect(profile.githubPat).toBeNull();
+    expect(profile.adoPat).toBeNull();
+    expect(profile.registryPat).toBeNull();
+    expect(profile.openrouterApiKey).toBeNull();
+    expect(profile.hasGithubPat).toBe(true);
+    expect(profile.hasAdoPat).toBe(true);
+    expect(profile.hasRegistryPat).toBe(true);
+  });
+
+  it('redacts embedded profile snapshots from pod API responses', async () => {
+    const podId = insertPod(db, {
+      id: 'snapshot-secret-pod',
+      profileSnapshot: {
+        name: 'test-profile',
+        providerCredentials: {
+          provider: 'max',
+          accessToken: 'snapshot-access-secret',
+          refreshToken: 'snapshot-refresh-secret',
+          expiresAt: '2026-07-01T00:00:00.000Z',
+        },
+        githubPat: 'snapshot-github-secret',
+        adoPat: 'snapshot-ado-secret',
+        registryPat: 'snapshot-registry-secret',
+        openrouterApiKey: 'snapshot-openrouter-secret',
+      },
+    });
+
+    for (const response of [
+      await app.inject({ method: 'GET', url: `/pods/${podId}`, headers: authHeaders }),
+      await app.inject({ method: 'GET', url: '/pods', headers: authHeaders }),
+    ]) {
+      expect(response.statusCode).toBe(200);
+      expect(response.body).not.toContain('snapshot-access-secret');
+      expect(response.body).not.toContain('snapshot-refresh-secret');
+      expect(response.body).not.toContain('snapshot-github-secret');
+      expect(response.body).not.toContain('snapshot-ado-secret');
+      expect(response.body).not.toContain('snapshot-registry-secret');
+      expect(response.body).not.toContain('snapshot-openrouter-secret');
+    }
+
+    const profileSnapshot = (
+      await app.inject({
+        method: 'GET',
+        url: `/pods/${podId}`,
+        headers: authHeaders,
+      })
+    ).json().profileSnapshot;
+    expect(profileSnapshot.providerCredentials).toEqual({ provider: 'max' });
+    expect(profileSnapshot.githubPat).toBeNull();
+    expect(profileSnapshot.adoPat).toBeNull();
+    expect(profileSnapshot.registryPat).toBeNull();
+    expect(profileSnapshot.openrouterApiKey).toBeNull();
+    expect(profileSnapshot.hasGithubPat).toBe(true);
+    expect(profileSnapshot.hasAdoPat).toBe(true);
+    expect(profileSnapshot.hasRegistryPat).toBe(true);
   });
 });
 
