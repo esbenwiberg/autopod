@@ -291,45 +291,65 @@ public actor EntraDesktopAuthService {
   }
 }
 
+@MainActor
 private final class AuthenticationPresentationContextProvider: NSObject,
   ASWebAuthenticationPresentationContextProviding {
   static let shared = AuthenticationPresentationContextProvider()
 
   private var activeSession: ASWebAuthenticationSession?
+  /// Captured on the main thread in `start`, read from `presentationAnchor(for:)`
+  /// which the framework may invoke on a background XPC queue. Set once before the
+  /// session starts, so the unsynchronized read is safe — and reading it never
+  /// touches AppKit (no `NSApplication.shared`, no `NSWindow` construction off-main).
+  nonisolated(unsafe) private var anchor: ASPresentationAnchor?
 
   func start(
     url: URL,
     callbackURLScheme: String,
-    completion: @escaping (Result<URL, Error>) -> Void
+    completion: @escaping @Sendable (Result<URL, Error>) -> Void
   ) {
-    let session = ASWebAuthenticationSession(
-      url: url,
-      callbackURLScheme: callbackURLScheme
-    ) { [weak self] callbackURL, error in
-      self?.activeSession = nil
+    // On the main thread here: safe to resolve the anchor and start the session.
+    anchor = NSApplication.shared.keyWindow
+      ?? NSApplication.shared.windows.first
+      ?? ASPresentationAnchor()
+
+    // CRITICAL: this handler must be @Sendable / non-isolated. ASWebAuthentication-
+    // Session invokes it on a background XPC reply queue. If it inherits this
+    // method's @MainActor isolation, the Swift runtime's executor check
+    // (swift_task_isCurrentExecutor) aborts the process when it fires off-main.
+    // It captures only `completion` (Sendable) — never `self`.
+    let handler: @Sendable (URL?, (any Error)?) -> Void = { callbackURL, error in
       if let callbackURL {
         completion(.success(callbackURL))
-        return
-      }
-      if let authError = error as? ASWebAuthenticationSessionError,
-         authError.code == .canceledLogin {
+      } else if let authError = error as? ASWebAuthenticationSessionError,
+                authError.code == .canceledLogin {
         completion(.failure(EntraDesktopAuthError.signInCancelled))
-        return
-      }
-      if let error {
+      } else if let error {
         completion(.failure(error))
-        return
+      } else {
+        completion(.failure(EntraDesktopAuthError.missingCallbackURL))
       }
-      completion(.failure(EntraDesktopAuthError.missingCallbackURL))
     }
+
+    let session = ASWebAuthenticationSession(
+      url: url,
+      callbackURLScheme: callbackURLScheme,
+      completionHandler: handler
+    )
     session.presentationContextProvider = self
     session.prefersEphemeralWebBrowserSession = false
     activeSession = session
     session.start()
   }
 
-  func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-    NSApplication.shared.keyWindow ?? ASPresentationAnchor()
+  nonisolated func presentationAnchor(
+    for session: ASWebAuthenticationSession
+  ) -> ASPresentationAnchor {
+    // Invoked on a background queue. Return the pre-captured anchor without
+    // touching AppKit. `start` always sets `anchor` (on the main thread) before
+    // the session runs, so this force-unwrap holds — and we must NOT construct an
+    // ASPresentationAnchor (an NSWindow) here, which would be illegal off-main.
+    anchor!
   }
 }
 
