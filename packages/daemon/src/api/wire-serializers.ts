@@ -95,9 +95,12 @@ export function serializeValidationResult(result: ValidationResult): unknown {
 export function serializePodForWire(pod: Pod): unknown {
   const hasSpecFilesField = Object.prototype.hasOwnProperty.call(pod, 'specFiles');
   const hasSpecContextFilesField = Object.prototype.hasOwnProperty.call(pod, 'specContextFiles');
+  const hasProfileSnapshotField = Object.prototype.hasOwnProperty.call(pod, 'profileSnapshot');
   const basePod = {
     ...pod,
-    profileSnapshot: pod.profileSnapshot ? redactProfileSecrets(pod.profileSnapshot) : null,
+    ...(hasProfileSnapshotField
+      ? { profileSnapshot: pod.profileSnapshot ? redactProfileSecrets(pod.profileSnapshot) : null }
+      : {}),
     readinessReview: pod.readinessReview ?? null,
   };
   if (!pod.lastValidationResult && !hasSpecFilesField && !hasSpecContextFilesField) {
