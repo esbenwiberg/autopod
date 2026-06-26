@@ -299,6 +299,7 @@ Each runtime (`claude-runtime.ts`, `codex-runtime.ts`, `copilot-runtime.ts`) has
 | `ACR_USERNAME` | — | no | ACR credentials for ACI |
 | `ACR_PASSWORD` | — | no | ACR credentials for ACI |
 | `AUTOPOD_CONTAINER_HOST` | — | no | Override host for MCP base URL inside containers |
+| `AUTOPOD_MCP_BASE_URL` | — | no | Full MCP base URL for containers when it differs from `http://AUTOPOD_CONTAINER_HOST:PORT` |
 | `AUTOPOD_MOBILE_DIST` | — | no | Override mobile PWA dist dir (default: `packages/mobile-web/dist`) |
 
 ## Environment Gotchas

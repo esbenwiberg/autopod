@@ -83,6 +83,7 @@ const LOG_LEVEL = process.env.LOG_LEVEL ?? 'info';
 const IS_DEV = process.env.NODE_ENV !== 'production';
 const PORT = Number.parseInt(process.env.PORT || '3100', 10);
 const HOST = process.env.HOST ?? '127.0.0.1';
+const MCP_BASE_URL = resolveMcpBaseUrl();
 const DB_PATH = process.env.DB_PATH ?? './autopod.db';
 const MAX_CONCURRENCY = Number.parseInt(process.env.MAX_CONCURRENCY ?? '3', 10);
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
@@ -90,6 +91,19 @@ const ACR_REGISTRY_URL = process.env.ACR_REGISTRY_URL;
 const ENTRA_TENANT_ID = process.env.ENTRA_TENANT_ID ?? process.env.AUTOPOD_TENANT_ID;
 const ENTRA_CLIENT_ID = process.env.ENTRA_CLIENT_ID ?? process.env.AUTOPOD_CLIENT_ID;
 const ENTRA_AUDIENCES = parseEnvList(process.env.ENTRA_AUDIENCE ?? process.env.AUTOPOD_AUDIENCE);
+
+function resolveMcpBaseUrl(): string {
+  const explicit = process.env.AUTOPOD_MCP_BASE_URL?.trim();
+  if (explicit) {
+    try {
+      return new URL(explicit).toString().replace(/\/+$/, '');
+    } catch {
+      throw new Error('AUTOPOD_MCP_BASE_URL must be an absolute URL, e.g. https://daemon.example');
+    }
+  }
+
+  return `http://${process.env.AUTOPOD_CONTAINER_HOST ?? 'host.docker.internal'}:${PORT}`;
+}
 
 // Fields to redact from all log records — covers common credential field names.
 const LOG_REDACT_PATHS = [
@@ -633,7 +647,7 @@ podManager = createPodManager({
   actionEngine: actionRegistry,
   enqueueSession: (id) => podQueue.enqueue(id),
   clearStuckQueueEntry: (id) => podQueue.clearStuckEntry(id),
-  mcpBaseUrl: `http://${process.env.AUTOPOD_CONTAINER_HOST ?? 'host.docker.internal'}:${PORT}`,
+  mcpBaseUrl: MCP_BASE_URL,
   daemonConfig: {
     mcpServers: JSON.parse(process.env.DAEMON_MCP_SERVERS ?? '[]'),
     claudeMdSections: JSON.parse(process.env.DAEMON_CLAUDE_MD_SECTIONS ?? '[]'),
