@@ -60,7 +60,7 @@ export async function runCodexReview(
   const modelArgs =
     config.model && config.model !== 'auto' ? ` --model ${shellQuote(config.model)}` : '';
   const codexCommand = [
-    `${shellQuote(SHIM_PATH)} codex exec`,
+    `sh ${shellQuote(SHIM_PATH)} codex exec`,
     '--cd /workspace',
     '--sandbox read-only',
     '--skip-git-repo-check',
