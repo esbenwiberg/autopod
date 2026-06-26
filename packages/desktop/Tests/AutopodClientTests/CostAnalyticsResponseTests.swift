@@ -91,7 +91,7 @@ import Testing
     }
 }
 
-@Test func sparklineDecodes30Elements() throws {
+@Test func costSparklineDecodes30Elements() throws {
     let json = makeSparklineJSON(days: 30).data(using: .utf8)!
     let points = try JSONDecoder().decode([SparklinePoint].self, from: json)
     #expect(points.count == 30)

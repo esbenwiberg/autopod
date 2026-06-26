@@ -19,6 +19,68 @@ import Testing
   #expect(conn.label == "daemon.example.com")
 }
 
+@Test func daemonConnectionDefaultsLegacyAuthKindToManualToken() throws {
+  let id = UUID()
+  let data = """
+  {
+    "id": "\(id.uuidString)",
+    "name": "Legacy",
+    "url": "https://daemon.example.com"
+  }
+  """.data(using: .utf8)!
+
+  let conn = try JSONDecoder().decode(DaemonConnection.self, from: data)
+
+  #expect(conn.id == id)
+  #expect(conn.authKind == .manualToken)
+}
+
+@Test func daemonConnectionNormalizesBareRemoteHostToHTTPS() {
+  let url = DaemonConnection.normalizedURL(
+    from: " autopod-daemon-ewi.swedencentral.cloudapp.azure.com "
+  )
+
+  #expect(url?.absoluteString == "https://autopod-daemon-ewi.swedencentral.cloudapp.azure.com")
+}
+
+@Test func daemonConnectionNormalizesBareLocalHostToHTTP() {
+  let url = DaemonConnection.normalizedURL(from: "localhost:3100")
+
+  #expect(url?.absoluteString == "http://localhost:3100")
+}
+
+@Test func entraCachedTokenHonorsRefreshBuffer() {
+  let token = EntraCachedToken(
+    accessToken: "access",
+    refreshToken: "refresh",
+    expiresAt: Date(timeIntervalSince1970: 1_000),
+    scope: "scope"
+  )
+
+  #expect(token.isValid(now: Date(timeIntervalSince1970: 600), refreshBuffer: 300))
+  #expect(!token.isValid(now: Date(timeIntervalSince1970: 750), refreshBuffer: 300))
+}
+
+@Test func hostedDaemonATSExceptionIsRemovedAndNativeRedirectSchemeIsRegistered() throws {
+  let packageRoot = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()
+    .deletingLastPathComponent()
+    .deletingLastPathComponent()
+  let plistURL = packageRoot.appendingPathComponent("Autopod/Info.plist")
+  let data = try Data(contentsOf: plistURL)
+  let plist = try #require(
+    PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+  )
+
+  let ats = try #require(plist["NSAppTransportSecurity"] as? [String: Any])
+  #expect(ats["NSExceptionDomains"] == nil)
+  #expect(ats["NSAllowsLocalNetworking"] as? Bool == true)
+
+  let urlTypes = try #require(plist["CFBundleURLTypes"] as? [[String: Any]])
+  let schemes = urlTypes.flatMap { ($0["CFBundleURLSchemes"] as? [String]) ?? [] }
+  #expect(schemes.contains("msauth.com.autopod.desktop"))
+}
+
 @Test func createSessionRequestOmitsNilFields() throws {
   let req = CreateSessionRequest(
     profileName: "my-app",

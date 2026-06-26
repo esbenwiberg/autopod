@@ -2,7 +2,7 @@ import Testing
 @testable import AutopodClient
 @testable import AutopodUI
 
-@Test func memoryWorkbenchGroupsPendingCandidatesByOrigin() {
+@MainActor @Test func memoryWorkbenchGroupsPendingCandidatesByOrigin() {
     let older = makeCandidate(id: "cand-old", podId: "pod-a", updatedAt: "2026-05-20T00:00:00Z")
     let newer = makeCandidate(id: "cand-new", podId: "pod-b", updatedAt: "2026-05-21T00:00:00Z")
     let sibling = makeCandidate(id: "cand-sibling", podId: "pod-a", updatedAt: "2026-05-22T00:00:00Z")
@@ -13,7 +13,7 @@ import Testing
     #expect(groups.first?.candidates.map(\.id) == ["cand-old", "cand-sibling"])
 }
 
-@Test func memoryWorkbenchFiltersActiveMemoriesByScopeAndQuery() {
+@MainActor @Test func memoryWorkbenchFiltersActiveMemoriesByScopeAndQuery() {
     let global = makeMemory(id: "global", scope: .global, path: "/conventions/commits.md", content: "Use direct commits")
     let profile = makeMemory(id: "profile", scope: .profile, path: "/gotchas/migrations.md", content: "Migration prefixes must be unique")
 
@@ -26,7 +26,7 @@ import Testing
     #expect(result.map(\.id) == ["profile"])
 }
 
-@Test func memoryWorkbenchMergesScopedActiveCacheWithApprovedEntries() {
+@MainActor @Test func memoryWorkbenchMergesScopedActiveCacheWithApprovedEntries() {
     let first = makeMemory(id: "mem-first", content: "Original first memory")
     let second = makeMemory(id: "mem-second", content: "Second memory")
     let refreshedFirst = makeMemory(id: "mem-first", content: "Refreshed first memory")
@@ -42,7 +42,7 @@ import Testing
     #expect(result.first?.content == "Refreshed first memory")
 }
 
-@Test func memoryWorkbenchPrefersCandidateSelectionThenKeepsValidSelection() {
+@MainActor @Test func memoryWorkbenchPrefersCandidateSelectionThenKeepsValidSelection() {
     let candidate = makeCandidate(id: "cand-1")
     let memory = makeMemory(id: "mem-1")
 
@@ -61,7 +61,7 @@ import Testing
     #expect(kept == .memory("mem-1"))
 }
 
-@Test func memoryWorkbenchSelectionFallsBackWhenCurrentItemIsNotVisible() {
+@MainActor @Test func memoryWorkbenchSelectionFallsBackWhenCurrentItemIsNotVisible() {
     let visibleCandidate = makeCandidate(id: "cand-visible")
     let visibleMemory = makeMemory(id: "mem-visible")
 
@@ -80,7 +80,7 @@ import Testing
     #expect(memoryFallback == .memory("mem-visible"))
 }
 
-@Test func memoryWorkbenchImpactCountsUsageOutcomes() {
+@MainActor @Test func memoryWorkbenchImpactCountsUsageOutcomes() {
     let counts = MemoryManagementView.usageImpactCounts([
         makeUsage(id: "u1", kind: .selected),
         makeUsage(id: "u2", kind: .injected),
@@ -94,13 +94,13 @@ import Testing
     #expect(counts.applied == 1)
 }
 
-@Test func memoryWorkbenchShowsWarningStateForStaleOrHarmfulEvidence() {
+@MainActor @Test func memoryWorkbenchShowsWarningStateForStaleOrHarmfulEvidence() {
     #expect(MemoryManagementView.hasWarningEvidence(stale: [], harmful: []) == false)
     #expect(MemoryManagementView.hasWarningEvidence(stale: [makeUsage(id: "stale", outcome: .notApplicable)], harmful: []) == true)
     #expect(MemoryManagementView.hasWarningEvidence(stale: [], harmful: [makeUsage(id: "harm", outcome: .harmfulStale)]) == true)
 }
 
-@Test func memoryWorkbenchRejectsDetailPayloadForDifferentSelection() {
+@MainActor @Test func memoryWorkbenchRejectsDetailPayloadForDifferentSelection() {
     #expect(
         MemoryManagementView.detailPayloadMatches(
             selection: .memory("mem-2"),
@@ -117,7 +117,7 @@ import Testing
     )
 }
 
-@Test func memoryWorkbenchFiltersUsageToSelectedMemory() {
+@MainActor @Test func memoryWorkbenchFiltersUsageToSelectedMemory() {
     let selected = makeUsage(id: "u1", memoryId: "mem-1")
     let stale = makeUsage(id: "u2", memoryId: "mem-2")
 
@@ -126,7 +126,7 @@ import Testing
     #expect(result.map(\.id) == ["u1"])
 }
 
-@Test func memoryWorkbenchShowsExtractionAttemptsOnWorkbenchEmptyStates() {
+@MainActor @Test func memoryWorkbenchShowsExtractionAttemptsOnWorkbenchEmptyStates() {
     let attempt = MemoryExtractionAttempt(
         id: "attempt-1",
         podId: "pod-1",

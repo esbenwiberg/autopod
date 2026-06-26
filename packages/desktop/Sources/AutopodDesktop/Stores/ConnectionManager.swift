@@ -38,6 +38,7 @@ public final class ConnectionManager {
   }
 
   private var healthTask: Task<Void, Never>?
+  private let entraAuthService = EntraDesktopAuthService()
 
   // MARK: - Init
 
@@ -46,26 +47,31 @@ public final class ConnectionManager {
     let connections = ConnectionStore.loadAll()
     if let activeId = ConnectionStore.activeConnectionId(),
        let saved = connections.first(where: { $0.id == activeId }) {
-      // For local connections, prefer the live dev token over stale Keychain value
-      let token: String? = if saved.isLocal {
-        DaemonConnection.readLocalDevToken()
-          ?? KeychainHelper.load(for: saved.id)
-          ?? ConnectionStore.loadToken(for: saved.id)
+      connection = saved
+      if saved.authKind == .entra {
+        state = .connecting
+        Task { await restoreEntraConnection(saved) }
       } else {
-        KeychainHelper.load(for: saved.id) ?? ConnectionStore.loadToken(for: saved.id)
-      }
+        // For local connections, prefer the live dev token over stale Keychain value
+        let token: String? = if saved.isLocal {
+          DaemonConnection.readLocalDevToken()
+            ?? KeychainHelper.load(for: saved.id)
+            ?? ConnectionStore.loadToken(for: saved.id)
+        } else {
+          KeychainHelper.load(for: saved.id) ?? ConnectionStore.loadToken(for: saved.id)
+        }
 
-      if let token {
-        let normalizedToken = Self.normalizeToken(token)
-        guard !normalizedToken.isEmpty else { return }
-        connection = saved
-        activeToken = normalizedToken
-        api = DaemonAPI(baseURL: saved.url, token: normalizedToken)
-        // Persist refreshed token
-        try? KeychainHelper.save(token: normalizedToken, for: saved.id)
-        ConnectionStore.saveToken(normalizedToken, for: saved.id)
-        // Kick off initial health check
-        Task { await connectToActive() }
+        if let token {
+          let normalizedToken = Self.normalizeToken(token)
+          guard !normalizedToken.isEmpty else { return }
+          activeToken = normalizedToken
+          api = makeAPI(baseURL: saved.url, token: normalizedToken, authKind: saved.authKind)
+          // Persist refreshed token
+          try? KeychainHelper.save(token: normalizedToken, for: saved.id)
+          ConnectionStore.saveToken(normalizedToken, for: saved.id)
+          // Kick off initial health check
+          Task { await connectToActive() }
+        }
       }
     }
   }
@@ -73,9 +79,14 @@ public final class ConnectionManager {
   // MARK: - Connect
 
   /// Save a new connection and connect to it.
-  public func addAndConnect(name: String, url: URL, token: String) async throws {
+  public func addAndConnect(
+    name: String,
+    url: URL,
+    token: String,
+    authKind: DaemonConnectionAuthKind = .manualToken
+  ) async throws {
     let normalizedToken = Self.normalizeToken(token)
-    let conn = DaemonConnection(name: name, url: url)
+    let conn = DaemonConnection(name: name, url: url, authKind: authKind)
 
     // Save token to Keychain + UserDefaults fallback
     try? KeychainHelper.save(token: normalizedToken, for: conn.id)
@@ -90,14 +101,18 @@ public final class ConnectionManager {
     // Create API client and connect
     connection = conn
     activeToken = normalizedToken
-    api = DaemonAPI(baseURL: url, token: normalizedToken)
+    api = makeAPI(baseURL: url, token: normalizedToken, authKind: authKind)
     await connectToActive()
   }
 
   /// Test a connection without saving it.
-  public func testConnection(url: URL, token: String) async -> Result<Bool, DaemonError> {
+  public func testConnection(
+    url: URL,
+    token: String,
+    authKind: DaemonConnectionAuthKind = .manualToken
+  ) async -> Result<Bool, DaemonError> {
     let normalizedToken = Self.normalizeToken(token)
-    let testApi = DaemonAPI(baseURL: url, token: normalizedToken)
+    let testApi = makeAPI(baseURL: url, token: normalizedToken, authKind: authKind)
     do {
       _ = try await testApi.healthCheck()
       _ = try await testApi.getSessionStats()
@@ -116,7 +131,9 @@ public final class ConnectionManager {
       throw DaemonError.notFound("connection")
     }
 
-    let token: String? = if conn.isLocal {
+    let token: String? = if conn.authKind == .entra {
+      try await entraAuthService.accessToken()
+    } else if conn.isLocal {
       DaemonConnection.readLocalDevToken()
         ?? KeychainHelper.load(for: conn.id)
         ?? ConnectionStore.loadToken(for: conn.id)
@@ -132,7 +149,7 @@ public final class ConnectionManager {
     }
 
     let previousState = state
-    let testApi = DaemonAPI(baseURL: conn.url, token: normalizedToken)
+    let testApi = makeAPI(baseURL: conn.url, token: normalizedToken, authKind: conn.authKind)
     state = .connecting
 
     do {
@@ -182,6 +199,24 @@ public final class ConnectionManager {
     DaemonAPI.normalizeBearerToken(token)
   }
 
+  public func signInWithMicrosoft() async throws -> String {
+    let token = try await entraAuthService.signIn()
+    activeToken = Self.normalizeToken(token)
+    return activeToken ?? token
+  }
+
+  public func makeAccessTokenProvider() -> DaemonAccessTokenProvider {
+    let authKind = connection?.authKind
+    let manualToken = activeToken ?? ""
+    let entraAuthService = entraAuthService
+    return {
+      if authKind == .entra {
+        return try await entraAuthService.accessToken()
+      }
+      return manualToken
+    }
+  }
+
   private func connectToActive() async {
     guard let api else { return }
     state = .connecting
@@ -210,6 +245,9 @@ public final class ConnectionManager {
   private func pollHealth() async {
     guard let api else { return }
     do {
+      if let conn = connection, conn.authKind == .entra {
+        try await refreshEntraTokenIfNeeded(for: conn)
+      }
       _ = try await api.healthCheck()
       if state != .connected {
         state = .connected
@@ -225,6 +263,52 @@ public final class ConnectionManager {
     }
   }
 
+  private func restoreEntraConnection(_ saved: DaemonConnection) async {
+    do {
+      let token = Self.normalizeToken(try await entraAuthService.accessToken())
+      guard !token.isEmpty else {
+        state = .error("Microsoft sign-in returned an empty token")
+        return
+      }
+      activeToken = token
+      api = makeAPI(baseURL: saved.url, token: token, authKind: .entra)
+      try? KeychainHelper.save(token: token, for: saved.id)
+      ConnectionStore.saveToken(token, for: saved.id)
+      await connectToActive()
+    } catch {
+      state = .error(error.localizedDescription)
+    }
+  }
+
+  private func refreshEntraTokenIfNeeded(for conn: DaemonConnection) async throws {
+    let freshToken = Self.normalizeToken(try await entraAuthService.accessToken())
+    guard !freshToken.isEmpty else {
+      throw DaemonError.unauthorized("Microsoft sign-in returned an empty token")
+    }
+    if freshToken != activeToken {
+      activeToken = freshToken
+      try? KeychainHelper.save(token: freshToken, for: conn.id)
+      ConnectionStore.saveToken(freshToken, for: conn.id)
+    }
+  }
+
+  private func makeAPI(
+    baseURL: URL,
+    token: String,
+    authKind: DaemonConnectionAuthKind
+  ) -> DaemonAPI {
+    if authKind == .entra {
+      return DaemonAPI(
+        baseURL: baseURL,
+        initialToken: token,
+        tokenProvider: { [entraAuthService] in
+          try await entraAuthService.accessToken()
+        }
+      )
+    }
+    return DaemonAPI(baseURL: baseURL, token: token)
+  }
+
   /// Try to read a fresh dev token from disk. Returns true if token was updated.
   private func refreshDevToken(for conn: DaemonConnection) async -> Bool {
     guard let freshToken = DaemonConnection.readLocalDevToken(),
@@ -232,7 +316,7 @@ public final class ConnectionManager {
 
     // Token changed — rebuild the API client
     activeToken = freshToken
-    api = DaemonAPI(baseURL: conn.url, token: freshToken)
+    api = makeAPI(baseURL: conn.url, token: freshToken, authKind: conn.authKind)
     try? KeychainHelper.save(token: freshToken, for: conn.id)
     ConnectionStore.saveToken(freshToken, for: conn.id)
 

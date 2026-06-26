@@ -8,22 +8,33 @@ public actor DaemonAPI {
   private let pod: URLSession
   private let decoder: JSONDecoder
   private let encoder: JSONEncoder
+  private let tokenProvider: DaemonAccessTokenProvider?
 
-  public init(baseURL: URL, token: String) {
+  public init(baseURL: URL, token: String, session: URLSession = .shared) {
     self.baseURL = baseURL
     self.token = Self.normalizeBearerToken(token)
-    self.pod = URLSession.shared
+    self.pod = session
     self.decoder = JSONDecoder()
     self.encoder = JSONEncoder()
+    self.tokenProvider = nil
+  }
+
+  public init(
+    baseURL: URL,
+    initialToken: String,
+    session: URLSession = .shared,
+    tokenProvider: @escaping DaemonAccessTokenProvider
+  ) {
+    self.baseURL = baseURL
+    self.token = Self.normalizeBearerToken(initialToken)
+    self.pod = session
+    self.decoder = JSONDecoder()
+    self.encoder = JSONEncoder()
+    self.tokenProvider = tokenProvider
   }
 
   public static func normalizeBearerToken(_ token: String) -> String {
-    let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-    if trimmed.lowercased().hasPrefix("bearer ") {
-      return String(trimmed.dropFirst("Bearer ".count))
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    return trimmed
+    DaemonAuth.normalizeBearerToken(token)
   }
 
   // MARK: - Health
@@ -702,7 +713,7 @@ public actor DaemonAPI {
     let url = try makeRequestURL(path)
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
-    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    req.setValue(try await authorizationHeader(), forHTTPHeaderField: "Authorization")
     req.setValue("application/json", forHTTPHeaderField: "Accept")
     req.timeoutInterval = 30
     let data: Data
@@ -786,7 +797,7 @@ public actor DaemonAPI {
 
     var req = URLRequest(url: url)
     req.httpMethod = method
-    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    req.setValue(try await authorizationHeader(), forHTTPHeaderField: "Authorization")
     req.setValue("application/json", forHTTPHeaderField: "Accept")
     req.timeoutInterval = 30
 
@@ -874,6 +885,16 @@ public actor DaemonAPI {
       return text
     }
     return nil
+  }
+
+  private func authorizationHeader() async throws -> String {
+    let accessToken: String
+    if let tokenProvider {
+      accessToken = try await tokenProvider()
+    } else {
+      accessToken = token
+    }
+    return "Bearer \(Self.normalizeBearerToken(accessToken))"
   }
 }
 

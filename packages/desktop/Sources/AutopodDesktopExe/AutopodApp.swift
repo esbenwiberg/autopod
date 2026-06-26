@@ -86,14 +86,19 @@ struct AutopodApp: App {
     actionHandler = ActionHandler(api: api, podStore: podStore, profileStore: profileStore)
 
     let connToken = connectionManager.activeToken ?? ""
-    terminalManager = TerminalManager(baseURL: conn.url, token: connToken)
+    let tokenProvider = connectionManager.makeAccessTokenProvider()
+    terminalManager = TerminalManager(
+      baseURL: conn.url,
+      token: connToken,
+      tokenProvider: tokenProvider
+    )
 
     let stream = EventStream(
       podStore: podStore,
       memoryStore: memoryStore,
       scheduledJobStore: scheduledJobStore
     )
-    stream.connect(baseURL: conn.url, token: connToken)
+    stream.connect(baseURL: conn.url, token: connToken, tokenProvider: tokenProvider)
     eventStream = stream
 
     // Reload historical events for the currently selected pod — the EventStream was just

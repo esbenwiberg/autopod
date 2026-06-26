@@ -7,8 +7,11 @@ public enum KeychainHelper {
   private static let service = "com.autopod.desktop"
 
   public static func save(token: String, for connectionId: UUID) throws {
-    let account = connectionId.uuidString
-    let data = Data(token.utf8)
+    try saveString(token, account: connectionId.uuidString)
+  }
+
+  public static func saveString(_ value: String, account: String) throws {
+    let data = Data(value.utf8)
 
     // Delete any existing item first
     let deleteQuery: [String: Any] = [
@@ -34,8 +37,10 @@ public enum KeychainHelper {
   }
 
   public static func load(for connectionId: UUID) -> String? {
-    let account = connectionId.uuidString
+    loadString(account: connectionId.uuidString)
+  }
 
+  public static func loadString(account: String) -> String? {
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
@@ -54,8 +59,10 @@ public enum KeychainHelper {
   }
 
   public static func delete(for connectionId: UUID) {
-    let account = connectionId.uuidString
+    delete(account: connectionId.uuidString)
+  }
 
+  public static func delete(account: String) {
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,

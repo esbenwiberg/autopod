@@ -141,6 +141,8 @@ Configure these rules on the target repositories that Autopod will open PRs agai
   - Application ID URI: `api://<ENTRA_CLIENT_ID>` (or set matching `ENTRA_AUDIENCE`)
   - Delegated scope: `access_as_user`
   - Public client flows enabled for device-code CLI login
+  - Native/mobile desktop redirect URI registered for the macOS app:
+    `msauth.com.autopod.desktop://auth`
 - [ ] CLI operators export:
   ```bash
   AUTOPOD_CLIENT_ID=<ENTRA_CLIENT_ID>

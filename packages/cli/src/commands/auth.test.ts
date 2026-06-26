@@ -115,7 +115,7 @@ describe('auth commands', () => {
   });
 
   describe('ap token', () => {
-    it('prints the stored Entra access token', async () => {
+    it('prints the daemon access token from the refresh-aware token path', async () => {
       writeCredentials('access-token-123');
 
       const cap = await runAuth(['token']);
@@ -131,12 +131,13 @@ describe('auth commands', () => {
       expect(cap.errors.join('\n')).toContain('Not authenticated. Run: ap login');
     });
 
-    it('treats expired credentials as missing', async () => {
+    it('does not print expired credentials', async () => {
       writeCredentials('expired-token', '2000-01-01T00:00:00.000Z');
 
       const cap = await runAuth(['token']);
 
       expect(cap.exitCode).toBe(2);
+      expect(cap.stdout.join('')).toBe('');
       expect(cap.errors.join('\n')).toContain('Not authenticated. Run: ap login');
     });
   });

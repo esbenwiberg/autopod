@@ -33,6 +33,7 @@ public actor TerminalSocket {
 
   private let baseURL: URL
   private let token: String
+  private let tokenProvider: DaemonAccessTokenProvider?
   private let pod: URLSession
   private let onData: @Sendable (Data) -> Void
   private let onStateChange: @Sendable (State) -> Void
@@ -40,11 +41,13 @@ public actor TerminalSocket {
   public init(
     baseURL: URL,
     token: String,
+    tokenProvider: DaemonAccessTokenProvider? = nil,
     onData: @escaping @Sendable (Data) -> Void,
     onStateChange: @escaping @Sendable (State) -> Void
   ) {
     self.baseURL = baseURL
-    self.token = token
+    self.token = DaemonAuth.normalizeBearerToken(token)
+    self.tokenProvider = tokenProvider
     self.pod = URLSession.shared
     self.onData = onData
     self.onStateChange = onStateChange
@@ -52,15 +55,15 @@ public actor TerminalSocket {
 
   // MARK: - Connect
 
-  public func connect(podId: String, cols: Int, rows: Int) {
+  public func connect(podId: String, cols: Int, rows: Int) async {
     cancelAll()
     lastSessionId = podId
     lastCols = cols
     lastRows = rows
-    doConnect(podId: podId, cols: cols, rows: rows)
+    await doConnect(podId: podId, cols: cols, rows: rows)
   }
 
-  private func doConnect(podId: String, cols: Int, rows: Int) {
+  private func doConnect(podId: String, cols: Int, rows: Int) async {
     // Kill previous connection before opening a new one. Critical during
     // reconnect: scheduleReconnect() calls doConnect() without cancelAll(),
     // so without this cleanup the old WebSocket and receive loop stay alive,
@@ -80,7 +83,7 @@ public actor TerminalSocket {
       resolvingAgainstBaseURL: false
     )!
     components.queryItems = [
-      URLQueryItem(name: "token", value: token),
+      URLQueryItem(name: "token", value: await currentToken()),
       URLQueryItem(name: "cols", value: "\(cols)"),
       URLQueryItem(name: "rows", value: "\(rows)"),
     ]
@@ -224,5 +227,12 @@ public actor TerminalSocket {
   private func setState(_ newState: State) {
     state = newState
     onStateChange(newState)
+  }
+
+  private func currentToken() async -> String {
+    if let tokenProvider, let freshToken = try? await tokenProvider() {
+      return DaemonAuth.normalizeBearerToken(freshToken)
+    }
+    return token
   }
 }

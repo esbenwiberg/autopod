@@ -5,7 +5,7 @@ import Testing
 
 // MARK: - Toggle-off semantics
 
-@Test func toggleOffCostCard() {
+@MainActor @Test func toggleOffCostCard() {
     var card: AnalyticsCardKind? = nil
     // First click selects
     card = MainView.toggleAnalyticsCard(card, tapping: .cost)
@@ -15,7 +15,7 @@ import Testing
     #expect(card == nil)
 }
 
-@Test func toggleOffQualityCard() {
+@MainActor @Test func toggleOffQualityCard() {
     var card: AnalyticsCardKind? = nil
     card = MainView.toggleAnalyticsCard(card, tapping: .quality)
     #expect(card == .quality)
@@ -23,7 +23,7 @@ import Testing
     #expect(card == nil)
 }
 
-@Test func toggleOffStatusCard() {
+@MainActor @Test func toggleOffStatusCard() {
     var card: AnalyticsCardKind? = nil
     card = MainView.toggleAnalyticsCard(card, tapping: .status)
     #expect(card == .status)
@@ -31,7 +31,7 @@ import Testing
     #expect(card == nil)
 }
 
-@Test func toggleOffMemoryCard() {
+@MainActor @Test func toggleOffMemoryCard() {
     var card: AnalyticsCardKind? = nil
     card = MainView.toggleAnalyticsCard(card, tapping: .memory)
     #expect(card == .memory)
@@ -41,7 +41,7 @@ import Testing
 
 // MARK: - Switch-drill semantics (no nil intermediate)
 
-@Test func switchDrillCostToQuality() {
+@MainActor @Test func switchDrillCostToQuality() {
     var card: AnalyticsCardKind? = nil
     card = MainView.toggleAnalyticsCard(card, tapping: .cost)
     #expect(card == .cost)
@@ -50,35 +50,35 @@ import Testing
     #expect(card == .quality)
 }
 
-@Test func switchDrillQualityToStatus() {
+@MainActor @Test func switchDrillQualityToStatus() {
     var card: AnalyticsCardKind? = .quality
     card = MainView.toggleAnalyticsCard(card, tapping: .status)
     #expect(card == .status)
 }
 
-@Test func switchDrillStatusToCost() {
+@MainActor @Test func switchDrillStatusToCost() {
     var card: AnalyticsCardKind? = .status
     card = MainView.toggleAnalyticsCard(card, tapping: .cost)
     #expect(card == .cost)
 }
 
-@Test func switchDrillModelsToMemory() {
+@MainActor @Test func switchDrillModelsToMemory() {
     var card: AnalyticsCardKind? = .models
     card = MainView.toggleAnalyticsCard(card, tapping: .memory)
     #expect(card == .memory)
 }
 
-@Test func analyticsRightPaneRoutesMemoryDrill() {
+@MainActor @Test func analyticsRightPaneRoutesMemoryDrill() {
     #expect(AnalyticsRightPaneView.drillRoute(for: .memory) == "memory")
 }
 
-@Test func unknownMemoryScopePreservesWireValue() {
+@MainActor @Test func unknownMemoryScopePreservesWireValue() {
     #expect(MemoryScope.unknown("team").label == "team")
 }
 
 // MARK: - filterPods for analytics
 
-@Test func filterPodsReturnsEmptyForAnalytics() {
+@MainActor @Test func filterPodsReturnsEmptyForAnalytics() {
     let pods: [Pod] = []
     let result = MainView.filterPods(pods, for: .analytics)
     #expect(result.isEmpty)
@@ -86,7 +86,7 @@ import Testing
 
 // MARK: - Browse pods
 
-@Test func browseRecentCapsArchiveButKeepsActionablePods() {
+@MainActor @Test func browseRecentCapsArchiveButKeepsActionablePods() {
     let oldRunning = makeBrowsePod("running-old", status: .running, timestamp: 1)
     let terminalPods = (0..<12).map {
         makeBrowsePod("done-\($0)", status: .complete, timestamp: Double(100 + $0))
@@ -105,7 +105,7 @@ import Testing
     #expect(result.count == 5)
 }
 
-@Test func browseRecentSearchUsesFullArchive() {
+@MainActor @Test func browseRecentSearchUsesFullArchive() {
     let oldMatch = makeBrowsePod("old-match", timestamp: 1, task: "Find the archive needle")
     let recentPods = (0..<8).map {
         makeBrowsePod("recent-\($0)", timestamp: Double(100 + $0), task: "No match")
@@ -122,7 +122,7 @@ import Testing
     #expect(result.map(\.id) == ["old-match"])
 }
 
-@Test func browseRecentKeepsDirectlySelectedArchivedPod() {
+@MainActor @Test func browseRecentKeepsDirectlySelectedArchivedPod() {
     let selected = makeBrowsePod("selected-old", timestamp: 1)
     let recentPods = (0..<8).map {
         makeBrowsePod("recent-\($0)", timestamp: Double(100 + $0))
@@ -140,7 +140,7 @@ import Testing
     #expect(result.count == 4)
 }
 
-@Test func browseArchiveShowsTheFullLoadedArchive() {
+@MainActor @Test func browseArchiveShowsTheFullLoadedArchive() {
     let pods = (0..<8).map {
         makeBrowsePod("pod-\($0)", timestamp: Double($0))
     }
@@ -152,14 +152,14 @@ import Testing
 
 // MARK: - onSelectPod handler
 
-@Test func analyticsSelectPodClearsCardAndNavigates() {
+@MainActor @Test func analyticsSelectPodClearsCardAndNavigates() {
     let result = MainView.analyticsSelectPodResult(sessionId: "abc123")
     #expect(result.card == nil)
     #expect(result.sidebar == .all)
     #expect(result.session == "abc123")
 }
 
-@Test func analyticsSelectPodWithDifferentSessionId() {
+@MainActor @Test func analyticsSelectPodWithDifferentSessionId() {
     let result = MainView.analyticsSelectPodResult(sessionId: "xyz-pod-9876")
     #expect(result.card == nil)
     #expect(result.sidebar == .all)

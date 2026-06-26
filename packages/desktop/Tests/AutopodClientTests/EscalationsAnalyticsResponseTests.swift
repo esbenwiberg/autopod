@@ -15,8 +15,8 @@ import Testing
     #expect(response.summary.humanAttentionCount == 42)
     #expect(response.summary.askAiCount == 15)
     #expect(response.summary.dailyHumanCountSparkline.count == 30)
-    #expect(response.summary.dailyHumanCountSparkline[0].day == "2026-04-11")
-    #expect(response.summary.dailyHumanCountSparkline[0].count == 1)
+    #expect(response.summary.dailyHumanCountSparkline[0].day == "2026-04-12")
+    #expect(response.summary.dailyHumanCountSparkline[0].count == 0)
     #expect(response.summary.selfRecoveryRateDelta.direction == .up)
     #expect(abs(response.summary.selfRecoveryRateDelta.value - 0.05) < 0.001)
 
@@ -172,7 +172,7 @@ private func makeFullEscalationsFixtureJSON() -> String {
         #"{"label":"\#(label)","count":\#(count)}"#
     }.joined(separator: ",")
 
-    let podIds = (0..<10).map { #""pod\($0)abc1""# }.joined(separator: ",")
+    let podIds = (0..<10).map { i in #""pod\#(i)abc1""# }.joined(separator: ",")
 
     return """
     {

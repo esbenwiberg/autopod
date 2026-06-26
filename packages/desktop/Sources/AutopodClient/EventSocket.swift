@@ -23,6 +23,7 @@ public actor EventSocket {
 
   private let baseURL: URL
   private let token: String
+  private let tokenProvider: DaemonAccessTokenProvider?
   private let pod: URLSession
   private let onEvent: @Sendable (RawSystemEvent) -> Void
   private let onStateChange: @Sendable (State) -> Void
@@ -35,11 +36,13 @@ public actor EventSocket {
   public init(
     baseURL: URL,
     token: String,
+    tokenProvider: DaemonAccessTokenProvider? = nil,
     onEvent: @escaping @Sendable (RawSystemEvent) -> Void,
     onStateChange: @escaping @Sendable (State) -> Void
   ) {
     self.baseURL = baseURL
-    self.token = token
+    self.token = DaemonAuth.normalizeBearerToken(token)
+    self.tokenProvider = tokenProvider
     self.pod = URLSession.shared
     self.onEvent = onEvent
     self.onStateChange = onStateChange
@@ -50,7 +53,7 @@ public actor EventSocket {
   public func connect() {
     guard state == .disconnected || state != .connecting else { return }
     setState(.connecting)
-    doConnect()
+    Task { await doConnect() }
   }
 
   public func disconnect() {
@@ -78,10 +81,10 @@ public actor EventSocket {
 
   // MARK: - Internal
 
-  private func doConnect() {
+  private func doConnect() async {
     // Build WebSocket URL: ws(s)://host:port/events?token=xxx
     var components = URLComponents(url: baseURL.appendingPathComponent("events"), resolvingAgainstBaseURL: false)!
-    components.queryItems = [URLQueryItem(name: "token", value: token)]
+    components.queryItems = [URLQueryItem(name: "token", value: await currentToken())]
     // Switch scheme to ws/wss
     if components.scheme == "http" { components.scheme = "ws" }
     else if components.scheme == "https" { components.scheme = "wss" }
@@ -185,6 +188,13 @@ public actor EventSocket {
       guard !Task.isCancelled else { return }
       await self?.doConnect()
     }
+  }
+
+  private func currentToken() async -> String {
+    if let tokenProvider, let freshToken = try? await tokenProvider() {
+      return DaemonAuth.normalizeBearerToken(freshToken)
+    }
+    return token
   }
 
   private func send(_ dict: [String: any Sendable]) {

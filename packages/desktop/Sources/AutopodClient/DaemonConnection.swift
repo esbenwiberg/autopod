@@ -1,16 +1,41 @@
 import Foundation
 
+public enum DaemonConnectionAuthKind: String, Codable, Sendable {
+  case manualToken
+  case entra
+}
+
 /// Persisted daemon connection metadata.
 /// Token is stored separately in Keychain, keyed by `id`.
 public struct DaemonConnection: Codable, Sendable, Identifiable {
   public var id: UUID
   public var name: String
   public var url: URL
+  public var authKind: DaemonConnectionAuthKind
 
-  public init(id: UUID = UUID(), name: String, url: URL) {
+  public init(
+    id: UUID = UUID(),
+    name: String,
+    url: URL,
+    authKind: DaemonConnectionAuthKind = .manualToken
+  ) {
     self.id = id
     self.name = name
     self.url = url
+    self.authKind = authKind
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case id, name, url, authKind
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(UUID.self, forKey: .id)
+    name = try container.decode(String.self, forKey: .name)
+    url = try container.decode(URL.self, forKey: .url)
+    authKind = try container.decodeIfPresent(DaemonConnectionAuthKind.self, forKey: .authKind)
+      ?? .manualToken
   }
 
   /// Display label for the connection (e.g. "localhost:3100")
@@ -34,6 +59,24 @@ public struct DaemonConnection: Codable, Sendable, Identifiable {
       .appendingPathComponent(".autopod/dev-token")
     return try? String(contentsOf: path, encoding: .utf8)
       .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  public static func normalizedURL(from rawValue: String) -> URL? {
+    let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    if trimmed.contains("://") {
+      return URL(string: trimmed)
+    }
+
+    if trimmed.hasPrefix("localhost")
+      || trimmed.hasPrefix("127.0.0.1")
+      || trimmed.hasPrefix("[::1]")
+      || trimmed.hasPrefix("::1") {
+      return URL(string: "http://\(trimmed)")
+    }
+
+    return URL(string: "https://\(trimmed)")
   }
 }
 
