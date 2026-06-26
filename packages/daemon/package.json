@@ -41,6 +41,7 @@
     "dockerode": "^5.0.0",
     "dotenv": "^17.3.1",
     "fastify": "^5.2.1",
+    "jose": "^6.2.3",
     "pino": "^9.6.0",
     "slugify": "^1.6.8",
     "tar-stream": "^3.1.7",

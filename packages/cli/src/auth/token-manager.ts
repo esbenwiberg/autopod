@@ -21,8 +21,8 @@ function readDevToken(): string | null {
 
 let msalClient: MsalClient | null = null;
 
-export function initMsal(clientId: string, tenantId: string): void {
-  msalClient = new MsalClient(clientId, tenantId);
+export function initMsal(clientId: string, tenantId: string, scopes?: string[]): void {
+  msalClient = new MsalClient(clientId, tenantId, scopes);
 }
 
 export function getMsalClient(): MsalClient {

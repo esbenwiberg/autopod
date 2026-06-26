@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PendingRequests } from '@autopod/escalation-mcp';
+import { AuthError } from '@autopod/shared';
 import { config as loadDotenv } from 'dotenv';
 import pino from 'pino';
 import { build as buildPrettyStream } from 'pino-pretty';
@@ -13,6 +14,7 @@ import {
   createActionRegistry,
 } from './actions/index.js';
 import { createServer } from './api/server.js';
+import { createEntraAuthModule, defaultEntraAudiences } from './auth/entra-auth-module.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
 import { DockerSidecarManager } from './containers/sidecar-manager.js';
@@ -84,6 +86,9 @@ const DB_PATH = process.env.DB_PATH ?? './autopod.db';
 const MAX_CONCURRENCY = Number.parseInt(process.env.MAX_CONCURRENCY ?? '3', 10);
 const TEAMS_WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
 const ACR_REGISTRY_URL = process.env.ACR_REGISTRY_URL;
+const ENTRA_TENANT_ID = process.env.ENTRA_TENANT_ID ?? process.env.AUTOPOD_TENANT_ID;
+const ENTRA_CLIENT_ID = process.env.ENTRA_CLIENT_ID ?? process.env.AUTOPOD_CLIENT_ID;
+const ENTRA_AUDIENCES = parseEnvList(process.env.ENTRA_AUDIENCE ?? process.env.AUTOPOD_AUDIENCE);
 
 // Fields to redact from all log records — covers common credential field names.
 const LOG_REDACT_PATHS = [
@@ -242,10 +247,9 @@ const devPayload = () => ({
   iat: Math.floor(Date.now() / 1000),
 });
 
-const authModule: AuthModule = {
+const devAuthModule: AuthModule = {
   async validateToken(token: string) {
     if (!ALLOW_DEV_AUTH) {
-      const { AuthError } = await import('@autopod/shared');
       throw new AuthError(
         IS_DEV
           ? 'Dev auth not enabled — set AUTOPOD_ALLOW_DEV_AUTH=1'
@@ -253,7 +257,6 @@ const authModule: AuthModule = {
       );
     }
     if (!token) {
-      const { AuthError } = await import('@autopod/shared');
       throw new AuthError('Missing token');
     }
     return devPayload();
@@ -272,6 +275,48 @@ const authModule: AuthModule = {
     return devPayload();
   },
 };
+
+function createRejectingAuthModule(reason: string): AuthModule {
+  return {
+    async validateToken() {
+      throw new AuthError(reason);
+    },
+    validateTokenSync() {
+      throw new AuthError(reason);
+    },
+  };
+}
+
+function createConfiguredAuthModule(): AuthModule {
+  if (ALLOW_DEV_AUTH) return devAuthModule;
+
+  if (ENTRA_TENANT_ID && ENTRA_CLIENT_ID) {
+    return createEntraAuthModule({
+      tenantId: ENTRA_TENANT_ID,
+      clientId: ENTRA_CLIENT_ID,
+      acceptedAudiences: ENTRA_AUDIENCES.length
+        ? ENTRA_AUDIENCES
+        : defaultEntraAudiences(ENTRA_CLIENT_ID),
+      logger,
+    });
+  }
+
+  const reason = IS_DEV
+    ? 'Dev auth not enabled — set AUTOPOD_ALLOW_DEV_AUTH=1'
+    : 'Entra auth not configured — set ENTRA_TENANT_ID and ENTRA_CLIENT_ID';
+  logger.warn(reason);
+  return createRejectingAuthModule(reason);
+}
+
+function parseEnvList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+const authModule: AuthModule = createConfiguredAuthModule();
 
 const worktreeManager = new LocalWorktreeManager({ logger });
 

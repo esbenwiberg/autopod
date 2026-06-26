@@ -28,7 +28,15 @@ program
 const clientId = process.env.AUTOPOD_CLIENT_ID;
 const tenantId = process.env.AUTOPOD_TENANT_ID;
 if (clientId && tenantId) {
-  initMsal(clientId, tenantId);
+  initMsal(clientId, tenantId, parseAuthScopes(process.env.AUTOPOD_AUTH_SCOPE, clientId));
+}
+
+function parseAuthScopes(value: string | undefined, clientId: string): string[] {
+  if (!value) return [`api://${clientId}/access_as_user`];
+  return value
+    .split(',')
+    .map((scope) => scope.trim())
+    .filter(Boolean);
 }
 
 // Lazy client factory — only creates client when a command actually needs it
