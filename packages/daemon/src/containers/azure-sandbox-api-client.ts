@@ -18,6 +18,8 @@ const ARM_SCOPE = 'https://management.azure.com/.default';
 const DATA_SCOPE = 'https://dynamicsessions.io/.default';
 const ACR_TOKEN_SCOPE = 'https://containerregistry.azure.net/.default';
 const ACR_DOCKER_USERNAME = '00000000-0000-0000-0000-000000000000';
+const ACR_EXCHANGE_TIMEOUT_MS = 30_000;
+const CREATE_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 
 interface AccessToken {
   token: string;
@@ -278,6 +280,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   }
 
   private async createDiskImage(baseImage: string): Promise<DiskImageResponse> {
+    this.logger.info({ image: baseImage }, 'Creating Azure sandbox disk image');
     const registryCredentials =
       this.config.registryCredentials ?? (await this.resolveAcrRegistryCredentials(baseImage));
     const initial = await this.requestData<DiskImageResponse>(
@@ -292,9 +295,11 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           ...(registryCredentials ? { registryCredentials } : {}),
           labels: { name: `autopod-${Date.now()}` },
         },
+        timeoutMs: CREATE_REQUEST_TIMEOUT_MS,
       },
     );
     const id = requiredId(initial, 'disk image');
+    this.logger.info({ diskImageId: id }, 'Azure sandbox disk image accepted');
     return this.pollState(
       () => this.getDiskImage(id),
       (image) => readyStates.has(image.status?.state ?? ''),
@@ -311,6 +316,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       return undefined;
     }
 
+    this.logger.info({ registry }, 'Minting ACR refresh token for Azure sandbox image pull');
     const token = await this.credential.getToken(ACR_TOKEN_SCOPE);
     if (!token) {
       throw new AutopodError(
@@ -320,15 +326,32 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       );
     }
 
-    const response = await this.fetchFn(`https://${registry}/oauth2/exchange`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'access_token',
-        service: registry,
-        access_token: token.token,
-      }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), ACR_EXCHANGE_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await this.fetchFn(`https://${registry}/oauth2/exchange`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'access_token',
+          service: registry,
+          access_token: token.token,
+        }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (isAbortError(err)) {
+        throw new AutopodError(
+          `ACR token exchange timed out for ${registry} after ${ACR_EXCHANGE_TIMEOUT_MS}ms`,
+          'AZURE_ACR_AUTH',
+          504,
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeout);
+    }
     if (!response.ok) {
       const body = await response.text();
       throw new AutopodError(
@@ -357,6 +380,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     diskImageId: string,
     options: CreateSandboxOptions,
   ): Promise<SandboxResponse> {
+    this.logger.info({ diskImageId, tier: options.tier }, 'Creating Azure sandbox from disk image');
     const initial = await this.requestData<SandboxResponse>(
       'PUT',
       `${this.groupPath()}/sandboxes`,
@@ -371,9 +395,11 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           egressPolicy: toWireEgressPolicy(options.egressPolicy),
           labels: { purpose: 'autopod-sandbox' },
         },
+        timeoutMs: CREATE_REQUEST_TIMEOUT_MS,
       },
     );
     const id = requiredId(initial, 'sandbox');
+    this.logger.info({ sandboxId: id, diskImageId }, 'Azure sandbox create accepted');
     return this.pollState(
       () => this.getSandbox(id),
       (sandbox) => sandbox.state === 'Running',
@@ -498,6 +524,15 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         await throwAzureHttpError(response, method, url);
       }
       return response;
+    } catch (err) {
+      if (controller && isAbortError(err)) {
+        throw new AutopodError(
+          `Azure Sandboxes ${method} ${url} timed out after ${options.timeoutMs}ms`,
+          'AZURE_SANDBOX_TIMEOUT',
+          504,
+        );
+      }
+      throw err;
     } finally {
       if (timeout) clearTimeout(timeout);
     }
@@ -684,6 +719,10 @@ async function throwAzureHttpError(
 
 function isStatusError(err: unknown, status: number): boolean {
   return err instanceof AutopodError && err.statusCode === status;
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError';
 }
 
 function sleep(ms: number): Promise<void> {
