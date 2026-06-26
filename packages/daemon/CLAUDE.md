@@ -187,8 +187,10 @@ Current preview caveats:
   that the tag exists in ACR before creating the sandbox.
 - ACR auth: private image pulls use `AZURE_SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID`, a
   user-assigned identity attached to the sandbox group and granted `AcrPull` on the registry.
-  `AZURE_SANDBOX_REGISTRY_USERNAME` + `AZURE_SANDBOX_REGISTRY_TOKEN` are supported only for
-  short-lived smoke/diagnostic tokens.
+  The current preview data plane still asks for `registryCredentials` during disk-image creation,
+  so the adapter mints a short-lived ACR refresh token from the daemon identity for each ACR warm
+  image request. `AZURE_SANDBOX_REGISTRY_USERNAME` + `AZURE_SANDBOX_REGISTRY_TOKEN` are supported
+  only for smoke/diagnostic override tokens.
 - RBAC: `Container Apps SandboxGroup Data Owner` is data-plane only. Creating or reading the
   sandbox group also needs control-plane rights such as resource-group `Contributor`/`Owner`, or
   set `AZURE_SANDBOX_ASSUME_GROUP_EXISTS=1` for a pre-created group.

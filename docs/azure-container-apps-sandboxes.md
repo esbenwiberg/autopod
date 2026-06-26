@@ -9,10 +9,10 @@ This target is production-supported only with Autopod warm images published to A
 - The sandbox group must live in a region where `Microsoft.App/sandboxGroups` is listed. The 2026-06-25 spike confirmed `swedencentral` and `northeurope`; `westeurope` was not listed.
 - Grant the daemon identity `Container Apps SandboxGroup Data Owner` on the sandbox group, or on the resource group that contains it. This is the data-plane role used for sandbox, disk-image, exec, file, lifecycle, and egress-policy operations.
 - If the daemon should create or read the sandbox group through ARM, grant normal control-plane RBAC with `Microsoft.App/sandboxGroups/read` and `Microsoft.App/sandboxGroups/write`, such as resource-group `Contributor` or `Owner`. If an admin pre-creates the group, set `AZURE_SANDBOX_ASSUME_GROUP_EXISTS=1` and grant only data-plane access.
-- Create or choose a user-assigned managed identity for private image pulls. Attach it to the sandbox group and grant that identity `AcrPull` on the ACR that stores Autopod warm images.
+- Create or choose a user-assigned managed identity for private image pulls. Attach it to the sandbox group and grant that identity `AcrPull` on the ACR that stores Autopod warm images. The current preview data plane still requires `registryCredentials` on disk-image creation, so Autopod mints a short-lived ACR refresh token from the daemon identity for each request instead of storing a static registry secret.
 - Grant the daemon identity enough ACR rights to push and inspect warm images. In practice this means `AcrPush` plus manifest read on the registry used by `ACR_REGISTRY_URL`.
 
-Managed identity is the production image-pull model. The adapter also supports the Sandbox SDK's `registryCredentials` field through `AZURE_SANDBOX_REGISTRY_USERNAME` + `AZURE_SANDBOX_REGISTRY_TOKEN`; use that only for short-lived smoke tokens or emergency diagnostics, not as the steady-state auth model.
+Managed identity plus short-lived token exchange is the production image-pull model. The adapter also supports explicitly provided `registryCredentials` through `AZURE_SANDBOX_REGISTRY_USERNAME` + `AZURE_SANDBOX_REGISTRY_TOKEN`; use that only for short-lived smoke tokens or emergency diagnostics, not as the steady-state auth model.
 
 Example shape:
 
@@ -97,7 +97,7 @@ At sandbox pod spawn, the daemon checks:
 - The tag is ACR-qualified.
 - If `ACR_REGISTRY_URL` is configured, the tag exists and is readable by the daemon identity.
 
-The sandbox data plane then proves the sandbox group image-pull identity can pull it by creating the disk image. A failure there usually means the user-assigned identity is not attached to the sandbox group or lacks `AcrPull`.
+The sandbox data plane then proves the image can be pulled by creating the disk image with a short-lived ACR refresh token minted by the daemon identity. A failure there usually means the daemon identity lacks ACR access, the user-assigned identity is not attached to the sandbox group, or the preview API changed its registry credential shape.
 
 ## Workspace Sync
 

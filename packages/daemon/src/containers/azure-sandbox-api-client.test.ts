@@ -69,6 +69,13 @@ function jsonBody(request: CapturedRequest): unknown {
   return JSON.parse(String(request.init?.body));
 }
 
+function formBody(request: CapturedRequest): URLSearchParams {
+  if (!(request.init?.body instanceof URLSearchParams)) {
+    throw new Error('request body is not URLSearchParams');
+  }
+  return request.init.body;
+}
+
 describe('AzureSandboxApiClient', () => {
   it('creates the group when missing, then creates a disk image and sandbox', async () => {
     const { client, requests } = makeClient([
@@ -121,6 +128,7 @@ describe('AzureSandboxApiClient', () => {
         { status: 404, body: {} },
         { status: 201, body: {} },
         { status: 200, body: { id: 'group-1' } },
+        { status: 200, body: { refresh_token: 'acr-refresh-token' } },
         { status: 200, body: { id: 'disk-1', status: { state: 'Ready' } } },
         { status: 200, body: { id: 'disk-1', status: { state: 'Ready' } } },
         { status: 200, body: { id: 'sbx-1', state: 'Running' } },
@@ -142,9 +150,18 @@ describe('AzureSandboxApiClient', () => {
         userAssignedIdentities: { [identityId]: {} },
       },
     });
-    expect(jsonBody(requests[3] ?? failRequest())).toMatchObject({
+    expect(requests[3]?.url).toBe('https://ewiacr.azurecr.io/oauth2/exchange');
+    const exchange = formBody(requests[3] ?? failRequest());
+    expect(exchange.get('grant_type')).toBe('access_token');
+    expect(exchange.get('service')).toBe('ewiacr.azurecr.io');
+    expect(exchange.get('access_token')).toBe('test-token');
+    expect(jsonBody(requests[4] ?? failRequest())).toMatchObject({
       image: { base: 'ewiacr.azurecr.io/autopod/test-app:latest' },
       managedIdentityResourceId: identityId,
+      registryCredentials: {
+        username: '00000000-0000-0000-0000-000000000000',
+        token: 'acr-refresh-token',
+      },
     });
   });
 
