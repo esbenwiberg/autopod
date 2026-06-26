@@ -139,6 +139,8 @@ interface TestProfileOverrides {
   prProvider?: 'github' | 'ado';
   defaultModel?: string;
   defaultRuntime?: RuntimeType;
+  executionTarget?: Profile['executionTarget'];
+  warmImageTag?: string | null;
   modelProvider?: Profile['modelProvider'];
   validationSetupCommand?: string | null;
 }
@@ -534,9 +536,9 @@ function createTestContext(
         defaultRuntime: row.default_runtime as RuntimeType,
         customInstructions: (row.custom_instructions as string) ?? null,
         escalation: JSON.parse(row.escalation_config as string),
-        executionTarget: 'local' as const,
+        executionTarget: profileOverrides?.executionTarget ?? 'local',
         extends: null,
-        warmImageTag: null,
+        warmImageTag: profileOverrides?.warmImageTag ?? null,
         warmImageBuiltAt: null,
         mcpServers: JSON.parse((row.mcp_servers as string) ?? '[]'),
         claudeMdSections: JSON.parse((row.claude_md_sections as string) ?? '[]'),
@@ -2403,7 +2405,54 @@ describe('PodManager', () => {
       expect(String(envFileWrite?.[2])).toContain(
         "export AUTOPOD_VALIDATION_BASE_REF='abc1234567890abcdef1234567890abcdef1234'",
       );
+      expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+        'container-123',
+        ['chmod', '0400', AGENT_ENV_PATH],
+        { timeout: 5_000 },
+      );
+      expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+        'container-123',
+        ['chmod', '0500', AGENT_SHIM_PATH],
+        { timeout: 5_000 },
+      );
       expect(reviewer.generateText).toHaveBeenCalledTimes(1);
+    });
+
+    it('uses owner-neutral agent shim modes for sandbox pods', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test:latest',
+      });
+      const memoryRepo = createMemoryRepository(ctx.db);
+      ctx.deps.memoryRepo = memoryRepo;
+      insertApprovedMemory(memoryRepo);
+      vi.mocked(createProfileMemoryReviewer).mockResolvedValueOnce({
+        ok: false,
+        reason: 'container_reviewer_unavailable: timeout',
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Smoke sandbox shim modes',
+          skipValidation: true,
+        },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+        'container-123',
+        ['chmod', '0444', AGENT_ENV_PATH],
+        { timeout: 5_000 },
+      );
+      expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+        'container-123',
+        ['chmod', '0555', AGENT_SHIM_PATH],
+        { timeout: 5_000 },
+      );
     });
 
     it('emits pod activity when memory ranking uses deterministic fallback', async () => {
