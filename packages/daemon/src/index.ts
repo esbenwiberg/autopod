@@ -17,6 +17,7 @@ import { createServer } from './api/server.js';
 import { createEntraAuthModule, defaultEntraAudiences } from './auth/entra-auth-module.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
+import { RoutingContainerManager } from './containers/routing-container-manager.js';
 import { DockerSidecarManager } from './containers/sidecar-manager.js';
 import { loadOrCreateKey } from './crypto/credentials-cipher.js';
 import { createPodTokenIssuer } from './crypto/pod-tokens.js';
@@ -441,11 +442,6 @@ if (docker) {
   );
 }
 
-const runtimeRegistry = createRuntimeRegistry([
-  new ClaudeRuntime(logger, containerManager),
-  new CodexRuntime(logger, containerManager, podRepo),
-  new CopilotRuntime(logger, containerManager),
-]);
 const hostBrowserRunner = createHostBrowserRunner(logger);
 const screenshotStore = createScreenshotStore(resolveDataDir());
 const validationEngine = createLocalValidationEngine(
@@ -553,6 +549,20 @@ const containerManagerFactory = {
     return containerManager;
   },
 };
+
+const runtimeContainerManager = new RoutingContainerManager({
+  local: containerManager,
+  sandbox: sandboxContainerManager,
+  resolveTarget(containerId) {
+    return podRepo.list().find((pod) => pod.containerId === containerId)?.executionTarget;
+  },
+});
+
+const runtimeRegistry = createRuntimeRegistry([
+  new ClaudeRuntime(logger, runtimeContainerManager),
+  new CodexRuntime(logger, runtimeContainerManager, podRepo),
+  new CopilotRuntime(logger, runtimeContainerManager),
+]);
 
 const ghPrManager = new GhPrManager({ logger });
 
