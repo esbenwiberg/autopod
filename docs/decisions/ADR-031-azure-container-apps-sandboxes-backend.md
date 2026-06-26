@@ -63,8 +63,10 @@ image tags before provisioning, and when `ACR_REGISTRY_URL` is configured the
 daemon checks the ACR manifest before creating the sandbox. Private ACR pulls
 use a user-assigned managed identity configured by
 `AZURE_SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID`, attached to the sandbox group
-and granted `AcrPull`. For short-lived diagnostics only, the adapter can pass
-the Sandbox SDK's `registryCredentials` field from
+and granted `AcrPull`. The current preview data plane still requires
+`registryCredentials` during disk-image creation, so the adapter mints a
+short-lived ACR refresh token from the daemon identity for each ACR warm image
+request. For diagnostics only, operators can override that generated token with
 `AZURE_SANDBOX_REGISTRY_USERNAME` and `AZURE_SANDBOX_REGISTRY_TOKEN`.
 
 For restricted network policy, reuse Autopod's existing allowlist calculation
@@ -100,7 +102,8 @@ Harder:
 - The daemon needs a reachable `AUTOPOD_CONTAINER_HOST` for cloud sandboxes to
   call the MCP endpoint.
 - Private ACR pulls require managed-identity setup on the sandbox group plus
-  `AcrPull` on the registry.
+  `AcrPull`, and the daemon identity needs ACR token-exchange rights such as
+  `AcrPush` or equivalent registry pull/read permission.
 - Preview API shape may drift; the adapter must stay covered by request-shape
   tests and live smoke checks.
 

@@ -16,6 +16,8 @@ import type {
 const API_VERSION = '2026-02-01-preview';
 const ARM_SCOPE = 'https://management.azure.com/.default';
 const DATA_SCOPE = 'https://dynamicsessions.io/.default';
+const ACR_TOKEN_SCOPE = 'https://containerregistry.azure.net/.default';
+const ACR_DOCKER_USERNAME = '00000000-0000-0000-0000-000000000000';
 
 interface AccessToken {
   token: string;
@@ -276,6 +278,8 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   }
 
   private async createDiskImage(baseImage: string): Promise<DiskImageResponse> {
+    const registryCredentials =
+      this.config.registryCredentials ?? (await this.resolveAcrRegistryCredentials(baseImage));
     const initial = await this.requestData<DiskImageResponse>(
       'PUT',
       `${this.groupPath()}/diskimages`,
@@ -285,9 +289,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           ...(this.config.imagePullIdentityResourceId
             ? { managedIdentityResourceId: this.config.imagePullIdentityResourceId }
             : {}),
-          ...(this.config.registryCredentials
-            ? { registryCredentials: this.config.registryCredentials }
-            : {}),
+          ...(registryCredentials ? { registryCredentials } : {}),
           labels: { name: `autopod-${Date.now()}` },
         },
       },
@@ -299,6 +301,56 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       `disk image ${id}`,
       (image) => image.status?.state === 'Failed',
     );
+  }
+
+  private async resolveAcrRegistryCredentials(
+    baseImage: string,
+  ): Promise<SandboxRegistryCredentials | undefined> {
+    const registry = registryHostFromImage(baseImage);
+    if (!registry?.endsWith('.azurecr.io')) {
+      return undefined;
+    }
+
+    const token = await this.credential.getToken(ACR_TOKEN_SCOPE);
+    if (!token) {
+      throw new AutopodError(
+        'Azure credential did not return an ACR access token',
+        'AZURE_AUTH',
+        401,
+      );
+    }
+
+    const response = await this.fetchFn(`https://${registry}/oauth2/exchange`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'access_token',
+        service: registry,
+        access_token: token.token,
+      }),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new AutopodError(
+        `ACR token exchange failed for ${registry} (${response.status} ${response.statusText}): ${body.slice(
+          0,
+          300,
+        )}`,
+        'AZURE_ACR_AUTH',
+        401,
+      );
+    }
+
+    const body = (await response.json()) as { refresh_token?: unknown };
+    if (typeof body.refresh_token !== 'string' || body.refresh_token.length === 0) {
+      throw new AutopodError(
+        `ACR token exchange for ${registry} did not return a refresh token`,
+        'AZURE_ACR_AUTH',
+        401,
+      );
+    }
+
+    return { username: ACR_DOCKER_USERNAME, token: body.refresh_token };
   }
 
   private async createSandboxFromDiskImage(
@@ -589,6 +641,14 @@ function withQuery(baseUrl: string, params?: Record<string, string | undefined>)
 
 function seg(value: string): string {
   return encodeURIComponent(value);
+}
+
+function registryHostFromImage(image: string): string | undefined {
+  const [firstComponent = ''] = image.split('/');
+  if (!image.includes('/') || (!firstComponent.includes('.') && !firstComponent.includes(':'))) {
+    return undefined;
+  }
+  return firstComponent.toLowerCase();
 }
 
 function requiredId(resource: { id?: string }, label: string): string {
