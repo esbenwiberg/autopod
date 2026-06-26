@@ -9,7 +9,9 @@ public struct SetupSheet: View {
   @State private var name = "Local"
   @State private var urlString = "http://localhost:3100"
   @State private var token = ""
+  @State private var authKind: DaemonConnectionAuthKind = .manualToken
   @State private var isTesting = false
+  @State private var isSigningIn = false
   @State private var isSaving = false
   @State private var testResult: TestResult?
 
@@ -19,7 +21,7 @@ public struct SetupSheet: View {
   }
 
   private var canTest: Bool {
-    !urlString.isEmpty && !token.isEmpty && URL(string: urlString) != nil
+    !urlString.isEmpty && !token.isEmpty && DaemonConnection.normalizedURL(from: urlString) != nil
   }
 
   private var canSave: Bool {
@@ -60,6 +62,23 @@ public struct SetupSheet: View {
           TextField("http://localhost:3100", text: $urlString)
             .textFieldStyle(.roundedBorder)
             .font(.system(.callout, design: .monospaced))
+            .onChange(of: urlString) { _, _ in
+              testResult = nil
+              if isLocalUrl {
+                authKind = .manualToken
+              }
+            }
+        }
+
+        if !isLocalUrl {
+          field("Auth") {
+            Picker("Auth", selection: $authKind) {
+              Text("Microsoft").tag(DaemonConnectionAuthKind.entra)
+              Text("Token").tag(DaemonConnectionAuthKind.manualToken)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+          }
         }
 
         field("Auth Token") {
@@ -67,7 +86,20 @@ public struct SetupSheet: View {
             SecureField("Access token", text: $token)
               .textFieldStyle(.roundedBorder)
               .font(.system(.callout, design: .monospaced))
-            if isLocalUrl {
+            if authKind == .entra && !isLocalUrl {
+              Button {
+                Task { await signInWithMicrosoft() }
+              } label: {
+                HStack(spacing: 6) {
+                  if isSigningIn {
+                    ProgressView().scaleEffect(0.6)
+                  }
+                  Text("Sign in")
+                }
+              }
+              .disabled(isSigningIn || isTesting)
+              .help("Sign in with Microsoft")
+            } else if isLocalUrl {
               Button("Dev token") {
                 if let t = DaemonConnection.readLocalDevToken() {
                   token = t
@@ -141,7 +173,7 @@ public struct SetupSheet: View {
       }
       .padding(16)
     }
-    .frame(width: 420, height: 380)
+    .frame(width: 420, height: 430)
     .background(Color(nsColor: .windowBackgroundColor))
     .onAppear {
       // Auto-fill dev token for local connections
@@ -165,18 +197,22 @@ public struct SetupSheet: View {
   }
 
   private var isLocalUrl: Bool {
-    urlString.contains("localhost") || urlString.contains("127.0.0.1")
+    guard let url = DaemonConnection.normalizedURL(from: urlString),
+          let host = url.host else {
+      return false
+    }
+    return host == "localhost" || host == "127.0.0.1" || host == "::1"
   }
 
   private func testConnection() async {
-    guard let url = URL(string: urlString) else {
+    guard let url = DaemonConnection.normalizedURL(from: urlString) else {
       testResult = .failure("Invalid URL")
       return
     }
     isTesting = true
     testResult = nil
 
-    let result = await connectionManager.testConnection(url: url, token: token)
+    let result = await connectionManager.testConnection(url: url, token: token, authKind: authKind)
     switch result {
     case .success:
       testResult = .success
@@ -186,11 +222,28 @@ public struct SetupSheet: View {
     isTesting = false
   }
 
+  private func signInWithMicrosoft() async {
+    isSigningIn = true
+    testResult = nil
+    do {
+      token = try await connectionManager.signInWithMicrosoft()
+      await testConnection()
+    } catch {
+      testResult = .failure(error.localizedDescription)
+    }
+    isSigningIn = false
+  }
+
   private func saveAndConnect() async {
-    guard let url = URL(string: urlString) else { return }
+    guard let url = DaemonConnection.normalizedURL(from: urlString) else { return }
     isSaving = true
     do {
-      try await connectionManager.addAndConnect(name: name, url: url, token: token)
+      try await connectionManager.addAndConnect(
+        name: name,
+        url: url,
+        token: token,
+        authKind: authKind
+      )
       isPresented = false
     } catch {
       testResult = .failure(error.localizedDescription)

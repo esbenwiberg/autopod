@@ -1202,7 +1202,9 @@ autopod uses Azure Entra ID for authentication.
 
 1. Go to [Azure Portal](https://portal.azure.com) > **Entra ID** > **App registrations**
 2. Create a new registration
-3. Set redirect URI to `http://localhost` (for PKCE flow)
+3. Under **Authentication**, add Mobile and desktop redirect URIs:
+   - `http://localhost` (CLI PKCE/device-code compatibility)
+   - `msauth.com.autopod.desktop://auth` (macOS desktop native sign-in)
 4. Enable **"Allow public client flows"** (for device code flow on headless machines)
 5. Under **Expose an API**, set the Application ID URI to `api://<application-client-id>`
 6. Add a delegated scope named `access_as_user`
@@ -1223,6 +1225,8 @@ export AUTOPOD_TENANT_ID=<directory-tenant-id>
 export AUTOPOD_AUTH_SCOPE=api://<application-client-id>/access_as_user
 ap auth login
 ```
+
+For the hosted desktop daemon flow, see `docs/hosted-daemon-tls-entra.md`.
 
 ---
 

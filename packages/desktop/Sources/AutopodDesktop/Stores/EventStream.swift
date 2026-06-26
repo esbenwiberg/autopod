@@ -68,12 +68,17 @@ public final class EventStream {
 
   // MARK: - Lifecycle
 
-  public func connect(baseURL: URL, token: String) {
+  public func connect(
+    baseURL: URL,
+    token: String,
+    tokenProvider: DaemonAccessTokenProvider? = nil
+  ) {
     disconnect()
 
     let socket = EventSocket(
       baseURL: baseURL,
       token: token,
+      tokenProvider: tokenProvider,
       onEvent: { [weak self] raw in
         Task { @MainActor [weak self] in
           self?.handleRawEvent(raw)

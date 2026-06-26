@@ -15,10 +15,16 @@ public final class TerminalManager {
   private var socket: TerminalSocket?
   private let baseURL: URL
   private let token: String
+  private let tokenProvider: DaemonAccessTokenProvider?
 
-  public init(baseURL: URL, token: String) {
+  public init(
+    baseURL: URL,
+    token: String,
+    tokenProvider: DaemonAccessTokenProvider? = nil
+  ) {
     self.baseURL = baseURL
     self.token = token
+    self.tokenProvider = tokenProvider
   }
 
   public func connect(podId: String, cols: Int = 120, rows: Int = 40) {
@@ -36,6 +42,7 @@ public final class TerminalManager {
     let sock = TerminalSocket(
       baseURL: baseURL,
       token: token,
+      tokenProvider: tokenProvider,
       onData: { data in
         Task { @MainActor in
           pipe.feed(data)
