@@ -61,11 +61,23 @@ function createMockExec(exitCode = 0) {
 }
 
 function createMockDocker(container = createMockContainer()) {
+  const image = {
+    inspect: vi.fn().mockResolvedValue({ Id: 'image-123' }),
+  };
   return {
     createContainer: vi.fn().mockResolvedValue(container),
     getContainer: vi.fn().mockReturnValue(container),
+    getImage: vi.fn().mockReturnValue(image),
+    pull: vi.fn().mockResolvedValue(createMockMuxStream()),
     listContainers: vi.fn().mockResolvedValue([]),
     modem: {
+      followProgress: vi.fn(
+        (
+          _stream: NodeJS.ReadableStream,
+          onComplete: (err: Error | null) => void,
+          _onProgress?: (event: unknown) => void,
+        ) => onComplete(null),
+      ),
       demuxStream: vi.fn(
         (
           stream: { _mockStdout?: string; _mockStderr?: string },
@@ -117,6 +129,54 @@ describe('DockerContainerManager', () => {
         }),
       );
       expect(container.start).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not pull when the image is already present locally', async () => {
+      await manager.spawn(baseConfig);
+
+      expect(docker.getImage).toHaveBeenCalledWith('node:22-alpine');
+      expect(docker.pull).not.toHaveBeenCalled();
+    });
+
+    it('pulls a missing image before creating the container', async () => {
+      docker.getImage.mockReturnValue({
+        inspect: vi.fn().mockRejectedValue({ statusCode: 404 }),
+      });
+
+      await manager.spawn(baseConfig);
+
+      expect(docker.pull).toHaveBeenCalledWith('node:22-alpine');
+      expect(docker.modem.followProgress).toHaveBeenCalled();
+      expect(docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({ Image: 'node:22-alpine' }),
+      );
+    });
+
+    it('uses the authenticated image puller for missing ACR images', async () => {
+      docker.getImage.mockReturnValue({
+        inspect: vi.fn().mockRejectedValue({ statusCode: 404 }),
+      });
+      const imagePuller = {
+        canPull: vi.fn((image: string) => image.startsWith('myregistry.azurecr.io/')),
+        pull: vi.fn().mockResolvedValue(undefined),
+      };
+      manager = new DockerContainerManager({ docker, logger, imagePuller });
+
+      await manager.spawn({
+        ...baseConfig,
+        image: 'myregistry.azurecr.io/autopod/test-app:latest',
+      });
+
+      expect(imagePuller.canPull).toHaveBeenCalledWith(
+        'myregistry.azurecr.io/autopod/test-app:latest',
+      );
+      expect(imagePuller.pull).toHaveBeenCalledWith(
+        'myregistry.azurecr.io/autopod/test-app:latest',
+      );
+      expect(docker.pull).not.toHaveBeenCalled();
+      expect(docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({ Image: 'myregistry.azurecr.io/autopod/test-app:latest' }),
+      );
     });
 
     it('maps env vars to KEY=VALUE format', async () => {

@@ -313,6 +313,7 @@ type DockerodeInstance = InstanceType<typeof Dockerode>;
 let docker: DockerodeInstance | undefined;
 let containerManager: ContainerManager;
 let networkManager: DockerNetworkManager | undefined;
+let acr: import('./images/acr-client.js').AcrClient | null = null;
 // Spawns companion sidecars (e.g. Dagger engine) on the pod's isolated
 // network. Only wired when real Docker is available — mock mode skips
 // sidecars entirely and the pod manager surfaces MISCONFIGURED_DAEMON if a
@@ -374,7 +375,11 @@ if (MOCK_DOCKER) {
     logger.debug({ err }, 'docker.info() failed — skipping memory headroom check');
   }
   docker = d;
-  containerManager = new DockerContainerManager({ docker: d, logger });
+  if (ACR_REGISTRY_URL) {
+    const { AcrClient } = await import('./images/acr-client.js');
+    acr = new AcrClient({ registryUrl: ACR_REGISTRY_URL }, d);
+  }
+  containerManager = new DockerContainerManager({ docker: d, logger, imagePuller: acr });
   networkManager = new DockerNetworkManager({ docker: d, logger });
   sidecarManager = new DockerSidecarManager({ docker: d, logger });
 }
@@ -410,13 +415,8 @@ function parseSandboxRegistryCredentials(): { username: string; token: string } 
 }
 
 let imageBuilder: import('./images/index.js').ImageBuilder | undefined;
-let acr: import('./images/acr-client.js').AcrClient | null = null;
 if (docker) {
   const { ImageBuilder } = await import('./images/image-builder.js');
-  if (ACR_REGISTRY_URL) {
-    const { AcrClient } = await import('./images/acr-client.js');
-    acr = new AcrClient({ registryUrl: ACR_REGISTRY_URL }, docker);
-  }
   imageBuilder = new ImageBuilder({ docker, acr, profileStore });
   logger.info(
     { acrRegistry: ACR_REGISTRY_URL ?? null, mode: acr ? 'acr-push' : 'local-only' },

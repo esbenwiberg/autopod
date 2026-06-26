@@ -106,6 +106,15 @@ describe('AcrClient', () => {
     );
   });
 
+  it('reports whether it can pull a fully qualified image reference', () => {
+    const mockDocker = createMockDocker();
+    const client = new AcrClient({ registryUrl: 'myregistry.azurecr.io' }, mockDocker);
+
+    expect(client.canPull('myregistry.azurecr.io/autopod/test-app:latest')).toBe(true);
+    expect(client.canPull('other.azurecr.io/autopod/test-app:latest')).toBe(false);
+    expect(client.canPull('node:22-alpine')).toBe(false);
+  });
+
   it('checks if image exists in ACR', async () => {
     const mockDocker = createMockDocker();
     const client = new AcrClient({ registryUrl: 'myregistry.azurecr.io' }, mockDocker);

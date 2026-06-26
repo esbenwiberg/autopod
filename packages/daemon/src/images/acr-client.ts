@@ -87,6 +87,11 @@ export class AcrClient {
     logger.info({ tag: acrTag }, 'Pulled image from ACR');
   }
 
+  /** Whether this ACR client owns the fully-qualified image reference. */
+  canPull(tag: string): boolean {
+    return tag.startsWith(`${this.config.registryUrl}/`);
+  }
+
   /** Check if an image exists in ACR. */
   async exists(tag: string): Promise<boolean> {
     try {

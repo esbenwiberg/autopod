@@ -172,15 +172,23 @@ function mirrorStagedDirectory(
 interface DockerContainerManagerOptions {
   docker?: Dockerode;
   logger: Logger;
+  imagePuller?: ImagePuller | null;
+}
+
+interface ImagePuller {
+  canPull(image: string): boolean;
+  pull(image: string): Promise<void>;
 }
 
 export class DockerContainerManager implements ContainerManager {
   private docker: Dockerode;
   private logger: Logger;
+  private imagePuller: ImagePuller | null;
 
-  constructor({ docker, logger }: DockerContainerManagerOptions) {
+  constructor({ docker, logger, imagePuller }: DockerContainerManagerOptions) {
     this.docker = docker ?? new Dockerode();
     this.logger = logger;
+    this.imagePuller = imagePuller ?? null;
   }
 
   private async isContainerListedAsRunning(containerId: string): Promise<boolean> {
@@ -239,6 +247,8 @@ export class DockerContainerManager implements ContainerManager {
   async spawn(config: ContainerSpawnConfig): Promise<string> {
     const containerName = `autopod-${config.podId}`;
     const env = Object.entries(config.env).map(([k, v]) => `${k}=${v}`);
+
+    await this.ensureImagePresent(config.image);
 
     // Build port bindings and exposed ports
     const exposedPorts: Record<string, object> = {};
@@ -408,6 +418,40 @@ export class DockerContainerManager implements ContainerManager {
       }
       this.logger.error({ containerId, err }, 'Failed to stop Docker container');
       throw err;
+    }
+  }
+
+  private async ensureImagePresent(image: string): Promise<void> {
+    try {
+      await boundedDockerCall(this.docker.getImage(image).inspect(), {
+        label: 'image.inspect (spawn preflight)',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+        logger: this.logger,
+      });
+      return;
+    } catch (err: unknown) {
+      if (!isExpectedDockerError(err, [404])) throw err;
+    }
+
+    try {
+      if (this.imagePuller?.canPull(image)) {
+        this.logger.info({ image }, 'Pulling missing image via authenticated image puller');
+        await this.imagePuller.pull(image);
+        return;
+      }
+
+      this.logger.info({ image }, 'Pulling missing Docker image');
+      const stream = (await this.docker.pull(image)) as NodeJS.ReadableStream;
+      await new Promise<void>((resolve, reject) => {
+        this.docker.modem.followProgress(
+          stream,
+          (followErr: Error | null) => (followErr ? reject(followErr) : resolve()),
+          () => {},
+        );
+      });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to pull Docker image "${image}": ${detail}`);
     }
   }
 
