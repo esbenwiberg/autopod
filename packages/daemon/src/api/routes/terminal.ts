@@ -31,7 +31,7 @@ export function terminalRoutes(
   app.get(
     '/pods/:podId/terminal',
     { websocket: true, config: { auth: false, rateLimit: false } },
-    (socket: WebSocket, request) => {
+    async (socket: WebSocket, request) => {
       const { podId } = request.params as { podId: string };
       const url = new URL(request.url, 'http://localhost');
       const token = url.searchParams.get('token');
@@ -44,7 +44,7 @@ export function terminalRoutes(
         return;
       }
       try {
-        authModule.validateTokenSync(token);
+        await authModule.validateToken(token);
       } catch {
         socket.close(4001, 'Invalid token');
         return;

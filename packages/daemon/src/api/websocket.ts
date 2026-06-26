@@ -84,7 +84,7 @@ export function websocketHandler(
 ): void {
   const clients = new Set<WsClient>();
 
-  app.get('/events', { websocket: true, config: { auth: false } }, (socket, request) => {
+  app.get('/events', { websocket: true, config: { auth: false } }, async (socket, request) => {
     // Auth via query param
     const url = new URL(request.url, 'http://localhost');
     const token = url.searchParams.get('token');
@@ -96,7 +96,7 @@ export function websocketHandler(
 
     let userId: string;
     try {
-      const payload = authModule.validateTokenSync(token);
+      const payload = await authModule.validateToken(token);
       userId = payload.oid;
     } catch {
       socket.close(4001, 'Invalid token');

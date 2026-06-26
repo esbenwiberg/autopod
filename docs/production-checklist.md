@@ -13,6 +13,7 @@ Verify every item before going live. Items marked **REQUIRED** will prevent the 
 | `NODE_ENV` | `production` | Enables auth enforcement. Without this, all API requests are accepted without a valid Entra token. |
 | `ENTRA_CLIENT_ID` | Real Azure AD app client ID (UUID) | Must match the registered app in your tenant. |
 | `ENTRA_TENANT_ID` | Real Azure AD tenant ID (UUID) | Daemon validates JWTs against this tenant's OIDC endpoint. |
+| `ENTRA_AUDIENCE` | App ID URI accepted by the daemon, e.g. `api://<client-id>` | Optional. Defaults to `api://<client-id>`, the raw client ID, and legacy `api://autopod`. Comma-separated values are supported. |
 | `DB_PATH` | Absolute path on a durable volume (e.g. `/data/autopod.db`) | Defaults to `./autopod.db` which is lost on container restart. |
 
 ### Must NOT be set in production
@@ -136,6 +137,16 @@ Configure these rules on the target repositories that Autopod will open PRs agai
 
 ## 6. Auth & API Security
 
+- [ ] App registration exposes an API scope:
+  - Application ID URI: `api://<ENTRA_CLIENT_ID>` (or set matching `ENTRA_AUDIENCE`)
+  - Delegated scope: `access_as_user`
+  - Public client flows enabled for device-code CLI login
+- [ ] CLI operators export:
+  ```bash
+  AUTOPOD_CLIENT_ID=<ENTRA_CLIENT_ID>
+  AUTOPOD_TENANT_ID=<ENTRA_TENANT_ID>
+  AUTOPOD_AUTH_SCOPE=api://<ENTRA_CLIENT_ID>/access_as_user
+  ```
 - [ ] Confirm the deployed binary has `NODE_ENV=production`. A quick check:
   ```bash
   curl -s -o /dev/null -w '%{http_code}' http://localhost:3100/health

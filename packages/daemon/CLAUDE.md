@@ -257,7 +257,7 @@ Agents call `execute_action` via the escalation MCP server. The daemon:
 ## API Server (`src/api/server.ts`)
 
 Fastify app with:
-- **Plugins**: `cors`, `rate-limit`, `request-logger`, `auth` (stubbed in dev)
+- **Plugins**: `cors`, `rate-limit`, `request-logger`, `auth`
 - **Routes**: `/pods`, `/profiles`, `/health`, `/diff`, `/terminal` (WebSocket),
   `/memory`, `/pods/memory-workspace`, `/scheduled-jobs`,
   `/scheduled-job-templates`, `/issue-watcher`, `/actions`, `/skills`, `/files`,
@@ -266,7 +266,10 @@ Fastify app with:
 - **MCP proxy**: `mcp-handler.ts` bridges HTTP POST requests from containers to the daemon's
   in-process MCP server, injecting auth and stripping PII from responses
 
-In `NODE_ENV !== 'production'`, the auth plugin accepts all tokens — no Entra credentials needed.
+Auth uses Entra JWT validation when `ENTRA_TENANT_ID` and `ENTRA_CLIENT_ID` are set. The daemon
+accepts `ENTRA_AUDIENCE` as a comma-separated override; otherwise it accepts
+`api://<client-id>`, the raw client ID, and legacy `api://autopod`. Dev auth only accepts local
+tokens when `AUTOPOD_ALLOW_DEV_AUTH=1` is explicitly set.
 
 ## Testing
 

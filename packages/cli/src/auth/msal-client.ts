@@ -9,11 +9,13 @@ import {
 } from '@azure/msal-node';
 import open from 'open';
 
-const SCOPES = ['api://autopod/.default'];
+const DEFAULT_SCOPES = ['api://autopod/.default'];
 
 export class MsalClient {
   private pca: PublicClientApplication;
-  constructor(clientId: string, tenantId: string) {
+  private scopes: string[];
+
+  constructor(clientId: string, tenantId: string, scopes: string[] = DEFAULT_SCOPES) {
     const config: Configuration = {
       auth: {
         clientId,
@@ -21,11 +23,12 @@ export class MsalClient {
       },
     };
     this.pca = new PublicClientApplication(config);
+    this.scopes = scopes.length ? scopes : DEFAULT_SCOPES;
   }
 
   async acquireTokenByDeviceCode(onMessage: (message: string) => void): Promise<AuthToken> {
     const request: DeviceCodeRequest = {
-      scopes: SCOPES,
+      scopes: this.scopes,
       deviceCodeCallback: (response) => {
         onMessage(response.message);
       },
@@ -41,7 +44,7 @@ export class MsalClient {
   async acquireTokenInteractive(): Promise<AuthToken> {
     // PKCE flow with local redirect
     const result = await this.pca.acquireTokenInteractive({
-      scopes: SCOPES,
+      scopes: this.scopes,
       openBrowser: async (url) => {
         await open(url);
       },
@@ -57,7 +60,7 @@ export class MsalClient {
 
   async refreshToken(account: AccountInfo): Promise<AuthToken | null> {
     const request: SilentFlowRequest = {
-      scopes: SCOPES,
+      scopes: this.scopes,
       account,
     };
 

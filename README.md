@@ -269,6 +269,9 @@ Edit `.env` with your values:
 # Required — from your Entra ID app registration
 ENTRA_CLIENT_ID=<application-client-id>
 ENTRA_TENANT_ID=<directory-tenant-id>
+# Optional when your app exposes a non-default App ID URI.
+# Defaults to api://<application-client-id>, client ID, and api://autopod.
+ENTRA_AUDIENCE=api://<application-client-id>
 
 # For AI agents (in dev, set directly; in prod, use Key Vault)
 ANTHROPIC_API_KEY=sk-ant-...
@@ -1201,12 +1204,24 @@ autopod uses Azure Entra ID for authentication.
 2. Create a new registration
 3. Set redirect URI to `http://localhost` (for PKCE flow)
 4. Enable **"Allow public client flows"** (for device code flow on headless machines)
-5. Note the **Application (client) ID** and **Directory (tenant) ID**
-6. Add them to your `.env`:
+5. Under **Expose an API**, set the Application ID URI to `api://<application-client-id>`
+6. Add a delegated scope named `access_as_user`
+7. Note the **Application (client) ID** and **Directory (tenant) ID**
+8. Add them to your daemon `.env`:
 
 ```bash
 ENTRA_CLIENT_ID=<application-client-id>
 ENTRA_TENANT_ID=<directory-tenant-id>
+ENTRA_AUDIENCE=api://<application-client-id>
+```
+
+For the CLI, use the same tenant/client and scope:
+
+```bash
+export AUTOPOD_CLIENT_ID=<application-client-id>
+export AUTOPOD_TENANT_ID=<directory-tenant-id>
+export AUTOPOD_AUTH_SCOPE=api://<application-client-id>/access_as_user
+ap auth login
 ```
 
 ---
