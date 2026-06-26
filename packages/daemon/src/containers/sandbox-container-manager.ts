@@ -49,6 +49,8 @@ export interface SandboxContainerManagerConfig {
   imagePullIdentityResourceId?: string;
   /** Transient registry credentials used for disk-image creation. Prefer managed identity. */
   registryCredentials?: SandboxRegistryCredentials;
+  /** Resolve mutable image tags to their current manifest digest for persistent disk-image keys. */
+  resolveImageDigest?: (image: string) => Promise<string | undefined>;
   /** Resource tier per sandbox (default: 'L' — the largest preview tier). */
   tier?: SandboxResourceTier;
 }
@@ -107,6 +109,7 @@ export class SandboxContainerManager implements ContainerManager {
         assumeGroupExists: config.assumeGroupExists,
         imagePullIdentityResourceId: config.imagePullIdentityResourceId,
         registryCredentials: config.registryCredentials,
+        resolveImageDigest: config.resolveImageDigest,
       },
       logger,
     );

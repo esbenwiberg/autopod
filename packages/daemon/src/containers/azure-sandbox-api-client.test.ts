@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import pino from 'pino';
 import { describe, expect, it } from 'vitest';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
@@ -82,6 +83,7 @@ describe('AzureSandboxApiClient', () => {
       { status: 404, body: {} },
       { status: 201, body: {} },
       { status: 200, body: { id: 'group-1' } },
+      { status: 200, body: { value: [] } },
       { status: 200, body: { id: 'disk-1', status: { state: 'Creating' } } },
       { status: 200, body: { id: 'disk-1', status: { state: 'Ready' } } },
       { status: 200, body: { id: 'sbx-1', state: 'Creating' } },
@@ -99,17 +101,20 @@ describe('AzureSandboxApiClient', () => {
     });
 
     expect(id).toBe('sbx-1');
-    expect(requests).toHaveLength(7);
+    expect(requests).toHaveLength(8);
     expect(requests[0]?.url).toContain(
       'https://management.azure.com/subscriptions/sub-1/resourceGroups/rg-1/providers/Microsoft.App/sandboxGroups/autopod-spike',
     );
     expect(requests[3]?.url).toContain(
       'https://management.swedencentral.azuredevcompute.io/subscriptions/sub-1/resourceGroups/rg-1/sandboxGroups/autopod-spike/diskimages',
     );
-    expect(jsonBody(requests[3] ?? failRequest())).toMatchObject({
+    expect(requests[4]?.url).toContain(
+      'https://management.swedencentral.azuredevcompute.io/subscriptions/sub-1/resourceGroups/rg-1/sandboxGroups/autopod-spike/diskimages',
+    );
+    expect(jsonBody(requests[4] ?? failRequest())).toMatchObject({
       image: { base: 'mcr.microsoft.com/cbl-mariner/base/core:2.0' },
     });
-    expect(jsonBody(requests[5] ?? failRequest())).toMatchObject({
+    expect(jsonBody(requests[6] ?? failRequest())).toMatchObject({
       sourcesRef: { diskImage: { id: 'disk-1' } },
       resources: { cpu: '2000m', memory: '4096Mi', disk: '40Gi' },
       environment: { POD_ID: 'pod-1' },
@@ -128,6 +133,7 @@ describe('AzureSandboxApiClient', () => {
         { status: 404, body: {} },
         { status: 201, body: {} },
         { status: 200, body: { id: 'group-1' } },
+        { status: 200, body: { value: [] } },
         { status: 200, body: { refresh_token: 'acr-refresh-token' } },
         { status: 200, body: { id: 'disk-1', status: { state: 'Ready' } } },
         { status: 200, body: { id: 'disk-1', status: { state: 'Ready' } } },
@@ -150,12 +156,12 @@ describe('AzureSandboxApiClient', () => {
         userAssignedIdentities: { [identityId]: {} },
       },
     });
-    expect(requests[3]?.url).toBe('https://ewiacr.azurecr.io/oauth2/exchange');
-    const exchange = formBody(requests[3] ?? failRequest());
+    expect(requests[4]?.url).toBe('https://ewiacr.azurecr.io/oauth2/exchange');
+    const exchange = formBody(requests[4] ?? failRequest());
     expect(exchange.get('grant_type')).toBe('access_token');
     expect(exchange.get('service')).toBe('ewiacr.azurecr.io');
     expect(exchange.get('access_token')).toBe('test-token');
-    expect(jsonBody(requests[4] ?? failRequest())).toMatchObject({
+    expect(jsonBody(requests[5] ?? failRequest())).toMatchObject({
       image: { base: 'ewiacr.azurecr.io/autopod/test-app:latest' },
       managedIdentityResourceId: identityId,
       registryCredentials: {
@@ -168,6 +174,7 @@ describe('AzureSandboxApiClient', () => {
   it('passes transient registry credentials for disk-image creation', async () => {
     const { client, requests } = makeClient(
       [
+        { status: 200, body: { value: [] } },
         { status: 200, body: { id: 'disk-1', status: { state: 'Ready' } } },
         { status: 200, body: { id: 'disk-1', status: { state: 'Ready' } } },
         { status: 200, body: { id: 'sbx-1', state: 'Running' } },
@@ -187,9 +194,115 @@ describe('AzureSandboxApiClient', () => {
     });
 
     expect(requests[0]?.url).toContain('/diskimages');
-    expect(jsonBody(requests[0] ?? failRequest())).toMatchObject({
+    expect(jsonBody(requests[1] ?? failRequest())).toMatchObject({
       image: { base: 'ewiacr.azurecr.io/autopod/test-app:latest' },
       registryCredentials: { username: 'token-user', token: 'secret-token' },
+    });
+  });
+
+  it('reuses a ready persistent disk image after sandbox deletion', async () => {
+    const image = 'ewiacr.azurecr.io/autopod/test-app:latest';
+    const sourceDigest = 'sha256:digest1';
+    const diskImage = {
+      id: 'disk-digest1',
+      status: { state: 'Ready' },
+      labels: diskImageLabelsFor(image, sourceDigest),
+    };
+    const { client, requests } = makeClient(
+      [
+        { status: 200, body: { value: [] } },
+        { status: 200, body: diskImage },
+        { status: 200, body: diskImage },
+        { status: 200, body: { id: 'sbx-1', state: 'Running' } },
+        { status: 200, body: { id: 'sbx-1', state: 'Running' } },
+        { status: 202, body: {} },
+        { status: 404, body: {} },
+        { status: 200, body: { value: [diskImage] } },
+        { status: 200, body: { id: 'sbx-2', state: 'Running' } },
+        { status: 200, body: { id: 'sbx-2', state: 'Running' } },
+      ],
+      {
+        assumeGroupExists: true,
+        registryCredentials: { username: 'token-user', token: 'secret-token' },
+        resolveImageDigest: async () => sourceDigest,
+      },
+    );
+
+    await client.createSandbox({
+      image,
+      tier: 'L',
+      env: {},
+      egressPolicy: { defaultAction: 'Allow', hostRules: [] },
+    });
+    await client.destroy('sbx-1');
+    await client.createSandbox({
+      image,
+      tier: 'L',
+      env: {},
+      egressPolicy: { defaultAction: 'Allow', hostRules: [] },
+    });
+
+    const diskImageCreates = requests.filter(
+      (request) => request.init?.method === 'PUT' && request.url.includes('/diskimages'),
+    );
+    const diskImageDeletes = requests.filter(
+      (request) => request.init?.method === 'DELETE' && request.url.includes('/diskimages/'),
+    );
+    const sandboxCreates = requests.filter(
+      (request) => request.init?.method === 'PUT' && request.url.includes('/sandboxes'),
+    );
+
+    expect(diskImageCreates).toHaveLength(1);
+    expect(diskImageDeletes).toHaveLength(0);
+    expect(sandboxCreates).toHaveLength(2);
+    expect(jsonBody(sandboxCreates[1] ?? failRequest())).toMatchObject({
+      sourcesRef: { diskImage: { id: 'disk-digest1' } },
+    });
+  });
+
+  it('garbage-collects stale disk images after the source digest changes', async () => {
+    const image = 'ewiacr.azurecr.io/autopod/test-app:latest';
+    const oldDiskImage = {
+      id: 'disk-old',
+      status: { state: 'Ready' },
+      labels: diskImageLabelsFor(image, 'sha256:old'),
+    };
+    const newDiskImage = {
+      id: 'disk-new',
+      status: { state: 'Ready' },
+      labels: diskImageLabelsFor(image, 'sha256:new'),
+    };
+    const { client, requests } = makeClient(
+      [
+        { status: 200, body: { value: [oldDiskImage] } },
+        { status: 200, body: newDiskImage },
+        { status: 200, body: newDiskImage },
+        { status: 202, body: {} },
+        { status: 404, body: {} },
+        { status: 200, body: { id: 'sbx-1', state: 'Running' } },
+        { status: 200, body: { id: 'sbx-1', state: 'Running' } },
+      ],
+      {
+        assumeGroupExists: true,
+        registryCredentials: { username: 'token-user', token: 'secret-token' },
+        resolveImageDigest: async () => 'sha256:new',
+      },
+    );
+
+    await client.createSandbox({
+      image,
+      tier: 'L',
+      env: {},
+      egressPolicy: { defaultAction: 'Allow', hostRules: [] },
+    });
+
+    const staleDeletes = requests.filter(
+      (request) =>
+        request.init?.method === 'DELETE' && request.url.includes('/diskimages/disk-old'),
+    );
+    expect(staleDeletes).toHaveLength(1);
+    expect(jsonBody(requests[1] ?? failRequest())).toMatchObject({
+      labels: diskImageLabelsFor(image, 'sha256:new'),
     });
   });
 
@@ -291,28 +404,34 @@ describe('AzureSandboxApiClient', () => {
     expect(jsonBody(requests[0] ?? failRequest())).toEqual({ path: '/mnt' });
   });
 
-  it('destroys sandbox and associated disk image idempotently', async () => {
+  it('destroys sandbox without deleting reusable disk images', async () => {
     const { client, requests } = makeClient([
-      { status: 200, body: { id: 'sbx-1', sourcesRef: { diskImage: { id: 'disk-1' } } } },
-      { status: 202, body: {} },
-      { status: 404, body: {} },
       { status: 202, body: {} },
       { status: 404, body: {} },
     ]);
 
     await client.destroy('sbx-1');
 
-    expect(requests.map((request) => request.init?.method)).toEqual([
-      'GET',
-      'DELETE',
-      'GET',
-      'DELETE',
-      'GET',
-    ]);
-    expect(requests[3]?.url).toContain('/diskimages/disk-1');
+    expect(requests.map((request) => request.init?.method)).toEqual(['DELETE', 'GET']);
+    expect(requests.some((request) => request.url.includes('/diskimages/'))).toBe(false);
   });
 });
 
 function failRequest(): CapturedRequest {
   throw new Error('missing request');
+}
+
+function diskImageLabelsFor(image: string, sourceDigest: string): Record<string, string> {
+  const sourceImageHash = testHash(image, 16);
+  const name = `autopod-${sourceImageHash}-${testHash(sourceDigest, 12)}`;
+  return {
+    managedBy: 'autopod',
+    name,
+    sourceImageHash,
+    sourceDigest,
+  };
+}
+
+function testHash(value: string, length: number): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, length);
 }

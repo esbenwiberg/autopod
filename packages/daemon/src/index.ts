@@ -486,6 +486,9 @@ if (SANDBOX_SUBSCRIPTION_ID && SANDBOX_RESOURCE_GROUP) {
       assumeGroupExists: SANDBOX_ASSUME_GROUP_EXISTS,
       imagePullIdentityResourceId: SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID,
       registryCredentials: SANDBOX_REGISTRY_CREDENTIALS,
+      resolveImageDigest: acr
+        ? (image) => (acr.canPull(image) ? acr.resolveDigest(image) : Promise.resolve(undefined))
+        : undefined,
       tier: SANDBOX_TIER,
     },
     logger,

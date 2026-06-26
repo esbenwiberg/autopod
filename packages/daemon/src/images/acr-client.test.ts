@@ -133,6 +133,16 @@ describe('AcrClient', () => {
     expect(mockGetArtifact).toHaveBeenCalledWith('autopod/test-app', 'stable');
   });
 
+  it('resolves the current manifest digest for fully qualified ACR image references', async () => {
+    const mockDocker = createMockDocker();
+    const client = new AcrClient({ registryUrl: 'myregistry.azurecr.io' }, mockDocker);
+
+    const digest = await client.resolveDigest('myregistry.azurecr.io/autopod/test-app:stable');
+
+    expect(digest).toBe('sha256:abc');
+    expect(mockGetArtifact).toHaveBeenCalledWith('autopod/test-app', 'stable');
+  });
+
   it('returns false when image does not exist', async () => {
     mockGetManifestProperties.mockRejectedValueOnce(new Error('Not found'));
 

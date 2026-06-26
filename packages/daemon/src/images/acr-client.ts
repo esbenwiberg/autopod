@@ -104,6 +104,18 @@ export class AcrClient {
     }
   }
 
+  /** Resolve the current manifest digest for an ACR image reference. */
+  async resolveDigest(tag: string): Promise<string> {
+    const { repo, version } = splitImageTag(this.stripRegistryPrefix(tag));
+    const artifact = this.registryClient.getArtifact(repo, version || 'latest');
+    const properties = await artifact.getManifestProperties();
+    const digest = (properties as { digest?: unknown }).digest;
+    if (typeof digest !== 'string' || digest.length === 0) {
+      throw new Error(`ACR manifest for ${tag} did not include a digest`);
+    }
+    return digest;
+  }
+
   private async getRegistryRefreshToken(): Promise<string> {
     const tokenResponse = await this.credential.getToken(ACR_TOKEN_SCOPE);
     const form = new URLSearchParams({

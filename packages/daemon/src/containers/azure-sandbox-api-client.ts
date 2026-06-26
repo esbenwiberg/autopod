@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import { DefaultAzureCredential } from '@azure/identity';
 import type { Logger } from 'pino';
@@ -31,6 +32,7 @@ interface TokenCredentialLike {
 }
 
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
+export type ImageDigestResolver = (image: string) => Promise<string | undefined>;
 
 export interface AzureSandboxApiClientConfig {
   /** Azure subscription ID. */
@@ -51,13 +53,34 @@ export interface AzureSandboxApiClientConfig {
   credential?: TokenCredentialLike;
   /** Test seam. Defaults to global fetch. */
   fetch?: FetchLike;
+  /** Resolve mutable image tags to their current manifest digest for persistent disk-image keys. */
+  resolveImageDigest?: ImageDigestResolver;
   /** Test seam. Defaults to 3s to match the Python SDK poller. */
   pollIntervalMs?: number;
 }
 
 interface DiskImageResponse {
   id?: string;
+  name?: string;
+  labels?: Record<string, string>;
+  properties?: {
+    labels?: Record<string, string>;
+    status?: { state?: string; message?: string };
+  };
   status?: { state?: string; message?: string };
+}
+
+interface DiskImageListResponse {
+  value?: DiskImageResponse[];
+  items?: DiskImageResponse[];
+  diskImages?: DiskImageResponse[];
+}
+
+interface DiskImageKey {
+  name: string;
+  sourceImageHash: string;
+  sourceDigest: string;
+  labels: Record<string, string>;
 }
 
 interface SandboxResponse {
@@ -103,9 +126,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private readonly logger: Logger;
   private readonly credential: TokenCredentialLike;
   private readonly fetchFn: FetchLike;
+  private readonly resolveImageDigest?: ImageDigestResolver;
   private readonly pollIntervalMs: number;
   private readonly dataEndpoint: string;
-  private readonly diskImagesBySandbox = new Map<string, string>();
   private groupReady: Promise<void> | null = null;
 
   constructor(config: AzureSandboxApiClientConfig, logger: Logger) {
@@ -121,6 +144,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.logger = logger.child({ component: 'azure-sandbox-api-client' });
     this.credential = config.credential ?? new DefaultAzureCredential();
     this.fetchFn = config.fetch ?? globalThis.fetch.bind(globalThis);
+    this.resolveImageDigest = config.resolveImageDigest;
     this.pollIntervalMs = config.pollIntervalMs ?? 3000;
     this.dataEndpoint = endpointForRegion(config.location);
     this.logger.info(
@@ -139,39 +163,17 @@ export class AzureSandboxApiClient implements SandboxApiClient {
 
   async createSandbox(options: CreateSandboxOptions): Promise<string> {
     await this.ensureSandboxGroup();
-    const diskImage = await this.createDiskImage(options.image);
+    const diskImage = await this.ensureDiskImage(options.image);
     const diskImageId = requiredId(diskImage, 'disk image');
-    try {
-      const sandbox = await this.createSandboxFromDiskImage(diskImageId, options);
-      const sandboxId = requiredId(sandbox, 'sandbox');
-      this.diskImagesBySandbox.set(sandboxId, diskImageId);
-      return sandboxId;
-    } catch (err) {
-      await this.deleteDiskImage(diskImageId).catch((deleteErr) => {
-        this.logger.warn({ err: deleteErr, diskImageId }, 'Failed to delete partial disk image');
-      });
-      throw err;
-    }
+    const sandbox = await this.createSandboxFromDiskImage(diskImageId, options);
+    return requiredId(sandbox, 'sandbox');
   }
 
   async destroy(sandboxId: string): Promise<void> {
-    let diskImageId = this.diskImagesBySandbox.get(sandboxId);
-    if (!diskImageId) {
-      const sandbox = await this.getSandbox(sandboxId).catch(() => null);
-      diskImageId = sandbox?.sourcesRef?.diskImage?.id;
-    }
-
     await this.requestData('DELETE', `${this.sandboxPath(sandboxId)}`, {
       okStatuses: [200, 202, 204, 404],
     });
     await this.pollDeleted(() => this.getSandbox(sandboxId), `sandbox ${sandboxId}`);
-
-    if (diskImageId) {
-      await this.deleteDiskImage(diskImageId).catch((err) => {
-        this.logger.warn({ err, sandboxId, diskImageId }, 'Failed to delete sandbox disk image');
-      });
-      this.diskImagesBySandbox.delete(sandboxId);
-    }
   }
 
   async exec(
@@ -312,8 +314,135 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     await this.pollArmOperation(created.response, path);
   }
 
-  private async createDiskImage(baseImage: string): Promise<DiskImageResponse> {
-    this.logger.info({ image: baseImage }, 'Creating Azure sandbox disk image');
+  private async ensureDiskImage(baseImage: string): Promise<DiskImageResponse> {
+    const key = await this.buildDiskImageKey(baseImage);
+    const existingImages = await this.listDiskImages();
+    const reusable = await this.findReusableDiskImage(key, existingImages);
+    if (reusable) {
+      await this.gcStaleDiskImages(key, existingImages);
+      return reusable;
+    }
+
+    const created = await this.createDiskImage(baseImage, key);
+    await this.gcStaleDiskImages(key, existingImages);
+    return created;
+  }
+
+  private async buildDiskImageKey(baseImage: string): Promise<DiskImageKey> {
+    const sourceImageHash = stableHash(baseImage, 16);
+    const digestFromReference = imageDigestFromReference(baseImage);
+    const resolvedDigest =
+      digestFromReference === undefined && this.resolveImageDigest
+        ? await this.resolveImageDigest(baseImage)
+        : undefined;
+    const sourceDigest =
+      digestFromReference ?? resolvedDigest ?? `tag:${stableHash(baseImage, 32)}`;
+    if (!sourceDigest) {
+      throw new AutopodError(
+        `Could not resolve image digest for ${baseImage}`,
+        'AZURE_SANDBOX_IMAGE_DIGEST',
+        502,
+      );
+    }
+
+    const digestHash = stableHash(sourceDigest, 12);
+    const name = `autopod-${sourceImageHash}-${digestHash}`;
+    return {
+      name,
+      sourceImageHash,
+      sourceDigest,
+      labels: {
+        managedBy: 'autopod',
+        name,
+        sourceImageHash,
+        sourceDigest,
+      },
+    };
+  }
+
+  private async findReusableDiskImage(
+    key: DiskImageKey,
+    images: DiskImageResponse[],
+  ): Promise<DiskImageResponse | undefined> {
+    for (const image of images) {
+      const labels = diskImageLabels(image);
+      if (
+        labels.managedBy !== 'autopod' ||
+        labels.sourceImageHash !== key.sourceImageHash ||
+        labels.sourceDigest !== key.sourceDigest
+      ) {
+        continue;
+      }
+
+      const id = image.id;
+      if (!id) {
+        this.logger.warn({ diskImage: image }, 'Skipping disk image without id');
+        continue;
+      }
+
+      const state = diskImageState(image);
+      if (readyStates.has(state)) {
+        this.logger.info(
+          { diskImageId: id, sourceImageHash: key.sourceImageHash, sourceDigest: key.sourceDigest },
+          'Reusing Azure sandbox disk image',
+        );
+        return image;
+      }
+      if (state === 'Failed' || state === 'Deleting') {
+        this.logger.warn({ diskImageId: id, state }, 'Discarding unusable disk image');
+        await this.deleteDiskImage(id).catch((err) => {
+          this.logger.warn({ err, diskImageId: id }, 'Failed to delete unusable disk image');
+        });
+        continue;
+      }
+
+      this.logger.info({ diskImageId: id, state }, 'Waiting for existing disk image');
+      return this.pollState(
+        () => this.getDiskImage(id),
+        (diskImage) => readyStates.has(diskImageState(diskImage)),
+        `disk image ${id}`,
+        (diskImage) => diskImageState(diskImage) === 'Failed',
+      );
+    }
+    return undefined;
+  }
+
+  private async gcStaleDiskImages(key: DiskImageKey, images: DiskImageResponse[]): Promise<void> {
+    const staleIds = images
+      .filter((image) => {
+        const labels = diskImageLabels(image);
+        return (
+          labels.managedBy === 'autopod' &&
+          labels.sourceImageHash === key.sourceImageHash &&
+          labels.sourceDigest !== key.sourceDigest &&
+          typeof image.id === 'string' &&
+          image.id.length > 0
+        );
+      })
+      .map((image) => image.id as string);
+
+    for (const id of staleIds) {
+      await this.deleteDiskImage(id).catch((err) => {
+        this.logger.warn({ err, diskImageId: id }, 'Failed to delete stale disk image');
+      });
+    }
+  }
+
+  private async listDiskImages(): Promise<DiskImageResponse[]> {
+    const response = await this.requestData<DiskImageListResponse | DiskImageResponse[]>(
+      'GET',
+      `${this.groupPath()}/diskimages`,
+      { okStatuses: [200, 404] },
+    );
+    if (Array.isArray(response)) return response;
+    return response.value ?? response.items ?? response.diskImages ?? [];
+  }
+
+  private async createDiskImage(baseImage: string, key: DiskImageKey): Promise<DiskImageResponse> {
+    this.logger.info(
+      { image: baseImage, sourceImageHash: key.sourceImageHash, sourceDigest: key.sourceDigest },
+      'Creating Azure sandbox disk image',
+    );
     const registryCredentials =
       this.config.registryCredentials ?? (await this.resolveAcrRegistryCredentials(baseImage));
     const initial = await this.requestData<DiskImageResponse>(
@@ -326,7 +455,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
             ? { managedIdentityResourceId: this.config.imagePullIdentityResourceId }
             : {}),
           ...(registryCredentials ? { registryCredentials } : {}),
-          labels: { name: `autopod-${Date.now()}` },
+          labels: key.labels,
         },
         timeoutMs: CREATE_REQUEST_TIMEOUT_MS,
       },
@@ -335,9 +464,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.logger.info({ diskImageId: id }, 'Azure sandbox disk image accepted');
     return this.pollState(
       () => this.getDiskImage(id),
-      (image) => readyStates.has(image.status?.state ?? ''),
+      (image) => readyStates.has(diskImageState(image)),
       `disk image ${id}`,
-      (image) => image.status?.state === 'Failed',
+      (image) => diskImageState(image) === 'Failed',
     );
   }
 
@@ -736,6 +865,24 @@ function registryHostFromImage(image: string): string | undefined {
     return undefined;
   }
   return firstComponent.toLowerCase();
+}
+
+function imageDigestFromReference(image: string): string | undefined {
+  const digestIndex = image.indexOf('@sha256:');
+  if (digestIndex === -1) return undefined;
+  return image.slice(digestIndex + 1);
+}
+
+function stableHash(value: string, length: number): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, length);
+}
+
+function diskImageLabels(image: DiskImageResponse): Record<string, string> {
+  return image.labels ?? image.properties?.labels ?? {};
+}
+
+function diskImageState(image: DiskImageResponse): string {
+  return image.status?.state ?? image.properties?.status?.state ?? '';
 }
 
 function normalizeSandboxFileInfo(info: WireSandboxFileInfo): SandboxFileInfo {
