@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import AutopodUI
 
-@Test func commandPalettePodSearchUsesMainViewFields() {
+@MainActor @Test func commandPalettePodSearchUsesMainViewFields() {
     let pods = [
         Pod(
             id: "pod-billing",
@@ -22,7 +22,7 @@ import Testing
     #expect(results.contains { $0.kind == .pod("pod-billing") })
 }
 
-@Test func commandPaletteProfileSearchReturnsShowAndEditActions() {
+@MainActor @Test func commandPaletteProfileSearchReturnsShowAndEditActions() {
     let profiles = [
         Profile(name: "base", repoUrl: "https://github.com/acme/base"),
         Profile(
@@ -38,7 +38,7 @@ import Testing
     #expect(results.contains { $0.kind == .editProfile("backend") })
 }
 
-@Test func commandPaletteProfileSearchMatchesRepoAndParent() {
+@MainActor @Test func commandPaletteProfileSearchMatchesRepoAndParent() {
     let profiles = [
         Profile(name: "backend", repoUrl: "https://github.com/acme/api", extendsProfile: "base"),
         Profile(name: "frontend", repoUrl: "https://github.com/acme/web"),
@@ -52,7 +52,7 @@ import Testing
     #expect(!parentResults.contains { $0.kind == .editProfile("frontend") })
 }
 
-@Test func commandPaletteEmptyQueryIncludesCoreActions() {
+@MainActor @Test func commandPaletteEmptyQueryIncludesCoreActions() {
     let results = CommandPalette.results(query: "", pods: [], profiles: [])
 
     #expect(results.contains { $0.kind == .action(.newPod) })
@@ -60,7 +60,7 @@ import Testing
     #expect(results.contains { $0.kind == .action(.killAllFailed) })
 }
 
-@Test func profileListDeepLinkResolverUsesExactProfileName() {
+@MainActor @Test func profileListDeepLinkResolverUsesExactProfileName() {
     let profiles = [
         Profile(name: "backend", repoUrl: "https://github.com/acme/api"),
         Profile(name: "backend-worker", repoUrl: "https://github.com/acme/worker"),

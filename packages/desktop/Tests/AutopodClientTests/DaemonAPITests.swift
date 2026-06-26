@@ -22,6 +22,33 @@ import Testing
   #expect(token == "test-token")
 }
 
+@Test func daemonAPIUsesDynamicTokenProviderForRequests() async throws {
+  let recorder = RequestRecorder()
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [RecordingURLProtocol.self]
+  RecordingURLProtocol.handler = { request in
+    await recorder.record(request.value(forHTTPHeaderField: "Authorization"))
+    let response = HTTPURLResponse(
+      url: request.url!,
+      statusCode: 200,
+      httpVersion: nil,
+      headerFields: ["Content-Type": "application/json"]
+    )!
+    return (response, #"{"status":"ok"}"#.data(using: .utf8)!)
+  }
+  defer { RecordingURLProtocol.handler = nil }
+
+  let api = DaemonAPI(
+    baseURL: URL(string: "https://daemon.example.com")!,
+    initialToken: "stale-token",
+    session: URLSession(configuration: configuration),
+    tokenProvider: { "fresh-token" }
+  )
+
+  #expect(try await api.healthCheck())
+  #expect(await recorder.authorizationHeaders == ["Bearer fresh-token"])
+}
+
 // MARK: - Response decoding tests
 
 @Test func sessionResponseDecodes() throws {
@@ -175,6 +202,48 @@ import Testing
   #expect(profile.githubPat == "encrypted-value")
   #expect(profile.githubPatExpiresAt == "2026-06-01")
   #expect(profile.containerMemoryGb == 4.0)
+}
+
+private actor RequestRecorder {
+  private(set) var authorizationHeaders: [String?] = []
+
+  func record(_ header: String?) {
+    authorizationHeaders.append(header)
+  }
+}
+
+private final class RecordingURLProtocol: URLProtocol, @unchecked Sendable {
+  typealias Handler = @Sendable (URLRequest) async throws -> (HTTPURLResponse, Data)
+
+  nonisolated(unsafe) static var handler: Handler?
+
+  override class func canInit(with request: URLRequest) -> Bool {
+    true
+  }
+
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+    request
+  }
+
+  override func startLoading() {
+    guard let handler = Self.handler else {
+      client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+      return
+    }
+
+    Task {
+      do {
+        let (response, data) = try await handler(request)
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+      } catch {
+        client?.urlProtocol(self, didFailWithError: error)
+      }
+    }
+  }
+
+  override func stopLoading() {}
 }
 
 @Test func profileResponseDecodesAdvisoryBrowserQaNil() throws {

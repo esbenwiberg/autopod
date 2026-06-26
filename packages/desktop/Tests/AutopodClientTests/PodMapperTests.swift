@@ -559,11 +559,11 @@ import AutopodUI
   let pod = PodMapper.map(response)
 
   #expect(pod.linkedSessionId == "legacy-parent")
-  #expect(!pod.isPrFixPod)
+  #expect(pod.isPrFixPod)
   #expect(pod.fixPodId == "passing-puffin")
   #expect(pod.prFixAttempts == 2)
   #expect(pod.maxPrFixAttempts == 3)
-  #expect(pod.prFixLifecycleLabel == "PR fix attempt 2/3 · fix pod passing-puffin")
+  #expect(pod.prFixLifecycleLabel == "Fix pod for legacy-parent · PR fix attempt 2/3")
 }
 
 @Test func mapsAwaitingInputWithEscalation() throws {

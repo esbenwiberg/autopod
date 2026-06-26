@@ -152,7 +152,7 @@ import Testing
 
 // MARK: - Sparkline: 30 elements
 
-@Test func sparklineDecodes30Elements() throws {
+@Test func reliabilitySparklineDecodes30Elements() throws {
     let json = makeSparklineJSON(days: 30).data(using: .utf8)!
     let points = try JSONDecoder().decode([SparklineRatePoint].self, from: json)
     #expect(points.count == 30)
