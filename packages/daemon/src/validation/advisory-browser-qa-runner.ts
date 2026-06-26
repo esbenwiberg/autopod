@@ -1971,7 +1971,7 @@ async function runClaudeContainerReview(input: {
       ? ` --model ${shellQuote(resolveAnthropicModelId(input.model))}`
       : '';
   const claudeCommand = [
-    `${shellQuote('/run/autopod/agent-shim.sh')} claude -p`,
+    `sh ${shellQuote('/run/autopod/agent-shim.sh')} claude -p`,
     modelArgs.trim(),
     '--output-format json',
     '--',

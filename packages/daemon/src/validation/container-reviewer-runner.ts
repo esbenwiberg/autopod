@@ -95,7 +95,7 @@ async function runClaudeContainerReview(
   const modelArgs =
     config.model && config.model !== 'auto' ? ` --model ${shellQuote(config.model)}` : '';
   const claudeCommand = [
-    `${shellQuote(SHIM_PATH)} claude -p`,
+    `sh ${shellQuote(SHIM_PATH)} claude -p`,
     modelArgs.trim(),
     '--output-format text',
     `< ${shellQuote(promptPath)}`,

@@ -118,7 +118,7 @@ export class CodexRuntime implements Runtime {
     const shimPath = '/run/autopod/agent-shim.sh';
     const handle = await this.containerManager.execStreaming(
       config.containerId,
-      [shimPath, 'codex', ...args],
+      ['sh', shimPath, 'codex', ...args],
       { cwd: config.workDir, env: config.env },
     );
 
@@ -194,7 +194,7 @@ export class CodexRuntime implements Runtime {
     const shimPath = '/run/autopod/agent-shim.sh';
     const handle = await this.containerManager.execStreaming(
       containerId,
-      [shimPath, 'codex', ...args],
+      ['sh', shimPath, 'codex', ...args],
       {
         cwd: '/workspace',
         ...(env ? { env } : {}),

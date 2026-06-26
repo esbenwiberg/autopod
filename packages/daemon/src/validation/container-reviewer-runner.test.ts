@@ -105,7 +105,7 @@ describe('runContainerReviewer', () => {
     );
     expect(cm.execInContainer).toHaveBeenCalledWith(
       'container-abc',
-      ['sh', '-c', expect.stringContaining("'/run/autopod/agent-shim.sh' claude -p")],
+      ['sh', '-c', expect.stringContaining("sh '/run/autopod/agent-shim.sh' claude -p")],
       expect.objectContaining({
         cwd: '/workspace',
         env: { ANTHROPIC_API_KEY_FILE: '/run/autopod/anthropic-api-key' },

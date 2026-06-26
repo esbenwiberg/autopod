@@ -68,7 +68,7 @@ export class CopilotRuntime implements Runtime {
     const shimPath = '/run/autopod/agent-shim.sh';
     const handle = await this.containerManager.execStreaming(
       config.containerId,
-      [shimPath, 'copilot', ...args],
+      ['sh', shimPath, 'copilot', ...args],
       { cwd: config.workDir, env },
     );
 

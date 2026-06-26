@@ -192,6 +192,7 @@ describe('CodexRuntime', () => {
       expect(cm.execStreaming).toHaveBeenCalledWith(
         'container-123',
         [
+          'sh',
           '/run/autopod/agent-shim.sh',
           'codex',
           'exec',
@@ -763,6 +764,7 @@ describe('CodexRuntime', () => {
       expect(cm.execStreaming).toHaveBeenCalledWith(
         'container-123',
         [
+          'sh',
           '/run/autopod/agent-shim.sh',
           'codex',
           'exec',
@@ -820,6 +822,7 @@ describe('CodexRuntime', () => {
       expect(cm.execStreaming).toHaveBeenCalledWith(
         'container-123',
         [
+          'sh',
           '/run/autopod/agent-shim.sh',
           'codex',
           'exec',
@@ -852,6 +855,7 @@ describe('CodexRuntime', () => {
       expect(cm.execStreaming).toHaveBeenCalledWith(
         'container-123',
         [
+          'sh',
           '/run/autopod/agent-shim.sh',
           'codex',
           'exec',
