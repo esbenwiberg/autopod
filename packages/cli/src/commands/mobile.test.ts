@@ -136,6 +136,17 @@ describe('ap mobile pair', () => {
     );
   });
 
+  it('accepts an explicit daemon token for VM pairing without a local token file', async () => {
+    mockTailscaleOutput = new Error('tailscale not running');
+
+    const cap = await runMobile(['pair', '--host', 'vm.tail1234.ts.net', '--token', 'vm-token']);
+
+    expect(cap.exitCode).toBeUndefined();
+    expect(cap.logs.join('\n')).toContain(
+      'https://vm.tail1234.ts.net/mobile/#/pair?token=vm-token',
+    );
+  });
+
   it('fails clearly when neither tailscale nor --host yields a hostname', async () => {
     fs.writeFileSync(path.join(tmpHome, '.autopod', 'dev-token'), 'tok123');
     mockTailscaleOutput = new Error('not installed');

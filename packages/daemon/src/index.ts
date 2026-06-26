@@ -14,6 +14,7 @@ import {
   createActionRegistry,
 } from './actions/index.js';
 import { createServer } from './api/server.js';
+import { createDevAuthModule } from './auth/dev-auth-module.js';
 import { createEntraAuthModule, defaultEntraAudiences } from './auth/entra-auth-module.js';
 import { DockerContainerManager } from './containers/docker-container-manager.js';
 import { DockerNetworkManager } from './containers/docker-network-manager.js';
@@ -240,9 +241,10 @@ function getOrCreateDevToken(): string {
   }
 }
 
+const DEV_AUTH_TOKEN = ALLOW_DEV_AUTH ? getOrCreateDevToken() : null;
+
 if (IS_DEV) {
   if (ALLOW_DEV_AUTH) {
-    getOrCreateDevToken();
     logger.info({ path: path.join(os.homedir(), '.autopod', 'dev-token') }, 'Dev auth token path');
   } else {
     logger.warn(
@@ -251,45 +253,11 @@ if (IS_DEV) {
   }
 }
 
-const devPayload = () => ({
-  oid: 'dev-user',
-  preferred_username: 'developer',
-  name: 'Developer',
-  roles: ['admin' as const],
-  aud: 'autopod',
-  iss: 'autopod-dev',
-  exp: Math.floor(Date.now() / 1000) + 3600,
-  iat: Math.floor(Date.now() / 1000),
+const devAuthModule: AuthModule = createDevAuthModule({
+  allowDevAuth: ALLOW_DEV_AUTH,
+  devToken: DEV_AUTH_TOKEN,
+  isDev: IS_DEV,
 });
-
-const devAuthModule: AuthModule = {
-  async validateToken(token: string) {
-    if (!ALLOW_DEV_AUTH) {
-      throw new AuthError(
-        IS_DEV
-          ? 'Dev auth not enabled — set AUTOPOD_ALLOW_DEV_AUTH=1'
-          : 'Auth module not configured',
-      );
-    }
-    if (!token) {
-      throw new AuthError('Missing token');
-    }
-    return devPayload();
-  },
-  validateTokenSync(token: string) {
-    if (!ALLOW_DEV_AUTH) {
-      throw new Error(
-        IS_DEV
-          ? 'Dev auth not enabled — set AUTOPOD_ALLOW_DEV_AUTH=1'
-          : 'Auth module not configured',
-      );
-    }
-    if (!token) {
-      throw new Error('Missing token');
-    }
-    return devPayload();
-  },
-};
 
 function createRejectingAuthModule(reason: string): AuthModule {
   return {

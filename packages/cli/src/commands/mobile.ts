@@ -16,6 +16,12 @@ function readDevToken(): string | null {
   }
 }
 
+function resolvePairingToken(override: string | undefined): string | null {
+  const normalized = override?.trim();
+  if (normalized) return normalized;
+  return readDevToken();
+}
+
 /**
  * Returns the laptop's tailnet DNS name (e.g. `mymac.tail1234.ts.net`), without
  * the trailing dot. Falls back to null when `tailscale` isn't on PATH or the
@@ -55,13 +61,22 @@ export function registerMobileCommands(program: Command): void {
     .command('pair')
     .description('Print a QR code that pairs a phone with this laptop over Tailscale')
     .option('--host <name>', 'Tailnet hostname to use (skips auto-detect + cache)')
-    .action((opts: { host?: string }) => {
-      const token = readDevToken();
+    .option(
+      '--token <token>',
+      'Dev auth token from the daemon (useful when the daemon runs in a VM)',
+    )
+    .action((opts: { host?: string; token?: string }) => {
+      const token = resolvePairingToken(opts.token);
       if (!token) {
         console.error(chalk.red('No dev token at ~/.autopod/dev-token.'));
         console.error(
           chalk.dim(
             'Start the daemon with AUTOPOD_ALLOW_DEV_AUTH=1 once to generate it, then re-run this command.',
+          ),
+        );
+        console.error(
+          chalk.dim(
+            'For a VM daemon, read the token inside the VM and pass it with `ap mobile pair --host <tailnet-host> --token <token-from-vm>`.',
           ),
         );
         process.exit(1);
