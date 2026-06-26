@@ -328,6 +328,7 @@ export class SandboxContainerManager implements ContainerManager {
     sandboxId: string,
     volumes: NonNullable<ContainerSpawnConfig['volumes']>,
   ): Promise<void> {
+    const createdDirs = new Set<string>();
     for (const volume of volumes) {
       if (!existsSync(volume.host)) {
         this.logger.debug(
@@ -336,7 +337,7 @@ export class SandboxContainerManager implements ContainerManager {
         );
         continue;
       }
-      await this.uploadPath(sandboxId, volume.host, volume.container);
+      await this.uploadPath(sandboxId, volume.host, volume.container, createdDirs);
     }
   }
 
@@ -344,26 +345,47 @@ export class SandboxContainerManager implements ContainerManager {
     sandboxId: string,
     hostPath: string,
     containerPath: string,
+    createdDirs: Set<string>,
   ): Promise<void> {
     const stat = lstatSync(hostPath);
     if (stat.isDirectory()) {
-      if (this.client.mkdir) {
-        await this.client.mkdir(sandboxId, containerPath);
-      }
+      await this.ensureSandboxDirectory(sandboxId, containerPath, createdDirs);
       for (const entry of readdirSync(hostPath)) {
         if (shouldSkipUploadedVolumeEntry(entry)) continue;
-        await this.uploadPath(sandboxId, join(hostPath, entry), `${containerPath}/${entry}`);
+        await this.uploadPath(
+          sandboxId,
+          join(hostPath, entry),
+          `${containerPath}/${entry}`,
+          createdDirs,
+        );
       }
       return;
     }
     if (stat.isSymbolicLink()) {
       const target = readlinkSync(hostPath);
+      await this.ensureSandboxDirectory(sandboxId, posix.dirname(containerPath), createdDirs);
       await this.client.writeFile(sandboxId, containerPath, Buffer.from(target, 'utf-8'));
       return;
     }
     if (stat.isFile()) {
+      await this.ensureSandboxDirectory(sandboxId, posix.dirname(containerPath), createdDirs);
       await this.client.writeFile(sandboxId, containerPath, await readFile(hostPath));
     }
+  }
+
+  private async ensureSandboxDirectory(
+    sandboxId: string,
+    path: string,
+    createdDirs: Set<string>,
+  ): Promise<void> {
+    if (!this.client.mkdir) return;
+
+    const normalized = normalizeSandboxPath(path);
+    if (normalized === '/' || createdDirs.has(normalized)) return;
+
+    await this.ensureSandboxDirectory(sandboxId, posix.dirname(normalized), createdDirs);
+    await this.client.mkdir(sandboxId, normalized);
+    createdDirs.add(normalized);
   }
 
   private async extractSandboxPath(

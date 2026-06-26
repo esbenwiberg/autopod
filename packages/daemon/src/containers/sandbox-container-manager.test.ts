@@ -164,6 +164,27 @@ class FakeSandboxApiClient implements SandboxApiClient {
   }
 }
 
+class StrictParentFakeClient extends FakeSandboxApiClient {
+  override async mkdir(sandboxId: string, path: string): Promise<void> {
+    this.assertParentExists(sandboxId, path);
+    await super.mkdir(sandboxId, path);
+  }
+
+  override async writeFile(sandboxId: string, path: string, content: Buffer): Promise<void> {
+    this.assertParentExists(sandboxId, path);
+    await super.writeFile(sandboxId, path, content);
+  }
+
+  private assertParentExists(sandboxId: string, path: string): void {
+    const sandbox = this.sandboxes.get(sandboxId);
+    if (!sandbox) throw new Error(`unknown sandbox: ${sandboxId}`);
+    const parent = normalizeSandboxPath(posix.dirname(normalizeSandboxPath(path)));
+    if (parent !== '/' && !sandbox.dirs.has(parent)) {
+      throw new Error(`parent directory missing: ${parent}`);
+    }
+  }
+}
+
 /** A client variant exposing a native streaming exec. */
 class StreamingFakeClient extends FakeSandboxApiClient {
   async *execStream(): AsyncIterable<SandboxExecChunk> {
@@ -272,10 +293,37 @@ describe('SandboxContainerManager', () => {
         expect(files?.get('/mnt/worktree/README-link')?.toString('utf-8')).toBe('README.md');
         expect(files?.has('/mnt/worktree/node_modules/left-pad.js')).toBe(false);
         expect(client.mkdirCalls.map((call) => call.path)).toEqual([
+          '/mnt',
           '/mnt/worktree',
           '/mnt/worktree/src',
         ]);
         expect(client.execCalls).toEqual([]);
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
+
+    it('creates sandbox parent directories before uploading nested volume paths', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-nested-upload-'));
+      try {
+        writeFileSync(join(hostDir, 'README.md'), 'hello');
+
+        const client = new StrictParentFakeClient();
+        const id = await new SandboxContainerManager(client, logger).spawn({
+          ...baseConfig,
+          volumes: [{ host: hostDir, container: '/home/ewi/.autopod/repos/worktree' }],
+        });
+
+        expect(
+          client.sandboxes.get(id)?.files.get('/home/ewi/.autopod/repos/worktree/README.md'),
+        ).toEqual(Buffer.from('hello'));
+        expect(client.mkdirCalls.map((call) => call.path)).toEqual([
+          '/home',
+          '/home/ewi',
+          '/home/ewi/.autopod',
+          '/home/ewi/.autopod/repos',
+          '/home/ewi/.autopod/repos/worktree',
+        ]);
       } finally {
         rmSync(hostDir, { recursive: true, force: true });
       }
