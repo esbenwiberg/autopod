@@ -56,12 +56,14 @@ public final class ConnectionManager {
       }
 
       if let token {
+        let normalizedToken = Self.normalizeToken(token)
+        guard !normalizedToken.isEmpty else { return }
         connection = saved
-        activeToken = token
-        api = DaemonAPI(baseURL: saved.url, token: token)
+        activeToken = normalizedToken
+        api = DaemonAPI(baseURL: saved.url, token: normalizedToken)
         // Persist refreshed token
-        try? KeychainHelper.save(token: token, for: saved.id)
-        ConnectionStore.saveToken(token, for: saved.id)
+        try? KeychainHelper.save(token: normalizedToken, for: saved.id)
+        ConnectionStore.saveToken(normalizedToken, for: saved.id)
         // Kick off initial health check
         Task { await connectToActive() }
       }
@@ -72,11 +74,12 @@ public final class ConnectionManager {
 
   /// Save a new connection and connect to it.
   public func addAndConnect(name: String, url: URL, token: String) async throws {
+    let normalizedToken = Self.normalizeToken(token)
     let conn = DaemonConnection(name: name, url: url)
 
     // Save token to Keychain + UserDefaults fallback
-    try? KeychainHelper.save(token: token, for: conn.id)
-    ConnectionStore.saveToken(token, for: conn.id)
+    try? KeychainHelper.save(token: normalizedToken, for: conn.id)
+    ConnectionStore.saveToken(normalizedToken, for: conn.id)
 
     // Save connection metadata
     var connections = ConnectionStore.loadAll()
@@ -86,14 +89,15 @@ public final class ConnectionManager {
 
     // Create API client and connect
     connection = conn
-    activeToken = token
-    api = DaemonAPI(baseURL: url, token: token)
+    activeToken = normalizedToken
+    api = DaemonAPI(baseURL: url, token: normalizedToken)
     await connectToActive()
   }
 
   /// Test a connection without saving it.
   public func testConnection(url: URL, token: String) async -> Result<Bool, DaemonError> {
-    let testApi = DaemonAPI(baseURL: url, token: token)
+    let normalizedToken = Self.normalizeToken(token)
+    let testApi = DaemonAPI(baseURL: url, token: normalizedToken)
     do {
       _ = try await testApi.healthCheck()
       _ = try await testApi.getSessionStats()
@@ -119,12 +123,16 @@ public final class ConnectionManager {
     } else {
       KeychainHelper.load(for: conn.id) ?? ConnectionStore.loadToken(for: conn.id)
     }
-    guard let token, !token.isEmpty else {
+    guard let token else {
+      throw DaemonError.unauthorized("Missing saved token")
+    }
+    let normalizedToken = Self.normalizeToken(token)
+    guard !normalizedToken.isEmpty else {
       throw DaemonError.unauthorized("Missing saved token")
     }
 
     let previousState = state
-    let testApi = DaemonAPI(baseURL: conn.url, token: token)
+    let testApi = DaemonAPI(baseURL: conn.url, token: normalizedToken)
     state = .connecting
 
     do {
@@ -133,11 +141,11 @@ public final class ConnectionManager {
       healthTask?.cancel()
       healthTask = nil
       connection = conn
-      activeToken = token
+      activeToken = normalizedToken
       api = testApi
       ConnectionStore.setActiveConnectionId(conn.id)
-      try? KeychainHelper.save(token: token, for: conn.id)
-      ConnectionStore.saveToken(token, for: conn.id)
+      try? KeychainHelper.save(token: normalizedToken, for: conn.id)
+      ConnectionStore.saveToken(normalizedToken, for: conn.id)
       state = .connected
       startHealthPolling()
     } catch {
@@ -169,6 +177,10 @@ public final class ConnectionManager {
   }
 
   // MARK: - Internal
+
+  private static func normalizeToken(_ token: String) -> String {
+    DaemonAPI.normalizeBearerToken(token)
+  }
 
   private func connectToActive() async {
     guard let api else { return }

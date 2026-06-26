@@ -13,6 +13,15 @@ import Testing
   #expect(url.absoluteString == "http://localhost:3000")
 }
 
+@Test func daemonAPINormalizesBearerTokenInput() async throws {
+  let api = DaemonAPI(
+    baseURL: URL(string: "http://localhost:3000")!,
+    token: "  Bearer test-token\n"
+  )
+  let token = await api.token
+  #expect(token == "test-token")
+}
+
 // MARK: - Response decoding tests
 
 @Test func sessionResponseDecodes() throws {
