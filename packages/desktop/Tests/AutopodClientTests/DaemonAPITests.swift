@@ -68,6 +68,43 @@ import Testing
   #expect(pod.commitCount == 2)
 }
 
+@Test func sessionStatsResponseDecodesBareStatusMap() throws {
+  let json = """
+  {
+    "running": 2,
+    "validated": 3,
+    "complete": 8
+  }
+  """.data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionStatsResponse.self, from: json)
+
+  #expect(response.counts["running"] == 2)
+  #expect(response.counts["validated"] == 3)
+  #expect(response.counts["complete"] == 8)
+}
+
+@Test func sessionStatsResponseDecodesWrappedByStatusMap() throws {
+  let json = """
+  {
+    "total": 568,
+    "byStatus": {
+      "running": 0,
+      "validated": 3,
+      "complete": 465,
+      "killed": 89
+    }
+  }
+  """.data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionStatsResponse.self, from: json)
+
+  #expect(response.counts["running"] == 0)
+  #expect(response.counts["validated"] == 3)
+  #expect(response.counts["complete"] == 465)
+  #expect(response.counts["killed"] == 89)
+}
+
 @Test func profileResponseDecodes() throws {
   let json = """
   {
