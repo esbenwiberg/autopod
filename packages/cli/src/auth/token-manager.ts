@@ -49,7 +49,8 @@ export async function getToken(): Promise<string> {
   // Check if token is still valid (with 5 min buffer)
   const expiresAt = new Date(creds.expiresAt);
   const buffer = 5 * 60 * 1000;
-  if (expiresAt.getTime() - buffer > Date.now()) {
+  const now = Date.now();
+  if (expiresAt.getTime() - buffer > now) {
     return creds.accessToken;
   }
 
@@ -59,7 +60,21 @@ export async function getToken(): Promise<string> {
     return refreshed.accessToken;
   }
 
+  // MSAL's refresh-token cache is process-local unless persisted. When a CLI
+  // invocation starts inside the refresh buffer but the cached access token is
+  // still valid, keep using it rather than forcing a fresh device login early.
+  if (shouldUseCachedTokenAfterRefreshFailure(expiresAt, now)) {
+    return creds.accessToken;
+  }
+
   throw new AuthError('Token expired and refresh failed. Run: ap login');
+}
+
+export function shouldUseCachedTokenAfterRefreshFailure(
+  expiresAt: Date,
+  nowMs = Date.now(),
+): boolean {
+  return expiresAt.getTime() > nowMs;
 }
 
 export function shouldUseDevTokenForDaemonUrl(daemonUrl: string | undefined): boolean {

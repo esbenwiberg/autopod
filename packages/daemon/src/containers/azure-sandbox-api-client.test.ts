@@ -220,12 +220,29 @@ describe('AzureSandboxApiClient', () => {
         status: 200,
         body: {
           path: '/tmp',
-          entries: [{ name: 'hello.txt', path: '/tmp/hello.txt', isDirectory: false, size: 5 }],
+          entries: [
+            {
+              name: 'hello.txt',
+              path: '/tmp/hello.txt',
+              isDir: false,
+              size: 5,
+              mode: 420,
+              modifiedTime: 1782467614,
+            },
+            {
+              name: 'nested',
+              path: '/tmp/nested',
+              isDir: true,
+              size: 4096,
+              mode: 493,
+              modifiedTime: 1782467614,
+            },
+          ],
         },
       },
       {
         status: 200,
-        body: { name: 'hello.txt', path: '/tmp/hello.txt', isDirectory: false, size: 5 },
+        body: { name: 'hello.txt', path: '/tmp/hello.txt', isDir: false, size: 5 },
       },
       { status: 204 },
     ]);
@@ -244,7 +261,12 @@ describe('AzureSandboxApiClient', () => {
     expect(requests[0]?.url).toContain('createDirs=true');
     expect(read.toString('utf-8')).toBe('hello');
     expect(list.entries[0]?.path).toBe('/tmp/hello.txt');
+    expect(list.entries[0]?.isDirectory).toBe(false);
+    expect(list.entries[0]?.mode).toBe('420');
+    expect(list.entries[0]?.modifiedAt).toBe('2026-06-26T09:53:34.000Z');
+    expect(list.entries[1]?.isDirectory).toBe(true);
     expect(stat.path).toBe('/tmp/hello.txt');
+    expect(stat.isDirectory).toBe(false);
     expect(requests[2]?.url).toContain('/sandboxes/sbx-1/files/list');
     expect(requests[2]?.url).toContain('path=%2Ftmp');
     expect(requests[3]?.url).toContain('/sandboxes/sbx-1/files/stat');
