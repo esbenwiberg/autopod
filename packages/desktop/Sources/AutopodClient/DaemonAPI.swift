@@ -11,10 +11,19 @@ public actor DaemonAPI {
 
   public init(baseURL: URL, token: String) {
     self.baseURL = baseURL
-    self.token = token
+    self.token = Self.normalizeBearerToken(token)
     self.pod = URLSession.shared
     self.decoder = JSONDecoder()
     self.encoder = JSONEncoder()
+  }
+
+  public static func normalizeBearerToken(_ token: String) -> String {
+    let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.lowercased().hasPrefix("bearer ") {
+      return String(trimmed.dropFirst("Bearer ".count))
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return trimmed
   }
 
   // MARK: - Health
