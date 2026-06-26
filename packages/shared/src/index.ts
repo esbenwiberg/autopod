@@ -114,11 +114,20 @@ export type {
   ActionAuditEntry,
 } from './types/actions.js';
 
-export type { AgentMode, OutputTarget, PodOptions } from './types/pod-options.js';
+export type {
+  AgentMode,
+  OutputTarget,
+  PodOptions,
+  ValidationSuite,
+} from './types/pod-options.js';
 export {
+  VALIDATION_SUITES,
+  isValidationSuite,
+  mergeValidationPhaseSkips,
   podOptionsFromOutputMode,
   outputModeFromPodOptions,
   resolvePodOptions,
+  skippedPhasesForValidationSuite,
 } from './types/pod-options.js';
 
 export type {

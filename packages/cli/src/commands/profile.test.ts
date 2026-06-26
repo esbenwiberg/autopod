@@ -41,6 +41,14 @@ function createProfile(overrides: Record<string, unknown> = {}) {
     mcpServers: [],
     claudeMdSections: [],
     actionPolicy: null,
+    outputMode: 'pr',
+    pod: {
+      agentMode: 'auto',
+      output: 'pr',
+      validate: true,
+      validationSuite: 'thin-with-facts',
+      promotable: false,
+    },
     warmImageTag: null,
     warmImageBuiltAt: null,
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -92,13 +100,43 @@ describe('profile commands', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('pip install -e ".[dev]"'));
   });
 
+  it('shows the profile validation suite in profile details', async () => {
+    await program.parseAsync(['node', 'ap', 'profile', 'show', 'my-app']);
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('thin-with-facts'));
+  });
+
   it('includes validationSetupCommand in the create template', async () => {
     process.env.EDITOR = 'true';
 
     await program.parseAsync(['node', 'ap', 'profile', 'create']);
 
     expect(mockClient.createProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ validationSetupCommand: null }),
+      expect.objectContaining({
+        validationSetupCommand: null,
+        pod: expect.objectContaining({ validationSuite: 'full' }),
+      }),
+    );
+  });
+
+  it('sets the profile validation suite', async () => {
+    await program.parseAsync([
+      'node',
+      'ap',
+      'profile',
+      'validation-suite',
+      'my-app',
+      'deterministic',
+    ]);
+
+    expect(mockClient.updateProfile).toHaveBeenCalledWith(
+      'my-app',
+      expect.objectContaining({
+        pod: expect.objectContaining({
+          validationSuite: 'deterministic',
+          validate: true,
+        }),
+      }),
     );
   });
 

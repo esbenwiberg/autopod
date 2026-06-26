@@ -108,6 +108,7 @@ public enum ProfileMapper {
             agentMode: agent,
             output: output,
             validate: p.validate,
+            validationSuite: p.validationSuite ?? (p.validate ? "full" : "off"),
             advisoryBrowserQaEnabled: p.advisoryBrowserQaEnabled,
             promotable: p.promotable
           )
@@ -200,6 +201,7 @@ public enum ProfileMapper {
           "agentMode": profile.pod.agentMode.rawValue,
           "output": profile.pod.output.rawValue,
           "validate": profile.pod.validate,
+          "validationSuite": profile.pod.validationSuite,
           "promotable": profile.pod.promotable,
         ]
         if let advisoryBrowserQaEnabled = profile.pod.advisoryBrowserQaEnabled {

@@ -85,7 +85,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .issueWatcher:
             "Automatically pick up GitHub Issues or ADO Work Items by label and create pods. Ideal for mobile-triggered workflows."
         case .validation:
-            "Smoke test pages loaded after the app starts to verify correctness."
+            "Autopod validation suite, smoke test pages, facts, and browser checks."
         case .credentials:
             "PATs for Git providers and package registries. OAuth credentials are managed in Providers."
         case .injections:
@@ -120,7 +120,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
         case .issueWatcher:
             ["issue watcher", "label", "github issues", "ado work items", "watcher", "trigger", "mobile", "label prefix"]
         case .validation:
-            ["validation", "smoke test", "smoke pages", "max attempts", "has web ui", "web ui", "browser", "playwright"]
+            ["validation", "suite", "thin", "facts", "smoke test", "smoke pages", "max attempts", "has web ui", "web ui", "browser", "playwright"]
         case .credentials:
             ["pat", "personal access token", "github pat", "ado pat", "registry pat", "private registry", "npm", "nuget", "encrypted"]
         case .injections:
@@ -799,12 +799,16 @@ public struct ProfileEditorView: View {
                         if profile.pod.output == .pr { profile.pod.output = .branch }
                         profile.pod.promotable = true
                         profile.pod.validate = false
+                        profile.pod.validationSuite = "off"
                     } else {
                         profile.pod.promotable = false
                         if profile.pod.output == .branch || profile.pod.output == .none {
                             profile.pod.output = .pr
                         }
                         profile.pod.validate = true
+                        if profile.pod.validationSuite == "off" {
+                            profile.pod.validationSuite = "full"
+                        }
                     }
                 }
             }
@@ -823,6 +827,27 @@ public struct ProfileEditorView: View {
                 Toggle("Run validation", isOn: $profile.pod.validate)
                     .toggleStyle(.switch)
                     .labelsHidden()
+                    .onChange(of: profile.pod.validate) { _, newValue in
+                        if newValue {
+                            if profile.pod.validationSuite == "off" {
+                                profile.pod.validationSuite = "full"
+                            }
+                        } else {
+                            profile.pod.validationSuite = "off"
+                        }
+                    }
+            }
+            fieldRow("Suite", help: "Autopod pre-PR validation preset. GitHub PR checks are configured in the repo.") {
+                Picker("", selection: $profile.pod.validationSuite) {
+                    ForEach(validationSuiteOptions, id: \.self) { suite in
+                        Text(suite).tag(suite)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 190)
+                .onChange(of: profile.pod.validationSuite) { _, newValue in
+                    profile.pod.validate = newValue != "off"
+                }
             }
             fieldRow("Advisory Browser QA", help: "Evidence-only browser QA during validation. Auto leaves the profile unset so derived profiles can inherit or use the daemon default.") {
                 Picker("", selection: advisoryBrowserQaModeBinding) {
@@ -3426,6 +3451,28 @@ public struct ProfileEditorView: View {
                     Text("Validate").font(.caption2).foregroundStyle(.tertiary)
                     Toggle("", isOn: $profile.pod.validate)
                         .toggleStyle(.switch).labelsHidden()
+                        .onChange(of: profile.pod.validate) { _, newValue in
+                            if newValue {
+                                if profile.pod.validationSuite == "off" {
+                                    profile.pod.validationSuite = "full"
+                                }
+                            } else {
+                                profile.pod.validationSuite = "off"
+                            }
+                        }
+                }
+                GridRow {
+                    Text("Suite").font(.caption2).foregroundStyle(.tertiary)
+                    Picker("", selection: $profile.pod.validationSuite) {
+                        ForEach(validationSuiteOptions, id: \.self) { suite in
+                            Text(suite).tag(suite)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 160)
+                    .onChange(of: profile.pod.validationSuite) { _, newValue in
+                        profile.pod.validate = newValue != "off"
+                    }
                 }
                 GridRow {
                     Text("Advisory Browser QA").font(.caption2).foregroundStyle(.tertiary)
@@ -3445,6 +3492,8 @@ public struct ProfileEditorView: View {
                 }
             }
             parentLine(
+                "Suite: \(editorPayload?.parent?.pod?.validationSuite ?? "full") · "
+                +
                 "Advisory browser QA: "
                 + AdvisoryBrowserQaMode(value: editorPayload?.parent?.pod?.advisoryBrowserQaEnabled).label
             )

@@ -36,6 +36,7 @@ public struct ValidationResponse: Codable, Sendable {
   public let podId: String
   public let attempt: Int
   public let timestamp: String
+  public let validationSuite: String?
   public let setup: SetupResultResponse?
   public let smoke: SmokeResultResponse
   public let test: TestResultResponse?

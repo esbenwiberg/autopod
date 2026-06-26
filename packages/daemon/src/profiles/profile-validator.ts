@@ -1,4 +1,4 @@
-import type { StackTemplate } from '@autopod/shared';
+import { type StackTemplate, VALIDATION_SUITES } from '@autopod/shared';
 import { isPrivateUrl } from '../api/ssrf-guard.js';
 
 export interface ProfileValidationResult {
@@ -169,6 +169,23 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
       maxValidationAttempts > 10
     ) {
       errors.push('maxValidationAttempts must be between 1 and 10');
+    }
+  }
+
+  // Pod defaults
+  const pod = input.pod;
+  if (pod !== undefined && pod !== null) {
+    if (typeof pod !== 'object' || Array.isArray(pod)) {
+      errors.push('pod must be an object or null');
+    } else {
+      const validationSuite = (pod as Record<string, unknown>).validationSuite;
+      if (
+        validationSuite !== undefined &&
+        (typeof validationSuite !== 'string' ||
+          !VALIDATION_SUITES.includes(validationSuite as (typeof VALIDATION_SUITES)[number]))
+      ) {
+        errors.push(`pod.validationSuite must be one of: ${VALIDATION_SUITES.join(', ')}`);
+      }
     }
   }
 

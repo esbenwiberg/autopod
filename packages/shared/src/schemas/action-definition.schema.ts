@@ -164,11 +164,20 @@ export const outputModeSchema = z.enum(['pr', 'artifact', 'workspace']);
 // ─── Pod Options (orthogonal axes) ──────────────────────────────
 export const agentModeSchema = z.enum(['auto', 'interactive']);
 export const outputTargetSchema = z.enum(['pr', 'branch', 'artifact', 'none']);
+export const validationSuiteSchema = z.enum([
+  'off',
+  'thin',
+  'thin-with-facts',
+  'deterministic',
+  'full',
+  'custom',
+]);
 
 export const podOptionsSchema = z.object({
   agentMode: agentModeSchema,
   output: outputTargetSchema,
   validate: z.boolean().optional(),
+  validationSuite: validationSuiteSchema.optional(),
   advisoryBrowserQaEnabled: z.boolean().optional(),
   promotable: z.boolean().optional(),
 });
@@ -177,6 +186,7 @@ export const partialPodOptionsSchema = z.object({
   agentMode: agentModeSchema.optional(),
   output: outputTargetSchema.optional(),
   validate: z.boolean().optional(),
+  validationSuite: validationSuiteSchema.optional(),
   advisoryBrowserQaEnabled: z.boolean().optional(),
   promotable: z.boolean().optional(),
 });

@@ -7,8 +7,9 @@ import type {
   PodStatus,
   SpecFile,
   SystemEvent,
+  ValidationSuite,
 } from '@autopod/shared';
-import { parseBriefs } from '@autopod/shared';
+import { VALIDATION_SUITES, isValidationSuite, parseBriefs } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
@@ -23,6 +24,7 @@ const podColumns: ColumnDef<Pod>[] = [
   { header: 'ID', formatter: (s) => s.id.slice(0, 8), width: 10 },
   { header: 'Profile', key: 'profileName', width: 16 },
   { header: 'Status', formatter: (s) => formatStatus(s.status), width: 18 },
+  { header: 'Suite', formatter: (s) => s.options?.validationSuite ?? 'full', width: 16 },
   { header: 'Task', formatter: (s) => truncate(s.task, 40), width: 42 },
   {
     header: 'Duration',
@@ -32,9 +34,37 @@ const podColumns: ColumnDef<Pod>[] = [
   { header: 'Files', formatter: (s) => String(s.filesChanged), width: 7 },
 ];
 
+const validationSuiteHelp = `Autopod validation suite: ${VALIDATION_SUITES.join('|')}`;
+
 function truncate(str: string, max: number): string {
   if (str.length <= max) return str;
   return `${str.slice(0, max - 1)}…`;
+}
+
+function parseValidationSuite(value: string | undefined): ValidationSuite | undefined {
+  if (value === undefined) return undefined;
+  if (isValidationSuite(value)) return value;
+  console.error(chalk.red(`--validation-suite must be one of: ${VALIDATION_SUITES.join(', ')}`));
+  process.exit(1);
+}
+
+function assertValidationFlags(opts: {
+  validate?: boolean;
+  skipValidation?: boolean;
+  validationSuite?: ValidationSuite;
+}): void {
+  if (opts.skipValidation && opts.validationSuite && opts.validationSuite !== 'off') {
+    console.error(chalk.red('--skip-validation cannot be combined with a non-off suite'));
+    process.exit(1);
+  }
+  if (opts.validate === false && opts.validationSuite && opts.validationSuite !== 'off') {
+    console.error(chalk.red('--no-validate cannot be combined with a non-off suite'));
+    process.exit(1);
+  }
+  if (opts.validate === true && opts.validationSuite === 'off') {
+    console.error(chalk.red('--validate cannot be combined with --validation-suite off'));
+    process.exit(1);
+  }
 }
 
 function formatReadinessLine(pod: Pod): string {
@@ -130,6 +160,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('--start-branch <branch>', 'Branch/ref to start from while targeting --base-branch')
     .option('--base-branch <branch>', 'Branch from a specific base (e.g. workspace output)')
     .option('--skip-validation', 'Skip validation phase')
+    .option('--validation-suite <suite>', validationSuiteHelp)
     .option(
       '-s, --sidecar <name>',
       'Companion sidecar to spawn (e.g. "dagger"). Repeatable. Requires the profile to have sidecars.<name> enabled; privileged sidecars also require trustedSource.',
@@ -148,10 +179,13 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           startBranch?: string;
           baseBranch?: string;
           skipValidation?: boolean;
+          validationSuite?: string;
           sidecar: string[];
         },
       ) => {
         const client = getClient();
+        const validationSuite = parseValidationSuite(opts.validationSuite);
+        assertValidationFlags({ skipValidation: opts.skipValidation, validationSuite });
         const pod = await withSpinner('Starting pod...', () =>
           client.createSession({
             profileName: profile,
@@ -163,6 +197,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             startBranch: opts.startBranch,
             baseBranch: opts.baseBranch,
             skipValidation: opts.skipValidation,
+            options: validationSuite ? { validationSuite } : undefined,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
           }),
         );
@@ -171,6 +206,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         console.log(`${chalk.bold('Profile:')}  ${pod.profileName}`);
         console.log(`${chalk.bold('Status:')}   ${formatStatus(pod.status)}`);
         console.log(`${chalk.bold('Branch:')}   ${pod.branch}`);
+        console.log(`${chalk.bold('Suite:')}    ${pod.options?.validationSuite ?? 'full'}`);
         console.log(chalk.dim(`Track progress: ap status ${pod.id.slice(0, 8)}`));
       },
     );
@@ -187,6 +223,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('--output <target>', 'Where output goes: pr | branch | artifact | none')
     .option('--validate', 'Run full validation pipeline before completing')
     .option('--no-validate', 'Skip validation')
+    .option('--validation-suite <suite>', validationSuiteHelp)
     .option('-m, --model <model>', 'AI model to use')
     .option('-r, --runtime <runtime>', 'Runtime (claude or codex)')
     .option('-b, --branch <branch>', 'Target branch name')
@@ -219,6 +256,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           agent?: string;
           output?: string;
           validate?: boolean;
+          validationSuite?: string;
           model?: string;
           runtime?: string;
           branch?: string;
@@ -233,6 +271,8 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         const client = getClient();
         const agent = opts.agent as 'auto' | 'interactive' | undefined;
         const output = opts.output as 'pr' | 'branch' | 'artifact' | 'none' | undefined;
+        const validationSuite = parseValidationSuite(opts.validationSuite);
+        assertValidationFlags({ validate: opts.validate, validationSuite });
 
         if (agent && agent !== 'auto' && agent !== 'interactive') {
           console.error(chalk.red(`--agent must be 'auto' or 'interactive'`));
@@ -244,11 +284,12 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         }
 
         const podOptions =
-          agent || output || opts.validate !== undefined
+          agent || output || opts.validate !== undefined || validationSuite !== undefined
             ? {
                 ...(agent ? { agentMode: agent } : {}),
                 ...(output ? { output } : {}),
                 ...(opts.validate !== undefined ? { validate: opts.validate } : {}),
+                ...(validationSuite ? { validationSuite } : {}),
               }
             : undefined;
 
@@ -296,6 +337,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         console.log(
           `${chalk.bold('Pod:')}      ${pod.options?.agentMode ?? 'auto'} → ${pod.options?.output ?? 'pr'}`,
         );
+        console.log(`${chalk.bold('Suite:')}    ${pod.options?.validationSuite ?? 'full'}`);
         if (pod.referenceRepos?.length) {
           console.log(
             `${chalk.bold('Refs:')}     ${pod.referenceRepos.map((r) => `/repos/${r.mountPath}`).join(', ')}`,
@@ -378,6 +420,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       console.log(
         `${chalk.bold('Validations:')}  ${s.validationAttempts}/${s.maxValidationAttempts}`,
       );
+      console.log(`${chalk.bold('Suite:')}        ${s.options?.validationSuite ?? 'full'}`);
       console.log(`${chalk.bold('Escalations:')}  ${s.escalationCount}`);
       console.log(
         `${chalk.bold('Changes:')}      ${s.filesChanged} files (+${s.linesAdded} -${s.linesRemoved})`,
@@ -450,7 +493,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         const vr = s.lastValidationResult;
         const color = vr.overall === 'pass' ? chalk.green : chalk.red;
         console.log(
-          `\n${chalk.bold('Last validation:')} ${color(vr.overall.toUpperCase())} (attempt ${vr.attempt})`,
+          `\n${chalk.bold('Last validation:')} ${color(vr.overall.toUpperCase())} (${vr.validationSuite ?? s.options?.validationSuite ?? 'full'}, attempt ${vr.attempt})`,
         );
       }
     });
@@ -759,6 +802,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('--start-branch <branch>', 'branch/ref to start from while targeting --base-branch')
     .option('--base-branch <branch>', 'branch from a specific base')
     .option('--skip-validation', 'skip validation phase')
+    .option('--validation-suite <suite>', validationSuiteHelp)
     .option(
       '-s, --sidecar <name>',
       'companion sidecar (repeatable)',
@@ -781,6 +825,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           startBranch?: string;
           baseBranch?: string;
           skipValidation?: boolean;
+          validationSuite?: string;
           sidecar: string[];
         },
       ) => {
@@ -834,6 +879,8 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         }
 
         const client = getClient();
+        const validationSuite = parseValidationSuite(opts.validationSuite);
+        assertValidationFlags({ skipValidation: opts.skipValidation, validationSuite });
         const pod = await withSpinner('Starting pod...', () =>
           client.createSession({
             profileName: profile,
@@ -848,6 +895,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             specFiles,
             specContextFiles,
             skipValidation: opts.skipValidation,
+            options: validationSuite ? { validationSuite } : undefined,
             requireSidecars: opts.sidecar.length > 0 ? opts.sidecar : undefined,
           }),
         );
@@ -856,6 +904,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         console.log(`${chalk.bold('Profile:')}  ${pod.profileName}`);
         console.log(`${chalk.bold('Status:')}   ${formatStatus(pod.status)}`);
         console.log(`${chalk.bold('Branch:')}   ${pod.branch}`);
+        console.log(`${chalk.bold('Suite:')}    ${pod.options?.validationSuite ?? 'full'}`);
         console.log(chalk.dim(`Track progress: ap status ${pod.id.slice(0, 8)}`));
       },
     );
@@ -959,7 +1008,7 @@ function formatLogEvent(
       const vc = event as import('@autopod/shared').ValidationCompletedEvent;
       const color = vc.result.overall === 'pass' ? chalk.green : chalk.red;
       console.log(
-        `${ts} ${color(`Validation ${vc.result.overall.toUpperCase()}`)} (attempt ${vc.result.attempt})`,
+        `${ts} ${color(`Validation ${vc.result.overall.toUpperCase()}`)} (${vc.result.validationSuite ?? 'full'}, attempt ${vc.result.attempt})`,
       );
       break;
     }

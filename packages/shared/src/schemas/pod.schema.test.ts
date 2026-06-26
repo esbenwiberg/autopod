@@ -42,6 +42,26 @@ describe('createPodRequestSchema', () => {
     ]);
   });
 
+  it('accepts validation suite per-pod overrides', () => {
+    const parsed = createPodRequestSchema.parse({
+      profileName: 'primary',
+      task: 'task',
+      options: { validationSuite: 'thin-with-facts' },
+    });
+
+    expect(parsed.options?.validationSuite).toBe('thin-with-facts');
+  });
+
+  it('rejects invalid validation suite per-pod overrides', () => {
+    expect(() =>
+      createPodRequestSchema.parse({
+        profileName: 'primary',
+        task: 'task',
+        options: { validationSuite: 'weekend-mode' },
+      }),
+    ).toThrow();
+  });
+
   it('rejects malformed reference repo URLs', () => {
     expect(() =>
       createPodRequestSchema.parse({

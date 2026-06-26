@@ -182,6 +182,21 @@ describe('PodRepository', () => {
       expect(pod.skipValidation).toBe(true);
     });
 
+    it('persists a per-pod validation suite override', () => {
+      repo.insert({
+        ...validSession,
+        options: {
+          agentMode: 'auto',
+          output: 'pr',
+          validate: true,
+          validationSuite: 'thin-with-facts',
+          promotable: false,
+        },
+      });
+
+      expect(repo.getOrThrow('sess-001').options.validationSuite).toBe('thin-with-facts');
+    });
+
     it('should throw on duplicate id', () => {
       repo.insert(validSession);
       expect(() => repo.insert(validSession)).toThrow();
@@ -369,6 +384,21 @@ describe('PodRepository', () => {
         .prepare('SELECT readiness_review FROM pods WHERE id = ?')
         .get('sess-001') as { readiness_review: string | null };
       expect(stored.readiness_review).toBeNull();
+    });
+
+    it('updates a per-pod validation suite override', () => {
+      repo.insert(validSession);
+      repo.update('sess-001', {
+        options: {
+          agentMode: 'auto',
+          output: 'pr',
+          validate: true,
+          validationSuite: 'thin-with-facts',
+          promotable: false,
+        },
+      });
+
+      expect(repo.getOrThrow('sess-001').options.validationSuite).toBe('thin-with-facts');
     });
 
     it('readiness rejects raw evidence fields before storage', () => {

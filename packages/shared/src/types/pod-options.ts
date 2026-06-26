@@ -1,4 +1,5 @@
 import type { OutputMode } from './actions.js';
+import type { ValidationPhase } from './events.js';
 
 /**
  * How the pod is driven.
@@ -22,6 +23,70 @@ export type AgentMode = 'auto' | 'interactive';
 export type OutputTarget = 'pr' | 'branch' | 'artifact' | 'none';
 
 /**
+ * Which validation phases Autopod runs before handing work to the PR workflow.
+ *
+ * Repo-owned GitHub checks remain independent from this setting: a pod may run
+ * thin Autopod validation while the PR or main workflow runs a fuller suite.
+ */
+export type ValidationSuite =
+  | 'off'
+  | 'thin'
+  | 'thin-with-facts'
+  | 'deterministic'
+  | 'full'
+  | 'custom';
+
+export const VALIDATION_SUITES: readonly ValidationSuite[] = [
+  'off',
+  'thin',
+  'thin-with-facts',
+  'deterministic',
+  'full',
+  'custom',
+] as const;
+
+const ALL_VALIDATION_PHASES: readonly ValidationPhase[] = [
+  'setup',
+  'lint',
+  'sast',
+  'build',
+  'test',
+  'health',
+  'pages',
+  'facts',
+  'review',
+  'advisory',
+] as const;
+
+const VALIDATION_SUITE_SKIPS: Record<ValidationSuite, readonly ValidationPhase[]> = {
+  off: ALL_VALIDATION_PHASES,
+  // Fast pre-PR confidence: no SAST/page smoke/facts/AI/advisory.
+  thin: ['sast', 'pages', 'facts', 'review', 'advisory'],
+  // Same thin deterministic path, plus contract facts.
+  'thin-with-facts': ['sast', 'pages', 'review', 'advisory'],
+  // Full deterministic signal, but no model review or advisory browser QA.
+  deterministic: ['review', 'advisory'],
+  full: [],
+  // Custom means profile.skipValidationPhases is the source of truth.
+  custom: [],
+};
+
+export function isValidationSuite(value: string): value is ValidationSuite {
+  return (VALIDATION_SUITES as readonly string[]).includes(value);
+}
+
+export function skippedPhasesForValidationSuite(suite: ValidationSuite): ValidationPhase[] {
+  return [...VALIDATION_SUITE_SKIPS[suite]];
+}
+
+export function mergeValidationPhaseSkips(
+  suite: ValidationSuite,
+  extraSkips: readonly ValidationPhase[] | null | undefined,
+): ValidationPhase[] {
+  return Array.from(new Set([...skippedPhasesForValidationSuite(suite), ...(extraSkips ?? [])]));
+}
+
+/**
  * Orthogonal axes describing what a pod is.
  *
  * Replaces the single `OutputMode` enum, which conflated agent presence,
@@ -35,6 +100,11 @@ export interface PodOptions {
    * Defaults: `output='pr'` → true; all others → false.
    */
   validate?: boolean;
+  /**
+   * Validation suite to run before the PR handoff. Undefined preserves legacy
+   * defaults (`validate=true` => `full`, `validate=false` => `off`).
+   */
+  validationSuite?: ValidationSuite;
   /**
    * Per-pod override for advisory browser QA. Undefined inherits the resolved
    * profile default. This produces evidence only and does not affect validation
@@ -56,11 +126,29 @@ export interface PodOptions {
 export function podOptionsFromOutputMode(mode: OutputMode): PodOptions {
   switch (mode) {
     case 'pr':
-      return { agentMode: 'auto', output: 'pr', validate: true, promotable: false };
+      return {
+        agentMode: 'auto',
+        output: 'pr',
+        validate: true,
+        validationSuite: 'full',
+        promotable: false,
+      };
     case 'artifact':
-      return { agentMode: 'auto', output: 'artifact', validate: false, promotable: false };
+      return {
+        agentMode: 'auto',
+        output: 'artifact',
+        validate: false,
+        validationSuite: 'off',
+        promotable: false,
+      };
     case 'workspace':
-      return { agentMode: 'interactive', output: 'branch', validate: false, promotable: true };
+      return {
+        agentMode: 'interactive',
+        output: 'branch',
+        validate: false,
+        validationSuite: 'off',
+        promotable: true,
+      };
   }
 }
 
@@ -95,17 +183,33 @@ export function resolvePodOptions(
     agentMode: 'auto',
     output: 'pr',
     validate: true,
+    validationSuite: 'full',
     promotable: false,
   };
   const merged: PodOptions = {
     agentMode: override?.agentMode ?? base.agentMode,
     output: override?.output ?? base.output,
     validate: override?.validate ?? base.validate,
+    validationSuite: override?.validationSuite ?? base.validationSuite,
     advisoryBrowserQaEnabled: override?.advisoryBrowserQaEnabled ?? base.advisoryBrowserQaEnabled,
     promotable: override?.promotable ?? base.promotable,
   };
   // Apply axis-implied defaults when validate/promotable weren't explicitly set.
   if (merged.validate === undefined) merged.validate = merged.output === 'pr';
+  if (merged.validationSuite === undefined) {
+    merged.validationSuite = merged.validate ? 'full' : 'off';
+  }
+  if (override?.validate === true && override.validationSuite === undefined) {
+    merged.validationSuite = merged.validationSuite === 'off' ? 'full' : merged.validationSuite;
+  }
+  if (override?.validate === false && override.validationSuite === undefined) {
+    merged.validationSuite = 'off';
+  }
+  if (override?.validationSuite !== undefined) {
+    merged.validate = override.validationSuite !== 'off';
+  }
+  if (merged.validationSuite !== 'off') merged.validate = true;
+  if (merged.validationSuite === 'off') merged.validate = false;
   if (merged.promotable === undefined) merged.promotable = merged.agentMode === 'interactive';
   return merged;
 }

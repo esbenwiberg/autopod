@@ -81,6 +81,7 @@ public enum PodMapper {
           agentMode: agent,
           output: output,
           validate: p.validate,
+          validationSuite: p.validationSuite ?? (p.validate ? "full" : "off"),
           advisoryBrowserQaEnabled: p.advisoryBrowserQaEnabled,
           promotable: p.promotable
         )
@@ -251,6 +252,7 @@ public enum PodMapper {
         reviewReasoning: v.taskReview?.reasoning,
         reviewSkipReason: v.reviewSkipReason,
         reviewSkipKind: v.reviewSkipKind,
+        validationSuite: v.validationSuite,
         healthCheck: healthCheck,
         pages: pages,
         factValidation: factValidation,

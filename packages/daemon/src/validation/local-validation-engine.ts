@@ -461,6 +461,7 @@ export function createLocalValidationEngine(
           podId: config.podId,
           attempt: config.attempt,
           timestamp: new Date().toISOString(),
+          validationSuite: config.validationSuite,
           setup: setupResult,
           smoke: {
             status: smokeStatus,
@@ -577,6 +578,7 @@ function makeSetupFailedResult(
     podId: config.podId,
     attempt: config.attempt,
     timestamp: new Date().toISOString(),
+    validationSuite: config.validationSuite,
     setup: setupResult,
     smoke: {
       status: 'fail',
@@ -610,6 +612,7 @@ function makeInterruptedResult(
     podId: config.podId,
     attempt: config.attempt,
     timestamp: new Date().toISOString(),
+    validationSuite: config.validationSuite,
     smoke: {
       status: 'fail',
       build: { status: 'skip', output: '', duration: 0 },

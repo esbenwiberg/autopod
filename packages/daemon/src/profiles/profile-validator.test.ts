@@ -131,6 +131,23 @@ describe('ProfileValidator', () => {
     expect(result.valid).toBe(true);
   });
 
+  it('should accept a validation suite in pod defaults', () => {
+    const result = validateProfile({
+      ...validInput,
+      pod: { agentMode: 'auto', output: 'pr', validationSuite: 'thin-with-facts' },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('should reject an invalid validation suite in pod defaults', () => {
+    const result = validateProfile({
+      ...validInput,
+      pod: { agentMode: 'auto', output: 'pr', validationSuite: 'slow-vibes' },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('pod.validationSuite');
+  });
+
   it('should accept validationSetupCommand when it is a command or null', () => {
     expect(
       validateProfile({

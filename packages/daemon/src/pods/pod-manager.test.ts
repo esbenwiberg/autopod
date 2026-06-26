@@ -413,7 +413,9 @@ function makeSetupFailure(): ValidationResult {
 
 function createMockValidationEngine(result?: Partial<ValidationResult>): ValidationEngine {
   return {
-    validate: vi.fn(async () => makeValidationResult(result)),
+    validate: vi.fn(async (config: Parameters<ValidationEngine['validate']>[0]) =>
+      makeValidationResult({ validationSuite: config.validationSuite, ...result }),
+    ),
     runAdvisoryBrowserQa: vi.fn(async () => null),
   };
 }
@@ -540,6 +542,38 @@ function createTestContext(
         claudeMdSections: JSON.parse((row.claude_md_sections as string) ?? '[]'),
         networkPolicy: null,
         actionPolicy: null,
+        pod:
+          row.agent_mode && row.output_target
+            ? {
+                agentMode: row.agent_mode as Profile['pod'] extends infer P
+                  ? P extends { agentMode: infer A }
+                    ? A
+                    : never
+                  : never,
+                output: row.output_target as Profile['pod'] extends infer P
+                  ? P extends { output: infer O }
+                    ? O
+                    : never
+                  : never,
+                validate:
+                  row.validate !== null && row.validate !== undefined
+                    ? Boolean(row.validate)
+                    : undefined,
+                validationSuite:
+                  row.validation_suite !== null && row.validation_suite !== undefined
+                    ? (row.validation_suite as NonNullable<Profile['pod']>['validationSuite'])
+                    : undefined,
+                advisoryBrowserQaEnabled:
+                  row.advisory_browser_qa_enabled !== null &&
+                  row.advisory_browser_qa_enabled !== undefined
+                    ? Boolean(row.advisory_browser_qa_enabled)
+                    : undefined,
+                promotable:
+                  row.promotable !== null && row.promotable !== undefined
+                    ? Boolean(row.promotable)
+                    : undefined,
+              }
+            : null,
         outputMode: 'pr' as const,
         modelProvider: (row.model_provider as Profile['modelProvider']) ?? 'anthropic',
         providerCredentials: row.provider_credentials
@@ -568,6 +602,9 @@ function createTestContext(
         workerProfile: (row.worker_profile as string) ?? null,
         preflightConflictPolicy:
           (row.preflight_conflict_policy as 'warn' | 'block' | null | undefined) ?? null,
+        skipValidationPhases: row.skip_validation_phases
+          ? JSON.parse(row.skip_validation_phases as string)
+          : null,
         createdAt: row.created_at as string,
         updatedAt: row.updated_at as string,
       };
@@ -3518,6 +3555,110 @@ describe('PodManager', () => {
 
       expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
         expect.objectContaining({ advisoryBrowserQaEnabled: true }),
+        expect.any(Function),
+        expect.any(AbortSignal),
+        expect.any(Object),
+      );
+    });
+
+    it('uses a profile default thin-with-facts validation suite', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      ctx.db
+        .prepare(
+          `UPDATE profiles
+           SET agent_mode = 'auto', output_target = 'pr', validate = 1, validation_suite = 'thin-with-facts'
+           WHERE name = 'test-profile'`,
+        )
+        .run();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      expect(pod.options.validationSuite).toBe('thin-with-facts');
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          validationSuite: 'thin-with-facts',
+          skipPhases: ['sast', 'pages', 'review', 'advisory'],
+        }),
+        expect.any(Function),
+        expect.any(AbortSignal),
+        expect.any(Object),
+      );
+      expect(manager.getSession(pod.id).lastValidationResult?.validationSuite).toBe(
+        'thin-with-facts',
+      );
+    });
+
+    it('allows a pod to override the profile validation suite', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      ctx.db
+        .prepare(
+          `UPDATE profiles
+           SET agent_mode = 'auto', output_target = 'pr', validate = 1, validation_suite = 'full'
+           WHERE name = 'test-profile'`,
+        )
+        .run();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Add feature',
+          options: { validationSuite: 'thin-with-facts' },
+        },
+        'user-1',
+      );
+      expect(pod.options.validationSuite).toBe('thin-with-facts');
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          validationSuite: 'thin-with-facts',
+          skipPhases: ['sast', 'pages', 'review', 'advisory'],
+        }),
+        expect.any(Function),
+        expect.any(AbortSignal),
+        expect.any(Object),
+      );
+    });
+
+    it('keeps legacy PR pods on full validation when no suite is configured', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          validationSuite: 'full',
+          skipPhases: [],
+        }),
         expect.any(Function),
         expect.any(AbortSignal),
         expect.any(Object),
@@ -6621,9 +6762,9 @@ describe('PodManager', () => {
         return [];
       });
       expect(messages).toContain('Resuming — revalidating with existing worktree');
-      expect(messages).toContain('Starting validation-only resume…');
+      expect(messages).toContain('Starting full validation-only resume…');
       expect(messages).toContain('Starting revalidation…');
-      expect(messages).not.toContain('New commits detected — starting revalidation…');
+      expect(messages).not.toContain('New commits detected — starting full validation…');
       expect(messages).not.toContain('Starting revalidation (human fix)…');
     });
 

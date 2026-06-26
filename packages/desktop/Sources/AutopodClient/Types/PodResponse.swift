@@ -7,6 +7,7 @@ public struct PodConfigResponse: Codable, Sendable {
   public var agentMode: String         // "auto" | "interactive"
   public var output: String            // "pr" | "branch" | "artifact" | "none"
   public var validate: Bool
+  public var validationSuite: String?
   public var advisoryBrowserQaEnabled: Bool?
   public var promotable: Bool
 
@@ -14,12 +15,14 @@ public struct PodConfigResponse: Codable, Sendable {
     agentMode: String,
     output: String,
     validate: Bool,
+    validationSuite: String? = nil,
     advisoryBrowserQaEnabled: Bool? = nil,
     promotable: Bool
   ) {
     self.agentMode = agentMode
     self.output = output
     self.validate = validate
+    self.validationSuite = validationSuite
     self.advisoryBrowserQaEnabled = advisoryBrowserQaEnabled
     self.promotable = promotable
   }
@@ -29,12 +32,13 @@ public struct PodConfigResponse: Codable, Sendable {
     agentMode = try c.decode(String.self, forKey: .agentMode)
     output = try c.decode(String.self, forKey: .output)
     validate = try decodeBoolOrInt(c, key: .validate)
+    validationSuite = try c.decodeIfPresent(String.self, forKey: .validationSuite)
     advisoryBrowserQaEnabled = try decodeBoolOrIntIfPresent(c, key: .advisoryBrowserQaEnabled)
     promotable = try decodeBoolOrInt(c, key: .promotable)
   }
 
   private enum CodingKeys: String, CodingKey {
-    case agentMode, output, validate, advisoryBrowserQaEnabled, promotable
+    case agentMode, output, validate, validationSuite, advisoryBrowserQaEnabled, promotable
   }
 }
 
@@ -43,6 +47,7 @@ public struct PodConfigRequest: Codable, Sendable {
   public var agentMode: String?
   public var output: String?
   public var validate: Bool?
+  public var validationSuite: String?
   public var advisoryBrowserQaEnabled: Bool?
   public var promotable: Bool?
 
@@ -50,12 +55,14 @@ public struct PodConfigRequest: Codable, Sendable {
     agentMode: String? = nil,
     output: String? = nil,
     validate: Bool? = nil,
+    validationSuite: String? = nil,
     advisoryBrowserQaEnabled: Bool? = nil,
     promotable: Bool? = nil
   ) {
     self.agentMode = agentMode
     self.output = output
     self.validate = validate
+    self.validationSuite = validationSuite
     self.advisoryBrowserQaEnabled = advisoryBrowserQaEnabled
     self.promotable = promotable
   }

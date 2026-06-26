@@ -8,6 +8,7 @@ import type {
   ValidationOverride,
   ValidationPhase,
   ValidationResult,
+  ValidationSuite,
 } from '@autopod/shared';
 
 export interface ValidationEngineConfig {
@@ -25,6 +26,7 @@ export interface ValidationEngineConfig {
   healthTimeout: number;
   smokePages: import('@autopod/shared').SmokePage[];
   attempt: number;
+  validationSuite?: ValidationSuite;
   task: string;
   diff: string;
   reviewerModel?: string;

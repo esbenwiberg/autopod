@@ -2,8 +2,21 @@ import { spawn as cpSpawn, execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { ActionOverride, Profile, PublicProfile } from '@autopod/shared';
-import { ProfileNotFoundError, createProfileSchema, updateProfileSchema } from '@autopod/shared';
+import type {
+  ActionOverride,
+  PodOptions,
+  Profile,
+  PublicProfile,
+  ValidationSuite,
+} from '@autopod/shared';
+import {
+  ProfileNotFoundError,
+  VALIDATION_SUITES,
+  createProfileSchema,
+  isValidationSuite,
+  podOptionsFromOutputMode,
+  updateProfileSchema,
+} from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { parse, stringify } from 'yaml';
@@ -19,6 +32,16 @@ const profileColumns: ColumnDef<Profile>[] = [
   { header: 'Model', key: 'defaultModel', width: 10 },
   { header: 'Runtime', key: 'defaultRuntime', width: 10 },
 ];
+
+function parseValidationSuite(value: string): ValidationSuite {
+  if (isValidationSuite(value)) return value;
+  console.error(chalk.red(`suite must be one of: ${VALIDATION_SUITES.join(', ')}`));
+  process.exit(1);
+}
+
+function defaultPodOptions(profile: Profile): PodOptions {
+  return profile.pod ?? podOptionsFromOutputMode(profile.outputMode ?? 'pr');
+}
 
 export function registerProfileCommands(program: Command, getClient: () => AutopodClient): void {
   const profile = program.command('profile').description('Manage project profiles');
@@ -63,6 +86,11 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         console.log(`${chalk.bold('Model:')}      ${data.defaultModel}`);
         console.log(`${chalk.bold('Runtime:')}    ${data.defaultRuntime}`);
         console.log(`${chalk.bold('Max retries:')} ${data.maxValidationAttempts}`);
+        const podOptions = defaultPodOptions(data);
+        console.log(`${chalk.bold('Pod:')}        ${podOptions.agentMode} -> ${podOptions.output}`);
+        console.log(
+          `${chalk.bold('Suite:')}      ${podOptions.validationSuite ?? (podOptions.validate === false ? 'off' : 'full')}`,
+        );
         if (data.agentDonePrompt) {
           console.log(`${chalk.bold('Done prompt:')} ${data.agentDonePrompt.length} chars`);
         }
@@ -182,6 +210,11 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
           //     requiresApproval: false
           //     disabled: false
         },
+        pod: {
+          agentMode: 'auto',
+          output: 'pr',
+          validationSuite: 'full',
+        },
       };
 
       const edited = await openInEditor(template);
@@ -227,6 +260,24 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       const parsed = updateProfileSchema.parse(updates) as Partial<Profile>;
       await withSpinner('Updating profile...', () => client.updateProfile(name, parsed));
       console.log(chalk.green(`Profile "${name}" updated.`));
+    });
+
+  profile
+    .command('validation-suite <name> <suite>')
+    .description(
+      `Set the profile default Autopod validation suite (${VALIDATION_SUITES.join('|')})`,
+    )
+    .action(async (name: string, suiteRaw: string) => {
+      const client = getClient();
+      const suite = parseValidationSuite(suiteRaw);
+      const existing = await withSpinner('Fetching profile...', () => client.getProfile(name));
+      const pod: PodOptions = {
+        ...defaultPodOptions(existing),
+        validationSuite: suite,
+        validate: suite !== 'off',
+      };
+      await withSpinner('Updating validation suite...', () => client.updateProfile(name, { pod }));
+      console.log(chalk.green(`Profile "${name}" default validation suite: ${suite}.`));
     });
 
   profile

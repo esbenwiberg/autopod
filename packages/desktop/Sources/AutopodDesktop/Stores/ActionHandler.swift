@@ -451,6 +451,7 @@ public final class ActionHandler {
         agentMode: source.pod.agentMode.rawValue,
         output: source.pod.output.rawValue,
         validate: source.pod.validate,
+        validationSuite: source.pod.validationSuite,
         advisoryBrowserQaEnabled: source.pod.advisoryBrowserQaEnabled,
         promotable: source.pod.promotable
       ),
@@ -687,7 +688,13 @@ public final class ActionHandler {
     let req = CreateSessionRequest(
       profileName: profileName,
       task: task,
-      pod: PodConfigRequest(agentMode: "auto", output: "pr", validate: true, promotable: false),
+      pod: PodConfigRequest(
+        agentMode: "auto",
+        output: "pr",
+        validate: true,
+        validationSuite: "full",
+        promotable: false
+      ),
       baseBranch: baseBranch?.isEmpty == true ? nil : baseBranch,
       dependsOnPodIds: dependsOnPodIds,
       seriesId: seriesId,

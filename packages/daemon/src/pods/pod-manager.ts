@@ -56,6 +56,7 @@ import {
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
   generateId,
   generatePodId,
+  mergeValidationPhaseSkips,
   outputModeFromPodOptions,
   podOptionsFromOutputMode,
   processContent,
@@ -1467,6 +1468,20 @@ function approvedMemoriesForPod(pod: Pod, memoryRepo: MemoryRepository): MemoryE
     ...memoryRepo.list('profile', pod.profileName, true),
     ...memoryRepo.list('global', null, true),
   ];
+}
+
+function getPodValidationSuite(pod: Pod): NonNullable<PodOptions['validationSuite']> {
+  return pod.options.validationSuite ?? (pod.options.validate === false ? 'off' : 'full');
+}
+
+function isPodValidationDisabled(pod: Pod): boolean {
+  return (
+    pod.skipValidation || pod.options.validate === false || getPodValidationSuite(pod) === 'off'
+  );
+}
+
+function getPodValidationSkipPhases(profile: Profile, pod: Pod): ValidationPhase[] {
+  return mergeValidationPhaseSkips(getPodValidationSuite(pod), profile.skipValidationPhases);
 }
 
 export async function selectMemoryBriefingForPod(opts: {
@@ -4795,6 +4810,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         request.options ??
           (request.outputMode ? podOptionsFromOutputMode(request.outputMode) : undefined),
       );
+      if (
+        skipValidation &&
+        request.options?.validationSuite &&
+        request.options.validationSuite !== 'off'
+      ) {
+        throw new AutopodError(
+          `skipValidation cannot be combined with validationSuite='${request.options.validationSuite}'`,
+          'INVALID_CONFIGURATION',
+          400,
+        );
+      }
+      if (skipValidation) {
+        resolvedPod.validate = false;
+        resolvedPod.validationSuite = 'off';
+      }
 
       // deny-all network policy blocks all outbound — incompatible with cloud-backed runtimes.
       // Interactive pods run without an AI agent, so they're unaffected.
@@ -7480,12 +7510,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const isScheduledSession = refreshed.scheduledJobId !== null;
       const noChangesAfterRework =
         noChanges && refreshed.lastCorrectionMessage?.startsWith(REWORK_IN_PROGRESS_PREFIX);
-      if (
-        noChangesAfterRework &&
-        !refreshed.skipValidation &&
-        !isForkSession &&
-        !isScheduledSession
-      ) {
+      const validationDisabled = isPodValidationDisabled(refreshed);
+      if (noChangesAfterRework && !validationDisabled && !isForkSession && !isScheduledSession) {
         const message = 'Rework produced no file changes.';
         logger.info({ podId }, 'Failing pod because rework produced no file changes');
         emitActivityStatus(podId, `${message} Marking pod failed.`);
@@ -7495,7 +7521,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         });
         return;
       }
-      if (noChanges && !isForkSession && !refreshed.skipValidation) {
+      if (noChanges && !isForkSession && !validationDisabled) {
         logger.info({ podId }, 'Completing pod directly — no files changed');
         emitActivityStatus(podId, 'No files changed — completing pod');
         await cleanupContainer(refreshed, 'no-changes-complete');
@@ -7508,10 +7534,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return;
       }
 
-      if (refreshed.skipValidation || (noChanges && !isForkSession)) {
+      if (validationDisabled || (noChanges && !isForkSession)) {
         if (noChanges) {
           logger.info({ podId }, 'Skipping validation — no files changed');
           emitActivityStatus(podId, 'No files changed — skipping validation');
+        } else if (getPodValidationSuite(refreshed) === 'off') {
+          emitActivityStatus(podId, 'Validation suite is off — marking pod validated');
         }
         transition(refreshed, 'validating');
         const s2 = podRepo.getOrThrow(podId);
@@ -9112,9 +9140,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       });
 
       const reworkLabel = s1.reworkCount > 0 ? `rework ${s1.reworkCount}, ` : '';
+      const validationSuite = getPodValidationSuite(s1);
       emitActivityStatus(
         podId,
-        `Starting validation (${reworkLabel}attempt ${attempt}/${s1.maxValidationAttempts})…`,
+        `Starting ${validationSuite} validation (${reworkLabel}attempt ${attempt}/${s1.maxValidationAttempts})…`,
       );
 
       try {
@@ -9229,6 +9258,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           healthTimeout: profile.healthTimeout ?? 120,
           smokePages: profile.smokePages,
           attempt,
+          validationSuite,
           task: pod.task,
           diff,
           testCommand: profile.testCommand,
@@ -9257,7 +9287,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           reviewerApiKey: process.env.ANTHROPIC_API_KEY,
           extraExecEnv: validationExecEnv,
           preSubmitReview: pod.preSubmitReview ?? undefined,
-          skipPhases: profile.skipValidationPhases ?? undefined,
+          skipPhases: getPodValidationSkipPhases(profile, s1),
         };
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
@@ -9987,11 +10017,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, 'Resuming — revalidating with existing worktree');
       }
 
-      logger.info({ podId, newCommits, force }, 'Running revalidation');
+      const validationSuite = getPodValidationSuite(pod);
+      logger.info({ podId, newCommits, force, validationSuite }, 'Running revalidation');
       if (newCommits) {
-        emitActivityStatus(podId, 'New commits detected — starting revalidation…');
+        emitActivityStatus(podId, `New commits detected — starting ${validationSuite} validation…`);
       } else {
-        emitActivityStatus(podId, 'Starting validation-only resume…');
+        emitActivityStatus(podId, `Starting ${validationSuite} validation-only resume…`);
       }
 
       // Reset validation attempts for the fresh human-driven validation
@@ -10090,6 +10121,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           healthTimeout: profile.healthTimeout ?? 120,
           smokePages: profile.smokePages,
           attempt,
+          validationSuite,
           task: pod.task,
           diff,
           testCommand: profile.testCommand,
@@ -10113,7 +10145,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           hasWebUi: profile.hasWebUi ?? true,
           advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
           preSubmitReview: pod.preSubmitReview ?? undefined,
-          skipPhases: profile.skipValidationPhases ?? undefined,
+          skipPhases: getPodValidationSkipPhases(profile, pod),
         };
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;

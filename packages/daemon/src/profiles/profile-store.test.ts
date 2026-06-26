@@ -236,6 +236,21 @@ describe('ProfileStore', () => {
       expect(store.getRaw('my-app').skipValidationPhases).toEqual(['setup']);
     });
 
+    it('persists a profile default validation suite', () => {
+      const profile = store.create({
+        ...validInput,
+        pod: {
+          agentMode: 'auto',
+          output: 'pr',
+          validationSuite: 'thin-with-facts',
+        },
+      });
+
+      expect(profile.pod?.validationSuite).toBe('thin-with-facts');
+      expect(store.get('my-app').pod?.validationSuite).toBe('thin-with-facts');
+      expect(store.getRaw('my-app').pod?.validationSuite).toBe('thin-with-facts');
+    });
+
     it('stores missing fields on a derived profile as null (not schema defaults)', () => {
       // Regression: a freshly-created derived profile with only name+extends
       // must leave every inheritable field null in the DB. Otherwise the
@@ -472,6 +487,23 @@ describe('ProfileStore', () => {
 
       const cleared = store.update('my-app', { skipValidationPhases: null });
       expect(cleared.skipValidationPhases).toBeNull();
+    });
+
+    it('updates and clears the profile default validation suite', () => {
+      store.create({
+        ...validInput,
+        pod: { agentMode: 'auto', output: 'pr', validationSuite: 'full' },
+      });
+
+      const updated = store.update('my-app', {
+        pod: { agentMode: 'auto', output: 'pr', validationSuite: 'thin-with-facts' },
+      });
+      expect(updated.pod?.validationSuite).toBe('thin-with-facts');
+
+      const cleared = store.update('my-app', {
+        pod: { agentMode: 'auto', output: 'pr' },
+      });
+      expect(cleared.pod?.validationSuite).toBeUndefined();
     });
   });
 

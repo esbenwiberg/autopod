@@ -20,6 +20,7 @@ import type {
   SmokePage,
   TestPipelineConfig,
   ValidationPhase,
+  ValidationSuite,
 } from '@autopod/shared';
 import {
   AutopodError,
@@ -113,6 +114,10 @@ function readProfilePodFromRow(row: Record<string, unknown>): PodOptions | null 
     output,
     validate:
       row.validate !== null && row.validate !== undefined ? Boolean(row.validate) : undefined,
+    validationSuite:
+      row.validation_suite !== null && row.validation_suite !== undefined
+        ? (row.validation_suite as ValidationSuite)
+        : undefined,
     advisoryBrowserQaEnabled:
       row.advisory_browser_qa_enabled !== null && row.advisory_browser_qa_enabled !== undefined
         ? Boolean(row.advisory_browser_qa_enabled)
@@ -345,7 +350,7 @@ export function createProfileStore(
           health_path, health_timeout, validation_pages, max_validation_attempts,
           default_model, reviewer_model, default_runtime, execution_target, custom_instructions, agent_done_prompt, escalation_config,
           extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
-          agent_mode, output_target, validate, advisory_browser_qa_enabled, promotable,
+          agent_mode, output_target, validate, validation_suite, advisory_browser_qa_enabled, promotable,
           model_provider, provider_credentials, test_command, validation_setup_command, pr_provider,
           ado_pat, ado_pat_expires_at, github_pat, github_pat_expires_at, openrouter_api_key,
           private_registries, registry_pat, registry_pat_expires_at, branch_prefix, container_memory_gb,
@@ -367,7 +372,7 @@ export function createProfileStore(
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
           @defaultModel, @reviewerModel, @defaultRuntime, @executionTarget, @customInstructions, @agentDonePrompt, @escalationConfig,
           @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
-          @agentMode, @outputTarget, @validate, @advisoryBrowserQaEnabled, @promotable,
+          @agentMode, @outputTarget, @validate, @validationSuite, @advisoryBrowserQaEnabled, @promotable,
           @modelProvider, @providerCredentials, @testCommand, @validationSetupCommand, @prProvider,
           @adoPat, @adoPatExpiresAt, @githubPat, @githubPatExpiresAt, @openrouterApiKey,
           @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix, @containerMemoryGb,
@@ -415,6 +420,7 @@ export function createProfileStore(
         agentMode: parsed.pod?.agentMode ?? null,
         outputTarget: parsed.pod?.output ?? null,
         validate: parsed.pod?.validate === undefined ? null : parsed.pod.validate ? 1 : 0,
+        validationSuite: parsed.pod?.validationSuite ?? null,
         advisoryBrowserQaEnabled:
           parsed.pod?.advisoryBrowserQaEnabled === undefined
             ? null
@@ -654,6 +660,7 @@ export function createProfileStore(
           'agent_mode = @agentMode',
           'output_target = @outputTarget',
           'validate = @validate',
+          'validation_suite = @validationSuite',
           'advisory_browser_qa_enabled = @advisoryBrowserQaEnabled',
           'promotable = @promotable',
         );
@@ -665,6 +672,7 @@ export function createProfileStore(
             : parsed.pod.validate
               ? 1
               : 0;
+        fieldMap.validationSuite = parsed.pod?.validationSuite ?? null;
         fieldMap.advisoryBrowserQaEnabled =
           parsed.pod?.advisoryBrowserQaEnabled === undefined || parsed.pod === null
             ? null

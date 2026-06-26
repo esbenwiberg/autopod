@@ -26,6 +26,41 @@ describe('createProfileSchema model validation', () => {
     expect(nullable.validationSetupCommand).toBeNull();
   });
 
+  it('accepts validation suite profile defaults in create and update schemas', () => {
+    const parsed = createProfileSchema.parse({
+      name: 'primary',
+      pod: {
+        agentMode: 'auto',
+        output: 'pr',
+        validationSuite: 'thin-with-facts',
+      },
+    });
+
+    expect(parsed.pod?.validationSuite).toBe('thin-with-facts');
+
+    const updated = updateProfileSchema.parse({
+      pod: {
+        agentMode: 'auto',
+        output: 'pr',
+        validationSuite: 'deterministic',
+      },
+    });
+    expect(updated.pod?.validationSuite).toBe('deterministic');
+  });
+
+  it('rejects invalid validation suite profile defaults', () => {
+    expect(
+      createProfileSchema.safeParse({
+        name: 'primary',
+        pod: {
+          agentMode: 'auto',
+          output: 'pr',
+          validationSuite: 'ship-it',
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it('preserves null inheritance for validationSetupCommand on derived profiles', () => {
     const derived = createProfileSchema.parse({ name: 'child', extends: 'parent' });
     expect(derived.validationSetupCommand).toBeNull();

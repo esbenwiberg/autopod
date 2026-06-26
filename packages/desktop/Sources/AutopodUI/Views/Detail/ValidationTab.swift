@@ -252,6 +252,7 @@ public struct ValidationTab: View {
       reviewReasoning: response.taskReview?.reasoning,
       reviewSkipReason: response.reviewSkipReason,
       reviewSkipKind: response.reviewSkipKind,
+      validationSuite: response.validationSuite,
       healthCheck: healthCheck,
       pages: pages,
       factValidation: factValidation,
@@ -809,6 +810,11 @@ public struct ValidationTab: View {
       }
 
       HStack(spacing: 8) {
+        summaryChip(
+          label: "Suite",
+          value: displayedChecks?.validationSuite ?? pod.pod.validationSuite,
+          color: .secondary
+        )
         summaryChip(
           label: "Phases",
           value: "\(displayedPhases.filter { phaseStatus($0) == .passed }.count)/\(displayedPhases.count)",

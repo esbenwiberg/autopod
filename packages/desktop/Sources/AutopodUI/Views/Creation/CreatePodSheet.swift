@@ -38,6 +38,7 @@ public struct CreateSessionSheet: View {
     @State private var agentMode: String = "auto"
     @State private var outputTarget: String = "pr"
     @State private var validate: Bool = true
+    @State private var validationSuite: String = "full"
     @State private var sourceBranch = ""
     @State private var baseBranch = ""
     @State private var branchPrefix = ""
@@ -74,6 +75,7 @@ public struct CreateSessionSheet: View {
         ("artifact", "Artifact"),
         ("none", "Ephemeral"),
     ]
+    private let validationSuites = validationSuiteOptions
 
     private var isInteractive: Bool { agentMode == "interactive" }
     private var canCreate: Bool {
@@ -202,6 +204,7 @@ public struct CreateSessionSheet: View {
                                     // Interactive pods default to branch-push on complete
                                     if outputTarget == "pr" { outputTarget = "branch" }
                                     validate = false
+                                    validationSuite = "off"
                                     taskSource = .manual
                                     clearBriefPreview()
                                 } else {
@@ -209,6 +212,7 @@ public struct CreateSessionSheet: View {
                                         outputTarget = "pr"
                                     }
                                     validate = true
+                                    if validationSuite == "off" { validationSuite = "full" }
                                 }
                             }
                         }
@@ -226,11 +230,27 @@ public struct CreateSessionSheet: View {
                     HStack(alignment: .top, spacing: 16) {
                         formSection("Validate") {
                             Toggle(isOn: $validate) {
-                                Text(validate ? "Run build / smoke / review" : "Skip validation")
+                                Text(validate ? "Run Autopod validation" : "Skip validation")
                                     .font(.callout)
                             }
                             .toggleStyle(.switch)
                             .controlSize(.small)
+                            .onChange(of: validate) { _, newValue in
+                                if newValue {
+                                    if validationSuite == "off" { validationSuite = "full" }
+                                } else {
+                                    validationSuite = "off"
+                                }
+                            }
+                            Picker("Suite", selection: $validationSuite) {
+                                ForEach(validationSuites, id: \.self) { suite in
+                                    Text(suite).tag(suite)
+                                }
+                            }
+                            .disabled(!validate)
+                            .onChange(of: validationSuite) { _, newValue in
+                                validate = newValue != "off"
+                            }
                         }
                         if !isInteractive {
                             formSection("Model (optional)") {
@@ -676,6 +696,7 @@ public struct CreateSessionSheet: View {
             agentMode: agentMode,
             output: outputTarget,
             validate: validate,
+            validationSuite: validationSuite,
             promotable: isInteractive
         )
         let refs = resolvedReferenceRepos()

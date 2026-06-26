@@ -1,3 +1,4 @@
+import type { ValidationSuite } from './pod-options.js';
 import type { PageAssertion } from './profile.js';
 import type { DeviationsAssessment } from './task-summary.js';
 
@@ -15,6 +16,8 @@ export interface ValidationResult {
   podId: string;
   attempt: number;
   timestamp: string;
+  /** Autopod validation suite used for this run. Undefined means legacy full validation. */
+  validationSuite?: ValidationSuite;
   setup?: SetupResult;
   smoke: SmokeResult;
   test?: { status: 'pass' | 'fail' | 'skip'; duration: number; stdout?: string; stderr?: string };

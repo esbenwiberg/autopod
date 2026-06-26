@@ -76,11 +76,22 @@ public enum AdvisoryBrowserQaMode: String, CaseIterable, Sendable {
     }
 }
 
+public let validationSuiteOptions = [
+    "off",
+    "thin",
+    "thin-with-facts",
+    "deterministic",
+    "full",
+    "custom",
+]
+
 public struct PodConfig: Sendable, Equatable {
     public var agentMode: AgentMode
     public var output: OutputTarget
-    /// Run full build/smoke/review before completing.
+    /// Run validation before completing.
     public var validate: Bool
+    /// Autopod pre-PR validation suite. GitHub PR checks remain repo-owned.
+    public var validationSuite: String
     /// Optional evidence-only browser QA. Nil means inherit / use the daemon default.
     public var advisoryBrowserQaEnabled: Bool?
     /// Allow promoting this pod to a different mode later.
@@ -90,12 +101,14 @@ public struct PodConfig: Sendable, Equatable {
         agentMode: AgentMode = .auto,
         output: OutputTarget = .pr,
         validate: Bool = true,
+        validationSuite: String = "full",
         advisoryBrowserQaEnabled: Bool? = nil,
         promotable: Bool = false
     ) {
         self.agentMode = agentMode
         self.output = output
         self.validate = validate
+        self.validationSuite = validationSuite
         self.advisoryBrowserQaEnabled = advisoryBrowserQaEnabled
         self.promotable = promotable
     }
@@ -104,13 +117,25 @@ public struct PodConfig: Sendable, Equatable {
     public static func fromLegacy(_ outputMode: String) -> PodConfig {
         switch outputMode {
         case "pr":
-            return PodConfig(agentMode: .auto, output: .pr, validate: true, promotable: false)
+            return PodConfig(
+                agentMode: .auto, output: .pr, validate: true, validationSuite: "full",
+                promotable: false
+            )
         case "artifact":
-            return PodConfig(agentMode: .auto, output: .artifact, validate: false, promotable: false)
+            return PodConfig(
+                agentMode: .auto, output: .artifact, validate: false, validationSuite: "off",
+                promotable: false
+            )
         case "workspace":
-            return PodConfig(agentMode: .interactive, output: .branch, validate: false, promotable: true)
+            return PodConfig(
+                agentMode: .interactive, output: .branch, validate: false, validationSuite: "off",
+                promotable: true
+            )
         default:
-            return PodConfig(agentMode: .auto, output: .pr, validate: true, promotable: false)
+            return PodConfig(
+                agentMode: .auto, output: .pr, validate: true, validationSuite: "full",
+                promotable: false
+            )
         }
     }
 
@@ -127,6 +152,6 @@ public struct PodConfig: Sendable, Equatable {
     }
 
     public var summaryLabel: String {
-        "\(agentMode.label) · \(output.label)"
+        "\(agentMode.label) · \(output.label) · \(validationSuite)"
     }
 }

@@ -250,6 +250,7 @@ This PR was approved by a human despite failed validation.
 
   if (validationResult) {
     const v = validationResult;
+    const suite = v.validationSuite ?? 'full';
     const icon = (status: string) => (status === 'pass' ? '✅' : '❌');
 
     const tableLines: string[] = [];
@@ -272,7 +273,7 @@ This PR was approved by a human despite failed validation.
 
     const overallLine = `\n**Overall: ${icon(v.overall)} ${v.overall}** (attempt ${v.attempt}, ${formatDuration(v.duration)})`;
 
-    let validationSection = `## Validation\n\n${tableLines.join('\n')}${overallLine}`;
+    let validationSection = `## Validation\n\nAutopod suite: \`${suite}\`\n\n${tableLines.join('\n')}${overallLine}`;
 
     if (v.taskReview?.reasoning) {
       validationSection += `\n\n<details>\n<summary>AI Review Details</summary>\n\n${v.taskReview.reasoning}\n\n</details>`;

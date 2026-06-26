@@ -1585,7 +1585,13 @@ public struct DetailPanelView: View {
             singleSpecWorkerProfile,
             brief.task,
             nil,
-            PodConfigRequest(agentMode: "auto", output: "pr", validate: true, promotable: false),
+            PodConfigRequest(
+                agentMode: "auto",
+                output: "pr",
+                validate: true,
+                validationSuite: "full",
+                promotable: false
+            ),
             pod.baseBranch,
             nil,
             nil,

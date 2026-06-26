@@ -187,7 +187,13 @@ public struct SessionCardFinal: View {
                         workerProfile,
                         task,
                         nil,
-                        PodConfigRequest(agentMode: "auto", output: "pr", validate: true, promotable: false),
+                        PodConfigRequest(
+                            agentMode: "auto",
+                            output: "pr",
+                            validate: true,
+                            validationSuite: "full",
+                            promotable: false
+                        ),
                         pod.branch,
                         nil,
                         nil,
