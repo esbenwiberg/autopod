@@ -96,6 +96,7 @@ public final class ConnectionManager {
     let testApi = DaemonAPI(baseURL: url, token: token)
     do {
       _ = try await testApi.healthCheck()
+      _ = try await testApi.getSessionStats()
       return .success(true)
     } catch let error as DaemonError {
       return .failure(error)
@@ -128,6 +129,7 @@ public final class ConnectionManager {
 
     do {
       _ = try await testApi.healthCheck()
+      _ = try await testApi.getSessionStats()
       healthTask?.cancel()
       healthTask = nil
       connection = conn
