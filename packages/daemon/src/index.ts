@@ -426,12 +426,6 @@ if (docker) {
 
 const hostBrowserRunner = createHostBrowserRunner(logger);
 const screenshotStore = createScreenshotStore(resolveDataDir());
-const validationEngine = createLocalValidationEngine(
-  containerManager,
-  logger,
-  hostBrowserRunner,
-  screenshotStore,
-);
 
 const retentionDays = Number.parseInt(process.env.AUTOPOD_SCREENSHOT_RETENTION_DAYS ?? '30', 10);
 if (!Number.isFinite(retentionDays) || retentionDays <= 0) {
@@ -539,6 +533,18 @@ const runtimeContainerManager = new RoutingContainerManager({
     return podRepo.list().find((pod) => pod.containerId === containerId)?.executionTarget;
   },
 });
+
+// Validation execs against the pod's existing container (pod.containerId), so it
+// MUST route by execution target exactly like the runtimes do — otherwise a
+// sandbox pod's container is looked up in local Docker and exec 404s ("no such
+// container"), failing setup before any phase runs. Hence runtimeContainerManager
+// (the routing manager), not the bare local containerManager.
+const validationEngine = createLocalValidationEngine(
+  runtimeContainerManager,
+  logger,
+  hostBrowserRunner,
+  screenshotStore,
+);
 
 const runtimeRegistry = createRuntimeRegistry([
   new ClaudeRuntime(logger, runtimeContainerManager),
