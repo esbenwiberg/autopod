@@ -74,6 +74,22 @@ interface ExecResponse {
   exit_code?: number;
 }
 
+interface WireSandboxFileInfo {
+  name?: string;
+  path?: string;
+  size?: number;
+  isDirectory?: boolean;
+  isDir?: boolean;
+  modifiedAt?: string;
+  modifiedTime?: number;
+  mode?: string | number;
+}
+
+interface WireSandboxDirListing {
+  path?: string;
+  entries?: WireSandboxFileInfo[];
+}
+
 export class AzureSandboxApiClient implements SandboxApiClient {
   private readonly config: Required<
     Pick<
@@ -194,15 +210,28 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   }
 
   async listFiles(sandboxId: string, path: string): Promise<SandboxDirListing> {
-    return this.requestData<SandboxDirListing>('GET', `${this.sandboxPath(sandboxId)}/files/list`, {
-      params: { path },
-    });
+    const listing = await this.requestData<WireSandboxDirListing>(
+      'GET',
+      `${this.sandboxPath(sandboxId)}/files/list`,
+      {
+        params: { path },
+      },
+    );
+    return {
+      path: listing.path ?? path,
+      entries: (listing.entries ?? []).map(normalizeSandboxFileInfo),
+    };
   }
 
   async statFile(sandboxId: string, path: string): Promise<SandboxFileInfo> {
-    return this.requestData<SandboxFileInfo>('GET', `${this.sandboxPath(sandboxId)}/files/stat`, {
-      params: { path },
-    });
+    const info = await this.requestData<WireSandboxFileInfo>(
+      'GET',
+      `${this.sandboxPath(sandboxId)}/files/stat`,
+      {
+        params: { path },
+      },
+    );
+    return normalizeSandboxFileInfo(info);
   }
 
   async mkdir(sandboxId: string, path: string): Promise<void> {
@@ -704,6 +733,23 @@ function registryHostFromImage(image: string): string | undefined {
     return undefined;
   }
   return firstComponent.toLowerCase();
+}
+
+function normalizeSandboxFileInfo(info: WireSandboxFileInfo): SandboxFileInfo {
+  const path = String(info.path ?? '');
+  const name = String(info.name ?? path.split('/').filter(Boolean).at(-1) ?? '');
+  return {
+    name,
+    path,
+    isDirectory: Boolean(info.isDirectory ?? info.isDir ?? false),
+    ...(typeof info.size === 'number' ? { size: info.size } : {}),
+    ...(info.modifiedAt
+      ? { modifiedAt: info.modifiedAt }
+      : typeof info.modifiedTime === 'number'
+        ? { modifiedAt: new Date(info.modifiedTime * 1000).toISOString() }
+        : {}),
+    ...(info.mode !== undefined ? { mode: String(info.mode) } : {}),
+  };
 }
 
 function requiredId(resource: { id?: string }, label: string): string {
