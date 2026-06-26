@@ -68,9 +68,11 @@ Recommended:
 export AZURE_SANDBOX_TIER=L
 export AZURE_SANDBOX_ASSUME_GROUP_EXISTS=1
 export AUTOPOD_CONTAINER_HOST=<daemon-host-reachable-from-azure-sandbox>
+# Optional when containers must reach the daemon through a proxy/front door:
+export AUTOPOD_MCP_BASE_URL=http://<daemon-host-reachable-from-azure-sandbox>
 ```
 
-`AUTOPOD_CONTAINER_HOST` must resolve from inside the cloud sandbox. The Docker default `host.docker.internal` is not reachable from Azure. Use a Tailscale address, private endpoint, tunnel, or public DNS name that routes back to the daemon. Restricted network policy automatically allowlists the host derived from the MCP base URL.
+`AUTOPOD_CONTAINER_HOST` must resolve from inside the cloud sandbox. The Docker default `host.docker.internal` is not reachable from Azure. Use a Tailscale address, private endpoint, tunnel, or public DNS name that routes back to the daemon. If the container-reachable MCP URL uses a different scheme or port than the daemon bind port, set `AUTOPOD_MCP_BASE_URL` to the full base URL, for example a port-80 or port-443 reverse proxy in front of a daemon still listening on `PORT=3100`. Restricted network policy automatically allowlists the host derived from the MCP base URL.
 
 ## Warm Images
 
