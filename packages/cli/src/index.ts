@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { AutopodClient } from './api/client.js';
+import { resolveAuthConfig } from './auth/auth-config.js';
 import { getToken, initMsal } from './auth/token-manager.js';
 import { registerAuthCommands } from './commands/auth.js';
 import { registerDaemonCommands } from './commands/daemon.js';
@@ -24,19 +25,10 @@ program
   .description('Autopod — Sandboxed AI coding pods with self-validation')
   .version('0.0.1');
 
-// Initialize MSAL if env vars are set
-const clientId = process.env.AUTOPOD_CLIENT_ID;
-const tenantId = process.env.AUTOPOD_TENANT_ID;
-if (clientId && tenantId) {
-  initMsal(clientId, tenantId, parseAuthScopes(process.env.AUTOPOD_AUTH_SCOPE, clientId));
-}
-
-function parseAuthScopes(value: string | undefined, clientId: string): string[] {
-  if (!value) return [`api://${clientId}/access_as_user`];
-  return value
-    .split(',')
-    .map((scope) => scope.trim())
-    .filter(Boolean);
+// Initialize MSAL from env vars first, then persisted CLI config.
+const authConfig = resolveAuthConfig(process.env, configStore.getAll());
+if (authConfig) {
+  initMsal(authConfig.clientId, authConfig.tenantId, authConfig.scopes);
 }
 
 // Lazy client factory — only creates client when a command actually needs it

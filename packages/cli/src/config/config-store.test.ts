@@ -40,12 +40,20 @@ describe('ConfigStore', () => {
     const config = {
       daemon: 'http://example.com:3200',
       defaultModel: 'sonnet',
+      auth: {
+        clientId: 'client-id',
+        tenantId: 'tenant-id',
+        scopes: ['api://client-id/access_as_user'],
+      },
       watch: { theme: 'light' as const, refreshInterval: 1000 },
     };
     setAll(config);
     const result = getAll();
     expect(result.daemon).toBe('http://example.com:3200');
     expect(result.defaultModel).toBe('sonnet');
+    expect(result.auth?.clientId).toBe('client-id');
+    expect(result.auth?.tenantId).toBe('tenant-id');
+    expect(result.auth?.scopes).toEqual(['api://client-id/access_as_user']);
     expect(result.watch?.theme).toBe('light');
   });
 

@@ -28,9 +28,7 @@ export function initMsal(clientId: string, tenantId: string, scopes?: string[]):
 
 export function getMsalClient(): MsalClient {
   if (!msalClient) {
-    throw new AuthError(
-      'MSAL not initialized. Set AUTOPOD_CLIENT_ID and AUTOPOD_TENANT_ID, then run: ap login',
-    );
+    throw new AuthError('MSAL not initialized. Run: ap login --client-id <id> --tenant-id <id>');
   }
   return msalClient;
 }

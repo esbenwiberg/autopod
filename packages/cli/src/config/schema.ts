@@ -3,6 +3,13 @@ import { z } from 'zod';
 export const configSchema = z.object({
   daemon: z.string().url().optional(),
   defaultModel: z.string().optional(),
+  auth: z
+    .object({
+      clientId: z.string().min(1).optional(),
+      tenantId: z.string().min(1).optional(),
+      scopes: z.array(z.string().min(1)).optional(),
+    })
+    .optional(),
   notifications: z
     .object({
       teams: z.boolean().optional(),

@@ -1,16 +1,34 @@
 import { spawn } from 'node:child_process';
 import chalk from 'chalk';
 import type { Command } from 'commander';
-import { clear, getCurrentUser, getMsalClient, getToken } from '../auth/token-manager.js';
+import { parseAuthScopes } from '../auth/auth-config.js';
+import { clear, getCurrentUser, getMsalClient, getToken, initMsal } from '../auth/token-manager.js';
+import * as configStore from '../config/config-store.js';
 import { writeCredentials } from '../config/credential-store.js';
 import { withSpinner } from '../output/spinner.js';
+
+interface LoginOptions {
+  device?: boolean;
+  clientId?: string;
+  tenantId?: string;
+  scope?: string[];
+}
 
 export function registerAuthCommands(program: Command): void {
   program
     .command('login')
     .description('Authenticate with Azure Entra ID')
     .option('--device', 'Use device code flow (for headless/SSH environments)')
-    .action(async (opts: { device?: boolean }) => {
+    .option('--client-id <id>', 'Persist the Entra application/client ID for future logins')
+    .option('--tenant-id <id>', 'Persist the Entra tenant ID for future logins')
+    .option(
+      '--scope <scope>',
+      'Persist an auth scope for future logins; repeat for multiple scopes',
+      collectScopes,
+      [] as string[],
+    )
+    .action(async (opts: LoginOptions) => {
+      configureMsalFromLoginOptions(opts);
       const msal = getMsalClient();
 
       if (opts.device) {
@@ -81,6 +99,30 @@ export function registerAuthCommands(program: Command): void {
       console.log(`${chalk.bold('Roles:')} ${user.roles.join(', ') || 'none'}`);
       console.log(`${chalk.bold('Expires:')} ${new Date(user.expiresAt).toLocaleString()}`);
     });
+}
+
+function configureMsalFromLoginOptions(opts: LoginOptions): void {
+  if (!opts.clientId && !opts.tenantId && (!opts.scope || opts.scope.length === 0)) return;
+  if (!opts.clientId || !opts.tenantId) {
+    throw new Error('--client-id and --tenant-id must be provided together');
+  }
+
+  const current = configStore.getAll();
+  const scopes = parseAuthScopes(opts.scope, opts.clientId);
+  configStore.setAll({
+    ...current,
+    auth: {
+      clientId: opts.clientId,
+      tenantId: opts.tenantId,
+      ...(opts.scope && opts.scope.length > 0 ? { scopes } : {}),
+    },
+  });
+  initMsal(opts.clientId, opts.tenantId, scopes);
+}
+
+function collectScopes(scope: string, scopes: string[]): string[] {
+  scopes.push(scope);
+  return scopes;
 }
 
 async function copyTextToClipboard(text: string): Promise<void> {
