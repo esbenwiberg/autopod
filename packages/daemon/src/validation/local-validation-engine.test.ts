@@ -316,6 +316,108 @@ human_review: []
     expect(result.factValidation?.results[0]?.stdout).toBe('host-fact');
   });
 
+  it('prewarms the app-local Playwright browser before browser-test fact commands', async () => {
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: true,
+        cached: false,
+        checkedAt: '2026-05-20T00:00:00.000Z',
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      })),
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+      readScreenshot: vi.fn(async () => ''),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp/autopod/screenshots'),
+    };
+
+    const { result } = await validateBrowserFact({
+      hostBrowserRunner,
+      command: 'npm run --silent fact',
+      setupWorktree: async (worktreePath) => {
+        await fs.mkdir(path.join(worktreePath, 'node_modules', '.bin'), { recursive: true });
+        await fs.writeFile(
+          path.join(worktreePath, 'node_modules', '.bin', 'playwright'),
+          [
+            '#!/bin/sh',
+            'test "$1" = install',
+            'test "$2" = chromium',
+            'touch .autopod-playwright-installed',
+          ].join('\n'),
+          { mode: 0o755 },
+        );
+        await fs.writeFile(
+          path.join(worktreePath, 'package.json'),
+          JSON.stringify({
+            name: 'fact-host',
+            version: '1.0.0',
+            scripts: {
+              fact: 'test -f .autopod-playwright-installed && printf host-fact',
+            },
+          }),
+        );
+      },
+    });
+
+    expect(result.factValidation?.status).toBe('pass');
+    expect(result.factValidation?.results[0]?.stdout).toBe('host-fact');
+  });
+
+  it('blocks browser-test facts as pending_human when app-local Playwright prewarm fails', async () => {
+    const hostBrowserRunner: HostBrowserRunner = {
+      getAvailability: vi.fn(async () => ({
+        available: true,
+        cached: false,
+        checkedAt: '2026-05-20T00:00:00.000Z',
+        reason: 'ok',
+        playwrightPackagePath: '/repo/node_modules/playwright/index.js',
+        playwrightCwd: '/repo',
+        chromiumExecutablePath: '/chrome',
+      })),
+      isAvailable: vi.fn(async () => true),
+      runScript: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+      readScreenshot: vi.fn(async () => ''),
+      cleanup: vi.fn(async () => {}),
+      screenshotDir: vi.fn(() => '/tmp/autopod/screenshots'),
+    };
+
+    const { result } = await validateBrowserFact({
+      hostBrowserRunner,
+      command: 'npm run --silent fact',
+      setupWorktree: async (worktreePath) => {
+        await fs.mkdir(path.join(worktreePath, 'node_modules', '.bin'), { recursive: true });
+        await fs.writeFile(
+          path.join(worktreePath, 'node_modules', '.bin', 'playwright'),
+          '#!/bin/sh\nprintf "%s" "Download failed: cdn.playwright.dev" >&2\nexit 1\n',
+          { mode: 0o755 },
+        );
+        await fs.writeFile(
+          path.join(worktreePath, 'package.json'),
+          JSON.stringify({
+            name: 'fact-host',
+            version: '1.0.0',
+            scripts: {
+              fact: 'printf should-not-run',
+            },
+          }),
+        );
+      },
+    });
+
+    expect(result.factValidation?.status).toBe('pending_human');
+    expect(result.factValidation?.results[0]).toMatchObject({
+      status: 'pending_human',
+      exitCode: 1,
+    });
+    expect(result.factValidation?.results[0]?.stdout).not.toContain('should-not-run');
+    expect(result.factValidation?.results[0]?.reasoning).toContain(
+      'Playwright browser prewarm failed',
+    );
+  });
+
   it('collects browser-test fact attachments written on the host', async () => {
     const hostBrowserRunner: HostBrowserRunner = {
       getAvailability: vi.fn(async () => ({

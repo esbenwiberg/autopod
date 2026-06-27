@@ -7,14 +7,15 @@
 # `az vm run-command invoke`. Releases live at /opt/autopod/releases/<sha> and
 # /opt/autopod/current is a symlink the systemd unit `autopod-daemon` runs from.
 #
-# This script automates the 7-step manual dance (preflight → build new release
-# on the VM → verify the built bundle → atomic symlink swap → post-verify →
-# print rollback → prune). See the `deploy-hosted-daemon` skill for the runbook
-# and judgment that wraps it.
+# This script automates the deploy dance (preflight → build new release on the
+# VM → prewarm Playwright → verify the built bundle → atomic symlink swap →
+# post-verify → print rollback → prune). See the `deploy-hosted-daemon` skill
+# for the runbook and judgment that wraps it.
 #
 # Usage:
 #   scripts/deploy-hosted-daemon.sh [--target <sha|ref>] [--yes] [--force]
 #                                   [--full] [--keep N] [--verify-string STR]
+#                                   [--skip-playwright-prewarm]
 #   scripts/deploy-hosted-daemon.sh --rollback <sha>
 #
 #   --target <sha|ref>   Commit/ref to deploy (default: origin/main HEAD).
@@ -26,6 +27,9 @@
 #   --keep N             Releases to retain when pruning (default: 5).
 #   --verify-string STR  Extra gate: grep the flattened built bundle for STR
 #                        before swapping (catches "built the wrong thing").
+#   --skip-playwright-prewarm
+#                        Emergency escape hatch: do not install/launch-check the
+#                        daemon Playwright Chromium browser before swapping.
 #   --rollback <sha>     Repoint current -> releases/<sha> + restart. Nothing else.
 #
 # Gotchas baked in (learned the hard way):
@@ -35,6 +39,9 @@
 #     a package.json / pnpm-lock.yaml change forces --full.
 #   - Verification greps the BUILT bundle (newlines flattened), never source and
 #     never a comment — comments get stripped by the bundler.
+#   - Host browser validation needs both OS libraries and an `ewi`-owned
+#     Playwright browser cache. Deploys prewarm and launch-check daemon Chromium
+#     before swapping so browser validation cannot come up half-ready.
 #
 set -euo pipefail
 
@@ -57,6 +64,7 @@ FULL=0
 KEEP=5
 VERIFY_STRING=""
 ROLLBACK_SHA=""
+PREWARM_PLAYWRIGHT=1
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 note() { echo "==> $*"; }
@@ -69,6 +77,7 @@ while [ $# -gt 0 ]; do
     --full) FULL=1; shift;;
     --keep) KEEP="${2:-}"; shift 2;;
     --verify-string) VERIFY_STRING="${2:-}"; shift 2;;
+    --skip-playwright-prewarm) PREWARM_PLAYWRIGHT=0; shift;;
     --rollback) ROLLBACK_SHA="${2:-}"; shift 2;;
     -h|--help) sed -n '2,40p' "$0"; exit 0;;
     *) die "unknown arg: $1";;
@@ -189,6 +198,7 @@ echo "  VM:        $RG/$VM"
 echo "  live:      $LIVE_SHA"
 echo "  target:    $TARGET_SHA  ($TARGET_REF)"
 echo "  mode:      $([ "$FULL" -eq 1 ] && echo 'FULL (clone + install)' || echo 'overlay (reuse node_modules)')"
+echo "  browser:   $([ "$PREWARM_PLAYWRIGHT" -eq 1 ] && echo 'prewarm + launch-check daemon Playwright Chromium' || echo 'SKIPPED')"
 echo "  rollback:  scripts/deploy-hosted-daemon.sh --rollback $LIVE_SHA"
 echo
 if [ "$ASSUME_YES" -eq 0 ]; then
@@ -208,14 +218,24 @@ if [ "$FULL" -eq 1 ]; then
 set -eu
 NEW=$NEW
 TMP=$TMP
+run_and_tail() {
+  log=\"\$1\"
+  lines=\"\$2\"
+  shift 2
+  if ! \"\$@\" >\"\$log\" 2>&1; then
+    tail -n 80 \"\$log\" || true
+    exit 1
+  fi
+  tail -n \"\$lines\" \"\$log\" || true
+}
 echo '=== clean clone of target ==='
 sudo -u ewi rm -rf \"\$TMP\"
-sudo -u ewi git clone --no-checkout '$REPO_URL' \"\$TMP\" 2>&1 | tail -2
-sudo -u ewi git -C \"\$TMP\" fetch --depth 1 origin $TARGET_SHA_FULL 2>&1 | tail -1
+run_and_tail /tmp/autopod-clone-$TARGET_SHA.log 2 sudo -u ewi git clone --no-checkout '$REPO_URL' \"\$TMP\"
+run_and_tail /tmp/autopod-fetch-$TARGET_SHA.log 1 sudo -u ewi git -C \"\$TMP\" fetch --depth 1 origin $TARGET_SHA_FULL
 sudo -u ewi git -C \"\$TMP\" checkout -q $TARGET_SHA_FULL
 echo \"checked out: \$(sudo -u ewi git -C \"\$TMP\" rev-parse HEAD)\"
 echo '=== install + build (all packages) ==='
-sudo -u ewi -H bash -lc \"cd \$TMP && npx --yes pnpm install --frozen-lockfile && npx --yes pnpm build\" 2>&1 | tail -12
+run_and_tail /tmp/autopod-build-$TARGET_SHA.log 24 sudo -u ewi -H bash -lc \"cd \$TMP && npx --yes pnpm install --frozen-lockfile && npx --yes pnpm build\"
 echo '=== stage as new release ==='
 rm -rf \"\$NEW\"
 mv \"\$TMP\" \"\$NEW\"
@@ -230,13 +250,23 @@ set -eu
 SRC=$RELEASES/$LIVE_SHA
 NEW=$NEW
 TMP=$TMP
+run_and_tail() {
+  log=\"\$1\"
+  lines=\"\$2\"
+  shift 2
+  if ! \"\$@\" >\"\$log\" 2>&1; then
+    tail -n 80 \"\$log\" || true
+    exit 1
+  fi
+  tail -n \"\$lines\" \"\$log\" || true
+}
 echo '=== copy current release (reuses node_modules) ==='
 rm -rf \"\$NEW\"
 cp -a \"\$SRC\" \"\$NEW\"
 echo '=== fetch target source ==='
 sudo -u ewi rm -rf \"\$TMP\"
-sudo -u ewi git clone --no-checkout '$REPO_URL' \"\$TMP\" 2>&1 | tail -1
-sudo -u ewi git -C \"\$TMP\" fetch --depth 1 origin $TARGET_SHA_FULL 2>&1 | tail -1
+run_and_tail /tmp/autopod-clone-$TARGET_SHA.log 1 sudo -u ewi git clone --no-checkout '$REPO_URL' \"\$TMP\"
+run_and_tail /tmp/autopod-fetch-$TARGET_SHA.log 1 sudo -u ewi git -C \"\$TMP\" fetch --depth 1 origin $TARGET_SHA_FULL
 sudo -u ewi git -C \"\$TMP\" checkout -q $TARGET_SHA_FULL
 echo \"target source: \$(sudo -u ewi git -C \"\$TMP\" rev-parse HEAD)\"
 echo '=== overlay changed files ==='
@@ -256,7 +286,7 @@ $DELETED_FILES
 DELETED_EOF
 chown -R ewi:ewi \"\$NEW\"
 echo '=== rebuild (turbo rebuilds only changed packages) ==='
-sudo -u ewi -H bash -lc \"cd \$NEW && npx --yes pnpm build\" 2>&1 | tail -12
+run_and_tail /tmp/autopod-build-$TARGET_SHA.log 24 sudo -u ewi -H bash -lc \"cd \$NEW && npx --yes pnpm build\"
 sudo -u ewi rm -rf \"\$TMP\"
 ls -la \"\$NEW/packages/daemon/dist/index.js\"
 echo '=== BUILD DONE (symlink NOT swapped) ==='
@@ -266,6 +296,39 @@ fi
 BUILD_OUT="$(remote "$BUILD_SCRIPT")"
 echo "$BUILD_OUT"
 echo "$BUILD_OUT" | grep -q "BUILD DONE" || die "build did not complete — see output above; symlink untouched"
+
+# ---- prewarm host browser cache (no swap yet) -----------------------------
+if [ "$PREWARM_PLAYWRIGHT" -eq 1 ]; then
+  note "prewarming daemon Playwright Chromium on the VM"
+  PREWARM_SCRIPT="
+set -eu
+NEW=$NEW
+run_and_tail() {
+  log=\"\$1\"
+  lines=\"\$2\"
+  shift 2
+  if ! \"\$@\" >\"\$log\" 2>&1; then
+    tail -n 80 \"\$log\" || true
+    exit 1
+  fi
+  tail -n \"\$lines\" \"\$log\" || true
+}
+cd \"\$NEW/packages/daemon\"
+[ -x ./node_modules/.bin/playwright ] || { echo PLAYWRIGHT_BIN_MISSING; exit 1; }
+echo '=== install Playwright Linux dependencies ==='
+run_and_tail /tmp/autopod-playwright-deps-$TARGET_SHA.log 24 ./node_modules/.bin/playwright install-deps chromium
+echo '=== install daemon Chromium into ewi cache ==='
+run_and_tail /tmp/autopod-playwright-browser-$TARGET_SHA.log 24 sudo -u ewi -H bash -lc \"cd \$NEW/packages/daemon && ./node_modules/.bin/playwright install chromium\"
+echo '=== launch-check daemon Chromium as ewi ==='
+sudo -u ewi -H bash -lc \"cd \$NEW/packages/daemon && node -e 'const { chromium } = require(\\\"playwright\\\"); const { existsSync } = require(\\\"fs\\\"); (async () => { const p = chromium.executablePath(); console.log(\\\"chromium=\\\" + p); if (!existsSync(p)) { throw new Error(\\\"missing Chromium executable\\\"); } const browser = await chromium.launch({ headless: true }); await browser.close(); })().catch((err) => { console.error(err && err.stack ? err.stack : err); process.exit(1); });'\"
+echo PLAYWRIGHT_PREWARM_OK
+"
+  PREWARM_OUT="$(remote "$PREWARM_SCRIPT")"
+  echo "$PREWARM_OUT"
+  echo "$PREWARM_OUT" | grep -q "PLAYWRIGHT_PREWARM_OK" || die "Playwright prewarm failed — symlink untouched"
+else
+  note "skipping Playwright Chromium prewarm (--skip-playwright-prewarm)"
+fi
 
 # ---- verify built bundle (optional semantic gate) -------------------------
 if [ -n "$VERIFY_STRING" ]; then

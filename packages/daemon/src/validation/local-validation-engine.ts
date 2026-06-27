@@ -1212,6 +1212,15 @@ function detectBrowserFactInfrastructureFailure(result: {
     ].join(' ');
   }
 
+  if (/Host browser-test Playwright browser install failed/i.test(combined)) {
+    return [
+      'browser-test could not run in this validation environment because Playwright browser prewarm failed.',
+      'This is an Autopod/browser-cache issue, not evidence that the app behavior failed.',
+      'Refresh the validation browser cache or approve a waive/replace decision.',
+      detail,
+    ].join(' ');
+  }
+
   if (
     /Executable doesn't exist at .*?(chromium|chrome|headless_shell)/i.test(combined) ||
     /chromium_headless_shell-\d+/i.test(combined) ||
@@ -1320,6 +1329,7 @@ async function runBrowserFactOnHost(
         config.testTimeout ?? 600_000,
         log,
       );
+      await prewarmHostBrowserFactBrowsers(config.worktreePath, config.testTimeout ?? 600_000, log);
     }
     const result = await execFileAsync('sh', ['-c', command], {
       cwd: config.worktreePath,
@@ -1345,6 +1355,53 @@ async function runBrowserFactOnHost(
       stderr: execErr.stderr ?? (err instanceof Error ? err.message : String(err)),
       exitCode,
     };
+  }
+}
+
+async function prewarmHostBrowserFactBrowsers(
+  worktreePath: string,
+  timeout: number,
+  log?: Logger,
+): Promise<void> {
+  const playwrightBin = path.join(worktreePath, 'node_modules', '.bin', 'playwright');
+  if (!(await pathExists(playwrightBin))) return;
+
+  const fullCommand = `${shellQuote(playwrightBin)} install chromium`;
+  log?.info(
+    { worktreePath, command: fullCommand },
+    'prewarming host browser-test Playwright browser cache',
+  );
+
+  try {
+    await execFileAsync('sh', ['-c', fullCommand], {
+      cwd: worktreePath,
+      env: process.env,
+      timeout,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+  } catch (err) {
+    const execErr = err as NodeJS.ErrnoException & {
+      stdout?: string;
+      stderr?: string;
+      code?: number | string;
+    };
+    const stdout = execErr.stdout ?? '';
+    const stderr = execErr.stderr ?? '';
+    const exitCode = typeof execErr.code === 'number' ? execErr.code : 1;
+    const detail = formatCommandDiagnostic(stdout, stderr, 4_000);
+    const enhanced = new Error(
+      [
+        `Host browser-test Playwright browser install failed (exit ${exitCode}) before running required fact command.`,
+        `Install command: ${fullCommand}`,
+        detail ? `\n${detail}` : null,
+      ]
+        .filter((part): part is string => part !== null)
+        .join('\n'),
+    ) as Error & { stdout?: string; stderr?: string; code?: number };
+    enhanced.stdout = stdout;
+    enhanced.stderr = [enhanced.message, stderr].filter(Boolean).join('\n\n');
+    enhanced.code = exitCode;
+    throw enhanced;
   }
 }
 
