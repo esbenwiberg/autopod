@@ -4,6 +4,7 @@ import { resolveAuthConfig } from './auth/auth-config.js';
 import { getToken, initMsal } from './auth/token-manager.js';
 import { registerAuthCommands } from './commands/auth.js';
 import { registerDaemonCommands } from './commands/daemon.js';
+import { registerDesktopCommands } from './commands/desktop.js';
 import { registerHistoryCommands } from './commands/history.js';
 import { registerMobileCommands } from './commands/mobile.js';
 import { registerPodCommands } from './commands/pod.js';
@@ -44,6 +45,7 @@ function getClient(): AutopodClient {
 // Register all commands
 registerAuthCommands(program);
 registerDaemonCommands(program);
+registerDesktopCommands(program);
 registerProfileCommands(program, getClient);
 registerPodCommands(program, getClient);
 registerWorkspaceCommands(program, getClient);

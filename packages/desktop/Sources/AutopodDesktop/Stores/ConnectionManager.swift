@@ -193,6 +193,49 @@ public final class ConnectionManager {
     }
   }
 
+  // MARK: - Deep links
+
+  /// Handle an `autopod://connect?url=…&name=…&token=…&authKind=…` deep link.
+  ///
+  /// Used by `ap desktop` to point the app at a daemon at launch. Upserts by URL:
+  /// an already-saved connection is switched to and reconnected (no clobber); a new
+  /// one is added. Token resolution: explicit `token` param wins; otherwise local
+  /// connections fall back to the on-disk dev token, and Entra connections sign in.
+  public func handleDeepLink(_ deepLink: URL) {
+    guard deepLink.scheme == "autopod", deepLink.host == "connect",
+      let comps = URLComponents(url: deepLink, resolvingAgainstBaseURL: false),
+      let rawURL = comps.queryItems?.first(where: { $0.name == "url" })?.value,
+      let url = DaemonConnection.normalizedURL(from: rawURL)
+    else { return }
+
+    let name = comps.queryItems?.first(where: { $0.name == "name" })?.value ?? (url.host ?? "daemon")
+    let kind =
+      DaemonConnectionAuthKind(
+        rawValue: comps.queryItems?.first(where: { $0.name == "authKind" })?.value ?? "")
+      ?? .manualToken
+    let tokenParam = comps.queryItems?.first(where: { $0.name == "token" })?.value
+
+    Task { @MainActor in
+      // Already saved? switch + reconnect rather than appending a duplicate.
+      if let existing = ConnectionStore.loadAll().first(where: { $0.url == url }) {
+        ConnectionStore.setActiveConnectionId(existing.id)
+        try? await connect(to: existing.id)
+        return
+      }
+
+      if kind == .entra {
+        try? await addAndConnect(name: name, url: url, token: tokenParam ?? "", authKind: .entra)
+        return
+      }
+
+      let isLocal = url.host == "localhost" || url.host == "127.0.0.1" || url.host == "::1"
+      let token = tokenParam ?? (isLocal ? DaemonConnection.readLocalDevToken() : nil)
+      if let token {
+        try? await addAndConnect(name: name, url: url, token: token, authKind: .manualToken)
+      }
+    }
+  }
+
   // MARK: - Internal
 
   private static func normalizeToken(_ token: String) -> String {

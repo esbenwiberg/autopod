@@ -30,6 +30,7 @@ struct AutopodApp: App {
         showSetup: $showSetup
       )
       .environment(\.controlActiveState, .key)
+      .onOpenURL { connectionManager.handleDeepLink($0) }
       .onAppear {
         if connectionManager.connection == nil {
           showSetup = true
