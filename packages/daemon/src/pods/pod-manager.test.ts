@@ -672,6 +672,34 @@ describe('PodManager', () => {
     mockExecFileSuccess();
   });
 
+  describe('sandbox warm image preflight', () => {
+    it('rejects sandbox pods without an ACR warm image before creating a pod row', () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: null,
+      });
+      const manager = createPodManager(ctx.deps);
+
+      expect(() =>
+        manager.createSession({ profileName: 'test-profile', task: 'Needs sandbox' }, 'user-1'),
+      ).toThrow(AutopodError);
+      expect(ctx.podRepo.list()).toHaveLength(0);
+    });
+
+    it('rejects sandbox pods with local-only warm image tags before creating a pod row', () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'autopod/test-profile:latest',
+      });
+      const manager = createPodManager(ctx.deps);
+
+      expect(() =>
+        manager.createSession({ profileName: 'test-profile', task: 'Needs sandbox' }, 'user-1'),
+      ).toThrow(/ACR-qualified image tag/);
+      expect(ctx.podRepo.list()).toHaveLength(0);
+    });
+  });
+
   describe('memory briefing startup', () => {
     it('memory reviewer setup is fail-soft', async () => {
       const ctx = createTestContext();

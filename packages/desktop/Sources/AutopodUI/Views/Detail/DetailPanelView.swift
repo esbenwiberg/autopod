@@ -1592,6 +1592,7 @@ public struct DetailPanelView: View {
                 validationSuite: "full",
                 promotable: false
             ),
+            nil,
             pod.baseBranch,
             nil,
             nil,

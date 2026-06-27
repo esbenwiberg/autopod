@@ -4892,6 +4892,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         resolvedPod.validate = false;
         resolvedPod.validationSuite = 'off';
       }
+      if (resolvedPod.agentMode === 'interactive' && executionTarget !== 'local') {
+        throw new AutopodError(
+          'Interactive pods only support local execution target',
+          'INVALID_CONFIGURATION',
+          400,
+        );
+      }
+      if (executionTarget === 'sandbox') {
+        if (!profile.warmImageTag) {
+          throw new AutopodError(
+            `Sandbox execution for profile "${profile.name}" requires a warm image. Run \`ap profile warm ${profile.name} --rebuild\` with ACR_REGISTRY_URL configured first.`,
+            'SANDBOX_WARM_IMAGE_REQUIRED',
+            400,
+          );
+        }
+        if (!isAcrQualifiedImage(profile.warmImageTag)) {
+          throw new AutopodError(
+            `Sandbox warm image for profile "${profile.name}" must be an ACR-qualified image tag, got "${profile.warmImageTag}". Rebuild the warm image with ACR_REGISTRY_URL so profile.warmImageTag is stored as <registry>.azurecr.io/...`,
+            'SANDBOX_WARM_IMAGE_REQUIRED',
+            400,
+          );
+        }
+      }
 
       // deny-all network policy blocks all outbound — incompatible with cloud-backed runtimes.
       // Interactive pods run without an AI agent, so they're unaffected.

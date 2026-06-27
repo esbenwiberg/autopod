@@ -41,10 +41,11 @@ public final class ActionHandler {
       rework: { [weak self] id in await self?.rework(id) },
       fixManually: { [weak self] id in await self?.fixManually(id) },
       revalidate: { [weak self] id in await self?.revalidate(id) },
-      createPod: { [weak self] profile, task, model, pod, base, branchPrefix, pimGroups, sidecars, refRepos, brief in
+      createPod: { [weak self] profile, task, model, pod, executionTarget, base, branchPrefix, pimGroups, sidecars, refRepos, brief in
         await self?.createPod(
           profileName: profile, task: task, model: model,
           pod: pod,
+          executionTarget: executionTarget,
           baseBranch: base, branchPrefix: branchPrefix,
           pimGroups: pimGroups,
           requireSidecars: sidecars,
@@ -353,6 +354,7 @@ public final class ActionHandler {
   public func createPod(
     profileName: String, task: String, model: String?,
     pod: PodConfigRequest?,
+    executionTarget: String? = nil,
     baseBranch: String?, branchPrefix: String? = nil,
     pimGroups: [PimGroupRequest]? = nil,
     requireSidecars: [String]? = nil,
@@ -365,6 +367,7 @@ public final class ActionHandler {
       profileName: profileName,
       task: task,
       model: model?.isEmpty == true ? nil : model,
+      executionTarget: executionTarget?.isEmpty == true ? nil : executionTarget,
       contract: briefMetadata?.contract,
       briefTitle: briefMetadata?.briefTitle,
       touches: briefMetadata?.touches,

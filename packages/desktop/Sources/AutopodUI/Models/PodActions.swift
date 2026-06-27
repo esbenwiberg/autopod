@@ -1,6 +1,20 @@
 import Foundation
 import AutopodClient
 
+public typealias CreatePodAction = @MainActor @Sendable (
+  String,
+  String,
+  String?,
+  PodConfigRequest?,
+  String?,
+  String?,
+  String?,
+  [PimGroupRequest]?,
+  [String]?,
+  [ReferenceRepoRequest]?,
+  BriefPodMetadata?
+) async -> String?
+
 /// Closure-based action dispatch for pod operations.
 /// Views call these; the app layer provides real implementations.
 /// All closures default to no-ops so previews work without wiring.
@@ -15,8 +29,8 @@ public struct PodActions: Sendable {
   public var rework: @MainActor @Sendable (String) async -> Void
   public var fixManually: @MainActor @Sendable (String) async -> String?
   public var revalidate: @MainActor @Sendable (String) async -> Void
-  public var createPod: @MainActor @Sendable (String, String, String?, PodConfigRequest?, String?, String?, [PimGroupRequest]?, [String]?, [ReferenceRepoRequest]?, BriefPodMetadata?) async -> String?
-  // createPod params: profileName, task, model, pod, baseBranch, branchPrefix, pimGroups, requireSidecars, referenceRepos, briefMetadata -> returns pod ID or nil
+  public var createPod: CreatePodAction
+  // createPod params: profileName, task, model, pod, executionTarget, baseBranch, branchPrefix, pimGroups, requireSidecars, referenceRepos, briefMetadata -> returns pod ID or nil
   /// Promote an interactive pod to agent-driven in place. `targetOutput` ∈ {pr, branch, artifact, none}.
   /// `instructions` is the human's typed handoff text from the sheet — composed into the agent's CLAUDE.md.
   /// `skipAgent` bypasses the runtime spawn entirely (only valid with pr/artifact targets).
@@ -117,7 +131,7 @@ public struct PodActions: Sendable {
     rework: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     fixManually: @escaping @MainActor @Sendable (String) async -> String? = { _ in nil },
     revalidate: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
-    createPod: @escaping @MainActor @Sendable (String, String, String?, PodConfigRequest?, String?, String?, [PimGroupRequest]?, [String]?, [ReferenceRepoRequest]?, BriefPodMetadata?) async -> String? = { _, _, _, _, _, _, _, _, _, _ in nil },
+    createPod: @escaping CreatePodAction = { _, _, _, _, _, _, _, _, _, _, _ in nil },
     promote: @escaping @MainActor @Sendable (String, String?, String?, Bool) async -> Void = { _, _, _, _ in },
     attachTerminal: @escaping @MainActor @Sendable (String) -> Void = { _ in },
     approveAll: @escaping @MainActor @Sendable () async -> Void = {},

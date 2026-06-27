@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import type {
   AgentActivityEvent,
+  ExecutionTarget,
   FirewallDeniedEvent,
   Pod,
   PodStatus,
@@ -35,6 +36,7 @@ const podColumns: ColumnDef<Pod>[] = [
 ];
 
 const validationSuiteHelp = `Autopod validation suite: ${VALIDATION_SUITES.join('|')}`;
+const executionTargetHelp = 'Execution target: local | sandbox';
 
 function truncate(str: string, max: number): string {
   if (str.length <= max) return str;
@@ -45,6 +47,13 @@ function parseValidationSuite(value: string | undefined): ValidationSuite | unde
   if (value === undefined) return undefined;
   if (isValidationSuite(value)) return value;
   console.error(chalk.red(`--validation-suite must be one of: ${VALIDATION_SUITES.join(', ')}`));
+  process.exit(1);
+}
+
+function parseExecutionTarget(value: string | undefined): ExecutionTarget | undefined {
+  if (value === undefined) return undefined;
+  if (value === 'local' || value === 'sandbox') return value;
+  console.error(chalk.red('--execution-target must be one of: local, sandbox'));
   process.exit(1);
 }
 
@@ -155,6 +164,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .description('Start a new coding pod')
     .option('-m, --model <model>', 'AI model to use')
     .option('-r, --runtime <runtime>', 'Runtime (claude or codex)')
+    .option('--execution-target <target>', executionTargetHelp)
     .option('-b, --branch <branch>', 'Target branch name')
     .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
     .option('--start-branch <branch>', 'Branch/ref to start from while targeting --base-branch')
@@ -174,6 +184,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         opts: {
           model?: string;
           runtime?: string;
+          executionTarget?: string;
           branch?: string;
           branchPrefix?: string;
           startBranch?: string;
@@ -185,6 +196,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       ) => {
         const client = getClient();
         const validationSuite = parseValidationSuite(opts.validationSuite);
+        const executionTarget = parseExecutionTarget(opts.executionTarget);
         assertValidationFlags({ skipValidation: opts.skipValidation, validationSuite });
         const pod = await withSpinner('Starting pod...', () =>
           client.createSession({
@@ -192,6 +204,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             task,
             model: opts.model,
             runtime: opts.runtime as 'claude' | 'codex' | undefined,
+            executionTarget,
             branch: opts.branch,
             branchPrefix: opts.branchPrefix,
             startBranch: opts.startBranch,
@@ -206,6 +219,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         console.log(`${chalk.bold('Profile:')}  ${pod.profileName}`);
         console.log(`${chalk.bold('Status:')}   ${formatStatus(pod.status)}`);
         console.log(`${chalk.bold('Branch:')}   ${pod.branch}`);
+        console.log(`${chalk.bold('Target:')}   ${pod.executionTarget}`);
         console.log(`${chalk.bold('Suite:')}    ${pod.options?.validationSuite ?? 'full'}`);
         console.log(chalk.dim(`Track progress: ap status ${pod.id.slice(0, 8)}`));
       },
@@ -226,6 +240,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('--validation-suite <suite>', validationSuiteHelp)
     .option('-m, --model <model>', 'AI model to use')
     .option('-r, --runtime <runtime>', 'Runtime (claude or codex)')
+    .option('--execution-target <target>', executionTargetHelp)
     .option('-b, --branch <branch>', 'Target branch name')
     .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
     .option('--start-branch <branch>', 'Branch/ref to start from while targeting --base-branch')
@@ -259,6 +274,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           validationSuite?: string;
           model?: string;
           runtime?: string;
+          executionTarget?: string;
           branch?: string;
           branchPrefix?: string;
           startBranch?: string;
@@ -272,6 +288,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         const agent = opts.agent as 'auto' | 'interactive' | undefined;
         const output = opts.output as 'pr' | 'branch' | 'artifact' | 'none' | undefined;
         const validationSuite = parseValidationSuite(opts.validationSuite);
+        const executionTarget = parseExecutionTarget(opts.executionTarget);
         assertValidationFlags({ validate: opts.validate, validationSuite });
 
         if (agent && agent !== 'auto' && agent !== 'interactive') {
@@ -320,6 +337,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             task: task ?? '',
             model: opts.model,
             runtime: opts.runtime as 'claude' | 'codex' | undefined,
+            executionTarget,
             branch: opts.branch,
             branchPrefix: opts.branchPrefix,
             startBranch: opts.startBranch,
@@ -334,6 +352,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         console.log(`${chalk.bold('Profile:')}  ${pod.profileName}`);
         console.log(`${chalk.bold('Status:')}   ${formatStatus(pod.status)}`);
         console.log(`${chalk.bold('Branch:')}   ${pod.branch}`);
+        console.log(`${chalk.bold('Target:')}   ${pod.executionTarget}`);
         console.log(
           `${chalk.bold('Pod:')}      ${pod.options?.agentMode ?? 'auto'} → ${pod.options?.output ?? 'pr'}`,
         );
@@ -811,6 +830,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       collectRepeatable,
       [] as string[],
     )
+    .option('--execution-target <target>', executionTargetHelp)
     .action(
       async (
         profile: string,
@@ -829,6 +849,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           skipValidation?: boolean;
           validationSuite?: string;
           sidecar: string[];
+          executionTarget?: string;
         },
       ) => {
         if ([opts.file, opts.spec, task].filter(Boolean).length > 1) {
@@ -882,6 +903,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
 
         const client = getClient();
         const validationSuite = parseValidationSuite(opts.validationSuite);
+        const executionTarget = parseExecutionTarget(opts.executionTarget);
         assertValidationFlags({ skipValidation: opts.skipValidation, validationSuite });
         const pod = await withSpinner('Starting pod...', () =>
           client.createSession({
@@ -890,6 +912,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             contract,
             model: opts.model,
             runtime: opts.runtime as 'claude' | 'codex' | undefined,
+            executionTarget,
             branch: opts.branch,
             branchPrefix: opts.branchPrefix,
             startBranch: opts.startBranch,
@@ -906,6 +929,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         console.log(`${chalk.bold('Profile:')}  ${pod.profileName}`);
         console.log(`${chalk.bold('Status:')}   ${formatStatus(pod.status)}`);
         console.log(`${chalk.bold('Branch:')}   ${pod.branch}`);
+        console.log(`${chalk.bold('Target:')}   ${pod.executionTarget}`);
         console.log(`${chalk.bold('Suite:')}    ${pod.options?.validationSuite ?? 'full'}`);
         console.log(chalk.dim(`Track progress: ap status ${pod.id.slice(0, 8)}`));
       },

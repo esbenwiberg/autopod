@@ -37,6 +37,7 @@ public struct CreateSessionSheet: View {
     @State private var modelText = ""
     @State private var agentMode: String = "auto"
     @State private var outputTarget: String = "pr"
+    @State private var executionTarget: String = "profile"
     @State private var validate: Bool = true
     @State private var validationSuite: String = "full"
     @State private var sourceBranch = ""
@@ -68,12 +69,22 @@ public struct CreateSessionSheet: View {
         guard let p = selectedProfileDetail else { return false }
         return p.trustedSource && (p.sidecars?.dagger?.enabled ?? false)
     }
+
+    private var effectiveExecutionTarget: String {
+        if executionTarget != "profile" { return executionTarget }
+        return selectedProfileDetail?.executionTarget.rawValue ?? "local"
+    }
     private let agentModes = [("auto", "Agent"), ("interactive", "Interactive")]
     private let outputTargets = [
         ("pr", "Pull Request"),
         ("branch", "Branch Push"),
         ("artifact", "Artifact"),
         ("none", "Ephemeral"),
+    ]
+    private let executionTargets = [
+        ("profile", "Profile default"),
+        ("local", "Local Docker"),
+        ("sandbox", "ACA Sandbox"),
     ]
     private let validationSuites = validationSuiteOptions
 
@@ -167,6 +178,9 @@ public struct CreateSessionSheet: View {
                         .labelsHidden()
                         .onChange(of: selectedProfile) { _, _ in
                             if taskSource == .onBranch { clearBriefPreview() }
+                            if isInteractive && effectiveExecutionTarget == "sandbox" {
+                                executionTarget = "local"
+                            }
                         }
                     }
 
@@ -190,6 +204,24 @@ public struct CreateSessionSheet: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
 
+                    formSection("Execution") {
+                        Picker("", selection: $executionTarget) {
+                            ForEach(executionTargets, id: \.0) { value, label in
+                                Text(label).tag(value)
+                            }
+                        }
+                        .labelsHidden()
+                        if effectiveExecutionTarget == "sandbox" && selectedProfileDetail?.warmImageTag == nil {
+                            HStack(spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .foregroundStyle(.yellow)
+                                Text("Sandbox pods require an ACR warm image. Run `ap profile warm \(selectedProfile) --rebuild` first.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
                     // Agent + Output
                     HStack(alignment: .top, spacing: 16) {
                         formSection("Agent") {
@@ -203,6 +235,7 @@ public struct CreateSessionSheet: View {
                                 if newValue == "interactive" {
                                     // Interactive pods default to branch-push on complete
                                     if outputTarget == "pr" { outputTarget = "branch" }
+                                    if effectiveExecutionTarget == "sandbox" { executionTarget = "local" }
                                     validate = false
                                     validationSuite = "off"
                                     taskSource = .manual
@@ -700,6 +733,7 @@ public struct CreateSessionSheet: View {
             promotable: isInteractive
         )
         let refs = resolvedReferenceRepos()
+        let targetOverride = executionTarget == "profile" ? nil : executionTarget
         let trimmedPrefix = branchPrefix.trimmingCharacters(in: .whitespaces)
         let trimmedBaseBranch = baseBranch.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedSourceBranch = sourceBranch.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -723,6 +757,7 @@ public struct CreateSessionSheet: View {
             requestTask,
             model.isEmpty ? nil : model,
             pod,
+            targetOverride,
             trimmedBaseBranch.isEmpty ? nil : trimmedBaseBranch,
             trimmedPrefix.isEmpty ? nil : trimmedPrefix,
             pim.isEmpty ? nil : pim,

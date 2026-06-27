@@ -70,6 +70,29 @@ public struct SessionCardFinal: View {
         shouldFixReviewFindings ? "Fix Review" : "Rework"
     }
 
+    private var deleteDialogTitle: String {
+        isDeletableNow ? "Delete pod \(pod.id)?" : "Kill and delete pod \(pod.id)?"
+    }
+
+    private var deleteButtonTitle: String {
+        isDeletableNow ? "Delete" : "Kill and delete"
+    }
+
+    private var deleteDialogMessage: String {
+        isDeletableNow
+            ? "This will permanently remove the pod record."
+            : "The pod is still active. It will be killed and then permanently removed."
+    }
+
+    private var launchWorkerErrorPresented: Binding<Bool> {
+        Binding(
+            get: { launchWorkerError != nil },
+            set: { isPresented in
+                if !isPresented { launchWorkerError = nil }
+            }
+        )
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Accent stripe
@@ -145,10 +168,10 @@ public struct SessionCardFinal: View {
         .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
         .sheet(isPresented: $showNudgeInput) { nudgeSheet }
         .confirmationDialog(
-            isDeletableNow ? "Delete pod \(pod.id)?" : "Kill and delete pod \(pod.id)?",
+            deleteDialogTitle,
             isPresented: $showDeleteConfirmation
         ) {
-            Button(isDeletableNow ? "Delete" : "Kill and delete", role: .destructive) {
+            Button(deleteButtonTitle, role: .destructive) {
                 Task {
                     if !isDeletableNow {
                         await actions.kill(pod.id)
@@ -157,11 +180,7 @@ public struct SessionCardFinal: View {
                 }
             }
         } message: {
-            Text(
-                isDeletableNow
-                ? "This will permanently remove the pod record."
-                : "The pod is still active. It will be killed and then permanently removed."
-            )
+            Text(deleteDialogMessage)
         }
         .alert("Resume pod", isPresented: $showResumeInput) {
             TextField("Message for the agent…", text: $resumeInputText)
@@ -194,6 +213,7 @@ public struct SessionCardFinal: View {
                             validationSuite: "full",
                             promotable: false
                         ),
+                        nil,
                         pod.branch,
                         nil,
                         nil,
@@ -215,10 +235,7 @@ public struct SessionCardFinal: View {
         }
         .alert(
             "Launch Worker Failed",
-            isPresented: Binding(
-                get: { launchWorkerError != nil },
-                set: { if !$0 { launchWorkerError = nil } }
-            )
+            isPresented: launchWorkerErrorPresented
         ) {
             Button("OK") { launchWorkerError = nil }
         } message: {
