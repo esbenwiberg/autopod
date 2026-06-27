@@ -37,7 +37,7 @@ DERIVED="packages/desktop/build"
 APP="$DERIVED/Build/Products/Release/Autopod.app"
 DEST="/Applications/Autopod.app"
 
-echo -e "${DIM}Building Autopod.app (Release)…${NC}"
+echo -e "${DIM}Building Autopod.app (Release)...${NC}"
 # Ad-hoc signing (CODE_SIGN_IDENTITY="-") so this works without a configured
 # Apple Developer team. Fine for a self-install; not for distribution.
 xcodebuild \
@@ -55,7 +55,7 @@ if [[ ! -d "$APP" ]]; then
   exit 1
 fi
 
-echo -e "${DIM}Installing to $DEST…${NC}"
+echo -e "${DIM}Installing to ${DEST}...${NC}"
 rm -rf "$DEST"
 cp -R "$APP" "$DEST"
 
