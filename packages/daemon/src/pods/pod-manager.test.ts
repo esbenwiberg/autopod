@@ -6811,6 +6811,30 @@ describe('PodManager', () => {
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
     });
 
+    it('Path 2: forced revalidation syncs container workspace before host-side validation', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, {
+        validationOverall: 'fail',
+        prUrl: null,
+      });
+
+      const result = await manager.revalidateSession(pod.id, { force: true });
+
+      expect(result).toEqual({ newCommits: false, result: 'pass' });
+      const syncCall = ctx.containerManager.execInContainer.mock.calls.find(([, cmd]) => {
+        if (!Array.isArray(cmd) || cmd[0] !== 'sh' || cmd[1] !== '-c') return false;
+        return String(cmd[2]).includes('/mnt/worktree');
+      });
+      expect(syncCall).toBeDefined();
+      const syncOrder = ctx.containerManager.execInContainer.mock.invocationCallOrder.find(
+        (_order, index) => ctx.containerManager.execInContainer.mock.calls[index] === syncCall,
+      );
+      const validateOrder = ctx.validationEngine.validate.mock.invocationCallOrder[0];
+      expect(syncOrder).toBeDefined();
+      expect(validateOrder).toBeDefined();
+      expect(syncOrder).toBeLessThan(validateOrder as number);
+    });
+
     it('Path 2: retries review infrastructure failures during forced revalidation', async () => {
       const ctx = createTestContext();
       ctx.deps.reviewInfrastructureRetryBackoffMs = [0];

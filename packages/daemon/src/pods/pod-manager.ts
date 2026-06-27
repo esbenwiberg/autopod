@@ -10189,6 +10189,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           throw err;
         }
 
+        // Revalidation runs host-side browser facts from worktreePath, so the host
+        // worktree must reflect the live /workspace before reading diffs or facts.
+        emitActivityStatus(podId, 'Syncing workspace…');
+        let validationSyncOk = true;
+        if (pod.containerId && pod.worktreePath) {
+          try {
+            await prepareWorkspaceForValidation(pod.containerId, pod.worktreePath, cm, podId);
+          } catch (err) {
+            logger.warn({ err, podId }, 'Failed to sync workspace before revalidation');
+            validationSyncOk =
+              err instanceof ValidationWorkspaceReconcileError
+                ? false
+                : await tryRecoverAfterWorkspaceSyncFailure(pod, err, 'validation');
+          }
+        }
+        if (!validationSyncOk) {
+          parkOnWorktreeSyncFailure(
+            podId,
+            'Workspace sync failed before revalidation — validation blocked.',
+          );
+          return { newCommits, result: 'fail' };
+        }
+
         const revalDefaultBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
         const [diff, commitLog] = pod.worktreePath
           ? await Promise.all([
