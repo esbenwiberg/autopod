@@ -53,6 +53,10 @@ RELEASES="/opt/autopod/releases"
 CURRENT_LINK="/opt/autopod/current"
 SERVICE="autopod-daemon"
 HEALTH_URL="https://autopod-daemon-ewi.swedencentral.cloudapp.azure.com/health"
+SERVICE_USER="ewi"
+SYSTEMD_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+CLAUDE_CLI_NPM_PACKAGE="${CLAUDE_CLI_NPM_PACKAGE:-@anthropic-ai/claude-code}"
+CODEX_CLI_NPM_PACKAGE="${CODEX_CLI_NPM_PACKAGE:-@openai/codex}"
 # Non-terminal pod statuses == "active"; we refuse to restart on top of these.
 NONTERMINAL="queued provisioning running validating validated approved merging merge_pending killing"
 
@@ -86,6 +90,12 @@ done
 
 command -v az >/dev/null || die "az CLI not found"
 az account show >/dev/null 2>&1 || die "az not logged in — run: az login"
+case "$CLAUDE_CLI_NPM_PACKAGE" in
+  *[!A-Za-z0-9@._/-]*|'') die "invalid CLAUDE_CLI_NPM_PACKAGE: $CLAUDE_CLI_NPM_PACKAGE";;
+esac
+case "$CODEX_CLI_NPM_PACKAGE" in
+  *[!A-Za-z0-9@._/-]*|'') die "invalid CODEX_CLI_NPM_PACKAGE: $CODEX_CLI_NPM_PACKAGE";;
+esac
 
 # Run a script block on the VM, returning its captured stdout/stderr message.
 remote() {
@@ -199,6 +209,7 @@ echo "  live:      $LIVE_SHA"
 echo "  target:    $TARGET_SHA  ($TARGET_REF)"
 echo "  mode:      $([ "$FULL" -eq 1 ] && echo 'FULL (clone + install)' || echo 'overlay (reuse node_modules)')"
 echo "  browser:   $([ "$PREWARM_PLAYWRIGHT" -eq 1 ] && echo 'prewarm + launch-check daemon Playwright Chromium' || echo 'SKIPPED')"
+echo "  reviewer:  ensure claude + codex CLIs for hosted review paths"
 echo "  rollback:  scripts/deploy-hosted-daemon.sh --rollback $LIVE_SHA"
 echo
 if [ "$ASSUME_YES" -eq 0 ]; then
@@ -296,6 +307,68 @@ fi
 BUILD_OUT="$(remote "$BUILD_SCRIPT")"
 echo "$BUILD_OUT"
 echo "$BUILD_OUT" | grep -q "BUILD DONE" || die "build did not complete — see output above; symlink untouched"
+
+# ---- prewarm reviewer CLIs (no swap yet) ---------------------------------
+note "ensuring hosted reviewer CLIs are installed on the VM"
+REVIEWER_CLI_SCRIPT="
+set -eu
+SERVICE=$SERVICE
+SERVICE_USER=$SERVICE_USER
+SYSTEMD_PATH='$SYSTEMD_PATH'
+CLAUDE_CLI_NPM_PACKAGE='$CLAUDE_CLI_NPM_PACKAGE'
+CODEX_CLI_NPM_PACKAGE='$CODEX_CLI_NPM_PACKAGE'
+
+command -v npm >/dev/null 2>&1 || { echo NPM_MISSING; exit 1; }
+
+ensure_npm_cli() {
+  name=\"\$1\"
+  package=\"\$2\"
+  upper=\"\$(printf '%s' \"\$name\" | tr '[:lower:]' '[:upper:]')\"
+
+  if ! PATH=\"\$SYSTEMD_PATH\" command -v \"\$name\" >/dev/null 2>&1; then
+    echo \"=== installing \$name from \$package ===\"
+    npm install -g \"\$package\"
+  fi
+
+  if ! PATH=\"\$SYSTEMD_PATH\" command -v \"\$name\" >/dev/null 2>&1; then
+    global_bin=\"\$(npm prefix -g)/bin/\$name\"
+    discovered=\"\$(command -v \"\$name\" 2>/dev/null || true)\"
+    if [ -x \"\$global_bin\" ]; then
+      ln -sfn \"\$global_bin\" \"/usr/local/bin/\$name\"
+    elif [ -n \"\$discovered\" ] && [ -x \"\$discovered\" ]; then
+      ln -sfn \"\$discovered\" \"/usr/local/bin/\$name\"
+    fi
+  fi
+
+  resolved=\"\$(PATH=\"\$SYSTEMD_PATH\" command -v \"\$name\" 2>/dev/null || true)\"
+  [ -n \"\$resolved\" ] || { echo \"\${upper}_CLI_MISSING\"; exit 1; }
+
+  echo \"\$name: \$resolved\"
+  version_log=\"/tmp/autopod-\$name-version.log\"
+  if ! sudo -u \"\$SERVICE_USER\" -H env PATH=\"\$SYSTEMD_PATH\" \"\$resolved\" --version >\"\$version_log\" 2>&1; then
+    if ! sudo -u \"\$SERVICE_USER\" -H env PATH=\"\$SYSTEMD_PATH\" \"\$resolved\" --help >\"\$version_log\" 2>&1; then
+      tail -n 20 \"\$version_log\" || true
+      echo \"\${upper}_CLI_UNRUNNABLE_AS_\$SERVICE_USER\"
+      exit 1
+    fi
+  fi
+  head -n 1 \"\$version_log\" || true
+}
+
+ensure_npm_cli claude \"\$CLAUDE_CLI_NPM_PACKAGE\"
+ensure_npm_cli codex \"\$CODEX_CLI_NPM_PACKAGE\"
+
+echo '=== OpenRouter support ==='
+if systemctl show \"\$SERVICE\" -p Environment 2>/dev/null | grep -q 'OPENROUTER_API_KEY'; then
+  echo 'OPENROUTER_API_KEY is configured in the service environment'
+else
+  echo 'OPENROUTER_API_KEY not found in the service environment; per-profile OpenRouter credentials still work'
+fi
+echo REVIEWER_CLI_PREWARM_OK
+"
+REVIEWER_CLI_OUT="$(remote "$REVIEWER_CLI_SCRIPT")"
+echo "$REVIEWER_CLI_OUT"
+echo "$REVIEWER_CLI_OUT" | grep -q "REVIEWER_CLI_PREWARM_OK" || die "reviewer CLI prewarm failed — symlink untouched"
 
 # ---- prewarm host browser cache (no swap yet) -----------------------------
 if [ "$PREWARM_PLAYWRIGHT" -eq 1 ]; then
