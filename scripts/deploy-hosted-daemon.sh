@@ -199,11 +199,12 @@ print(sum(1 for p in pods if isinstance(p, dict) and p.get("status") in nt))
   [ "$ACTIVE" = "?" ] && note "WARN: could not parse pod list; proceeding (verify manually)"
 else
   note "WARN: no token/daemon URL — falling back to VM DB active-pods preflight"
-  ACTIVE="$(remote "
+  ACTIVE_RAW="$(remote "
 set -eu
 cd $CURRENT_LINK/packages/daemon
 sudo -u ewi -H env NONTERMINAL='$NONTERMINAL' node -e \"const Database = require('better-sqlite3'); const db = new Database('/data/autopod/autopod.db', { readonly: true }); const statuses = process.env.NONTERMINAL.split(/\\\\s+/).filter(Boolean); const placeholders = statuses.map(() => '?').join(','); const row = db.prepare('select count(*) as n from pods where status in (' + placeholders + ')').get(...statuses); console.log(row.n);\"
-" 2>/dev/null || echo '?')"
+" 2>/dev/null || true)"
+  ACTIVE="$(printf '%s\n' "$ACTIVE_RAW" | awk '/^[0-9]+$/ { value = $0 } END { if (value != "") print value; else print "?" }')"
   note "active (non-terminal) pods from VM DB: $ACTIVE"
   if [ "$ACTIVE" != "0" ] && [ "$ACTIVE" != "?" ] && [ "$FORCE" -eq 0 ]; then
     die "$ACTIVE active pod(s) — restart would interrupt them (use --force to override)"
