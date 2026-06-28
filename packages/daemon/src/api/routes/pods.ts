@@ -580,7 +580,7 @@ export function podRoutes(
   });
 
   // POST /pods/:podId/kick — operator unstick: re-enqueue a stuck queued pod, or
-  // kill+fail a stuck running/provisioning pod so its concurrency slot frees up.
+  // stop and fail a stuck running/provisioning/validating pod so its concurrency slot frees up.
   app.post('/pods/:podId/kick', async (request, reply) => {
     const { podId } = request.params as { podId: string };
     const body = (request.body ?? {}) as { reason?: string };

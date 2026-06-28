@@ -7340,6 +7340,35 @@ describe('PodManager', () => {
       expect(refreshed.status).toBe('failed');
     });
 
+    it('force-fails a stuck validating pod while preserving its worktree for resume', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'do thing' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'provisioning',
+        worktreePath: '/tmp/worktree/abc',
+        containerId: 'container-gone',
+        startedAt: new Date().toISOString(),
+      });
+      ctx.podRepo.update(pod.id, { status: 'running' });
+      ctx.podRepo.update(pod.id, { status: 'validating' });
+      (ctx.containerManager.stop as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('container already gone'),
+      );
+
+      const result = await manager.kickPod(pod.id, 'validation wedged after deploy');
+
+      expect(result).toEqual({ action: 'failed' });
+      expect(ctx.containerManager.stop).toHaveBeenCalledWith('container-gone');
+      const refreshed = manager.getSession(pod.id);
+      expect(refreshed.status).toBe('failed');
+      expect(refreshed.worktreePath).toBe('/tmp/worktree/abc');
+      expect(refreshed.kickedReason).toBe('validation wedged after deploy');
+    });
+
     it('rejects with INVALID_STATE for non-kickable statuses', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);

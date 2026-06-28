@@ -645,7 +645,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   program
     .command('kick <id>')
     .description(
-      'Unstick a pod: re-enqueues a stuck queued pod, or kills+fails a stuck running/provisioning pod',
+      'Unstick a pod: re-enqueues queued, or stops and fails stuck running/provisioning/validating',
     )
     .option('-r, --reason <reason>', 'Reason for the kick (audit trail)')
     .action(async (id: string, opts: { reason?: string }) => {

@@ -11812,11 +11812,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return { action: 'requeued' };
       }
 
-      if (pod.status === 'running' || pod.status === 'provisioning') {
+      if (
+        pod.status === 'running' ||
+        pod.status === 'provisioning' ||
+        pod.status === 'validating'
+      ) {
         // Bounded — the whole point of kick is to free a slot when something
         // upstream (often Docker itself) is wedged. The transition to `failed`
         // must not depend on Docker cooperating. Mode='stop' so a subsequent
         // `resume` can still restart the same container if Docker recovers.
+        validationAbortControllers.get(podId)?.abort();
         await cleanupContainer(pod, 'kick', 'stop');
         podRepo.update(podId, { kickedAt: nowIso, kickedReason: trimmedReason });
         transition(pod, 'failed', { completedAt: nowIso });
@@ -11834,7 +11839,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       throw new AutopodError(
-        `Cannot kick pod ${podId} in status ${pod.status} — only queued/running/provisioning are eligible`,
+        `Cannot kick pod ${podId} in status ${pod.status} — only queued/running/provisioning/validating are eligible`,
         'INVALID_STATE',
         409,
       );
