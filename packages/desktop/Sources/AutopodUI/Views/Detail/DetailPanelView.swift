@@ -684,7 +684,7 @@ public struct DetailPanelView: View {
                 .tint(.red)
 
             case .provisioning:
-                // Kick — kills container and force-fails. Use when provisioning is hung.
+                // Kick — stops the container and force-fails. Use when provisioning is hung.
                 Button {
                     kickReasonText = ""
                     showKickSheet = true
@@ -694,7 +694,7 @@ public struct DetailPanelView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.orange)
-                .help("Kill the container and mark this pod failed so the slot frees up.")
+                .help("Stop the container and mark this pod failed so the slot frees up.")
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
@@ -783,7 +783,27 @@ public struct DetailPanelView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.orange)
-                .help("Force-fail this pod (kills the container) so its slot frees up. Reach for this when the pod looks hung.")
+                .help("Force-fail this pod (stops the container) so its slot frees up. Reach for this when the pod looks hung.")
+
+            case .validating:
+                Button {
+                    Task { await actions.kill(pod.id) }
+                } label: {
+                    Label("Kill", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+                Button {
+                    kickReasonText = ""
+                    showKickSheet = true
+                } label: {
+                    Label("Kick", systemImage: "bolt")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.orange)
+                .help("Force-fail this pod so its slot frees up. The worktree is preserved for Resume.")
 
             case .paused:
                 Button {
@@ -1250,7 +1270,7 @@ public struct DetailPanelView: View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Kick pod", systemImage: "bolt.horizontal")
                 .font(.headline)
-            Text("Force **\(pod.id)** to fail and free its concurrency slot. The container is killed; you can `Resume` or `Force Complete` afterward.")
+            Text("Force **\(pod.id)** to fail and free its concurrency slot. The container is stopped if present; you can `Resume` or `Force Complete` afterward.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
