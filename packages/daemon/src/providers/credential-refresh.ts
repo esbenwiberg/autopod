@@ -1,4 +1,4 @@
-import type { MaxCredentials } from '@autopod/shared';
+import type { MaxRefreshCredentials } from '@autopod/shared';
 import type { Logger } from 'pino';
 
 const CLAUDE_OAUTH_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
@@ -13,9 +13,9 @@ const REFRESH_GRACE_MS = 5 * 60 * 1000;
  * or updated credentials with new access/refresh tokens.
  */
 export async function refreshOAuthToken(
-  credentials: MaxCredentials,
+  credentials: MaxRefreshCredentials,
   logger: Logger,
-): Promise<MaxCredentials> {
+): Promise<MaxRefreshCredentials> {
   const expiresAt = new Date(credentials.expiresAt).getTime();
   const now = Date.now();
 
@@ -68,7 +68,7 @@ export async function refreshOAuthToken(
     expires_in: number;
   };
 
-  const refreshed: MaxCredentials = {
+  const refreshed: MaxRefreshCredentials = {
     provider: 'max',
     accessToken: data.access_token,
     refreshToken: data.refresh_token,

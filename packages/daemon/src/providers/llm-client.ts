@@ -1,5 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { ModelProvider, Profile, ProviderCredentials } from '@autopod/shared';
+import type {
+  MaxCredentials,
+  MaxRefreshCredentials,
+  MaxSetupTokenCredentials,
+  ModelProvider,
+  Profile,
+  ProviderCredentials,
+} from '@autopod/shared';
 import type { Logger } from 'pino';
 import { getAzureToken } from './azure-token.js';
 import { refreshOAuthToken } from './credential-refresh.js';
@@ -15,6 +22,23 @@ const MODEL_ALIASES: Record<string, string> = {
   sonnet: 'claude-sonnet-4-6',
   haiku: 'claude-haiku-4-5',
 };
+
+function isMaxSetupTokenCredentials(creds: MaxCredentials): creds is MaxSetupTokenCredentials {
+  return (
+    'oauthToken' in creds && typeof creds.oauthToken === 'string' && creds.oauthToken.length > 0
+  );
+}
+
+function isMaxRefreshCredentials(creds: MaxCredentials): creds is MaxRefreshCredentials {
+  return (
+    'accessToken' in creds &&
+    'refreshToken' in creds &&
+    'expiresAt' in creds &&
+    typeof creds.accessToken === 'string' &&
+    typeof creds.refreshToken === 'string' &&
+    typeof creds.expiresAt === 'string'
+  );
+}
 
 export function resolveAnthropicModelId(model: string): string {
   return MODEL_ALIASES[model] ?? model;
@@ -87,11 +111,22 @@ export async function createProviderAnthropicClient(
       );
       return { ok: false, reason: 'no_credentials' };
     }
-    const refreshed = await refreshOAuthToken(creds, logger);
+    const authToken = isMaxSetupTokenCredentials(creds)
+      ? creds.oauthToken
+      : isMaxRefreshCredentials(creds)
+        ? (await refreshOAuthToken(creds, logger)).accessToken
+        : null;
+    if (!authToken) {
+      logger.warn(
+        { profile: profileName, reason: 'no_credentials' },
+        'Profile uses max provider but credentials are incomplete — daemon-side LLM helpers fall back to templates',
+      );
+      return { ok: false, reason: 'no_credentials' };
+    }
     return {
       ok: true,
       client: new Anthropic({
-        authToken: refreshed.accessToken,
+        authToken,
         defaultHeaders: { 'anthropic-beta': MAX_OAUTH_BETA },
       }),
       model,

@@ -118,6 +118,8 @@ const LOG_REDACT_PATHS = [
   '*.access_token',
   '*.refreshToken',
   '*.refresh_token',
+  '*.oauthToken',
+  '*.oauth_token',
   '*.authToken',
   '*.auth_token',
   '*.privateKey',

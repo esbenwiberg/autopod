@@ -181,6 +181,24 @@ describe('createProfileSchema model validation', () => {
     expect(updated.openrouterApiKey).toBe('sk-or-updated');
   });
 
+  it('accepts Claude MAX setup-token credentials', () => {
+    const parsed = createProfileSchema.parse({
+      name: 'max-token',
+      modelProvider: 'max',
+      providerCredentials: {
+        provider: 'max',
+        authMode: 'setup-token',
+        oauthToken: 'claude-oauth-token',
+      },
+    });
+
+    expect(parsed.providerCredentials).toEqual({
+      provider: 'max',
+      authMode: 'setup-token',
+      oauthToken: 'claude-oauth-token',
+    });
+  });
+
   it('accepts Foundry OpenAI-surface provider credentials', () => {
     const parsed = createProfileSchema.parse({
       name: 'foundry-openai',

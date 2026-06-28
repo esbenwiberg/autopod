@@ -43,6 +43,49 @@ function defaultPodOptions(profile: Profile): PodOptions {
   return profile.pod ?? podOptionsFromOutputMode(profile.outputMode ?? 'pr');
 }
 
+function extractClaudeOauthToken(output: string): string | null {
+  const patterns = [
+    /CLAUDE_CODE_OAUTH_TOKEN\s*=\s*['"]?([A-Za-z0-9._~+/=-]{32,})/,
+    /(sk-ant-[A-Za-z0-9._=-]{20,})/,
+    /^\s*([A-Za-z0-9._~+/=-]{80,})\s*$/m,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(output);
+    if (match?.[1]) return match[1].replace(/^['"]|['"]$/g, '').trim();
+  }
+  return null;
+}
+
+async function runClaudeSetupToken(): Promise<string> {
+  const spawnEnv = { ...process.env };
+  spawnEnv.ANTHROPIC_API_KEY = undefined;
+  spawnEnv.CLAUDE_CODE_OAUTH_TOKEN = undefined;
+
+  return new Promise((resolve, reject) => {
+    let output = '';
+    const proc = cpSpawn('claude', ['setup-token'], {
+      stdio: ['inherit', 'pipe', 'pipe'],
+      env: spawnEnv,
+    });
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      output += chunk.toString('utf8');
+      process.stdout.write(chunk);
+    });
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      output += chunk.toString('utf8');
+      process.stderr.write(chunk);
+    });
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve(output);
+      } else {
+        reject(new Error(`claude setup-token exited with code ${code ?? 'unknown'}`));
+      }
+    });
+  });
+}
+
 export function registerProfileCommands(program: Command, getClient: () => AutopodClient): void {
   const profile = program.command('profile').description('Manage project profiles');
 
@@ -673,7 +716,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
 
   profile
     .command('auth <name>')
-    .description('Authenticate a profile with Claude MAX/PRO via interactive login')
+    .description('Authenticate a profile with Claude MAX/PRO via Claude setup-token')
     .action(async (name: string) => {
       const client = getClient();
 
@@ -689,118 +732,35 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         process.exit(1);
       }
 
-      // Isolated home so credentials land in a known place
-      const token = Math.random().toString(36).slice(2, 10);
-      const home = path.join(os.tmpdir(), `autopod-auth-${token}`);
-      const claudeDir = path.join(home, '.claude');
-      fs.mkdirSync(claudeDir, { recursive: true });
-
-      // Suppress first-run prompts
-      fs.writeFileSync(
-        path.join(claudeDir, '.config.json'),
-        JSON.stringify({ hasCompletedOnboarding: true, theme: 'dark' }),
-      );
-
-      // Working dir (claude needs a git repo context)
-      const cwd = path.join(os.tmpdir(), `autopod-auth-cwd-${token}`);
-      fs.mkdirSync(cwd, { recursive: true });
-      try {
-        execSync('git init', { cwd, stdio: 'ignore' });
-      } catch {
-        /* best-effort */
-      }
-
-      // Build env: strip API key so Claude uses OAuth
-      const spawnEnv: Record<string, string> = {};
-      for (const [k, v] of Object.entries(process.env)) {
-        if (v !== undefined && k !== 'ANTHROPIC_API_KEY') spawnEnv[k] = v;
-      }
-      spawnEnv.HOME = home;
-
-      console.log(chalk.cyan(`\nStarting Claude login for profile "${name}"...`));
+      console.log(chalk.cyan(`\nStarting Claude setup-token for profile "${name}"...`));
       console.log(
         chalk.dim(
-          'Claude will open a browser URL. Complete the OAuth flow, then the credentials will be saved automatically.\n',
+          'Complete the Claude subscription auth flow. Autopod will store the setup token on the profile.\n',
         ),
       );
 
-      console.log(
-        chalk.yellow(
-          'When the Claude REPL opens, type /login and complete the OAuth flow, then exit with /exit.\n',
-        ),
-      );
-
-      await new Promise<void>((resolve, reject) => {
-        const proc = cpSpawn('claude', [], {
-          stdio: 'inherit',
-          env: spawnEnv,
-          cwd,
-        });
-        proc.on('error', reject);
-        proc.on('close', () => resolve());
-      });
-
-      // Read credentials from isolated home
-      const credsPath = path.join(home, '.claude', '.credentials.json');
-      if (!fs.existsSync(credsPath)) {
-        console.error(chalk.red('\nNo credentials file found — login may not have completed.'));
+      const envToken = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+      const setupOutput = envToken ? '' : await runClaudeSetupToken();
+      const oauthToken = envToken ?? extractClaudeOauthToken(setupOutput);
+      if (!oauthToken) {
+        console.error(
+          chalk.red(
+            '\nNo Claude setup token found. Run `claude setup-token`, then retry with CLAUDE_CODE_OAUTH_TOKEN set.',
+          ),
+        );
         process.exit(1);
       }
-
-      let creds: {
-        claudeAiOauth?: {
-          accessToken?: string;
-          refreshToken?: string;
-          expiresAt?: number;
-          scopes?: string[];
-          subscriptionType?: string;
-          rateLimitTier?: string;
-        };
-      };
-      try {
-        creds = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
-      } catch {
-        console.error(chalk.red('\nFailed to parse credentials file.'));
-        process.exit(1);
-      }
-
-      const oauth = creds.claudeAiOauth;
-      if (!oauth?.accessToken || !oauth?.refreshToken) {
-        console.error(chalk.red('\nCredentials file missing OAuth tokens.'));
-        process.exit(1);
-      }
-
-      const expiresAt = oauth.expiresAt
-        ? new Date(oauth.expiresAt).toISOString()
-        : new Date(Date.now() + 3600_000).toISOString();
 
       await withSpinner(`Saving credentials for "${name}"...`, () =>
         client.setProfileCredentials(name, {
           modelProvider: 'max',
           providerCredentials: {
             provider: 'max',
-            accessToken: oauth.accessToken,
-            refreshToken: oauth.refreshToken,
-            expiresAt,
-            // Preserve all fields — claude 2.1.80+ requires scopes/subscriptionType
-            ...(oauth.scopes && { scopes: oauth.scopes }),
-            ...(oauth.subscriptionType && { subscriptionType: oauth.subscriptionType }),
-            ...(oauth.rateLimitTier && { rateLimitTier: oauth.rateLimitTier }),
+            authMode: 'setup-token',
+            oauthToken,
           },
         }),
       );
-
-      // Cleanup temp dirs
-      try {
-        fs.rmSync(home, { recursive: true, force: true });
-      } catch {
-        /* best-effort */
-      }
-      try {
-        fs.rmSync(cwd, { recursive: true, force: true });
-      } catch {
-        /* best-effort */
-      }
 
       console.log(chalk.green(`\nProfile "${name}" is now authenticated with Claude MAX/PRO.`));
     });

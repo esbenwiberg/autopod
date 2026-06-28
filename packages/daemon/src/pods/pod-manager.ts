@@ -520,6 +520,7 @@ _read_file_var() {
 }
 _read_file_var ANTHROPIC_API_KEY
 _read_file_var OPENAI_API_KEY
+_read_file_var CLAUDE_CODE_OAUTH_TOKEN
 _read_file_var COPILOT_GITHUB_TOKEN
 _read_file_var VSS_NUGET_EXTERNAL_FEED_ENDPOINTS
 exec "$@"

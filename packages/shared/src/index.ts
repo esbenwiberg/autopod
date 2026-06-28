@@ -147,6 +147,8 @@ export type {
   AnthropicCredentials,
   OpenAiCredentials,
   MaxCredentials,
+  MaxRefreshCredentials,
+  MaxSetupTokenCredentials,
   FoundryCredentials,
   FoundryApiSurface,
   CopilotCredentials,

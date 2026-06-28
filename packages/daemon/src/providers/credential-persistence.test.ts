@@ -131,6 +131,20 @@ describe('persistRefreshedCredentials', () => {
     });
   });
 
+  it('skips credential-file persistence for setup-token credentials', async () => {
+    const cm = makeContainerManager('should-not-be-read');
+    const ps = makeProfileStore({
+      provider: 'max',
+      authMode: 'setup-token',
+      oauthToken: 'setup-token-123',
+    });
+
+    await persistRefreshedCredentials('ctr-1', cm, ps, 'test-profile', logger);
+
+    expect(cm.readFile).not.toHaveBeenCalled();
+    expect(ps.update).not.toHaveBeenCalled();
+  });
+
   it('handles readFile failure gracefully', async () => {
     const cm = {
       readFile: vi.fn().mockRejectedValue(new Error('container gone')),

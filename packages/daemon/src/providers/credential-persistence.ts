@@ -1,5 +1,5 @@
 import { CONTAINER_HOME_DIR } from '@autopod/shared';
-import type { MaxCredentials } from '@autopod/shared';
+import type { MaxCredentials, MaxRefreshCredentials } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
@@ -32,7 +32,18 @@ function withOwnerLock<T>(owner: string, fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-function sameMaxCredentials(a: MaxCredentials, b: MaxCredentials): boolean {
+function isMaxRefreshCredentials(
+  credentials: MaxCredentials | null | undefined,
+): credentials is MaxRefreshCredentials {
+  return (
+    credentials?.provider === 'max' &&
+    'accessToken' in credentials &&
+    'refreshToken' in credentials &&
+    'expiresAt' in credentials
+  );
+}
+
+function sameMaxCredentials(a: MaxRefreshCredentials, b: MaxRefreshCredentials): boolean {
   return (
     a.accessToken === b.accessToken &&
     a.refreshToken === b.refreshToken &&
@@ -45,18 +56,19 @@ function sameMaxCredentials(a: MaxCredentials, b: MaxCredentials): boolean {
 }
 
 function mergeMaxMetadata(
-  credentials: MaxCredentials,
+  credentials: MaxRefreshCredentials,
   currentCreds: MaxCredentials | null | undefined,
-): MaxCredentials {
+): MaxRefreshCredentials {
+  const currentRefreshCreds = isMaxRefreshCredentials(currentCreds) ? currentCreds : null;
   return {
     provider: 'max',
     accessToken: credentials.accessToken,
     refreshToken: credentials.refreshToken,
     expiresAt: credentials.expiresAt,
-    clientId: credentials.clientId ?? currentCreds?.clientId,
-    scopes: credentials.scopes ?? currentCreds?.scopes,
-    subscriptionType: credentials.subscriptionType ?? currentCreds?.subscriptionType,
-    rateLimitTier: credentials.rateLimitTier ?? currentCreds?.rateLimitTier,
+    clientId: credentials.clientId ?? currentRefreshCreds?.clientId,
+    scopes: credentials.scopes ?? currentRefreshCreds?.scopes,
+    subscriptionType: credentials.subscriptionType ?? currentRefreshCreds?.subscriptionType,
+    rateLimitTier: credentials.rateLimitTier ?? currentRefreshCreds?.rateLimitTier,
   };
 }
 
@@ -64,15 +76,15 @@ async function persistMaxCredentialsUnderLock(
   profileStore: ProfileStore,
   ownerName: string,
   profileName: string,
-  credentials: MaxCredentials,
+  credentials: MaxRefreshCredentials,
   logger: Logger,
-): Promise<MaxCredentials> {
+): Promise<MaxRefreshCredentials> {
   const ownerProfile = profileStore.getRaw(ownerName);
   const currentCreds =
     ownerProfile.providerCredentials?.provider === 'max' ? ownerProfile.providerCredentials : null;
   const updated = mergeMaxMetadata(credentials, currentCreds);
 
-  if (currentCreds && sameMaxCredentials(updated, currentCreds)) {
+  if (isMaxRefreshCredentials(currentCreds) && sameMaxCredentials(updated, currentCreds)) {
     logger.debug(
       { profileName, ownerName },
       'Owner MAX credentials already match refreshed credentials — skipping persist',
@@ -98,9 +110,9 @@ async function persistMaxCredentialsUnderLock(
 export async function refreshAndPersistMaxCredentials(
   profileStore: ProfileStore,
   profileName: string,
-  fallbackCreds: MaxCredentials,
+  fallbackCreds: MaxRefreshCredentials,
   logger: Logger,
-): Promise<{ credentials: MaxCredentials; lineage: MaxCredentialLineage }> {
+): Promise<{ credentials: MaxRefreshCredentials; lineage: MaxCredentialLineage }> {
   const ownerName = profileStore.resolveCredentialOwner(profileName) ?? profileName;
 
   return withOwnerLock(ownerName, async () => {
@@ -109,6 +121,11 @@ export async function refreshAndPersistMaxCredentials(
       ownerProfile.providerCredentials?.provider === 'max'
         ? ownerProfile.providerCredentials
         : fallbackCreds;
+    if (!isMaxRefreshCredentials(currentCreds)) {
+      throw new Error(
+        `Profile "${profileName}" uses MAX setup-token auth; refresh-token rotation is not available`,
+      );
+    }
 
     const refreshed = await refreshOAuthToken(currentCreds, logger);
     if (sameMaxCredentials(refreshed, currentCreds)) {
@@ -151,6 +168,20 @@ export async function persistRefreshedCredentials(
   logger: Logger,
   lineage?: MaxCredentialLineage,
 ): Promise<void> {
+  const ownerName = profileStore.resolveCredentialOwner(profileName) ?? profileName;
+  const initialOwnerProfile = profileStore.getRaw(ownerName);
+  const initialOwnerCreds =
+    initialOwnerProfile.providerCredentials?.provider === 'max'
+      ? initialOwnerProfile.providerCredentials
+      : null;
+  if (initialOwnerCreds && !isMaxRefreshCredentials(initialOwnerCreds)) {
+    logger.debug(
+      { profileName, ownerName },
+      'Skipping MAX credential persist because credential owner uses setup-token auth',
+    );
+    return;
+  }
+
   // Read the credentials file from the container
   let rawContent: string;
   try {
@@ -190,15 +221,14 @@ export async function persistRefreshedCredentials(
   // Resolve which profile actually owns these credentials. For derived
   // profiles that inherit from a parent, rotations go to the parent's row
   // so all sibling profiles stay in sync.
-  const ownerName = profileStore.resolveCredentialOwner(profileName) ?? profileName;
-
   await withOwnerLock(ownerName, async () => {
     // Re-read under the lock — another concurrent run may have persisted.
     const ownerProfile = profileStore.getRaw(ownerName);
-    const currentCreds =
+    const rawCurrentCreds =
       ownerProfile.providerCredentials?.provider === 'max'
         ? ownerProfile.providerCredentials
         : null;
+    const currentCreds = isMaxRefreshCredentials(rawCurrentCreds) ? rawCurrentCreds : null;
 
     if (currentCreds && currentCreds.refreshToken === oauth.refreshToken) {
       logger.debug(
@@ -234,7 +264,7 @@ export async function persistRefreshedCredentials(
       }
     }
 
-    const updated: MaxCredentials = {
+    const updated: MaxRefreshCredentials = {
       provider: 'max',
       accessToken: oauth.accessToken,
       refreshToken: oauth.refreshToken,

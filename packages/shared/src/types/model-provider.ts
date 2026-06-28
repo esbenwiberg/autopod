@@ -31,16 +31,18 @@ export interface OpenAiCredentials {
 }
 
 /**
- * Claude MAX/PRO OAuth credentials.
+ * Claude MAX/PRO OAuth credentials captured from the legacy
+ * `~/.claude/.credentials.json` flow.
  *
- * Claude Code reads these from `~/.claude/.credentials.json` when no API key is set.
- * The daemon handles token refresh pre-flight and persists rotated tokens post-exec.
+ * Claude Code reads these from `~/.claude/.credentials.json` when no API key is
+ * set. The daemon handles token refresh pre-flight and persists rotated tokens
+ * post-exec.
  *
  * All fields from the `claudeAiOauth` object must be preserved — claude 2.1.80+
  * requires `scopes` and `subscriptionType` to be present or it treats the user as
  * logged out even with a valid, non-expired access token.
  */
-export interface MaxCredentials {
+export interface MaxRefreshCredentials {
   provider: 'max';
   /** OAuth access token (short-lived). */
   accessToken: string;
@@ -57,6 +59,22 @@ export interface MaxCredentials {
   /** Rate limit tier. Preserved for completeness. */
   rateLimitTier?: string;
 }
+
+/**
+ * Claude MAX/PRO long-lived OAuth token produced by `claude setup-token`.
+ *
+ * Current Claude Code on macOS stores interactive auth in Keychain instead of a
+ * portable `.credentials.json`; setup-token is the supported unattended path.
+ * The daemon injects this as `CLAUDE_CODE_OAUTH_TOKEN` for the Claude CLI.
+ */
+export interface MaxSetupTokenCredentials {
+  provider: 'max';
+  authMode?: 'setup-token';
+  /** Long-lived OAuth token for Claude Code CLI unattended auth. */
+  oauthToken: string;
+}
+
+export type MaxCredentials = MaxRefreshCredentials | MaxSetupTokenCredentials;
 
 /**
  * Foundry exposes models behind two protocol surfaces:

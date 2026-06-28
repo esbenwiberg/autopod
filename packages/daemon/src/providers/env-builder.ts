@@ -1,5 +1,11 @@
 import { CONTAINER_HOME_DIR } from '@autopod/shared';
-import type { FoundryCredentials, Profile } from '@autopod/shared';
+import type {
+  FoundryCredentials,
+  MaxCredentials,
+  MaxRefreshCredentials,
+  MaxSetupTokenCredentials,
+  Profile,
+} from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ProfileStore } from '../profiles/index.js';
 import { RUNTIME_TELEMETRY_OPT_OUT_ENV, withRuntimeTelemetryOptOutEnv } from '../runtime-env.js';
@@ -101,6 +107,23 @@ export async function buildProviderEnv(
 
 const SECRET_DIR = '/run/autopod';
 
+function isMaxSetupTokenCredentials(creds: MaxCredentials): creds is MaxSetupTokenCredentials {
+  return (
+    'oauthToken' in creds && typeof creds.oauthToken === 'string' && creds.oauthToken.length > 0
+  );
+}
+
+function isMaxRefreshCredentials(creds: MaxCredentials): creds is MaxRefreshCredentials {
+  return (
+    'accessToken' in creds &&
+    'refreshToken' in creds &&
+    'expiresAt' in creds &&
+    typeof creds.accessToken === 'string' &&
+    typeof creds.refreshToken === 'string' &&
+    typeof creds.expiresAt === 'string'
+  );
+}
+
 /**
  * Anthropic API key provider — uses daemon env var.
  * The key is written to a 0400 secret file inside the container; the exec env
@@ -164,10 +187,10 @@ function buildOpenAiEnv(profile: Profile): ProviderEnvResult {
 /**
  * MAX/PRO OAuth provider.
  *
- * 1. Refreshes the access token if near expiry
- * 2. Builds a `.claude/.credentials.json` file for the container
- * 3. Sets HOME env to a temp dir so Claude Code finds the credentials
- * 4. Does NOT set ANTHROPIC_API_KEY (forces OAuth path)
+ * Supports both current setup-token credentials (injected as
+ * `CLAUDE_CODE_OAUTH_TOKEN`) and legacy `.claude/.credentials.json` refresh
+ * credentials. The legacy path refreshes access tokens and persists rotations;
+ * the setup-token path has no container credential file to read back.
  */
 async function buildMaxEnv(
   profile: Profile,
@@ -179,6 +202,22 @@ async function buildMaxEnv(
   if (!creds || creds.provider !== 'max') {
     throw new Error(
       `Profile "${profile.name}" has modelProvider=max but missing or mismatched providerCredentials`,
+    );
+  }
+
+  if (isMaxSetupTokenCredentials(creds)) {
+    const filePath = `${SECRET_DIR}/claude-code-oauth-token`;
+    return {
+      env: withRuntimeTelemetryOptOutEnv({ CLAUDE_CODE_OAUTH_TOKEN_FILE: filePath }),
+      containerFiles: buildClaudeConfigFiles(),
+      secretFiles: [{ path: filePath, content: creds.oauthToken }],
+      requiresPostExecPersistence: false,
+    };
+  }
+
+  if (!isMaxRefreshCredentials(creds)) {
+    throw new Error(
+      `Profile "${profile.name}" has modelProvider=max but invalid providerCredentials`,
     );
   }
 

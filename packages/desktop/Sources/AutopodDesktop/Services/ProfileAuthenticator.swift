@@ -2,7 +2,7 @@ import Foundation
 import AutopodClient
 
 /// Handles interactive OAuth flows for profile model-provider authentication.
-/// Opens Terminal.app with the appropriate CLI tool, polls for the credentials file,
+/// Opens Terminal.app with the appropriate CLI tool, polls for the credential artifact,
 /// then patches the profile via the daemon API.
 public final class ProfileAuthenticator: Sendable {
 
@@ -14,8 +14,8 @@ public final class ProfileAuthenticator: Sendable {
 
   // MARK: - Claude MAX / PRO
 
-  /// Authenticate a profile with Claude MAX/PRO via `claude` CLI OAuth.
-  /// Opens Terminal.app for the interactive login, then reads credentials and patches the profile.
+  /// Authenticate a profile with Claude MAX/PRO via `claude setup-token`.
+  /// Opens Terminal.app for the interactive login, then captures the setup token.
   public func authenticateMax(profileName: String) async throws -> String {
     let tag = UUID().uuidString.prefix(8)
     let home = FileManager.default.temporaryDirectory
@@ -40,20 +40,37 @@ public final class ProfileAuthenticator: Sendable {
       throw AuthError.cliNotFound("claude")
     }
 
-    // Write a shell script that Terminal.app will run
+    // Write a shell script that Terminal.app will run. `script(1)` preserves a
+    // pseudo-TTY while capturing output, which keeps `claude setup-token`
+    // interactive and still lets Autopod parse the resulting token.
     let markerFile = home.appendingPathComponent(".auth-done")
+    let tokenOutputPath = home.appendingPathComponent("setup-token.log")
     let script = """
     #!/bin/bash
     export HOME="\(home.path)"
+    unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN
     echo ""
     echo "=== Autopod: Claude MAX Authentication ==="
-    echo "Type /login to start OAuth, then /exit when done."
+    echo "Follow the Claude setup-token flow in this terminal."
     echo ""
     cd "\(cwd.path)"
-    "\(claudePath.path)"
-    touch "\(markerFile.path)"
+    if [ -x /usr/bin/script ]; then
+      /usr/bin/script -q "\(tokenOutputPath.path)" "\(claudePath.path)" setup-token
+      status=$?
+    else
+      "\(claudePath.path)" setup-token 2>&1 | tee "\(tokenOutputPath.path)"
+      status=${PIPESTATUS[0]}
+    fi
+    if [ "$status" -eq 0 ]; then
+      touch "\(markerFile.path)"
+    fi
     echo ""
-    echo "Authentication complete. You can close this window."
+    if [ "$status" -eq 0 ]; then
+      echo "Authentication complete. You can close this window."
+    else
+      echo "Authentication failed (exit $status). You can close this window."
+    fi
+    exit "$status"
     """
     let scriptPath = home.appendingPathComponent("auth.sh")
     try script.write(to: scriptPath, atomically: true, encoding: .utf8)
@@ -64,44 +81,24 @@ public final class ProfileAuthenticator: Sendable {
     // Open Terminal.app with the script
     Self.openInTerminal(scriptPath)
 
-    // Poll for completion (marker file or credentials file)
-    let credsPath = claudeDir.appendingPathComponent(".credentials.json")
+    // Poll for completion
     let timeout: TimeInterval = 600 // 10 minutes
     let start = Date()
     while Date().timeIntervalSince(start) < timeout {
       try await Task.sleep(for: .seconds(2))
       if FileManager.default.fileExists(atPath: markerFile.path) { break }
-      if FileManager.default.fileExists(atPath: credsPath.path) { break }
     }
 
-    guard FileManager.default.fileExists(atPath: credsPath.path) else {
-      throw AuthError.noCredentials("No credentials file found — login may not have completed.")
+    let tokenOutput = (try? String(contentsOf: tokenOutputPath, encoding: .utf8)) ?? ""
+    guard let oauthToken = Self.extractClaudeOAuthToken(from: tokenOutput) else {
+      throw AuthError.noCredentials("No Claude setup token found — login may not have completed.")
     }
 
-    let credsData = try Data(contentsOf: credsPath)
-    guard let creds = try JSONSerialization.jsonObject(with: credsData) as? [String: Any],
-          let oauth = creds["claudeAiOauth"] as? [String: Any],
-          let accessToken = oauth["accessToken"] as? String,
-          let refreshToken = oauth["refreshToken"] as? String else {
-      throw AuthError.noCredentials("Credentials file missing OAuth tokens.")
-    }
-
-    let expiresAt: String
-    if let ts = oauth["expiresAt"] as? TimeInterval {
-      expiresAt = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: ts / 1000))
-    } else {
-      expiresAt = ISO8601DateFormatter().string(from: Date(timeIntervalSinceNow: 3600))
-    }
-
-    var providerCredentials: [String: Any] = [
+    let providerCredentials: [String: Any] = [
       "provider": "max",
-      "accessToken": accessToken,
-      "refreshToken": refreshToken,
-      "expiresAt": expiresAt,
+      "authMode": "setup-token",
+      "oauthToken": oauthToken,
     ]
-    if let scopes = oauth["scopes"] { providerCredentials["scopes"] = scopes }
-    if let sub = oauth["subscriptionType"] { providerCredentials["subscriptionType"] = sub }
-    if let tier = oauth["rateLimitTier"] { providerCredentials["rateLimitTier"] = tier }
 
     _ = try await api.patchProfile(profileName, fields: [
       "modelProvider": "max",
@@ -311,6 +308,32 @@ public final class ProfileAuthenticator: Sendable {
     guard proc.terminationStatus == 0 else { return nil }
     return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
       .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  /// Extract the token from `claude setup-token` output.
+  private static func extractClaudeOAuthToken(from output: String) -> String? {
+    let patterns = [
+      #"CLAUDE_CODE_OAUTH_TOKEN\s*=\s*['"]?([A-Za-z0-9._~+/=-]{32,})"#,
+      #"(sk-ant-[A-Za-z0-9._=-]{20,})"#,
+      #"(?m)^\s*([A-Za-z0-9._~+/=-]{80,})\s*$"#,
+    ]
+    for pattern in patterns {
+      if let token = firstRegexCapture(pattern, in: output) {
+        return token.trimmingCharacters(in: CharacterSet(charactersIn: "'\" \t\r\n"))
+      }
+    }
+    return nil
+  }
+
+  private static func firstRegexCapture(_ pattern: String, in text: String) -> String? {
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+    let range = NSRange(text.startIndex..<text.endIndex, in: text)
+    guard let match = regex.firstMatch(in: text, range: range), match.numberOfRanges > 1 else {
+      return nil
+    }
+    let captureRange = match.range(at: 1)
+    guard let swiftRange = Range(captureRange, in: text) else { return nil }
+    return String(text[swiftRange])
   }
 
   /// Find an executable by checking the user's login shell PATH and common install locations.

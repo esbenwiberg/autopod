@@ -208,6 +208,29 @@ describe('buildProviderEnv', () => {
       });
     });
 
+    it('injects setup-token credentials via secret file', async () => {
+      const profile = makeProfile({
+        modelProvider: 'max',
+        providerCredentials: {
+          provider: 'max',
+          authMode: 'setup-token',
+          oauthToken: 'setup-token-123',
+        },
+      });
+
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
+
+      expect(result.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+      expect(result.env.CLAUDE_CODE_OAUTH_TOKEN_FILE).toBe('/run/autopod/claude-code-oauth-token');
+      expect(result.secretFiles).toEqual([
+        { path: '/run/autopod/claude-code-oauth-token', content: 'setup-token-123' },
+      ]);
+      expect(result.containerFiles.some((file) => file.path.includes('.credentials.json'))).toBe(
+        false,
+      );
+      expect(result.requiresPostExecPersistence).toBe(false);
+    });
+
     it('throws when modelProvider is max but credentials are missing', async () => {
       const profile = makeProfile({
         modelProvider: 'max',

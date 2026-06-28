@@ -35,7 +35,7 @@ const openAiCredentialsSchema = z.object({
   authJson: z.string().min(1).optional(),
 });
 
-const maxCredentialsSchema = z.object({
+const maxRefreshCredentialsSchema = z.object({
   provider: z.literal('max'),
   accessToken: z.string().min(1),
   refreshToken: z.string().min(1),
@@ -46,6 +46,14 @@ const maxCredentialsSchema = z.object({
   subscriptionType: z.string().optional(),
   rateLimitTier: z.string().optional(),
 });
+
+const maxSetupTokenCredentialsSchema = z.object({
+  provider: z.literal('max'),
+  authMode: z.literal('setup-token').optional(),
+  oauthToken: z.string().min(1),
+});
+
+const maxCredentialsSchema = z.union([maxRefreshCredentialsSchema, maxSetupTokenCredentialsSchema]);
 
 const foundryCredentialsSchema = z.object({
   provider: z.literal('foundry'),
@@ -68,7 +76,7 @@ const openRouterCredentialsSchema = z.object({
   baseUrl: z.string().url().optional(),
 });
 
-export const providerCredentialsSchema = z.discriminatedUnion('provider', [
+export const providerCredentialsSchema = z.union([
   anthropicCredentialsSchema,
   openAiCredentialsSchema,
   maxCredentialsSchema,
