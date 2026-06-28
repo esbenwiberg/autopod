@@ -1,8 +1,8 @@
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const execFileMock = vi.hoisted(() =>
-  vi.fn((...args: unknown[]) => {
+const execFileState = vi.hoisted(() => {
+  const defaultImpl = (...args: unknown[]) => {
     const command = args[0];
     const callback = args.find(
       (arg): arg is (err: Error | null, stdout: string, stderr: string) => void =>
@@ -16,8 +16,15 @@ const execFileMock = vi.hoisted(() =>
     }
     callback?.(null, stdout, '');
     return { pid: 1234 };
-  }),
-);
+  };
+
+  return {
+    defaultImpl,
+    mock: vi.fn(defaultImpl),
+  };
+});
+
+const execFileMock = execFileState.mock;
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
@@ -91,7 +98,8 @@ describe('findStoppedDesktopProcessIds', () => {
 
 describe('launchDesktopApp', () => {
   afterEach(() => {
-    execFileMock.mockClear();
+    execFileMock.mockReset();
+    execFileMock.mockImplementation(execFileState.defaultImpl);
     vi.restoreAllMocks();
   });
 
@@ -128,6 +136,65 @@ describe('launchDesktopApp', () => {
       expect.any(Function),
     );
     expect(killSpy).toHaveBeenCalledWith(12345, 'SIGCONT');
+  });
+
+  it('restarts the app when LaunchServices reports the running app is unavailable', async () => {
+    const deepLink = 'autopod://connect?url=https%3A%2F%2Fdaemon.example.com&authKind=entra';
+    let openCalls = 0;
+    let pgrepCalls = 0;
+    const killSpy = vi
+      .spyOn(process, 'kill')
+      .mockImplementation((() => true) as typeof process.kill);
+
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const command = args[0];
+      const commandArgs = args[1] as string[] | undefined;
+      const callback = args.find(
+        (arg): arg is (err: Error | null, stdout: string, stderr: string) => void =>
+          typeof arg === 'function',
+      );
+
+      if (command === 'open') {
+        openCalls++;
+        if (openCalls === 1) {
+          callback?.(
+            new Error('_LSOpenURLsWithCompletionHandler() failed with error -600.'),
+            '',
+            '',
+          );
+          return { pid: 1234 };
+        }
+      }
+
+      if (command === 'pgrep') {
+        pgrepCalls++;
+        if (pgrepCalls === 1) {
+          callback?.(null, '12345\n', '');
+          return { pid: 1234 };
+        }
+        if (pgrepCalls === 2) {
+          const err = Object.assign(new Error('pgrep exited with code 1'), { code: 1 });
+          callback?.(err, '', '');
+          return { pid: 1234 };
+        }
+        callback?.(null, '67890\n', '');
+        return { pid: 1234 };
+      }
+
+      if (command === 'ps') {
+        const pid = commandArgs?.[1] ?? '';
+        callback?.(null, ` ${pid} S /Applications/Autopod.app/Contents/MacOS/Autopod\n`, '');
+        return { pid: 1234 };
+      }
+
+      callback?.(null, '', '');
+      return { pid: 1234 };
+    });
+
+    await launchDesktopApp(deepLink, { settleMs: 0, launchTimeoutMs: 100 });
+
+    expect(execFileMock.mock.calls.filter(([command]) => command === 'open')).toHaveLength(2);
+    expect(killSpy).toHaveBeenCalledWith(12345, 'SIGTERM');
   });
 });
 

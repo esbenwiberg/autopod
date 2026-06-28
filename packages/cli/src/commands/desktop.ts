@@ -127,6 +127,7 @@ async function resumeStoppedDesktopProcesses(
 async function waitForDesktopToRun(timeoutMs: number, intervalMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let lastStoppedCount = 0;
+  let sawProcess = false;
 
   do {
     let processes: Array<{ pid: string; stat: string }>;
@@ -138,6 +139,7 @@ async function waitForDesktopToRun(timeoutMs: number, intervalMs: number): Promi
       return;
     }
 
+    sawProcess ||= processes.length > 0;
     lastStoppedCount = processes.filter((process) => process.stat.includes('T')).length;
 
     if (lastStoppedCount > 0) {
@@ -146,13 +148,79 @@ async function waitForDesktopToRun(timeoutMs: number, intervalMs: number): Promi
       return;
     }
 
-    if (timeoutMs <= 0) return;
+    if (timeoutMs <= 0) {
+      if (!sawProcess) throw new Error('Autopod launch returned but no app process appeared.');
+      return;
+    }
     await delay(intervalMs);
   } while (Date.now() < deadline);
 
   if (lastStoppedCount > 0) {
     throw new Error('Autopod launched but remained stopped before startup completed.');
   }
+  if (!sawProcess) {
+    throw new Error('Autopod launch returned but no app process appeared.');
+  }
+}
+
+function isLaunchServicesUnavailableError(err: unknown): boolean {
+  const message = (err as Error | undefined)?.message ?? '';
+  return message.includes('_LSOpenURLsWithCompletionHandler') && message.includes('error -600');
+}
+
+function signalDesktopProcess(pid: string, signal: NodeJS.Signals): void {
+  const parsedPid = Number.parseInt(pid, 10);
+  if (Number.isNaN(parsedPid)) return;
+  try {
+    process.kill(parsedPid, signal);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'ESRCH') throw err;
+  }
+}
+
+async function stopDesktopProcesses(timeoutMs: number, intervalMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  const signaled = new Set<string>();
+
+  do {
+    const processes = await readDesktopProcesses();
+    if (processes.length === 0) return;
+
+    for (const desktopProcess of processes) {
+      if (!signaled.has(desktopProcess.pid)) {
+        signalDesktopProcess(desktopProcess.pid, 'SIGTERM');
+        signaled.add(desktopProcess.pid);
+      } else if (Date.now() >= deadline) {
+        signalDesktopProcess(desktopProcess.pid, 'SIGKILL');
+      }
+    }
+
+    if (timeoutMs <= 0) break;
+    await delay(intervalMs);
+  } while (Date.now() < deadline);
+
+  if ((await readDesktopProcesses()).length > 0) {
+    throw new Error('Could not stop the existing Autopod desktop process.');
+  }
+}
+
+function spawnDesktopExecutable(deepLink: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(APP_EXECUTABLE_PATH, [deepLink], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.on('error', reject);
+    child.on('spawn', () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
+async function openDesktopBundle(deepLink: string): Promise<void> {
+  await execFileAsync('open', [APP_PATH, '--args', deepLink]);
 }
 
 async function writePendingDeepLink(deepLink: string): Promise<void> {
@@ -175,7 +243,21 @@ export async function launchDesktopApp(
   // a second LaunchServices URL dispatch, which can fail with -600 on local
   // unsigned "Sign to Run Locally" builds while the app is still checking in.
   await writePendingDeepLink(deepLink);
-  await execFileAsync('open', [APP_PATH, '--args', deepLink]);
+  try {
+    await openDesktopBundle(deepLink);
+  } catch (err) {
+    if (!isLaunchServicesUnavailableError(err)) throw err;
+
+    await stopDesktopProcesses(launchTimeoutMs, settleMs);
+    await writePendingDeepLink(deepLink);
+
+    try {
+      await openDesktopBundle(deepLink);
+    } catch (retryErr) {
+      if (!isLaunchServicesUnavailableError(retryErr)) throw retryErr;
+      await spawnDesktopExecutable(deepLink);
+    }
+  }
   await waitForDesktopToRun(launchTimeoutMs, settleMs);
 }
 
