@@ -38,25 +38,30 @@ APP="$DERIVED/Build/Products/Release/Autopod.app"
 DEST="/Applications/Autopod.app"
 
 echo -e "${DIM}Building Autopod.app (Release)...${NC}"
-# Ad-hoc signing (CODE_SIGN_IDENTITY="-") so this works without a configured
-# Apple Developer team. Fine for a self-install; not for distribution.
+# Xcode's "Sign to Run Locally" path keeps entitlements intact and registers
+# a local execution-policy exception. Fine for a self-install; not distribution.
 xcodebuild \
   -project "$PROJECT" \
   -scheme Autopod \
   -configuration Release \
   -derivedDataPath "$DERIVED" \
   build \
-  CODE_SIGN_IDENTITY="-" \
-  CODE_SIGNING_REQUIRED=NO \
-  CODE_SIGNING_ALLOWED=NO
+  CODE_SIGNING_REQUIRED=YES \
+  CODE_SIGNING_ALLOWED=YES
 
 if [[ ! -d "$APP" ]]; then
   echo -e "${RED}Build succeeded but $APP is missing.${NC}" >&2
   exit 1
 fi
 
+echo -e "${DIM}Verifying Autopod.app signature...${NC}"
+codesign --verify --deep --strict --verbose=2 "$APP"
+
 echo -e "${DIM}Installing to ${DEST}...${NC}"
 rm -rf "$DEST"
 cp -R "$APP" "$DEST"
+codesign --verify --deep --strict --verbose=2 "$DEST"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+  -f -R -trusted "$DEST"
 
 echo -e "${GREEN}Installed Autopod.app → $DEST${NC}"

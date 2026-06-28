@@ -5,6 +5,7 @@ import AutopodClient
 @Observable
 @MainActor
 public final class ConnectionManager {
+  private static let pendingDeepLinkKey = "autopod.pendingDeepLink"
 
   // MARK: - Connection state
 
@@ -74,6 +75,8 @@ public final class ConnectionManager {
         }
       }
     }
+
+    consumeLaunchDeepLink()
   }
 
   // MARK: - Connect
@@ -194,6 +197,24 @@ public final class ConnectionManager {
   }
 
   // MARK: - Deep links
+
+  /// Consume a CLI-provided launch request before SwiftUI view lifecycle begins.
+  private func consumeLaunchDeepLink() {
+    guard let deepLink = Self.launchDeepLink() else { return }
+    UserDefaults.standard.removeObject(forKey: Self.pendingDeepLinkKey)
+    UserDefaults.standard.synchronize()
+    handleDeepLink(deepLink)
+  }
+
+  private static func launchDeepLink() -> URL? {
+    if let arg = CommandLine.arguments.dropFirst().first(where: { $0.hasPrefix("autopod://") }),
+       let url = URL(string: arg) {
+      return url
+    }
+
+    guard let raw = UserDefaults.standard.string(forKey: pendingDeepLinkKey) else { return nil }
+    return URL(string: raw)
+  }
 
   /// Handle an `autopod://connect?url=…&name=…&token=…&authKind=…` deep link.
   ///
