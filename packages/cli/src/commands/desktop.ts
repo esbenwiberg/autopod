@@ -205,22 +205,8 @@ async function stopDesktopProcesses(timeoutMs: number, intervalMs: number): Prom
   }
 }
 
-function spawnDesktopExecutable(deepLink: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(APP_EXECUTABLE_PATH, [deepLink], {
-      detached: true,
-      stdio: 'ignore',
-    });
-    child.on('error', reject);
-    child.on('spawn', () => {
-      child.unref();
-      resolve();
-    });
-  });
-}
-
 async function openDesktopBundle(deepLink: string): Promise<void> {
-  await execFileAsync('open', [APP_PATH, '--args', deepLink]);
+  await execFileAsync('open', ['-n', APP_PATH, '--args', deepLink]);
 }
 
 async function writePendingDeepLink(deepLink: string): Promise<void> {
@@ -239,6 +225,11 @@ export async function launchDesktopApp(
   const settleMs = opts.settleMs ?? 150;
   const launchTimeoutMs = opts.launchTimeoutMs ?? 3_000;
 
+  const existingProcesses = await readDesktopProcesses();
+  if (existingProcesses.length > 0) {
+    await stopDesktopProcesses(launchTimeoutMs, settleMs);
+  }
+
   // Store the connect request before launch. Passing it via defaults/argv avoids
   // a second LaunchServices URL dispatch, which can fail with -600 on local
   // unsigned "Sign to Run Locally" builds while the app is still checking in.
@@ -255,7 +246,7 @@ export async function launchDesktopApp(
       await openDesktopBundle(deepLink);
     } catch (retryErr) {
       if (!isLaunchServicesUnavailableError(retryErr)) throw retryErr;
-      await spawnDesktopExecutable(deepLink);
+      throw retryErr;
     }
   }
   await waitForDesktopToRun(launchTimeoutMs, settleMs);

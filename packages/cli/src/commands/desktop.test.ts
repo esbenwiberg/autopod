@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const execFileState = vi.hoisted(() => {
+  const state = { pgrepCalls: 0 };
   const defaultImpl = (...args: unknown[]) => {
     const command = args[0];
     const callback = args.find(
@@ -10,6 +11,12 @@ const execFileState = vi.hoisted(() => {
     );
     let stdout = '';
     if (command === 'pgrep') {
+      state.pgrepCalls++;
+      if (state.pgrepCalls === 1) {
+        const err = Object.assign(new Error('pgrep exited with code 1'), { code: 1 });
+        callback?.(err, '', '');
+        return { pid: 1234 };
+      }
       stdout = '12345\n';
     } else if (command === 'ps') {
       stdout = ' 12345 T /Applications/Autopod.app/Contents/MacOS/Autopod\n';
@@ -20,6 +27,9 @@ const execFileState = vi.hoisted(() => {
 
   return {
     defaultImpl,
+    reset: () => {
+      state.pgrepCalls = 0;
+    },
     mock: vi.fn(defaultImpl),
   };
 });
@@ -99,6 +109,7 @@ describe('findStoppedDesktopProcessIds', () => {
 describe('launchDesktopApp', () => {
   afterEach(() => {
     execFileMock.mockReset();
+    execFileState.reset();
     execFileMock.mockImplementation(execFileState.defaultImpl);
     vi.restoreAllMocks();
   });
@@ -113,24 +124,30 @@ describe('launchDesktopApp', () => {
 
     expect(execFileMock).toHaveBeenNthCalledWith(
       1,
-      'defaults',
-      ['write', 'com.autopod.desktop', 'autopod.pendingDeepLink', deepLink],
-      expect.any(Function),
-    );
-    expect(execFileMock).toHaveBeenNthCalledWith(
-      2,
-      'open',
-      ['/Applications/Autopod.app', '--args', deepLink],
-      expect.any(Function),
-    );
-    expect(execFileMock).toHaveBeenNthCalledWith(
-      3,
       'pgrep',
       ['-f', '/Applications/Autopod.app/Contents/MacOS/Autopod'],
       expect.any(Function),
     );
     expect(execFileMock).toHaveBeenNthCalledWith(
+      2,
+      'defaults',
+      ['write', 'com.autopod.desktop', 'autopod.pendingDeepLink', deepLink],
+      expect.any(Function),
+    );
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      3,
+      'open',
+      ['-n', '/Applications/Autopod.app', '--args', deepLink],
+      expect.any(Function),
+    );
+    expect(execFileMock).toHaveBeenNthCalledWith(
       4,
+      'pgrep',
+      ['-f', '/Applications/Autopod.app/Contents/MacOS/Autopod'],
+      expect.any(Function),
+    );
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      5,
       'ps',
       ['-p', '12345', '-o', 'pid=,stat=,command='],
       expect.any(Function),
@@ -138,9 +155,8 @@ describe('launchDesktopApp', () => {
     expect(killSpy).toHaveBeenCalledWith(12345, 'SIGCONT');
   });
 
-  it('restarts the app when LaunchServices reports the running app is unavailable', async () => {
+  it('restarts an existing app process before opening a fresh LaunchServices instance', async () => {
     const deepLink = 'autopod://connect?url=https%3A%2F%2Fdaemon.example.com&authKind=entra';
-    let openCalls = 0;
     let pgrepCalls = 0;
     const killSpy = vi
       .spyOn(process, 'kill')
@@ -154,25 +170,13 @@ describe('launchDesktopApp', () => {
           typeof arg === 'function',
       );
 
-      if (command === 'open') {
-        openCalls++;
-        if (openCalls === 1) {
-          callback?.(
-            new Error('_LSOpenURLsWithCompletionHandler() failed with error -600.'),
-            '',
-            '',
-          );
-          return { pid: 1234 };
-        }
-      }
-
       if (command === 'pgrep') {
         pgrepCalls++;
-        if (pgrepCalls === 1) {
+        if (pgrepCalls <= 2) {
           callback?.(null, '12345\n', '');
           return { pid: 1234 };
         }
-        if (pgrepCalls === 2) {
+        if (pgrepCalls === 3) {
           const err = Object.assign(new Error('pgrep exited with code 1'), { code: 1 });
           callback?.(err, '', '');
           return { pid: 1234 };
@@ -193,7 +197,12 @@ describe('launchDesktopApp', () => {
 
     await launchDesktopApp(deepLink, { settleMs: 0, launchTimeoutMs: 100 });
 
-    expect(execFileMock.mock.calls.filter(([command]) => command === 'open')).toHaveLength(2);
+    expect(execFileMock.mock.calls.filter(([command]) => command === 'open')).toHaveLength(1);
+    expect(execFileMock.mock.calls.find(([command]) => command === 'open')).toEqual([
+      'open',
+      ['-n', '/Applications/Autopod.app', '--args', deepLink],
+      expect.any(Function),
+    ]);
     expect(killSpy).toHaveBeenCalledWith(12345, 'SIGTERM');
   });
 });

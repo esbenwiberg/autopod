@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import AutopodUI
 import AutopodClient
 import AutopodDesktop
@@ -6,6 +7,8 @@ import AutopodDesktop
 /// Xcode app target entry point — has real bundle ID, entitlements, and Edit menu.
 @main
 struct AutopodXcodeApp: App {
+  @NSApplicationDelegateAdaptor(AutopodAppDelegate.self) private var appDelegate
+
   @State private var connectionManager = ConnectionManager()
   @State private var podStore = PodStore()
   @State private var profileStore = ProfileStore()
@@ -17,7 +20,7 @@ struct AutopodXcodeApp: App {
   @State private var showSetup = false
 
   var body: some Scene {
-    WindowGroup {
+    Window("Autopod", id: "main") {
       AppRootView(
         connectionManager: connectionManager,
         podStore: podStore,
@@ -30,6 +33,7 @@ struct AutopodXcodeApp: App {
         showSetup: $showSetup
       )
       .environment(\.controlActiveState, .key)
+      .background(MainWindowPresenter())
       .onOpenURL { connectionManager.handleDeepLink($0) }
       .onAppear {
         if connectionManager.connection == nil {
@@ -55,6 +59,7 @@ struct AutopodXcodeApp: App {
     }
     .windowStyle(.titleBar)
     .defaultSize(width: 1200, height: 700)
+    .defaultLaunchBehavior(.presented)
     // Window's min size tracks the content's current min size — lets the user
     // shrink the window back down if a transient view (e.g. a warning banner)
     // briefly raised the content's intrinsic minimum.
@@ -71,6 +76,7 @@ struct AutopodXcodeApp: App {
     } label: {
       let count = podStore.attentionSessions.count
       Image(systemName: count > 0 ? "\(min(count, 50)).circle.fill" : "circle")
+        .background(MainWindowOpenTrigger())
     }
     .menuBarExtraStyle(.window)
   }
@@ -116,6 +122,42 @@ struct AutopodXcodeApp: App {
       await podStore.loadSessions()
       await profileStore.loadProfiles()
       await scheduledJobStore.load()
+    }
+  }
+}
+
+final class AutopodAppDelegate: NSObject, NSApplicationDelegate {
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    Task { @MainActor in
+      NSApp.setActivationPolicy(.regular)
+      presentMainWindow()
+    }
+  }
+
+  func applicationShouldHandleReopen(
+    _ sender: NSApplication,
+    hasVisibleWindows flag: Bool
+  ) -> Bool {
+    Task { @MainActor in
+      presentMainWindow()
+    }
+    return true
+  }
+
+  @MainActor
+  private func presentMainWindow() {
+    NSApp.activate(ignoringOtherApps: true)
+
+    let visibleWindows = NSApp.windows.filter { window in
+      window.isVisible && !window.isMiniaturized && window.canBecomeMain
+    }
+    if visibleWindows.isEmpty {
+      NotificationCenter.default.post(name: .autopodShowMainWindow, object: nil)
+      NSApp.sendAction(#selector(NSResponder.newWindowForTab(_:)), to: nil, from: nil)
+    }
+
+    for window in NSApp.windows where window.canBecomeMain {
+      window.makeKeyAndOrderFront(nil)
     }
   }
 }
