@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 /// Stores and retrieves daemon tokens in the macOS Keychain.
@@ -18,6 +19,7 @@ public enum KeychainHelper {
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
       kSecAttrAccount as String: account,
+      kSecUseAuthenticationContext as String: nonInteractiveContext(),
     ]
     SecItemDelete(deleteQuery as CFDictionary)
 
@@ -47,6 +49,7 @@ public enum KeychainHelper {
       kSecAttrAccount as String: account,
       kSecReturnData as String: true,
       kSecMatchLimit as String: kSecMatchLimitOne,
+      kSecUseAuthenticationContext as String: nonInteractiveContext(),
     ]
 
     var result: AnyObject?
@@ -67,9 +70,16 @@ public enum KeychainHelper {
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
       kSecAttrAccount as String: account,
+      kSecUseAuthenticationContext as String: nonInteractiveContext(),
     ]
 
     SecItemDelete(query as CFDictionary)
+  }
+
+  private static func nonInteractiveContext() -> LAContext {
+    let context = LAContext()
+    context.interactionNotAllowed = true
+    return context
   }
 
   public enum KeychainError: Error, LocalizedError {

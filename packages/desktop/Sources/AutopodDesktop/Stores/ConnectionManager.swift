@@ -44,14 +44,24 @@ public final class ConnectionManager {
   // MARK: - Init
 
   public init() {
-    // Restore saved connection on launch
+    // CLI launches should win over stale saved state. Restoring the previous
+    // connection first can touch old Keychain items and block launch behind a
+    // system prompt before the fresh `ap desktop` deep link is handled.
+    if consumeLaunchDeepLink() { return }
+    restoreSavedConnection()
+  }
+
+  private func restoreSavedConnection() {
     let connections = ConnectionStore.loadAll()
     if let activeId = ConnectionStore.activeConnectionId(),
        let saved = connections.first(where: { $0.id == activeId }) {
       connection = saved
       if saved.authKind == .entra {
-        state = .connecting
-        Task { await restoreEntraConnection(saved) }
+        if let token = Self.launchEntraToken(for: saved) {
+          Task { try? await connect(saved, using: token, persistToKeychain: false) }
+        } else {
+          state = .error("Microsoft sign-in required. Run ap login or sign in from Autopod.")
+        }
       } else {
         // For local connections, prefer the live dev token over stale Keychain value
         let token: String? = if saved.isLocal {
@@ -75,8 +85,6 @@ public final class ConnectionManager {
         }
       }
     }
-
-    consumeLaunchDeepLink()
   }
 
   // MARK: - Connect
@@ -91,9 +99,12 @@ public final class ConnectionManager {
     let normalizedToken = Self.normalizeToken(token)
     let conn = DaemonConnection(name: name, url: url, authKind: authKind)
 
-    // Save token to Keychain + UserDefaults fallback
-    try? KeychainHelper.save(token: normalizedToken, for: conn.id)
-    ConnectionStore.saveToken(normalizedToken, for: conn.id)
+    // Save token to Keychain + UserDefaults fallback. Entra connections can be
+    // created before a token is available, so do not persist an empty secret.
+    if !normalizedToken.isEmpty {
+      try? KeychainHelper.save(token: normalizedToken, for: conn.id)
+      ConnectionStore.saveToken(normalizedToken, for: conn.id)
+    }
 
     // Save connection metadata
     var connections = ConnectionStore.loadAll()
@@ -135,7 +146,13 @@ public final class ConnectionManager {
     }
 
     let token: String? = if conn.authKind == .entra {
-      try await entraAuthService.accessToken()
+      if let launchToken = Self.launchEntraToken(for: conn) {
+        launchToken
+      } else if let activeToken {
+        activeToken
+      } else {
+        try await entraAuthService.accessToken()
+      }
     } else if conn.isLocal {
       DaemonConnection.readLocalDevToken()
         ?? KeychainHelper.load(for: conn.id)
@@ -199,11 +216,13 @@ public final class ConnectionManager {
   // MARK: - Deep links
 
   /// Consume a CLI-provided launch request before SwiftUI view lifecycle begins.
-  private func consumeLaunchDeepLink() {
-    guard let deepLink = Self.launchDeepLink() else { return }
+  @discardableResult
+  private func consumeLaunchDeepLink() -> Bool {
+    guard let deepLink = Self.launchDeepLink() else { return false }
     UserDefaults.standard.removeObject(forKey: Self.pendingDeepLinkKey)
     UserDefaults.standard.synchronize()
     handleDeepLink(deepLink)
+    return true
   }
 
   private static func launchDeepLink() -> URL? {
@@ -239,13 +258,19 @@ public final class ConnectionManager {
     Task { @MainActor in
       // Already saved? switch + reconnect rather than appending a duplicate.
       if let existing = ConnectionStore.loadAll().first(where: { $0.url == url }) {
-        ConnectionStore.setActiveConnectionId(existing.id)
-        try? await connect(to: existing.id)
+        let updated = upsertConnection(existing, name: name, authKind: kind)
+        ConnectionStore.setActiveConnectionId(updated.id)
+        if kind == .entra {
+          await connectToLaunchEntraConnection(updated)
+        } else {
+          try? await connect(to: updated.id)
+        }
         return
       }
 
       if kind == .entra {
-        try? await addAndConnect(name: name, url: url, token: tokenParam ?? "", authKind: .entra)
+        let conn = saveNewConnection(name: name, url: url, authKind: .entra)
+        await connectToLaunchEntraConnection(conn, tokenOverride: tokenParam)
         return
       }
 
@@ -257,10 +282,105 @@ public final class ConnectionManager {
     }
   }
 
+  private func connectToLaunchEntraConnection(
+    _ conn: DaemonConnection,
+    tokenOverride: String? = nil
+  ) async {
+    ConnectionStore.setActiveConnectionId(conn.id)
+    connection = conn
+    guard let token = Self.normalizeOptionalToken(tokenOverride ?? Self.launchEntraToken(for: conn)),
+          !token.isEmpty else {
+      state = .error("Microsoft sign-in required. Run ap login or sign in from Autopod.")
+      return
+    }
+    try? await connect(conn, using: token, persistToKeychain: false)
+  }
+
+  private func saveNewConnection(
+    name: String,
+    url: URL,
+    authKind: DaemonConnectionAuthKind
+  ) -> DaemonConnection {
+    let conn = DaemonConnection(name: name, url: url, authKind: authKind)
+    var connections = ConnectionStore.loadAll()
+    connections.append(conn)
+    ConnectionStore.save(connections)
+    ConnectionStore.setActiveConnectionId(conn.id)
+    return conn
+  }
+
+  private func upsertConnection(
+    _ existing: DaemonConnection,
+    name: String,
+    authKind: DaemonConnectionAuthKind
+  ) -> DaemonConnection {
+    var updated = existing
+    var changed = false
+    if updated.name != name {
+      updated.name = name
+      changed = true
+    }
+    if updated.authKind != authKind {
+      updated.authKind = authKind
+      changed = true
+    }
+    guard changed else { return existing }
+
+    var connections = ConnectionStore.loadAll()
+    if let index = connections.firstIndex(where: { $0.id == existing.id }) {
+      connections[index] = updated
+      ConnectionStore.save(connections)
+    }
+    return updated
+  }
+
   // MARK: - Internal
 
-  private static func normalizeToken(_ token: String) -> String {
+  nonisolated private static func normalizeToken(_ token: String) -> String {
     DaemonAPI.normalizeBearerToken(token)
+  }
+
+  nonisolated private static func normalizeOptionalToken(_ token: String?) -> String? {
+    guard let token else { return nil }
+    let normalized = normalizeToken(token)
+    return normalized.isEmpty ? nil : normalized
+  }
+
+  nonisolated private static func launchEntraToken(for conn: DaemonConnection) -> String? {
+    cliEntraAccessToken() ?? normalizeOptionalToken(ConnectionStore.loadToken(for: conn.id))
+  }
+
+  nonisolated static func cliEntraAccessToken(
+    credentialsURL: URL = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".autopod/credentials.json"),
+    now: Date = Date()
+  ) -> String? {
+    guard let data = try? Data(contentsOf: credentialsURL) else { return nil }
+    return cliEntraAccessToken(from: data, now: now)
+  }
+
+  nonisolated static func cliEntraAccessToken(from data: Data, now: Date = Date()) -> String? {
+    struct CliCredentials: Decodable {
+      let accessToken: String
+      let expiresAt: String
+    }
+
+    guard let credentials = try? JSONDecoder().decode(CliCredentials.self, from: data),
+          let expiresAt = parseCliDate(credentials.expiresAt),
+          expiresAt.timeIntervalSince(now) > 300 else {
+      return nil
+    }
+    return normalizeToken(credentials.accessToken)
+  }
+
+  nonisolated private static func parseCliDate(_ raw: String) -> Date? {
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = fractional.date(from: raw) { return date }
+
+    let wholeSeconds = ISO8601DateFormatter()
+    wholeSeconds.formatOptions = [.withInternetDateTime]
+    return wholeSeconds.date(from: raw)
   }
 
   public func signInWithMicrosoft() async throws -> String {
@@ -275,6 +395,7 @@ public final class ConnectionManager {
     let entraAuthService = entraAuthService
     return {
       if authKind == .entra {
+        if !manualToken.isEmpty { return manualToken }
         return try await entraAuthService.accessToken()
       }
       return manualToken
@@ -310,7 +431,7 @@ public final class ConnectionManager {
     guard let api else { return }
     do {
       if let conn = connection, conn.authKind == .entra {
-        try await refreshEntraTokenIfNeeded(for: conn)
+        refreshCliEntraTokenIfAvailable(for: conn)
       }
       _ = try await api.healthCheck()
       if state != .connected {
@@ -328,6 +449,8 @@ public final class ConnectionManager {
   }
 
   private func restoreEntraConnection(_ saved: DaemonConnection) async {
+    connection = saved
+    state = .connecting
     do {
       let token = Self.normalizeToken(try await entraAuthService.accessToken())
       guard !token.isEmpty else {
@@ -351,8 +474,54 @@ public final class ConnectionManager {
     }
     if freshToken != activeToken {
       activeToken = freshToken
+      api = makeAPI(baseURL: conn.url, token: freshToken, authKind: conn.authKind)
       try? KeychainHelper.save(token: freshToken, for: conn.id)
       ConnectionStore.saveToken(freshToken, for: conn.id)
+    }
+  }
+
+  private func refreshCliEntraTokenIfAvailable(for conn: DaemonConnection) {
+    guard let freshToken = Self.launchEntraToken(for: conn),
+          freshToken != activeToken else { return }
+    activeToken = freshToken
+    api = DaemonAPI(baseURL: conn.url, token: freshToken)
+    ConnectionStore.saveToken(freshToken, for: conn.id)
+  }
+
+  private func connect(
+    _ conn: DaemonConnection,
+    using token: String,
+    persistToKeychain: Bool
+  ) async throws {
+    let normalizedToken = Self.normalizeToken(token)
+    guard !normalizedToken.isEmpty else {
+      throw DaemonError.unauthorized("Missing saved token")
+    }
+
+    let testApi = DaemonAPI(baseURL: conn.url, token: normalizedToken)
+    state = .connecting
+
+    do {
+      _ = try await testApi.healthCheck()
+      _ = try await testApi.getSessionStats()
+      healthTask?.cancel()
+      healthTask = nil
+      connection = conn
+      activeToken = normalizedToken
+      api = testApi
+      ConnectionStore.setActiveConnectionId(conn.id)
+      if persistToKeychain {
+        try? KeychainHelper.save(token: normalizedToken, for: conn.id)
+      }
+      ConnectionStore.saveToken(normalizedToken, for: conn.id)
+      state = .connected
+      startHealthPolling()
+    } catch {
+      connection = conn
+      activeToken = normalizedToken
+      api = testApi
+      state = .error(error.localizedDescription)
+      throw error
     }
   }
 

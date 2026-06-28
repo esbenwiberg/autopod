@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import AutopodClient
+@testable import AutopodDesktop
 
 @Test func daemonConnectionLabel() {
   let conn = DaemonConnection(
@@ -112,4 +113,95 @@ import Testing
   KeychainHelper.delete(for: id)
   let afterDelete = KeychainHelper.load(for: id)
   #expect(afterDelete == nil)
+}
+
+@MainActor
+@Test func launchDeepLinkSkipsSavedConnectionRestoreAtStartup() {
+  let defaults = UserDefaults.standard
+  let connectionsKey = "autopod.connections"
+  let activeKey = "autopod.activeConnectionId"
+  let pendingKey = "autopod.pendingDeepLink"
+  let previousConnections = defaults.data(forKey: connectionsKey)
+  let previousActive = defaults.string(forKey: activeKey)
+  let previousPending = defaults.string(forKey: pendingKey)
+  defer {
+    restore(previousConnections, forKey: connectionsKey, in: defaults)
+    restore(previousActive, forKey: activeKey, in: defaults)
+    restore(previousPending, forKey: pendingKey, in: defaults)
+  }
+
+  let saved = DaemonConnection(
+    name: "Old",
+    url: URL(string: "https://old.example.com")!,
+    authKind: .manualToken
+  )
+  ConnectionStore.save([saved])
+  ConnectionStore.setActiveConnectionId(saved.id)
+  defaults.set(
+    "autopod://connect?url=http://127.0.0.1:9&name=Fresh&token=fresh-token",
+    forKey: pendingKey
+  )
+
+  let manager = ConnectionManager()
+
+  #expect(manager.connection?.id != saved.id)
+  #expect(defaults.string(forKey: pendingKey) == nil)
+}
+
+@Test func cliEntraAccessTokenUsesUnexpiredCliCredentials() {
+  let data = """
+  {
+    "accessToken": "Bearer cli-token",
+    "refreshToken": "",
+    "expiresAt": "2026-06-28T22:30:00.000Z",
+    "userId": "u",
+    "displayName": "User",
+    "email": "user@example.com",
+    "roles": []
+  }
+  """.data(using: .utf8)!
+
+  let token = ConnectionManager.cliEntraAccessToken(
+    from: data,
+    now: ISO8601DateFormatter().date(from: "2026-06-28T22:00:00Z")!
+  )
+
+  #expect(token == "cli-token")
+}
+
+@Test func cliEntraAccessTokenRejectsCredentialsInsideRefreshBuffer() {
+  let data = """
+  {
+    "accessToken": "cli-token",
+    "refreshToken": "",
+    "expiresAt": "2026-06-28T22:03:00.000Z",
+    "userId": "u",
+    "displayName": "User",
+    "email": "user@example.com",
+    "roles": []
+  }
+  """.data(using: .utf8)!
+
+  let token = ConnectionManager.cliEntraAccessToken(
+    from: data,
+    now: ISO8601DateFormatter().date(from: "2026-06-28T22:00:00Z")!
+  )
+
+  #expect(token == nil)
+}
+
+private func restore(_ data: Data?, forKey key: String, in defaults: UserDefaults) {
+  if let data {
+    defaults.set(data, forKey: key)
+  } else {
+    defaults.removeObject(forKey: key)
+  }
+}
+
+private func restore(_ value: String?, forKey key: String, in defaults: UserDefaults) {
+  if let value {
+    defaults.set(value, forKey: key)
+  } else {
+    defaults.removeObject(forKey: key)
+  }
 }
