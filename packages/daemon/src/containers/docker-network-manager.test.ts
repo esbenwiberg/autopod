@@ -136,6 +136,17 @@ describe('DockerNetworkManager', () => {
       expect(result).toContain('host.docker.internal');
     });
 
+    it('includes extra control-plane hostnames even when defaults are replaced', () => {
+      const result = manager.computeAllowlist(
+        makePolicy({ replaceDefaults: true }),
+        [],
+        GATEWAY,
+        [],
+        ['daemon.example.com'],
+      );
+      expect(result).toContain('daemon.example.com');
+    });
+
     it('extracts hostnames from private registries', () => {
       const registries = [
         makeRegistry('https://pkgs.dev.azure.com/myorg/_packaging/myfeed/nuget/v3/index.json'),
@@ -707,6 +718,22 @@ describe('DockerNetworkManager', () => {
         ['172.19.0.5'],
       );
       expect(result?.firewallScript).toContain('iptables -A OUTPUT -d "172.19.0.5" -j ACCEPT');
+    });
+
+    it('injects extraAllowedHosts into the HAProxy SNI allowlist for explicit MCP URLs', async () => {
+      docker.mock._inspect.mockResolvedValueOnce({});
+      const result = await manager.buildNetworkConfig(
+        makePolicy({ enabled: true, replaceDefaults: true }),
+        [],
+        GATEWAY,
+        [],
+        'pod-abc',
+        [],
+        ['daemon.example.com'],
+      );
+      expect(result?.firewallScript).toContain(
+        'acl allowed_sni var(sess.sni) -m str daemon.example.com',
+      );
     });
   });
 });

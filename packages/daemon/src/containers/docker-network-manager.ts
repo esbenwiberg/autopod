@@ -62,6 +62,7 @@ export function computeNetworkPolicyAllowlist(
   mcpServers: InjectedMcpServer[],
   daemonGatewayHost: string,
   registries: PrivateRegistry[] = [],
+  extraAllowedHosts: string[] = [],
 ): string[] {
   const hosts = new Set<string>();
 
@@ -81,6 +82,13 @@ export function computeNetworkPolicyAllowlist(
   hosts.add(daemonGatewayHost);
   // Also add host.docker.internal as a common alternative
   hosts.add('host.docker.internal');
+
+  // Add caller-supplied control-plane hostnames. Docker pods can reach the
+  // daemon by bridge IP, but explicit HTTPS MCP URLs still present their DNS
+  // hostname as TLS SNI and must pass the HAProxy allowlist.
+  for (const h of extraAllowedHosts) {
+    hosts.add(h);
+  }
 
   // Extract hostnames from MCP server URLs
   for (const server of mcpServers) {
@@ -319,8 +327,15 @@ export class DockerNetworkManager {
     mcpServers: InjectedMcpServer[],
     daemonGatewayIp: string,
     registries: PrivateRegistry[] = [],
+    extraAllowedHosts: string[] = [],
   ): string[] {
-    return computeNetworkPolicyAllowlist(policy, mcpServers, daemonGatewayIp, registries);
+    return computeNetworkPolicyAllowlist(
+      policy,
+      mcpServers,
+      daemonGatewayIp,
+      registries,
+      extraAllowedHosts,
+    );
   }
 
   /**
@@ -547,6 +562,7 @@ export class DockerNetworkManager {
     registries: PrivateRegistry[] = [],
     podId?: string,
     extraAllowedIps: string[] = [],
+    extraAllowedHosts: string[] = [],
   ): Promise<NetworkConfig | null> {
     if (!policy?.enabled) return null;
 
@@ -558,7 +574,13 @@ export class DockerNetworkManager {
         // Real pod spawns always pass podId.
         'autopod-shared';
 
-    const allowlist = this.computeAllowlist(policy, mcpServers, daemonGatewayIp, registries);
+    const allowlist = this.computeAllowlist(
+      policy,
+      mcpServers,
+      daemonGatewayIp,
+      registries,
+      extraAllowedHosts,
+    );
     const firewallScript = await this.generateFirewallScript(
       allowlist,
       policy.mode,

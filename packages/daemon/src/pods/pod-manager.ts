@@ -1105,6 +1105,7 @@ export interface NetworkManager {
     registries?: PrivateRegistry[],
     podId?: string,
     extraAllowedIps?: string[],
+    extraAllowedHosts?: string[],
   ): Promise<{ networkName: string; firewallScript: string } | null>;
   getGatewayIp(podId?: string): Promise<string>;
   /** Remove the per-pod bridge — called from pod cleanup. Idempotent. */
@@ -5664,6 +5665,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             profile.privateRegistries,
             podId,
             [],
+            [hostnameFromUrl(mcpBaseUrl)],
           );
           if (netConfig) {
             networkName = netConfig.networkName;
@@ -5778,6 +5780,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             profile.privateRegistries,
             podId,
             sidecarIps,
+            [hostnameFromUrl(mcpBaseUrl)],
           );
           if (finalConfig) {
             firewallScript = finalConfig.firewallScript;
@@ -11446,6 +11449,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 profile.privateRegistries,
                 pod.id,
                 sidecarIps,
+                [hostnameFromUrl(mcpBaseUrl)],
               );
               if (!netConfig) return;
               const cm = containerManagerFactory.get('local');
