@@ -100,9 +100,11 @@ import type {
 import { selectGitPat } from '../profiles/index.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { assertNoExpiredPat } from '../profiles/pat-expiry.js';
+import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import {
   buildClaudeConfigFiles,
   buildProviderEnv,
+  persistOpenAiAuthJson,
   persistRefreshedCredentials,
 } from '../providers/index.js';
 import type {
@@ -1118,6 +1120,7 @@ export interface PodManagerDependencies {
   validationRepo?: ValidationRepository;
   progressEventRepo?: ProgressEventRepository;
   profileStore: ProfileStore;
+  providerAccountStore?: ProviderAccountStore;
   eventBus: EventBus;
   containerManagerFactory: ContainerManagerFactory;
   worktreeManager: WorktreeManager;
@@ -1586,6 +1589,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     nudgeRepo,
     fixFeedbackRepo,
     profileStore,
+    providerAccountStore,
     eventBus,
     containerManagerFactory,
     worktreeManager,
@@ -3027,9 +3031,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   /**
    * Build provider env for resume calls.
    *
-   * Two providers need fresh env on resume:
+   * Three providers need fresh env on resume:
    *  - `max` — Claude Code rotates OAuth tokens during use; persist the
    *    container's latest creds back to the store, then re-issue.
+   *  - `openai` — Codex may rotate/update ~/.codex/auth.json during use;
+   *    persist the container's latest auth file back to the owner, then
+   *    rewrite it before resume.
    *  - `foundry` (token-auth) — Entra access tokens last ~60-90 minutes,
    *    so for long-running pods the secret file goes stale. Re-acquire via
    *    `getAzureToken` (cached if still valid) and rewrite the secret file.
@@ -3038,7 +3045,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   async function getResumeEnv(pod: Pod): Promise<Record<string, string> | undefined> {
     const profile = profileStore.get(pod.profileName);
     const provider = profile.modelProvider;
-    if (provider !== 'max' && provider !== 'foundry') return undefined;
+    if (provider !== 'max' && provider !== 'foundry' && provider !== 'openai') return undefined;
 
     // Foundry only needs refresh when using bearer-token auth (no static apiKey).
     if (provider === 'foundry') {
@@ -3062,6 +3069,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           pod.profileName,
           logger,
           maxCredentialLineageByPod.get(pod.id),
+          { providerAccountStore },
         );
       } catch (err) {
         logger.warn(
@@ -3071,7 +3079,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     }
 
-    const result = await buildProviderEnv(profile, pod.id, logger, { profileStore });
+    if (provider === 'openai' && pod.containerId) {
+      try {
+        await persistOpenAiAuthJson(
+          pod.containerId,
+          containerManagerFactory.get(pod.executionTarget),
+          profileStore,
+          pod.profileName,
+          logger,
+          { providerAccountStore },
+        );
+      } catch (err) {
+        logger.warn(
+          { err, podId: pod.id },
+          'Could not recover Codex auth.json from container before resume',
+        );
+      }
+    }
+
+    const result = await buildProviderEnv(profile, pod.id, logger, {
+      profileStore,
+      providerAccountStore,
+    });
     rememberMaxCredentialLineage(pod.id, result);
     // Re-write credential files to container in case tokens were rotated.
     // For Foundry token-auth this also rewrites the bearer-token secret file
@@ -3089,21 +3118,33 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return { POD_ID: pod.id, ...result.env };
   }
 
-  async function persistMaxCredentialsForPod(podId: string, logMessage: string): Promise<void> {
+  async function persistRuntimeCredentialsForPod(podId: string, logMessage: string): Promise<void> {
     const pod = podRepo.getOrThrow(podId);
     if (!pod.containerId) return;
     const profile = profileStore.get(pod.profileName);
-    if (profile.modelProvider !== 'max') return;
+    if (profile.modelProvider !== 'max' && profile.modelProvider !== 'openai') return;
 
     try {
-      await persistRefreshedCredentials(
-        pod.containerId,
-        containerManagerFactory.get(pod.executionTarget),
-        profileStore,
-        pod.profileName,
-        logger,
-        maxCredentialLineageByPod.get(podId),
-      );
+      if (profile.modelProvider === 'max') {
+        await persistRefreshedCredentials(
+          pod.containerId,
+          containerManagerFactory.get(pod.executionTarget),
+          profileStore,
+          pod.profileName,
+          logger,
+          maxCredentialLineageByPod.get(podId),
+          { providerAccountStore },
+        );
+      } else {
+        await persistOpenAiAuthJson(
+          pod.containerId,
+          containerManagerFactory.get(pod.executionTarget),
+          profileStore,
+          pod.profileName,
+          logger,
+          { providerAccountStore },
+        );
+      }
     } catch (err) {
       logger.warn({ err, podId }, logMessage);
     }
@@ -5325,27 +5366,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             return;
           }
 
-          // Recover MAX/PRO OAuth tokens before tearing down the workspace
-          // container. Claude CLI rotates refresh tokens during the human's
-          // interactive session; if we stop the container without persisting,
-          // the auto-pod resume will hit invalid_grant on its first refresh.
-          if (profile.modelProvider === 'max') {
-            try {
-              await persistRefreshedCredentials(
-                pod.containerId,
-                cm,
-                profileStore,
-                pod.profileName,
-                logger,
-                maxCredentialLineageByPod.get(pod.id),
-              );
-            } catch (err) {
-              logger.warn(
-                { err, podId },
-                'Failed to persist rotated credentials before handoff stop — refresh may fail',
-              );
-            }
-          }
+          // Recover runtime credentials before tearing down the workspace
+          // container. MAX rotates refresh tokens; Codex may update auth.json.
+          await persistRuntimeCredentialsForPod(
+            podId,
+            'Failed to persist runtime credentials before handoff stop — auth may be stale',
+          );
           try {
             await cm.stop(pod.containerId);
           } catch (err) {
@@ -6677,7 +6703,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // ranking so automatic review can use the same prepared pod/container auth path
         // as the agent runtime.
         emitStatus('Building provider credentials…');
-        const providerResult = await buildProviderEnv(profile, podId, logger, { profileStore });
+        const providerResult = await buildProviderEnv(profile, podId, logger, {
+          profileStore,
+          providerAccountStore,
+        });
         rememberMaxCredentialLineage(podId, providerResult);
         const secretEnv: Record<string, string> = {
           POD_ID: podId,
@@ -7106,23 +7135,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         visibleFailurePhase = 'agent';
         const outcome = await this.consumeAgentEvents(podId, events, startingAttempt);
 
-        // Persist rotated OAuth credentials if provider requires it (MAX/PRO token rotation)
+        // Persist any runtime credentials if provider requires it (MAX token rotation, Codex auth.json)
         if (providerResult.requiresPostExecPersistence) {
-          try {
-            await persistRefreshedCredentials(
-              containerId,
-              containerManager,
-              profileStore,
-              pod.profileName,
-              logger,
-              maxCredentialLineageByPod.get(podId),
-            );
-          } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Failed to persist refreshed credentials — pod still succeeded',
-            );
-          }
+          await persistRuntimeCredentialsForPod(
+            podId,
+            'Failed to persist refreshed credentials — pod still succeeded',
+          );
         }
 
         if (outcome === 'completed') {
@@ -7132,25 +7150,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       } catch (err) {
         logger.error({ err, podId }, 'Pod processing error');
         emitActivityError(podId, operatorErrorMessage(err, visibleFailurePhase), true);
-        // Best-effort: recover rotated MAX/PRO tokens before the failure path
+        // Best-effort: recover runtime credentials before the failure path
         // tears the container down. The happy-path persist at the end of the
-        // try block was bypassed, so without this the latest refresh token
-        // dies with the container.
+        // try block was bypassed, so without this latest auth state can die
+        // with the container.
         try {
-          const failingPod = podRepo.getOrThrow(podId);
-          if (failingPod.containerId) {
-            const failingProfile = profileStore.get(failingPod.profileName);
-            if (failingProfile.modelProvider === 'max') {
-              await persistRefreshedCredentials(
-                failingPod.containerId,
-                containerManagerFactory.get(failingPod.executionTarget),
-                profileStore,
-                failingPod.profileName,
-                logger,
-                maxCredentialLineageByPod.get(podId),
-              );
-            }
-          }
+          await persistRuntimeCredentialsForPod(
+            podId,
+            'Failed to persist rotated credentials after pod error — proceeding',
+          );
         } catch (persistErr) {
           logger.warn(
             { err: persistErr, podId },
@@ -7921,7 +7929,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
             const events = runtime.resume(podId, correctionMessage, pod.containerId, resumeEnv);
             const outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
-            await persistMaxCredentialsForPod(
+            await persistRuntimeCredentialsForPod(
               podId,
               'Failed to persist rotated credentials after override-guidance resume',
             );
@@ -7968,7 +7976,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
         const events = runtime.resume(podId, message, pod.containerId, resumeEnv);
         const outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
-        await persistMaxCredentialsForPod(
+        await persistRuntimeCredentialsForPod(
           podId,
           'Failed to persist rotated credentials after human-message resume',
         );
@@ -8512,7 +8520,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           events,
           deriveAgentAttempt(pod.phaseTokenUsage),
         );
-        await persistMaxCredentialsForPod(
+        await persistRuntimeCredentialsForPod(
           podId,
           'Failed to persist rotated credentials after rejection resume',
         );
@@ -8597,27 +8605,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Kill container
         if (pod.containerId) {
           const cm = containerManagerFactory.get(pod.executionTarget);
-          // Best-effort: recover rotated MAX/PRO tokens before the container
-          // dies. Otherwise a kill mid-session strands the latest refresh
-          // token in the doomed container, and the next pod hits invalid_grant.
-          try {
-            const profile = profileStore.get(pod.profileName);
-            if (profile.modelProvider === 'max') {
-              await persistRefreshedCredentials(
-                pod.containerId,
-                cm,
-                profileStore,
-                pod.profileName,
-                logger,
-                maxCredentialLineageByPod.get(podId),
-              );
-            }
-          } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Failed to persist rotated credentials during kill — proceeding',
-            );
-          }
+          // Best-effort: recover runtime credentials before the container dies.
+          await persistRuntimeCredentialsForPod(
+            podId,
+            'Failed to persist rotated credentials during kill — proceeding',
+          );
           try {
             await cm.kill(pod.containerId);
           } catch (err) {
@@ -9983,7 +9975,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           if (!s2.containerId) throw new Error(`Pod ${podId} has no container`);
           const events = runtime.resume(podId, correctionMessage, s2.containerId, resumeEnv);
           const outcome = await this.consumeAgentEvents(podId, events, attempt);
-          await persistMaxCredentialsForPod(
+          await persistRuntimeCredentialsForPod(
             podId,
             'Failed to persist rotated credentials after validation-feedback resume',
           );

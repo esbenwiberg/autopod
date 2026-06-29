@@ -3,6 +3,7 @@ import type { ValidationPhase } from './events.js';
 import type { InjectedClaudeMdSection, InjectedMcpServer, InjectedSkill } from './injection.js';
 import type { ModelProvider, ProviderCredentials } from './model-provider.js';
 import type { PodOptions } from './pod-options.js';
+import type { ProviderAuthSource } from './provider-account.js';
 import type { RuntimeType } from './runtime.js';
 import type { SecurityScanPolicy } from './security-scan.js';
 import type { SidecarsConfig } from './sidecar.js';
@@ -103,6 +104,8 @@ export interface Profile {
   outputMode: OutputMode | null;
   /** Model provider — determines how the daemon authenticates with the AI backend */
   modelProvider: ModelProvider | null;
+  /** Shared provider account used for model-provider auth. Null on derived profiles means inherit. */
+  providerAccountId: string | null;
   /** Provider-specific credentials (OAuth tokens for MAX, endpoint config for Foundry, etc.) */
   providerCredentials: ProviderCredentials | null;
   /** Optional test command to run after build (e.g. 'pnpm test') */
@@ -254,6 +257,8 @@ export interface ProfileEditorPayload {
   resolved: PublicProfile;
   parent: PublicProfile | null;
   sourceMap: Record<string, 'own' | 'inherited' | 'merged'>;
+  authSource?: ProviderAuthSource;
+  providerAccountId?: string | null;
   credentialOwner: string | null;
 }
 

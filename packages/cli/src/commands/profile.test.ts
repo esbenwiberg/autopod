@@ -42,6 +42,8 @@ function createProfile(overrides: Record<string, unknown> = {}) {
     claudeMdSections: [],
     actionPolicy: null,
     outputMode: 'pr',
+    modelProvider: 'anthropic',
+    providerAccountId: null,
     pod: {
       agentMode: 'auto',
       output: 'pr',
@@ -106,6 +108,15 @@ describe('profile commands', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('thin-with-facts'));
   });
 
+  it('shows provider account link in profile details', async () => {
+    const getProfile = vi.mocked(mockClient.getProfile);
+    getProfile.mockResolvedValueOnce(createProfile({ providerAccountId: 'team-openai' }));
+
+    await program.parseAsync(['node', 'ap', 'profile', 'show', 'my-app']);
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('team-openai'));
+  });
+
   it('includes validationSetupCommand in the create template', async () => {
     process.env.EDITOR = 'true';
 
@@ -114,6 +125,7 @@ describe('profile commands', () => {
     expect(mockClient.createProfile).toHaveBeenCalledWith(
       expect.objectContaining({
         validationSetupCommand: null,
+        providerAccountId: null,
         pod: expect.objectContaining({ validationSuite: 'full' }),
       }),
     );

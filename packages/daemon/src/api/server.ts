@@ -32,6 +32,7 @@ import type {
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import type { ValidationRepository } from '../pods/validation-repository.js';
 import type { ProfileStore } from '../profiles/index.js';
+import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 import type { ScheduledJobManager } from '../scheduled-jobs/scheduled-job-manager.js';
 import { errorHandler } from './error-handler.js';
@@ -52,6 +53,7 @@ import { memoryWorkspaceRoutes } from './routes/memory-workspace.js';
 import { memoryRoutes } from './routes/memory.js';
 import { podRoutes } from './routes/pods.js';
 import { profileRoutes } from './routes/profiles.js';
+import { providerAccountRoutes } from './routes/provider-accounts.js';
 import { scheduledJobRoutes } from './routes/scheduled-jobs.js';
 import { screenshotRoutes } from './routes/screenshots.js';
 import { seriesRoutes } from './routes/series.js';
@@ -64,6 +66,7 @@ export interface ServerDependencies {
   authModule: AuthModule;
   podManager: PodManager;
   profileStore: ProfileStore;
+  providerAccountStore?: ProviderAccountStore;
   worktreeManager?: WorktreeManager;
   eventBus: EventBus;
   eventRepo: EventRepository;
@@ -175,7 +178,11 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     deps.profileStore,
     (profileName) => deps.podManager.refreshNetworkPolicy(profileName),
     deps.imageBuilder,
+    deps.providerAccountStore,
   );
+  if (deps.providerAccountStore) {
+    providerAccountRoutes(app, deps.providerAccountStore, deps.profileStore);
+  }
 
   // Scheduled jobs routes
   if (deps.scheduledJobManager) {

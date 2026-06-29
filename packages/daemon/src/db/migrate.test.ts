@@ -4,6 +4,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createProfileStore } from '../profiles/profile-store.js';
 import { runMigrations } from './migrate.js';
 
 const logger = pino({ level: 'silent' });
@@ -146,6 +147,48 @@ describe('runMigrations — migrations 092-095 (safety foundation)', () => {
       db.prepare('SELECT COUNT(*) as n FROM audit_chain_verifications').get() as { n: number }
     ).n;
     expect(count).toBe(0);
+  });
+});
+
+// ── Migration 120 — provider accounts ───────────────────────────────────────
+
+describe('runMigrations — migration 120 (provider accounts)', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    runMigrations(db, MIGRATIONS_DIR, logger);
+  });
+
+  it('creates provider_accounts and adds the nullable profile link column', () => {
+    const providerAccountColumns = db
+      .prepare('PRAGMA table_info(provider_accounts)')
+      .all()
+      .map((r) => (r as { name: string }).name);
+
+    expect(providerAccountColumns).toContain('id');
+    expect(providerAccountColumns).toContain('name');
+    expect(providerAccountColumns).toContain('provider');
+    expect(providerAccountColumns).toContain('credentials');
+    expect(providerAccountColumns).toContain('last_authenticated_at');
+    expect(providerAccountColumns).toContain('last_used_at');
+    expect(hasColumn(db, 'profiles', 'provider_account_id')).toBe(true);
+  });
+
+  it('keeps old profile rows loadable with no provider account link', () => {
+    db.prepare(`
+      INSERT INTO profiles (
+        name, repo_url, default_branch, template, build_command, start_command,
+        health_path, health_timeout, validation_pages, max_validation_attempts,
+        default_model, default_runtime, escalation_config
+      ) VALUES (
+        'legacy', 'https://github.com/org/repo', 'main', 'node22', 'npm run build', 'npm start',
+        '/', 120, '[]', 3, 'claude-opus-4-8', 'claude', '{}'
+      )
+    `).run();
+
+    const store = createProfileStore(db);
+    expect(store.getRaw('legacy').providerAccountId).toBeNull();
   });
 });
 

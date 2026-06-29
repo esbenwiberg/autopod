@@ -500,6 +500,57 @@ public actor DaemonAPI {
     try await request("POST", "/profiles/\(name)/warm", body: try encode(WarmBody(rebuild: rebuild, gitPat: gitPat)))
   }
 
+  // MARK: - Provider accounts
+
+  public func listProviderAccounts(provider: String? = nil) async throws -> [PublicProviderAccountResponse] {
+    var query: [String: String] = [:]
+    if let provider { query["provider"] = provider }
+    return try await request("GET", "/provider-accounts", query: query)
+  }
+
+  public func getProviderAccount(_ id: String) async throws -> PublicProviderAccountResponse {
+    try await request("GET", "/provider-accounts/\(id)")
+  }
+
+  public func createProviderAccount(
+    name: String,
+    provider: String,
+    id: String? = nil
+  ) async throws -> PublicProviderAccountResponse {
+    var fields: [String: Any] = ["name": name, "provider": provider]
+    if let id { fields["id"] = id }
+    let body = try JSONSerialization.data(withJSONObject: fields)
+    return try await request("POST", "/provider-accounts", body: body)
+  }
+
+  public func updateProviderAccount(
+    _ id: String,
+    fields: [String: Any]
+  ) async throws -> PublicProviderAccountResponse {
+    let body = try JSONSerialization.data(withJSONObject: fields)
+    return try await request("PATCH", "/provider-accounts/\(id)", body: body)
+  }
+
+  public func deleteProviderAccount(_ id: String) async throws {
+    let _: EmptyResponse = try await request("DELETE", "/provider-accounts/\(id)")
+  }
+
+  public func linkProviderAccount(
+    _ id: String,
+    profileName: String,
+    clearLegacyCredentials: Bool = false
+  ) async throws -> ProfileResponse {
+    let body = try JSONSerialization.data(withJSONObject: [
+      "accountId": id,
+      "clearLegacyCredentials": clearLegacyCredentials,
+    ])
+    return try await request("POST", "/profiles/\(profileName)/provider-account", body: body)
+  }
+
+  public func unlinkProviderAccount(profileName: String) async throws {
+    let _: EmptyResponse = try await request("DELETE", "/profiles/\(profileName)/provider-account")
+  }
+
   // MARK: - History
 
   public func createHistoryWorkspace(

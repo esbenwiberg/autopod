@@ -1,16 +1,78 @@
 import { AutopodError } from '@autopod/shared';
-import type { ProfileEditorPayload } from '@autopod/shared';
+import type { ProfileEditorPayload, ProviderAuthSource } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ImageBuilder } from '../../images/index.js';
 import { type ProfileStore, buildSourceMap } from '../../profiles/index.js';
+import type { ProviderAccountStore } from '../../provider-accounts/index.js';
 import { redactProfileSecrets } from '../profile-redaction.js';
+import { redactProviderAccountSecrets } from '../provider-account-redaction.js';
+
+function hasEnvFallback(provider: ProviderAuthSource['provider']): boolean {
+  if (provider === 'anthropic') return Boolean(process.env.ANTHROPIC_API_KEY);
+  if (provider === 'openai') return Boolean(process.env.OPENAI_API_KEY);
+  if (provider === 'openrouter') return Boolean(process.env.OPENROUTER_API_KEY);
+  return false;
+}
 
 export function profileRoutes(
   app: FastifyInstance,
   profileStore: ProfileStore,
   refreshNetworkPolicy: (profileName: string) => Promise<void>,
   imageBuilder?: ImageBuilder,
+  providerAccountStore?: ProviderAccountStore,
 ): void {
+  function validateProviderAccountMismatch(name: string, changes: Record<string, unknown>): void {
+    if (!providerAccountStore) return;
+    const existing = profileStore.get(name);
+    const nextAccountId =
+      changes.providerAccountId === undefined
+        ? existing.providerAccountId
+        : (changes.providerAccountId as string | null);
+    if (!nextAccountId) return;
+
+    const account = providerAccountStore.get(nextAccountId);
+    const nextProvider =
+      typeof changes.modelProvider === 'string' ? changes.modelProvider : existing.modelProvider;
+    if (nextProvider !== account.provider) {
+      throw new AutopodError(
+        `Profile "${name}" uses modelProvider=${nextProvider ?? 'none'} but provider account "${account.name}" is for ${account.provider}`,
+        'PROVIDER_ACCOUNT_PROVIDER_MISMATCH',
+        400,
+      );
+    }
+  }
+
+  function resolveAuthSource(
+    name: string,
+    sourceMap: Record<string, 'own' | 'inherited' | 'merged'>,
+  ): ProviderAuthSource {
+    const resolved = profileStore.get(name);
+    if (resolved.providerAccountId && providerAccountStore) {
+      const account = providerAccountStore.get(resolved.providerAccountId);
+      return {
+        type: 'provider-account',
+        provider: account.provider,
+        account: redactProviderAccountSecrets(account),
+        inherited: sourceMap.providerAccountId === 'inherited',
+      };
+    }
+
+    const credentialOwner = profileStore.resolveCredentialOwner(name);
+    if (credentialOwner && resolved.modelProvider) {
+      return {
+        type: 'legacy-profile',
+        provider: resolved.modelProvider,
+        profileName: credentialOwner,
+      };
+    }
+
+    if (hasEnvFallback(resolved.modelProvider)) {
+      return { type: 'env-fallback', provider: resolved.modelProvider };
+    }
+
+    return { type: 'none', provider: resolved.modelProvider };
+  }
+
   // POST /profiles — create profile
   app.post('/profiles', async (request, reply) => {
     const profile = profileStore.create(request.body as Record<string, unknown>);
@@ -43,11 +105,14 @@ export function profileRoutes(
     const parent = raw.extends ? profileStore.get(raw.extends) : null;
     const sourceMap = buildSourceMap(raw, parent);
     const credentialOwner = profileStore.resolveCredentialOwner(name);
+    const authSource = resolveAuthSource(name, sourceMap);
     return {
       raw: redactProfileSecrets(raw),
       resolved: redactProfileSecrets(resolved),
       parent: parent ? redactProfileSecrets(parent) : null,
       sourceMap,
+      authSource,
+      providerAccountId: resolved.providerAccountId,
       credentialOwner,
     } satisfies ProfileEditorPayload;
   });
@@ -55,7 +120,9 @@ export function profileRoutes(
   // PUT/PATCH /profiles/:name — update profile
   const updateHandler = async (request: import('fastify').FastifyRequest) => {
     const { name } = request.params as { name: string };
-    const updated = profileStore.update(name, request.body as Record<string, unknown>);
+    const changes = request.body as Record<string, unknown>;
+    validateProviderAccountMismatch(name, changes);
+    const updated = profileStore.update(name, changes);
     // Fire-and-forget: re-apply network policy to running containers using this profile
     refreshNetworkPolicy(name).catch(() => {
       // Errors are logged inside refreshNetworkPolicy — don't surface to caller

@@ -11,6 +11,7 @@ import {
   injectedSkillSchema,
 } from './injection.schema.js';
 import { withCanonicalModelIdPolicy } from './model.schema.js';
+import { providerAccountIdSchema } from './provider-account.schema.js';
 
 // ---------------------------------------------------------------------------
 // Model provider credentials schemas
@@ -340,6 +341,7 @@ const createProfileBaseSchema = z.object({
   pod: podOptionsSchema.nullable().default(null),
   outputMode: outputModeSchema.nullable().default('pr'),
   modelProvider: modelProviderSchema.nullable().default('anthropic'),
+  providerAccountId: providerAccountIdSchema.nullable().default(null),
   providerCredentials: providerCredentialsSchema.nullable().default(null),
   testCommand: z.string().nullable().optional().default(null),
   validationSetupCommand: validationSetupCommandSchema.nullable().optional().default(null),

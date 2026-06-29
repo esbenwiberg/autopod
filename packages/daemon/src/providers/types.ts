@@ -1,3 +1,5 @@
+import type { CredentialOwner } from './auth-resolution.js';
+
 /**
  * Result of building provider-specific environment for a pod.
  */
@@ -15,11 +17,15 @@ export interface ProviderEnvResult {
   secretFiles: Array<{ path: string; content: string }>;
   /** If true, caller must read back credentials after exec completes (token rotation). */
   requiresPostExecPersistence: boolean;
+  /** If true, caller should read back Codex ~/.codex/auth.json when possible. */
+  requiresOpenAiAuthJsonPersistence?: boolean;
+  /** The auth owner that should receive any credential rotations/read-backs. */
+  credentialOwner?: CredentialOwner;
   /** MAX/PRO credential lineage for guarding rotated refresh-token persistence. */
   maxCredentialLineage?: MaxCredentialLineage;
 }
 
 export interface MaxCredentialLineage {
-  ownerName: string;
+  owner: CredentialOwner;
   issuedRefreshToken: string;
 }

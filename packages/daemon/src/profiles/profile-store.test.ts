@@ -39,6 +39,21 @@ const validInput = {
   startCommand: 'node server.js --port $PORT',
 };
 
+function insertProviderAccount(db: Database.Database, id: string, provider = 'openai'): void {
+  db.prepare(
+    `INSERT INTO provider_accounts (
+      id, name, provider, credentials, created_at, updated_at
+    ) VALUES (
+      @id, @name, @provider, NULL, @now, @now
+    )`,
+  ).run({
+    id,
+    name: id,
+    provider,
+    now: new Date().toISOString(),
+  });
+}
+
 describe('ProfileStore', () => {
   let db: Database.Database;
   let store: ProfileStore;
@@ -934,6 +949,62 @@ describe('ProfileStore', () => {
       });
       store.create({ ...validInput, name: 'leaf', extends: 'middle' });
       expect(store.resolveCredentialOwner('leaf')).toBe('middle');
+    });
+  });
+
+  describe('providerAccountId', () => {
+    it('creates, reads, and updates a linked provider account id', () => {
+      insertProviderAccount(db, 'team-openai');
+      insertProviderAccount(db, 'shared-openai');
+      const profile = store.create({
+        ...validInput,
+        modelProvider: 'openai',
+        providerAccountId: 'team-openai',
+      });
+      expect(profile.providerAccountId).toBe('team-openai');
+
+      const updated = store.update(profile.name, { providerAccountId: 'shared-openai' });
+      expect(updated.providerAccountId).toBe('shared-openai');
+
+      const unlinked = store.update(profile.name, { providerAccountId: null });
+      expect(unlinked.providerAccountId).toBeNull();
+    });
+
+    it('inherits providerAccountId through the extends chain', () => {
+      insertProviderAccount(db, 'team-openai');
+      store.create({
+        ...validInput,
+        name: 'base',
+        modelProvider: 'openai',
+        providerAccountId: 'team-openai',
+      });
+      store.create({ ...validInput, name: 'middle', extends: 'base' });
+      store.create({ ...validInput, name: 'leaf', extends: 'middle' });
+
+      expect(store.getRaw('leaf').providerAccountId).toBeNull();
+      expect(store.get('leaf').providerAccountId).toBe('team-openai');
+      expect(store.resolveProviderAccountId('leaf')).toBe('team-openai');
+    });
+
+    it('uses the closest providerAccountId override in the chain', () => {
+      insertProviderAccount(db, 'base-openai');
+      insertProviderAccount(db, 'middle-openai');
+      store.create({
+        ...validInput,
+        name: 'base',
+        modelProvider: 'openai',
+        providerAccountId: 'base-openai',
+      });
+      store.create({
+        ...validInput,
+        name: 'middle',
+        extends: 'base',
+        providerAccountId: 'middle-openai',
+      });
+      store.create({ ...validInput, name: 'leaf', extends: 'middle' });
+
+      expect(store.get('leaf').providerAccountId).toBe('middle-openai');
+      expect(store.resolveProviderAccountId('leaf')).toBe('middle-openai');
     });
   });
 });

@@ -35,6 +35,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     actionPolicy: null,
     outputMode: 'pr' as const,
     modelProvider: 'anthropic' as const,
+    providerAccountId: null,
     providerCredentials: null,
     testCommand: null,
     prProvider: 'github' as const,
@@ -69,6 +70,14 @@ describe('resolveInheritance', () => {
 
     const resolved = resolveInheritance(child, parent);
     expect(resolved.warmImageTag).toBe('my-image:latest');
+  });
+
+  it('should inherit providerAccountId as a simple nullable field', () => {
+    const parent = makeProfile({ name: 'parent', providerAccountId: 'team-openai' });
+    const child = makeProfile({ name: 'child', providerAccountId: null, extends: 'parent' });
+
+    const resolved = resolveInheritance(child, parent);
+    expect(resolved.providerAccountId).toBe('team-openai');
   });
 
   it('should append smokePages (parent first, child second)', () => {

@@ -14,7 +14,10 @@ import type {
   Pod,
   PodStatus,
   Profile,
+  ProviderAccountProvider,
+  ProviderCredentials,
   PublicProfile,
+  PublicProviderAccount,
   ReadinessStatus,
   ScheduledJob,
   ScheduledJobTemplate,
@@ -354,6 +357,85 @@ export class AutopodClient {
     credentials: { modelProvider: string; providerCredentials: unknown; defaultRuntime?: string },
   ): Promise<PublicProfile> {
     return this.request<PublicProfile>('PATCH', `/profiles/${name}`, credentials);
+  }
+
+  // Provider Accounts
+  async listProviderAccounts(filters?: {
+    provider?: ProviderAccountProvider;
+  }): Promise<PublicProviderAccount[]> {
+    const params = new URLSearchParams();
+    if (filters?.provider) params.set('provider', filters.provider);
+    const qs = params.toString();
+    return this.request<PublicProviderAccount[]>('GET', `/provider-accounts${qs ? `?${qs}` : ''}`);
+  }
+
+  async getProviderAccount(id: string): Promise<PublicProviderAccount> {
+    return this.request<PublicProviderAccount>('GET', `/provider-accounts/${id}`);
+  }
+
+  async createProviderAccount(account: {
+    id?: string;
+    name: string;
+    provider: ProviderAccountProvider;
+    credentials?: ProviderCredentials | null;
+  }): Promise<PublicProviderAccount> {
+    return this.request<PublicProviderAccount>('POST', '/provider-accounts', account);
+  }
+
+  async updateProviderAccount(
+    id: string,
+    changes: { name?: string; credentials?: ProviderCredentials | null },
+  ): Promise<PublicProviderAccount> {
+    return this.request<PublicProviderAccount>('PATCH', `/provider-accounts/${id}`, changes);
+  }
+
+  async deleteProviderAccount(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/provider-accounts/${id}`);
+  }
+
+  async linkProviderAccount(
+    id: string,
+    profileName: string,
+    options?: { clearLegacyCredentials?: boolean },
+  ): Promise<{ account: PublicProviderAccount; profile: PublicProfile }> {
+    return this.request<{ account: PublicProviderAccount; profile: PublicProfile }>(
+      'POST',
+      `/provider-accounts/${id}/link-profile`,
+      { profileName, clearLegacyCredentials: options?.clearLegacyCredentials ?? false },
+    );
+  }
+
+  async setProfileProviderAccount(
+    profileName: string,
+    accountId: string | null,
+    options?: { clearLegacyCredentials?: boolean },
+  ): Promise<PublicProfile> {
+    return this.request<PublicProfile>('POST', `/profiles/${profileName}/provider-account`, {
+      accountId,
+      clearLegacyCredentials: options?.clearLegacyCredentials ?? false,
+    });
+  }
+
+  async unlinkProfileProviderAccount(profileName: string): Promise<void> {
+    await this.request<void>('DELETE', `/profiles/${profileName}/provider-account`);
+  }
+
+  async importProviderAccountFromProfile(request: {
+    profileName: string;
+    accountId?: string;
+    accountName?: string;
+    linkProfileNames?: string[];
+    clearLegacyCredentials?: boolean;
+  }): Promise<{
+    account: PublicProviderAccount;
+    linkedProfiles: PublicProfile[];
+    legacyCredentialsCleared: boolean;
+  }> {
+    return this.request<{
+      account: PublicProviderAccount;
+      linkedProfiles: PublicProfile[];
+      legacyCredentialsCleared: boolean;
+    }>('POST', '/provider-accounts/import-from-profile', request);
   }
 
   // Scheduled Jobs
