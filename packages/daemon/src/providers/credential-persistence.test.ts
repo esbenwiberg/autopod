@@ -1,9 +1,11 @@
-import type { MaxCredentials, Profile } from '@autopod/shared';
+import type { MaxCredentials, Profile, ProviderCredentials } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
+import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import {
+  persistOpenAiAuthJson,
   persistRefreshedCredentials,
   refreshAndPersistMaxCredentials,
 } from './credential-persistence.js';
@@ -40,6 +42,51 @@ function makeProfileStore(
     exists: vi.fn(),
     resolveCredentialOwner: vi.fn((_name: string) => ownerName),
   } as unknown as ProfileStore;
+}
+
+function makeOpenAiProfileStore(options: {
+  providerAccountId?: string | null;
+  credentialOwner?: string | null;
+  ownerCredentials?: ProviderCredentials | null;
+}): ProfileStore {
+  return {
+    resolveProviderAccountId: vi.fn((_name: string) => options.providerAccountId ?? null),
+    resolveCredentialOwner: vi.fn((_name: string) => options.credentialOwner ?? null),
+    getRaw: vi.fn((_name: string) => ({
+      name: options.credentialOwner ?? 'owner-profile',
+      providerCredentials: options.ownerCredentials ?? null,
+    })),
+    update: vi.fn(),
+    get: vi.fn(),
+    create: vi.fn(),
+    list: vi.fn(),
+    delete: vi.fn(),
+    exists: vi.fn(),
+    setWarmImage: vi.fn(),
+  } as unknown as ProfileStore;
+}
+
+function makeProviderAccountStore(credentials: ProviderCredentials | null): ProviderAccountStore {
+  return {
+    get: vi.fn((id: string) => ({
+      id,
+      name: 'Team OpenAI',
+      provider: 'openai',
+      credentials,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      lastAuthenticatedAt: null,
+      lastUsedAt: null,
+    })),
+    updateCredentials: vi.fn(),
+    create: vi.fn(),
+    list: vi.fn(),
+    update: vi.fn(),
+    touchLastUsed: vi.fn(),
+    delete: vi.fn(),
+    exists: vi.fn(),
+    listLinkedProfileNames: vi.fn(),
+  } as unknown as ProviderAccountStore;
 }
 
 describe('persistRefreshedCredentials', () => {
@@ -238,7 +285,7 @@ describe('persistRefreshedCredentials', () => {
     const ps = makeProfileStore(currentCreds);
 
     await persistRefreshedCredentials('ctr-1', cm, ps, 'test-profile', logger, {
-      ownerName: 'test-profile',
+      owner: { type: 'profile', name: 'test-profile' },
       issuedRefreshToken: 'issued-refresh',
     });
 
@@ -270,7 +317,7 @@ describe('persistRefreshedCredentials', () => {
     const ps = makeProfileStore(currentCreds);
 
     await persistRefreshedCredentials('ctr-1', cm, ps, 'test-profile', logger, {
-      ownerName: 'test-profile',
+      owner: { type: 'profile', name: 'test-profile' },
       issuedRefreshToken: 'issued-refresh',
     });
 
@@ -305,7 +352,7 @@ describe('persistRefreshedCredentials', () => {
     } as unknown as ProfileStore;
 
     const lineage = {
-      ownerName: 'owner-profile',
+      owner: { type: 'profile' as const, name: 'owner-profile' },
       issuedRefreshToken: 'issued-refresh',
     };
 
@@ -399,10 +446,83 @@ describe('persistRefreshedCredentials', () => {
     expect(ps.update).toHaveBeenCalledTimes(1);
     expect(first.credentials.refreshToken).toBe('new-refresh');
     expect(first.lineage).toEqual({
-      ownerName: 'owner-profile',
+      owner: { type: 'profile', name: 'owner-profile' },
       issuedRefreshToken: 'new-refresh',
     });
     expect(second.credentials.refreshToken).toBe('new-refresh');
     expect(storedCreds.refreshToken).toBe('new-refresh');
+  });
+});
+
+describe('persistOpenAiAuthJson', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('persists updated Codex auth.json to a provider account owner', async () => {
+    const authJson = JSON.stringify({ tokens: { access_token: 'fresh' } });
+    const cm = makeContainerManager(authJson);
+    const ps = makeOpenAiProfileStore({ providerAccountId: 'team-openai' });
+    const providerAccountStore = makeProviderAccountStore({
+      provider: 'openai',
+      authMode: 'chatgpt',
+      authJson: JSON.stringify({ tokens: { access_token: 'old' } }),
+    });
+
+    await persistOpenAiAuthJson('ctr-1', cm, ps, 'child-profile', logger, {
+      providerAccountStore,
+    });
+
+    expect(providerAccountStore.updateCredentials).toHaveBeenCalledWith('team-openai', {
+      provider: 'openai',
+      authMode: 'chatgpt',
+      authJson,
+    });
+    expect(ps.update).not.toHaveBeenCalled();
+  });
+
+  it('persists updated Codex auth.json to a legacy profile credential owner', async () => {
+    const authJson = JSON.stringify({ tokens: { access_token: 'fresh' } });
+    const cm = makeContainerManager(authJson);
+    const ps = makeOpenAiProfileStore({
+      credentialOwner: 'base-profile',
+      ownerCredentials: {
+        provider: 'openai',
+        authMode: 'chatgpt',
+        authJson: JSON.stringify({ tokens: { access_token: 'old' } }),
+      },
+    });
+
+    await persistOpenAiAuthJson('ctr-1', cm, ps, 'child-profile', logger);
+
+    expect(ps.update).toHaveBeenCalledWith('base-profile', {
+      providerCredentials: {
+        provider: 'openai',
+        authMode: 'chatgpt',
+        authJson,
+      },
+    });
+  });
+
+  it('does not read or persist Codex auth.json when no auth owner exists', async () => {
+    const cm = makeContainerManager(JSON.stringify({ tokens: { access_token: 'fresh' } }));
+    const ps = makeOpenAiProfileStore({});
+
+    await persistOpenAiAuthJson('ctr-1', cm, ps, 'child-profile', logger);
+
+    expect(cm.readFile).not.toHaveBeenCalled();
+    expect(ps.update).not.toHaveBeenCalled();
+  });
+
+  it('skips invalid Codex auth.json content', async () => {
+    const cm = makeContainerManager('{not-json');
+    const ps = makeOpenAiProfileStore({ providerAccountId: 'team-openai' });
+    const providerAccountStore = makeProviderAccountStore(null);
+
+    await persistOpenAiAuthJson('ctr-1', cm, ps, 'child-profile', logger, {
+      providerAccountStore,
+    });
+
+    expect(providerAccountStore.updateCredentials).not.toHaveBeenCalled();
   });
 });

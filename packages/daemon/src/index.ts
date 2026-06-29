@@ -57,6 +57,7 @@ import { createSessionBridge } from './pods/pod-bridge-impl.js';
 import { ScreenshotRetention } from './pods/screenshot-retention.js';
 import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
 import { createProfileStore } from './profiles/index.js';
+import { createProviderAccountStore } from './provider-accounts/index.js';
 import {
   ClaudeRuntime,
   CodexRuntime,
@@ -195,6 +196,7 @@ const sessionTokenIssuer = createPodTokenIssuer(secretsKeyPath);
 
 // Repositories
 const profileStore = createProfileStore(db, credentialsCipher);
+const providerAccountStore = createProviderAccountStore(db, credentialsCipher);
 const podRepo = createPodRepository(db);
 const eventRepo = createEventRepository(db);
 const escalationRepo = createEscalationRepository(db);
@@ -613,6 +615,7 @@ podManager = createPodManager({
   validationRepo,
   progressEventRepo,
   profileStore,
+  providerAccountStore,
   eventBus,
   eventRepo,
   actionAuditRepo,
@@ -775,6 +778,7 @@ const app = await createServer({
   authModule,
   podManager,
   profileStore,
+  providerAccountStore,
   worktreeManager,
   eventBus,
   eventRepo,

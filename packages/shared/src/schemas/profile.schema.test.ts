@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createProfileSchema, updateProfileSchema } from './profile.schema.js';
+import {
+  createProviderAccountSchema,
+  updateProviderAccountSchema,
+} from './provider-account.schema.js';
 
 const canonicalModelMessage = 'canonical Claude model ID';
 
@@ -226,18 +230,81 @@ describe('createProfileSchema model validation', () => {
     expect(derived.defaultModel).toBeNull();
     expect(derived.reviewerModel).toBeNull();
     expect(derived.escalation).toBeNull();
+    expect(derived.providerAccountId).toBeNull();
     expect(derived.openrouterApiKey).toBeNull();
 
     const updated = updateProfileSchema.parse({
       defaultModel: null,
       reviewerModel: null,
       escalation: null,
+      providerAccountId: null,
       openrouterApiKey: null,
     });
     expect(updated.defaultModel).toBeNull();
     expect(updated.reviewerModel).toBeNull();
     expect(updated.escalation).toBeNull();
+    expect(updated.providerAccountId).toBeNull();
     expect(updated.openrouterApiKey).toBeNull();
+  });
+
+  it('accepts providerAccountId on create and update schemas', () => {
+    const parsed = createProfileSchema.parse({
+      name: 'account-linked',
+      modelProvider: 'openai',
+      providerAccountId: 'team-openai.1',
+    });
+    expect(parsed.providerAccountId).toBe('team-openai.1');
+
+    const updated = updateProfileSchema.parse({ providerAccountId: 'team-openai.2' });
+    expect(updated.providerAccountId).toBe('team-openai.2');
+  });
+
+  it('rejects invalid providerAccountId values', () => {
+    expect(updateProfileSchema.safeParse({ providerAccountId: 'Team OpenAI' }).success).toBe(false);
+    expect(updateProfileSchema.safeParse({ providerAccountId: '-openai' }).success).toBe(false);
+  });
+});
+
+describe('provider account schemas', () => {
+  it('accepts account create and update payloads without raw secret redaction assumptions', () => {
+    const created = createProviderAccountSchema.parse({
+      name: 'Team OpenAI',
+      provider: 'openai',
+      credentials: {
+        provider: 'openai',
+        authMode: 'chatgpt',
+        authJson: '{"tokens":{"access_token":"secret"}}',
+      },
+    });
+
+    expect(created.name).toBe('Team OpenAI');
+    expect(created.credentials?.provider).toBe('openai');
+
+    const updated = updateProviderAccountSchema.parse({
+      credentials: { provider: 'copilot', token: 'gho_token' },
+    });
+    expect(updated.credentials?.provider).toBe('copilot');
+  });
+
+  it('rejects mismatched provider account credentials on create', () => {
+    const parsed = createProviderAccountSchema.safeParse({
+      name: 'Mismatched',
+      provider: 'openai',
+      credentials: { provider: 'copilot', token: 'gho_token' },
+    });
+
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues[0]?.message).toContain('must match');
+    }
+  });
+
+  it('normalizes provider account names by trimming whitespace', () => {
+    const created = createProviderAccountSchema.parse({
+      name: '  Claude Max  ',
+      provider: 'max',
+    });
+    expect(created.name).toBe('Claude Max');
   });
 });
 

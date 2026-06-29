@@ -69,6 +69,12 @@ export interface ProfileStore {
    * Returns `null` if no profile in the chain has credentials set.
    */
   resolveCredentialOwner(name: string): string | null;
+  /**
+   * Walk the `extends` chain starting at `name` and return the first linked
+   * provider account id. This is separate from legacy providerCredentials so
+   * account-linked profiles can inherit auth without copying secrets.
+   */
+  resolveProviderAccountId(name: string): string | null;
 }
 
 function canonicalizeLegacyProfileModel(model: string | null): string | null {
@@ -186,6 +192,7 @@ export function rowToProfile(
     pod: readProfilePodFromRow(row),
     outputMode: nullableStr(row.output_mode) as Profile['outputMode'],
     modelProvider: nullableStr(row.model_provider) as Profile['modelProvider'],
+    providerAccountId: nullableStr(row.provider_account_id),
     providerCredentials: decryptCreds(row.provider_credentials),
     testCommand: nullableStr(row.test_command),
     validationSetupCommand: nullableStr(row.validation_setup_command),
@@ -351,7 +358,7 @@ export function createProfileStore(
           default_model, reviewer_model, default_runtime, execution_target, custom_instructions, agent_done_prompt, escalation_config,
           extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
           agent_mode, output_target, validate, validation_suite, advisory_browser_qa_enabled, promotable,
-          model_provider, provider_credentials, test_command, validation_setup_command, pr_provider,
+          model_provider, provider_account_id, provider_credentials, test_command, validation_setup_command, pr_provider,
           ado_pat, ado_pat_expires_at, github_pat, github_pat_expires_at, openrouter_api_key,
           private_registries, registry_pat, registry_pat_expires_at, branch_prefix, container_memory_gb,
           build_timeout, test_timeout, build_env,
@@ -373,7 +380,7 @@ export function createProfileStore(
           @defaultModel, @reviewerModel, @defaultRuntime, @executionTarget, @customInstructions, @agentDonePrompt, @escalationConfig,
           @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
           @agentMode, @outputTarget, @validate, @validationSuite, @advisoryBrowserQaEnabled, @promotable,
-          @modelProvider, @providerCredentials, @testCommand, @validationSetupCommand, @prProvider,
+          @modelProvider, @providerAccountId, @providerCredentials, @testCommand, @validationSetupCommand, @prProvider,
           @adoPat, @adoPatExpiresAt, @githubPat, @githubPatExpiresAt, @openrouterApiKey,
           @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix, @containerMemoryGb,
           @buildTimeout, @testTimeout, @buildEnv,
@@ -429,6 +436,7 @@ export function createProfileStore(
               : 0,
         promotable: parsed.pod?.promotable === undefined ? null : parsed.pod.promotable ? 1 : 0,
         modelProvider: parsed.modelProvider,
+        providerAccountId: parsed.providerAccountId,
         providerCredentials: encryptCreds(parsed.providerCredentials),
         testCommand: parsed.testCommand ?? null,
         validationSetupCommand: parsed.validationSetupCommand ?? null,
@@ -695,6 +703,10 @@ export function createProfileStore(
         setClauses.push('model_provider = @modelProvider');
         fieldMap.modelProvider = parsed.modelProvider;
       }
+      if (parsed.providerAccountId !== undefined) {
+        setClauses.push('provider_account_id = @providerAccountId');
+        fieldMap.providerAccountId = parsed.providerAccountId;
+      }
       if (parsed.providerCredentials !== undefined) {
         setClauses.push('provider_credentials = @providerCredentials');
         fieldMap.providerCredentials = encryptCreds(parsed.providerCredentials);
@@ -955,6 +967,25 @@ export function createProfileStore(
         if (!row) return null;
         if (row.provider_credentials !== null && row.provider_credentials !== undefined) {
           return current;
+        }
+        current = row.extends;
+      }
+      return null;
+    },
+
+    resolveProviderAccountId(name: string): string | null {
+      const visited = new Set<string>();
+      let current: string | null = name;
+      while (current !== null && !visited.has(current)) {
+        visited.add(current);
+        const row = db
+          .prepare('SELECT provider_account_id, extends FROM profiles WHERE name = ?')
+          .get(current) as
+          | { provider_account_id: string | null; extends: string | null }
+          | undefined;
+        if (!row) return null;
+        if (row.provider_account_id !== null && row.provider_account_id !== undefined) {
+          return row.provider_account_id;
         }
         current = row.extends;
       }

@@ -202,6 +202,12 @@ public enum ProfileOverrideCatalog {
             help: "anthropic / max / openai / foundry / copilot / openrouter. Credentials are tied to this choice."
         ),
         .init(
+            key: "providerAccountId",
+            label: "Provider Account",
+            section: .providers,
+            help: "Shared provider account id. Leave empty to inherit profile credentials or daemon environment auth."
+        ),
+        .init(
             key: "prProvider",
             label: "PR Provider",
             section: .providers,

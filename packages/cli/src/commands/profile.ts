@@ -1,4 +1,4 @@
-import { spawn as cpSpawn, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -24,6 +24,12 @@ import type { AutopodClient } from '../api/client.js';
 import { withJsonOutput } from '../output/json.js';
 import { withSpinner } from '../output/spinner.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
+import {
+  extractClaudeOauthToken,
+  runClaudeSetupToken,
+  runCopilotLogin,
+  runOpenAiCodexLogin,
+} from './provider-auth.js';
 
 const profileColumns: ColumnDef<Profile>[] = [
   { header: 'Name', key: 'name', width: 20 },
@@ -41,49 +47,6 @@ function parseValidationSuite(value: string): ValidationSuite {
 
 function defaultPodOptions(profile: Profile): PodOptions {
   return profile.pod ?? podOptionsFromOutputMode(profile.outputMode ?? 'pr');
-}
-
-function extractClaudeOauthToken(output: string): string | null {
-  const patterns = [
-    /CLAUDE_CODE_OAUTH_TOKEN\s*=\s*['"]?([A-Za-z0-9._~+/=-]{32,})/,
-    /(sk-ant-[A-Za-z0-9._=-]{20,})/,
-    /^\s*([A-Za-z0-9._~+/=-]{80,})\s*$/m,
-  ];
-  for (const pattern of patterns) {
-    const match = pattern.exec(output);
-    if (match?.[1]) return match[1].replace(/^['"]|['"]$/g, '').trim();
-  }
-  return null;
-}
-
-async function runClaudeSetupToken(): Promise<string> {
-  const spawnEnv = { ...process.env };
-  spawnEnv.ANTHROPIC_API_KEY = undefined;
-  spawnEnv.CLAUDE_CODE_OAUTH_TOKEN = undefined;
-
-  return new Promise((resolve, reject) => {
-    let output = '';
-    const proc = cpSpawn('claude', ['setup-token'], {
-      stdio: ['inherit', 'pipe', 'pipe'],
-      env: spawnEnv,
-    });
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      output += chunk.toString('utf8');
-      process.stdout.write(chunk);
-    });
-    proc.stderr?.on('data', (chunk: Buffer) => {
-      output += chunk.toString('utf8');
-      process.stderr.write(chunk);
-    });
-    proc.on('error', reject);
-    proc.on('close', (code) => {
-      if (code === 0) {
-        resolve(output);
-      } else {
-        reject(new Error(`claude setup-token exited with code ${code ?? 'unknown'}`));
-      }
-    });
-  });
 }
 
 export function registerProfileCommands(program: Command, getClient: () => AutopodClient): void {
@@ -128,6 +91,10 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         );
         console.log(`${chalk.bold('Model:')}      ${data.defaultModel}`);
         console.log(`${chalk.bold('Runtime:')}    ${data.defaultRuntime}`);
+        console.log(`${chalk.bold('Provider:')}   ${data.modelProvider ?? 'none'}`);
+        if (data.providerAccountId) {
+          console.log(`${chalk.bold('Account:')}    ${data.providerAccountId}`);
+        }
         console.log(`${chalk.bold('Max retries:')} ${data.maxValidationAttempts}`);
         const podOptions = defaultPodOptions(data);
         console.log(`${chalk.bold('Pod:')}        ${podOptions.agentMode} -> ${podOptions.output}`);
@@ -243,6 +210,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         githubPatExpiresAt: null,
         adoPatExpiresAt: null,
         registryPatExpiresAt: null,
+        providerAccountId: null,
         actionPolicy: {
           enabledGroups: ['github-issues', 'github-prs'],
           // actionOverrides:
@@ -542,18 +510,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         process.exit(1);
       }
 
-      const token = Math.random().toString(36).slice(2, 10);
-      const codexHome = path.join(os.tmpdir(), `autopod-codex-auth-${token}`);
-      fs.mkdirSync(codexHome, { recursive: true });
-
-      const spawnEnv: Record<string, string> = {};
-      for (const [k, v] of Object.entries(process.env)) {
-        if (v !== undefined && k !== 'OPENAI_API_KEY' && k !== 'CODEX_ACCESS_TOKEN') {
-          spawnEnv[k] = v;
-        }
-      }
-      spawnEnv.CODEX_HOME = codexHome;
-
       console.log(chalk.cyan(`\nStarting OpenAI Codex login for profile "${name}"...`));
       console.log(
         chalk.dim(
@@ -561,27 +517,11 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         ),
       );
 
-      await new Promise<void>((resolve, reject) => {
-        const proc = cpSpawn('codex', ['login', '--device-auth'], {
-          stdio: 'inherit',
-          env: spawnEnv,
-        });
-        proc.on('error', reject);
-        proc.on('close', () => resolve());
-      });
-
-      const authPath = path.join(codexHome, 'auth.json');
-      if (!fs.existsSync(authPath)) {
-        console.error(chalk.red('\nNo Codex auth.json found — login may not have completed.'));
-        process.exit(1);
-      }
-
       let authJson: string;
       try {
-        authJson = fs.readFileSync(authPath, 'utf-8');
-        JSON.parse(authJson);
-      } catch {
-        console.error(chalk.red('\nFailed to parse Codex auth.json.'));
+        authJson = await runOpenAiCodexLogin();
+      } catch (error) {
+        console.error(chalk.red(`\n${error instanceof Error ? error.message : String(error)}`));
         process.exit(1);
       }
 
@@ -597,12 +537,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
           },
         }),
       );
-
-      try {
-        fs.rmSync(codexHome, { recursive: true, force: true });
-      } catch {
-        /* best-effort */
-      }
 
       console.log(chalk.green(`\nProfile "${name}" is now authenticated with OpenAI Codex.`));
     });
@@ -625,24 +559,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         process.exit(1);
       }
 
-      // Isolated config dir so credentials land in a known place
-      const token = Math.random().toString(36).slice(2, 10);
-      const configDir = path.join(os.tmpdir(), `autopod-copilot-auth-${token}`);
-      fs.mkdirSync(configDir, { recursive: true });
-
-      // Build env: strip existing GitHub tokens so Copilot prompts a fresh login
-      const spawnEnv: Record<string, string> = {};
-      for (const [k, v] of Object.entries(process.env)) {
-        if (
-          v !== undefined &&
-          k !== 'COPILOT_GITHUB_TOKEN' &&
-          k !== 'GH_TOKEN' &&
-          k !== 'GITHUB_TOKEN'
-        ) {
-          spawnEnv[k] = v;
-        }
-      }
-
       console.log(chalk.cyan(`\nStarting Copilot login for profile "${name}"...`));
       console.log(
         chalk.dim(
@@ -650,47 +566,11 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         ),
       );
 
-      await new Promise<void>((resolve, reject) => {
-        const proc = cpSpawn('copilot', ['login', '--config-dir', configDir], {
-          stdio: 'inherit',
-          env: spawnEnv,
-        });
-        proc.on('error', reject);
-        proc.on('close', () => resolve());
-      });
-
-      // @github/copilot stores tokens as <config-dir>/github.com.tokens.json (file fallback)
-      // or in the system keychain (macOS/Windows credential store) — try both
-      let authToken: string | undefined;
-
-      const credsPath = path.join(configDir, 'github.com.tokens.json');
-      if (fs.existsSync(credsPath)) {
-        try {
-          const credsJson = JSON.parse(fs.readFileSync(credsPath, 'utf-8')) as Record<
-            string,
-            unknown
-          >;
-          authToken = typeof credsJson.token === 'string' ? credsJson.token : undefined;
-        } catch {
-          /* fall through to keychain */
-        }
-      }
-
-      // macOS keychain fallback — security CLI will prompt for access if needed
-      if (!authToken && process.platform === 'darwin') {
-        try {
-          authToken =
-            execSync('security find-generic-password -s "copilot-cli" -w', {
-              encoding: 'utf-8',
-              stdio: ['inherit', 'pipe', 'inherit'],
-            }).trim() || undefined;
-        } catch {
-          /* keychain read failed */
-        }
-      }
-
-      if (!authToken) {
-        console.error(chalk.red('\nNo token found — login may not have completed.'));
+      let authToken: string;
+      try {
+        authToken = await runCopilotLogin();
+      } catch (error) {
+        console.error(chalk.red(`\n${error instanceof Error ? error.message : String(error)}`));
         process.exit(1);
       }
 
@@ -703,13 +583,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
           },
         }),
       );
-
-      // Cleanup temp dir
-      try {
-        fs.rmSync(configDir, { recursive: true, force: true });
-      } catch {
-        /* best-effort */
-      }
 
       console.log(chalk.green(`\nProfile "${name}" is now authenticated with GitHub Copilot.`));
     });

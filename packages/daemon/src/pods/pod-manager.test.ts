@@ -5,6 +5,8 @@ import type {
   AgentEvent,
   PodCreatedEvent,
   Profile,
+  ProviderAccount,
+  ProviderCredentials,
   ReadinessReview,
   ReadinessStatus,
   Runtime,
@@ -37,6 +39,7 @@ import type {
   WorktreeManager,
 } from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
+import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import { DeletionGuardError } from '../worktrees/local-worktree-manager.js';
@@ -200,6 +203,81 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     adoPatExpiresAt: opts.adoPatExpiresAt ?? null,
     modelProvider: opts.modelProvider ?? 'anthropic',
   });
+}
+
+function insertProviderAccount(
+  db: Database.Database,
+  id: string,
+  provider: NonNullable<Profile['modelProvider']>,
+  credentials: unknown,
+): void {
+  db.prepare(
+    `INSERT INTO provider_accounts (
+      id, name, provider, credentials, created_at, updated_at
+    ) VALUES (
+      @id, @name, @provider, @credentials, @now, @now
+    )`,
+  ).run({
+    id,
+    name: id,
+    provider,
+    credentials: credentials ? JSON.stringify(credentials) : null,
+    now: new Date().toISOString(),
+  });
+}
+
+function linkProfileToProviderAccount(
+  db: Database.Database,
+  profileName: string,
+  providerAccountId: string,
+): void {
+  db.prepare('UPDATE profiles SET provider_account_id = ? WHERE name = ?').run(
+    providerAccountId,
+    profileName,
+  );
+}
+
+function createMutableProviderAccountStore(
+  id: string,
+  provider: NonNullable<Profile['modelProvider']>,
+  initialCredentials: ProviderCredentials | null,
+): ProviderAccountStore {
+  let credentials = initialCredentials;
+  const account = (): ProviderAccount => ({
+    id,
+    name: id,
+    provider,
+    credentials,
+    lastAuthenticatedAt: credentials ? '2026-01-01T00:00:00.000Z' : null,
+    lastUsedAt: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+
+  return {
+    create: vi.fn(() => account()),
+    get: vi.fn((requestedId: string) => {
+      if (requestedId !== id) throw new Error(`Unexpected provider account id: ${requestedId}`);
+      return account();
+    }),
+    list: vi.fn(() => [account()]),
+    update: vi.fn(() => account()),
+    updateCredentials: vi.fn(
+      (
+        requestedId: string,
+        updatedCredentials: ProviderCredentials | null,
+        _options?: { authenticatedAt?: string | null; touchLastUsed?: boolean },
+      ) => {
+        if (requestedId !== id) throw new Error(`Unexpected provider account id: ${requestedId}`);
+        credentials = updatedCredentials;
+        return account();
+      },
+    ),
+    touchLastUsed: vi.fn(),
+    delete: vi.fn(),
+    exists: vi.fn((requestedId: string) => requestedId === id),
+    listLinkedProfileNames: vi.fn(() => ['test-profile']),
+  };
 }
 
 function createMockRuntime(): Runtime {
@@ -578,6 +656,7 @@ function createTestContext(
             : null,
         outputMode: 'pr' as const,
         modelProvider: (row.model_provider as Profile['modelProvider']) ?? 'anthropic',
+        providerAccountId: (row.provider_account_id as string | null) ?? null,
         providerCredentials: row.provider_credentials
           ? JSON.parse(row.provider_credentials as string)
           : null,
@@ -616,6 +695,13 @@ function createTestContext(
     update: vi.fn(),
     delete: vi.fn(),
     exists: vi.fn(() => true),
+    resolveCredentialOwner: vi.fn((_name: string) => null),
+    resolveProviderAccountId: vi.fn((name: string) => {
+      const row = db.prepare('SELECT provider_account_id FROM profiles WHERE name = ?').get(name) as
+        | { provider_account_id: string | null }
+        | undefined;
+      return row?.provider_account_id ?? null;
+    }),
   };
 
   const runtime = createMockRuntime();
@@ -2320,6 +2406,138 @@ describe('PodManager', () => {
       expect(processed.status).toBe('validated');
       expect(processed.containerId).toBe('container-123');
       expect(processed.worktreePath).toBe('/tmp/worktree/abc');
+    });
+
+    it('persists Codex auth.json back to a linked OpenAI provider account after agent run', async () => {
+      const accountId = 'team-openai';
+      const oldAuthJson = JSON.stringify({ token: 'old' });
+      const freshAuthJson = JSON.stringify({ token: 'fresh' });
+      const oldCredentials = {
+        provider: 'openai',
+        authMode: 'chatgpt',
+        authJson: oldAuthJson,
+      } satisfies ProviderCredentials;
+      const freshCredentials = {
+        provider: 'openai',
+        authMode: 'chatgpt',
+        authJson: freshAuthJson,
+      } satisfies ProviderCredentials;
+
+      const runtime = createMockRuntime();
+      runtime.type = 'codex';
+      const ctx = createTestContext(undefined, {
+        defaultModel: 'auto',
+        defaultRuntime: 'codex',
+        modelProvider: 'openai',
+      });
+      ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+      insertProviderAccount(ctx.db, accountId, 'openai', oldCredentials);
+      linkProfileToProviderAccount(ctx.db, 'test-profile', accountId);
+      const providerAccountStore = createMutableProviderAccountStore(
+        accountId,
+        'openai',
+        oldCredentials,
+      );
+      ctx.deps.providerAccountStore = providerAccountStore;
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (_containerId, command) => {
+          if (command.join(' ').includes('command -v codex')) {
+            return { stdout: '/usr/local/bin/codex\n', stderr: '', exitCode: 0 };
+          }
+          return { stdout: '', stderr: '', exitCode: 0 };
+        },
+      );
+      vi.mocked(ctx.containerManager.readFile).mockImplementation(
+        async (_containerId, filePath) => {
+          if (filePath === '/home/autopod/.codex/auth.json') return freshAuthJson;
+          return '';
+        },
+      );
+
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Build widget',
+          runtime: 'codex',
+          skipValidation: true,
+        },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      expect(manager.getSession(pod.id).status).toBe('validated');
+      expect(providerAccountStore.touchLastUsed).toHaveBeenCalledWith(accountId);
+      expect(providerAccountStore.updateCredentials).toHaveBeenCalledWith(
+        accountId,
+        freshCredentials,
+      );
+      expect(ctx.containerManager.writeFile).toHaveBeenCalledWith(
+        'container-123',
+        '/home/autopod/.codex/auth.json',
+        oldAuthJson,
+      );
+    });
+
+    it('recovers and rewrites fresh Codex auth.json for resume env from provider account', async () => {
+      const accountId = 'team-openai';
+      const oldAuthJson = JSON.stringify({ token: 'old-resume' });
+      const freshAuthJson = JSON.stringify({ token: 'fresh-resume' });
+      const oldCredentials = {
+        provider: 'openai',
+        authMode: 'chatgpt',
+        authJson: oldAuthJson,
+      } satisfies ProviderCredentials;
+      const freshCredentials = {
+        provider: 'openai',
+        authMode: 'chatgpt',
+        authJson: freshAuthJson,
+      } satisfies ProviderCredentials;
+
+      const ctx = createTestContext(undefined, {
+        defaultModel: 'auto',
+        defaultRuntime: 'codex',
+        modelProvider: 'openai',
+      });
+      insertProviderAccount(ctx.db, accountId, 'openai', oldCredentials);
+      linkProfileToProviderAccount(ctx.db, 'test-profile', accountId);
+      const providerAccountStore = createMutableProviderAccountStore(
+        accountId,
+        'openai',
+        oldCredentials,
+      );
+      ctx.deps.providerAccountStore = providerAccountStore;
+      vi.mocked(ctx.containerManager.readFile).mockImplementation(
+        async (_containerId, filePath) => {
+          if (filePath === '/home/autopod/.codex/auth.json') return freshAuthJson;
+          return '';
+        },
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Resume widget',
+          runtime: 'codex',
+          skipValidation: true,
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, { containerId: 'container-123' });
+
+      const env = await manager.getReviewerExecEnv(ctx.podRepo.getOrThrow(pod.id));
+
+      expect(env).toEqual(expect.objectContaining({ POD_ID: pod.id }));
+      expect(providerAccountStore.updateCredentials).toHaveBeenCalledWith(
+        accountId,
+        freshCredentials,
+      );
+      expect(ctx.containerManager.writeFile).toHaveBeenCalledWith(
+        'container-123',
+        '/home/autopod/.codex/auth.json',
+        freshAuthJson,
+      );
     });
 
     it('completes no-change pods directly without validation readiness', async () => {

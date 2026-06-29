@@ -8,7 +8,9 @@ import type {
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ProfileStore } from '../profiles/index.js';
+import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import { RUNTIME_TELEMETRY_OPT_OUT_ENV, withRuntimeTelemetryOptOutEnv } from '../runtime-env.js';
+import { type ProviderAuthResolution, resolveProviderAuth } from './auth-resolution.js';
 import { getAzureToken } from './azure-token.js';
 import { refreshAndPersistMaxCredentials } from './credential-persistence.js';
 import { refreshOAuthToken } from './credential-refresh.js';
@@ -20,6 +22,7 @@ const CONTAINER_WORK_DIR = '/workspace';
 
 export interface BuildProviderEnvOptions {
   profileStore?: ProfileStore;
+  providerAccountStore?: ProviderAccountStore;
 }
 
 /**
@@ -79,25 +82,29 @@ export async function buildProviderEnv(
   options: BuildProviderEnvOptions = {},
 ): Promise<ProviderEnvResult> {
   const provider = profile.modelProvider;
+  const auth = resolveProviderAuth(profile, options);
+  if (auth.owner?.type === 'provider-account') {
+    options.providerAccountStore?.touchLastUsed(auth.owner.id);
+  }
 
   switch (provider) {
     case 'anthropic':
       return buildAnthropicEnv();
 
     case 'max':
-      return buildMaxEnv(profile, logger, options.profileStore);
+      return buildMaxEnv(profile, auth, logger, options);
 
     case 'openai':
-      return buildOpenAiEnv(profile);
+      return buildOpenAiEnv(auth);
 
     case 'foundry':
-      return buildFoundryEnv(profile, logger);
+      return buildFoundryEnv(profile, auth, logger);
 
     case 'copilot':
-      return buildCopilotEnv(profile);
+      return buildCopilotEnv(profile, auth);
 
     case 'openrouter':
-      return buildOpenRouterEnv(profile);
+      return buildOpenRouterEnv(profile, auth);
 
     default:
       // Exhaustiveness check
@@ -152,8 +159,8 @@ function buildAnthropicEnv(): ProviderEnvResult {
  * OpenAI API key provider — used by the Codex runtime.
  * The key is written to a secret file; exec env only receives the file pointer.
  */
-function buildOpenAiEnv(profile: Profile): ProviderEnvResult {
-  const creds = profile.providerCredentials;
+function buildOpenAiEnv(auth: ProviderAuthResolution): ProviderEnvResult {
+  const creds = auth.credentials;
   if (creds?.provider === 'openai' && creds.authJson) {
     return {
       env: withRuntimeTelemetryOptOutEnv(),
@@ -162,7 +169,9 @@ function buildOpenAiEnv(profile: Profile): ProviderEnvResult {
         { path: `${CONTAINER_HOME_DIR}/.codex/auth.json`, content: creds.authJson },
       ],
       secretFiles: [],
-      requiresPostExecPersistence: false,
+      requiresPostExecPersistence: true,
+      requiresOpenAiAuthJsonPersistence: true,
+      credentialOwner: auth.owner ?? undefined,
     };
   }
 
@@ -180,7 +189,9 @@ function buildOpenAiEnv(profile: Profile): ProviderEnvResult {
     env,
     containerFiles: buildClaudeConfigFiles(),
     secretFiles,
-    requiresPostExecPersistence: false,
+    requiresPostExecPersistence: Boolean(auth.owner),
+    requiresOpenAiAuthJsonPersistence: Boolean(auth.owner),
+    credentialOwner: auth.owner ?? undefined,
   };
 }
 
@@ -194,10 +205,11 @@ function buildOpenAiEnv(profile: Profile): ProviderEnvResult {
  */
 async function buildMaxEnv(
   profile: Profile,
+  auth: ProviderAuthResolution,
   logger: Logger,
-  profileStore?: ProfileStore,
+  options: BuildProviderEnvOptions,
 ): Promise<ProviderEnvResult> {
-  const creds = profile.providerCredentials;
+  const creds = auth.credentials;
 
   if (!creds || creds.provider !== 'max') {
     throw new Error(
@@ -212,6 +224,7 @@ async function buildMaxEnv(
       containerFiles: buildClaudeConfigFiles(),
       secretFiles: [{ path: filePath, content: creds.oauthToken }],
       requiresPostExecPersistence: false,
+      credentialOwner: auth.owner ?? undefined,
     };
   }
 
@@ -224,13 +237,19 @@ async function buildMaxEnv(
   // Pre-flight token refresh. When the profile store is available, serialize
   // by credential owner and persist rotations immediately so concurrent pods
   // do not reuse a stale refresh token.
-  const issued = profileStore
-    ? await refreshAndPersistMaxCredentials(profileStore, profile.name, creds, logger)
+  const issued = options.profileStore
+    ? await refreshAndPersistMaxCredentials(options.profileStore, profile.name, creds, logger, {
+        providerAccountStore: options.providerAccountStore,
+        owner: auth.owner ?? undefined,
+      })
     : await (async () => {
         const credentials = await refreshOAuthToken(creds, logger);
         return {
           credentials,
-          lineage: { ownerName: profile.name, issuedRefreshToken: credentials.refreshToken },
+          lineage: {
+            owner: auth.owner ?? { type: 'profile', name: profile.name },
+            issuedRefreshToken: credentials.refreshToken,
+          },
         };
       })();
   const refreshed = issued.credentials;
@@ -261,6 +280,7 @@ async function buildMaxEnv(
     containerFiles: [{ path: credPath, content: credentialsFile }, ...buildClaudeConfigFiles()],
     secretFiles: [],
     requiresPostExecPersistence: true,
+    credentialOwner: auth.owner ?? undefined,
     maxCredentialLineage: issued.lineage,
   };
 }
@@ -269,8 +289,8 @@ async function buildMaxEnv(
  * GitHub Copilot CLI provider — token written to a 0400 secret file; env carries
  * only COPILOT_GITHUB_TOKEN_FILE so the raw token stays out of env dumps.
  */
-function buildCopilotEnv(profile: Profile): ProviderEnvResult {
-  const creds = profile.providerCredentials;
+function buildCopilotEnv(profile: Profile, auth: ProviderAuthResolution): ProviderEnvResult {
+  const creds = auth.credentials;
 
   if (!creds || creds.provider !== 'copilot') {
     throw new Error(
@@ -287,6 +307,7 @@ function buildCopilotEnv(profile: Profile): ProviderEnvResult {
     containerFiles: buildClaudeConfigFiles(),
     secretFiles: [{ path: filePath, content: creds.token }],
     requiresPostExecPersistence: false,
+    credentialOwner: auth.owner ?? undefined,
   };
 }
 
@@ -304,8 +325,8 @@ const OPENROUTER_DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
  *
  * Only use models that have passed the spike telemetry contract.
  */
-function buildOpenRouterEnv(profile: Profile): ProviderEnvResult {
-  const creds = profile.providerCredentials;
+function buildOpenRouterEnv(profile: Profile, auth: ProviderAuthResolution): ProviderEnvResult {
+  const creds = auth.credentials;
   const isOpenRouterCreds = creds?.provider === 'openrouter';
   const baseUrl = isOpenRouterCreds
     ? (creds.baseUrl ?? OPENROUTER_DEFAULT_BASE_URL)
@@ -330,6 +351,7 @@ function buildOpenRouterEnv(profile: Profile): ProviderEnvResult {
     containerFiles: buildClaudeConfigFiles(),
     secretFiles,
     requiresPostExecPersistence: false,
+    credentialOwner: auth.owner ?? undefined,
   };
 }
 
@@ -351,8 +373,12 @@ const FOUNDRY_TOKEN_SCOPE = 'https://cognitiveservices.azure.com/.default';
  * deployments (GPT, Qwen, etc.) route through Codex's env vars instead of
  * Claude's.
  */
-async function buildFoundryEnv(profile: Profile, logger: Logger): Promise<ProviderEnvResult> {
-  const creds = profile.providerCredentials;
+async function buildFoundryEnv(
+  profile: Profile,
+  auth: ProviderAuthResolution,
+  logger: Logger,
+): Promise<ProviderEnvResult> {
+  const creds = auth.credentials;
 
   if (!creds || creds.provider !== 'foundry') {
     throw new Error(
@@ -364,8 +390,8 @@ async function buildFoundryEnv(profile: Profile, logger: Logger): Promise<Provid
   const secretValue = await resolveFoundrySecret(creds, logger);
 
   return surface === 'openai'
-    ? buildFoundryOpenAiEnv(creds, secretValue)
-    : buildFoundryAnthropicEnv(creds, secretValue);
+    ? buildFoundryOpenAiEnv(creds, secretValue, auth)
+    : buildFoundryAnthropicEnv(creds, secretValue, auth);
 }
 
 /**
@@ -382,7 +408,11 @@ async function resolveFoundrySecret(creds: FoundryCredentials, logger: Logger): 
   return token.token;
 }
 
-function buildFoundryAnthropicEnv(creds: FoundryCredentials, secret: string): ProviderEnvResult {
+function buildFoundryAnthropicEnv(
+  creds: FoundryCredentials,
+  secret: string,
+  auth: ProviderAuthResolution,
+): ProviderEnvResult {
   const filePath = `${SECRET_DIR}/foundry-api-key`;
   const env = withRuntimeTelemetryOptOutEnv({
     CLAUDE_CODE_USE_FOUNDRY: '1',
@@ -396,10 +426,15 @@ function buildFoundryAnthropicEnv(creds: FoundryCredentials, secret: string): Pr
     containerFiles: buildClaudeConfigFiles(),
     secretFiles: [{ path: filePath, content: secret }],
     requiresPostExecPersistence: false,
+    credentialOwner: auth.owner ?? undefined,
   };
 }
 
-function buildFoundryOpenAiEnv(creds: FoundryCredentials, secret: string): ProviderEnvResult {
+function buildFoundryOpenAiEnv(
+  creds: FoundryCredentials,
+  secret: string,
+  auth: ProviderAuthResolution,
+): ProviderEnvResult {
   const filePath = `${SECRET_DIR}/foundry-openai-key`;
   const env = withRuntimeTelemetryOptOutEnv({
     OPENAI_BASE_URL: creds.endpoint,
@@ -418,5 +453,6 @@ function buildFoundryOpenAiEnv(creds: FoundryCredentials, secret: string): Provi
     containerFiles: buildClaudeConfigFiles(),
     secretFiles: [{ path: filePath, content: secret }],
     requiresPostExecPersistence: false,
+    credentialOwner: auth.owner ?? undefined,
   };
 }

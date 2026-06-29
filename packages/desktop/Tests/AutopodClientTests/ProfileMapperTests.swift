@@ -166,6 +166,25 @@ import AutopodUI
   #expect(askAi?["model"] as? String == "claude-sonnet-4-6")
 }
 
+@Test func profileMapperRoundTripsProviderAccountId() throws {
+  let json = """
+  {
+    "name": "app",
+    "modelProvider": "openai",
+    "providerAccountId": "team-openai",
+    "version": 1,
+    "createdAt": "2026-05-25T00:00:00Z",
+    "updatedAt": "2026-05-25T00:00:00Z"
+  }
+  """.data(using: .utf8)!
+  let response = try JSONDecoder().decode(ProfileResponse.self, from: json)
+  let mapped = ProfileMapper.map(response)
+  let fields = ProfileMapper.mapToFields(mapped)
+
+  #expect(mapped.providerAccountId == "team-openai")
+  #expect(fields["providerAccountId"] as? String == "team-openai")
+}
+
 private func decodeMapperProfile(advisoryBrowserQaFragment: String) throws -> ProfileResponse {
   let json = """
   {

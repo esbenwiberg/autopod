@@ -51,6 +51,7 @@ public struct Profile: Identifiable, Sendable {
     public var defaultRuntime: RuntimeType
     public var executionTarget: ExecutionTarget
     public var modelProvider: ModelProvider
+    public var providerAccountId: String?
     public var prProvider: PRProvider
     public var customInstructions: String?
     public var agentDonePrompt: String?
@@ -208,7 +209,9 @@ public struct Profile: Identifiable, Sendable {
         defaultModel: String = "claude-opus-4-8", reviewerModel: String = "claude-sonnet-4-6",
         defaultRuntime: RuntimeType = .claude,
         executionTarget: ExecutionTarget = .local,
-        modelProvider: ModelProvider = .anthropic, prProvider: PRProvider = .github,
+        modelProvider: ModelProvider = .anthropic,
+        providerAccountId: String? = nil,
+        prProvider: PRProvider = .github,
         customInstructions: String? = nil, agentDonePrompt: String? = nil,
         containerMemoryGb: Double? = nil,
         branchPrefix: String = "autopod/", hasWebUi: Bool = true,
@@ -273,6 +276,7 @@ public struct Profile: Identifiable, Sendable {
         self.defaultModel = defaultModel; self.reviewerModel = reviewerModel
         self.defaultRuntime = defaultRuntime
         self.executionTarget = executionTarget; self.modelProvider = modelProvider
+        self.providerAccountId = providerAccountId
         self.prProvider = prProvider; self.customInstructions = customInstructions
         self.agentDonePrompt = agentDonePrompt
         self.containerMemoryGb = containerMemoryGb

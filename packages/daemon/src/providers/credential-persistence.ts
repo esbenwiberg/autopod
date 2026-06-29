@@ -1,35 +1,48 @@
 import { CONTAINER_HOME_DIR } from '@autopod/shared';
-import type { MaxCredentials, MaxRefreshCredentials } from '@autopod/shared';
+import type {
+  MaxCredentials,
+  MaxRefreshCredentials,
+  OpenAiCredentials,
+  ProviderCredentials,
+} from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ProfileStore } from '../profiles/index.js';
+import type { ProviderAccountStore } from '../provider-accounts/index.js';
+import { type CredentialOwner, credentialOwnerKey } from './auth-resolution.js';
 import { refreshOAuthToken } from './credential-refresh.js';
 import type { MaxCredentialLineage } from './types.js';
 
 /** Path where MAX credentials are written inside the container. */
 const CREDENTIALS_PATH = `${CONTAINER_HOME_DIR}/.claude/.credentials.json`;
+/** Path where Codex stores ChatGPT/OpenAI auth inside the container. */
+const CODEX_AUTH_PATH = `${CONTAINER_HOME_DIR}/.codex/auth.json`;
 
 /**
- * In-process serialization keyed by credential-owner profile name. When
- * multiple pods on derived profiles share one owner (Option B credential
- * inheritance), their rotation persists must not interleave — the second
+ * In-process serialization keyed by credential owner. When multiple pods share
+ * one account/profile owner, their persists must not interleave — the second
  * writer could otherwise blow away a fresher token from the first.
  */
 const ownerLocks = new Map<string, Promise<void>>();
 
-function withOwnerLock<T>(owner: string, fn: () => Promise<T>): Promise<T> {
-  const prev = ownerLocks.get(owner) ?? Promise.resolve();
+function withOwnerLock<T>(ownerKey: string, fn: () => Promise<T>): Promise<T> {
+  const prev = ownerLocks.get(ownerKey) ?? Promise.resolve();
   const run = prev.then(fn, fn);
   const next = run.then(
     () => undefined,
     () => undefined,
   );
-  ownerLocks.set(owner, next);
-  // Clean up once done so the map doesn't leak profile names forever.
+  ownerLocks.set(ownerKey, next);
+  // Clean up once done so the map doesn't leak owner ids forever.
   next.finally(() => {
-    if (ownerLocks.get(owner) === next) ownerLocks.delete(owner);
+    if (ownerLocks.get(ownerKey) === next) ownerLocks.delete(ownerKey);
   });
   return run;
+}
+
+interface CredentialPersistenceOptions {
+  providerAccountStore?: ProviderAccountStore;
+  owner?: CredentialOwner;
 }
 
 function isMaxRefreshCredentials(
@@ -72,29 +85,88 @@ function mergeMaxMetadata(
   };
 }
 
+function ownerLogFields(owner: CredentialOwner): Record<string, string> {
+  return owner.type === 'provider-account'
+    ? { credentialOwnerType: owner.type, credentialOwnerId: owner.id }
+    : { credentialOwnerType: owner.type, credentialOwnerName: owner.name };
+}
+
+function resolveMaxOwner(
+  profileStore: ProfileStore,
+  profileName: string,
+  options: CredentialPersistenceOptions,
+): CredentialOwner {
+  if (options.owner) return options.owner;
+  const providerAccountId = profileStore.resolveProviderAccountId?.(profileName);
+  if (providerAccountId) return { type: 'provider-account', id: providerAccountId };
+  return { type: 'profile', name: profileStore.resolveCredentialOwner(profileName) ?? profileName };
+}
+
+function resolveExistingAuthOwner(
+  profileStore: ProfileStore,
+  profileName: string,
+  options: CredentialPersistenceOptions,
+): CredentialOwner | null {
+  if (options.owner) return options.owner;
+  const providerAccountId = profileStore.resolveProviderAccountId?.(profileName);
+  if (providerAccountId) return { type: 'provider-account', id: providerAccountId };
+  const credentialOwner = profileStore.resolveCredentialOwner(profileName);
+  return credentialOwner ? { type: 'profile', name: credentialOwner } : null;
+}
+
+function getOwnerCredentials(
+  profileStore: ProfileStore,
+  providerAccountStore: ProviderAccountStore | undefined,
+  owner: CredentialOwner,
+): ProviderCredentials | null {
+  if (owner.type === 'profile') {
+    return profileStore.getRaw(owner.name).providerCredentials;
+  }
+  if (!providerAccountStore) {
+    throw new Error('Provider account credential owner requires ProviderAccountStore');
+  }
+  return providerAccountStore.get(owner.id).credentials;
+}
+
+function updateOwnerCredentials(
+  profileStore: ProfileStore,
+  providerAccountStore: ProviderAccountStore | undefined,
+  owner: CredentialOwner,
+  credentials: ProviderCredentials | null,
+): void {
+  if (owner.type === 'profile') {
+    profileStore.update(owner.name, { providerCredentials: credentials });
+    return;
+  }
+  if (!providerAccountStore) {
+    throw new Error('Provider account credential owner requires ProviderAccountStore');
+  }
+  providerAccountStore.updateCredentials(owner.id, credentials);
+}
+
 async function persistMaxCredentialsUnderLock(
   profileStore: ProfileStore,
-  ownerName: string,
+  providerAccountStore: ProviderAccountStore | undefined,
+  owner: CredentialOwner,
   profileName: string,
   credentials: MaxRefreshCredentials,
   logger: Logger,
 ): Promise<MaxRefreshCredentials> {
-  const ownerProfile = profileStore.getRaw(ownerName);
-  const currentCreds =
-    ownerProfile.providerCredentials?.provider === 'max' ? ownerProfile.providerCredentials : null;
+  const rawCurrentCreds = getOwnerCredentials(profileStore, providerAccountStore, owner);
+  const currentCreds = rawCurrentCreds?.provider === 'max' ? rawCurrentCreds : null;
   const updated = mergeMaxMetadata(credentials, currentCreds);
 
   if (isMaxRefreshCredentials(currentCreds) && sameMaxCredentials(updated, currentCreds)) {
     logger.debug(
-      { profileName, ownerName },
+      { profileName, ...ownerLogFields(owner) },
       'Owner MAX credentials already match refreshed credentials — skipping persist',
     );
     return updated;
   }
 
-  profileStore.update(ownerName, { providerCredentials: updated });
+  updateOwnerCredentials(profileStore, providerAccountStore, owner, updated);
   logger.info(
-    { profileName, ownerName, expiresAt: updated.expiresAt },
+    { profileName, ...ownerLogFields(owner), expiresAt: updated.expiresAt },
     'Persisted refreshed MAX credentials to credential owner',
   );
   return updated;
@@ -112,15 +184,14 @@ export async function refreshAndPersistMaxCredentials(
   profileName: string,
   fallbackCreds: MaxRefreshCredentials,
   logger: Logger,
+  options: CredentialPersistenceOptions = {},
 ): Promise<{ credentials: MaxRefreshCredentials; lineage: MaxCredentialLineage }> {
-  const ownerName = profileStore.resolveCredentialOwner(profileName) ?? profileName;
+  const owner = resolveMaxOwner(profileStore, profileName, options);
+  const ownerKey = credentialOwnerKey(owner);
 
-  return withOwnerLock(ownerName, async () => {
-    const ownerProfile = profileStore.getRaw(ownerName);
-    const currentCreds =
-      ownerProfile.providerCredentials?.provider === 'max'
-        ? ownerProfile.providerCredentials
-        : fallbackCreds;
+  return withOwnerLock(ownerKey, async () => {
+    const rawCurrentCreds = getOwnerCredentials(profileStore, options.providerAccountStore, owner);
+    const currentCreds = rawCurrentCreds?.provider === 'max' ? rawCurrentCreds : fallbackCreds;
     if (!isMaxRefreshCredentials(currentCreds)) {
       throw new Error(
         `Profile "${profileName}" uses MAX setup-token auth; refresh-token rotation is not available`,
@@ -131,20 +202,21 @@ export async function refreshAndPersistMaxCredentials(
     if (sameMaxCredentials(refreshed, currentCreds)) {
       return {
         credentials: currentCreds,
-        lineage: { ownerName, issuedRefreshToken: currentCreds.refreshToken },
+        lineage: { owner, issuedRefreshToken: currentCreds.refreshToken },
       };
     }
 
     const persisted = await persistMaxCredentialsUnderLock(
       profileStore,
-      ownerName,
+      options.providerAccountStore,
+      owner,
       profileName,
       refreshed,
       logger,
     );
     return {
       credentials: persisted,
-      lineage: { ownerName, issuedRefreshToken: persisted.refreshToken },
+      lineage: { owner, issuedRefreshToken: persisted.refreshToken },
     };
   });
 }
@@ -167,16 +239,22 @@ export async function persistRefreshedCredentials(
   profileName: string,
   logger: Logger,
   lineage?: MaxCredentialLineage,
+  options: CredentialPersistenceOptions = {},
 ): Promise<void> {
-  const ownerName = profileStore.resolveCredentialOwner(profileName) ?? profileName;
-  const initialOwnerProfile = profileStore.getRaw(ownerName);
-  const initialOwnerCreds =
-    initialOwnerProfile.providerCredentials?.provider === 'max'
-      ? initialOwnerProfile.providerCredentials
-      : null;
+  const owner = resolveMaxOwner(profileStore, profileName, {
+    ...options,
+    owner: options.owner ?? lineage?.owner,
+  });
+  const ownerKey = credentialOwnerKey(owner);
+  const rawInitialOwnerCreds = getOwnerCredentials(
+    profileStore,
+    options.providerAccountStore,
+    owner,
+  );
+  const initialOwnerCreds = rawInitialOwnerCreds?.provider === 'max' ? rawInitialOwnerCreds : null;
   if (initialOwnerCreds && !isMaxRefreshCredentials(initialOwnerCreds)) {
     logger.debug(
-      { profileName, ownerName },
+      { profileName, ...ownerLogFields(owner) },
       'Skipping MAX credential persist because credential owner uses setup-token auth',
     );
     return;
@@ -221,18 +299,14 @@ export async function persistRefreshedCredentials(
   // Resolve which profile actually owns these credentials. For derived
   // profiles that inherit from a parent, rotations go to the parent's row
   // so all sibling profiles stay in sync.
-  await withOwnerLock(ownerName, async () => {
+  await withOwnerLock(ownerKey, async () => {
     // Re-read under the lock — another concurrent run may have persisted.
-    const ownerProfile = profileStore.getRaw(ownerName);
-    const rawCurrentCreds =
-      ownerProfile.providerCredentials?.provider === 'max'
-        ? ownerProfile.providerCredentials
-        : null;
+    const rawCurrentCreds = getOwnerCredentials(profileStore, options.providerAccountStore, owner);
     const currentCreds = isMaxRefreshCredentials(rawCurrentCreds) ? rawCurrentCreds : null;
 
     if (currentCreds && currentCreds.refreshToken === oauth.refreshToken) {
       logger.debug(
-        { profileName, ownerName },
+        { profileName, ...ownerLogFields(owner) },
         'Owner refresh token matches container — skipping persist',
       );
       return;
@@ -241,21 +315,25 @@ export async function persistRefreshedCredentials(
     if (lineage) {
       if (!currentCreds) {
         logger.warn(
-          { profileName, ownerName, lineageOwnerName: lineage.ownerName },
+          {
+            profileName,
+            ...ownerLogFields(owner),
+            lineageOwner: credentialOwnerKey(lineage.owner),
+          },
           'Skipping MAX credential persist because credential owner no longer has MAX credentials',
         );
         return;
       }
 
       if (
-        ownerName !== lineage.ownerName ||
+        ownerKey !== credentialOwnerKey(lineage.owner) ||
         currentCreds.refreshToken !== lineage.issuedRefreshToken
       ) {
         logger.warn(
           {
             profileName,
-            ownerName,
-            lineageOwnerName: lineage.ownerName,
+            ...ownerLogFields(owner),
+            lineageOwner: credentialOwnerKey(lineage.owner),
             ownerTokenChanged: currentCreds.refreshToken !== lineage.issuedRefreshToken,
           },
           'Skipping stale MAX credential persist because credential owner advanced since container issue',
@@ -275,6 +353,77 @@ export async function persistRefreshedCredentials(
       rateLimitTier: currentCreds?.rateLimitTier,
     };
 
-    await persistMaxCredentialsUnderLock(profileStore, ownerName, profileName, updated, logger);
+    await persistMaxCredentialsUnderLock(
+      profileStore,
+      options.providerAccountStore,
+      owner,
+      profileName,
+      updated,
+      logger,
+    );
+  });
+}
+
+export async function persistOpenAiAuthJson(
+  containerId: string,
+  containerManager: ContainerManager,
+  profileStore: ProfileStore,
+  profileName: string,
+  logger: Logger,
+  options: CredentialPersistenceOptions = {},
+): Promise<void> {
+  const owner = resolveExistingAuthOwner(profileStore, profileName, options);
+  if (!owner) {
+    logger.debug({ profileName }, 'Skipping Codex auth.json persist because no auth owner exists');
+    return;
+  }
+
+  let rawContent: string;
+  try {
+    rawContent = await containerManager.readFile(containerId, CODEX_AUTH_PATH);
+  } catch (err) {
+    logger.debug(
+      { err, containerId, profileName },
+      'Could not read Codex auth.json from container',
+    );
+    return;
+  }
+
+  try {
+    JSON.parse(rawContent);
+  } catch (err) {
+    logger.warn({ err, profileName }, 'Failed to parse Codex auth.json from container');
+    return;
+  }
+
+  const ownerKey = credentialOwnerKey(owner);
+  await withOwnerLock(ownerKey, async () => {
+    const currentCreds = getOwnerCredentials(profileStore, options.providerAccountStore, owner);
+    if (currentCreds && currentCreds.provider !== 'openai') {
+      logger.warn(
+        { profileName, ...ownerLogFields(owner), ownerProvider: currentCreds.provider },
+        'Skipping Codex auth.json persist because credential owner is not OpenAI',
+      );
+      return;
+    }
+
+    if (currentCreds?.provider === 'openai' && currentCreds.authJson === rawContent) {
+      logger.debug(
+        { profileName, ...ownerLogFields(owner) },
+        'Codex auth.json already matches credential owner — skipping persist',
+      );
+      return;
+    }
+
+    const updated: OpenAiCredentials = {
+      provider: 'openai',
+      authMode: 'chatgpt',
+      authJson: rawContent,
+    };
+    updateOwnerCredentials(profileStore, options.providerAccountStore, owner, updated);
+    logger.info(
+      { profileName, ...ownerLogFields(owner) },
+      'Persisted Codex auth.json to credential owner',
+    );
   });
 }

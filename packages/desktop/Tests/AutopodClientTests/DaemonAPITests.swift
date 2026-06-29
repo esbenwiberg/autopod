@@ -174,6 +174,7 @@ import Testing
     "actionPolicy": null,
     "outputMode": "pr",
     "modelProvider": "anthropic",
+    "providerAccountId": "team-anthropic",
     "providerCredentials": null,
     "testCommand": "pnpm test",
     "buildTimeout": 300,
@@ -202,6 +203,7 @@ import Testing
   #expect(profile.githubPat == "encrypted-value")
   #expect(profile.githubPatExpiresAt == "2026-06-01")
   #expect(profile.containerMemoryGb == 4.0)
+  #expect(profile.providerAccountId == "team-anthropic")
 }
 
 private actor RequestRecorder {

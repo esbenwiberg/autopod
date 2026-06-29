@@ -176,6 +176,90 @@ describe('AutopodClient', () => {
     });
   });
 
+  describe('provider accounts', () => {
+    it('lists provider accounts with a provider filter', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse([{ id: 'team-openai' }]));
+
+      const result = await client.listProviderAccounts({ provider: 'openai' });
+
+      expect(result).toEqual([{ id: 'team-openai' }]);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/provider-accounts?provider=openai',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
+
+    it('creates provider accounts', async () => {
+      const account = { id: 'team-openai', name: 'Team OpenAI', provider: 'openai' };
+      mockFetch.mockResolvedValueOnce(jsonResponse(account, 201));
+
+      const result = await client.createProviderAccount({
+        name: 'Team OpenAI',
+        provider: 'openai',
+      });
+
+      expect(result).toEqual(account);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/provider-accounts',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ name: 'Team OpenAI', provider: 'openai' }),
+        }),
+      );
+    });
+
+    it('links provider accounts to profiles', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ account: { id: 'team-openai' }, profile: { name: 'my-app' } }),
+      );
+
+      await client.linkProviderAccount('team-openai', 'my-app', {
+        clearLegacyCredentials: true,
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/provider-accounts/team-openai/link-profile',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            profileName: 'my-app',
+            clearLegacyCredentials: true,
+          }),
+        }),
+      );
+    });
+
+    it('imports provider accounts from legacy profile credentials', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          account: { id: 'team-openai' },
+          linkedProfiles: [{ name: 'my-app' }],
+          legacyCredentialsCleared: true,
+        }),
+      );
+
+      await client.importProviderAccountFromProfile({
+        profileName: 'legacy-profile',
+        accountName: 'Team OpenAI',
+        linkProfileNames: ['my-app'],
+        clearLegacyCredentials: true,
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/provider-accounts/import-from-profile',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            profileName: 'legacy-profile',
+            accountName: 'Team OpenAI',
+            linkProfileNames: ['my-app'],
+            clearLegacyCredentials: true,
+          }),
+        }),
+      );
+    });
+  });
+
   describe('scheduled job templates', () => {
     it('lists scheduled job templates', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse([{ id: 'tmpl-1', name: 'Log triage' }]));

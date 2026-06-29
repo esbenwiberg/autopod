@@ -1,6 +1,7 @@
 import type { Profile } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import { RUNTIME_TELEMETRY_OPT_OUT_ENV } from '../runtime-env.js';
 import { clearAzureTokenCache } from './azure-token.js';
 import { buildProviderEnv } from './env-builder.js';
@@ -41,6 +42,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     actionPolicy: null,
     outputMode: 'pr',
     modelProvider: 'anthropic',
+    providerAccountId: null,
     providerCredentials: null,
     testCommand: null,
     prProvider: 'github',
@@ -131,6 +133,75 @@ describe('buildProviderEnv', () => {
       expect(result.containerFiles).toEqual(
         expect.arrayContaining([{ path: '/home/autopod/.codex/auth.json', content: authJson }]),
       );
+      expect(result.requiresOpenAiAuthJsonPersistence).toBe(true);
+    });
+
+    it('prefers linked provider-account credentials over legacy profile credentials', async () => {
+      const accountAuthJson = JSON.stringify({ tokens: { access_token: 'account-token' } });
+      const legacyAuthJson = JSON.stringify({ tokens: { access_token: 'legacy-token' } });
+      const providerAccountStore = {
+        get: vi.fn(() => ({
+          id: 'team-openai',
+          name: 'Team OpenAI',
+          provider: 'openai',
+          credentials: {
+            provider: 'openai',
+            authMode: 'chatgpt',
+            authJson: accountAuthJson,
+          },
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+          lastAuthenticatedAt: '2026-01-01T00:00:00Z',
+          lastUsedAt: null,
+        })),
+        touchLastUsed: vi.fn(),
+      } as unknown as ProviderAccountStore;
+      const profile = makeProfile({
+        modelProvider: 'openai',
+        defaultRuntime: 'codex',
+        providerAccountId: 'team-openai',
+        providerCredentials: {
+          provider: 'openai',
+          authMode: 'chatgpt',
+          authJson: legacyAuthJson,
+        },
+      });
+
+      const result = await buildProviderEnv(profile, 'pod-1', logger, { providerAccountStore });
+
+      expect(providerAccountStore.touchLastUsed).toHaveBeenCalledWith('team-openai');
+      expect(result.containerFiles).toEqual(
+        expect.arrayContaining([
+          { path: '/home/autopod/.codex/auth.json', content: accountAuthJson },
+        ]),
+      );
+      expect(result.credentialOwner).toEqual({ type: 'provider-account', id: 'team-openai' });
+      expect(result.requiresOpenAiAuthJsonPersistence).toBe(true);
+    });
+
+    it('rejects a linked provider account for the wrong model provider', async () => {
+      const providerAccountStore = {
+        get: vi.fn(() => ({
+          id: 'team-copilot',
+          name: 'Team Copilot',
+          provider: 'copilot',
+          credentials: { provider: 'copilot', token: 'gho_token' },
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+          lastAuthenticatedAt: '2026-01-01T00:00:00Z',
+          lastUsedAt: null,
+        })),
+        touchLastUsed: vi.fn(),
+      } as unknown as ProviderAccountStore;
+      const profile = makeProfile({
+        modelProvider: 'openai',
+        defaultRuntime: 'codex',
+        providerAccountId: 'team-copilot',
+      });
+
+      await expect(
+        buildProviderEnv(profile, 'pod-1', logger, { providerAccountStore }),
+      ).rejects.toThrow(/provider account.*copilot/i);
     });
 
     it('writes OPENAI_API_KEY to a secret file when configured', async () => {

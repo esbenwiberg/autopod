@@ -35,6 +35,7 @@ public struct ProfileResponse: Codable, Sendable {
   public var outputMode: String?
   public var pod: PodConfigResponse?
   public var modelProvider: String?
+  public var providerAccountId: String?
   public var providerCredentials: ProviderCredentialsResponse?
   public var testCommand: String?
   public var validationSetupCommand: String?
@@ -125,6 +126,7 @@ public struct ProfileResponse: Codable, Sendable {
     case outputMode
     case pod
     case modelProvider
+    case providerAccountId
     case providerCredentials
     case testCommand
     case validationSetupCommand
@@ -205,6 +207,7 @@ public struct ProfileResponse: Codable, Sendable {
     outputMode = try c.decodeIfPresent(String.self, forKey: .outputMode)
     pod = try c.decodeIfPresent(PodConfigResponse.self, forKey: .pod)
     modelProvider = try c.decodeIfPresent(String.self, forKey: .modelProvider)
+    providerAccountId = try c.decodeIfPresent(String.self, forKey: .providerAccountId)
     providerCredentials = try c.decodeIfPresent(ProviderCredentialsResponse.self, forKey: .providerCredentials)
     testCommand = try c.decodeIfPresent(String.self, forKey: .testCommand)
     validationSetupCommand = try c.decodeIfPresent(String.self, forKey: .validationSetupCommand)
@@ -260,6 +263,7 @@ public struct ProfileResponse: Codable, Sendable {
     agentDonePrompt = nil
     escalation = .init(); mcpServers = []; claudeMdSections = []; skills = []
     outputMode = "pr"; modelProvider = "anthropic"; buildTimeout = 300
+    providerAccountId = nil
     testTimeout = 600; prProvider = "github"; privateRegistries = []
     validationSetupCommand = nil
     hasAdoPat = false; hasGithubPat = false; hasRegistryPat = false
@@ -298,20 +302,50 @@ public struct ProfileEditorResponse: Codable, Sendable {
   /// Used to render "Authenticated via <owner>" when the current profile
   /// inherits its auth from an ancestor.
   public let credentialOwner: String?
+  /// Resolved provider-account link, if profile auth comes from a shared account.
+  public let providerAccountId: String?
+  /// Server-computed model-provider auth source for the resolved profile.
+  public let authSource: ProviderAuthSourceResponse?
 
   public init(
     raw: ProfileResponse,
     resolved: ProfileResponse,
     parent: ProfileResponse?,
     sourceMap: [String: FieldSource],
-    credentialOwner: String?
+    credentialOwner: String?,
+    providerAccountId: String? = nil,
+    authSource: ProviderAuthSourceResponse? = nil
   ) {
     self.raw = raw
     self.resolved = resolved
     self.parent = parent
     self.sourceMap = sourceMap
     self.credentialOwner = credentialOwner
+    self.providerAccountId = providerAccountId
+    self.authSource = authSource
   }
+}
+
+// MARK: - Provider accounts
+
+public struct PublicProviderAccountResponse: Codable, Sendable {
+  public var id: String
+  public var name: String
+  public var provider: String
+  public var credentials: ProviderCredentialsResponse?
+  public var hasCredentials: Bool
+  public var lastAuthenticatedAt: String?
+  public var lastUsedAt: String?
+  public var createdAt: String
+  public var updatedAt: String
+}
+
+public struct ProviderAuthSourceResponse: Codable, Sendable {
+  public var type: String
+  public var provider: String?
+  public var account: PublicProviderAccountResponse?
+  public var inherited: Bool?
+  public var profileName: String?
 }
 
 // MARK: - Nested types

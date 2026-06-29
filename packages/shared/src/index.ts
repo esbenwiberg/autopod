@@ -152,7 +152,15 @@ export type {
   FoundryCredentials,
   FoundryApiSurface,
   CopilotCredentials,
+  OpenRouterCredentials,
 } from './types/model-provider.js';
+
+export type {
+  ProviderAccount,
+  PublicProviderAccount,
+  ProviderAccountProvider,
+  ProviderAuthSource,
+} from './types/provider-account.js';
 
 export type {
   RuntimeType,
@@ -353,6 +361,16 @@ export {
   providerCredentialsSchema,
   pimActivationConfigSchema,
 } from './schemas/profile.schema.js';
+
+export {
+  createProviderAccountSchema,
+  importProviderAccountFromProfileSchema,
+  linkProviderAccountSchema,
+  providerAccountIdSchema,
+  providerAccountNameSchema,
+  providerAccountProviderSchema,
+  updateProviderAccountSchema,
+} from './schemas/provider-account.schema.js';
 
 export {
   actionDefinitionSchema,

@@ -1311,6 +1311,25 @@ public struct ProfileEditorView: View {
             }
         }
 
+        fieldRow("Provider Account", help: "Shared provider account id for model-provider auth. Leave empty to use profile credentials or daemon environment auth.") {
+            HStack(spacing: 8) {
+                TextField("team-openai", text: Binding(
+                    get: { profile.providerAccountId ?? "" },
+                    set: { profile.providerAccountId = $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.callout, design: .monospaced))
+                .frame(minWidth: 180)
+                if profile.providerAccountId != nil {
+                    Button("Clear") {
+                        profile.providerAccountId = nil
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                }
+            }
+        }
+
         // Provider credentials indicator
         if let credType = profile.providerCredentialsType {
             HStack(spacing: 6) {
@@ -1375,7 +1394,7 @@ public struct ProfileEditorView: View {
         }
 
         // OAuth/auth buttons for MAX, OpenAI Codex, and Copilot
-        if !isNew && (profile.modelProvider == .max || profile.modelProvider == .openai || profile.modelProvider == .copilot) {
+        if !isNew && profile.providerAccountId == nil && (profile.modelProvider == .max || profile.modelProvider == .openai || profile.modelProvider == .copilot) {
             HStack(spacing: 12) {
                 if profile.modelProvider == .max {
                     Button {
@@ -2425,9 +2444,13 @@ public struct ProfileEditorView: View {
     /// users don't have to fish for it in the Add menu.
     @ViewBuilder
     private var providersCard: some View {
+        let authSource = editorPayload?.authSource
+        let account = authSource?.account
         let ownerName = editorPayload?.credentialOwner
         let isOwnerSelf = ownerName == profile.name
-        let resolvedProvider = editorPayload?.resolved.modelProvider ?? profile.modelProvider.rawValue
+        let resolvedProvider = authSource?.provider
+            ?? editorPayload?.resolved.modelProvider
+            ?? profile.modelProvider.rawValue
 
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
@@ -2447,7 +2470,29 @@ public struct ProfileEditorView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if let ownerName, !isOwnerSelf {
+            if authSource?.type == "provider-account", let account {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.2.badge.key.fill")
+                        .foregroundStyle(account.hasCredentials ? .green : .orange)
+                    Text(account.hasCredentials ? "Authenticated via provider account" : "Provider account linked")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(account.name)
+                        .font(.system(.caption, design: .monospaced).weight(.medium))
+                    Spacer()
+                }
+                Text(account.hasCredentials
+                    ? "Account id: \(account.id). Token rotations during pod runs are saved on this shared account."
+                    : "Account id: \(account.id). Add credentials to the shared provider account before running pods.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if authSource?.inherited == true {
+                    Text("Inherited from parent profile")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            } else if let ownerName, !isOwnerSelf {
                 // Inherited auth — read-only state + explicit break-inheritance.
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.turn.down.right")
@@ -2809,6 +2854,14 @@ public struct ProfileEditorView: View {
             enumCard(field, selection: $profile.modelProvider,
                      options: ModelProvider.allCases.map { ($0, $0.label) },
                      parent: editorPayload?.parent?.modelProvider ?? "")
+        case "providerAccountId":
+            nullableStringCard(field,
+                value: Binding(
+                    get: { profile.providerAccountId ?? "" },
+                    set: { profile.providerAccountId = $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+                ),
+                parent: editorPayload?.parent?.providerAccountId ?? "",
+                placeholder: "team-openai")
         case "prProvider":
             enumCard(field, selection: $profile.prProvider,
                      options: PRProvider.allCases.map { ($0, $0.label) },
