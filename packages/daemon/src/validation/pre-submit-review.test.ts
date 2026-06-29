@@ -94,6 +94,54 @@ describe('runPreSubmitReview', () => {
     expect(mockRunClaudeCli).not.toHaveBeenCalled();
   });
 
+  it('runs Anthropic-compatible reviewers through the live pod container when available', async () => {
+    const containerManager = {
+      getStatus: vi.fn().mockResolvedValue('running' as const),
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      execInContainer: vi.fn().mockResolvedValue({
+        stdout: JSON.stringify({
+          status: 'pass',
+          reasoning: 'Container Claude says clean.',
+          issues: [],
+        }),
+        stderr: '',
+        exitCode: 0,
+      }),
+    } as unknown as ContainerManager;
+
+    const result = await runPreSubmitReview({
+      task: 'Add dark mode toggle',
+      diff: 'diff --git a/app.tsx b/app.tsx\n+const [theme, setTheme] = useState("light")',
+      reviewerModel: 'sonnet',
+      reviewerProvider: 'max',
+      reviewerProviderCredentials: {
+        provider: 'max',
+        authMode: 'setup-token',
+        oauthToken: 'stored-token',
+      },
+      podId: 'pod-1',
+      containerId: 'container-1',
+      containerManager,
+    });
+
+    expect(result.status).toBe('pass');
+    expect(result.reasoning).toBe('Container Claude says clean.');
+    expect(containerManager.writeFile).toHaveBeenCalledWith(
+      'container-1',
+      expect.stringContaining('/tmp/autopod-claude-review-pod-1-'),
+      expect.stringContaining('## DIFF'),
+    );
+    expect(containerManager.execInContainer).toHaveBeenCalledWith(
+      'container-1',
+      ['sh', '-c', expect.stringContaining("sh '/run/autopod/agent-shim.sh' claude -p")],
+      expect.objectContaining({
+        cwd: '/workspace',
+        timeout: 90_000,
+      }),
+    );
+    expect(mockRunClaudeCli).not.toHaveBeenCalled();
+  });
+
   it('surfaces medium+ issues on a fail', async () => {
     mockRunClaudeCli.mockResolvedValueOnce({
       stdout: JSON.stringify({

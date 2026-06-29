@@ -101,6 +101,14 @@ When ACR is configured, the image builder stores the ACR-qualified tag on the pr
 
 ACR warm-image builds force `linux/amd64`, because the Sandboxes preview rejects `linux/arm64` images even when they are otherwise valid OCI images.
 
+Daemons with `ACR_REGISTRY_URL` configured also run a daemon-native warm-image maintenance
+scheduler by default. It scans profiles after startup and every 24 hours, rebuilds missing or stale
+warm images, and continues if one profile fails. The default scope is `sandbox`: profiles whose
+default `executionTarget` is `sandbox`, plus any local profile that already has a warm image. Set
+`AUTOPOD_WARM_IMAGE_MAINTENANCE_SCOPE=all` to keep every repo-backed profile warm, or set
+`AUTOPOD_WARM_IMAGE_MAINTENANCE=false` to disable the scheduler. Override the cadence with
+`AUTOPOD_WARM_IMAGE_MAINTENANCE_INTERVAL_MS`.
+
 At sandbox pod spawn, the daemon checks:
 
 - `profile.warmImageTag` exists.

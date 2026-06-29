@@ -25,6 +25,10 @@ import { createPodTokenIssuer } from './crypto/pod-tokens.js';
 import { createDbBackupManager } from './db/backup.js';
 import { createDatabase } from './db/connection.js';
 import { runMigrations } from './db/migrate.js';
+import type {
+  WarmImageMaintenanceJob,
+  WarmImageMaintenanceScope,
+} from './images/warm-image-maintenance.js';
 import type { AuthModule } from './interfaces/index.js';
 import type { ContainerManager } from './interfaces/index.js';
 import {
@@ -303,6 +307,30 @@ function parseEnvList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+function parseBooleanEnv(name: string, fallback: boolean): boolean {
+  const value = process.env[name]?.trim().toLowerCase();
+  if (!value) return fallback;
+  if (value === '1' || value === 'true' || value === 'yes' || value === 'on') return true;
+  if (value === '0' || value === 'false' || value === 'no' || value === 'off') return false;
+  throw new Error(`${name} must be a boolean: true/false or 1/0`);
+}
+
+function parsePositiveIntegerEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed.toString() !== raw) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function parseWarmImageMaintenanceScope(value: string | undefined): WarmImageMaintenanceScope {
+  if (!value) return 'sandbox';
+  if (value === 'sandbox' || value === 'all') return value;
+  throw new Error('AUTOPOD_WARM_IMAGE_MAINTENANCE_SCOPE must be "sandbox" or "all"');
+}
+
 const authModule: AuthModule = createConfiguredAuthModule();
 
 const worktreeManager = new LocalWorktreeManager({ logger });
@@ -426,6 +454,35 @@ if (docker) {
     { acrRegistry: ACR_REGISTRY_URL ?? null, mode: acr ? 'acr-push' : 'local-only' },
     'Image warming enabled',
   );
+}
+
+let warmImageMaintenanceJob: WarmImageMaintenanceJob | undefined;
+const warmImageMaintenanceEnabled = parseBooleanEnv(
+  'AUTOPOD_WARM_IMAGE_MAINTENANCE',
+  Boolean(ACR_REGISTRY_URL),
+);
+if (warmImageMaintenanceEnabled) {
+  if (!imageBuilder) {
+    logger.warn(
+      'Warm-image maintenance requested but image warming is not configured. Start with Docker enabled to run the maintenance scheduler.',
+    );
+  } else {
+    const { DEFAULT_WARM_IMAGE_MAINTENANCE_INTERVAL_MS, createWarmImageMaintenanceJob } =
+      await import('./images/warm-image-maintenance.js');
+    const intervalMs = parsePositiveIntegerEnv(
+      'AUTOPOD_WARM_IMAGE_MAINTENANCE_INTERVAL_MS',
+      DEFAULT_WARM_IMAGE_MAINTENANCE_INTERVAL_MS,
+    );
+    const scope = parseWarmImageMaintenanceScope(process.env.AUTOPOD_WARM_IMAGE_MAINTENANCE_SCOPE);
+    warmImageMaintenanceJob = createWarmImageMaintenanceJob({
+      profileStore,
+      imageBuilder,
+      logger: logger.child({ component: 'warm-image-maintenance' }),
+      intervalMs,
+      scope,
+    });
+    logger.info({ intervalMs, scope }, 'Warm-image maintenance configured');
+  }
 }
 
 const hostBrowserRunner = createHostBrowserRunner(logger);
@@ -849,6 +906,7 @@ screenshotRetention.start();
 
 // Start scheduled job scheduler AFTER server is listening
 scheduledJobScheduler.start();
+warmImageMaintenanceJob?.start();
 
 // Reconcile sandbox pods after startup (non-blocking — errors are logged, not fatal)
 if (sandboxContainerManager) {
@@ -949,6 +1007,7 @@ async function shutdown(signal: string) {
 
   // Stop scheduled job scheduler
   scheduledJobScheduler.stop();
+  warmImageMaintenanceJob?.stop();
 
   // Stop perf-mark cleaner
   clearInterval(perfClearTimer);

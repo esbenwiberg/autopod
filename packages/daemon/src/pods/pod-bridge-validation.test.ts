@@ -31,6 +31,7 @@ interface BuildOpts {
   containerId?: string | null;
   containerStatus?: 'running' | 'stopped' | 'unknown';
   reviewerExecEnv?: Record<string, string>;
+  executionTarget?: 'local' | 'sandbox';
   execImpl?: (
     containerId: string,
     command: string[],
@@ -80,7 +81,7 @@ function buildBridge(opts: BuildOpts = {}): {
       id: podId,
       profileName: 'proj',
       containerId,
-      executionTarget: 'local',
+      executionTarget: opts.executionTarget ?? 'local',
     })),
     touchHeartbeat: vi.fn(),
     getReviewerExecEnv: vi.fn().mockResolvedValue(opts.reviewerExecEnv),
@@ -508,6 +509,40 @@ describe('PodBridge.generateBrowserValidationScript', () => {
     expect(mockRunCodexReview).not.toHaveBeenCalled();
   });
 
+  it('passes fresh reviewer exec env into Max/Pro browser script generation for sandbox pods', async () => {
+    const reviewerExecEnv = {
+      CLAUDE_CODE_OAUTH_TOKEN: 'fresh-token',
+      CLAUDE_CONFIG_DIR: '/tmp/autopod/reviewer-claude',
+    };
+    const { bridge, execMock, podId } = buildBridge({
+      executionTarget: 'sandbox',
+      reviewerExecEnv,
+      profileOverrides: {
+        modelProvider: 'max',
+        reviewerModel: 'sonnet',
+        providerCredentials: {
+          provider: 'max',
+          authMode: 'setup-token',
+          oauthToken: 'stored-token',
+        },
+      },
+      execImpl: async () => ({ stdout: 'generated playwright script\n', stderr: '', exitCode: 0 }),
+    });
+
+    const result = await bridge.generateBrowserValidationScript(podId, 'Generate a script');
+
+    expect(result).toBe('generated playwright script');
+    expect(execMock).toHaveBeenCalledWith(
+      'container-abc',
+      expect.any(Array),
+      expect.objectContaining({
+        cwd: '/workspace',
+        timeout: 60_000,
+        env: reviewerExecEnv,
+      }),
+    );
+  });
+
   it('runs OpenAI browser script generation through the container Codex CLI path', async () => {
     mockRunCodexReview.mockResolvedValueOnce({ stdout: 'generated playwright script' });
     const { bridge, podId } = buildBridge({
@@ -594,6 +629,7 @@ describe('PodBridge.runPreSubmitReview', () => {
     };
     /** Container id on the pod. Set null to force the host worktree fallback. */
     containerId?: string | null;
+    reviewerExecEnv?: Record<string, string>;
     runResult: Awaited<ReturnType<typeof runPreSubmitReview>>;
   }
 
@@ -628,6 +664,7 @@ describe('PodBridge.runPreSubmitReview', () => {
         preSubmitReview: opts.cachedVerdict ?? null,
       })),
       touchHeartbeat: vi.fn(),
+      getReviewerExecEnv: vi.fn().mockResolvedValue(opts.reviewerExecEnv),
     } as unknown as Deps['podManager'];
 
     const profileStore = {
@@ -969,6 +1006,56 @@ describe('PodBridge.runPreSubmitReview', () => {
         plannedDeviations: [{ step: 'Step 1', planned: 'A', actual: 'B', reason: 'because' }],
       }),
       expect.anything(),
+    );
+  });
+
+  it('passes fresh reviewer exec env into live-container pre-submit review', async () => {
+    const reviewerExecEnv = {
+      CLAUDE_CODE_OAUTH_TOKEN: 'fresh-token',
+      CLAUDE_CONFIG_DIR: '/tmp/autopod/reviewer-claude',
+    };
+    const runResult = {
+      status: 'pass',
+      reasoning: 'ok',
+      issues: [],
+      model: 'sonnet',
+      diffHash: 'h',
+      durationMs: 1,
+    } satisfies Awaited<ReturnType<typeof runPreSubmitReview>>;
+
+    mockRunPreSubmitReview.mockImplementationOnce(async (opts) => {
+      await opts.containerManager?.execInContainer(
+        'container-abc',
+        ['sh', '-c', 'claude -p review'],
+        {
+          cwd: '/workspace',
+          timeout: 90_000,
+          env: { EXISTING: 'kept' },
+        },
+      );
+      return runResult;
+    });
+
+    const { bridge, podId, containerExecMock } = buildBridgeWithWorktree({
+      containerDiff: SAMPLE_DIFF,
+      reviewerExecEnv,
+      runResult,
+    });
+
+    await bridge.runPreSubmitReview(podId, {});
+
+    expect(containerExecMock).toHaveBeenCalledWith(
+      'container-abc',
+      ['sh', '-c', 'claude -p review'],
+      expect.objectContaining({
+        cwd: '/workspace',
+        timeout: 90_000,
+        env: {
+          CLAUDE_CODE_OAUTH_TOKEN: 'fresh-token',
+          CLAUDE_CONFIG_DIR: '/tmp/autopod/reviewer-claude',
+          EXISTING: 'kept',
+        },
+      }),
     );
   });
 });

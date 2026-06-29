@@ -281,6 +281,34 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
     expect(parsed.results[1].passed).toBe(false);
   });
 
+  it('returns structured failed results when browser script generation fails', async () => {
+    const bridge = makeBridge('');
+    bridge.generateBrowserValidationScript.mockRejectedValueOnce(new Error('fetch failed'));
+
+    const result = await validateInBrowser(
+      'sess-1',
+      { url: 'http://localhost:3000', checks: ['Has title', 'Button is clickable'] },
+      bridge as never,
+    );
+
+    const parsed = JSON.parse(result);
+    expect(parsed.passed).toBe(false);
+    expect(parsed.results).toEqual([
+      {
+        check: 'Has title',
+        passed: false,
+        reasoning: expect.stringContaining('Browser validation infrastructure failed'),
+      },
+      {
+        check: 'Button is clickable',
+        passed: false,
+        reasoning: expect.stringContaining('fetch failed'),
+      },
+    ]);
+    expect(bridge.writeFileInContainer).not.toHaveBeenCalled();
+    expect(bridge.execInContainer).not.toHaveBeenCalled();
+  });
+
   it('calls bridge methods in correct order', async () => {
     const scriptOutput = `__AUTOPOD_BROWSER_RESULTS_START__
 [{ "check": "x", "passed": true, "reasoning": "ok" }]

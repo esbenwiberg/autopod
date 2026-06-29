@@ -3,6 +3,7 @@ import type { ModelProvider, PreSubmitReviewSnapshot, ProviderCredentials } from
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
+import { runContainerReviewer } from './container-reviewer-runner.js';
 import { parseReviewJson } from './local-validation-engine.js';
 import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
 
@@ -95,12 +96,16 @@ export async function runPreSubmitReview(
     return skipped('cli-error', 'Codex pre-submit reviewer requires a live pod container.');
   }
 
+  let runner: 'codex' | 'container-claude' | 'daemon-claude' =
+    reviewerRunner === 'codex' ? 'codex' : 'daemon-claude';
+
   try {
     let stdout: string;
     if (reviewerRunner === 'codex') {
       if (!opts.containerId || !opts.containerManager) {
         return skipped('cli-error', 'Codex pre-submit reviewer requires a live pod container.');
       }
+      runner = 'codex';
       ({ stdout } = await runCodexReview({
         podId: opts.podId ?? 'pre-submit',
         containerId: opts.containerId,
@@ -108,6 +113,21 @@ export async function runPreSubmitReview(
         model: opts.reviewerModel,
         prompt,
         timeout: timeoutMs,
+      }));
+    } else if (opts.containerId && opts.containerManager) {
+      runner = 'container-claude';
+      ({ stdout } = await runContainerReviewer({
+        podId: opts.podId ?? 'pre-submit',
+        containerId: opts.containerId,
+        containerManager: opts.containerManager,
+        profile: {
+          modelProvider: opts.reviewerProvider ?? null,
+          providerCredentials: opts.reviewerProviderCredentials ?? null,
+        },
+        model: opts.reviewerModel,
+        prompt,
+        timeout: timeoutMs,
+        logger: log,
       }));
     } else {
       ({ stdout } = await runClaudeCli({
@@ -131,9 +151,10 @@ export async function runPreSubmitReview(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const runner = err instanceof CodexReviewError ? 'codex' : 'claude';
+    if (err instanceof CodexReviewError) runner = 'codex';
     log?.warn({ err: message, runner }, 'pre-submit review: reviewer CLI failed');
-    return skipped('cli-error', `Pre-submit reviewer failed to run: ${message}`);
+    const location = opts.containerId && opts.containerManager ? ' in pod container' : '';
+    return skipped('cli-error', `Pre-submit reviewer failed to run${location}: ${message}`);
   }
 }
 

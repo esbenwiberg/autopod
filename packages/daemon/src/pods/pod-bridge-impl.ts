@@ -246,10 +246,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       const cm = containerManagerFactory.get(pod.executionTarget);
 
       try {
+        const reviewerExecEnv = await podManager.getReviewerExecEnv(pod);
         const { stdout } = await runContainerReviewer({
           podId,
           containerId: pod.containerId,
-          containerManager: cm,
+          containerManager: withReviewerExecEnv(cm, reviewerExecEnv),
           profile,
           model,
           prompt,
@@ -900,6 +901,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         );
       }
 
+      const reviewerExecEnv = containerManager
+        ? await podManager.getReviewerExecEnv(pod)
+        : undefined;
+      const reviewerContainerManager = containerManager
+        ? withReviewerExecEnv(containerManager, reviewerExecEnv)
+        : undefined;
+
       const result = await runPreSubmitReview(
         {
           task: pod.task ?? '',
@@ -909,7 +917,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           reviewerProviderCredentials: profile.providerCredentials,
           podId,
           containerId: pod.containerId,
-          containerManager,
+          containerManager: reviewerContainerManager,
           plannedSummary: input.plannedSummary,
           plannedDeviations: input.plannedDeviations,
         },

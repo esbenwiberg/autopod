@@ -50,14 +50,18 @@ export async function validateInBrowser(
 
   const timeout = input.checks.length * 45_000 + 30_000;
 
-  // Try host-side execution first — this avoids network isolation issues since
-  // the browser runs on the daemon host where external resources (CDN, fonts,
-  // client-side APIs) are reachable.
-  const hostResult = await tryHostExecution(podId, input, bridge, timeout);
-  if (hostResult) return hostResult;
+  try {
+    // Try host-side execution first — this avoids network isolation issues since
+    // the browser runs on the daemon host where external resources (CDN, fonts,
+    // client-side APIs) are reachable.
+    const hostResult = await tryHostExecution(podId, input, bridge, timeout);
+    if (hostResult) return hostResult;
 
-  // Fall back to in-container execution
-  return runInContainer(podId, input, bridge, timeout);
+    // Fall back to in-container execution
+    return await runInContainer(podId, input, bridge, timeout);
+  } catch (err) {
+    return JSON.stringify(browserInfraFailure(input.checks, err), null, 2);
+  }
 }
 
 // ── Host-side execution ────────────────────────────────────────────────────
@@ -262,6 +266,19 @@ export function parseResults(stdout: string, checks: string[]): BrowserCheckResu
       reasoning: 'Failed to parse script output as JSON',
     }));
   }
+}
+
+function browserInfraFailure(checks: string[], err: unknown): ValidateInBrowserResult {
+  const message = err instanceof Error ? err.message : String(err);
+  const reasoning = `Browser validation infrastructure failed before checks could run: ${message}`;
+  return {
+    passed: false,
+    results: checks.map((check) => ({
+      check,
+      passed: false,
+      reasoning,
+    })),
+  };
 }
 
 /** Strip markdown code fences from LLM output. */
