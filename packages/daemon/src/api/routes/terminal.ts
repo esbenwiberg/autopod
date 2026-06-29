@@ -70,6 +70,14 @@ export function terminalRoutes(
         return;
       }
 
+      if (pod.executionTarget !== 'local') {
+        socket.close(
+          4004,
+          'Sandbox interactive terminal is unsupported: Azure Sandboxes do not provide bidirectional TTY streaming yet',
+        );
+        return;
+      }
+
       const containerId = pod.containerId;
       const container = docker.getContainer(containerId);
 

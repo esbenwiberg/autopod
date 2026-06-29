@@ -55,6 +55,7 @@ function createMockClient() {
   return {
     createSession: vi.fn().mockResolvedValue(makePod()),
     getSession: vi.fn().mockResolvedValue(makePod({ status: 'running', containerId: 'ctr1' })),
+    getProfile: vi.fn().mockResolvedValue({ name: 'test-profile', executionTarget: 'local' }),
     listSessions: vi.fn().mockResolvedValue([]),
   } as unknown as AutopodClient;
 }
@@ -170,5 +171,33 @@ describe('workspace commands', () => {
     );
     expect(mockClient.getSession).toHaveBeenCalledWith('abcd1234');
     expect(attachSession).toHaveBeenCalledWith('autopod-abcd1234');
+  });
+
+  it('shell rejects sandbox-profile defaults before creating a workspace pod', async () => {
+    vi.mocked(mockClient.getProfile).mockResolvedValueOnce({
+      name: 'test-profile',
+      executionTarget: 'sandbox',
+    } as Awaited<ReturnType<AutopodClient['getProfile']>>);
+
+    await expect(program.parseAsync(['node', 'ap', 'shell', 'test-profile'])).rejects.toThrow(
+      /Sandbox interactive pods are not supported/,
+    );
+
+    expect(mockClient.createSession).not.toHaveBeenCalled();
+    expect(attachSession).not.toHaveBeenCalled();
+  });
+
+  it('workspace rejects sandbox-profile defaults before creating an interactive pod', async () => {
+    vi.mocked(mockClient.getProfile).mockResolvedValueOnce({
+      name: 'test-profile',
+      executionTarget: 'sandbox',
+    } as Awaited<ReturnType<AutopodClient['getProfile']>>);
+
+    await expect(program.parseAsync(['node', 'ap', 'workspace', 'test-profile'])).rejects.toThrow(
+      /Sandbox interactive pods are not supported/,
+    );
+
+    expect(mockClient.createSession).not.toHaveBeenCalled();
+    expect(attachSession).not.toHaveBeenCalled();
   });
 });

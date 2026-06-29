@@ -164,6 +164,7 @@ struct HelpBadge: View {
 /// Callback for profile authentication flows.
 /// Parameters: profile name, provider ("max", "openai", or "copilot"), completion callback (error message or nil).
 public typealias ProfileAuthHandler = (String, String, @escaping (String?) -> Void) -> Void
+public typealias ProviderAccountsLoadHandler = (String?) async throws -> [PublicProviderAccountResponse]
 
 /// Profile editor — settings-style layout with sidebar section navigation and inline help.
 public struct ProfileEditorView: View {
@@ -173,6 +174,7 @@ public struct ProfileEditorView: View {
     public let builtinSkills: [BuiltinSkillEntry]
     public var onSave: ((Profile) async throws -> Void)?
     public var onAuthenticate: ProfileAuthHandler?
+    public var onLoadProviderAccounts: ProviderAccountsLoadHandler?
     public var memoryEntries: [MemoryEntry] = []
     public var onApproveMemory: (String) -> Void = { _ in }
     public var onRejectMemory: (String) -> Void = { _ in }
@@ -219,6 +221,7 @@ public struct ProfileEditorView: View {
                 builtinSkills: [BuiltinSkillEntry] = [],
                 onSave: ((Profile) async throws -> Void)? = nil,
                 onAuthenticate: ProfileAuthHandler? = nil,
+                onLoadProviderAccounts: ProviderAccountsLoadHandler? = nil,
                 memoryEntries: [MemoryEntry] = [],
                 onApproveMemory: @escaping (String) -> Void = { _ in },
                 onRejectMemory: @escaping (String) -> Void = { _ in },
@@ -238,6 +241,7 @@ public struct ProfileEditorView: View {
         self.builtinSkills = builtinSkills
         self.onSave = onSave
         self.onAuthenticate = onAuthenticate
+        self.onLoadProviderAccounts = onLoadProviderAccounts
         self.memoryEntries = memoryEntries
         self.onApproveMemory = onApproveMemory
         self.onRejectMemory = onRejectMemory
@@ -258,6 +262,9 @@ public struct ProfileEditorView: View {
     @State private var saveError: String?
     @State private var isDeleting: Bool = false
     @State private var showDeleteConfirmation: Bool = false
+    @State private var providerAccounts: [PublicProviderAccountResponse] = []
+    @State private var isLoadingProviderAccounts = false
+    @State private var providerAccountsError: String?
     @State private var editorPayload: ProfileEditorResponse?
     /// Load state for the inheritance payload. Drives the overrides view's
     /// loading / error UI. We route derived profiles to the overrides view
@@ -327,6 +334,12 @@ public struct ProfileEditorView: View {
         .onAppear { normalizeRuntimeModelSelections() }
         .onChange(of: profile.defaultRuntime) { _, _ in
             normalizeRuntimeModelSelections()
+        }
+        .onChange(of: profile.modelProvider) { _, newValue in
+            handleModelProviderChanged(newValue)
+        }
+        .task(id: profile.modelProvider.rawValue) {
+            await loadProviderAccounts()
         }
         .task { await loadEditorPayloadIfNeeded() }
     }
@@ -1136,6 +1149,52 @@ public struct ProfileEditorView: View {
         )
     }
 
+    private func handleModelProviderChanged(_ newValue: ModelProvider) {
+        profile.providerAccountId = nil
+        providerAccountsError = nil
+        if newValue == .openai || newValue == .openrouter {
+            profile.defaultRuntime = .codex
+            normalizeRuntimeModelSelections(resetCodexRestrictedModel: true)
+        }
+    }
+
+    private func loadProviderAccounts() async {
+        guard let onLoadProviderAccounts else {
+            await MainActor.run {
+                providerAccounts = []
+                providerAccountsError = nil
+                isLoadingProviderAccounts = false
+            }
+            return
+        }
+        let provider = profile.modelProvider.rawValue
+        await MainActor.run {
+            isLoadingProviderAccounts = true
+            providerAccountsError = nil
+        }
+        do {
+            let accounts = try await onLoadProviderAccounts(provider)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                providerAccounts = accounts
+                providerAccountsError = nil
+                isLoadingProviderAccounts = false
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                providerAccounts = []
+                providerAccountsError = error.localizedDescription
+                isLoadingProviderAccounts = false
+            }
+        }
+    }
+
+    private func providerAccountLabel(_ account: PublicProviderAccountResponse) -> String {
+        let base = account.name == account.id ? account.id : "\(account.name) (\(account.id))"
+        return account.hasCredentials ? base : "\(base) - no credentials"
+    }
+
     // MARK: - Escalation
 
     @ViewBuilder
@@ -1289,6 +1348,62 @@ public struct ProfileEditorView: View {
 
     // MARK: - Providers (AI model provider + code platform)
 
+    private var sortedProviderAccounts: [PublicProviderAccountResponse] {
+        providerAccounts
+            .filter { $0.provider == profile.modelProvider.rawValue }
+            .sorted {
+                if $0.name == $1.name { return $0.id < $1.id }
+                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+    }
+
+    private var providerAccountIdBinding: Binding<String> {
+        Binding(
+            get: { profile.providerAccountId ?? "" },
+            set: { profile.providerAccountId = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    @ViewBuilder
+    private var providerAccountPicker: some View {
+        HStack(spacing: 8) {
+            Picker("", selection: providerAccountIdBinding) {
+                Text("None").tag("")
+                ForEach(sortedProviderAccounts, id: \.id) { account in
+                    Text(providerAccountLabel(account)).tag(account.id)
+                }
+                if let current = profile.providerAccountId,
+                   !sortedProviderAccounts.contains(where: { $0.id == current }) {
+                    Text("\(current) (unavailable)").tag(current)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 260, alignment: .leading)
+
+            if isLoadingProviderAccounts {
+                ProgressView()
+                    .scaleEffect(0.6)
+                    .frame(width: 16, height: 16)
+            }
+        }
+
+        if let providerAccountsError {
+            HStack(spacing: 5) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.yellow)
+                Text(providerAccountsError)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+            }
+        } else if sortedProviderAccounts.isEmpty {
+            Text("No shared \(profile.modelProvider.label) accounts configured.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
     @ViewBuilder
     private var providersFields: some View {
         Text("AI Provider")
@@ -1303,31 +1418,10 @@ public struct ProfileEditorView: View {
             }
             .labelsHidden()
             .frame(width: 160)
-            .onChange(of: profile.modelProvider) { _, newValue in
-                if newValue == .openai || newValue == .openrouter {
-                    profile.defaultRuntime = .codex
-                    normalizeRuntimeModelSelections(resetCodexRestrictedModel: true)
-                }
-            }
         }
 
         fieldRow("Provider Account", help: "Shared provider account id for model-provider auth. Leave empty to use profile credentials or daemon environment auth.") {
-            HStack(spacing: 8) {
-                TextField("team-openai", text: Binding(
-                    get: { profile.providerAccountId ?? "" },
-                    set: { profile.providerAccountId = $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
-                ))
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.callout, design: .monospaced))
-                .frame(minWidth: 180)
-                if profile.providerAccountId != nil {
-                    Button("Clear") {
-                        profile.providerAccountId = nil
-                    }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-                }
-            }
+            providerAccountPicker
         }
 
         // Provider credentials indicator
@@ -2855,13 +2949,7 @@ public struct ProfileEditorView: View {
                      options: ModelProvider.allCases.map { ($0, $0.label) },
                      parent: editorPayload?.parent?.modelProvider ?? "")
         case "providerAccountId":
-            nullableStringCard(field,
-                value: Binding(
-                    get: { profile.providerAccountId ?? "" },
-                    set: { profile.providerAccountId = $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
-                ),
-                parent: editorPayload?.parent?.providerAccountId ?? "",
-                placeholder: "team-openai")
+            providerAccountCard(field, parent: editorPayload?.parent?.providerAccountId ?? "")
         case "prProvider":
             enumCard(field, selection: $profile.prProvider,
                      options: PRProvider.allCases.map { ($0, $0.label) },
@@ -3045,6 +3133,16 @@ public struct ProfileEditorView: View {
             TextField(placeholder, text: value)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.callout, design: .monospaced))
+            parentLine(parent.isEmpty ? "(none)" : parent)
+        }
+    }
+
+    private func providerAccountCard(
+        _ field: ProfileOverrideField,
+        parent: String
+    ) -> some View {
+        overrideCardShell(field: field) {
+            providerAccountPicker
             parentLine(parent.isEmpty ? "(none)" : parent)
         }
     }

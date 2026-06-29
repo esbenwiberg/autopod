@@ -3287,11 +3287,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     worktreePath: string,
     cm: ContainerManager,
     podId: string,
+    executionTarget: ExecutionTarget = 'local',
   ): Promise<{ pushed: boolean }> {
     return withEngineStallRetry(
       containerId,
       cm,
-      () => syncWorkspaceBackOnce(containerId, worktreePath, cm, podId),
+      () => syncWorkspaceBackOnce(containerId, worktreePath, cm, podId, executionTarget),
       'syncWorkspaceBack',
     );
   }
@@ -3429,6 +3430,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     worktreePath: string,
     cm: ContainerManager,
     podId: string,
+    executionTarget: ExecutionTarget,
   ): Promise<void> {
     const [hostHead, hostStatus, containerHead, containerStatus] = await Promise.all([
       readHostWorktreeHead(worktreePath),
@@ -3442,7 +3444,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         { podId, hostHead, containerHead },
         'Could not inspect workspace heads before validation — falling back to sync-back',
       );
-      await syncWorkspaceBack(containerId, worktreePath, cm, podId);
+      await syncWorkspaceBack(containerId, worktreePath, cm, podId, executionTarget);
       return;
     }
 
@@ -3451,7 +3453,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     if (hostHead === containerHead) {
       if (containerDirty !== false) {
-        await syncWorkspaceBack(containerId, worktreePath, cm, podId);
+        await syncWorkspaceBack(containerId, worktreePath, cm, podId, executionTarget);
       }
       return;
     }
@@ -3478,7 +3480,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       containerHead,
     );
     if (hostAncestorOfContainer === true) {
-      await syncWorkspaceBack(containerId, worktreePath, cm, podId);
+      await syncWorkspaceBack(containerId, worktreePath, cm, podId, executionTarget);
       return;
     }
 
@@ -3492,8 +3494,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     worktreePath: string,
     cm: ContainerManager,
     podId: string,
+    executionTarget: ExecutionTarget,
   ): Promise<{ pushed: boolean }> {
     let pushed = false;
+    if (executionTarget === 'sandbox') {
+      return extractWorkspaceBackAndRecoverGit(containerId, worktreePath, cm, podId);
+    }
     try {
       // Read the bare repo path from the alternates file written during gitlink conversion.
       // Alternates contains "<bareRepoPath>/objects" — strip the trailing "/objects".
@@ -3643,66 +3649,77 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'In-container sync command failed — falling back to archive API extraction',
       );
 
-      // Extract workspace files excluding .git so the host gitlink is preserved.
-      await cm.extractDirectoryFromContainer(
-        containerId,
-        '/workspace',
-        worktreePath,
-        WORKSPACE_SYNC_EXCLUDES,
-      );
+      ({ pushed } = await extractWorkspaceBackAndRecoverGit(containerId, worktreePath, cm, podId));
+    }
+    return { pushed };
+  }
 
-      // Try to recover commits: extract the container's .git to a temp dir and push to bare.
-      let bareRepoPath: string | null = null;
+  async function extractWorkspaceBackAndRecoverGit(
+    containerId: string,
+    worktreePath: string,
+    cm: ContainerManager,
+    podId: string,
+  ): Promise<{ pushed: boolean }> {
+    let pushed = false;
+    // Extract workspace files excluding .git so the host gitlink is preserved.
+    await cm.extractDirectoryFromContainer(
+      containerId,
+      '/workspace',
+      worktreePath,
+      WORKSPACE_SYNC_EXCLUDES,
+    );
+
+    // Try to recover commits: extract the container's .git to a temp dir and push to bare.
+    let bareRepoPath: string | null = null;
+    try {
+      // Host worktree gitlink is intact (we excluded .git above), so we can derive the path.
+      bareRepoPath = await deriveBareRepoPath(worktreePath);
+    } catch {
+      // Best-effort — if we can't get the bare path, commit recovery is skipped.
+    }
+    if (bareRepoPath) {
+      const tmpGitDir = path.join(os.tmpdir(), `autopod-git-${Date.now()}`);
       try {
-        // Host worktree gitlink is intact (we excluded .git above), so we can derive the path.
-        bareRepoPath = await deriveBareRepoPath(worktreePath);
-      } catch {
-        // Best-effort — if we can't get the bare path, commit recovery is skipped.
-      }
-      if (bareRepoPath) {
-        const tmpGitDir = path.join(os.tmpdir(), `autopod-git-${Date.now()}`);
-        try {
-          await mkdir(tmpGitDir, { recursive: true });
-          // Extract /workspace/.git into tmpGitDir — the alternates inside point at the bare,
-          // so git can resolve baseline objects and push only the new ones.
-          await cm.extractDirectoryFromContainer(containerId, '/workspace/.git', tmpGitDir);
-          const result = await pushCommitsToBareViaStagingRef(
-            async (args) => {
-              try {
-                const r = await execFileAsync('git', ['--git-dir', tmpGitDir, ...args]);
-                return { stdout: r.stdout, stderr: r.stderr, exitCode: 0 };
-              } catch (err) {
-                const e = err as { stdout?: string; stderr?: string; code?: number };
-                return {
-                  stdout: e.stdout ?? '',
-                  stderr: e.stderr ?? (err as Error).message,
-                  exitCode: typeof e.code === 'number' ? e.code : 1,
-                };
-              }
-            },
-            bareRepoPath,
-            podId,
-          );
-          if (result.pushed) {
-            pushed = true;
-          } else {
-            logger.warn(
-              { worktreePath, reason: result.reason },
-              'Could not push commits from container during sync fallback — new commits may be lost',
-            );
-          }
-        } catch (gitRecoveryErr) {
+        await mkdir(tmpGitDir, { recursive: true });
+        // Extract /workspace/.git into tmpGitDir — the alternates inside point at the bare,
+        // so git can resolve baseline objects and push only the new ones.
+        await cm.extractDirectoryFromContainer(containerId, '/workspace/.git', tmpGitDir);
+        const result = await pushCommitsToBareViaStagingRef(
+          async (args) => {
+            try {
+              const r = await execFileAsync('git', ['--git-dir', tmpGitDir, ...args]);
+              return { stdout: r.stdout, stderr: r.stderr, exitCode: 0 };
+            } catch (err) {
+              const e = err as { stdout?: string; stderr?: string; code?: number };
+              return {
+                stdout: e.stdout ?? '',
+                stderr: e.stderr ?? (err as Error).message,
+                exitCode: typeof e.code === 'number' ? e.code : 1,
+              };
+            }
+          },
+          bareRepoPath,
+          podId,
+        );
+        if (result.pushed) {
+          pushed = true;
+        } else {
           logger.warn(
-            { err: gitRecoveryErr, worktreePath },
+            { worktreePath, reason: result.reason },
             'Could not push commits from container during sync fallback — new commits may be lost',
           );
-        } finally {
-          await rm(tmpGitDir, { recursive: true, force: true }).catch(() => {});
         }
+      } catch (gitRecoveryErr) {
+        logger.warn(
+          { err: gitRecoveryErr, worktreePath },
+          'Could not push commits from container during sync fallback — new commits may be lost',
+        );
+      } finally {
+        await rm(tmpGitDir, { recursive: true, force: true }).catch(() => {});
       }
-      if (pushed) {
-        await refreshHostWorktreeIndex(worktreePath, podId);
-      }
+    }
+    if (pushed) {
+      await refreshHostWorktreeIndex(worktreePath, podId);
     }
     return { pushed };
   }
@@ -4985,6 +5002,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const autoAttached = getAutoAttachedSidecars(profile);
       const requestedSidecars = request.requireSidecars ?? [];
       const requireSidecars = Array.from(new Set([...autoAttached, ...requestedSidecars]));
+      if (executionTarget === 'sandbox' && requireSidecars.length > 0) {
+        throw new AutopodError(
+          `Sidecars are not supported for sandbox execution yet (requested: ${requireSidecars.join(', ')}). Azure Sandboxes do not provide the Docker bridge network sidecars require.`,
+          'UNSUPPORTED_SANDBOX_SIDECAR',
+          400,
+        );
+      }
       for (const name of requireSidecars) {
         const spec = resolveSidecarSpec(profile, name);
         if (!spec) {
@@ -5330,7 +5354,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           };
 
           try {
-            await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, pod.id);
+            await syncWorkspaceBack(
+              pod.containerId,
+              pod.worktreePath,
+              cm,
+              pod.id,
+              pod.executionTarget,
+            );
           } catch (err) {
             blockHandoff('could not sync the interactive workspace back to the host worktree', err);
             return;
@@ -5801,6 +5831,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           'Spawning pod container',
         );
 
+        const hostPreviewUrl =
+          pod.executionTarget === 'local' ? `http://127.0.0.1:${hostPort}` : null;
+        const containerPreviewUrl = `http://127.0.0.1:${CONTAINER_APP_PORT}`;
         const containerEnv: Record<string, string> = {
           POD_ID: podId,
           ...RUNTIME_TELEMETRY_OPT_OUT_ENV,
@@ -5812,11 +5845,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }),
           PORT: String(CONTAINER_APP_PORT),
           HOST: '0.0.0.0', // bind to all interfaces inside container for Docker port forwarding
-          // Host-side preview URL — same value the daemon writes to pod.previewUrl.
-          // Surfaced inside the container so workspace users (and `claude`) know
-          // which port to open from their host browser; container-local fetches
-          // should still hit http://localhost:3000.
-          PREVIEW_URL: `http://127.0.0.1:${hostPort}`,
+          // Docker pods expose a host preview URL; sandbox pods do not have port
+          // forwarding yet, so only advertise the container-local URL there.
+          PREVIEW_URL: hostPreviewUrl ?? containerPreviewUrl,
           ...(isDotnet
             ? {
                 MSBUILDNODECOUNT: '4',
@@ -6205,11 +6236,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
-        const previewUrl = `http://127.0.0.1:${hostPort}`;
         pod = transition(pod, 'running', {
           containerId,
           worktreePath,
-          previewUrl,
+          previewUrl: hostPreviewUrl,
           runningAt: new Date().toISOString(),
         });
 
@@ -7496,7 +7526,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (pod.containerId && pod.worktreePath) {
         try {
           const cm = containerManagerFactory.get(pod.executionTarget);
-          const result = await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, pod.id);
+          const result = await syncWorkspaceBack(
+            pod.containerId,
+            pod.worktreePath,
+            cm,
+            pod.id,
+            pod.executionTarget,
+          );
           agentCommitsPushed = result.pushed;
           if (!agentCommitsPushed) {
             logger.warn(
@@ -8862,7 +8898,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (pod.containerId && pod.worktreePath) {
           try {
             const cm = containerManagerFactory.get(pod.executionTarget);
-            await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, podId);
+            await syncWorkspaceBack(
+              pod.containerId,
+              pod.worktreePath,
+              cm,
+              podId,
+              pod.executionTarget,
+            );
           } catch (err) {
             workspaceSyncOk = false;
             logger.warn({ err, podId }, 'Failed to sync workspace before push');
@@ -9039,7 +9081,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (pod.containerId) {
         try {
           const cm = containerManagerFactory.get(pod.executionTarget);
-          await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, podId);
+          await syncWorkspaceBack(
+            pod.containerId,
+            pod.worktreePath,
+            cm,
+            podId,
+            pod.executionTarget,
+          );
         } catch (err) {
           logger.warn({ err, podId }, 'syncWorkspaceBranch: sync-back failed — continuing');
         }
@@ -9273,7 +9321,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (pod.containerId && pod.worktreePath) {
           try {
             const cm = containerManagerFactory.get(pod.executionTarget);
-            await prepareWorkspaceForValidation(pod.containerId, pod.worktreePath, cm, podId);
+            await prepareWorkspaceForValidation(
+              pod.containerId,
+              pod.worktreePath,
+              cm,
+              podId,
+              pod.executionTarget,
+            );
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to sync workspace before validation');
             validationSyncOk =
@@ -9425,7 +9479,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (pod.containerId && pod.worktreePath) {
           try {
             const cm = containerManagerFactory.get(pod.executionTarget);
-            await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, podId);
+            await syncWorkspaceBack(
+              pod.containerId,
+              pod.worktreePath,
+              cm,
+              podId,
+              pod.executionTarget,
+            );
           } catch (err) {
             validationSyncOk = false;
             logger.warn({ err, podId }, 'Failed to sync workspace after validation');
@@ -10191,7 +10251,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         let validationSyncOk = true;
         if (pod.containerId && pod.worktreePath) {
           try {
-            await prepareWorkspaceForValidation(pod.containerId, pod.worktreePath, cm, podId);
+            await prepareWorkspaceForValidation(
+              pod.containerId,
+              pod.worktreePath,
+              cm,
+              podId,
+              pod.executionTarget,
+            );
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to sync workspace before revalidation');
             validationSyncOk =
@@ -10668,6 +10734,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     async startPreview(podId: string): Promise<{ previewUrl: string }> {
       const pod = podRepo.getOrThrow(podId);
 
+      if (pod.executionTarget === 'sandbox') {
+        throw new AutopodError(
+          `Sandbox host preview is not supported for pod ${podId}: Azure Sandboxes do not provide host port forwarding or tunneling yet.`,
+          'UNSUPPORTED_SANDBOX_PREVIEW',
+          409,
+        );
+      }
+
       if (!pod.containerId) {
         throw new AutopodError(
           `Pod ${podId} has no container — cannot start preview`,
@@ -10810,6 +10884,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       previewUrl: string | null;
     }> {
       const pod = podRepo.getOrThrow(podId);
+      if (pod.executionTarget === 'sandbox') {
+        return {
+          running: false,
+          reachable: false,
+          restartCount: 0,
+          lastError: 'Sandbox host preview is not supported because no port forwarding exists.',
+          previewUrl: null,
+        };
+      }
       const safeDefaults = {
         running: false,
         reachable: false,

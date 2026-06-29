@@ -915,10 +915,6 @@ if (sandboxContainerManager) {
     podRepo,
     eventBus,
     sandboxContainerManager,
-    onReconnected: async (podId, _containerId) => {
-      // Re-trigger completion handling for reconnected pods
-      await podManager.handleCompletion(podId);
-    },
     logger,
   }).catch((err) => {
     logger.error({ err }, 'Sandbox pod reconciliation failed');

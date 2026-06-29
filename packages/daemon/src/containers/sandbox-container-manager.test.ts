@@ -464,7 +464,7 @@ describe('SandboxContainerManager', () => {
       });
     });
 
-    it('execStreaming falls back to buffered output when no native stream', async () => {
+    it('execStreaming rejects when no native stream is available', async () => {
       const client = new FakeSandboxApiClient(() => ({
         stdout: 'hello world',
         stderr: '',
@@ -472,10 +472,9 @@ describe('SandboxContainerManager', () => {
       }));
       const mgr = new SandboxContainerManager(client, logger);
       const id = await mgr.spawn(baseConfig);
-      const stream = await mgr.execStreaming(id, ['echo', 'hi']);
-      const [out, code] = await Promise.all([readStream(stream.stdout), stream.exitCode]);
-      expect(out).toBe('hello world');
-      expect(code).toBe(0);
+      await expect(mgr.execStreaming(id, ['echo', 'hi'])).rejects.toThrow(
+        /Sandbox streaming exec is not supported/,
+      );
     });
 
     it('execStreaming uses the native stream when available', async () => {

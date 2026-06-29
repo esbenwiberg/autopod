@@ -152,6 +152,24 @@ describe('DockerContainerManager', () => {
       );
     });
 
+    it('does not pull missing local Autopod warm images from Docker Hub', async () => {
+      docker.getImage.mockReturnValue({
+        inspect: vi.fn().mockRejectedValue({ statusCode: 404 }),
+      });
+
+      await expect(
+        manager.spawn({
+          ...baseConfig,
+          image: 'autopod/teamplanner-base:latest',
+        }),
+      ).rejects.toThrow(
+        'Local Autopod warm image "autopod/teamplanner-base:latest" is recorded on the profile but is not present in this Docker daemon. Rebuild it with `ap profile warm teamplanner-base --rebuild`, then resume the pod.',
+      );
+
+      expect(docker.pull).not.toHaveBeenCalled();
+      expect(docker.createContainer).not.toHaveBeenCalled();
+    });
+
     it('uses the authenticated image puller for missing ACR images', async () => {
       docker.getImage.mockReturnValue({
         inspect: vi.fn().mockRejectedValue({ statusCode: 404 }),

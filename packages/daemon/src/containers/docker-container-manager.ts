@@ -169,6 +169,15 @@ function mirrorStagedDirectory(
   }
 }
 
+function isLocalAutopodWarmImage(image: string): boolean {
+  return image.startsWith('autopod/');
+}
+
+function warmImageProfileName(image: string): string {
+  const withoutNamespace = image.slice('autopod/'.length);
+  return withoutNamespace.split(/[:@]/)[0] ?? withoutNamespace;
+}
+
 interface DockerContainerManagerOptions {
   docker?: Dockerode;
   logger: Logger;
@@ -431,6 +440,13 @@ export class DockerContainerManager implements ContainerManager {
       return;
     } catch (err: unknown) {
       if (!isExpectedDockerError(err, [404])) throw err;
+    }
+
+    if (isLocalAutopodWarmImage(image)) {
+      const profileName = warmImageProfileName(image);
+      throw new Error(
+        `Local Autopod warm image "${image}" is recorded on the profile but is not present in this Docker daemon. Rebuild it with \`ap profile warm ${profileName} --rebuild\`, then resume the pod.`,
+      );
     }
 
     try {

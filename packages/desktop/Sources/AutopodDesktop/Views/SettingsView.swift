@@ -337,6 +337,10 @@ public struct SettingsView: View {
                            builtinSkills: builtinSkills,
                            onSave: onSaveProfile, onCreate: onCreateProfile,
                            onAuthenticate: onAuthenticateProfile,
+                           onLoadProviderAccounts: { provider in
+                               guard let api = connectionManager.api else { return [] }
+                               return try await api.listProviderAccounts(provider: provider)
+                           },
                            onLoadEditor: onLoadProfileEditor,
                            onSaveWithInheritance: onSaveProfileWithInheritance,
                            onCreateWithInheritance: onCreateProfileWithInheritance,

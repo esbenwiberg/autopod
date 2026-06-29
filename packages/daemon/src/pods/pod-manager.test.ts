@@ -784,6 +784,47 @@ describe('PodManager', () => {
       ).toThrow(/ACR-qualified image tag/);
       expect(ctx.podRepo.list()).toHaveLength(0);
     });
+
+    it('rejects interactive workspace pods when the profile default target is sandbox', () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      const manager = createPodManager(ctx.deps);
+
+      expect(() =>
+        manager.createSession(
+          { profileName: 'test-profile', task: 'Workspace', outputMode: 'workspace' },
+          'user-1',
+        ),
+      ).toThrow(/Interactive pods only support local execution target/);
+      expect(ctx.podRepo.list()).toHaveLength(0);
+    });
+
+    it('rejects sandbox pods with sidecars before provisioning', () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      const baseGet = ctx.profileStore.get;
+      ctx.profileStore.get = vi.fn((name: string) => ({
+        ...baseGet(name),
+        trustedSource: true,
+        sidecars: {
+          dagger: {
+            enabled: true,
+            engineImageDigest: `registry.dagger.io/engine@sha256:${'a'.repeat(64)}`,
+            engineVersion: 'v0.18.6',
+          },
+        },
+      }));
+      const manager = createPodManager(ctx.deps);
+
+      expect(() =>
+        manager.createSession({ profileName: 'test-profile', task: 'Needs Dagger' }, 'user-1'),
+      ).toThrow(/Sidecars are not supported for sandbox execution/);
+      expect(ctx.podRepo.list()).toHaveLength(0);
+    });
   });
 
   describe('memory briefing startup', () => {
@@ -6631,6 +6672,78 @@ describe('PodManager', () => {
       expect(script).not.toContain('then;');
       expect(script).not.toContain('else;');
       expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+    });
+
+    it('uses sandbox extraction for sync-back instead of the uploaded /mnt/worktree snapshot', async () => {
+      const ctx = createTestContext(
+        { overall: 'pass' },
+        {
+          executionTarget: 'sandbox',
+          warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+        },
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+      });
+
+      await manager.handleCompletion(pod.id);
+
+      const syncScriptCall = ctx.containerManager.execInContainer.mock.calls.find(([, cmd]) => {
+        if (!Array.isArray(cmd) || cmd[0] !== 'sh' || cmd[1] !== '-c') return false;
+        return String(cmd[2]).includes('/mnt/worktree/.autopod-sync-');
+      });
+      expect(syncScriptCall).toBeUndefined();
+      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledWith(
+        'ctr-1',
+        '/workspace',
+        '/tmp/wt',
+        expect.arrayContaining(['.git', 'node_modules']),
+      );
+      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledWith(
+        'ctr-1',
+        '/workspace/.git',
+        expect.stringContaining('autopod-git-'),
+      );
+    });
+
+    it('rejects host preview for sandbox pods because no port forwarding exists', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preview sandbox' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        previewUrl: 'http://127.0.0.1:32123',
+      });
+
+      await expect(manager.startPreview(pod.id)).rejects.toThrow(
+        /Sandbox host preview is not supported/,
+      );
+      await expect(manager.previewStatus(pod.id)).resolves.toEqual({
+        running: false,
+        reachable: false,
+        restartCount: 0,
+        lastError: 'Sandbox host preview is not supported because no port forwarding exists.',
+        previewUrl: null,
+      });
+      expect(ctx.containerManager.execInContainer).not.toHaveBeenCalledWith(
+        'ctr-1',
+        expect.arrayContaining(['sh', '-c']),
+        expect.anything(),
+      );
     });
 
     it('refreshes the host linked-worktree index after promoting container commits', async () => {

@@ -68,8 +68,8 @@ export interface SandboxContainerManagerConfig {
  *   - host bind mounts → best-effort upload at spawn (Sandboxes have no bind mounts)
  *   - `extractDirectoryFromContainer` → list/read recursively into the same
  *     staging-and-mirror sync-back strategy as Docker
- *   - `execStreaming` → native streaming when the client exposes it, else a
- *     buffered `exec()` surfaced through one-shot streams
+ *   - `execStreaming` → native streaming when the client exposes it; otherwise
+ *     rejected because buffered exec breaks long-running agent runtime semantics
  *
  * The Azure adapter uses the preview data-plane shape confirmed by
  * `spikes/aca-sandbox/probe.py`: buffered exec, file read/write, host-rule egress,
@@ -251,7 +251,9 @@ export class SandboxContainerManager implements ContainerManager {
     if (this.client.execStream) {
       return this.streamNative(containerId, command, sandboxOptions);
     }
-    return this.streamBuffered(containerId, command, sandboxOptions);
+    throw new Error(
+      'Sandbox streaming exec is not supported by the Azure Sandboxes data plane yet. Buffered exec is available for short commands, but agent runtimes and terminals require native streaming/TTY support.',
+    );
   }
 
   /** Native streaming path — pipe SDK chunks into stdout/stderr streams. */
@@ -291,39 +293,6 @@ export class SandboxContainerManager implements ContainerManager {
       kill: async () => {
         cancelled = true;
       },
-    };
-  }
-
-  /** Buffered fallback — run exec() and surface the whole output through one-shot streams. */
-  private streamBuffered(
-    containerId: string,
-    command: string[],
-    options: SandboxExecOptions,
-  ): StreamingExecResult {
-    const stdout = new Readable({ read() {} });
-    const stderr = new Readable({ read() {} });
-
-    const exitCode = (async () => {
-      try {
-        const result = await this.client.exec(containerId, command, options);
-        if (result.stdout) stdout.push(result.stdout);
-        if (result.stderr) stderr.push(result.stderr);
-        return result.exitCode;
-      } catch (err) {
-        stderr.push(String(err instanceof Error ? err.message : err));
-        return 1;
-      } finally {
-        stdout.push(null);
-        stderr.push(null);
-      }
-    })();
-
-    return {
-      stdout,
-      stderr,
-      exitCode,
-      // Buffered exec cannot be interrupted mid-flight; the promise still resolves.
-      kill: async () => {},
     };
   }
 

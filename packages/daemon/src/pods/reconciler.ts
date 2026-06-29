@@ -8,7 +8,6 @@ export interface ReconcilerDependencies {
   podRepo: PodRepository;
   eventBus: EventBus;
   sandboxContainerManager: SandboxContainerManager;
-  onReconnected: (podId: string, containerId: string) => Promise<void>;
   logger: Logger;
 }
 
@@ -45,7 +44,7 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
 }
 
 async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise<void> {
-  const { sandboxContainerManager, podRepo, eventBus, onReconnected, logger } = deps;
+  const { sandboxContainerManager, podRepo, eventBus, logger } = deps;
   if (!pod.containerId) return;
   const containerId = pod.containerId;
 
@@ -53,17 +52,18 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
 
   switch (status) {
     case 'running': {
-      // Sandbox still running — reconnect and resume event consumption
-      logger.info({ podId: pod.id, containerId }, 'Sandbox still running, reconnecting');
-      await onReconnected(pod.id, containerId);
+      const reason =
+        'Sandbox is still running after daemon restart, but the agent stream cannot be reattached; operator action is required to inspect or recover the work before continuing.';
+      logger.warn({ podId: pod.id, containerId }, reason);
+      parkSession(pod, 'paused', reason, podRepo, eventBus);
       break;
     }
 
     case 'stopped': {
-      // Sandbox finished — trigger completion handling
-      logger.info({ podId: pod.id, containerId }, 'Sandbox stopped, triggering completion');
-      // Mark as completing — the pod manager's handleCompletion will take over
-      await onReconnected(pod.id, containerId);
+      const reason =
+        'Sandbox stopped while the daemon was offline; agent completion was not observed, so validation and PR creation are blocked until the worktree is recovered or the pod is kicked.';
+      logger.warn({ podId: pod.id, containerId }, reason);
+      parkSession(pod, 'failed', reason, podRepo, eventBus);
       break;
     }
 
@@ -74,6 +74,37 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
       break;
     }
   }
+}
+
+function parkSession(
+  pod: Pod,
+  status: 'paused' | 'failed',
+  reason: string,
+  podRepo: PodRepository,
+  eventBus: EventBus,
+): void {
+  const previousStatus = pod.status;
+  podRepo.update(pod.id, {
+    status,
+    pauseReason: status === 'paused' ? 'manual' : null,
+    lastCorrectionMessage: reason,
+    ...(status === 'failed' ? { completedAt: new Date().toISOString() } : {}),
+  });
+
+  const timestamp = new Date().toISOString();
+  eventBus.emit({
+    type: 'pod.status_changed',
+    timestamp,
+    podId: pod.id,
+    previousStatus,
+    newStatus: status,
+  });
+  eventBus.emit({
+    type: 'pod.agent_activity',
+    timestamp,
+    podId: pod.id,
+    event: { type: 'status', timestamp, message: reason },
+  });
 }
 
 function markSessionFailed(

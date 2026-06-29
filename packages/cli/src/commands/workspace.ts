@@ -460,6 +460,8 @@ async function createWorkspacePod(
   opts: WorkspaceCreateOptions,
   deps: ResolvedWorkspaceCommandDeps,
 ): Promise<void> {
+  await assertInteractiveProfileSupported(client, profile);
+
   const label = opts.label ?? positionalLabel ?? 'Workspace pod';
   const pod = await withSpinner('Creating workspace pod...', () =>
     client.createSession({
@@ -488,6 +490,18 @@ async function createWorkspacePod(
   );
 
   await attachToRunningPod(client, runningPod, deps.attachSession);
+}
+
+async function assertInteractiveProfileSupported(
+  client: AutopodClient,
+  profileName: string,
+): Promise<void> {
+  const profile = await client.getProfile(profileName);
+  if (profile.executionTarget === 'sandbox') {
+    throw new Error(
+      `Sandbox interactive pods are not supported for profile "${profileName}" because Azure Sandboxes do not provide bidirectional TTY streaming yet. Use a local execution profile for ap shell/workspace, or run a non-interactive sandbox pod.`,
+    );
+  }
 }
 
 function printWorkspaceSummary(pod: Pod): void {
@@ -545,6 +559,15 @@ async function attachToRunningPod(
 
   if (pod.status !== 'running') {
     console.error(chalk.red(`Pod ${pod.id} is ${pod.status} — can only attach to running pods.`));
+    process.exit(1);
+  }
+
+  if (pod.executionTarget !== 'local') {
+    console.error(
+      chalk.red(
+        `Pod ${pod.id} uses executionTarget=${pod.executionTarget}; ap attach only supports local Docker pods because sandbox TTY streaming is unavailable.`,
+      ),
+    );
     process.exit(1);
   }
 

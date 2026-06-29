@@ -1,7 +1,25 @@
 # Azure Container Apps Sandboxes
 
-Autopod can run `executionTarget: sandbox` pods in Azure Container Apps Sandboxes.
-This target is production-supported only with Autopod warm images published to ACR.
+Autopod can provision `executionTarget: sandbox` containers in Azure Container Apps Sandboxes.
+This target is production-supported only with Autopod warm images published to ACR, and agent
+runtime execution remains gated until the sandbox data plane exposes native streaming.
+
+## Current Contract
+
+Supported:
+
+- Short, buffered command execution through the sandbox data plane.
+- File upload/download/list operations.
+- Snapshot workspace sync-in and sync-back through `/workspace`.
+- Container-local validation probes for health and pages at `http://127.0.0.1:3000`.
+- Stop/resume and native sandbox egress-policy refresh.
+
+Explicitly unsupported until the Azure Sandboxes data plane exposes the missing primitive:
+
+- Interactive pods (`ap shell`, `ap workspace`, `ap attach`, daemon terminal WebSocket). Reason: the data plane does not provide bidirectional TTY streaming.
+- Host preview URLs such as `http://127.0.0.1:<hostPort>`. Reason: sandboxes do not provide Docker-style host port forwarding or an Autopod tunnel yet.
+- Sidecars. Reason: current sidecars require a Docker bridge network shared with the pod container.
+- Long-running runtime `execStreaming` without native streaming. Reason: buffered exec cannot preserve progress, cancellation, or watchdog semantics for agent runtimes.
 
 ## Required Azure Setup
 

@@ -28,6 +28,7 @@ public struct ProfileListView: View {
     public var onSave: ((Profile) async throws -> Void)?
     public var onCreate: ((Profile) async throws -> Void)?
     public var onAuthenticate: ProfileAuthHandler?
+    public var onLoadProviderAccounts: ProviderAccountsLoadHandler?
     public var onLoadEditor: ((String) async throws -> ProfileEditorResponse)?
     public var onSaveWithInheritance: (
         (Profile, Set<String>, Set<String>, [String: MergeMode]) async throws -> Void
@@ -41,6 +42,7 @@ public struct ProfileListView: View {
                 builtinSkills: [BuiltinSkillEntry] = [],
                 onSave: ((Profile) async throws -> Void)? = nil, onCreate: ((Profile) async throws -> Void)? = nil,
                 onAuthenticate: ProfileAuthHandler? = nil,
+                onLoadProviderAccounts: ProviderAccountsLoadHandler? = nil,
                 onLoadEditor: ((String) async throws -> ProfileEditorResponse)? = nil,
                 onSaveWithInheritance: (
                     (Profile, Set<String>, Set<String>, [String: MergeMode]) async throws -> Void
@@ -54,6 +56,7 @@ public struct ProfileListView: View {
         self.builtinSkills = builtinSkills
         self.onSave = onSave; self.onCreate = onCreate
         self.onAuthenticate = onAuthenticate
+        self.onLoadProviderAccounts = onLoadProviderAccounts
         self.onLoadEditor = onLoadEditor
         self.onSaveWithInheritance = onSaveWithInheritance
         self.onCreateWithInheritance = onCreateWithInheritance
@@ -90,6 +93,7 @@ public struct ProfileListView: View {
                 builtinSkills: builtinSkills,
                 onSave: onSave,
                 onAuthenticate: onAuthenticate,
+                onLoadProviderAccounts: onLoadProviderAccounts,
                 onLoadEditor: onLoadEditor,
                 onSaveWithInheritance: onSaveWithInheritance,
                 onDelete: onDelete
@@ -112,7 +116,8 @@ public struct ProfileListView: View {
                 isNew: true,
                 actionCatalog: actionCatalog,
                 builtinSkills: builtinSkills,
-                onSave: onCreate
+                onSave: onCreate,
+                onLoadProviderAccounts: onLoadProviderAccounts
             )
         }
         .sheet(item: $creatingDerivedFrom) { parent in
@@ -126,6 +131,7 @@ public struct ProfileListView: View {
                 actionCatalog: actionCatalog,
                 builtinSkills: builtinSkills,
                 onSave: onCreate,
+                onLoadProviderAccounts: onLoadProviderAccounts,
                 onLoadEditor: onLoadEditor,
                 onSaveWithInheritance: onSaveWithInheritance,
                 onCreateWithInheritance: onCreateWithInheritance
