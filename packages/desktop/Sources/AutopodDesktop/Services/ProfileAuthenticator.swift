@@ -17,6 +17,26 @@ public final class ProfileAuthenticator: Sendable {
   /// Authenticate a profile with Claude MAX/PRO via `claude setup-token`.
   /// Opens Terminal.app for the interactive login, then captures the setup token.
   public func authenticateMax(profileName: String) async throws -> String {
+    let providerCredentials = try await collectMaxCredentials()
+
+    _ = try await api.patchProfile(profileName, fields: [
+      "modelProvider": "max",
+      "providerCredentials": providerCredentials,
+    ])
+
+    return "Authenticated with Claude MAX/PRO"
+  }
+
+  /// Authenticate a shared provider account with Claude MAX/PRO via `claude setup-token`.
+  public func authenticateMaxProviderAccount(accountId: String) async throws -> String {
+    let providerCredentials = try await collectMaxCredentials()
+    _ = try await api.updateProviderAccount(accountId, fields: [
+      "credentials": providerCredentials,
+    ])
+    return "Authenticated provider account with Claude MAX/PRO"
+  }
+
+  private func collectMaxCredentials() async throws -> [String: Any] {
     let tag = UUID().uuidString.prefix(8)
     let home = FileManager.default.temporaryDirectory
       .appendingPathComponent("autopod-auth-\(tag)")
@@ -33,6 +53,10 @@ public final class ProfileAuthenticator: Sendable {
     let cwd = FileManager.default.temporaryDirectory
       .appendingPathComponent("autopod-auth-cwd-\(tag)")
     try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+    defer {
+      try? FileManager.default.removeItem(at: home)
+      try? FileManager.default.removeItem(at: cwd)
+    }
     try runSilent("/usr/bin/git", args: ["init"], cwd: cwd)
 
     // Resolve claude path
@@ -100,15 +124,7 @@ public final class ProfileAuthenticator: Sendable {
       "oauthToken": oauthToken,
     ]
 
-    _ = try await api.patchProfile(profileName, fields: [
-      "modelProvider": "max",
-      "providerCredentials": providerCredentials,
-    ])
-
-    try? FileManager.default.removeItem(at: home)
-    try? FileManager.default.removeItem(at: cwd)
-
-    return "Authenticated with Claude MAX/PRO"
+    return providerCredentials
   }
 
   // MARK: - OpenAI / ChatGPT
@@ -116,10 +132,35 @@ public final class ProfileAuthenticator: Sendable {
   /// Authenticate a profile with OpenAI Codex via `codex login --device-auth`.
   /// Captures Codex's `auth.json` so pods can run with ChatGPT/Pro auth.
   public func authenticateOpenAI(profileName: String) async throws -> String {
+    let providerCredentials = try await collectOpenAICredentials()
+
+    _ = try await api.patchProfile(profileName, fields: [
+      "defaultRuntime": "codex",
+      "defaultModel": "auto",
+      "modelProvider": "openai",
+      "providerCredentials": providerCredentials,
+    ])
+
+    return "Authenticated with OpenAI Codex"
+  }
+
+  /// Authenticate a shared provider account with OpenAI Codex ChatGPT/Pro auth.
+  public func authenticateOpenAIProviderAccount(accountId: String) async throws -> String {
+    let providerCredentials = try await collectOpenAICredentials()
+    _ = try await api.updateProviderAccount(accountId, fields: [
+      "credentials": providerCredentials,
+    ])
+    return "Authenticated provider account with OpenAI Codex"
+  }
+
+  private func collectOpenAICredentials() async throws -> [String: Any] {
     let tag = UUID().uuidString.prefix(8)
     let codexHome = FileManager.default.temporaryDirectory
       .appendingPathComponent("autopod-codex-auth-\(tag)")
     try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+    defer {
+      try? FileManager.default.removeItem(at: codexHome)
+    }
 
     guard let codexPath = Self.findExecutable("codex") else {
       throw AuthError.cliNotFound("codex")
@@ -166,20 +207,11 @@ public final class ProfileAuthenticator: Sendable {
       throw AuthError.noCredentials("Codex auth.json was not valid JSON.")
     }
 
-    _ = try await api.patchProfile(profileName, fields: [
-      "defaultRuntime": "codex",
-      "defaultModel": "auto",
-      "modelProvider": "openai",
-      "providerCredentials": [
-        "provider": "openai",
-        "authMode": "chatgpt",
-        "authJson": authJson,
-      ] as [String: Any],
-    ])
-
-    try? FileManager.default.removeItem(at: codexHome)
-
-    return "Authenticated with OpenAI Codex"
+    return [
+      "provider": "openai",
+      "authMode": "chatgpt",
+      "authJson": authJson,
+    ]
   }
 
   // MARK: - GitHub Copilot
@@ -187,10 +219,33 @@ public final class ProfileAuthenticator: Sendable {
   /// Authenticate a profile with GitHub Copilot via `copilot login`.
   /// Opens Terminal.app for the interactive login, then reads the token and patches the profile.
   public func authenticateCopilot(profileName: String) async throws -> String {
+    let providerCredentials = try await collectCopilotCredentials()
+
+    _ = try await api.patchProfile(profileName, fields: [
+      "modelProvider": "copilot",
+      "providerCredentials": providerCredentials,
+    ])
+
+    return "Authenticated with GitHub Copilot"
+  }
+
+  /// Authenticate a shared provider account with GitHub Copilot OAuth.
+  public func authenticateCopilotProviderAccount(accountId: String) async throws -> String {
+    let providerCredentials = try await collectCopilotCredentials()
+    _ = try await api.updateProviderAccount(accountId, fields: [
+      "credentials": providerCredentials,
+    ])
+    return "Authenticated provider account with GitHub Copilot"
+  }
+
+  private func collectCopilotCredentials() async throws -> [String: Any] {
     let tag = UUID().uuidString.prefix(8)
     let configDir = FileManager.default.temporaryDirectory
       .appendingPathComponent("autopod-copilot-auth-\(tag)")
     try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+    defer {
+      try? FileManager.default.removeItem(at: configDir)
+    }
 
     guard let copilotPath = Self.findExecutable("copilot") else {
       throw AuthError.cliNotFound("copilot")
@@ -244,17 +299,10 @@ public final class ProfileAuthenticator: Sendable {
       throw AuthError.noCredentials("No token found — login may not have completed.")
     }
 
-    _ = try await api.patchProfile(profileName, fields: [
-      "modelProvider": "copilot",
-      "providerCredentials": [
-        "provider": "copilot",
-        "token": authToken,
-      ] as [String: Any],
-    ])
-
-    try? FileManager.default.removeItem(at: configDir)
-
-    return "Authenticated with GitHub Copilot"
+    return [
+      "provider": "copilot",
+      "token": authToken,
+    ]
   }
 
   // MARK: - Types

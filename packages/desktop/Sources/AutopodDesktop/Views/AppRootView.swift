@@ -372,6 +372,9 @@ public struct AppRootView: View {
         onDeleteProfile: { [profileStore] name in
           try await profileStore.deleteProfile(name)
         },
+        onReloadProfiles: { [profileStore] in
+          await profileStore.loadProfiles()
+        },
         deepLinkedProfileName: $settingsProfileToEdit,
         isPresented: $showSettings
       )

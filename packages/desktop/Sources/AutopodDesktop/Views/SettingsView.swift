@@ -7,6 +7,7 @@ import AutopodUI
 enum SettingsSection: Hashable {
     case connections
     case profiles
+    case providerAccounts
     case notifications
     case logs
     case about
@@ -15,6 +16,7 @@ enum SettingsSection: Hashable {
         switch self {
         case .connections:   "Connections"
         case .profiles:      "Profiles"
+        case .providerAccounts: "Provider Accounts"
         case .notifications: "Notifications"
         case .logs:          "Logs"
         case .about:         "About"
@@ -25,6 +27,7 @@ enum SettingsSection: Hashable {
         switch self {
         case .connections:   "server.rack"
         case .profiles:      "person.crop.rectangle.stack"
+        case .providerAccounts: "person.2.badge.key"
         case .notifications: "bell"
         case .logs:          "text.line.last.and.arrowtriangle.forward"
         case .about:         "info.circle"
@@ -52,6 +55,7 @@ public struct SettingsView: View {
         (Profile, Set<String>, [String: MergeMode]) async throws -> Void
     )?
     public var onDeleteProfile: ((String) async throws -> Void)?
+    public var onReloadProfiles: (() async -> Void)?
     @Binding public var deepLinkedProfileName: String?
     @Binding public var isPresented: Bool
 
@@ -69,6 +73,7 @@ public struct SettingsView: View {
                     (Profile, Set<String>, [String: MergeMode]) async throws -> Void
                 )? = nil,
                 onDeleteProfile: ((String) async throws -> Void)? = nil,
+                onReloadProfiles: (() async -> Void)? = nil,
                 deepLinkedProfileName: Binding<String?> = .constant(nil),
                 isPresented: Binding<Bool>) {
         self.connectionManager = connectionManager
@@ -83,6 +88,7 @@ public struct SettingsView: View {
         self.onSaveProfileWithInheritance = onSaveProfileWithInheritance
         self.onCreateProfileWithInheritance = onCreateProfileWithInheritance
         self.onDeleteProfile = onDeleteProfile
+        self.onReloadProfiles = onReloadProfiles
         self._deepLinkedProfileName = deepLinkedProfileName
         self._isPresented = isPresented
     }
@@ -140,7 +146,7 @@ public struct SettingsView: View {
 
     private var settingsSidebar: some View {
         VStack(spacing: 1) {
-            ForEach([SettingsSection.connections, .profiles, .notifications, .logs], id: \.self) { section in
+            ForEach([SettingsSection.connections, .profiles, .providerAccounts, .notifications, .logs], id: \.self) { section in
                 sidebarRow(section)
             }
             Spacer()
@@ -185,6 +191,12 @@ public struct SettingsView: View {
         switch selectedSection {
         case .connections:   connectionsContent
         case .profiles:      profilesContent
+        case .providerAccounts:
+            ProviderAccountsSettingsView(
+                api: connectionManager.api,
+                profiles: profiles,
+                onProfilesChanged: onReloadProfiles
+            )
         case .notifications: notificationsContent
         case .logs:          logsContent
         case .about:         aboutContent

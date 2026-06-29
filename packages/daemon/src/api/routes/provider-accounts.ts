@@ -128,7 +128,14 @@ export function providerAccountRoutes(
     }
 
     const account = body.accountId
-      ? providerAccountStore.updateCredentials(body.accountId, credentials)
+      ? providerAccountStore.exists(body.accountId)
+        ? providerAccountStore.updateCredentials(body.accountId, credentials)
+        : providerAccountStore.create({
+            id: body.accountId,
+            name: body.accountName ?? `${credentials.provider} ${ownerName}`,
+            provider: credentials.provider,
+            credentials,
+          })
       : providerAccountStore.create({
           name: body.accountName ?? `${credentials.provider} ${ownerName}`,
           provider: credentials.provider,

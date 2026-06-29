@@ -153,6 +153,39 @@ describe('provider account routes', () => {
     expect(profileStore.getRaw('base').providerCredentials?.provider).toBe('max');
   });
 
+  it('creates a missing stable account id while importing legacy profile credentials', async () => {
+    profileStore.create({
+      ...validProfile,
+      name: 'base',
+      modelProvider: 'max',
+      providerCredentials: {
+        provider: 'max',
+        accessToken: 'access',
+        refreshToken: 'refresh',
+        expiresAt: '2026-12-31T00:00:00Z',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/provider-accounts/import-from-profile',
+      payload: {
+        profileName: 'base',
+        accountId: 'anth-pro',
+        accountName: 'Anthropic Pro',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().account).toMatchObject({
+      id: 'anth-pro',
+      name: 'Anthropic Pro',
+      provider: 'max',
+      credentials: { provider: 'max' },
+      hasCredentials: true,
+    });
+  });
+
   it('exposes provider account auth source in the profile editor payload', async () => {
     profileStore.create({
       ...validProfile,

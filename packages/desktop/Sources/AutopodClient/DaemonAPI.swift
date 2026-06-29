@@ -551,6 +551,24 @@ public actor DaemonAPI {
     let _: EmptyResponse = try await request("DELETE", "/profiles/\(profileName)/provider-account")
   }
 
+  public func importProviderAccountFromProfile(
+    profileName: String,
+    accountId: String? = nil,
+    accountName: String? = nil,
+    linkProfileNames: [String] = [],
+    clearLegacyCredentials: Bool = false
+  ) async throws -> ProviderAccountImportResponse {
+    var fields: [String: Any] = [
+      "profileName": profileName,
+      "linkProfileNames": linkProfileNames,
+      "clearLegacyCredentials": clearLegacyCredentials,
+    ]
+    if let accountId { fields["accountId"] = accountId }
+    if let accountName { fields["accountName"] = accountName }
+    let body = try JSONSerialization.data(withJSONObject: fields)
+    return try await request("POST", "/provider-accounts/import-from-profile", body: body)
+  }
+
   // MARK: - History
 
   public func createHistoryWorkspace(

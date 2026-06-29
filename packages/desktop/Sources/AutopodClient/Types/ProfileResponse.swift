@@ -348,6 +348,12 @@ public struct ProviderAuthSourceResponse: Codable, Sendable {
   public var profileName: String?
 }
 
+public struct ProviderAccountImportResponse: Codable, Sendable {
+  public var account: PublicProviderAccountResponse
+  public var linkedProfiles: [ProfileResponse]
+  public var legacyCredentialsCleared: Bool
+}
+
 // MARK: - Nested types
 
 public struct SmokePageResponse: Codable, Sendable {
