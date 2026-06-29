@@ -22,6 +22,7 @@ import type {
   ValidationPhaseCallbacks,
 } from '../interfaces/validation-engine.js';
 import { buildSupervisorCommand } from '../pods/preview-supervisor.js';
+import { wrapValidationExecCommand } from '../pods/registry-injector.js';
 import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { runAdvisoryBrowserQa } from './advisory-browser-qa-runner.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
@@ -175,7 +176,7 @@ export function createLocalValidationEngine(
           try {
             setupExecResult = await containerManager.execInContainer(
               config.containerId,
-              ['sh', '-c', config.validationSetupCommand],
+              wrapValidationExecCommand(config.validationSetupCommand, config.extraExecEnv),
               {
                 cwd: '/workspace',
                 timeout: config.buildTimeout ?? 300_000,
@@ -829,7 +830,7 @@ async function runBuild(
   try {
     result = await containerManager.execInContainer(
       config.containerId,
-      ['sh', '-c', config.buildCommand],
+      wrapValidationExecCommand(config.buildCommand, config.extraExecEnv),
       {
         cwd: buildCwd,
         timeout: config.buildTimeout ?? 300_000,
@@ -910,7 +911,7 @@ async function runTests(
   try {
     result = await containerManager.execInContainer(
       config.containerId,
-      ['sh', '-c', config.testCommand],
+      wrapValidationExecCommand(config.testCommand, config.extraExecEnv),
       {
         cwd: testCwd,
         timeout: config.testTimeout ?? 600_000,
@@ -1076,17 +1077,18 @@ async function runFactValidation(
         );
         hostBrowserFactDependenciesPrepared = true;
       } else {
+        const factEnv = {
+          ...(config.extraExecEnv ?? {}),
+          AUTOPOD_FACT_EVIDENCE_DIR: `/workspace/.autopod/evidence/${fact.id}`,
+          AUTOPOD_FACT_SCREENSHOT_PATH: `/workspace/.autopod/evidence/${fact.id}/screenshot.png`,
+        };
         commandResult = await containerManager.execInContainer(
           config.containerId,
-          ['sh', '-c', fact.command],
+          wrapValidationExecCommand(fact.command, factEnv),
           {
             cwd,
             timeout: config.testTimeout ?? 600_000,
-            env: {
-              ...(config.extraExecEnv ?? {}),
-              AUTOPOD_FACT_EVIDENCE_DIR: `/workspace/.autopod/evidence/${fact.id}`,
-              AUTOPOD_FACT_SCREENSHOT_PATH: `/workspace/.autopod/evidence/${fact.id}/screenshot.png`,
-            },
+            env: factEnv,
           },
         );
       }
@@ -1765,7 +1767,7 @@ async function runLint(
   try {
     result = await containerManager.execInContainer(
       config.containerId,
-      ['sh', '-c', config.lintCommand],
+      wrapValidationExecCommand(config.lintCommand, config.extraExecEnv),
       {
         cwd,
         timeout: config.lintTimeout ?? 120_000,
@@ -1817,7 +1819,7 @@ async function runSast(
   try {
     result = await containerManager.execInContainer(
       config.containerId,
-      ['sh', '-c', config.sastCommand],
+      wrapValidationExecCommand(config.sastCommand, config.extraExecEnv),
       {
         cwd,
         timeout: config.sastTimeout ?? 300_000,

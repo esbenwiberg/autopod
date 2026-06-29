@@ -38,8 +38,15 @@ export async function reportBlocker(
   if (currentCount + 1 >= autoPauseThreshold) {
     // Block and wait for human
     const timeoutMs = bridge.getHumanResponseTimeout(podId) * 1000;
-    const response = await pendingRequests.waitForResponse(escalationId, timeoutMs);
-    return response;
+    try {
+      const response = await pendingRequests.waitForResponse(escalationId, timeoutMs);
+      return response;
+    } catch (err) {
+      const isTimeout = err instanceof Error && err.message.includes('timed out');
+      return isTimeout
+        ? 'Blocker reported, but no human response arrived before the timeout. Continue only if you can make safe progress without that answer.'
+        : `Blocker response wait was cancelled: ${err instanceof Error ? err.message : String(err)}`;
+    }
   }
 
   return `Blocker reported: ${input.description}. Continuing with reduced confidence.`;

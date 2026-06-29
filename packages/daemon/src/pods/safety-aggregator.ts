@@ -111,8 +111,18 @@ function verifyFleetAuditChain(db: Database.Database): FleetVerifyResult {
     let runningPrevHash: string | null = null;
 
     for (const row of rows) {
+      if (row.prev_hash !== runningPrevHash) {
+        return {
+          valid: false,
+          totalPods: podIds.length,
+          totalEntries,
+          firstMismatchPodId: row.pod_id,
+          firstMismatchRowId: row.id,
+          firstMismatchReason: `prev_hash broken chain at row id=${row.id}`,
+        };
+      }
       const expected = computeEntryHash(
-        row.prev_hash,
+        runningPrevHash,
         row.pod_id,
         row.action_name,
         row.params,
@@ -128,16 +138,6 @@ function verifyFleetAuditChain(db: Database.Database): FleetVerifyResult {
           firstMismatchPodId: row.pod_id,
           firstMismatchRowId: row.id,
           firstMismatchReason: `entry_hash mismatch for row id=${row.id}`,
-        };
-      }
-      if (runningPrevHash !== null && row.prev_hash !== runningPrevHash) {
-        return {
-          valid: false,
-          totalPods: podIds.length,
-          totalEntries,
-          firstMismatchPodId: row.pod_id,
-          firstMismatchRowId: row.id,
-          firstMismatchReason: `prev_hash broken chain at row id=${row.id}`,
         };
       }
       runningPrevHash = row.entry_hash;

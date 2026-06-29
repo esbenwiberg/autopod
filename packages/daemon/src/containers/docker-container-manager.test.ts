@@ -462,6 +462,7 @@ describe('DockerContainerManager', () => {
       container.start.mockRejectedValue(new Error('port already in use'));
 
       await expect(manager.spawn(baseConfig)).rejects.toThrow('port already in use');
+      expect(container.remove).toHaveBeenCalledWith({ force: true });
     });
   });
 

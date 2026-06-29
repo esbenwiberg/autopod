@@ -337,11 +337,20 @@ async function readFileCapped(
 ): Promise<string | null> {
   try {
     // Prevent path traversal
-    const resolved = path.resolve(worktreePath, relPath);
-    if (!resolved.startsWith(path.resolve(worktreePath))) return null;
+    const root = path.resolve(worktreePath);
+    const resolved = path.resolve(root, relPath);
+    const relative = path.relative(root, resolved);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
 
-    const content = await fs.readFile(resolved, 'utf-8');
-    return content.length > maxBytes ? `${content.slice(0, maxBytes)}\n... (truncated)` : content;
+    const handle = await fs.open(resolved, 'r');
+    try {
+      const buffer = Buffer.alloc(maxBytes + 1);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      const content = buffer.subarray(0, Math.min(bytesRead, maxBytes)).toString('utf-8');
+      return bytesRead > maxBytes ? `${content}\n... (truncated)` : content;
+    } finally {
+      await handle.close();
+    }
   } catch {
     return null;
   }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
@@ -232,6 +232,19 @@ describe('pod commands', () => {
       { path: `${outputRoot}/contract.yaml`, content: contractYaml },
       { path: `${outputRoot}/notes.md`, content: 'Planning context.\n' },
     ]);
+  });
+
+  it('rejects symlinked files in --spec pod context', async () => {
+    const specRoot = createSpecFolder();
+    const outside = mkdtempSync(join(tmpdir(), 'autopod-cli-spec-secret-'));
+    createdDirs.push(specRoot, outside);
+    writeFileSync(join(outside, 'secret.txt'), 'do-not-send\n');
+    symlinkSync(join(outside, 'secret.txt'), join(specRoot, 'leak.txt'));
+
+    await expect(
+      program.parseAsync(['node', 'ap', 'pod', 'create', 'test-profile', '--spec', specRoot]),
+    ).rejects.toThrow('spec file symlink not allowed');
+    expect(mockClient.createSession).not.toHaveBeenCalled();
   });
 
   it('accepts contract.yml for --spec pod creation', async () => {

@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { basename, extname, isAbsolute, join, resolve } from 'node:path';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { type SpecFile, numericPrefix, parseBriefs } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
@@ -51,26 +51,31 @@ function readMaybe(baseDir: string, relPath: string): string {
 const pathSeparatorRegex = /[/\\]+/g;
 
 function collectSpecFiles(specRoot: string): SpecFile[] {
-  const root = resolve(specRoot);
+  const root = realpathSync(resolve(specRoot));
   const outputRoot = `specs/${basename(root) || 'spec'}`;
   const files: SpecFile[] = [];
 
   function walk(dir: string): void {
     for (const entry of readdirSync(dir).sort()) {
       const full = join(dir, entry);
-      const stat = statSync(full);
+      const stat = lstatSync(full);
+      if (stat.isSymbolicLink()) {
+        throw new Error(`spec file symlink not allowed: ${full}`);
+      }
       if (stat.isDirectory()) {
         walk(full);
         continue;
       }
       if (!stat.isFile()) continue;
-      const rel = full
-        .slice(root.length + 1)
-        .split(pathSeparatorRegex)
-        .join('/');
+      const real = realpathSync(full);
+      const rel = relative(root, real);
+      if (rel.startsWith('..') || isAbsolute(rel)) {
+        throw new Error(`spec file outside root: ${full}`);
+      }
+      const outputPath = rel.split(pathSeparatorRegex).join('/');
       files.push({
-        path: `${outputRoot}/${rel}`,
-        content: readFileSync(full, 'utf-8'),
+        path: `${outputRoot}/${outputPath}`,
+        content: readFileSync(real, 'utf-8'),
       });
     }
   }

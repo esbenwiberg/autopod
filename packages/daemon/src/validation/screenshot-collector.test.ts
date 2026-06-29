@@ -31,6 +31,8 @@ function makeMockStore() {
 describe('collectScreenshots', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedFs.lstat.mockResolvedValue({ isFile: () => true } as never);
+    mockedFs.realpath.mockImplementation(async (value) => String(value));
   });
 
   afterEach(() => {
@@ -119,6 +121,30 @@ describe('collectScreenshots', () => {
     expect(store.write).not.toHaveBeenCalled();
   });
 
+  it('rejects worktree screenshots whose real path escapes through a symlink', async () => {
+    mockedFs.realpath
+      .mockResolvedValueOnce('/tmp/worktree-secret/root.png')
+      .mockResolvedValueOnce('/tmp/worktree/abc');
+
+    const pages: PageResult[] = [
+      {
+        path: '/',
+        status: 'pass',
+        screenshotPath: '/workspace/.autopod/screenshots/root.png',
+        consoleErrors: [],
+        assertions: [],
+        loadTime: 100,
+      },
+    ];
+
+    const store = makeMockStore();
+    const result = await collectScreenshots('/tmp/worktree/abc', pages, store, 'pod-1');
+
+    expect(result).toHaveLength(0);
+    expect(mockedFs.readFile).not.toHaveBeenCalled();
+    expect(store.write).not.toHaveBeenCalled();
+  });
+
   it('skips pages without screenshotPath', async () => {
     const pages: PageResult[] = [
       {
@@ -194,6 +220,8 @@ describe('collectScreenshots', () => {
 describe('collectFactScreenshots', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedFs.lstat.mockResolvedValue({ isFile: () => true } as never);
+    mockedFs.realpath.mockImplementation(async (value) => String(value));
   });
 
   afterEach(() => {
@@ -245,6 +273,45 @@ describe('collectFactScreenshots', () => {
       'fact-page-0-screenshot.png',
       pngBuffer,
     );
+  });
+
+  it('does not promote fact screenshots whose real path escapes the worktree', async () => {
+    mockedFs.realpath
+      .mockResolvedValueOnce('/tmp/worktree-secret/fact.png')
+      .mockResolvedValueOnce('/tmp/worktree/abc');
+
+    const store = makeMockStore();
+    const factValidation = {
+      status: 'pass' as const,
+      results: [
+        {
+          factId: 'fact-page',
+          proves: ['page'],
+          kind: 'browser-test',
+          artifactPath: 'tests/fact.spec.ts',
+          command: 'node fact.mjs',
+          passed: true,
+          reasoning: 'Fact passed.',
+          attachments: [
+            {
+              kind: 'screenshot' as const,
+              path: '.autopod/evidence/fact-page/screenshot.png',
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = await collectFactScreenshots(
+      '/tmp/worktree/abc',
+      factValidation,
+      store,
+      'pod-1',
+    );
+
+    expect(result).toHaveLength(0);
+    expect(mockedFs.readFile).not.toHaveBeenCalled();
+    expect(store.write).not.toHaveBeenCalled();
   });
 });
 

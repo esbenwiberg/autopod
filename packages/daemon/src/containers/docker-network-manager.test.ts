@@ -218,15 +218,18 @@ describe('DockerNetworkManager', () => {
         expect(script).toContain('iptables -A OUTPUT -j REJECT');
       });
 
-      it('allows DNS', async () => {
+      it("allows DNS only to Docker's embedded resolver", async () => {
         const script = await manager.generateFirewallScript([], 'deny-all');
-        expect(script).toContain('--dport 53 -j ACCEPT');
+        expect(script).toContain('iptables -A OUTPUT -p udp -d 127.0.0.11 --dport 53 -j ACCEPT');
+        expect(script).toContain('iptables -A OUTPUT -p tcp -d 127.0.0.11 --dport 53 -j ACCEPT');
+        expect(script).not.toContain('iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');
+        expect(script).not.toContain('iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT');
       });
 
       it('resolves host.docker.internal for daemon gateway access', async () => {
         const script = await manager.generateFirewallScript([], 'deny-all');
         expect(script).toContain('getent ahostsv4 host.docker.internal');
-        expect(script).toContain('iptables -A OUTPUT -d "$_gw_ip" -j ACCEPT');
+        expect(script).toContain('iptables -A OUTPUT -p tcp -d "$_gw_ip" --dport 3100 -j ACCEPT');
         // Gateway resolution must come before the REJECT rule
         const gatewayIdx = script.indexOf('host.docker.internal');
         const rejectIdx = script.indexOf('-j REJECT --reject-with');
@@ -235,7 +238,9 @@ describe('DockerNetworkManager', () => {
 
       it('includes explicit gateway IP when provided', async () => {
         const script = await manager.generateFirewallScript([], 'deny-all', '172.18.0.1');
-        expect(script).toContain('iptables -A OUTPUT -d "172.18.0.1" -j ACCEPT');
+        expect(script).toContain(
+          'iptables -A OUTPUT -p tcp -d "172.18.0.1" --dport 3100 -j ACCEPT',
+        );
       });
     });
 
@@ -305,10 +310,12 @@ describe('DockerNetworkManager', () => {
         expect(script).not.toContain('socat -u UDP-RECV');
       });
 
-      it('allows DNS using the container default resolver (no in-pod DNS filter)', async () => {
+      it("allows DNS only to Docker's embedded resolver (no in-pod DNS filter)", async () => {
         const script = await manager.generateFirewallScript(['api.anthropic.com']);
-        expect(script).toContain('iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');
-        expect(script).toContain('iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT');
+        expect(script).toContain('iptables -A OUTPUT -p udp -d 127.0.0.11 --dport 53 -j ACCEPT');
+        expect(script).toContain('iptables -A OUTPUT -p tcp -d 127.0.0.11 --dport 53 -j ACCEPT');
+        expect(script).not.toContain('iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');
+        expect(script).not.toContain('iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT');
         // No more dnsmasq listener overriding /etc/resolv.conf
         expect(script).not.toContain('listen-address=127.0.0.53');
         expect(script).not.toContain('nameserver 127.0.0.53');
@@ -317,7 +324,7 @@ describe('DockerNetworkManager', () => {
       it('resolves host.docker.internal for daemon gateway access', async () => {
         const script = await manager.generateFirewallScript(['api.anthropic.com']);
         expect(script).toContain('getent ahostsv4 host.docker.internal');
-        expect(script).toContain('iptables -A OUTPUT -d "$_gw_ip" -j ACCEPT');
+        expect(script).toContain('iptables -A OUTPUT -p tcp -d "$_gw_ip" --dport 3100 -j ACCEPT');
       });
 
       it('includes explicit gateway IP when provided', async () => {
@@ -326,7 +333,23 @@ describe('DockerNetworkManager', () => {
           'restricted',
           '172.18.0.1',
         );
-        expect(script).toContain('iptables -A OUTPUT -d "172.18.0.1" -j ACCEPT');
+        expect(script).toContain(
+          'iptables -A OUTPUT -p tcp -d "172.18.0.1" --dport 3100 -j ACCEPT',
+        );
+      });
+
+      it('scopes gateway access to the provided daemon port', async () => {
+        const script = await manager.generateFirewallScript(
+          ['api.anthropic.com'],
+          'restricted',
+          '172.18.0.1',
+          [],
+          4310,
+        );
+        expect(script).toContain(
+          'iptables -A OUTPUT -p tcp -d "172.18.0.1" --dport 4310 -j ACCEPT',
+        );
+        expect(script).not.toContain('iptables -A OUTPUT -d "172.18.0.1" -j ACCEPT');
       });
 
       it('ACCEPTs sidecar IPs unconditionally before the HAProxy redirect', async () => {

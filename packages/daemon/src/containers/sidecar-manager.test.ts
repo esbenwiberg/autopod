@@ -137,6 +137,15 @@ describe('DockerSidecarManager', () => {
       await manager.spawn({ spec: daggerSpec, podId: 'pod-a', networkName: 'net-a' });
       expect(docker.pull).not.toHaveBeenCalled();
     });
+
+    it('removes the created sidecar when start fails', async () => {
+      container.start.mockRejectedValueOnce(new Error('start failed'));
+
+      await expect(
+        manager.spawn({ spec: daggerSpec, podId: 'pod-a', networkName: 'net-a' }),
+      ).rejects.toThrow('start failed');
+      expect(container.remove).toHaveBeenCalledWith({ force: true });
+    });
   });
 
   describe('kill()', () => {

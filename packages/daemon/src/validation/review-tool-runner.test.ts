@@ -14,6 +14,11 @@ const execFileAsync = promisify(execFile);
 describe('review tool runner - path safety', () => {
   let tmpDir: string;
 
+  function isContained(resolved: string, root: string): boolean {
+    const relative = path.relative(path.resolve(root), resolved);
+    return !relative.startsWith('..') && !path.isAbsolute(relative);
+  }
+
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'review-tools-'));
     await fs.mkdir(path.join(tmpDir, 'src'), { recursive: true });
@@ -29,19 +34,26 @@ describe('review tool runner - path safety', () => {
     // Simulate the path resolution logic
     const relPath = '../../etc/passwd';
     const resolved = path.resolve(tmpDir, relPath);
-    expect(resolved.startsWith(path.resolve(tmpDir))).toBe(false);
+    expect(isContained(resolved, tmpDir)).toBe(false);
   });
 
   it('resolveSafePath allows valid paths', () => {
     const relPath = 'src/index.ts';
     const resolved = path.resolve(tmpDir, relPath);
-    expect(resolved.startsWith(path.resolve(tmpDir))).toBe(true);
+    expect(isContained(resolved, tmpDir)).toBe(true);
   });
 
   it('resolveSafePath allows nested paths', () => {
     const relPath = 'src/../src/index.ts';
     const resolved = path.resolve(tmpDir, relPath);
-    expect(resolved.startsWith(path.resolve(tmpDir))).toBe(true);
+    expect(isContained(resolved, tmpDir)).toBe(true);
+  });
+
+  it('resolveSafePath rejects sibling paths with a shared prefix', () => {
+    const root = path.join(tmpDir, 'repo');
+    const sibling = path.join(tmpDir, 'repo-secret', 'token');
+    expect(sibling.startsWith(root)).toBe(true);
+    expect(isContained(sibling, root)).toBe(false);
   });
 });
 

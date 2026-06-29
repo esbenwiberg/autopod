@@ -1,10 +1,12 @@
-import type { Pod } from '@autopod/shared';
+import type { JwtPayload, Pod } from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { AuthModule } from '../../interfaces/index.js';
 import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
 import { extractWebSocketBearerToken } from '../websocket-auth.js';
+
+type TerminalStream = NodeJS.ReadWriteStream & { destroy?: () => void };
 
 /**
  * WebSocket terminal endpoint — interactive shell into running containers.
@@ -44,8 +46,9 @@ export function terminalRoutes(
         socket.close(4001, 'Missing token');
         return;
       }
+      let user: JwtPayload;
       try {
-        await authModule.validateToken(token);
+        user = await authModule.validateToken(token);
       } catch {
         socket.close(4001, 'Invalid token');
         return;
@@ -57,6 +60,11 @@ export function terminalRoutes(
         pod = podManager.getSession(podId);
       } catch {
         socket.close(4004, 'Pod not found');
+        return;
+      }
+
+      if (!canAccessPodTerminal(user, pod)) {
+        socket.close(4003, 'Forbidden');
         return;
       }
 
@@ -90,6 +98,26 @@ export function terminalRoutes(
       }
       activeTerminals.set(podId, socket);
 
+      let stream: TerminalStream | undefined;
+      let cleanedUp = false;
+      const cleanupTerminal = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        if (activeTerminals.get(podId) === socket) {
+          activeTerminals.delete(podId);
+        }
+        try {
+          stream?.destroy?.();
+        } catch {
+          // Best effort cleanup
+        }
+      };
+
+      socket.once('close', cleanupTerminal);
+      socket.on('error', (err: Error) => {
+        request.log.error({ err, podId }, 'Terminal WebSocket error');
+      });
+
       // Create exec with TTY
       const startTerminal = async () => {
         try {
@@ -111,16 +139,25 @@ export function terminalRoutes(
             WorkingDir: '/workspace',
           });
 
-          const stream = await exec.start({ hijack: true, stdin: true, Tty: true });
+          const startedStream = (await exec.start({
+            hijack: true,
+            stdin: true,
+            Tty: true,
+          })) as TerminalStream;
+          stream = startedStream;
+          if (cleanedUp) {
+            startedStream.destroy?.();
+            return;
+          }
 
           // stdout → WebSocket (binary frames)
-          stream.on('data', (chunk: Buffer) => {
+          startedStream.on('data', (chunk: Buffer) => {
             if (socket.readyState === socket.OPEN) {
               socket.send(chunk, { binary: true });
             }
           });
 
-          stream.on('end', () => {
+          startedStream.on('end', () => {
             // Exec finished — close WebSocket with exit code
             exec
               .inspect()
@@ -133,7 +170,7 @@ export function terminalRoutes(
               });
           });
 
-          stream.on('error', (err: Error) => {
+          startedStream.on('error', (err: Error) => {
             request.log.error({ err, podId }, 'Terminal stream error');
             socket.close(1011, 'Stream error');
           });
@@ -167,37 +204,17 @@ export function terminalRoutes(
               } catch {
                 // Not JSON — treat as text input
               }
-              stream.write(text);
+              startedStream.write(text);
             } else {
               // Binary frame — raw stdin bytes
-              stream.write(rawData);
+              startedStream.write(rawData);
             }
-          });
-
-          socket.on('close', () => {
-            // Only remove tracking if WE are still the active connection —
-            // a late close from an evicted socket must not remove the new one.
-            if (activeTerminals.get(podId) === socket) {
-              activeTerminals.delete(podId);
-            }
-            // Client disconnected — kill the exec stream
-            try {
-              const destroyable = stream as NodeJS.ReadWriteStream & { destroy?: () => void };
-              if (typeof destroyable.destroy === 'function') {
-                destroyable.destroy();
-              }
-            } catch {
-              // Best effort cleanup
-            }
-          });
-
-          socket.on('error', (err: Error) => {
-            request.log.error({ err, podId }, 'Terminal WebSocket error');
           });
 
           request.log.info({ podId, containerId, cols, rows }, 'Terminal pod started');
         } catch (err) {
           request.log.error({ err, podId }, 'Failed to start terminal');
+          cleanupTerminal();
           socket.close(1011, 'Failed to start terminal');
         }
       };
@@ -205,4 +222,8 @@ export function terminalRoutes(
       startTerminal();
     },
   );
+}
+
+function canAccessPodTerminal(user: JwtPayload, pod: Pod): boolean {
+  return pod.userId === user.oid || user.roles.includes('admin') || user.roles.includes('operator');
 }

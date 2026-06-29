@@ -30,6 +30,23 @@ function isInsideDirectory(candidate: string, root: string): boolean {
   return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
+async function readContainedFile(candidate: string, root: string): Promise<Buffer | null> {
+  try {
+    const stat = await fsp.lstat(candidate);
+    if (!stat.isFile()) return null;
+
+    const [candidateReal, rootReal] = await Promise.all([
+      fsp.realpath(candidate),
+      fsp.realpath(root),
+    ]);
+    if (!isInsideDirectory(candidateReal, rootReal)) return null;
+
+    return await fsp.readFile(candidateReal);
+  } catch {
+    return null;
+  }
+}
+
 function resolveSmokeScreenshotPath(
   worktreePath: string,
   screenshotPath: string,
@@ -85,7 +102,13 @@ export async function collectScreenshots(
     if (!hostPath) continue;
 
     try {
-      const buffer = await fsp.readFile(hostPath);
+      const allowedRoot =
+        path.isAbsolute(page.screenshotPath) && !page.screenshotPath.startsWith('/workspace/')
+          ? options.allowedHostScreenshotDir
+          : worktreePath;
+      if (!allowedRoot) continue;
+      const buffer = await readContainedFile(hostPath, allowedRoot);
+      if (!buffer) continue;
       const filename = `${slugifyPagePath(page.path, idx)}.png`;
       const ref = await store.write(podId, 'smoke', filename, buffer);
       collected.push({ pagePath: page.path, ref });
@@ -129,7 +152,8 @@ export async function collectFactScreenshots(
       }
 
       try {
-        const buffer = await fsp.readFile(hostPath);
+        const buffer = await readContainedFile(hostPath, worktreePath);
+        if (!buffer) continue;
         const basename = path.basename(attachment.path, path.extname(attachment.path));
         const safeFactId = fact.factId.replace(/[^A-Za-z0-9._-]/g, '_') || 'fact';
         const safeBase = basename.replace(/[^A-Za-z0-9._-]/g, '_') || 'screenshot';

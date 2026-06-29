@@ -6,6 +6,7 @@ import type {
 } from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
+import { DOCKER_CALL_TIMEOUTS, boundedDockerCall } from './docker-bounds.js';
 import { HAPROXY_LISTEN_PORT, HAPROXY_LOG_PORT, generateHaproxyConfig } from './haproxy-config.js';
 
 // Defense-in-depth: only allow hostnames/IPs that are safe to interpolate into shell scripts.
@@ -169,7 +170,11 @@ export class DockerNetworkManager {
   async ensureNetworkForPod(podId: string): Promise<string> {
     const name = networkNameForPod(podId);
     try {
-      await this.docker.getNetwork(name).inspect();
+      await boundedDockerCall(this.docker.getNetwork(name).inspect(), {
+        label: 'network.inspect',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.inspectNetwork,
+        logger: this.logger,
+      });
       this.logger.debug({ network: name, podId }, 'Pod network already exists');
       return name;
     } catch {
@@ -190,7 +195,11 @@ export class DockerNetworkManager {
       },
     };
     try {
-      await this.docker.createNetwork(networkConfig);
+      await boundedDockerCall(this.docker.createNetwork(networkConfig), {
+        label: 'network.create',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.createNetwork,
+        logger: this.logger,
+      });
     } catch (err: unknown) {
       const msg = (err as { message?: string }).message ?? '';
       if (msg.includes('all predefined address pools have been fully subnetted')) {
@@ -198,21 +207,36 @@ export class DockerNetworkManager {
         // Prune any autopod network that has no containers attached (safe to
         // remove — active networks always have at least the pod or a sidecar).
         this.logger.warn({ podId }, 'Subnet pool exhausted — pruning unattached autopod networks');
-        const nets = await this.docker.listNetworks({
-          filters: JSON.stringify({ label: ['com.autopod.pod-network=true'] }),
-        });
+        const nets = await boundedDockerCall(
+          this.docker.listNetworks({
+            filters: JSON.stringify({ label: ['com.autopod.pod-network=true'] }),
+          }),
+          {
+            label: 'network.list',
+            timeoutMs: DOCKER_CALL_TIMEOUTS.listNetworks,
+            logger: this.logger,
+          },
+        );
         await Promise.all(
           nets
             .filter((n) => !n.Containers || Object.keys(n.Containers).length === 0)
             .map(async (n) => {
               try {
-                await this.docker.getNetwork(n.Id).remove();
+                await boundedDockerCall(this.docker.getNetwork(n.Id).remove(), {
+                  label: 'network.remove',
+                  timeoutMs: DOCKER_CALL_TIMEOUTS.removeNetwork,
+                  logger: this.logger,
+                });
               } catch {
                 // best effort
               }
             }),
         );
-        await this.docker.createNetwork(networkConfig);
+        await boundedDockerCall(this.docker.createNetwork(networkConfig), {
+          label: 'network.create',
+          timeoutMs: DOCKER_CALL_TIMEOUTS.createNetwork,
+          logger: this.logger,
+        });
       } else {
         throw err;
       }
@@ -227,9 +251,16 @@ export class DockerNetworkManager {
    * safe to prune.
    */
   async reconcileOrphanNetworks(activePodIds: Set<string>): Promise<number> {
-    const networks = await this.docker.listNetworks({
-      filters: JSON.stringify({ label: ['com.autopod.pod-network=true'] }),
-    });
+    const networks = await boundedDockerCall(
+      this.docker.listNetworks({
+        filters: JSON.stringify({ label: ['com.autopod.pod-network=true'] }),
+      }),
+      {
+        label: 'network.list',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.listNetworks,
+        logger: this.logger,
+      },
+    );
     let pruned = 0;
     await Promise.all(
       networks.map(async (net) => {
@@ -242,7 +273,11 @@ export class DockerNetworkManager {
           // every endpoint is detached, so force-disconnect each one first. The
           // containers themselves get reaped by the sidecar/local reconcilers.
           await this.detachEndpoints(network, net);
-          await network.remove();
+          await boundedDockerCall(network.remove(), {
+            label: 'network.remove',
+            timeoutMs: DOCKER_CALL_TIMEOUTS.removeNetwork,
+            logger: this.logger,
+          });
           this.logger.info({ network: net.Name, podId }, 'Pruned orphan pod network');
           pruned++;
         } catch (err) {
@@ -266,9 +301,11 @@ export class DockerNetworkManager {
     // the network is on the same node as the daemon, and the data can lag.
     let containerIds: string[] = [];
     try {
-      const info = (await network.inspect()) as
-        | { Containers?: Record<string, unknown> }
-        | undefined;
+      const info = (await boundedDockerCall(network.inspect(), {
+        label: 'network.inspect',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.inspectNetwork,
+        logger: this.logger,
+      })) as { Containers?: Record<string, unknown> } | undefined;
       containerIds = Object.keys(info?.Containers ?? {});
     } catch {
       containerIds = Object.keys(listEntry.Containers ?? {});
@@ -277,7 +314,11 @@ export class DockerNetworkManager {
     await Promise.all(
       containerIds.map(async (containerId) => {
         try {
-          await network.disconnect({ Container: containerId, Force: true });
+          await boundedDockerCall(network.disconnect({ Container: containerId, Force: true }), {
+            label: 'network.disconnect',
+            timeoutMs: DOCKER_CALL_TIMEOUTS.disconnectNetwork,
+            logger: this.logger,
+          });
           this.logger.info(
             { network: listEntry.Name, containerId },
             'Force-disconnected stale endpoint from orphan pod network',
@@ -300,7 +341,11 @@ export class DockerNetworkManager {
     const name = networkNameForPod(podId);
     try {
       const network = this.docker.getNetwork(name);
-      await network.remove();
+      await boundedDockerCall(network.remove(), {
+        label: 'network.remove',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.removeNetwork,
+        logger: this.logger,
+      });
       this.logger.info({ network: name, podId }, 'Pod network removed');
     } catch (err: unknown) {
       const statusCode = (err as { statusCode?: number }).statusCode;
@@ -374,6 +419,7 @@ export class DockerNetworkManager {
      * speak arbitrary protocols, not just TLS-with-SNI).
      */
     extraAllowedIps: string[] = [],
+    daemonGatewayPort = 3100,
   ): Promise<string> {
     const lines = ['#!/bin/sh', 'set -e', ''];
 
@@ -412,15 +458,17 @@ export class DockerNetworkManager {
       lines.push(
         "for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1}' | sort -u); do",
       );
-      lines.push('  iptables -A OUTPUT -d "$_gw_ip" -j ACCEPT');
+      lines.push(`  iptables -A OUTPUT -p tcp -d "$_gw_ip" --dport ${daemonGatewayPort} -j ACCEPT`);
       lines.push('done');
       if (daemonGatewayIp) {
-        lines.push(`iptables -A OUTPUT -d "${daemonGatewayIp}" -j ACCEPT 2>/dev/null || true`);
+        lines.push(
+          `iptables -A OUTPUT -p tcp -d "${daemonGatewayIp}" --dport ${daemonGatewayPort} -j ACCEPT 2>/dev/null || true`,
+        );
       }
       lines.push('');
-      lines.push('# Allow DNS');
-      lines.push('iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');
-      lines.push('iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT');
+      lines.push("# Allow DNS only to Docker's embedded resolver");
+      lines.push('iptables -A OUTPUT -p udp -d 127.0.0.11 --dport 53 -j ACCEPT');
+      lines.push('iptables -A OUTPUT -p tcp -d 127.0.0.11 --dport 53 -j ACCEPT');
       if (extraAllowedIps.length > 0) {
         lines.push('');
         lines.push(`# Allow sidecar IPs (${extraAllowedIps.length})`);
@@ -450,19 +498,21 @@ export class DockerNetworkManager {
     const haproxyConfig = generateHaproxyConfig({ allowedHosts: safeHosts });
 
     lines.push('');
-    lines.push('# DNS: use Docker default resolver (forwards to host). HAProxy is the allowlist.');
-    lines.push('iptables -A OUTPUT -p udp --dport 53 -j ACCEPT');
-    lines.push('iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT');
+    lines.push("# DNS: use Docker's embedded resolver only. HAProxy is the allowlist.");
+    lines.push('iptables -A OUTPUT -p udp -d 127.0.0.11 --dport 53 -j ACCEPT');
+    lines.push('iptables -A OUTPUT -p tcp -d 127.0.0.11 --dport 53 -j ACCEPT');
     lines.push('');
 
     lines.push('# Allow daemon gateway (MCP escalation endpoint) — bypasses HAProxy');
     lines.push(
       "for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1}' | sort -u); do",
     );
-    lines.push('  iptables -A OUTPUT -d "$_gw_ip" -j ACCEPT');
+    lines.push(`  iptables -A OUTPUT -p tcp -d "$_gw_ip" --dport ${daemonGatewayPort} -j ACCEPT`);
     lines.push('done');
     if (daemonGatewayIp) {
-      lines.push(`iptables -A OUTPUT -d "${daemonGatewayIp}" -j ACCEPT 2>/dev/null || true`);
+      lines.push(
+        `iptables -A OUTPUT -p tcp -d "${daemonGatewayIp}" --dport ${daemonGatewayPort} -j ACCEPT 2>/dev/null || true`,
+      );
     }
     lines.push('');
 
@@ -563,6 +613,7 @@ export class DockerNetworkManager {
     podId?: string,
     extraAllowedIps: string[] = [],
     extraAllowedHosts: string[] = [],
+    daemonGatewayPort = 3100,
   ): Promise<NetworkConfig | null> {
     if (!policy?.enabled) return null;
 
@@ -586,6 +637,7 @@ export class DockerNetworkManager {
       policy.mode,
       daemonGatewayIp,
       extraAllowedIps,
+      daemonGatewayPort,
     );
 
     return {
@@ -604,7 +656,11 @@ export class DockerNetworkManager {
     if (!podId) return 'host.docker.internal';
     try {
       const network = this.docker.getNetwork(networkNameForPod(podId));
-      const info = await network.inspect();
+      const info = await boundedDockerCall(network.inspect(), {
+        label: 'network.inspect',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.inspectNetwork,
+        logger: this.logger,
+      });
       const gateway = info.IPAM?.Config?.[0]?.Gateway;
       if (gateway) return gateway;
     } catch {

@@ -8,6 +8,7 @@ import {
 } from '@autopod/shared';
 import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
+import { DOCKER_CALL_TIMEOUTS, boundedDockerCall } from './docker-bounds.js';
 import {
   alignMemoryToPageSize,
   createContainerWithStaleRetry,
@@ -144,7 +145,29 @@ export class DockerSidecarManager implements SidecarManager {
       this.logger,
     );
 
-    await container.start();
+    try {
+      await boundedDockerCall(container.start(), {
+        label: 'sidecar.start',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.start,
+        logger: this.logger,
+        containerId: container.id,
+      });
+    } catch (err) {
+      try {
+        await boundedDockerCall(container.remove({ force: true }), {
+          label: 'sidecar.remove (start-failed)',
+          timeoutMs: DOCKER_CALL_TIMEOUTS.remove,
+          logger: this.logger,
+          containerId: container.id,
+        });
+      } catch (cleanupErr) {
+        this.logger.warn(
+          { err: cleanupErr, containerId: container.id, podId, sidecarName: spec.name },
+          'Failed to remove sidecar after start failure',
+        );
+      }
+      throw err;
+    }
 
     this.logger.info(
       { containerId: container.id, containerName, podId, sidecarName: spec.name },
@@ -218,9 +241,21 @@ export class DockerSidecarManager implements SidecarManager {
   ): Promise<{ exitCode: number; startedAt: string; finishedAt: string; logs: string } | null> {
     try {
       const container = this.docker.getContainer(handle.containerId);
-      const info = await container.inspect();
+      const info = await boundedDockerCall(container.inspect(), {
+        label: 'sidecar.inspect',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+        logger: this.logger,
+        containerId: handle.containerId,
+      });
       if (info.State.Running) return null;
-      const logs = (await container.logs({ stdout: true, stderr: true, tail: 40 })).toString();
+      const logs = (
+        await boundedDockerCall(container.logs({ stdout: true, stderr: true, tail: 40 }), {
+          label: 'sidecar.logs',
+          timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+          logger: this.logger,
+          containerId: handle.containerId,
+        })
+      ).toString();
       return {
         exitCode: info.State.ExitCode ?? -1,
         startedAt: info.State.StartedAt ?? '',
@@ -236,12 +271,22 @@ export class DockerSidecarManager implements SidecarManager {
     try {
       const container = this.docker.getContainer(containerId);
       try {
-        await container.stop({ t: 10 });
+        await boundedDockerCall(container.stop({ t: 10 }), {
+          label: 'sidecar.stop',
+          timeoutMs: DOCKER_CALL_TIMEOUTS.stop,
+          logger: this.logger,
+          containerId,
+        });
       } catch (err: unknown) {
         if (!isExpectedDockerError(err, [304, 404])) throw err;
       }
       try {
-        await container.remove({ force: true });
+        await boundedDockerCall(container.remove({ force: true }), {
+          label: 'sidecar.remove',
+          timeoutMs: DOCKER_CALL_TIMEOUTS.remove,
+          logger: this.logger,
+          containerId,
+        });
       } catch (err: unknown) {
         if (!isExpectedDockerError(err, [404])) throw err;
       }
@@ -260,10 +305,17 @@ export class DockerSidecarManager implements SidecarManager {
     const filters = {
       label: [`${SIDECAR_CONTAINER_LABEL}=true`],
     };
-    const containers = await this.docker.listContainers({
-      all: true,
-      filters: JSON.stringify(filters),
-    });
+    const containers = await boundedDockerCall(
+      this.docker.listContainers({
+        all: true,
+        filters: JSON.stringify(filters),
+      }),
+      {
+        label: 'sidecar.listContainers',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.listContainers,
+        logger: this.logger,
+      },
+    );
 
     const orphans = containers.filter((info) => {
       const podId = info.Labels?.[SIDECAR_LABEL_POD_ID];
@@ -315,20 +367,35 @@ export class DockerSidecarManager implements SidecarManager {
    */
   private async ensureImagePresent(image: string): Promise<void> {
     try {
-      await this.docker.getImage(image).inspect();
+      await boundedDockerCall(this.docker.getImage(image).inspect(), {
+        label: 'sidecar.image.inspect',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+        logger: this.logger,
+      });
       return;
     } catch (err: unknown) {
       if (!isExpectedDockerError(err, [404])) throw err;
     }
     this.logger.info({ image }, 'Pulling sidecar image');
-    const stream = (await this.docker.pull(image)) as NodeJS.ReadableStream;
-    await new Promise<void>((resolve, reject) => {
-      this.docker.modem.followProgress(
-        stream,
-        (followErr: Error | null) => (followErr ? reject(followErr) : resolve()),
-        () => {},
-      );
-    });
+    const stream = (await boundedDockerCall(this.docker.pull(image), {
+      label: 'sidecar.image.pull',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.pullImage,
+      logger: this.logger,
+    })) as NodeJS.ReadableStream;
+    await boundedDockerCall(
+      new Promise<void>((resolve, reject) => {
+        this.docker.modem.followProgress(
+          stream,
+          (followErr: Error | null) => (followErr ? reject(followErr) : resolve()),
+          () => {},
+        );
+      }),
+      {
+        label: 'sidecar.image.followProgress',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.followProgress,
+        logger: this.logger,
+      },
+    );
   }
 
   /**
@@ -349,7 +416,12 @@ export class DockerSidecarManager implements SidecarManager {
   private async probeOnce(handle: SidecarHandle, spec: SidecarSpec): Promise<boolean> {
     try {
       const container = this.docker.getContainer(handle.containerId);
-      const info = await container.inspect();
+      const info = await boundedDockerCall(container.inspect(), {
+        label: 'sidecar.inspect',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+        logger: this.logger,
+        containerId: handle.containerId,
+      });
       if (!info.State.Running) return false;
       if (info.State.ExitCode && info.State.ExitCode !== 0) return false;
 
@@ -377,12 +449,23 @@ export class DockerSidecarManager implements SidecarManager {
     // because the awk hasn't actually finished yet. The probe then misreads
     // "null !== 0" as "port isn't listening" and falls into a 90s timeout loop.
     // Attaching ties stream-end to process-exit, so the drain below is correct.
-    const exec = await container.exec({
-      Cmd: ['sh', '-c', script],
-      AttachStdout: true,
-      AttachStderr: true,
+    const exec = await boundedDockerCall(
+      container.exec({
+        Cmd: ['sh', '-c', script],
+        AttachStdout: true,
+        AttachStderr: true,
+      }),
+      {
+        label: 'sidecar.exec',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.exec,
+        logger: this.logger,
+      },
+    );
+    const stream = await boundedDockerCall(exec.start({ hijack: true, stdin: false }), {
+      label: 'sidecar.execStart',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.execStart,
+      logger: this.logger,
     });
-    const stream = await exec.start({ hijack: true, stdin: false });
     await new Promise<void>((resolve) => {
       stream.on('end', () => resolve());
       stream.on('error', () => resolve());
@@ -391,7 +474,11 @@ export class DockerSidecarManager implements SidecarManager {
     // Belt-and-braces: poll inspect a few times in case stream-end races the
     // ExitCode field being populated on Docker's side.
     for (let i = 0; i < 10; i++) {
-      const info = await exec.inspect();
+      const info = await boundedDockerCall(exec.inspect(), {
+        label: 'sidecar.execInspect',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.execInspect,
+        logger: this.logger,
+      });
       if (!info.Running) return info.ExitCode === 0;
       await sleep(20);
     }
@@ -406,7 +493,12 @@ export class DockerSidecarManager implements SidecarManager {
   async getBridgeIp(handle: SidecarHandle, networkName: string): Promise<string | null> {
     try {
       const container = this.docker.getContainer(handle.containerId);
-      const info = await container.inspect();
+      const info = await boundedDockerCall(container.inspect(), {
+        label: 'sidecar.inspect',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+        logger: this.logger,
+        containerId: handle.containerId,
+      });
       const networks = info.NetworkSettings?.Networks;
       const net = networks?.[networkName];
       return net?.IPAddress || null;

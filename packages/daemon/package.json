@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "postbuild": "mkdir -p dist/db dist/actions && cp -R src/db/migrations dist/db/ && cp -R src/actions/defaults dist/actions/",
     "clean": "rm -rf dist",
     "typecheck": "tsup --dts-only",
     "pretest": "pnpm --filter @autopod/shared build",

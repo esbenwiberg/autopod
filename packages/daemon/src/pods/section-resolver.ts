@@ -59,77 +59,79 @@ async function resolveOne(
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), section.fetch.timeoutMs ?? 10_000);
 
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (section.fetch.authorization) {
-        headers.Authorization = section.fetch.authorization;
-      }
-
-      const res = await fetch(section.fetch.url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(section.fetch.body ?? {}),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeout);
-
-      if (!res.ok) {
-        logger.warn(
-          { heading: section.heading, status: res.status },
-          'CLAUDE.md section fetch failed',
-        );
-      } else {
-        const rawText = await res.text();
-        // Always sanitize fetched content — external sources are untrusted
-        const cfg = options?.contentProcessing ?? DEFAULT_CONTENT_PROCESSING;
-        const processed = processContent(rawText, cfg);
-        const text = processed.text;
-        if (processed.quarantined) {
-          logger.warn(
-            { heading: section.heading },
-            'Fetched CLAUDE.md section content quarantined',
-          );
+      try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (section.fetch.authorization) {
+          headers.Authorization = section.fetch.authorization;
         }
 
-        // Write per-pattern safety_events rows (non-fatal)
-        if (options?.safetyEventsRepo && options.podId) {
-          const repo = options.safetyEventsRepo;
-          const podId = options.podId;
-          const excerpt = text.slice(0, 256) || null;
-          try {
-            for (const threat of processed.threats) {
-              repo.insert({
-                podId,
-                source: 'claude_md_section',
-                kind: 'injection',
-                patternName: threat.pattern,
-                severity: threat.severity,
-                payloadExcerpt: excerpt,
-              });
-            }
-            if (processed.sanitized) {
-              // PII: collect patterns from raw pre-sanitize text (written alongside any injection rows)
-              for (const name of collectPiiPatternNames(rawText)) {
+        const res = await fetch(section.fetch.url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(section.fetch.body ?? {}),
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          logger.warn(
+            { heading: section.heading, status: res.status },
+            'CLAUDE.md section fetch failed',
+          );
+        } else {
+          const rawText = await res.text();
+          // Always sanitize fetched content — external sources are untrusted
+          const cfg = options?.contentProcessing ?? DEFAULT_CONTENT_PROCESSING;
+          const processed = processContent(rawText, cfg);
+          const text = processed.text;
+          if (processed.quarantined) {
+            logger.warn(
+              { heading: section.heading },
+              'Fetched CLAUDE.md section content quarantined',
+            );
+          }
+
+          // Write per-pattern safety_events rows (non-fatal)
+          if (options?.safetyEventsRepo && options.podId) {
+            const repo = options.safetyEventsRepo;
+            const podId = options.podId;
+            const excerpt = text.slice(0, 256) || null;
+            try {
+              for (const threat of processed.threats) {
                 repo.insert({
                   podId,
                   source: 'claude_md_section',
-                  kind: 'pii',
-                  patternName: name,
-                  severity: null,
+                  kind: 'injection',
+                  patternName: threat.pattern,
+                  severity: threat.severity,
                   payloadExcerpt: excerpt,
                 });
               }
+              if (processed.sanitized) {
+                // PII: collect patterns from raw pre-sanitize text (written alongside any injection rows)
+                for (const name of collectPiiPatternNames(rawText)) {
+                  repo.insert({
+                    podId,
+                    source: 'claude_md_section',
+                    kind: 'pii',
+                    patternName: name,
+                    severity: null,
+                    payloadExcerpt: excerpt,
+                  });
+                }
+              }
+            } catch (err) {
+              logger.warn(
+                { err, heading: section.heading },
+                'Failed to write safety events for section',
+              );
             }
-          } catch (err) {
-            logger.warn(
-              { err, heading: section.heading },
-              'Failed to write safety events for section',
-            );
           }
-        }
 
-        const truncated = truncateToTokenBudget(text, section.maxTokens ?? 4000);
-        parts.push(truncated);
+          const truncated = truncateToTokenBudget(text, section.maxTokens ?? 4000);
+          parts.push(truncated);
+        }
+      } finally {
+        clearTimeout(timeout);
       }
     } catch (err) {
       logger.warn({ err, heading: section.heading }, 'CLAUDE.md section fetch error — skipping');

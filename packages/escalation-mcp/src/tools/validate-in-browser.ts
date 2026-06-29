@@ -51,70 +51,10 @@ export async function validateInBrowser(
   const timeout = input.checks.length * 45_000 + 30_000;
 
   try {
-    // Try host-side execution first — this avoids network isolation issues since
-    // the browser runs on the daemon host where external resources (CDN, fonts,
-    // client-side APIs) are reachable.
-    const hostResult = await tryHostExecution(podId, input, bridge, timeout);
-    if (hostResult) return hostResult;
-
-    // Fall back to in-container execution
     return await runInContainer(podId, input, bridge, timeout);
   } catch (err) {
     return JSON.stringify(browserInfraFailure(input.checks, err), null, 2);
   }
-}
-
-// ── Host-side execution ────────────────────────────────────────────────────
-
-async function tryHostExecution(
-  podId: string,
-  input: ValidateInBrowserInput,
-  bridge: PodBridge,
-  timeout: number,
-): Promise<string | null> {
-  const previewUrl = bridge.getPreviewUrl(podId);
-  const hostScreenshotDir = bridge.getHostScreenshotDir(podId);
-  if (!previewUrl || !hostScreenshotDir) return null;
-
-  // Rewrite container-local URL to host-accessible URL
-  const hostUrl = rewriteUrlToHost(input.url, previewUrl);
-
-  const script = await generateBrowserScript(
-    podId,
-    { ...input, url: hostUrl },
-    bridge,
-    hostScreenshotDir,
-  );
-
-  const execResult = await bridge.runBrowserOnHost(podId, script, timeout);
-  if (!execResult) return null;
-
-  // If the script crashed before writing result markers (e.g. ERR_CONNECTION_REFUSED on the
-  // host-side port binding), fall back to in-container execution rather than reporting all
-  // checks as failed.
-  const hasMarkers =
-    execResult.stdout.includes(START_MARKER) && execResult.stdout.includes(END_MARKER);
-  if (!hasMarkers) return null;
-
-  const results = parseResults(execResult.stdout, input.checks);
-
-  // Collect screenshots from host filesystem and write to the on-disk store
-  for (let i = 0; i < results.length; i++) {
-    try {
-      const b64 = await bridge.readHostScreenshot(`${hostScreenshotDir}/check-${i}.png`);
-      const entry = results[i];
-      if (entry && b64) {
-        const bytes = Buffer.from(b64, 'base64');
-        entry.screenshot = await bridge.storeScreenshot(podId, 'review', `check-${i}.png`, bytes);
-      }
-    } catch {
-      // Screenshot may not exist if the check crashed before taking one
-    }
-  }
-
-  const allPassed = results.every((r) => r.passed);
-  const response: ValidateInBrowserResult = { passed: allPassed, results };
-  return JSON.stringify(response, null, 2);
 }
 
 // ── In-container execution (fallback) ──────────────────────────────────────
@@ -254,7 +194,7 @@ export function parseResults(stdout: string, checks: string[]): BrowserCheckResu
       }
       return {
         check,
-        passed: Boolean(result.passed),
+        passed: typeof result.passed === 'boolean' ? result.passed : false,
         reasoning:
           typeof result.reasoning === 'string' ? result.reasoning : 'No reasoning provided',
       };

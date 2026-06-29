@@ -690,12 +690,20 @@ async function runAttachSession(containerName: string): Promise<number> {
   };
   process.stdout.on('resize', onResize);
 
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    process.stdin.setRawMode(false);
+    process.stdout.write('\x1b[?2004l');
+    process.stdin.removeListener('data', onData);
+    process.stdout.removeListener('resize', onResize);
+    process.stdin.pause();
+  };
+
   return new Promise<number>((resolve) => {
     ptyProcess.onExit(({ exitCode }) => {
-      process.stdin.setRawMode(false);
-      process.stdout.write('\x1b[?2004l');
-      process.stdin.removeListener('data', onData);
-      process.stdout.removeListener('resize', onResize);
+      cleanup();
       resolve(exitCode ?? 0);
     });
   });

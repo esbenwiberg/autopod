@@ -175,6 +175,27 @@ describe('pod-queue', () => {
     expect(processed).toEqual(['next']);
   });
 
+  it('clearStuckEntry starts pending work when it frees a queue slot', async () => {
+    const processed: string[] = [];
+    const stuckPromise = new Promise<void>(() => {});
+    const processor = vi.fn(async (id: string) => {
+      if (id === 'stuck') return stuckPromise;
+      processed.push(id);
+    });
+
+    const queue = createPodQueue(1, processor, logger);
+    queue.enqueue('stuck');
+    queue.enqueue('next');
+    expect(queue.processing).toBe(1);
+    expect(queue.pending).toBe(1);
+
+    expect(queue.clearStuckEntry('stuck')).toBe(true);
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(processed).toEqual(['next']);
+    expect(queue.pending).toBe(0);
+  });
+
   it('processes items in FIFO order', async () => {
     const processed: string[] = [];
     const processor = vi.fn(async (id: string) => {

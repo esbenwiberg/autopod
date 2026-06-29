@@ -363,6 +363,27 @@ describe('reportBlocker', () => {
     expect(result).toBe('Try a different approach');
   });
 
+  it('returns a tool result instead of throwing when human response times out', async () => {
+    const bridge = makeBridge({
+      getAiEscalationCount: vi.fn().mockReturnValue(2),
+      getAutoPauseThreshold: vi.fn().mockReturnValue(3),
+      getHumanResponseTimeout: vi.fn().mockReturnValue(0.05),
+    });
+
+    const promise = reportBlocker(
+      'sess-1',
+      { description: 'Blocked again', attempted: [], needs: 'human help' },
+      bridge,
+      pendingRequests,
+    );
+
+    await vi.advanceTimersByTimeAsync(60);
+
+    const result = await promise;
+    expect(result).toContain('no human response');
+    expect(result).toContain('timeout');
+  });
+
   it('increments escalation count', async () => {
     const bridge = makeBridge({
       getAiEscalationCount: vi.fn().mockReturnValue(0),

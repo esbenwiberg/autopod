@@ -261,8 +261,10 @@ async function executeToolCall(
 }
 
 function resolveSafePath(worktreePath: string, relPath: string): string {
-  const resolved = path.resolve(worktreePath, relPath);
-  if (!resolved.startsWith(path.resolve(worktreePath))) {
+  const root = path.resolve(worktreePath);
+  const resolved = path.resolve(root, relPath);
+  const relative = path.relative(root, resolved);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error('Path traversal detected — access denied');
   }
   return resolved;
@@ -270,11 +272,18 @@ function resolveSafePath(worktreePath: string, relPath: string): string {
 
 async function toolReadFile(worktreePath: string, relPath: string): Promise<string> {
   const absPath = resolveSafePath(worktreePath, relPath);
-  const content = await fs.readFile(absPath, 'utf-8');
-  if (content.length > MAX_FILE_READ_BYTES) {
-    return `${content.slice(0, MAX_FILE_READ_BYTES)}\n... (truncated at ${MAX_FILE_READ_BYTES} bytes)`;
+  const handle = await fs.open(absPath, 'r');
+  try {
+    const buffer = Buffer.alloc(MAX_FILE_READ_BYTES + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    const content = buffer.subarray(0, Math.min(bytesRead, MAX_FILE_READ_BYTES)).toString('utf-8');
+    if (bytesRead > MAX_FILE_READ_BYTES) {
+      return `${content}\n... (truncated at ${MAX_FILE_READ_BYTES} bytes)`;
+    }
+    return content;
+  } finally {
+    await handle.close();
   }
-  return content;
 }
 
 async function toolListDirectory(worktreePath: string, relPath: string): Promise<string> {

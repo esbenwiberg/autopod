@@ -47,7 +47,7 @@ import { computePodDiff, summarizeDiff } from './pod-diff-fetcher.js';
 import type { ContainerManagerFactory, PodManager } from './pod-manager.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
-import { buildValidationExecEnv } from './registry-injector.js';
+import { buildValidationExecEnv, wrapValidationExecCommand } from './registry-injector.js';
 import { resolveReviewerModel, resolveReviewerProvider } from './runtime-resolver.js';
 
 export interface SessionBridgeDependencies {
@@ -459,7 +459,10 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       podId: string,
       actionName: string,
       params: Record<string, unknown>,
-      options?: { skipApprovalCheck?: boolean },
+      options?: {
+        skipApprovalCheck?: boolean;
+        approvalContext?: Record<string, unknown>;
+      },
     ): Promise<ActionResponse> {
       const pod = podManager.getSession(podId);
       const profile = profileStore.get(pod.profileName);
@@ -997,7 +1000,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       try {
         const result = await cm.execInContainer(
           pod.containerId,
-          ['sh', '-c', phaseConfig.command],
+          wrapValidationExecCommand(phaseConfig.command, env),
           {
             cwd,
             timeout: phaseConfig.timeoutMs,

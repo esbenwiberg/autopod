@@ -344,12 +344,27 @@ export class DockerContainerManager implements ContainerManager {
       this.logger,
     );
 
-    await boundedDockerCall(container.start(), {
-      label: 'container.start (spawn)',
-      timeoutMs: DOCKER_CALL_TIMEOUTS.start,
-      logger: this.logger,
-      containerId: container.id,
-    });
+    try {
+      await boundedDockerCall(container.start(), {
+        label: 'container.start (spawn)',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.start,
+        logger: this.logger,
+        containerId: container.id,
+      });
+    } catch (err) {
+      await boundedDockerCall(container.remove({ force: true }), {
+        label: 'container.remove (start-failed cleanup)',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.remove,
+        logger: this.logger,
+        containerId: container.id,
+      }).catch((cleanupErr) => {
+        this.logger.warn(
+          { err: cleanupErr, containerId: container.id },
+          'Failed to remove container after start failure',
+        );
+      });
+      throw err;
+    }
 
     this.logger.info({ containerId: container.id, containerName }, 'Docker container started');
 
@@ -457,14 +472,25 @@ export class DockerContainerManager implements ContainerManager {
       }
 
       this.logger.info({ image }, 'Pulling missing Docker image');
-      const stream = (await this.docker.pull(image)) as NodeJS.ReadableStream;
-      await new Promise<void>((resolve, reject) => {
-        this.docker.modem.followProgress(
-          stream,
-          (followErr: Error | null) => (followErr ? reject(followErr) : resolve()),
-          () => {},
-        );
-      });
+      const stream = (await boundedDockerCall(this.docker.pull(image), {
+        label: 'image.pull',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.pullImage,
+        logger: this.logger,
+      })) as NodeJS.ReadableStream;
+      await boundedDockerCall(
+        new Promise<void>((resolve, reject) => {
+          this.docker.modem.followProgress(
+            stream,
+            (followErr: Error | null) => (followErr ? reject(followErr) : resolve()),
+            () => {},
+          );
+        }),
+        {
+          label: 'image.followProgress',
+          timeoutMs: DOCKER_CALL_TIMEOUTS.followProgress,
+          logger: this.logger,
+        },
+      );
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       throw new Error(`Failed to pull Docker image "${image}": ${detail}`);

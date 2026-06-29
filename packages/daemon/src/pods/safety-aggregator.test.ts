@@ -1,8 +1,12 @@
+import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createSafetyEventsRepository } from '../safety/safety-events-repository.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
-import { computeSafetyAnalytics } from './safety-aggregator.js';
+import {
+  computeSafetyAnalytics,
+  runAndPersistAuditChainVerification,
+} from './safety-aggregator.js';
 
 let db: Database.Database;
 
@@ -40,6 +44,22 @@ function insertEvent(
       ...payload,
     }),
   });
+}
+
+function auditHash(
+  prevHash: string | null,
+  podId: string,
+  actionName: string,
+  params: string,
+  responseSummary: string | null,
+  quarantineScore: number,
+  createdAt: string,
+): string {
+  return createHash('sha256')
+    .update(
+      `${prevHash ?? ''}|${podId}|${actionName}|${params}|${responseSummary ?? ''}|${quarantineScore}|${createdAt}`,
+    )
+    .digest('hex');
 }
 
 describe('computeSafetyAnalytics security stats', () => {
@@ -108,5 +128,31 @@ describe('computeSafetyAnalytics security stats', () => {
       totalIncidents: 0,
       recentIncidents: [],
     });
+  });
+
+  it('rejects a first audit-chain row with non-null prev_hash', () => {
+    insertPod('pod-1');
+    const createdAt = '2026-05-28 11:27:48';
+    const prevHash = 'forged-prev';
+    const params = '{}';
+    const entryHash = auditHash(prevHash, 'pod-1', 'deploy', params, null, 0, createdAt);
+
+    db.prepare(
+      `INSERT INTO action_audit
+         (pod_id, action_name, params, response_summary, pii_detected,
+          quarantine_score, created_at, prev_hash, entry_hash)
+       VALUES
+         ('pod-1', 'deploy', @params, NULL, 0, 0, @createdAt, @prevHash, @entryHash)`,
+    ).run({ params, createdAt, prevHash, entryHash });
+
+    const result = runAndPersistAuditChainVerification(db);
+
+    expect(result.valid).toBe(false);
+    expect(result.firstMismatch).toEqual(
+      expect.objectContaining({
+        podId: 'pod-1',
+        reason: expect.stringContaining('prev_hash broken chain'),
+      }),
+    );
   });
 });

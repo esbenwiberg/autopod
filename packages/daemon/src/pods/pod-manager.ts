@@ -1106,6 +1106,7 @@ export interface NetworkManager {
     podId?: string,
     extraAllowedIps?: string[],
     extraAllowedHosts?: string[],
+    daemonGatewayPort?: number,
   ): Promise<{ networkName: string; firewallScript: string } | null>;
   getGatewayIp(podId?: string): Promise<string>;
   /** Remove the per-pod bridge — called from pod cleanup. Idempotent. */
@@ -5696,6 +5697,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId,
             [],
             [hostnameFromUrl(mcpBaseUrl)],
+            portFromUrl(mcpBaseUrl),
           );
           if (netConfig) {
             networkName = netConfig.networkName;
@@ -5811,6 +5813,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId,
             sidecarIps,
             [hostnameFromUrl(mcpBaseUrl)],
+            portFromUrl(mcpBaseUrl),
           );
           if (finalConfig) {
             firewallScript = finalConfig.firewallScript;
@@ -11533,6 +11536,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 pod.id,
                 sidecarIps,
                 [hostnameFromUrl(mcpBaseUrl)],
+                portFromUrl(mcpBaseUrl),
               );
               if (!netConfig) return;
               const cm = containerManagerFactory.get('local');
@@ -12161,6 +12165,16 @@ function hostnameFromUrl(url: string): string {
     return new URL(url).hostname;
   } catch {
     return 'host.docker.internal';
+  }
+}
+
+function portFromUrl(url: string): number {
+  try {
+    const parsed = new URL(url);
+    if (parsed.port) return Number.parseInt(parsed.port, 10);
+    return parsed.protocol === 'https:' ? 443 : 80;
+  } catch {
+    return 3100;
   }
 }
 

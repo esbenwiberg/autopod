@@ -22,6 +22,14 @@ export const DOCKER_CALL_TIMEOUTS = {
   putArchive: 30_000,
   getArchive: 30_000,
   createContainer: 60_000,
+  createNetwork: 30_000,
+  listContainers: 15_000,
+  listNetworks: 15_000,
+  inspectNetwork: 5_000,
+  removeNetwork: 15_000,
+  disconnectNetwork: 15_000,
+  pullImage: 60_000,
+  followProgress: 120_000,
 } as const;
 
 export type DockerCallLabel = keyof typeof DOCKER_CALL_TIMEOUTS | (string & {});

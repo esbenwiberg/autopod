@@ -326,11 +326,16 @@ describe('buildValidationExecEnv', () => {
     expect(buildValidationExecEnv([], null, {})).toEqual(RUNTIME_TELEMETRY_OPT_OUT_ENV);
   });
 
-  it('returns telemetry opt-outs and NuGet env when buildEnv is null', () => {
+  it('returns telemetry opt-outs and NuGet secret-file env when buildEnv is null', () => {
     const env = buildValidationExecEnv(nugetRegs, 'my-pat', null);
     expect(env).toBeDefined();
     expect(env).toEqual(expect.objectContaining(RUNTIME_TELEMETRY_OPT_OUT_ENV));
-    expect(env).toHaveProperty('VSS_NUGET_EXTERNAL_FEED_ENDPOINTS');
+    expect(env).not.toHaveProperty('VSS_NUGET_EXTERNAL_FEED_ENDPOINTS');
+    expect(env).toHaveProperty(
+      'VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE',
+      '/run/autopod/nuget-endpoints',
+    );
+    expect(JSON.stringify(env)).not.toContain('my-pat');
   });
 
   it('returns telemetry opt-outs and buildEnv when no NuGet PAT', () => {
@@ -341,22 +346,24 @@ describe('buildValidationExecEnv', () => {
     });
   });
 
-  it('merges NuGet env and buildEnv when both present', () => {
+  it('merges NuGet secret-file env and buildEnv when both present', () => {
     const env = buildValidationExecEnv(nugetRegs, 'my-pat', {
       NODE_OPTIONS: '--max-old-space-size=4096',
       CI: 'true',
     });
     expect(env).toBeDefined();
-    expect(env?.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS).toBeDefined();
+    expect(env?.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS).toBeUndefined();
+    expect(env?.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE).toBe('/run/autopod/nuget-endpoints');
+    expect(JSON.stringify(env)).not.toContain('my-pat');
     expect(env?.NODE_OPTIONS).toBe('--max-old-space-size=4096');
     expect(env?.CI).toBe('true');
   });
 
-  it('lets buildEnv override NuGet env on key collision (explicit wins)', () => {
+  it('lets buildEnv override NuGet secret-file env on key collision (explicit wins)', () => {
     const env = buildValidationExecEnv(nugetRegs, 'my-pat', {
-      VSS_NUGET_EXTERNAL_FEED_ENDPOINTS: 'override-value',
+      VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE: '/custom/nuget-endpoints',
     });
-    expect(env?.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS).toBe('override-value');
+    expect(env?.VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE).toBe('/custom/nuget-endpoints');
   });
 });
 
@@ -417,6 +424,25 @@ describe('validateRegistryFiles', () => {
     const files = [{ path: NUGET_CONFIG_PATH, content: '<valid/>' }];
     await expect(validateRegistryFiles(cm, 'ctr-1', files)).rejects.toThrow(
       /Registry auth failed.*PAT.*Packaging/,
+    );
+  });
+
+  it('throws when nuget auth probe exits non-zero without NU1301', async () => {
+    const cm = mockCm({
+      'dotnet nuget list': {
+        stdout: 'Registered Sources:\n  1. private-feed',
+        stderr: '',
+        exitCode: 0,
+      },
+      'dotnet nuget search': {
+        stdout: 'Credential provider failed unexpectedly',
+        stderr: '',
+        exitCode: 1,
+      },
+    });
+    const files = [{ path: NUGET_CONFIG_PATH, content: '<valid/>' }];
+    await expect(validateRegistryFiles(cm, 'ctr-1', files)).rejects.toThrow(
+      /Registry auth probe failed.*exited 1/,
     );
   });
 

@@ -155,8 +155,9 @@ export function createTestPipelineHandler(config: TestPipelineHandlerConfig): Ac
         { timeout: 60_000 },
       );
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       throw new AutopodError(
-        `Failed to push to test repo: ${err instanceof Error ? err.message.slice(0, 300) : String(err)}`,
+        `Failed to push to test repo: ${redactGitCredentialMessage(message, pat).slice(0, 300)}`,
         'PUSH_FAILED',
         502,
       );
@@ -322,6 +323,14 @@ export function injectPatIntoAdoUrl(repoUrl: string, pat: string): string {
   u.username = 'x-access-token';
   u.password = pat;
   return u.toString();
+}
+
+function redactGitCredentialMessage(message: string, pat: string): string {
+  let redacted = message;
+  if (pat) {
+    redacted = redacted.split(pat).join('[REDACTED]');
+  }
+  return redacted.replace(/(https?:\/\/[^/\s:@]+:)[^@\s/]+(@)/g, '$1[REDACTED]$2');
 }
 
 function sleep(ms: number): Promise<void> {

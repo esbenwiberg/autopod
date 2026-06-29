@@ -7,7 +7,6 @@ import type { PendingRequests } from '@autopod/escalation-mcp';
 import { AuthError } from '@autopod/shared';
 import { config as loadDotenv } from 'dotenv';
 import pino from 'pino';
-import { build as buildPrettyStream } from 'pino-pretty';
 import {
   createActionAuditRepository,
   createActionEngine,
@@ -150,7 +149,7 @@ const PINO_BASE_OPTIONS = {
 
 // Logger — use pino-pretty as a direct stream (not a transport) to avoid worker-thread issues
 const logger = IS_DEV
-  ? pino(PINO_BASE_OPTIONS, buildPrettyStream({ colorize: true }))
+  ? pino(PINO_BASE_OPTIONS, (await import('pino-pretty')).build({ colorize: true }))
   : pino(PINO_BASE_OPTIONS);
 
 // Node's `fetch` (undici) calls `performance.mark()` per request for the

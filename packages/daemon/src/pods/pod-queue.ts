@@ -75,6 +75,7 @@ export function createPodQueue(
       activeCount = Math.max(0, activeCount - 1);
       logger.warn({ podId, activeCount }, 'Cleared stuck activeIds entry from pod queue');
       checkDrain();
+      processNext();
       return true;
     },
     get pending() {

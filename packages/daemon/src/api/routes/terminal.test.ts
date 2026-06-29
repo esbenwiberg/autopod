@@ -30,6 +30,7 @@ function makePod(overrides: Partial<Pod> = {}): Pod {
     runtime: 'claude',
     executionTarget: 'sandbox',
     branch: 'autopod/pod-1',
+    userId: 'user-1',
     containerId: 'sandbox-1',
     worktreePath: '/tmp/worktree/pod-1',
     options: { agentMode: 'auto', output: 'pr', validate: true },
@@ -76,5 +77,44 @@ describe('terminalRoutes', () => {
       4004,
       expect.stringContaining('Sandbox interactive terminal is unsupported'),
     );
+  });
+
+  it('rejects non-owner non-operator terminal sessions before touching Docker', async () => {
+    let handler: TerminalHandler | undefined;
+    const app = {
+      get: vi.fn((_path: string, _opts: unknown, registered: TerminalHandler) => {
+        handler = registered;
+      }),
+    } as unknown as FastifyInstance;
+    const podManager = {
+      getSession: vi.fn(() =>
+        makePod({ executionTarget: 'local', containerId: 'container-1', userId: 'user-2' }),
+      ),
+    } as unknown as PodManager;
+    const authModule = {
+      validateToken: vi.fn(async () => ({ ...testUser, roles: ['viewer'] })),
+    } as unknown as AuthModule;
+    const docker = {
+      getContainer: vi.fn(),
+    } as unknown as Dockerode;
+
+    terminalRoutes(app, podManager, {} as unknown as ContainerManagerFactory, authModule, docker);
+
+    if (!handler) throw new Error('terminal route was not registered');
+
+    const socket = {
+      close: vi.fn(),
+    } as unknown as WebSocket;
+    const request = {
+      params: { podId: 'pod-1' },
+      url: '/pods/pod-1/terminal?cols=80&rows=24',
+      headers: { authorization: 'Bearer test-token' },
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    } as unknown as FastifyRequest;
+
+    await handler(socket, request);
+
+    expect(docker.getContainer).not.toHaveBeenCalled();
+    expect(socket.close).toHaveBeenCalledWith(4003, 'Forbidden');
   });
 });

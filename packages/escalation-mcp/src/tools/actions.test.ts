@@ -98,6 +98,19 @@ describe('executeAction', () => {
     expect(result).toBe('null');
   });
 
+  it('handles omitted data gracefully', async () => {
+    const bridge = makeBridge({
+      success: true,
+      sanitized: false,
+      quarantined: false,
+    });
+    const pr = makePendingRequests();
+
+    const result = await executeAction('sess-1', 'noop', {}, bridge as never, pr);
+
+    expect(result).toBe('Action succeeded.');
+  });
+
   // ─── Approval flow tests ────────────────────────────────────
   it('blocks and executes after human approves', async () => {
     const bridge = makeBridge(
@@ -161,6 +174,32 @@ describe('executeAction', () => {
     expect(result).toContain('rejected');
     expect(result).toContain('too dangerous');
     // Action should NOT have been executed
+    expect(bridge.executeAction).not.toHaveBeenCalled();
+  });
+
+  it('does not treat ambiguous approval prefixes as approval', async () => {
+    const bridge = makeBridge(
+      { success: true, data: null, sanitized: false, quarantined: false },
+      true,
+    );
+    const pr = makePendingRequests();
+
+    const resultPromise = executeAction(
+      'sess-1',
+      'delete-issue',
+      { id: '42' },
+      bridge as never,
+      pr,
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+    const escalationId = bridge.createEscalation.mock.calls[0]?.[0]?.id as string;
+    pr.resolve(escalationId, 'approved? no, do not run it yet');
+
+    const result = await resultPromise;
+
+    expect(result).toContain('rejected');
+    expect(result).toContain('approved? no');
     expect(bridge.executeAction).not.toHaveBeenCalled();
   });
 

@@ -149,6 +149,7 @@ export function generateNuGetConfig(registries: PrivateRegistry[]): string {
 }
 
 const NUGET_SECRET_PATH = '/run/autopod/nuget-endpoints';
+const AGENT_SHIM_PATH = '/run/autopod/agent-shim.sh';
 
 /**
  * Build the NuGet credential payload and return it as a secret file entry
@@ -213,7 +214,7 @@ export function buildNuGetCredentialEnv(
  * Merges three sources, with `buildEnv` winning on key collision so a profile
  * author's explicit override beats inferred credentials:
  *  1) Autopod's non-secret runtime/tool telemetry opt-outs
- *  2) NuGet credential env (from `buildNuGetCredentialEnv`)
+ *  2) NuGet credential file pointer (from `buildNuGetSecretFile`)
  *  3) `profile.buildEnv` — free-form user-supplied env (e.g.
  *     `NODE_OPTIONS=--max-old-space-size=4096` for memory-heavy production
  *     bundles).
@@ -223,11 +224,20 @@ export function buildValidationExecEnv(
   pat: string | null,
   buildEnv: Record<string, string> | null | undefined,
 ): Record<string, string> | undefined {
+  const nugetSecret = buildNuGetSecretFile(registries, pat);
   const merged = withRuntimeTelemetryOptOutEnv({
-    ...buildNuGetCredentialEnv(registries, pat),
+    ...(nugetSecret ? { [nugetSecret.envFileKey]: nugetSecret.path } : {}),
     ...(buildEnv ?? {}),
   });
   return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+export function wrapValidationExecCommand(
+  command: string,
+  env: Record<string, string> | undefined,
+): string[] {
+  const hasSecretFileEnv = env ? Object.keys(env).some((key) => key.endsWith('_FILE')) : false;
+  return hasSecretFileEnv ? ['sh', AGENT_SHIM_PATH, 'sh', '-c', command] : ['sh', '-c', command];
 }
 
 /**
@@ -361,6 +371,12 @@ export async function validateRegistryFiles(
         const output = `${authCheck.stdout}\n${authCheck.stderr}`.trim();
         throw new Error(
           `Registry auth failed: NuGet feed returned 401/403. Check that the PAT is valid and has Packaging (Read) scope. Output: ${output.slice(0, 800)}`,
+        );
+      }
+      if (authCheck.exitCode !== 0) {
+        const output = `${authCheck.stdout}\n${authCheck.stderr}`.trim();
+        throw new Error(
+          `Registry auth probe failed: dotnet nuget search exited ${authCheck.exitCode}: ${output.slice(0, 800)}`,
         );
       }
     }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
@@ -106,6 +106,19 @@ describe('series commands', () => {
       { path: `${outputRoot}/design.md`, content: 'Keep the design scoped.\n' },
       { path: `${outputRoot}/purpose.md`, content: 'Ship a small feature.\n' },
     ]);
+  });
+
+  it('rejects symlinked files in series spec context', async () => {
+    const specRoot = createSeriesSpecFolder();
+    const outside = mkdtempSync(join(tmpdir(), 'autopod-cli-series-secret-'));
+    createdDirs.push(specRoot, outside);
+    writeFileSync(join(outside, 'secret.txt'), 'do-not-send\n');
+    symlinkSync(join(outside, 'secret.txt'), join(specRoot, 'leak.txt'));
+
+    await expect(
+      program.parseAsync(['node', 'ap', 'series', 'create', specRoot, '--profile', 'test']),
+    ).rejects.toThrow('spec file symlink not allowed');
+    expect(mockClient.createSeries).not.toHaveBeenCalled();
   });
 
   it('accepts contract.yml for series creation', async () => {

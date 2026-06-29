@@ -180,6 +180,43 @@ describe('test-pipeline handler', () => {
     );
   });
 
+  it('redacts the ADO PAT from failed push errors', async () => {
+    const secret = 'SUPERSECRET';
+    const authenticatedUrl = injectPatIntoAdoUrl(
+      'https://dev.azure.com/myorg/myproject/_git/test-repo',
+      secret,
+    );
+    mockExecFile.mockImplementationOnce(
+      (
+        _cmd: string,
+        _args: string[],
+        _opts: unknown,
+        cb: (err: Error | null, stdout: string, stderr: string) => void,
+      ) => {
+        cb(new Error(`fatal: could not push to ${authenticatedUrl}`), '', '');
+      },
+    );
+
+    const handler = createTestPipelineHandler({
+      logger,
+      podRepo: makePodRepo(),
+      profileStore: makeProfileStore({ adoPat: secret }),
+    });
+
+    let thrown: unknown;
+    try {
+      await handler.execute(runAction, {}, { podId: 'pod-1' });
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const message = (thrown as Error).message;
+    expect(message).not.toContain(secret);
+    expect(message).not.toContain(`:${secret}@`);
+    expect(message).toContain('[REDACTED]');
+  });
+
   it('get_test_run_status returns succeeded with duration when run completes', async () => {
     const handler = createTestPipelineHandler({
       logger,

@@ -7,7 +7,7 @@ const APPROVAL_KEYWORDS = ['approved', 'approve', 'yes', 'proceed', 'go ahead', 
 
 function isApproved(response: string): boolean {
   const lower = response.toLowerCase().trim();
-  return APPROVAL_KEYWORDS.some((kw) => lower === kw || lower.startsWith(`${kw}`));
+  return APPROVAL_KEYWORDS.includes(lower);
 }
 
 /**
@@ -46,10 +46,19 @@ export async function executeAction(
     }
 
     // Approved — execute with skipApprovalCheck to bypass engine's defense-in-depth guard
-    const response = await bridge.executeAction(podId, actionName, params, {
-      skipApprovalCheck: true,
-      approvalContext,
-    });
+    const response = await bridge.executeAction(
+      podId,
+      actionName,
+      params,
+      approvalContext
+        ? {
+            skipApprovalCheck: true,
+            approvalContext,
+          }
+        : {
+            skipApprovalCheck: true,
+          },
+    );
     return formatResponse(response);
   }
 
@@ -135,7 +144,8 @@ function formatResponse(response: {
     return `Action failed: ${response.error}`;
   }
 
-  let text = JSON.stringify(response.data, null, 2);
+  let text =
+    response.data === undefined ? 'Action succeeded.' : JSON.stringify(response.data, null, 2);
 
   if (response.quarantined) {
     text = `⚠️ Note: Some content was quarantined due to injection detection.\n\n${text}`;
