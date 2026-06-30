@@ -9218,7 +9218,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // bridge below; blow away any stale bridge from the prior attempt.
         await destroyPodNetwork(podId);
 
-        // Re-queue through processPod with recovery worktree.
+        const failedBeforeAgentWork =
+          pod.status === 'failed' &&
+          pod.validationAttempts === 0 &&
+          pod.lastValidationResult === null &&
+          pod.taskSummary === null &&
+          pod.claudeSessionId === null &&
+          pod.codexSessionId === null &&
+          pod.prUrl === null;
+        const recoveryWorktreePath = failedBeforeAgentWork ? null : (pod.worktreePath ?? null);
+
+        // Re-queue through processPod. Preserve the worktree only when the
+        // previous run got far enough that it may contain agent-authored work.
+        // Setup-only failures (image pull, provider auth, registry probes, etc.)
+        // need a fresh baseline; otherwise a persistent hosted daemon can
+        // resurrect stale VM worktree/branch state and show it as this run's diff.
         // Clear claudeSessionId so the agent gets a fresh spawn instead of resuming
         // a stale/broken pod context. Set reworkReason so processPod builds
         // a rework-specific prompt instead of the generic "you were interrupted" recovery prompt.
@@ -9232,13 +9246,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           validationAttempts: 0,
           lastValidationResult: null,
           containerId: null,
+          worktreePath: recoveryWorktreePath,
           claudeSessionId: null,
           codexSessionId: null,
-          recoveryWorktreePath: pod.worktreePath ?? null,
+          recoveryWorktreePath,
           reworkReason,
           reworkCount: (pod.reworkCount ?? 0) + 1,
           recoveryCount: 0,
           preSubmitReview: null,
+          completedAt: null,
+          ...(failedBeforeAgentWork
+            ? {
+                filesChanged: 0,
+                linesAdded: 0,
+                linesRemoved: 0,
+                commitCount: 0,
+                lastCommitAt: null,
+                startCommitSha: null,
+              }
+            : {}),
         });
         transition(pod, 'queued');
         enqueueSession(podId);

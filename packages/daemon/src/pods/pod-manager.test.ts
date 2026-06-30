@@ -5239,6 +5239,45 @@ describe('PodManager', () => {
       expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
     });
 
+    it('does not reuse stale worktree state when force retrying a setup-only failure', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Daily log scan' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/worktrees/stale-branch',
+        completedAt: '2026-06-29T19:30:20.858Z',
+        filesChanged: 7,
+        linesAdded: 166,
+        linesRemoved: 5,
+        commitCount: 2,
+        lastCommitAt: '2026-06-29T10:17:11+00:00',
+        startCommitSha: 'old-start-sha',
+      });
+
+      await manager.triggerValidation(pod.id, { force: true });
+
+      const result = manager.getSession(pod.id);
+      expect(result.status).toBe('queued');
+      expect(result.containerId).toBeNull();
+      expect(result.worktreePath).toBeNull();
+      expect(result.recoveryWorktreePath).toBeNull();
+      expect(result.completedAt).toBeNull();
+      expect(result.filesChanged).toBe(0);
+      expect(result.linesAdded).toBe(0);
+      expect(result.linesRemoved).toBe(0);
+      expect(result.commitCount).toBe(0);
+      expect(result.lastCommitAt).toBeNull();
+      expect(result.startCommitSha).toBeNull();
+      expect(ctx.enqueuedSessions).toContain(pod.id);
+      expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
+    });
+
     it('re-provisions from validated state with worktree on force rework', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
