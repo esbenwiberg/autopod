@@ -2943,12 +2943,14 @@ async function runProfileBoundAnthropicReview(
     throw new Error(`Reviewer provider unavailable: ${llm.reason}`);
   }
 
-  const response = await llm.client.messages.create({
-    model: llm.model,
-    max_tokens: 8192,
-    messages: [{ role: 'user', content: prompt }],
-    timeout,
-  });
+  const response = await llm.client.messages.create(
+    {
+      model: llm.model,
+      max_tokens: 8192,
+      messages: [{ role: 'user', content: prompt }],
+    },
+    { timeout },
+  );
   const stdout = response.content
     .filter((block): block is Extract<(typeof response.content)[number], { type: 'text' }> => {
       return block.type === 'text';

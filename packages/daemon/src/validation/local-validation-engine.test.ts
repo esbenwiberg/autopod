@@ -1968,17 +1968,19 @@ describe('validate() — facts + review gate', () => {
       },
       expect.anything(),
     );
-    expect(messagesCreate).toHaveBeenCalledWith({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 8192,
-      messages: [
-        {
-          role: 'user',
-          content: expect.stringContaining('performing an independent code review'),
-        },
-      ],
-      timeout: 300_000,
-    });
+    expect(messagesCreate).toHaveBeenCalledWith(
+      {
+        model: 'claude-sonnet-4-6',
+        max_tokens: 8192,
+        messages: [
+          {
+            role: 'user',
+            content: expect.stringContaining('performing an independent code review'),
+          },
+        ],
+      },
+      { timeout: 300_000 },
+    );
     expect(vi.mocked(cm.execInContainer)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(cm.execInContainer).mock.calls[0]?.[1].join(' ')).toContain(
       'git reset --hard HEAD',
