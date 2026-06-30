@@ -21,6 +21,49 @@ Explicitly unsupported until the Azure Sandboxes data plane exposes the missing 
 - Sidecars. Reason: current sidecars require a Docker bridge network shared with the pod container.
 - Long-running runtime `execStreaming` without native streaming. Reason: buffered exec cannot preserve progress, cancellation, or watchdog semantics for agent runtimes.
 
+## Preview Tunnel Proof
+
+Sandbox app preview needs an outbound reverse tunnel because Azure Sandboxes do
+not expose inbound app ports. Before building the daemon-owned tunnel broker,
+prove the core runtime behavior with Cloudflare quick tunnels:
+
+```bash
+npx pnpm --filter @autopod/daemon build
+
+SANDBOX_IMAGE=<acr-qualified-warm-image> \
+AZURE_SUBSCRIPTION_ID=<subscription-id> \
+AZURE_RESOURCE_GROUP=<resource-group> \
+AZURE_SANDBOX_GROUP=<sandbox-group> \
+node scripts/prove-sandbox-preview-tunnel.mjs
+```
+
+The proof creates a disposable sandbox, writes a tiny Node HTTP server listening
+on `127.0.0.1:3000`, downloads `cloudflared`, starts
+`cloudflared tunnel --url http://127.0.0.1:3000` inside the sandbox, waits for a
+temporary `trycloudflare.com` URL, then fetches that public URL from the daemon
+host and verifies a random proof token.
+
+By default the proof uses `allow-all` egress so a failure isolates tunnel/runtime
+behavior instead of allowlist tuning. To also prove restricted egress:
+
+```bash
+SANDBOX_TUNNEL_NETWORK=restricted \
+SANDBOX_TUNNEL_ALLOWED_HOSTS='github.com,*.github.com,*.githubusercontent.com,*.githubassets.com,cloudflare.com,*.cloudflare.com,argotunnel.com,*.argotunnel.com,*.trycloudflare.com' \
+node scripts/prove-sandbox-preview-tunnel.mjs
+```
+
+Debug flags:
+
+- `SANDBOX_TUNNEL_KEEP=1` keeps a passing sandbox alive.
+- `SANDBOX_TUNNEL_KEEP_ON_FAIL=1` keeps a failing sandbox for manual inspection.
+- `SANDBOX_TUNNEL_CLOUDFLARED_URL=<url>` overrides the binary download URL.
+
+A passing proof means the hard product assumption is true: a sandbox process can
+keep an outbound tunnel open and serve its own localhost app externally. It does
+not mean production preview is complete; Autopod still needs a first-party daemon
+tunnel broker, authenticated preview URLs, lifecycle cleanup, and wildcard
+preview DNS/Caddy routing.
+
 ## Required Azure Setup
 
 - Use an Entra organization identity. Personal Microsoft accounts are not supported by the preview.
