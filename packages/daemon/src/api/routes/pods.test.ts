@@ -1992,6 +1992,7 @@ describe('GET /pods/:podId/preview/status', () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllGlobals();
     await app.close();
     db.close();
   });
@@ -2021,7 +2022,7 @@ describe('GET /pods/:podId/preview/status', () => {
     expect(mockPreviewStatus).toHaveBeenCalledWith('pod-abc');
   });
 
-  it('rewrites loopback preview URLs to the remote daemon host for VM clients', async () => {
+  it('rewrites loopback preview URLs to the daemon proxy for VM clients', async () => {
     mockPreviewStatus.mockResolvedValue({
       running: true,
       reachable: true,
@@ -2037,12 +2038,115 @@ describe('GET /pods/:podId/preview/status', () => {
         ...authHeaders,
         host: '127.0.0.1:3100',
         'x-forwarded-host': 'autopod-daemon-ewi.swedencentral.cloudapp.azure.com',
+        'x-forwarded-proto': 'https',
       },
     });
 
     expect(res.statusCode).toBe(200);
     expect(res.json().previewUrl).toBe(
-      'http://autopod-daemon-ewi.swedencentral.cloudapp.azure.com:15000',
+      'https://autopod-daemon-ewi.swedencentral.cloudapp.azure.com/pods/pod-abc/preview/proxy/',
+    );
+  });
+
+  it('proxies browser preview requests to the internal preview URL without auth headers', async () => {
+    mockPreviewStatus.mockResolvedValue({
+      running: true,
+      reachable: true,
+      restartCount: 0,
+      lastError: null,
+      previewUrl: 'http://127.0.0.1:15000',
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('proxied app', {
+        status: 200,
+        headers: { 'content-type': 'text/plain', 'x-preview': 'ok' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/pod-abc/preview/proxy/deep/path?x=1',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('proxied app');
+    expect(res.headers['content-type']).toContain('text/plain');
+    expect(res.headers['x-preview']).toBe('ok');
+    expect(String(res.headers['set-cookie'])).toContain('autopod_preview_pod=pod-abc');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:15000/deep/path?x=1',
+      expect.objectContaining({
+        method: 'GET',
+        redirect: 'manual',
+      }),
+    );
+  });
+
+  it('proxies absolute preview asset paths using the preview referer', async () => {
+    mockPreviewStatus.mockResolvedValue({
+      running: true,
+      reachable: true,
+      restartCount: 0,
+      lastError: null,
+      previewUrl: 'http://127.0.0.1:15000',
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('vite client', {
+        status: 200,
+        headers: { 'content-type': 'application/javascript' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/@vite/client?x=1',
+      headers: {
+        referer: 'https://autopod.example.com/pods/pod-abc/preview/proxy/',
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('vite client');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:15000/@vite/client?x=1',
+      expect.objectContaining({
+        method: 'GET',
+        redirect: 'manual',
+      }),
+    );
+  });
+
+  it('rewrites upstream preview redirects back through the daemon proxy', async () => {
+    mockPreviewStatus.mockResolvedValue({
+      running: true,
+      reachable: true,
+      restartCount: 0,
+      lastError: null,
+      previewUrl: 'http://127.0.0.1:15000',
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('', {
+        status: 302,
+        headers: { location: 'http://127.0.0.1:15000/login?next=1' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/pod-abc/preview/proxy',
+      headers: {
+        host: '127.0.0.1:3100',
+        'x-forwarded-host': 'autopod.example.com',
+        'x-forwarded-proto': 'https',
+      },
+    });
+
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe(
+      'https://autopod.example.com/pods/pod-abc/preview/proxy/login?next=1',
     );
   });
 

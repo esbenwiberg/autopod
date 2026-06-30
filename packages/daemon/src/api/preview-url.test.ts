@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   isLoopbackHost,
+  resolvePublicPreviewAuthority,
   resolvePublicPreviewHost,
+  resolvePublicPreviewOrigin,
   rewriteLoopbackPreviewUrl,
+  rewritePreviewUrlForBrowser,
 } from './preview-url.js';
 
 describe('preview URL rewriting', () => {
@@ -58,12 +61,44 @@ describe('preview URL rewriting', () => {
     ).toBe('https://preview.example.com:32123');
   });
 
+  it('rewrites remote browser preview URLs through the daemon proxy path', () => {
+    expect(
+      rewritePreviewUrlForBrowser('pod-abc', 'http://127.0.0.1:32123', {
+        requestHost: '127.0.0.1:3100',
+        forwardedHost: 'autopod.example.com',
+        forwardedProto: 'https',
+      }),
+    ).toBe('https://autopod.example.com/pods/pod-abc/preview/proxy/');
+  });
+
+  it('preserves daemon authority ports for direct remote daemon callers', () => {
+    expect(
+      rewritePreviewUrlForBrowser('pod-abc', 'http://127.0.0.1:32123', {
+        requestHost: 'vm.example.com:3100',
+      }),
+    ).toBe('http://vm.example.com:3100/pods/pod-abc/preview/proxy/');
+  });
+
   it('parses comma-separated forwarded hosts', () => {
     expect(
       resolvePublicPreviewHost({
         forwardedHost: 'preview.example.com, internal-proxy.local',
       }),
     ).toBe('preview.example.com');
+  });
+
+  it('resolves preview proxy authority and origin', () => {
+    expect(
+      resolvePublicPreviewAuthority({
+        forwardedHost: 'preview.example.com:8443, internal-proxy.local',
+      }),
+    ).toBe('preview.example.com:8443');
+    expect(
+      resolvePublicPreviewOrigin({
+        forwardedHost: 'preview.example.com:8443',
+        forwardedProto: 'https',
+      }),
+    ).toBe('https://preview.example.com:8443');
   });
 
   it('treats loopback-like hosts as local', () => {

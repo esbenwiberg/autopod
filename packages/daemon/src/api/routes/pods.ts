@@ -9,7 +9,7 @@ import {
   sendMessageSchema,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ActionAuditRepository } from '../../actions/audit-repository.js';
 import { aggregateCost, parseDays } from '../../pods/cost-aggregation.js';
@@ -35,7 +35,7 @@ import {
 import { computeThroughputAnalytics } from '../../pods/throughput-aggregator.js';
 import type { ValidationRepository } from '../../pods/validation-repository.js';
 import type { SafetyEventsRepository } from '../../safety/safety-events-repository.js';
-import { rewriteLoopbackPreviewUrl } from '../preview-url.js';
+import { resolvePublicPreviewOrigin, rewritePreviewUrlForBrowser } from '../preview-url.js';
 import { serializePodForWire, serializeValidationResult } from '../wire-serializers.js';
 
 function parseEscalationsScope(query: Record<string, unknown>): EscalationsAnalyticsScope | null {
@@ -58,16 +58,18 @@ function previewRewriteContext(request: FastifyRequest) {
   return {
     requestHost: request.headers.host,
     forwardedHost: request.headers['x-forwarded-host'],
+    forwardedProto: request.headers['x-forwarded-proto'],
     publicHost: process.env.AUTOPOD_PREVIEW_PUBLIC_HOST,
     publicScheme: process.env.AUTOPOD_PREVIEW_PUBLIC_SCHEME,
   };
 }
 
 function rewritePreviewUrlForRequest(
+  podId: string,
   previewUrl: string | null,
   request: FastifyRequest,
 ): string | null {
-  return rewriteLoopbackPreviewUrl(previewUrl, previewRewriteContext(request));
+  return rewritePreviewUrlForBrowser(podId, previewUrl, previewRewriteContext(request));
 }
 
 function serializePodForRequest(
@@ -76,9 +78,158 @@ function serializePodForRequest(
 ): unknown {
   const wire = serializePodForWire(pod) as Record<string, unknown>;
   if (typeof wire.previewUrl === 'string') {
-    wire.previewUrl = rewritePreviewUrlForRequest(wire.previewUrl, request);
+    wire.previewUrl = rewritePreviewUrlForRequest(pod.id, wire.previewUrl, request);
   }
   return wire;
+}
+
+const PREVIEW_PROXY_HOP_BY_HOP_HEADERS = new Set([
+  'connection',
+  'content-encoding',
+  'content-length',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
+const PREVIEW_POD_COOKIE = 'autopod_preview_pod';
+
+function proxyBasePath(podId: string): string {
+  return `/pods/${encodeURIComponent(podId)}/preview/proxy`;
+}
+
+function rewritePreviewProxyTarget(previewUrl: string, requestUrl: string, podId: string): string {
+  const incoming = new URL(requestUrl, 'http://autopod.local');
+  const marker = proxyBasePath(podId);
+  const suffix = incoming.pathname.startsWith(marker) ? incoming.pathname.slice(marker.length) : '';
+  const proxyPath = suffix ? (suffix.startsWith('/') ? suffix : `/${suffix}`) : '/';
+
+  return rewritePreviewProxyTargetPath(previewUrl, proxyPath, incoming.search);
+}
+
+function rewritePreviewFallbackTarget(previewUrl: string, requestUrl: string): string {
+  const incoming = new URL(requestUrl, 'http://autopod.local');
+  return rewritePreviewProxyTargetPath(previewUrl, incoming.pathname, incoming.search);
+}
+
+function rewritePreviewProxyTargetPath(
+  previewUrl: string,
+  proxyPath: string,
+  search: string,
+): string {
+  const target = new URL(previewUrl);
+  const basePath = target.pathname.endsWith('/') ? target.pathname.slice(0, -1) : target.pathname;
+  target.pathname = `${basePath}${proxyPath}`;
+  target.search = search;
+  return target.toString();
+}
+
+function proxyRequestHeaders(headers: FastifyRequest['headers']): Headers {
+  const forwarded = new Headers();
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    if (lower === 'host' || PREVIEW_PROXY_HOP_BY_HOP_HEADERS.has(lower)) continue;
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      for (const item of value) forwarded.append(name, item);
+    } else {
+      forwarded.set(name, String(value));
+    }
+  }
+  return forwarded;
+}
+
+function proxyRequestBody(method: string, body: unknown): BodyInit | undefined {
+  if (method === 'GET' || method === 'HEAD' || body === undefined || body === null) {
+    return undefined;
+  }
+  if (typeof body === 'string' || body instanceof Uint8Array) return body;
+  if (Buffer.isBuffer(body)) return body;
+  if (typeof body === 'object') return JSON.stringify(body);
+  return String(body);
+}
+
+function previewCookie(podId: string): string {
+  return `${PREVIEW_POD_COOKIE}=${encodeURIComponent(
+    podId,
+  )}; Path=/; Max-Age=600; SameSite=Lax; HttpOnly`;
+}
+
+function previewPodIdFromRequest(request: FastifyRequest): string | null {
+  return previewPodIdFromReferer(request) ?? previewPodIdFromCookie(request);
+}
+
+function previewPodIdFromReferer(request: FastifyRequest): string | null {
+  const referer =
+    firstHeaderValue(request.headers.referer) ?? firstHeaderValue(request.headers.referrer);
+  if (!referer) return null;
+
+  try {
+    const url = new URL(referer, 'http://autopod.local');
+    return previewPodIdFromPath(url.pathname);
+  } catch {
+    return null;
+  }
+}
+
+function previewPodIdFromCookie(request: FastifyRequest): string | null {
+  const cookie = firstHeaderValue(request.headers.cookie);
+  if (!cookie) return null;
+
+  for (const part of cookie.split(';')) {
+    const [name, ...valueParts] = part.trim().split('=');
+    if (name !== PREVIEW_POD_COOKIE) continue;
+    const value = valueParts.join('=');
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function previewPodIdFromPath(pathname: string): string | null {
+  const match = /^\/pods\/([^/]+)\/preview\/proxy(?:\/|$)/.exec(pathname);
+  if (!match?.[1]) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
+function rewritePreviewLocation(
+  location: string,
+  previewUrl: string,
+  podId: string,
+  request: FastifyRequest,
+): string {
+  const basePath = proxyBasePath(podId);
+  if (location.startsWith('/')) {
+    return `${basePath}${location}`;
+  }
+
+  try {
+    const upstreamBase = new URL(previewUrl);
+    const target = new URL(location, upstreamBase);
+    if (target.origin !== upstreamBase.origin) return location;
+
+    const publicOrigin = resolvePublicPreviewOrigin(previewRewriteContext(request));
+    const browserBase = publicOrigin ? `${publicOrigin}${basePath}` : basePath;
+    return `${browserBase}${target.pathname}${target.search}${target.hash}`;
+  } catch {
+    return location;
+  }
+}
+
+function firstHeaderValue(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
 }
 
 export function podRoutes(
@@ -883,8 +1034,81 @@ export function podRoutes(
     const result = await podManager.startPreview(podId);
     return {
       ...result,
-      previewUrl: rewritePreviewUrlForRequest(result.previewUrl, request),
+      previewUrl: rewritePreviewUrlForRequest(podId, result.previewUrl, request),
     };
+  });
+
+  async function proxyPreviewRequestForPod(
+    podId: string,
+    request: FastifyRequest,
+    reply: FastifyReply,
+    targetUrlForRequest: (previewUrl: string) => string,
+  ) {
+    const status = await podManager.previewStatus(podId);
+    if (!status.previewUrl) {
+      reply.status(409);
+      return { error: 'Preview is not available for this pod' };
+    }
+
+    const previewUrl = status.previewUrl;
+    const targetUrl = targetUrlForRequest(previewUrl);
+    const upstream = await fetch(targetUrl, {
+      method: request.method,
+      headers: proxyRequestHeaders(request.headers),
+      body: proxyRequestBody(request.method, request.body),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    reply.status(upstream.status);
+    const setCookies = [previewCookie(podId)];
+    upstream.headers.forEach((value, name) => {
+      const lower = name.toLowerCase();
+      if (PREVIEW_PROXY_HOP_BY_HOP_HEADERS.has(lower)) return;
+      if (lower === 'set-cookie') {
+        setCookies.push(value);
+        return;
+      }
+      if (lower === 'location') {
+        reply.header(name, rewritePreviewLocation(value, previewUrl, podId, request));
+        return;
+      }
+      reply.header(name, value);
+    });
+    reply.header('set-cookie', setCookies);
+    return reply.send(Buffer.from(await upstream.arrayBuffer()));
+  }
+
+  async function proxyPreviewRequest(request: FastifyRequest, reply: FastifyReply) {
+    const { podId } = request.params as { podId: string };
+    return proxyPreviewRequestForPod(podId, request, reply, (previewUrl) =>
+      rewritePreviewProxyTarget(previewUrl, request.url, podId),
+    );
+  }
+
+  async function proxyPreviewFallbackRequest(request: FastifyRequest, reply: FastifyReply) {
+    const podId = previewPodIdFromRequest(request);
+    if (!podId) {
+      reply.status(404);
+      return { error: 'Not found' };
+    }
+
+    return proxyPreviewRequestForPod(podId, request, reply, (previewUrl) =>
+      rewritePreviewFallbackTarget(previewUrl, request.url),
+    );
+  }
+
+  // Browser-friendly preview proxy. Open App cannot attach Authorization headers,
+  // and hosted VM dynamic preview ports are not internet-reachable, so browser
+  // traffic comes through the daemon's normal HTTPS origin and is forwarded
+  // internally to the pod preview server.
+  app.all('/pods/:podId/preview/proxy', { config: { auth: false } }, proxyPreviewRequest);
+  app.all('/pods/:podId/preview/proxy/*', { config: { auth: false } }, proxyPreviewRequest);
+  app.route({
+    method: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    url: '/*',
+    config: { auth: false },
+    handler: proxyPreviewFallbackRequest,
   });
 
   // DELETE /pods/:podId/preview — stop preview (pod-token auth)
@@ -900,7 +1124,7 @@ export function podRoutes(
     const status = await podManager.previewStatus(podId);
     return {
       ...status,
-      previewUrl: rewritePreviewUrlForRequest(status.previewUrl, request),
+      previewUrl: rewritePreviewUrlForRequest(podId, status.previewUrl, request),
     };
   });
 
