@@ -10,6 +10,7 @@ import type {
   ValidationEngineConfig,
   ValidationPhaseCallbacks,
 } from '../interfaces/validation-engine.js';
+import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import {
@@ -24,6 +25,7 @@ import {
   startAppStabilityMonitor,
   stripMarkdownFences,
 } from './local-validation-engine.js';
+import { hashDiff } from './pre-submit-review.js';
 
 vi.mock('../runtimes/run-claude-cli.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../runtimes/run-claude-cli.js')>();
@@ -33,8 +35,24 @@ vi.mock('../runtimes/run-claude-cli.js', async (importOriginal) => {
   };
 });
 
+vi.mock('../providers/llm-client.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../providers/llm-client.js')>();
+  return {
+    ...actual,
+    createProviderAnthropicClient: vi.fn(),
+  };
+});
+
 beforeEach(() => {
   vi.mocked(runClaudeCli).mockReset();
+  vi.mocked(createProviderAnthropicClient)
+    .mockReset()
+    .mockResolvedValue({ ok: false, reason: 'no_anthropic_api_key' });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 function getAdvisoryBrowserQaRunner(engine: ReturnType<typeof createLocalValidationEngine>) {
@@ -1753,70 +1771,6 @@ describe('validate() — facts + review gate', () => {
     };
   }
 
-  function codexReviewContainerManager(options?: {
-    reviewStdout?: string;
-    reviewLog?: string;
-    reviewError?: Error;
-    commands?: string[];
-    prompts?: string[];
-  }): ContainerManager {
-    const fail = (name: string) =>
-      vi.fn(() => Promise.reject(new Error(`stub: ${name} unexpectedly called`)));
-    const execInContainer = vi.fn(
-      async (
-        _containerId: string,
-        command: string[],
-      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
-        const shell = command[2] ?? '';
-        options?.commands?.push(shell);
-        if (
-          command[0] === 'sh' &&
-          command[1] === '-c' &&
-          typeof shell === 'string' &&
-          shell.includes('git reset --hard HEAD')
-        ) {
-          return { stdout: '', stderr: '', exitCode: 0 };
-        }
-        if (typeof shell === 'string' && shell.includes('codex exec')) {
-          if (options?.reviewError) throw options.reviewError;
-          return {
-            stdout:
-              options?.reviewStdout ??
-              JSON.stringify({
-                status: 'pass',
-                reasoning: 'Codex reviewer passed',
-                issues: [],
-              }),
-            stderr: '',
-            exitCode: 0,
-          };
-        }
-        throw new Error(`stub: execInContainer unexpectedly called: ${JSON.stringify(command)}`);
-      },
-    );
-    return {
-      spawn: fail('spawn'),
-      kill: fail('kill'),
-      refreshFirewall: fail('refreshFirewall'),
-      stop: fail('stop'),
-      start: fail('start'),
-      writeFile: vi.fn(async (_containerId: string, _path: string, content: string | Buffer) => {
-        options?.prompts?.push(String(content));
-      }),
-      readFile: vi.fn(async (_containerId: string, path: string) => {
-        if (path.includes('/tmp/autopod-codex-review-') && path.endsWith('.log')) {
-          return options?.reviewLog ?? '';
-        }
-        throw new Error(`stub: readFile unexpectedly called: ${path}`);
-      }),
-      readFileBinary: fail('readFileBinary'),
-      extractDirectoryFromContainer: fail('extractDirectoryFromContainer'),
-      getStatus: fail('getStatus'),
-      execInContainer,
-      execStreaming: fail('execStreaming'),
-    } as unknown as ContainerManager;
-  }
-
   it('skips Facts + Review with upstream-failed reason when build fails', async () => {
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
@@ -1943,32 +1897,42 @@ describe('validate() — facts + review gate', () => {
     });
   });
 
-  it('runs Review through Codex for OpenAI reviewer profiles', async () => {
-    const commands: string[] = [];
-    const prompts: string[] = [];
-    const cm = codexReviewContainerManager({
-      commands,
-      prompts,
-      reviewLog: JSON.stringify({
-        type: 'event_msg',
-        payload: {
-          type: 'token_count',
-          info: {
-            total_token_usage: {
-              input_tokens: 12_345,
-              cached_input_tokens: 10_000,
-              output_tokens: 678,
-            },
-          },
+  it('runs MAX profile Tier 1 Claude review through profile auth outside the pod', async () => {
+    const messagesCreate = vi.fn().mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            status: 'pass',
+            reasoning: 'Profile-auth reviewer passed',
+            issues: [],
+          }),
         },
-      }),
+      ],
+      usage: {
+        input_tokens: 123,
+        output_tokens: 45,
+        cache_read_input_tokens: 6,
+      },
     });
+    vi.mocked(createProviderAnthropicClient).mockResolvedValue({
+      ok: true,
+      client: { messages: { create: messagesCreate } },
+      model: 'claude-sonnet-4-6',
+    } as Awaited<ReturnType<typeof createProviderAnthropicClient>>);
+    const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
 
     const result = await engine.validate(
       baseConfig({
-        reviewerProvider: 'openai',
-        reviewerModel: 'gpt-5',
+        reviewerProvider: 'max',
+        reviewerProviderCredentials: {
+          provider: 'max',
+          authMode: 'setup-token',
+          oauthToken: 'stored-token',
+        },
+        reviewerExecEnv: { CLAUDE_CODE_OAUTH_TOKEN_FILE: '/run/autopod/claude-code-oauth-token' },
+        reviewerModel: 'claude-sonnet-4-6',
         diff: `diff --git a/src/app.ts b/src/app.ts
 --- a/src/app.ts
 +++ b/src/app.ts
@@ -1979,15 +1943,141 @@ describe('validate() — facts + review gate', () => {
       }),
     );
 
+    expect(result.taskReview).toMatchObject({
+      status: 'pass',
+      model: 'claude-sonnet-4-6',
+      reasoning: 'Profile-auth reviewer passed',
+      tokenUsage: {
+        inputTokens: 123,
+        outputTokens: 45,
+        cachedInputTokens: 6,
+      },
+    });
+    expect(result.overall).toBe('pass');
+    expect(vi.mocked(runClaudeCli)).not.toHaveBeenCalled();
+    expect(createProviderAnthropicClient).toHaveBeenCalledWith(
+      {
+        provider: 'max',
+        credentials: {
+          provider: 'max',
+          authMode: 'setup-token',
+          oauthToken: 'stored-token',
+        },
+        model: 'claude-sonnet-4-6',
+        profileName: 'pod-test',
+      },
+      expect.anything(),
+    );
+    expect(messagesCreate).toHaveBeenCalledWith({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 8192,
+      messages: [
+        {
+          role: 'user',
+          content: expect.stringContaining('performing an independent code review'),
+        },
+      ],
+      timeout: 300_000,
+    });
+    expect(vi.mocked(cm.execInContainer)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(cm.execInContainer).mock.calls[0]?.[1].join(' ')).toContain(
+      'git reset --hard HEAD',
+    );
+  });
+
+  it('runs Review through the daemon OpenAI API for OpenAI reviewer profiles', async () => {
+    vi.stubEnv('OPENAI_API_KEY', undefined);
+    const diff = `diff --git a/src/app.ts b/src/app.ts
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old
++new
+`;
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  status: 'pass',
+                  reasoning: 'OpenAI reviewer passed',
+                  issues: [],
+                }),
+              },
+            },
+          ],
+          usage: {
+            prompt_tokens: 12_345,
+            completion_tokens: 678,
+            prompt_tokens_details: {
+              cached_tokens: 10_000,
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(
+      baseConfig({
+        reviewerProvider: 'openai',
+        reviewerProviderCredentials: {
+          provider: 'openai',
+          authMode: 'chatgpt',
+          authJson: JSON.stringify({ tokens: { access_token: 'chatgpt-profile-token' } }),
+        },
+        reviewerModel: 'gpt-5',
+        diff,
+        preSubmitReview: {
+          status: 'pass',
+          diffHash: hashDiff(diff),
+          reasoning: 'Cached pre-submit pass should not suppress daemon-side OpenAI Review.',
+          issues: [],
+          model: 'gpt-5',
+          checkedAt: new Date().toISOString(),
+        },
+      }),
+    );
+
+    const fetchCall = fetchMock.mock.calls[0];
+    const fetchInit = fetchCall?.[1] as
+      | {
+          method?: string;
+          headers?: Record<string, string>;
+          body?: string;
+        }
+      | undefined;
+    const requestBody = JSON.parse(fetchInit?.body ?? '{}') as {
+      model?: string;
+      messages?: Array<{ content?: string }>;
+    };
+
     expect(result.overall).toBe('pass');
     expect(result.taskReview).toMatchObject({
       status: 'pass',
       model: 'gpt-5',
-      reasoning: 'Codex reviewer passed',
+      reasoning: 'OpenAI reviewer passed',
     });
-    expect(commands.some((cmd) => cmd.includes('codex exec'))).toBe(true);
-    expect(commands.some((cmd) => cmd.includes("--model 'gpt-5'"))).toBe(true);
-    expect(prompts[0]).toContain('## DIFF');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchCall?.[0]).toBe('https://api.openai.com/v1/chat/completions');
+    expect(fetchInit).toMatchObject({
+      method: 'POST',
+      headers: expect.objectContaining({
+        authorization: 'Bearer chatgpt-profile-token',
+        'content-type': 'application/json',
+      }),
+    });
+    expect(requestBody.model).toBe('gpt-5');
+    expect(requestBody.messages?.[0]?.content).toContain('## DIFF');
+    expect(vi.mocked(cm.execInContainer)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(cm.execInContainer).mock.calls[0]?.[1].join(' ')).toContain(
+      'git reset --hard HEAD',
+    );
     expect(result.taskReview?.tokenUsage).toEqual({
       inputTokens: 12_345,
       cachedInputTokens: 10_000,
@@ -1995,10 +2085,15 @@ describe('validate() — facts + review gate', () => {
     });
   });
 
-  it('blocks validation when Codex review times out', async () => {
-    const cm = codexReviewContainerManager({
-      reviewError: new Error('Command timed out after 300000ms'),
+  it('blocks validation when OpenAI review times out', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test');
+    const fetchMock = vi.fn(async () => {
+      const err = new Error('The operation was aborted');
+      err.name = 'AbortError';
+      throw err;
     });
+    vi.stubGlobal('fetch', fetchMock);
+    const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
     const completed: Array<{ phase: string; status: string }> = [];
 
@@ -2021,15 +2116,18 @@ describe('validate() — facts + review gate', () => {
 
     expect(result.taskReview).toBeNull();
     expect(result.reviewSkipKind).toBe('review-timeout');
-    expect(result.reviewSkipReason).toMatch(/Review timed out:/);
+    expect(result.reviewSkipReason).toMatch(/Review timed out: openai review timed out/);
     expect(result.overall).toBe('fail');
     expect(completed).toContainEqual({ phase: 'review', status: 'fail' });
   });
 
-  it('blocks validation when Codex review fails after deterministic gates pass', async () => {
-    const cm = codexReviewContainerManager({
-      reviewError: new Error('codex review exited with code 2'),
+  it('blocks validation when OpenAI review fails after deterministic gates pass', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test');
+    const fetchMock = vi.fn(async () => {
+      return new Response('quota exceeded', { status: 429 });
     });
+    vi.stubGlobal('fetch', fetchMock);
+    const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
     const completed: Array<{ phase: string; status: string }> = [];
 
@@ -2052,7 +2150,7 @@ describe('validate() — facts + review gate', () => {
 
     expect(result.taskReview).toBeNull();
     expect(result.reviewSkipKind).toBe('review-failed');
-    expect(result.reviewSkipReason).toContain('codex review exited with code 2');
+    expect(result.reviewSkipReason).toContain('openai review failed (http 429): quota exceeded');
     expect(result.overall).toBe('fail');
     expect(result.smoke.status).toBe('pass');
     expect(result.factValidation?.status).toBe('skip');

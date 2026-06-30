@@ -92,6 +92,28 @@ describe('runClaudeCli', () => {
     }
   });
 
+  it('non-zero exit with stdout but empty stderr — includes stdout diagnostic', async () => {
+    try {
+      await runClaudeCli({
+        model: MODEL,
+        input: '',
+        timeout: 5_000,
+        ...bash('printf \'{"result":"Not logged in - Please run /login"}\'; exit 1'),
+      });
+      throw new Error('should have rejected');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ClaudeCliError);
+      const e = err as ClaudeCliError;
+      expect(e.kind).toBe('non-zero-exit');
+      expect(e.exitCode).toBe(1);
+      expect(e.stderr).toBe('');
+      expect(e.stdoutPreview).toContain('Not logged in');
+      expect(e.message).toContain('stdout:');
+      expect(e.message).toContain('Not logged in');
+      expect(e.message).not.toContain('OOM');
+    }
+  });
+
   it('signal kill — captures signal and notes it in the message', async () => {
     try {
       await runClaudeCli({

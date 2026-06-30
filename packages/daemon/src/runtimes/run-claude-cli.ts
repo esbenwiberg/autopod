@@ -40,6 +40,7 @@ export class ClaudeCliError extends Error {
 function buildMessage(fields: ClaudeCliErrorFields): string {
   const cmd = `claude -p --model ${fields.model}`;
   const stderrPreview = fields.stderr.trim().slice(0, 500);
+  const stdoutPreview = fields.stdoutPreview.trim().slice(0, 500);
 
   switch (fields.kind) {
     case 'timeout':
@@ -57,6 +58,9 @@ function buildMessage(fields: ClaudeCliErrorFields): string {
       }
       if (stderrPreview) {
         return `${cmd} failed (exit=${fields.exitCode}): ${stderrPreview}`;
+      }
+      if (stdoutPreview) {
+        return `${cmd} failed (exit=${fields.exitCode}, signal=null) — stdout: ${stdoutPreview}`;
       }
       return `${cmd} failed (exit=${fields.exitCode}, signal=null) — no stderr captured (likely killed externally: OOM, container limit, or silent auth/credits failure)`;
     }
