@@ -1,6 +1,7 @@
 import type { ActionDefinition } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearAzureTokenCache } from '../../providers/azure-token.js';
 import { createAzurePimHandler, createPimClient } from './azure-pim-handler.js';
 
 function mockResponse(
@@ -15,6 +16,24 @@ function mockResponse(
 }
 
 const logger = pino({ level: 'silent' });
+
+type ExecFileCallback = (err: Error | null, result?: { stdout: string; stderr: string }) => void;
+
+function mockAzCliToken(token = 'az-arm-token') {
+  const execFile = vi.fn(
+    (_cmd: string, _args: readonly string[], _opts: unknown, cb: ExecFileCallback) => {
+      cb(null, {
+        stdout: JSON.stringify({
+          accessToken: token,
+          expiresOn: new Date(Date.now() + 3600_000).toISOString(),
+        }),
+        stderr: '',
+      });
+    },
+  );
+  vi.doMock('node:child_process', () => ({ execFile }));
+  return execFile;
+}
 
 function makeAction(name: string): ActionDefinition {
   return {
@@ -31,10 +50,13 @@ describe('createPimClient', () => {
   const originalFetch = global.fetch;
 
   beforeEach(() => {
+    clearAzureTokenCache();
     global.fetch = vi.fn();
   });
 
   afterEach(() => {
+    vi.doUnmock('@azure/identity');
+    vi.doUnmock('node:child_process');
     global.fetch = originalFetch;
   });
 
@@ -114,16 +136,83 @@ describe('createPimClient', () => {
       client.activate('group-uuid-1', 'principal-uuid-1', 'PT8H', 'test'),
     ).rejects.toThrow(/403/);
   });
+
+  it('prefers az CLI for RBAC role activation when no explicit ARM token is configured', async () => {
+    const roleDefinitionId = '73c42c96-874c-492b-b04d-ab87d138a893';
+    const fullRoleDefinitionId = `/subscriptions/sub-1/providers/Microsoft.Authorization/roleDefinitions/${roleDefinitionId}`;
+    vi.mocked(global.fetch)
+      .mockResolvedValueOnce(
+        mockResponse({
+          value: [
+            {
+              properties: {
+                principalId: 'real-aad-principal',
+                roleDefinitionId: fullRoleDefinitionId,
+                scope: '/subscriptions/sub-1/resourceGroups/rg-logs',
+                roleEligibilityScheduleId: 'eligibility-1',
+              },
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(mockResponse({ value: [] }))
+      .mockResolvedValueOnce(
+        mockResponse({ name: 'activation-1', properties: { status: 'Accepted' } }),
+      );
+    const getToken = vi.fn().mockResolvedValue({
+      token: 'managed-identity-token',
+      expiresOnTimestamp: Date.now() + 3600_000,
+    });
+    vi.doMock('@azure/identity', () => ({
+      // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
+      DefaultAzureCredential: vi.fn().mockImplementation(function () {
+        return { getToken };
+      }),
+    }));
+    const execFile = mockAzCliToken();
+
+    const client = createPimClient(() => undefined, logger);
+
+    await client.activateRbacRole(
+      '/subscriptions/sub-1/resourceGroups/rg-logs',
+      roleDefinitionId,
+      'ignored-by-rbac-path',
+      'PT1H',
+      'test activation',
+    );
+
+    expect(getToken).not.toHaveBeenCalled();
+    expect(execFile).toHaveBeenCalledWith(
+      'az',
+      [
+        'account',
+        'get-access-token',
+        '--resource',
+        'https://management.azure.com',
+        '--output',
+        'json',
+      ],
+      expect.any(Object),
+      expect.any(Function),
+    );
+    const firstFetchOpts = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;
+    expect((firstFetchOpts.headers as Record<string, string>).Authorization).toBe(
+      'Bearer az-arm-token',
+    );
+  });
 });
 
 describe('createAzurePimHandler', () => {
   const originalFetch = global.fetch;
 
   beforeEach(() => {
+    clearAzureTokenCache();
     global.fetch = vi.fn();
   });
 
   afterEach(() => {
+    vi.doUnmock('@azure/identity');
+    vi.doUnmock('node:child_process');
     global.fetch = originalFetch;
   });
 

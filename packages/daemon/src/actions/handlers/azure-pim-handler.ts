@@ -1,5 +1,6 @@
 import type { ActionDefinition } from '@autopod/shared';
 import type { Logger } from 'pino';
+import { getAzureToken } from '../../providers/azure-token.js';
 import type { ActionHandler, HandlerConfig } from './handler.js';
 import { fetchWithTimeout, readSafeJson } from './handler.js';
 
@@ -8,41 +9,6 @@ const PIM_ENDPOINT = `${GRAPH_API}/identityGovernance/privilegedAccess/group/ass
 const PIM_SCHEDULES_ENDPOINT = `${GRAPH_API}/identityGovernance/privilegedAccess/group/assignmentSchedules`;
 const ARM_API = 'https://management.azure.com';
 const ARM_RBAC_API_VERSION = '2020-10-01';
-const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
-
-interface CachedToken {
-  token: string;
-  expiresAtMs: number;
-}
-
-let cachedGraphToken: CachedToken | null = null;
-let cachedArmToken: CachedToken | null = null;
-
-async function getTokenFromAzCli(resource: string, log: Logger): Promise<CachedToken | null> {
-  try {
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execFileAsync = promisify(execFile);
-
-    const { stdout } = await execFileAsync(
-      'az',
-      ['account', 'get-access-token', '--resource', resource, '--output', 'json'],
-      { timeout: 15_000 },
-    );
-
-    const parsed = JSON.parse(stdout) as { accessToken?: string; expiresOn?: string };
-    if (!parsed.accessToken) return null;
-
-    const expiresAtMs = parsed.expiresOn
-      ? new Date(parsed.expiresOn).getTime() - TOKEN_REFRESH_BUFFER_MS
-      : Date.now() + 3600_000 - TOKEN_REFRESH_BUFFER_MS;
-
-    log.debug({ resource }, 'Azure CLI token acquired');
-    return { token: parsed.accessToken, expiresAtMs };
-  } catch {
-    return null;
-  }
-}
 
 async function getArmToken(
   getSecret: (ref: string) => string | undefined,
@@ -51,41 +17,7 @@ async function getArmToken(
   const directToken = getSecret('AZURE_ARM_TOKEN');
   if (directToken) return directToken;
 
-  if (cachedArmToken && Date.now() < cachedArmToken.expiresAtMs) {
-    return cachedArmToken.token;
-  }
-
-  let identityErr: string | undefined;
-  try {
-    const { DefaultAzureCredential } = await import('@azure/identity');
-    const credential = new DefaultAzureCredential();
-    const tokenResponse = await credential.getToken('https://management.azure.com/.default');
-    cachedArmToken = {
-      token: tokenResponse.token,
-      expiresAtMs:
-        (tokenResponse.expiresOnTimestamp ?? Date.now() + 3600_000) - TOKEN_REFRESH_BUFFER_MS,
-    };
-    log.debug('Azure ARM managed identity token refreshed');
-    return cachedArmToken.token;
-  } catch (err) {
-    identityErr = err instanceof Error ? err.message : String(err);
-    log.debug(
-      { err: identityErr },
-      'DefaultAzureCredential failed for ARM, trying az CLI fallback',
-    );
-  }
-
-  // Azure CLI fallback (az account get-access-token)
-  const azResult = await getTokenFromAzCli('https://management.azure.com', log);
-  if (azResult) {
-    cachedArmToken = azResult;
-    return azResult.token;
-  }
-
-  cachedArmToken = null;
-  throw new Error(
-    `Azure ARM auth failed — configure AZURE_ARM_TOKEN, ensure Managed Identity is available, or log in with 'az login'. Identity error: ${identityErr}`,
-  );
+  return (await getAzureToken('https://management.azure.com/.default', log)).token;
 }
 
 /** Looks up the eligible role assignment for SelfActivate.
@@ -234,43 +166,7 @@ async function getGraphToken(
   const directToken = getSecret('AZURE_GRAPH_TOKEN');
   if (directToken) return directToken;
 
-  // Return cached managed identity token if still valid
-  if (cachedGraphToken && Date.now() < cachedGraphToken.expiresAtMs) {
-    return cachedGraphToken.token;
-  }
-
-  // Managed Identity via @azure/identity
-  let identityErr: string | undefined;
-  try {
-    const { DefaultAzureCredential } = await import('@azure/identity');
-    const credential = new DefaultAzureCredential();
-    const tokenResponse = await credential.getToken('https://graph.microsoft.com/.default');
-    cachedGraphToken = {
-      token: tokenResponse.token,
-      expiresAtMs:
-        (tokenResponse.expiresOnTimestamp ?? Date.now() + 3600_000) - TOKEN_REFRESH_BUFFER_MS,
-    };
-    log.debug('Azure Graph managed identity token refreshed');
-    return cachedGraphToken.token;
-  } catch (err) {
-    identityErr = err instanceof Error ? err.message : String(err);
-    log.debug(
-      { err: identityErr },
-      'DefaultAzureCredential failed for Graph, trying az CLI fallback',
-    );
-  }
-
-  // Azure CLI fallback (az account get-access-token)
-  const azResult = await getTokenFromAzCli('https://graph.microsoft.com', log);
-  if (azResult) {
-    cachedGraphToken = azResult;
-    return azResult.token;
-  }
-
-  cachedGraphToken = null;
-  throw new Error(
-    `Azure Graph auth failed — configure AZURE_GRAPH_TOKEN, ensure Managed Identity is available, or log in with 'az login'. Identity error: ${identityErr}`,
-  );
+  return (await getAzureToken('https://graph.microsoft.com/.default', log)).token;
 }
 
 export function createPimClient(

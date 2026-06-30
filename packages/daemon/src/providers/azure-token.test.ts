@@ -6,6 +6,58 @@ const logger = pino({ level: 'silent' });
 
 const SCOPE = 'https://cognitiveservices.azure.com/.default';
 
+type ExecFileCallback = (err: Error | null, result?: { stdout: string; stderr: string }) => void;
+
+function mockAzCliToken(token = 'az-cli-token') {
+  const execFile = vi.fn(
+    (_cmd: string, _args: readonly string[], _opts: unknown, cb: ExecFileCallback) => {
+      cb(null, {
+        stdout: JSON.stringify({
+          accessToken: token,
+          expiresOn: new Date(Date.now() + 3600_000).toISOString(),
+        }),
+        stderr: '',
+      });
+    },
+  );
+  vi.doMock('node:child_process', () => ({ execFile }));
+  return execFile;
+}
+
+function mockAzCliFailure() {
+  const execFile = vi.fn(
+    (_cmd: string, _args: readonly string[], _opts: unknown, cb: ExecFileCallback) =>
+      cb(new Error('az not installed')),
+  );
+  vi.doMock('node:child_process', () => ({ execFile }));
+  return execFile;
+}
+
+function mockDefaultAzureCredentialToken(token: string) {
+  const getToken = vi.fn().mockResolvedValue({
+    token,
+    expiresOnTimestamp: Date.now() + 3600_000,
+  });
+  vi.doMock('@azure/identity', () => ({
+    // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
+    DefaultAzureCredential: vi.fn().mockImplementation(function () {
+      return { getToken };
+    }),
+  }));
+  return getToken;
+}
+
+function mockDefaultAzureCredentialFailure(message = 'no identity available') {
+  const getToken = vi.fn().mockRejectedValue(new Error(message));
+  vi.doMock('@azure/identity', () => ({
+    // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
+    DefaultAzureCredential: vi.fn().mockImplementation(function () {
+      return { getToken };
+    }),
+  }));
+  return getToken;
+}
+
 describe('getAzureToken', () => {
   beforeEach(() => {
     clearAzureTokenCache();
@@ -17,17 +69,9 @@ describe('getAzureToken', () => {
     vi.doUnmock('node:child_process');
   });
 
-  it('returns a token from DefaultAzureCredential', async () => {
-    const getToken = vi.fn().mockResolvedValue({
-      token: 'mi-token-1',
-      expiresOnTimestamp: Date.now() + 3600_000,
-    });
-    vi.doMock('@azure/identity', () => ({
-      // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
-      DefaultAzureCredential: vi.fn().mockImplementation(function () {
-        return { getToken };
-      }),
-    }));
+  it('falls back to DefaultAzureCredential when az CLI is unavailable', async () => {
+    mockAzCliFailure();
+    const getToken = mockDefaultAzureCredentialToken('mi-token-1');
 
     const result = await getAzureToken(SCOPE, logger);
     expect(result.token).toBe('mi-token-1');
@@ -35,16 +79,8 @@ describe('getAzureToken', () => {
   });
 
   it('caches the token across calls within the validity window', async () => {
-    const getToken = vi.fn().mockResolvedValue({
-      token: 'cached-token',
-      expiresOnTimestamp: Date.now() + 3600_000,
-    });
-    vi.doMock('@azure/identity', () => ({
-      // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
-      DefaultAzureCredential: vi.fn().mockImplementation(function () {
-        return { getToken };
-      }),
-    }));
+    mockAzCliFailure();
+    const getToken = mockDefaultAzureCredentialToken('cached-token');
 
     const a = await getAzureToken(SCOPE, logger);
     const b = await getAzureToken(SCOPE, logger);
@@ -53,33 +89,13 @@ describe('getAzureToken', () => {
     expect(getToken).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to az CLI when DefaultAzureCredential throws', async () => {
-    vi.doMock('@azure/identity', () => ({
-      // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
-      DefaultAzureCredential: vi.fn().mockImplementation(function () {
-        return { getToken: vi.fn().mockRejectedValue(new Error('no managed identity')) };
-      }),
-    }));
-    const execFile = vi.fn(
-      (
-        _cmd: string,
-        _args: readonly string[],
-        _opts: unknown,
-        cb: (err: Error | null, result: { stdout: string; stderr: string }) => void,
-      ) => {
-        cb(null, {
-          stdout: JSON.stringify({
-            accessToken: 'az-cli-token',
-            expiresOn: new Date(Date.now() + 3600_000).toISOString(),
-          }),
-          stderr: '',
-        });
-      },
-    );
-    vi.doMock('node:child_process', () => ({ execFile }));
+  it('prefers az CLI when both az CLI and DefaultAzureCredential are available', async () => {
+    const getToken = mockDefaultAzureCredentialToken('mi-token-1');
+    const execFile = mockAzCliToken();
 
     const result = await getAzureToken(SCOPE, logger);
     expect(result.token).toBe('az-cli-token');
+    expect(getToken).not.toHaveBeenCalled();
     // az is invoked with the resource form (no `/.default` suffix)
     expect(execFile).toHaveBeenCalledWith(
       'az',
@@ -97,25 +113,14 @@ describe('getAzureToken', () => {
   });
 
   it('throws with guidance when both managed identity and az CLI fail', async () => {
-    vi.doMock('@azure/identity', () => ({
-      // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
-      DefaultAzureCredential: vi.fn().mockImplementation(function () {
-        return { getToken: vi.fn().mockRejectedValue(new Error('no identity available')) };
-      }),
-    }));
-    vi.doMock('node:child_process', () => ({
-      execFile: (
-        _cmd: string,
-        _args: readonly string[],
-        _opts: unknown,
-        cb: (err: Error | null) => void,
-      ) => cb(new Error('az not installed')),
-    }));
+    mockAzCliFailure();
+    mockDefaultAzureCredentialFailure();
 
     await expect(getAzureToken(SCOPE, logger)).rejects.toThrow(/Azure auth failed/);
   });
 
   it('keys cache by scope so two scopes do not collide', async () => {
+    mockAzCliFailure();
     const getToken = vi.fn().mockImplementation(async (scope: string) => ({
       token: `token-for-${scope}`,
       expiresOnTimestamp: Date.now() + 3600_000,

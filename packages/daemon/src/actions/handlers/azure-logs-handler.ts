@@ -1,17 +1,10 @@
 import type { ActionDefinition } from '@autopod/shared';
+import { getAzureToken } from '../../providers/azure-token.js';
 import type { ActionHandler, HandlerConfig } from './handler.js';
 import { fetchWithTimeout, readSafeJson } from './handler.js';
 
 const LOG_ANALYTICS_API = 'https://api.loganalytics.io/v1';
 const APP_INSIGHTS_API = 'https://api.applicationinsights.io/v1';
-
-/** Cache managed identity tokens — refresh 5 minutes before actual expiry. */
-interface CachedToken {
-  token: string;
-  expiresAtMs: number;
-}
-let cachedManagedIdentityToken: CachedToken | null = null;
-const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
 
 export function createAzureLogsHandler(config: HandlerConfig): ActionHandler {
   const { logger, getSecret } = config;
@@ -21,40 +14,15 @@ export function createAzureLogsHandler(config: HandlerConfig): ActionHandler {
    * Get bearer token for Azure Monitor APIs.
    * Supports:
    * 1. Explicit token via AZURE_MONITOR_TOKEN env var (for local dev)
-   * 2. Managed Identity via Azure Identity SDK (for production on Container Apps)
-   *
-   * Managed identity tokens are cached until 5 minutes before expiry to avoid
-   * per-call token acquisition latency.
+   * 2. Azure CLI login on the daemon host
+   * 3. Managed Identity via Azure Identity SDK (for production on Container Apps)
    */
   async function getToken(): Promise<string> {
     // Direct token (local dev / test) — never cached, always fresh from env
     const directToken = getSecret('AZURE_MONITOR_TOKEN');
     if (directToken) return directToken;
 
-    // Return cached managed identity token if still valid
-    if (cachedManagedIdentityToken && Date.now() < cachedManagedIdentityToken.expiresAtMs) {
-      return cachedManagedIdentityToken.token;
-    }
-
-    // Managed Identity: dynamically import @azure/identity
-    try {
-      const { DefaultAzureCredential } = await import('@azure/identity');
-      const credential = new DefaultAzureCredential();
-      const tokenResponse = await credential.getToken('https://api.loganalytics.io/.default');
-      cachedManagedIdentityToken = {
-        token: tokenResponse.token,
-        // expiresOnTimestamp is milliseconds epoch from the SDK
-        expiresAtMs:
-          (tokenResponse.expiresOnTimestamp ?? Date.now() + 3600_000) - TOKEN_REFRESH_BUFFER_MS,
-      };
-      log.debug('Azure Monitor managed identity token refreshed');
-      return cachedManagedIdentityToken.token;
-    } catch (err) {
-      cachedManagedIdentityToken = null;
-      throw new Error(
-        `Azure auth failed — configure AZURE_MONITOR_TOKEN or ensure Managed Identity is available: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    return (await getAzureToken('https://api.loganalytics.io/.default', log)).token;
   }
 
   async function queryApi(

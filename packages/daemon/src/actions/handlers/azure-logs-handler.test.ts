@@ -1,6 +1,7 @@
 import type { ActionDefinition } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearAzureTokenCache } from '../../providers/azure-token.js';
 import { createAzureLogsHandler } from './azure-logs-handler.js';
 
 function mockResponse(
@@ -15,6 +16,8 @@ function mockResponse(
 }
 
 const logger = pino({ level: 'silent' });
+
+type ExecFileCallback = (err: Error | null, result?: { stdout: string; stderr: string }) => void;
 
 function makeAction(name: string, fields: string[] = []): ActionDefinition {
   return {
@@ -39,14 +42,33 @@ function makeTableResponse(columns: string[], rows: unknown[][], tableName = 'Pr
   };
 }
 
+function mockAzCliToken(token = 'az-monitor-token') {
+  const execFile = vi.fn(
+    (_cmd: string, _args: readonly string[], _opts: unknown, cb: ExecFileCallback) => {
+      cb(null, {
+        stdout: JSON.stringify({
+          accessToken: token,
+          expiresOn: new Date(Date.now() + 3600_000).toISOString(),
+        }),
+        stderr: '',
+      });
+    },
+  );
+  vi.doMock('node:child_process', () => ({ execFile }));
+  return execFile;
+}
+
 describe('createAzureLogsHandler', () => {
   const originalFetch = global.fetch;
 
   beforeEach(() => {
+    clearAzureTokenCache();
     global.fetch = vi.fn();
   });
 
   afterEach(() => {
+    vi.doUnmock('@azure/identity');
+    vi.doUnmock('node:child_process');
     global.fetch = originalFetch;
   });
 
@@ -68,6 +90,51 @@ describe('createAzureLogsHandler', () => {
     const calledOpts = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;
     const authHeader = (calledOpts.headers as Record<string, string>).Authorization;
     expect(authHeader).toBe('Bearer bearer-token-123');
+  });
+
+  it('prefers az CLI for Azure Monitor when no explicit token is configured', async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(
+      mockResponse(makeTableResponse(['Count'], [[42]])),
+    );
+    const getToken = vi.fn().mockResolvedValue({
+      token: 'managed-identity-token',
+      expiresOnTimestamp: Date.now() + 3600_000,
+    });
+    vi.doMock('@azure/identity', () => ({
+      // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
+      DefaultAzureCredential: vi.fn().mockImplementation(function () {
+        return { getToken };
+      }),
+    }));
+    const execFile = mockAzCliToken();
+
+    const handler = createAzureLogsHandler({
+      logger,
+      getSecret: () => undefined,
+    });
+
+    await handler.execute(makeAction('query_logs'), {
+      workspace_id: 'ws-abc',
+      query: 'AzureActivity | take 10',
+    });
+
+    expect(getToken).not.toHaveBeenCalled();
+    expect(execFile).toHaveBeenCalledWith(
+      'az',
+      [
+        'account',
+        'get-access-token',
+        '--resource',
+        'https://api.loganalytics.io',
+        '--output',
+        'json',
+      ],
+      expect.any(Object),
+      expect.any(Function),
+    );
+    const calledOpts = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;
+    const authHeader = (calledOpts.headers as Record<string, string>).Authorization;
+    expect(authHeader).toBe('Bearer az-monitor-token');
   });
 
   it('query_logs calls correct URL with query and default timespan PT1H', async () => {

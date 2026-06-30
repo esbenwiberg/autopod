@@ -3,13 +3,13 @@ import type { Logger } from 'pino';
 /**
  * Shared Azure access token acquirer.
  *
- * Mirrors the managed-identity → az-CLI → cached pattern that the action handlers
- * (`azure-pim-handler`, `azure-logs-handler`) open-coded for ARM/Graph. Lifted
- * here so other code paths (Foundry credential injection, future Azure-backed
- * features) can reuse the same auth chain instead of growing more copies.
+ * Mirrors the az-CLI → managed-identity → cached pattern used by Azure action
+ * handlers. Lifted here so other code paths (Foundry credential injection,
+ * future Azure-backed features) can reuse the same auth chain instead of growing
+ * more copies.
  *
- * Local dev: works because `DefaultAzureCredential` falls back to the user's
- * `az login` session. No user re-auth, no Entra app registration needed.
+ * Local/dev VM: works because an explicit `az login` session is preferred before
+ * hosted managed identity. No user re-auth, no Entra app registration needed.
  *
  * Tokens are cached per-scope with a 5-minute expiry buffer so callers don't
  * have to think about lifetime — just call `getAzureToken(scope, logger)`.
@@ -37,10 +37,10 @@ export interface AzureTokenResult {
  *
  * Resolution order:
  *  1. Cached token (if not within the refresh buffer of expiry)
- *  2. `DefaultAzureCredential` — managed identity in Azure-hosted environments,
- *     environment-variable service principal, or `az login` session locally
- *  3. `az account get-access-token` shell fallback (in case @azure/identity's
- *     `AzureCliCredential` chain misses the active session)
+ *  2. `az account get-access-token` — prefer the daemon host's explicit CLI
+ *     login, including Azure VM SSH sessions
+ *  3. `DefaultAzureCredential` — managed identity in Azure-hosted environments
+ *     or environment-variable service principal fallback
  *
  * Throws with a guidance message if all paths fail.
  */
@@ -50,6 +50,14 @@ export async function getAzureToken(scope: string, logger: Logger): Promise<Azur
   const cached = cache.get(scope);
   if (cached && Date.now() < cached.expiresAtMs) {
     return { token: cached.token, expiresAtMs: cached.expiresAtMs };
+  }
+
+  // az CLI takes a resource (not a /.default scope), so strip the suffix.
+  const resource = scope.replace(/\/\.default$/, '');
+  const azResult = await getTokenFromAzCli(resource, log);
+  if (azResult) {
+    cache.set(scope, azResult);
+    return { token: azResult.token, expiresAtMs: azResult.expiresAtMs };
   }
 
   let identityErr: string | undefined;
@@ -65,15 +73,7 @@ export async function getAzureToken(scope: string, logger: Logger): Promise<Azur
     return { token: entry.token, expiresAtMs };
   } catch (err) {
     identityErr = err instanceof Error ? err.message : String(err);
-    log.debug({ err: identityErr }, 'DefaultAzureCredential failed, trying az CLI fallback');
-  }
-
-  // az CLI takes a resource (not a /.default scope), so strip the suffix.
-  const resource = scope.replace(/\/\.default$/, '');
-  const azResult = await getTokenFromAzCli(resource, log);
-  if (azResult) {
-    cache.set(scope, azResult);
-    return { token: azResult.token, expiresAtMs: azResult.expiresAtMs };
+    log.debug({ err: identityErr }, 'DefaultAzureCredential failed after az CLI was unavailable');
   }
 
   cache.delete(scope);
