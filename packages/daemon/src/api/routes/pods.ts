@@ -9,7 +9,7 @@ import {
   sendMessageSchema,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ActionAuditRepository } from '../../actions/audit-repository.js';
 import { aggregateCost, parseDays } from '../../pods/cost-aggregation.js';
@@ -35,6 +35,7 @@ import {
 import { computeThroughputAnalytics } from '../../pods/throughput-aggregator.js';
 import type { ValidationRepository } from '../../pods/validation-repository.js';
 import type { SafetyEventsRepository } from '../../safety/safety-events-repository.js';
+import { rewriteLoopbackPreviewUrl } from '../preview-url.js';
 import { serializePodForWire, serializeValidationResult } from '../wire-serializers.js';
 
 function parseEscalationsScope(query: Record<string, unknown>): EscalationsAnalyticsScope | null {
@@ -52,6 +53,33 @@ function parsePositiveIntegerQueryParam(raw: unknown): number | null | undefined
 }
 
 const LOG_REPLAY_EVENT_TYPES = ['pod.agent_activity', 'pod.firewall_denied'];
+
+function previewRewriteContext(request: FastifyRequest) {
+  return {
+    requestHost: request.headers.host,
+    forwardedHost: request.headers['x-forwarded-host'],
+    publicHost: process.env.AUTOPOD_PREVIEW_PUBLIC_HOST,
+    publicScheme: process.env.AUTOPOD_PREVIEW_PUBLIC_SCHEME,
+  };
+}
+
+function rewritePreviewUrlForRequest(
+  previewUrl: string | null,
+  request: FastifyRequest,
+): string | null {
+  return rewriteLoopbackPreviewUrl(previewUrl, previewRewriteContext(request));
+}
+
+function serializePodForRequest(
+  pod: ReturnType<PodManager['getSession']>,
+  request: FastifyRequest,
+): unknown {
+  const wire = serializePodForWire(pod) as Record<string, unknown>;
+  if (typeof wire.previewUrl === 'string') {
+    wire.previewUrl = rewritePreviewUrlForRequest(wire.previewUrl, request);
+  }
+  return wire;
+}
 
 export function podRoutes(
   app: FastifyInstance,
@@ -142,7 +170,7 @@ export function podRoutes(
         name: request.user.name,
       });
       reply.status(201);
-      return serializePodForWire(pod);
+      return serializePodForRequest(pod, request);
     } catch (err) {
       if (err instanceof AutopodError) {
         reply.status(err.statusCode ?? 400);
@@ -160,7 +188,7 @@ export function podRoutes(
       status: query.status as PodStatus | undefined,
       userId: query.userId,
     });
-    return pods.map(serializePodForWire);
+    return pods.map((pod) => serializePodForRequest(pod, request));
   });
 
   // GET /pods/stats — pod counts grouped by status
@@ -174,7 +202,7 @@ export function podRoutes(
   // GET /pods/:podId — get pod
   app.get('/pods/:podId', async (request) => {
     const { podId } = request.params as { podId: string };
-    return serializePodForWire(podManager.getSession(podId));
+    return serializePodForRequest(podManager.getSession(podId), request);
   });
 
   // POST /pods/:podId/message — send message
@@ -852,7 +880,11 @@ export function podRoutes(
   // POST /pods/:podId/preview — start preview (pod-token auth)
   app.post('/pods/:podId/preview', { config: { auth: 'pod-token' } }, async (request) => {
     const { podId } = request.params as { podId: string };
-    return podManager.startPreview(podId);
+    const result = await podManager.startPreview(podId);
+    return {
+      ...result,
+      previewUrl: rewritePreviewUrlForRequest(result.previewUrl, request),
+    };
   });
 
   // DELETE /pods/:podId/preview — stop preview (pod-token auth)
@@ -865,7 +897,11 @@ export function podRoutes(
   // GET /pods/:podId/preview/status — poll supervisor + reachability (pod-token auth)
   app.get('/pods/:podId/preview/status', { config: { auth: 'pod-token' } }, async (request) => {
     const { podId } = request.params as { podId: string };
-    return podManager.previewStatus(podId);
+    const status = await podManager.previewStatus(podId);
+    return {
+      ...status,
+      previewUrl: rewritePreviewUrlForRequest(status.previewUrl, request),
+    };
   });
 
   // DELETE /pods/:podId — delete a terminal pod

@@ -15,6 +15,9 @@ https://autopod-daemon-ewi.swedencentral.cloudapp.azure.com
   tokens to the daemon.
 - Sandbox MCP traffic uses
   `AUTOPOD_MCP_BASE_URL=https://autopod-daemon-ewi.swedencentral.cloudapp.azure.com`.
+- Docker/local execution preview links returned to desktop clients use the daemon
+  request host, or `AUTOPOD_PREVIEW_PUBLIC_HOST` when set, instead of
+  `127.0.0.1`.
 - Direct public access to daemon `:3100` is closed or restricted after HTTPS is
   verified.
 - The macOS app has no ATS exception for plain HTTP to the hosted daemon.
@@ -122,6 +125,26 @@ az network nsg rule create \
   --destination-address-prefixes '*' \
   --destination-port-ranges 443
 ```
+
+### Preview App Ports
+
+For Docker-backed pods running on the VM, Autopod maps the app container port to
+a random VM host port in `10000-48999`. The API rewrites loopback preview URLs
+like `http://127.0.0.1:15000` to the daemon's public host, for example
+`http://autopod-daemon-ewi.swedencentral.cloudapp.azure.com:15000`.
+
+To use desktop "Open App" against VM-hosted Docker pods, allow that preview port
+range only from trusted operator IPs or a private overlay network. If the daemon
+is reached through a hostname that should not be used for previews, set:
+
+```ini
+[Service]
+Environment=AUTOPOD_PREVIEW_PUBLIC_HOST=<preview-hostname-or-tailscale-name>
+```
+
+Azure Container Apps Sandboxes still do not expose Docker-style host port
+forwarding; this preview-port rule applies to Docker/local execution pods on the
+VM.
 
 After HTTPS is verified, close or restrict direct daemon `3100/tcp`:
 

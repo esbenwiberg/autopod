@@ -2021,6 +2021,31 @@ describe('GET /pods/:podId/preview/status', () => {
     expect(mockPreviewStatus).toHaveBeenCalledWith('pod-abc');
   });
 
+  it('rewrites loopback preview URLs to the remote daemon host for VM clients', async () => {
+    mockPreviewStatus.mockResolvedValue({
+      running: true,
+      reachable: true,
+      restartCount: 0,
+      lastError: null,
+      previewUrl: 'http://127.0.0.1:15000',
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/pods/pod-abc/preview/status',
+      headers: {
+        ...authHeaders,
+        host: '127.0.0.1:3100',
+        'x-forwarded-host': 'autopod-daemon-ewi.swedencentral.cloudapp.azure.com',
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().previewUrl).toBe(
+      'http://autopod-daemon-ewi.swedencentral.cloudapp.azure.com:15000',
+    );
+  });
+
   it('returns running=false, reachable=false with status 200 for a stopped container', async () => {
     mockPreviewStatus.mockResolvedValue({
       running: false,
