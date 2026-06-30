@@ -91,6 +91,10 @@ export class SandboxContainerManager implements ContainerManager {
     this.defaultTier = options.defaultTier ?? 'L';
   }
 
+  get supportsStreamingExec(): boolean {
+    return typeof this.client.execStream === 'function';
+  }
+
   /**
    * Build a manager backed by the Azure adapter — the wiring entry point
    * used by the daemon. Equivalent to

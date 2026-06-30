@@ -801,6 +801,39 @@ describe('PodManager', () => {
       expect(ctx.podRepo.list()).toHaveLength(0);
     });
 
+    it('rejects buffered-only sandbox agent pods before creating a pod row', () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      Object.assign(ctx.containerManager, { supportsStreamingExec: false });
+      const manager = createPodManager(ctx.deps);
+
+      expect(() =>
+        manager.createSession({ profileName: 'test-profile', task: 'Needs sandbox' }, 'user-1'),
+      ).toThrow(/does not support native streaming exec/);
+      expect(ctx.podRepo.list()).toHaveLength(0);
+    });
+
+    it('fails legacy buffered-only sandbox agent pods before provisioning work', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Needs sandbox' },
+        'user-1',
+      );
+      Object.assign(ctx.containerManager, { supportsStreamingExec: false });
+
+      await manager.processPod(pod.id);
+
+      expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('failed');
+      expect(ctx.worktreeManager.create).not.toHaveBeenCalled();
+      expect(ctx.containerManager.spawn).not.toHaveBeenCalled();
+    });
+
     it('rejects sandbox pods with sidecars before provisioning', () => {
       const ctx = createTestContext(undefined, {
         executionTarget: 'sandbox',

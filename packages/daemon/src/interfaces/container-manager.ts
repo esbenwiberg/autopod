@@ -61,6 +61,11 @@ export interface StreamingExecResult {
 }
 
 export interface ContainerManager {
+  /**
+   * Whether `execStreaming()` supports long-lived stdout/stderr streams for agent runtimes.
+   * Omitted means supported for legacy/test managers; buffered-only managers must set false.
+   */
+  supportsStreamingExec?: boolean;
   spawn(config: ContainerSpawnConfig): Promise<string>; // returns containerId
   kill(containerId: string): Promise<void>;
   /** Re-apply firewall rules to a running container (live policy update). Idempotent — flushes and re-applies. */

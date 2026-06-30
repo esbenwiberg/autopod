@@ -1617,6 +1617,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const reviewInfrastructureRetryBackoffMs =
     deps.reviewInfrastructureRetryBackoffMs ?? REVIEW_INFRA_RETRY_BACKOFF_MS;
 
+  function assertSandboxAgentStreamingExecSupported(
+    profile: Pick<Profile, 'name'>,
+    executionTarget: ExecutionTarget,
+    options: PodOptions,
+  ): void {
+    if (executionTarget !== 'sandbox' || options.agentMode === 'interactive') return;
+
+    const cm = containerManagerFactory.get('sandbox');
+    if (cm.supportsStreamingExec === false) {
+      const message = [
+        `Sandbox execution for profile "${profile.name}" cannot run agent pods because the`,
+        'configured sandbox backend does not support native streaming exec.',
+        'Azure Sandboxes currently expose only buffered exec, which is safe for short commands',
+        'but not Claude/Codex/Copilot runtimes. Use executionTarget=local for agent pods',
+        'until sandbox streaming is available.',
+      ].join(' ');
+      throw new AutopodError(message, 'UNSUPPORTED_SANDBOX_STREAMING_EXEC', 400);
+    }
+  }
+
   /**
    * Sequential merge queue keyed by `repo+baseBranch`.
    *
@@ -4976,6 +4996,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           );
         }
       }
+      assertSandboxAgentStreamingExecSupported(profile, executionTarget, resolvedPod);
 
       // deny-all network policy blocks all outbound — incompatible with cloud-backed runtimes.
       // Interactive pods run without an AI agent, so they're unaffected.
@@ -5500,6 +5521,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Transition to provisioning
         pod = transition(pod, 'provisioning', provisioningUpdates);
+        assertSandboxAgentStreamingExecSupported(profile, pod.executionTarget, pod.options);
 
         // Snapshot the resolved profile at pod start time for auditability
         podRepo.update(podId, { profileSnapshot: profile });

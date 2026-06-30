@@ -95,8 +95,8 @@ export interface SandboxApiClient {
     options?: SandboxExecOptions,
   ): Promise<SandboxExecResult>;
   /**
-   * Native streaming exec. Optional: when omitted, the manager falls back to a
-   * buffered `exec()` surfaced through one-shot streams.
+   * Native streaming exec. Optional: when omitted, the manager reports
+   * `supportsStreamingExec=false` and rejects long-lived runtime streams.
    */
   execStream?(
     sandboxId: string,
