@@ -6,10 +6,54 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const execFileAsync = promisify(execFile);
+const anthropicMocks = vi.hoisted(() => {
+  const messagesCreate = vi.fn();
+  class MockAnthropic {
+    messages = {
+      create: messagesCreate,
+    };
+  }
+  return { messagesCreate, MockAnthropic };
+});
+
+vi.mock('@anthropic-ai/sdk', () => ({
+  default: anthropicMocks.MockAnthropic,
+}));
 
 // We test the internal tool implementations by importing the module and
 // exercising them through the exported runToolUseReview (with a mocked SDK).
 // For unit testing the tools directly, we re-implement the path safety check.
+
+describe('review tool runner - Anthropic request shape', () => {
+  afterEach(() => {
+    anthropicMocks.messagesCreate.mockReset();
+  });
+
+  it('passes timeout as an SDK option instead of an API body field', async () => {
+    anthropicMocks.messagesCreate.mockResolvedValueOnce({
+      content: [{ type: 'text', text: '{"status":"pass","reasoning":"ok","issues":[]}' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 1, output_tokens: 2 },
+    });
+
+    const { runToolUseReview } = await import('./review-tool-runner.js');
+
+    await runToolUseReview({
+      model: 'claude-sonnet-4-6',
+      prompt: 'Review this diff.',
+      worktreePath: process.cwd(),
+      timeout: 60_000,
+      apiKey: 'test-key',
+    });
+
+    expect(anthropicMocks.messagesCreate).toHaveBeenCalledTimes(1);
+    const [body, options] = anthropicMocks.messagesCreate.mock.calls[0] ?? [];
+    expect(body).not.toHaveProperty('timeout');
+    expect(options).toMatchObject({ timeout: expect.any(Number) });
+    expect(options.timeout).toBeGreaterThan(0);
+    expect(options.timeout).toBeLessThanOrEqual(60_000);
+  });
+});
 
 describe('review tool runner - path safety', () => {
   let tmpDir: string;

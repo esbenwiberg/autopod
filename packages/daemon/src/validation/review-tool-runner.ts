@@ -80,18 +80,20 @@ export async function runToolUseReview(
 
     const remainingMs = deadline - Date.now();
 
-    const response: Message = await client.messages.create({
-      model: resolveModelId(config.model),
-      max_tokens: 8192,
-      messages,
-      tools,
-      system:
-        'You are an expert code reviewer with access to tools for investigating the repository. ' +
-        'Use the tools to verify claims in the diff when the diff alone is insufficient. ' +
-        'When done investigating, respond with ONLY a JSON object (the review verdict). ' +
-        'Do not wrap the JSON in markdown fences.',
-      timeout: remainingMs,
-    });
+    const response: Message = await client.messages.create(
+      {
+        model: resolveModelId(config.model),
+        max_tokens: 8192,
+        messages,
+        tools,
+        system:
+          'You are an expert code reviewer with access to tools for investigating the repository. ' +
+          'Use the tools to verify claims in the diff when the diff alone is insufficient. ' +
+          'When done investigating, respond with ONLY a JSON object (the review verdict). ' +
+          'Do not wrap the JSON in markdown fences.',
+      },
+      { timeout: remainingMs },
+    );
 
     totalInputTokens += response.usage.input_tokens;
     totalOutputTokens += response.usage.output_tokens;
