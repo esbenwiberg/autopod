@@ -27,6 +27,7 @@ import { getAzureToken } from '../providers/azure-token.js';
 import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { runAdvisoryBrowserQa } from './advisory-browser-qa-runner.js';
+import { runContainerReviewer } from './container-reviewer-runner.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 import { runAgenticReview } from './review-agentic-runner.js';
@@ -2611,7 +2612,7 @@ async function runTaskReview(
       | { inputTokens: number; outputTokens: number; cachedInputTokens?: number }
       | undefined;
 
-    if (!diffIsTruncated || reviewRunner === 'codex') {
+    if (!diffIsTruncated || reviewRunner === 'codex' || reviewRunner === 'container-claude') {
       // Reuse the agent's pre-submit verdict when it applies to the same diff
       // bytes and was a clean pass. Saves ~30s–5min of Tier 1 work on diffs
       // the reviewer model already opined on.
@@ -2642,6 +2643,22 @@ async function runTaskReview(
           );
           stdout = openAiReview.stdout;
           tier1TokenUsage = openAiReview.tokenUsage;
+        } else if (reviewRunner === 'container-claude') {
+          const containerReview = await runContainerReviewer({
+            podId: config.podId,
+            containerId: config.containerId,
+            containerManager,
+            profile: {
+              modelProvider: config.reviewerProvider ?? 'anthropic',
+              providerCredentials: config.reviewerProviderCredentials ?? null,
+            },
+            model: config.reviewerModel,
+            prompt,
+            ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
+            timeout: reviewTimeout,
+            logger: log,
+          });
+          stdout = containerReview.stdout;
         } else if (shouldUseProfileBoundAnthropicReviewer(config)) {
           const providerReview = await runProfileBoundAnthropicReview(
             config,
@@ -2892,7 +2909,9 @@ function classifyReviewSkipKind(reason: string): ValidationResult['reviewSkipKin
   return 'review-failed';
 }
 
-function resolveReviewRunner(config: ValidationEngineConfig): 'claude' | 'codex' | 'unsupported' {
+function resolveReviewRunner(
+  config: ValidationEngineConfig,
+): 'claude' | 'container-claude' | 'codex' | 'unsupported' {
   if (config.reviewerProvider === 'openai') return 'codex';
   if (
     config.reviewerProvider === 'foundry' &&
@@ -2901,24 +2920,24 @@ function resolveReviewRunner(config: ValidationEngineConfig): 'claude' | 'codex'
   ) {
     return 'codex';
   }
+  if (config.reviewerProvider === 'max') return 'container-claude';
   if (config.reviewerProvider === 'copilot') return 'unsupported';
   return 'claude';
 }
 
 function shouldUseProfileBoundAnthropicReviewer(config: ValidationEngineConfig): boolean {
   return (
-    config.reviewerProvider === 'max' ||
-    (config.reviewerProvider === 'foundry' &&
-      config.reviewerProviderCredentials?.provider === 'foundry' &&
-      (config.reviewerProviderCredentials.apiSurface ?? 'anthropic') === 'anthropic')
+    config.reviewerProvider === 'foundry' &&
+    config.reviewerProviderCredentials?.provider === 'foundry' &&
+    (config.reviewerProviderCredentials.apiSurface ?? 'anthropic') === 'anthropic'
   );
 }
 
 function canReuseCachedPreSubmitForTier1(
   config: ValidationEngineConfig,
-  reviewRunner: 'claude' | 'codex',
+  reviewRunner: 'claude' | 'container-claude' | 'codex',
 ): boolean {
-  return reviewRunner !== 'codex' && !shouldUseProfileBoundAnthropicReviewer(config);
+  return reviewRunner === 'claude' && !shouldUseProfileBoundAnthropicReviewer(config);
 }
 
 async function runProfileBoundAnthropicReview(

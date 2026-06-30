@@ -26,6 +26,7 @@ import {
   stripMarkdownFences,
 } from './local-validation-engine.js';
 import { hashDiff } from './pre-submit-review.js';
+import { runToolUseReview } from './review-tool-runner.js';
 
 vi.mock('../runtimes/run-claude-cli.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../runtimes/run-claude-cli.js')>();
@@ -43,11 +44,20 @@ vi.mock('../providers/llm-client.js', async (importOriginal) => {
   };
 });
 
+vi.mock('./review-tool-runner.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./review-tool-runner.js')>();
+  return {
+    ...actual,
+    runToolUseReview: vi.fn(),
+  };
+});
+
 beforeEach(() => {
   vi.mocked(runClaudeCli).mockReset();
   vi.mocked(createProviderAnthropicClient)
     .mockReset()
     .mockResolvedValue({ ok: false, reason: 'no_anthropic_api_key' });
+  vi.mocked(runToolUseReview).mockReset();
 });
 
 afterEach(() => {
@@ -1897,14 +1907,141 @@ describe('validate() — facts + review gate', () => {
     });
   });
 
-  it('runs MAX profile Tier 1 Claude review through profile auth outside the pod', async () => {
+  it('runs Max full-validation Review through the live container Claude reviewer', async () => {
+    const reviewerExecEnv = {
+      CLAUDE_CODE_OAUTH_TOKEN_FILE: '/run/autopod/claude-code-oauth-token',
+      POD_ID: 'pod-test',
+    };
+    const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-max-review-'));
+    const writeFile = vi.fn(async () => {});
+    const getStatus = vi.fn(async () => 'running' as const);
+    const execInContainer = vi.fn(
+      async (
+        _containerId: string,
+        command: string[],
+        options?: { env?: Record<string, string>; cwd?: string; timeout?: number },
+      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+        const shell = command[2] ?? '';
+        if (shell.includes('git reset --hard HEAD')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('/run/autopod/agent-shim.sh') && shell.includes('claude -p')) {
+          expect(options?.env).toEqual(reviewerExecEnv);
+          return {
+            stdout: JSON.stringify({
+              status: 'pass',
+              reasoning: 'Container reviewer reached a verdict',
+              issues: [],
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        throw new Error(`stub: execInContainer unexpectedly called: ${JSON.stringify(command)}`);
+      },
+    );
+    const cm = {
+      ...stubContainerManager(),
+      writeFile,
+      getStatus,
+      execInContainer,
+    } as unknown as ContainerManager;
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(
+      baseConfig({
+        reviewerProvider: 'max',
+        reviewerProviderCredentials: {
+          provider: 'max',
+          authMode: 'setup-token',
+          oauthToken: 'stored-token',
+        },
+        reviewerExecEnv,
+        reviewerModel: 'claude-sonnet-4-6',
+        reviewDepth: 'deep',
+        worktreePath,
+        diff: `diff --git a/src/app.ts b/src/app.ts
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old
++new
+`,
+      }),
+    );
+
+    expect(result.taskReview).toMatchObject({
+      status: 'pass',
+      model: 'claude-sonnet-4-6',
+      reasoning: 'Container reviewer reached a verdict',
+    });
+    expect(result.overall).toBe('pass');
+    expect(vi.mocked(runClaudeCli)).not.toHaveBeenCalled();
+    expect(createProviderAnthropicClient).not.toHaveBeenCalled();
+    expect(runToolUseReview).not.toHaveBeenCalled();
+    expect(getStatus).toHaveBeenCalledWith('container-test');
+    expect(writeFile).toHaveBeenCalledWith(
+      'container-test',
+      expect.stringContaining('/tmp/autopod-claude-review-pod-test-'),
+      expect.stringContaining('performing an independent code review'),
+    );
+    expect(execInContainer).toHaveBeenCalledTimes(2);
+    expect(execInContainer.mock.calls[1]?.[0]).toBe('container-test');
+    expect(execInContainer.mock.calls[1]?.[1].join(' ')).toContain('/run/autopod/agent-shim.sh');
+    expect(execInContainer.mock.calls[1]?.[2]).toMatchObject({
+      cwd: '/workspace',
+      env: reviewerExecEnv,
+      timeout: 300_000,
+    });
+  });
+
+  it('fails Max Review clearly when no live container is available', async () => {
+    const cm = {
+      ...stubContainerManager(),
+      getStatus: vi.fn(async () => 'stopped' as const),
+    } as unknown as ContainerManager;
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(
+      baseConfig({
+        reviewerProvider: 'max',
+        reviewerProviderCredentials: {
+          provider: 'max',
+          authMode: 'setup-token',
+          oauthToken: 'stored-token',
+        },
+        reviewerExecEnv: {
+          CLAUDE_CODE_OAUTH_TOKEN_FILE: '/run/autopod/claude-code-oauth-token',
+        },
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: `diff --git a/src/app.ts b/src/app.ts
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old
++new
+`,
+      }),
+    );
+
+    expect(result.taskReview).toBeNull();
+    expect(result.reviewSkipKind).toBe('review-failed');
+    expect(result.reviewSkipReason).toContain(
+      'Container reviewer unavailable: container is stopped (not running)',
+    );
+    expect(result.overall).toBe('fail');
+    expect(createProviderAnthropicClient).not.toHaveBeenCalled();
+    expect(runToolUseReview).not.toHaveBeenCalled();
+  });
+
+  it('keeps Foundry Anthropic validation Review on daemon provider auth', async () => {
     const messagesCreate = vi.fn().mockResolvedValue({
       content: [
         {
           type: 'text',
           text: JSON.stringify({
             status: 'pass',
-            reasoning: 'Profile-auth reviewer passed',
+            reasoning: 'Foundry Anthropic reviewer passed',
             issues: [],
           }),
         },
@@ -1925,13 +2062,14 @@ describe('validate() — facts + review gate', () => {
 
     const result = await engine.validate(
       baseConfig({
-        reviewerProvider: 'max',
+        reviewerProvider: 'foundry',
         reviewerProviderCredentials: {
-          provider: 'max',
-          authMode: 'setup-token',
-          oauthToken: 'stored-token',
+          provider: 'foundry',
+          endpoint: 'https://foundry.example',
+          projectId: 'project-test',
+          apiKey: 'foundry-api-key',
+          apiSurface: 'anthropic',
         },
-        reviewerExecEnv: { CLAUDE_CODE_OAUTH_TOKEN_FILE: '/run/autopod/claude-code-oauth-token' },
         reviewerModel: 'claude-sonnet-4-6',
         diff: `diff --git a/src/app.ts b/src/app.ts
 --- a/src/app.ts
@@ -1946,7 +2084,7 @@ describe('validate() — facts + review gate', () => {
     expect(result.taskReview).toMatchObject({
       status: 'pass',
       model: 'claude-sonnet-4-6',
-      reasoning: 'Profile-auth reviewer passed',
+      reasoning: 'Foundry Anthropic reviewer passed',
       tokenUsage: {
         inputTokens: 123,
         outputTokens: 45,
@@ -1957,11 +2095,13 @@ describe('validate() — facts + review gate', () => {
     expect(vi.mocked(runClaudeCli)).not.toHaveBeenCalled();
     expect(createProviderAnthropicClient).toHaveBeenCalledWith(
       {
-        provider: 'max',
+        provider: 'foundry',
         credentials: {
-          provider: 'max',
-          authMode: 'setup-token',
-          oauthToken: 'stored-token',
+          provider: 'foundry',
+          endpoint: 'https://foundry.example',
+          projectId: 'project-test',
+          apiKey: 'foundry-api-key',
+          apiSurface: 'anthropic',
         },
         model: 'claude-sonnet-4-6',
         profileName: 'pod-test',
