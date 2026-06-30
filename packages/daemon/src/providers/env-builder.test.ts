@@ -7,6 +7,7 @@ import { clearAzureTokenCache } from './azure-token.js';
 import { buildProviderEnv } from './env-builder.js';
 
 const logger = pino({ level: 'silent' });
+const mockGetAzureToken = vi.fn();
 
 /** Minimal profile stub with provider fields. */
 function makeProfile(overrides: Partial<Profile> = {}): Profile {
@@ -370,21 +371,19 @@ describe('buildProviderEnv', () => {
     beforeEach(() => {
       clearAzureTokenCache();
       vi.resetModules();
-      vi.doMock('@azure/identity', () => ({
-        // biome-ignore lint/complexity/useArrowFunction: vitest 4 requires regular functions for class mocks
-        DefaultAzureCredential: vi.fn().mockImplementation(function () {
-          return {
-            getToken: vi.fn().mockResolvedValue({
-              token: 'entra-bearer-xyz',
-              expiresOnTimestamp: Date.now() + 3600_000,
-            }),
-          };
-        }),
+      mockGetAzureToken.mockResolvedValue({
+        token: 'entra-bearer-xyz',
+        expiresAtMs: Date.now() + 3600_000,
+      });
+      vi.doMock('./azure-token.js', async (importOriginal) => ({
+        ...(await importOriginal<typeof import('./azure-token.js')>()),
+        getAzureToken: mockGetAzureToken,
       }));
     });
 
     afterEach(() => {
-      vi.doUnmock('@azure/identity');
+      vi.doUnmock('./azure-token.js');
+      mockGetAzureToken.mockReset();
     });
 
     it('acquires an Entra bearer token and writes it to the secret file', async () => {
@@ -408,6 +407,10 @@ describe('buildProviderEnv', () => {
       expect(result.env.ANTHROPIC_API_KEY_FILE).toBe('/run/autopod/foundry-api-key');
       expect(result.secretFiles).toHaveLength(1);
       expect(result.secretFiles[0]?.content).toBe('entra-bearer-xyz');
+      expect(mockGetAzureToken).toHaveBeenCalledWith(
+        'https://cognitiveservices.azure.com/.default',
+        logger,
+      );
     });
   });
 
