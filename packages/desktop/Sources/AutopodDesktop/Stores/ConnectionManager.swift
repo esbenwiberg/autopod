@@ -39,7 +39,12 @@ public final class ConnectionManager {
   }
 
   private var healthTask: Task<Void, Never>?
+  private var authenticationRecoveryTask: Task<Bool, Never>?
+  private var cliLoginTask: Task<String, Error>?
   private let entraAuthService = EntraDesktopAuthService()
+
+  public private(set) var isRecoveringAuthentication = false
+  public private(set) var authenticationRecoveryError: String?
 
   // MARK: - Init
 
@@ -290,7 +295,11 @@ public final class ConnectionManager {
     connection = conn
     guard let token = Self.normalizeOptionalToken(tokenOverride ?? Self.launchEntraToken(for: conn)),
           !token.isEmpty else {
-      state = .error("Microsoft sign-in required. Run ap login or sign in from Autopod.")
+      state = .connecting
+      let recovered = await recoverAuthentication()
+      if !recovered {
+        state = .error(authenticationRecoveryError ?? "Microsoft sign-in required. Run ap login.")
+      }
       return
     }
     try? await connect(conn, using: token, persistToKeychain: false)
@@ -385,21 +394,54 @@ public final class ConnectionManager {
 
   public func signInWithMicrosoft() async throws -> String {
     let token = try await entraAuthService.signIn()
-    activeToken = Self.normalizeToken(token)
-    return activeToken ?? token
+    let normalized = Self.normalizeToken(token)
+    if let conn = connection {
+      applyActiveToken(normalized, for: conn, persistToKeychain: true)
+    } else {
+      activeToken = normalized
+    }
+    return activeToken ?? normalized
   }
 
   public func makeAccessTokenProvider() -> DaemonAccessTokenProvider {
-    let authKind = connection?.authKind
-    let manualToken = activeToken ?? ""
+    let fallbackToken = activeToken ?? ""
     let entraAuthService = entraAuthService
-    return {
-      if authKind == .entra {
-        if !manualToken.isEmpty { return manualToken }
+    return { [weak self] in
+      guard let self else {
+        if let cliToken = Self.cliEntraAccessToken() { return cliToken }
         return try await entraAuthService.accessToken()
       }
-      return manualToken
+      return try await self.accessTokenForCurrentConnection(fallbackToken: fallbackToken)
     }
+  }
+
+  /// Repair an expired/revoked daemon auth token. For hosted Entra connections this
+  /// runs `ap login` in the background, rereads the CLI credentials, and reconnects.
+  @discardableResult
+  public func recoverAuthentication() async -> Bool {
+    if let task = authenticationRecoveryTask {
+      return await task.value
+    }
+
+    let task = Task { @MainActor [weak self] in
+      guard let self else { return false }
+      self.isRecoveringAuthentication = true
+      self.authenticationRecoveryError = nil
+      defer {
+        self.isRecoveringAuthentication = false
+        self.authenticationRecoveryTask = nil
+      }
+
+      do {
+        try await self.performAuthenticationRecovery()
+        return true
+      } catch {
+        self.authenticationRecoveryError = error.localizedDescription
+        return false
+      }
+    }
+    authenticationRecoveryTask = task
+    return await task.value
   }
 
   private func connectToActive() async {
@@ -452,15 +494,12 @@ public final class ConnectionManager {
     connection = saved
     state = .connecting
     do {
-      let token = Self.normalizeToken(try await entraAuthService.accessToken())
+      let token = try await refreshEntraAccessToken(forceLogin: false, fallbackToken: nil)
       guard !token.isEmpty else {
         state = .error("Microsoft sign-in returned an empty token")
         return
       }
-      activeToken = token
-      api = makeAPI(baseURL: saved.url, token: token, authKind: .entra)
-      try? KeychainHelper.save(token: token, for: saved.id)
-      ConnectionStore.saveToken(token, for: saved.id)
+      applyActiveToken(token, for: saved, persistToKeychain: true)
       await connectToActive()
     } catch {
       state = .error(error.localizedDescription)
@@ -468,24 +507,19 @@ public final class ConnectionManager {
   }
 
   private func refreshEntraTokenIfNeeded(for conn: DaemonConnection) async throws {
-    let freshToken = Self.normalizeToken(try await entraAuthService.accessToken())
+    let freshToken = try await refreshEntraAccessToken(forceLogin: false, fallbackToken: activeToken)
     guard !freshToken.isEmpty else {
       throw DaemonError.unauthorized("Microsoft sign-in returned an empty token")
     }
     if freshToken != activeToken {
-      activeToken = freshToken
-      api = makeAPI(baseURL: conn.url, token: freshToken, authKind: conn.authKind)
-      try? KeychainHelper.save(token: freshToken, for: conn.id)
-      ConnectionStore.saveToken(freshToken, for: conn.id)
+      applyActiveToken(freshToken, for: conn, persistToKeychain: true)
     }
   }
 
   private func refreshCliEntraTokenIfAvailable(for conn: DaemonConnection) {
     guard let freshToken = Self.launchEntraToken(for: conn),
           freshToken != activeToken else { return }
-    activeToken = freshToken
-    api = DaemonAPI(baseURL: conn.url, token: freshToken)
-    ConnectionStore.saveToken(freshToken, for: conn.id)
+    applyActiveToken(freshToken, for: conn, persistToKeychain: false)
   }
 
   private func connect(
@@ -498,7 +532,7 @@ public final class ConnectionManager {
       throw DaemonError.unauthorized("Missing saved token")
     }
 
-    let testApi = DaemonAPI(baseURL: conn.url, token: normalizedToken)
+    let testApi = makeAPI(baseURL: conn.url, token: normalizedToken, authKind: conn.authKind)
     state = .connecting
 
     do {
@@ -507,19 +541,15 @@ public final class ConnectionManager {
       healthTask?.cancel()
       healthTask = nil
       connection = conn
-      activeToken = normalizedToken
       api = testApi
       ConnectionStore.setActiveConnectionId(conn.id)
-      if persistToKeychain {
-        try? KeychainHelper.save(token: normalizedToken, for: conn.id)
-      }
-      ConnectionStore.saveToken(normalizedToken, for: conn.id)
+      applyActiveToken(normalizedToken, for: conn, persistToKeychain: persistToKeychain)
       state = .connected
       startHealthPolling()
     } catch {
       connection = conn
-      activeToken = normalizedToken
       api = testApi
+      applyActiveToken(normalizedToken, for: conn, persistToKeychain: persistToKeychain)
       state = .error(error.localizedDescription)
       throw error
     }
@@ -531,15 +561,116 @@ public final class ConnectionManager {
     authKind: DaemonConnectionAuthKind
   ) -> DaemonAPI {
     if authKind == .entra {
+      let fallbackToken = Self.normalizeToken(token)
       return DaemonAPI(
         baseURL: baseURL,
-        initialToken: token,
-        tokenProvider: { [entraAuthService] in
-          try await entraAuthService.accessToken()
+        initialToken: fallbackToken,
+        tokenProvider: { [weak self] in
+          guard let self else {
+            return Self.cliEntraAccessToken() ?? fallbackToken
+          }
+          return try await self.refreshEntraAccessToken(
+            forceLogin: false,
+            fallbackToken: fallbackToken
+          )
         }
       )
     }
     return DaemonAPI(baseURL: baseURL, token: token)
+  }
+
+  private func accessTokenForCurrentConnection(fallbackToken: String) async throws -> String {
+    guard let conn = connection else { return fallbackToken }
+    if conn.authKind == .entra {
+      return try await refreshEntraAccessToken(forceLogin: false, fallbackToken: fallbackToken)
+    }
+    if conn.isLocal, let freshToken = DaemonConnection.readLocalDevToken(),
+       freshToken != activeToken {
+      applyActiveToken(freshToken, for: conn, persistToKeychain: true)
+      return freshToken
+    }
+    return activeToken ?? fallbackToken
+  }
+
+  private func performAuthenticationRecovery() async throws {
+    guard let conn = connection else {
+      throw DaemonError.networkError("No daemon connection is active")
+    }
+
+    if conn.isLocal {
+      if await refreshDevToken(for: conn) { return }
+      throw DaemonError.unauthorized("Local daemon token is invalid or missing")
+    }
+
+    guard conn.authKind == .entra else {
+      throw DaemonError.unauthorized("Saved token is invalid. Update the connection token.")
+    }
+
+    let token = try await refreshEntraAccessToken(forceLogin: true, fallbackToken: nil)
+    try await connect(conn, using: token, persistToKeychain: false)
+  }
+
+  private func refreshEntraAccessToken(
+    forceLogin: Bool,
+    fallbackToken: String?
+  ) async throws -> String {
+    let applyConnection = connection?.authKind == .entra ? connection : nil
+    if !forceLogin, let cliToken = Self.cliEntraAccessToken() {
+      applyActiveToken(cliToken, for: applyConnection, persistToKeychain: false)
+      return cliToken
+    }
+
+    if !forceLogin, let token = try? await entraAuthService.accessToken() {
+      let normalized = Self.normalizeToken(token)
+      applyActiveToken(normalized, for: applyConnection, persistToKeychain: true)
+      return normalized
+    }
+
+    do {
+      let cliToken = try await runCliLoginAndReadToken()
+      applyActiveToken(cliToken, for: applyConnection, persistToKeychain: false)
+      return cliToken
+    } catch {
+      if !forceLogin, let fallbackToken = Self.normalizeOptionalToken(fallbackToken) {
+        return fallbackToken
+      }
+      let token = try await entraAuthService.signIn()
+      let normalized = Self.normalizeToken(token)
+      applyActiveToken(normalized, for: applyConnection, persistToKeychain: true)
+      return normalized
+    }
+  }
+
+  private func runCliLoginAndReadToken() async throws -> String {
+    if let task = cliLoginTask {
+      return try await task.value
+    }
+
+    let task = Task {
+      try await Self.runApLoginAndReadToken()
+    }
+    cliLoginTask = task
+    defer { cliLoginTask = nil }
+    return try await task.value
+  }
+
+  private func applyActiveToken(
+    _ token: String,
+    for conn: DaemonConnection?,
+    persistToKeychain: Bool
+  ) {
+    let normalized = Self.normalizeToken(token)
+    guard !normalized.isEmpty else { return }
+    activeToken = normalized
+
+    guard let conn else { return }
+    if api == nil || api?.baseURL != conn.url {
+      api = makeAPI(baseURL: conn.url, token: normalized, authKind: conn.authKind)
+    }
+    if persistToKeychain {
+      try? KeychainHelper.save(token: normalized, for: conn.id)
+    }
+    ConnectionStore.saveToken(normalized, for: conn.id)
   }
 
   /// Try to read a fresh dev token from disk. Returns true if token was updated.
@@ -561,5 +692,76 @@ public final class ConnectionManager {
     } catch {
       return false
     }
+  }
+
+  nonisolated private static func runApLoginAndReadToken() async throws -> String {
+    let apURL = try findExecutable("ap")
+    try await runApLogin(apURL)
+    guard let token = cliEntraAccessToken() else {
+      throw DaemonError.unauthorized("ap login finished but did not write a valid access token")
+    }
+    return token
+  }
+
+  nonisolated private static func findExecutable(_ name: String) throws -> URL {
+    if let path = resolveViaLoginShell(name) {
+      return URL(fileURLWithPath: path)
+    }
+
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    let candidates = [
+      "/opt/homebrew/bin/\(name)",
+      "/usr/local/bin/\(name)",
+      "\(home)/.local/bin/\(name)",
+      "\(home)/.npm/bin/\(name)",
+    ]
+    for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
+      return URL(fileURLWithPath: path)
+    }
+
+    throw DaemonError.networkError("\(name) CLI not found. Install it or add it to your login shell PATH.")
+  }
+
+  nonisolated private static func resolveViaLoginShell(_ name: String) -> String? {
+    let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: shell)
+    proc.arguments = ["-l", "-c", "command -v \(name)"]
+    let pipe = Pipe()
+    proc.standardOutput = pipe
+    proc.standardError = FileHandle.nullDevice
+    try? proc.run()
+    proc.waitUntilExit()
+
+    guard proc.terminationStatus == 0 else { return nil }
+    let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return (output?.isEmpty == false) ? output : nil
+  }
+
+  nonisolated private static func runApLogin(_ apURL: URL) async throws {
+    try await Task.detached(priority: .userInitiated) {
+      let proc = Process()
+      proc.executableURL = apURL
+      proc.arguments = ["login"]
+
+      let output = Pipe()
+      let error = Pipe()
+      proc.standardOutput = output
+      proc.standardError = error
+
+      try proc.run()
+      proc.waitUntilExit()
+
+      guard proc.terminationStatus == 0 else {
+        let stdout = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderr = String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let message = [stderr, stdout]
+          .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+          .first(where: { !$0.isEmpty })
+          ?? "ap login exited with code \(proc.terminationStatus)"
+        throw DaemonError.unauthorized(message)
+      }
+    }.value
   }
 }

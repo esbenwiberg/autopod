@@ -97,6 +97,7 @@ public struct SettingsView: View {
     @State private var showAddConnection = false
     @State private var switchingConnectionId: UUID?
     @State private var connectionError: String?
+    @State private var isRecoveringProfileAuth = false
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -324,10 +325,27 @@ public struct SettingsView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.yellow)
-                    Text(profileError)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if connectionManager.isRecoveringAuthentication || isRecoveringProfileAuth {
+                        ProgressView()
+                            .scaleEffect(0.55)
+                            .frame(width: 14, height: 14)
+                        Text("Refreshing sign-in…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(profileError)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
+                    if isUnauthorizedMessage(profileError)
+                        && !connectionManager.isRecoveringAuthentication
+                        && !isRecoveringProfileAuth {
+                        Button("Sign in") {
+                            Task { await recoverProfileAuthentication() }
+                        }
+                        .buttonStyle(.borderless)
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
@@ -347,6 +365,24 @@ public struct SettingsView: View {
                            onDelete: onDeleteProfile,
                            profileToOpen: $deepLinkedProfileName)
         }
+    }
+
+    private func recoverProfileAuthentication() async {
+        isRecoveringProfileAuth = true
+        let recovered = await connectionManager.recoverAuthentication()
+        if recovered {
+            await onReloadProfiles?()
+        }
+        isRecoveringProfileAuth = false
+    }
+
+    private func isUnauthorizedMessage(_ message: String?) -> Bool {
+        guard let message else { return false }
+        let lowercased = message.lowercased()
+        return lowercased.contains("unauthorized")
+            || lowercased.contains("invalid authorization token")
+            || lowercased.contains("token expired")
+            || lowercased.contains("sign in")
     }
 
     // MARK: - Notifications

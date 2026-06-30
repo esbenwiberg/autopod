@@ -37,6 +37,8 @@ public struct AppRootView: View {
   }
 
   @State private var showError = false
+  @State private var showAuthRecoveryFailure = false
+  @State private var authRecoveryFailureMessage = ""
   @State private var showSettings = false
   @State private var settingsProfileToEdit: String?
 
@@ -286,8 +288,29 @@ public struct AppRootView: View {
     } message: {
       Text(actionHandler?.lastError ?? "Unknown error")
     }
+    .alert("Sign In Required", isPresented: $showAuthRecoveryFailure) {
+      Button("Sign in") {
+        Task { await recoverAuthenticationAndReload(fallbackMessage: authRecoveryFailureMessage) }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text(authRecoveryFailureMessage)
+    }
     .onChange(of: actionHandler?.lastError) { old, new in
-      if new != nil, new != old { showError = true }
+      if new != nil, new != old, !isUnauthorizedMessage(new) { showError = true }
+      handleAuthenticationError(new)
+    }
+    .onChange(of: podStore.error) { _, new in
+      handleAuthenticationError(new)
+    }
+    .onChange(of: profileStore.error) { _, new in
+      handleAuthenticationError(new)
+    }
+    .onChange(of: memoryStore.error) { _, new in
+      handleAuthenticationError(new)
+    }
+    .onChange(of: scheduledJobStore.error) { _, new in
+      handleAuthenticationError(new)
     }
     .alert(
       "Scheduled Job Error",
@@ -384,5 +407,41 @@ public struct AppRootView: View {
         Task { await profileStore.loadProfiles() }
       }
     }
+  }
+
+  private func handleAuthenticationError(_ message: String?) {
+    guard isUnauthorizedMessage(message), !connectionManager.isRecoveringAuthentication else { return }
+    Task { await recoverAuthenticationAndReload(fallbackMessage: message) }
+  }
+
+  private func recoverAuthenticationAndReload(fallbackMessage: String?) async {
+    let recovered = await connectionManager.recoverAuthentication()
+    if recovered {
+      if let api = connectionManager.api {
+        podStore.configure(api: api)
+        profileStore.configure(api: api)
+        memoryStore.configure(api: api)
+        scheduledJobStore.configure(api: api)
+      }
+      await podStore.loadSessions()
+      await profileStore.loadProfiles()
+      await scheduledJobStore.load()
+      return
+    }
+
+    authRecoveryFailureMessage =
+      connectionManager.authenticationRecoveryError
+      ?? fallbackMessage
+      ?? "The daemon rejected the current authorization token. Run ap login and try again."
+    showAuthRecoveryFailure = true
+  }
+
+  private func isUnauthorizedMessage(_ message: String?) -> Bool {
+    guard let message else { return false }
+    let lowercased = message.lowercased()
+    return lowercased.contains("unauthorized")
+      || lowercased.contains("invalid authorization token")
+      || lowercased.contains("token expired")
+      || lowercased.contains("sign in")
   }
 }
