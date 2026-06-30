@@ -6785,7 +6785,7 @@ describe('PodManager', () => {
       );
     });
 
-    it('rejects host preview for sandbox pods because no port forwarding exists', async () => {
+    it('starts a daemon host-port preview proxy for sandbox pods', async () => {
       const ctx = createTestContext(undefined, {
         executionTarget: 'sandbox',
         warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
@@ -6798,24 +6798,49 @@ describe('PodManager', () => {
       ctx.podRepo.update(pod.id, {
         status: 'running',
         containerId: 'ctr-1',
-        previewUrl: 'http://127.0.0.1:32123',
-      });
-
-      await expect(manager.startPreview(pod.id)).rejects.toThrow(
-        /Sandbox host preview is not supported/,
-      );
-      await expect(manager.previewStatus(pod.id)).resolves.toEqual({
-        running: false,
-        reachable: false,
-        restartCount: 0,
-        lastError: 'Sandbox host preview is not supported because no port forwarding exists.',
         previewUrl: null,
       });
-      expect(ctx.containerManager.execInContainer).not.toHaveBeenCalledWith(
-        'ctr-1',
-        expect.arrayContaining(['sh', '-c']),
-        expect.anything(),
-      );
+
+      ctx.containerManager.execInContainer = vi.fn(async (_containerId, command) => {
+        if (command[0] === 'node') {
+          return {
+            stdout: JSON.stringify({
+              statusCode: 200,
+              statusMessage: 'OK',
+              headers: { 'content-type': 'text/plain; charset=utf-8' },
+              bodyBase64: Buffer.from('sandbox preview ok').toString('base64'),
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        const script = command[2] ?? '';
+        if (String(script).includes('autopod-supervisor.pid')) {
+          return { stdout: '123\n', stderr: '', exitCode: 0 };
+        }
+        if (String(script).includes('kill -0 123')) {
+          return { stdout: '1\n', stderr: '', exitCode: 0 };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      });
+
+      const { previewUrl } = await manager.startPreview(pod.id);
+      expect(previewUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+
+      const response = await fetch(previewUrl);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('sandbox preview ok');
+
+      await expect(manager.previewStatus(pod.id)).resolves.toMatchObject({
+        running: true,
+        reachable: true,
+        restartCount: 0,
+        lastError: null,
+        previewUrl,
+      });
+
+      await manager.stopPreview(pod.id);
+      expect(ctx.containerManager.stop).toHaveBeenCalledWith('ctr-1');
     });
 
     it('refreshes the host linked-worktree index after promoting container commits', async () => {

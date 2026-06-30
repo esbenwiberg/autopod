@@ -166,6 +166,7 @@ import {
   resolveReviewerModel,
   resolveReviewerProvider,
 } from './runtime-resolver.js';
+import { type SandboxPreviewProxy, startSandboxPreviewProxy } from './sandbox-preview-proxy.js';
 import { resolveSections } from './section-resolver.js';
 import { resolveSkills } from './skill-resolver.js';
 import {
@@ -1882,6 +1883,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     mode: 'kill' | 'stop' = 'kill',
   ): Promise<void> {
     if (!pod.containerId) return;
+    await stopSandboxPreviewProxy(pod.id);
     if (mode === 'kill' && deps.beforeContainerCleanup) {
       let extractionTimer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
@@ -1998,6 +2000,76 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     } catch (err) {
       logger.warn({ err, podId }, 'Failed to load security findings for PR body');
       return [];
+    }
+  }
+
+  const sandboxPreviewProxies = new Map<
+    string,
+    { containerId: string; proxy: SandboxPreviewProxy }
+  >();
+
+  async function ensureSandboxPreviewProxy(pod: Pod): Promise<string> {
+    if (pod.executionTarget !== 'sandbox') {
+      if (!pod.previewUrl) {
+        throw new AutopodError(`Pod ${pod.id} has no preview URL`, 'INVALID_STATE', 409);
+      }
+      return pod.previewUrl;
+    }
+
+    if (!pod.containerId) {
+      throw new AutopodError(
+        `Pod ${pod.id} has no container — cannot start preview`,
+        'INVALID_STATE',
+        409,
+      );
+    }
+
+    let previewUrl = pod.previewUrl;
+    if (!previewUrl) {
+      previewUrl = `http://127.0.0.1:${allocateHostPort()}`;
+      podRepo.update(pod.id, { previewUrl });
+    }
+
+    const existing = sandboxPreviewProxies.get(pod.id);
+    if (existing?.containerId === pod.containerId) return existing.proxy.url;
+    if (existing) await stopSandboxPreviewProxy(pod.id);
+
+    const hostPort = parsePreviewPort(previewUrl);
+    if (!hostPort) {
+      throw new AutopodError(`Pod ${pod.id} has invalid preview URL`, 'INVALID_STATE', 409);
+    }
+
+    const proxy = await startSandboxPreviewProxy({
+      podId: pod.id,
+      containerId: pod.containerId,
+      hostPort,
+      containerPort: CONTAINER_APP_PORT,
+      containerManager: containerManagerFactory.get('sandbox'),
+      logger,
+    });
+    sandboxPreviewProxies.set(pod.id, { containerId: pod.containerId, proxy });
+    if (proxy.url !== previewUrl) {
+      podRepo.update(pod.id, { previewUrl: proxy.url });
+    }
+    return proxy.url;
+  }
+
+  async function stopSandboxPreviewProxy(podId: string): Promise<void> {
+    const existing = sandboxPreviewProxies.get(podId);
+    if (!existing) return;
+    sandboxPreviewProxies.delete(podId);
+    await existing.proxy.close().catch((err) => {
+      logger.warn({ err, podId }, 'Failed to close sandbox preview proxy');
+    });
+  }
+
+  function parsePreviewPort(previewUrl: string): number | null {
+    try {
+      const parsed = new URL(previewUrl);
+      const port = Number.parseInt(parsed.port, 10);
+      return Number.isSafeInteger(port) && port >= 0 ? port : null;
+    } catch {
+      return null;
     }
   }
 
@@ -3038,6 +3110,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const timer = setTimeout(async () => {
       previewTimers.delete(podId);
       try {
+        await stopSandboxPreviewProxy(podId);
         const cm = containerManagerFactory.get(target);
         await cm.stop(containerId);
         logger.info({ podId, containerId }, 'Preview auto-stopped after timeout');
@@ -4785,6 +4858,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     if (pod.containerId) {
       try {
+        await stopSandboxPreviewProxy(pod.id);
         const cm = containerManagerFactory.get(pod.executionTarget);
         await cm.stop(pod.containerId);
         logger.info({ podId: pod.id }, 'Container stopped after review infrastructure failure');
@@ -5426,6 +5500,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             'Failed to persist runtime credentials before handoff stop — auth may be stale',
           );
           try {
+            await stopSandboxPreviewProxy(podId);
             await cm.stop(pod.containerId);
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to stop interactive container during handoff');
@@ -5856,8 +5931,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           'Spawning pod container',
         );
 
-        const hostPreviewUrl =
-          pod.executionTarget === 'local' ? `http://127.0.0.1:${hostPort}` : null;
+        const hostPreviewUrl = `http://127.0.0.1:${hostPort}`;
         const containerPreviewUrl = `http://127.0.0.1:${CONTAINER_APP_PORT}`;
         const containerEnv: Record<string, string> = {
           POD_ID: podId,
@@ -5870,9 +5944,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }),
           PORT: String(CONTAINER_APP_PORT),
           HOST: '0.0.0.0', // bind to all interfaces inside container for Docker port forwarding
-          // Docker pods expose a host preview URL; sandbox pods do not have port
-          // forwarding yet, so only advertise the container-local URL there.
-          PREVIEW_URL: hostPreviewUrl ?? containerPreviewUrl,
+          // Docker pods get native port mapping. Sandbox pods get a daemon-owned
+          // host-port proxy for humans, while in-container tooling still needs
+          // the app's loopback URL.
+          PREVIEW_URL: pod.executionTarget === 'local' ? hostPreviewUrl : containerPreviewUrl,
           ...(isDotnet
             ? {
                 MSBUILDNODECOUNT: '4',
@@ -7890,6 +7965,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // Stop the container post-validation (mirrors the original push path).
             if (validatedPod.containerId) {
               try {
+                await stopSandboxPreviewProxy(podId);
                 const cm = containerManagerFactory.get(validatedPod.executionTarget);
                 await cm.stop(validatedPod.containerId);
               } catch (stopErr) {
@@ -8645,6 +8721,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async killSession(podId: string): Promise<void> {
       clearPreviewTimer(podId);
+      await stopSandboxPreviewProxy(podId);
       stopMergePolling(podId);
       const pod = podRepo.getOrThrow(podId);
       if (!canKill(pod.status)) {
@@ -9799,6 +9876,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           if (s2.containerId) {
             try {
+              await stopSandboxPreviewProxy(podId);
               const cm = containerManagerFactory.get(s2.executionTarget);
               await cm.stop(s2.containerId);
               logger.info({ podId }, 'Container stopped while awaiting fact deviation decision');
@@ -9818,6 +9896,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           if (s2.containerId) {
             try {
+              await stopSandboxPreviewProxy(podId);
               const cm = containerManagerFactory.get(s2.executionTarget);
               await cm.stop(s2.containerId);
               logger.info(
@@ -10033,6 +10112,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Stop the container (not remove) so it can be restarted for preview
           if (postAdvisoryPod.containerId) {
             try {
+              await stopSandboxPreviewProxy(podId);
               const cm = containerManagerFactory.get(postAdvisoryPod.executionTarget);
               await cm.stop(postAdvisoryPod.containerId);
               logger.info({ podId }, 'Container stopped post-validation');
@@ -10123,6 +10203,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Stop the container (not remove) so it can be restarted for preview
           if (s2.containerId) {
             try {
+              await stopSandboxPreviewProxy(podId);
               const cm = containerManagerFactory.get(s2.executionTarget);
               await cm.stop(s2.containerId);
               logger.info({ podId }, 'Container stopped after max validation attempts');
@@ -10152,6 +10233,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Stop the container (not remove) so it can be restarted for preview
         if (s2.containerId) {
           try {
+            await stopSandboxPreviewProxy(podId);
             const cm = containerManagerFactory.get(s2.executionTarget);
             await cm.stop(s2.containerId);
           } catch (stopErr) {
@@ -10708,6 +10790,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async deleteSession(podId: string): Promise<void> {
       clearPreviewTimer(podId);
+      await stopSandboxPreviewProxy(podId);
       const pod = podRepo.getOrThrow(podId);
       const deletable =
         isTerminalState(pod.status) ||
@@ -10785,14 +10868,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     async startPreview(podId: string): Promise<{ previewUrl: string }> {
       const pod = podRepo.getOrThrow(podId);
 
-      if (pod.executionTarget === 'sandbox') {
-        throw new AutopodError(
-          `Sandbox host preview is not supported for pod ${podId}: Azure Sandboxes do not provide host port forwarding or tunneling yet.`,
-          'UNSUPPORTED_SANDBOX_PREVIEW',
-          409,
-        );
-      }
-
       if (!pod.containerId) {
         throw new AutopodError(
           `Pod ${podId} has no container — cannot start preview`,
@@ -10801,7 +10876,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
-      if (!pod.previewUrl) {
+      if (!pod.previewUrl && pod.executionTarget !== 'sandbox') {
         throw new AutopodError(`Pod ${podId} has no preview URL`, 'INVALID_STATE', 409);
       }
 
@@ -10844,9 +10919,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           })();
 
           if (supervisorAlive) {
+            const previewUrl =
+              pod.executionTarget === 'sandbox'
+                ? await ensureSandboxPreviewProxy(pod)
+                : // biome-ignore lint/style/noNonNullAssertion: checked above for local pods
+                  pod.previewUrl!;
             schedulePreviewAutoStop(podId, pod.containerId, pod.executionTarget);
             logger.info({ podId }, 'Supervisor already running — reusing existing preview');
-            return { previewUrl: pod.previewUrl };
+            return { previewUrl };
           }
 
           // Supervisor is dead — (re)spawn it
@@ -10859,13 +10939,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
         }
 
+        const previewUrl =
+          pod.executionTarget === 'sandbox'
+            ? await ensureSandboxPreviewProxy(pod)
+            : // biome-ignore lint/style/noNonNullAssertion: checked above for local pods
+              pod.previewUrl!;
         schedulePreviewAutoStop(podId, pod.containerId, pod.executionTarget);
-        logger.info({ podId, previewUrl: pod.previewUrl }, 'Preview started');
-        return { previewUrl: pod.previewUrl };
+        logger.info({ podId, previewUrl }, 'Preview started');
+        return { previewUrl };
       }
 
       // Container is stopped — start it
       await cm.start(pod.containerId);
+      const previewUrl =
+        pod.executionTarget === 'sandbox'
+          ? await ensureSandboxPreviewProxy(pod)
+          : // biome-ignore lint/style/noNonNullAssertion: checked above for local pods
+            pod.previewUrl!;
 
       // Re-run the start command under the supervisor and wait for health check
       if (profile.startCommand) {
@@ -10881,7 +10971,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         });
 
         // Poll for health
-        const healthUrl = pod.previewUrl + profile.healthPath;
+        const healthUrl = previewUrl + profile.healthPath;
         const timeoutMs = (profile.healthTimeout ?? 30) * 1_000;
         const pollIntervalMs = 2_000;
         const start = Date.now();
@@ -10906,12 +10996,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       schedulePreviewAutoStop(podId, pod.containerId, pod.executionTarget);
-      logger.info({ podId, previewUrl: pod.previewUrl }, 'Preview started');
-      return { previewUrl: pod.previewUrl };
+      logger.info({ podId, previewUrl }, 'Preview started');
+      return { previewUrl };
     },
 
     async stopPreview(podId: string): Promise<void> {
       clearPreviewTimer(podId);
+      await stopSandboxPreviewProxy(podId);
       const pod = podRepo.getOrThrow(podId);
 
       if (!pod.containerId) {
@@ -10935,15 +11026,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       previewUrl: string | null;
     }> {
       const pod = podRepo.getOrThrow(podId);
-      if (pod.executionTarget === 'sandbox') {
-        return {
-          running: false,
-          reachable: false,
-          restartCount: 0,
-          lastError: 'Sandbox host preview is not supported because no port forwarding exists.',
-          previewUrl: null,
-        };
-      }
       const safeDefaults = {
         running: false,
         reachable: false,
@@ -10952,7 +11034,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         previewUrl: pod.previewUrl,
       };
 
-      if (!pod.containerId || !pod.previewUrl) return safeDefaults;
+      if (!pod.containerId || (!pod.previewUrl && pod.executionTarget !== 'sandbox')) {
+        return safeDefaults;
+      }
 
       const cm = containerManagerFactory.get(pod.executionTarget);
 
@@ -10963,6 +11047,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       } catch {
         return safeDefaults;
       }
+
+      const previewUrl =
+        pod.executionTarget === 'sandbox'
+          ? await ensureSandboxPreviewProxy(pod)
+          : // biome-ignore lint/style/noNonNullAssertion: checked before status probe
+            pod.previewUrl!;
 
       // Exec four parallel reads inside the container + HTTP probe from the host.
       const [pidResult, restartCountResult, logTailResult, httpProbeResult] = await Promise.all([
@@ -10987,7 +11077,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             {},
           )
           .catch(() => null),
-        fetch(pod.previewUrl, { signal: AbortSignal.timeout(3_000) })
+        fetch(previewUrl, { signal: AbortSignal.timeout(3_000) })
           .then((r) => r.status)
           .catch(() => null),
       ]);
@@ -11015,7 +11105,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         reachableHttp: typeof httpProbeResult === 'number' ? httpProbeResult : null,
       });
 
-      return { ...status, previewUrl: pod.previewUrl };
+      return { ...status, previewUrl };
     },
 
     getSession(podId: string): Pod {
@@ -12032,6 +12122,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             );
             if (pod.containerId) {
               try {
+                await stopSandboxPreviewProxy(pod.id);
                 const cm = containerManagerFactory.get(pod.executionTarget);
                 await cm.stop(pod.containerId);
               } catch (err) {
