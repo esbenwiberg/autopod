@@ -43,6 +43,7 @@
       "**/.agentry/**",
       ".clawpatch/project.json",
       ".clawpatch/features/**",
+      ".clawpatch/findings/**",
       "**/.speclint-cache/**",
       "packages/desktop/.build/**",
       "packages/desktop/build/**",
