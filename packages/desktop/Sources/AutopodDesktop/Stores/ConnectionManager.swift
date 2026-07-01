@@ -153,10 +153,10 @@ public final class ConnectionManager {
     let token: String? = if conn.authKind == .entra {
       if let launchToken = Self.launchEntraToken(for: conn) {
         launchToken
-      } else if let activeToken {
+      } else if connection?.id == conn.id, let activeToken {
         activeToken
       } else {
-        try await entraAuthService.accessToken()
+        try await refreshEntraAccessToken(forceLogin: false, fallbackToken: nil)
       }
     } else if conn.isLocal {
       DaemonConnection.readLocalDevToken()

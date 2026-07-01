@@ -253,38 +253,24 @@ public struct SettingsView: View {
                 ScrollView {
                     VStack(spacing: 8) {
                         ForEach(connections) { conn in
+                            let isCurrent = connectionManager.connection?.id == conn.id
+
                             HStack {
-                                Circle()
-                                    .fill(connectionManager.connection?.id == conn.id && connectionManager.isConnected ? .green : .secondary)
-                                    .frame(width: 8, height: 8)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(conn.name)
-                                        .font(.callout.weight(.medium))
-                                    Text(conn.label)
-                                        .font(.system(.caption, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if connectionManager.connection?.id == conn.id {
-                                    Text("Active")
-                                        .font(.caption2)
-                                        .foregroundStyle(.green)
+                                if isCurrent {
+                                    connectionSummary(conn)
                                 } else {
                                     Button {
-                                        Task { await connect(to: conn) }
+                                        switchConnectionIfNeeded(conn)
                                     } label: {
-                                        if switchingConnectionId == conn.id {
-                                            ProgressView()
-                                                .scaleEffect(0.6)
-                                                .frame(width: 14, height: 14)
-                                        } else {
-                                            Image(systemName: "checkmark.circle")
-                                        }
+                                        connectionSummary(conn)
                                     }
-                                    .buttonStyle(.borderless)
+                                    .buttonStyle(.plain)
                                     .disabled(switchingConnectionId != nil)
-                                    .help("Set active connection")
+                                    .help("Connect to \(conn.name)")
                                 }
+
+                                connectionStatusOrAction(for: conn, isCurrent: isCurrent)
+
                                 Button {
                                     connectionError = nil
                                     connectionManager.removeConnection(conn.id)
@@ -304,6 +290,65 @@ public struct SettingsView: View {
             }
         }
         .padding(20)
+    }
+
+    private func connectionSummary(_ conn: DaemonConnection) -> some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(
+                    connectionManager.connection?.id == conn.id && connectionManager.isConnected
+                        ? .green : .secondary
+                )
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(conn.name)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.primary)
+                Text(conn.label)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private func connectionStatusOrAction(for conn: DaemonConnection, isCurrent: Bool) -> some View {
+        if isCurrent {
+            Label("Active", systemImage: "checkmark.circle.fill")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(connectionManager.isConnected ? .green : .secondary)
+                .frame(width: 92, alignment: .trailing)
+        } else {
+            Button {
+                switchConnectionIfNeeded(conn)
+            } label: {
+                if switchingConnectionId == conn.id {
+                    HStack(spacing: 5) {
+                        ProgressView()
+                            .scaleEffect(0.55)
+                            .frame(width: 12, height: 12)
+                        Text("Connecting")
+                    }
+                } else {
+                    Label("Connect", systemImage: "arrow.right.circle")
+                }
+            }
+            .font(.caption.weight(.medium))
+            .buttonStyle(.borderless)
+            .disabled(switchingConnectionId != nil)
+            .frame(width: 92, alignment: .trailing)
+            .help("Connect to \(conn.name)")
+        }
+    }
+
+    private func switchConnectionIfNeeded(_ connection: DaemonConnection) {
+        guard switchingConnectionId == nil,
+              connectionManager.connection?.id != connection.id else {
+            return
+        }
+        Task { await connect(to: connection) }
     }
 
     private func connect(to connection: DaemonConnection) async {
