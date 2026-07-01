@@ -502,7 +502,11 @@ describe('createReadinessService', () => {
           podId: reworkedPod.id,
           attempt: 9,
           reworkCount: 0,
-          result: validation({ attempt: 9, smoke: { ...validation().smoke, status: 'fail' }, overall: 'fail' }),
+          result: validation({
+            attempt: 9,
+            smoke: { ...validation().smoke, status: 'fail' },
+            overall: 'fail',
+          }),
           createdAt: NOW,
         },
         {
