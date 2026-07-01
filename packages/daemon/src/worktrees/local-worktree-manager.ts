@@ -21,6 +21,7 @@ import type {
   WorktreeResult,
 } from '../interfaces/worktree-manager.js';
 import { agentToolingCachePaths } from '../pods/agent-tooling-cache-paths.js';
+import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
 import { KeyedPromiseQueue } from '../util/keyed-promise-queue.js';
 import { generateAutoCommitMessage } from './auto-commit-message.js';
 import {
@@ -298,6 +299,8 @@ export interface LocalWorktreeManagerConfig {
   cacheDir?: string;
   worktreeDir?: string;
   logger: Logger;
+  /** Stores so the auto-commit LLM helper resolves live provider-account credentials. */
+  llmDeps?: ProfileLlmClientDeps;
 }
 
 /**
@@ -310,6 +313,7 @@ export class LocalWorktreeManager implements WorktreeManager {
   private cacheDir: string;
   private worktreeDir: string;
   private logger: Logger;
+  private llmDeps?: ProfileLlmClientDeps;
 
   /** Per-repo mutex to avoid git lock contention during concurrent fetches. */
   private repoLocks = new KeyedPromiseQueue();
@@ -332,6 +336,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       process.env.AUTOPOD_WORKTREE_DIR ??
       path.join(os.homedir(), '.autopod', 'worktrees');
     this.logger = config.logger;
+    this.llmDeps = config.llmDeps;
   }
 
   async create(config: WorktreeCreateConfig): Promise<WorktreeResult> {
@@ -870,7 +875,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     const hasStaged = await this.stageAllChanges(worktreePath, excludePaths);
     if (!hasStaged) return false;
     const result = await generateAutoCommitMessage(
-      { worktreePath, podTask, profile, podModel },
+      { worktreePath, podTask, profile, podModel, deps: this.llmDeps },
       this.logger,
     );
     if (result.usedFallback) {

@@ -4,6 +4,7 @@ import type { ContentBlock } from '@anthropic-ai/sdk/resources/messages.js';
 import type { Profile, TaskSummary } from '@autopod/shared';
 import type { Logger } from 'pino';
 import {
+  type ProfileLlmClientDeps,
   type ProfileLlmClientUnavailableReason,
   createProfileAnthropicClient,
 } from '../providers/llm-client.js';
@@ -103,6 +104,11 @@ export interface PrDescriptionInput {
    * often a placeholder ("#4") on the original interactive pod.
    */
   handoffInstructions?: string;
+  /**
+   * Optional stores so the daemon-side LLM helper resolves the profile's live
+   * provider-account credentials instead of its (possibly stale) inline column.
+   */
+  deps?: ProfileLlmClientDeps;
 }
 
 async function readBranchDiff(
@@ -166,6 +172,7 @@ export async function generatePrTitle(
     input.profile,
     pickDescriptionModel(input.profile, input.podModel),
     logger,
+    input.deps,
   );
   if (!llm.ok) {
     return { title: fallbackTitle, usedFallback: true, fallbackReason: llm.reason };
@@ -246,6 +253,7 @@ export async function generatePrNarrative(
     input.profile,
     pickDescriptionModel(input.profile, input.podModel),
     logger,
+    input.deps,
   );
   if (!llm.ok) {
     return {

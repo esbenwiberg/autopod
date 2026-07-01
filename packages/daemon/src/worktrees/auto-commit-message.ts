@@ -4,6 +4,7 @@ import type { ContentBlock } from '@anthropic-ai/sdk/resources/messages.js';
 import type { Profile } from '@autopod/shared';
 import type { Logger } from 'pino';
 import {
+  type ProfileLlmClientDeps,
   type ProfileLlmClientUnavailableReason,
   createProfileAnthropicClient,
 } from '../providers/llm-client.js';
@@ -34,6 +35,11 @@ export interface AutoCommitMessageInput {
   profile: Profile;
   /** Pod's model id (e.g. 'haiku', 'sonnet', 'opus', or full id). */
   podModel: string;
+  /**
+   * Optional stores so the daemon-side LLM helper resolves the profile's live
+   * provider-account credentials instead of its (possibly stale) inline column.
+   */
+  deps?: ProfileLlmClientDeps;
 }
 
 export type AutoCommitFallbackReason =
@@ -91,6 +97,7 @@ export async function generateAutoCommitMessage(
     input.profile,
     pickModel(input.profile, input.podModel),
     logger,
+    input.deps,
   );
   if (!llm.ok) {
     return { message: heuristic, usedFallback: true, fallbackReason: llm.reason };

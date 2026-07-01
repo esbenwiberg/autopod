@@ -200,6 +200,9 @@ const sessionTokenIssuer = createPodTokenIssuer(secretsKeyPath);
 // Repositories
 const profileStore = createProfileStore(db, credentialsCipher);
 const providerAccountStore = createProviderAccountStore(db, credentialsCipher);
+// Stores that let daemon-side LLM helpers (PR body, auto-commit message) resolve
+// the same live provider-account credentials the agent authenticates with.
+const llmDeps = { profileStore, providerAccountStore };
 const podRepo = createPodRepository(db);
 const eventRepo = createEventRepository(db);
 const escalationRepo = createEscalationRepository(db);
@@ -332,7 +335,7 @@ function parseWarmImageMaintenanceScope(value: string | undefined): WarmImageMai
 
 const authModule: AuthModule = createConfiguredAuthModule();
 
-const worktreeManager = new LocalWorktreeManager({ logger });
+const worktreeManager = new LocalWorktreeManager({ logger, llmDeps });
 
 const MOCK_DOCKER = process.env.AUTOPOD_MOCK_DOCKER === 'true';
 
@@ -615,7 +618,7 @@ const runtimeRegistry = createRuntimeRegistry([
   new CopilotRuntime(logger, runtimeContainerManager),
 ]);
 
-const ghPrManager = new GhPrManager({ logger });
+const ghPrManager = new GhPrManager({ logger, llmDeps });
 
 function prManagerFactory(
   profile: import('@autopod/shared').Profile,
@@ -644,6 +647,7 @@ function prManagerFactory(
         pat: profile.adoPat,
         logger,
         screenshotStore,
+        llmDeps,
       });
     } catch (err) {
       logger.warn(
@@ -654,7 +658,7 @@ function prManagerFactory(
     }
   }
   if (profile.githubPat) {
-    return new GitHubApiPrManager({ pat: profile.githubPat, logger });
+    return new GitHubApiPrManager({ pat: profile.githubPat, logger, llmDeps });
   }
   return ghPrManager;
 }

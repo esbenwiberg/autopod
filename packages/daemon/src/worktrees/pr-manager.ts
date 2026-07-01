@@ -13,6 +13,7 @@ import type {
   ReviewFeedbackReply,
   ReviewFeedbackReplyResult,
 } from '../interfaces/pr-manager.js';
+import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
 import { buildPrBody } from './pr-body-builder.js';
 import {
   type PrNarrativeResult,
@@ -261,6 +262,8 @@ async function fetchGitHubReviewThreadCommentsWithApi(config: {
 
 export interface GhPrManagerConfig {
   logger: Logger;
+  /** Stores so PR-body LLM helpers resolve live provider-account credentials. */
+  llmDeps?: ProfileLlmClientDeps;
 }
 
 /**
@@ -272,9 +275,11 @@ export interface GhPrManagerConfig {
  */
 export class GhPrManager implements PrManager {
   private logger: Logger;
+  private llmDeps?: ProfileLlmClientDeps;
 
   constructor(config: GhPrManagerConfig) {
     this.logger = config.logger;
+    this.llmDeps = config.llmDeps;
   }
 
   async createPr(config: CreatePrConfig): Promise<CreatePrResult> {
@@ -291,6 +296,7 @@ export class GhPrManager implements PrManager {
       profile: config.profile,
       podModel: config.podModel,
       handoffInstructions: config.handoffInstructions,
+      deps: this.llmDeps,
     };
     const [titleResult, narrativeResult] = await Promise.all([
       generatePrTitle(descInput, this.logger),
@@ -642,6 +648,8 @@ export class GhPrManager implements PrManager {
 export interface GitHubApiPrManagerConfig {
   pat: string;
   logger: Logger;
+  /** Stores so PR-body LLM helpers resolve live provider-account credentials. */
+  llmDeps?: ProfileLlmClientDeps;
 }
 
 export function parseGitHubRepoUrl(repoUrl: string): { owner: string; repo: string } {
@@ -665,10 +673,12 @@ function parseGitHubCommentFeedbackId(feedbackId: string): number | null {
 export class GitHubApiPrManager implements PrManager {
   private pat: string;
   private logger: Logger;
+  private llmDeps?: ProfileLlmClientDeps;
 
   constructor(config: GitHubApiPrManagerConfig) {
     this.pat = config.pat;
     this.logger = config.logger;
+    this.llmDeps = config.llmDeps;
   }
 
   private get headers(): Record<string, string> {
@@ -696,6 +706,7 @@ export class GitHubApiPrManager implements PrManager {
       profile: config.profile,
       podModel: config.podModel,
       handoffInstructions: config.handoffInstructions,
+      deps: this.llmDeps,
     };
     const [titleResult, narrativeResult] = await Promise.all([
       generatePrTitle(descInput, this.logger),
