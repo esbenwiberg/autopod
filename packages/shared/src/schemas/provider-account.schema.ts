@@ -109,7 +109,9 @@ export const updateProviderAccountSchema = z
 
 export const linkProviderAccountSchema = z.object({
   profileName: z.string().min(1),
-  clearLegacyCredentials: z.boolean().optional().default(false),
+  // Default to clearing: once a profile resolves through the account, its inline
+  // providerCredentials are dead weight and a stale copy is a latent auth footgun.
+  clearLegacyCredentials: z.boolean().optional().default(true),
 });
 
 export const importProviderAccountFromProfileSchema = z.object({
@@ -117,5 +119,6 @@ export const importProviderAccountFromProfileSchema = z.object({
   accountId: providerAccountIdSchema.optional(),
   accountName: providerAccountNameSchema.optional(),
   linkProfileNames: z.array(z.string().min(1)).optional().default([]),
-  clearLegacyCredentials: z.boolean().optional().default(false),
+  // Import centralizes creds onto the account — clear the profile copy by default.
+  clearLegacyCredentials: z.boolean().optional().default(true),
 });

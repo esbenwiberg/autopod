@@ -401,7 +401,8 @@ export class AutopodClient {
     return this.request<{ account: PublicProviderAccount; profile: PublicProfile }>(
       'POST',
       `/provider-accounts/${id}/link-profile`,
-      { profileName, clearLegacyCredentials: options?.clearLegacyCredentials ?? false },
+      // Omit when unset so the daemon default (clear on link) applies.
+      { profileName, clearLegacyCredentials: options?.clearLegacyCredentials },
     );
   }
 
@@ -412,7 +413,9 @@ export class AutopodClient {
   ): Promise<PublicProfile> {
     return this.request<PublicProfile>('POST', `/profiles/${profileName}/provider-account`, {
       accountId,
-      clearLegacyCredentials: options?.clearLegacyCredentials ?? false,
+      // Omit when unset so the daemon picks the right default per direction
+      // (clear on link, preserve on unlink).
+      clearLegacyCredentials: options?.clearLegacyCredentials,
     });
   }
 

@@ -107,7 +107,6 @@ describe('provider-account commands', () => {
       'team-openai',
       '--link-profile',
       'my-app',
-      '--clear-legacy-credentials',
     ]);
 
     expect(mockClient.createProviderAccount).toHaveBeenCalledWith({
@@ -115,8 +114,30 @@ describe('provider-account commands', () => {
       id: 'team-openai',
       provider: 'openai',
     });
+    // No flag → undefined → daemon default clears the linked profile's inline creds.
     expect(mockClient.linkProviderAccount).toHaveBeenCalledWith('team-openai', 'my-app', {
-      clearLegacyCredentials: true,
+      clearLegacyCredentials: undefined,
+    });
+  });
+
+  it('keeps linked profile credentials when --keep-legacy-credentials is passed', async () => {
+    await program.parseAsync([
+      'node',
+      'ap',
+      'provider-account',
+      'create',
+      'Team OpenAI',
+      '--provider',
+      'openai',
+      '--id',
+      'team-openai',
+      '--link-profile',
+      'my-app',
+      '--keep-legacy-credentials',
+    ]);
+
+    expect(mockClient.linkProviderAccount).toHaveBeenCalledWith('team-openai', 'my-app', {
+      clearLegacyCredentials: false,
     });
   });
 
@@ -133,7 +154,6 @@ describe('provider-account commands', () => {
       'my-app',
       '--link-profile',
       'worker',
-      '--clear-legacy-credentials',
     ]);
 
     expect(mockClient.importProviderAccountFromProfile).toHaveBeenCalledWith({
@@ -141,7 +161,8 @@ describe('provider-account commands', () => {
       accountId: undefined,
       accountName: 'Team OpenAI',
       linkProfileNames: ['my-app', 'worker'],
-      clearLegacyCredentials: true,
+      // No flag → undefined → daemon default clears the owner's imported creds.
+      clearLegacyCredentials: undefined,
     });
   });
 
