@@ -112,6 +112,72 @@ describe('provider account routes', () => {
     expect(profileStore.getRaw('app').providerAccountId).toBeNull();
   });
 
+  it('clears the profile’s inline credentials on link by default', async () => {
+    profileStore.create({
+      ...validProfile,
+      modelProvider: 'max',
+      providerCredentials: {
+        provider: 'max',
+        accessToken: 'access',
+        refreshToken: 'refresh',
+        expiresAt: '2026-12-31T00:00:00Z',
+      },
+    });
+    providerAccountStore.create({
+      id: 'team-max',
+      name: 'Team Max',
+      provider: 'max',
+      credentials: {
+        provider: 'max',
+        accessToken: 'acc2',
+        refreshToken: 'ref2',
+        expiresAt: '2026-12-31T00:00:00Z',
+      },
+    });
+
+    const linkResponse = await app.inject({
+      method: 'POST',
+      url: '/provider-accounts/team-max/link-profile',
+      payload: { profileName: 'app' },
+    });
+    expect(linkResponse.statusCode).toBe(200);
+    expect(profileStore.getRaw('app').providerAccountId).toBe('team-max');
+    // Default clears the now-dead inline snapshot.
+    expect(profileStore.getRaw('app').providerCredentials).toBeNull();
+  });
+
+  it('keeps inline credentials on link when clearLegacyCredentials is false', async () => {
+    profileStore.create({
+      ...validProfile,
+      modelProvider: 'max',
+      providerCredentials: {
+        provider: 'max',
+        accessToken: 'access',
+        refreshToken: 'refresh',
+        expiresAt: '2026-12-31T00:00:00Z',
+      },
+    });
+    providerAccountStore.create({
+      id: 'team-max',
+      name: 'Team Max',
+      provider: 'max',
+      credentials: {
+        provider: 'max',
+        accessToken: 'acc2',
+        refreshToken: 'ref2',
+        expiresAt: '2026-12-31T00:00:00Z',
+      },
+    });
+
+    const linkResponse = await app.inject({
+      method: 'POST',
+      url: '/provider-accounts/team-max/link-profile',
+      payload: { profileName: 'app', clearLegacyCredentials: false },
+    });
+    expect(linkResponse.statusCode).toBe(200);
+    expect(profileStore.getRaw('app').providerCredentials?.provider).toBe('max');
+  });
+
   it('imports legacy profile credentials into an account and links selected profiles', async () => {
     profileStore.create({
       ...validProfile,
@@ -150,6 +216,37 @@ describe('provider account routes', () => {
     expect(response.body).not.toContain('refresh');
     expect(profileStore.getRaw('base').providerAccountId).toBe('claude-max-team');
     expect(profileStore.getRaw('child').providerAccountId).toBe('claude-max-team');
+    // Import clears the owner's inline creds by default — the account is now the
+    // source of truth and a leftover stale copy is a latent auth footgun.
+    expect(response.json().legacyCredentialsCleared).toBe(true);
+    expect(profileStore.getRaw('base').providerCredentials).toBeNull();
+  });
+
+  it('preserves legacy credentials on import when clearLegacyCredentials is false', async () => {
+    profileStore.create({
+      ...validProfile,
+      name: 'base',
+      modelProvider: 'max',
+      providerCredentials: {
+        provider: 'max',
+        accessToken: 'access',
+        refreshToken: 'refresh',
+        expiresAt: '2026-12-31T00:00:00Z',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/provider-accounts/import-from-profile',
+      payload: {
+        profileName: 'base',
+        accountName: 'Claude Max Team',
+        clearLegacyCredentials: false,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().legacyCredentialsCleared).toBe(false);
     expect(profileStore.getRaw('base').providerCredentials?.provider).toBe('max');
   });
 

@@ -11,14 +11,19 @@ import type { ProviderAccountStore } from '../../provider-accounts/index.js';
 import { redactProfileSecrets } from '../profile-redaction.js';
 import { redactProviderAccountSecrets } from '../provider-account-redaction.js';
 
+// `clearLegacyCredentials` is intentionally left without a Zod default so each
+// handler can pick the right default for its direction: clearing on link (the
+// inline creds are dead weight once a profile resolves through the account, and
+// a stale copy is a latent auth footgun) but preserving on unlink (so a profile
+// can fall back to its own creds again).
 const profileProviderAccountPatchSchema = z.object({
   accountId: providerAccountIdSchema.nullable(),
-  clearLegacyCredentials: z.boolean().optional().default(false),
+  clearLegacyCredentials: z.boolean().optional(),
 });
 
 const linkProviderProfileSchema = z.object({
   profileName: z.string().min(1),
-  clearLegacyCredentials: z.boolean().optional().default(false),
+  clearLegacyCredentials: z.boolean().optional(),
 });
 
 function assertAccountMatchesProfile(
@@ -77,9 +82,12 @@ export function providerAccountRoutes(
     const account = providerAccountStore.get(id);
     const profile = profileStore.get(body.profileName);
     assertAccountMatchesProfile(account, profile);
+    // Clear legacy inline creds by default when linking — the account is now the
+    // source of truth; a leftover stale copy only breaks daemon-side paths later.
+    const clearLegacy = body.clearLegacyCredentials ?? true;
     const updated = profileStore.update(body.profileName, {
       providerAccountId: id,
-      ...(body.clearLegacyCredentials ? { providerCredentials: null } : {}),
+      ...(clearLegacy ? { providerCredentials: null } : {}),
     });
     return {
       account: redactProviderAccountSecrets(account),
@@ -91,9 +99,12 @@ export function providerAccountRoutes(
     const { name } = request.params as { name: string };
     const body = profileProviderAccountPatchSchema.parse(request.body ?? {});
     if (body.accountId === null) {
+      // Unlink: preserve inline creds by default so the profile keeps working
+      // on its own auth. Only clear when explicitly asked.
+      const clearLegacy = body.clearLegacyCredentials ?? false;
       const updated = profileStore.update(name, {
         providerAccountId: null,
-        ...(body.clearLegacyCredentials ? { providerCredentials: null } : {}),
+        ...(clearLegacy ? { providerCredentials: null } : {}),
       });
       return redactProfileSecrets(updated);
     }
@@ -101,9 +112,11 @@ export function providerAccountRoutes(
     const account = providerAccountStore.get(body.accountId);
     const profile = profileStore.get(name);
     assertAccountMatchesProfile(account, profile);
+    // Link: clear legacy inline creds by default (see schema note above).
+    const clearLegacy = body.clearLegacyCredentials ?? true;
     const updated = profileStore.update(name, {
       providerAccountId: body.accountId,
-      ...(body.clearLegacyCredentials ? { providerCredentials: null } : {}),
+      ...(clearLegacy ? { providerCredentials: null } : {}),
     });
     return redactProfileSecrets(updated);
   });

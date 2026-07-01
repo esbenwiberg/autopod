@@ -132,7 +132,10 @@ export function registerProviderAccountCommands(
       collectOption,
       [] as string[],
     )
-    .option('--clear-legacy-credentials', 'Clear legacy profile credentials while linking')
+    .option(
+      '--keep-legacy-credentials',
+      'Keep linked profiles’ inline credentials (default: clear them on link)',
+    )
     .option('--json', 'Output as JSON')
     .action(
       async (
@@ -141,7 +144,7 @@ export function registerProviderAccountCommands(
           provider: string;
           id?: string;
           linkProfile: string[];
-          clearLegacyCredentials?: boolean;
+          keepLegacyCredentials?: boolean;
           json?: boolean;
         },
       ) => {
@@ -154,7 +157,7 @@ export function registerProviderAccountCommands(
         for (const profileName of opts.linkProfile) {
           await withSpinner(`Linking ${profileName}...`, () =>
             client.linkProviderAccount(account.id, profileName, {
-              clearLegacyCredentials: opts.clearLegacyCredentials,
+              clearLegacyCredentials: opts.keepLegacyCredentials ? false : undefined,
             }),
           );
         }
@@ -199,12 +202,15 @@ export function registerProviderAccountCommands(
   accounts
     .command('link <id> <profile>')
     .description('Link a profile to a provider account')
-    .option('--clear-legacy-credentials', 'Clear legacy profile credentials after linking')
-    .action(async (id: string, profileName: string, opts: { clearLegacyCredentials?: boolean }) => {
+    .option(
+      '--keep-legacy-credentials',
+      'Keep the profile’s inline credentials (default: clear them on link)',
+    )
+    .action(async (id: string, profileName: string, opts: { keepLegacyCredentials?: boolean }) => {
       const client = getClient();
       await withSpinner('Linking provider account...', () =>
         client.linkProviderAccount(id, profileName, {
-          clearLegacyCredentials: opts.clearLegacyCredentials,
+          clearLegacyCredentials: opts.keepLegacyCredentials ? false : undefined,
         }),
       );
       console.log(chalk.green(`Profile "${profileName}" now uses provider account "${id}".`));
@@ -233,8 +239,8 @@ export function registerProviderAccountCommands(
       [] as string[],
     )
     .option(
-      '--clear-legacy-credentials',
-      'Clear imported legacy credentials from the owner profile',
+      '--keep-legacy-credentials',
+      'Keep the imported credentials on the owner profile (default: clear them)',
     )
     .option('--json', 'Output as JSON')
     .action(
@@ -244,7 +250,7 @@ export function registerProviderAccountCommands(
           id?: string;
           name?: string;
           linkProfile: string[];
-          clearLegacyCredentials?: boolean;
+          keepLegacyCredentials?: boolean;
           json?: boolean;
         },
       ) => {
@@ -255,7 +261,7 @@ export function registerProviderAccountCommands(
             accountId: opts.id,
             accountName: opts.name,
             linkProfileNames: opts.linkProfile,
-            clearLegacyCredentials: opts.clearLegacyCredentials,
+            clearLegacyCredentials: opts.keepLegacyCredentials ? false : undefined,
           }),
         );
         withJsonOutput(opts, result, (data) => {
