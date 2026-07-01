@@ -161,7 +161,13 @@ function selectLatestValidation(
   pod: Pod,
   validations: StoredValidation[],
 ): ValidationResult | null {
-  const repoLatest = validations[validations.length - 1]?.result ?? null;
+  // Attempt numbers reset per rework, so only the current rework's rows are
+  // comparable by attempt. Rows from earlier reworks (or pre-migration rows
+  // stamped rework_count=0) are ignored — readiness must reflect the rework
+  // the pod is actually on, not a stale higher-numbered failure from a prior one.
+  const currentRework = pod.reworkCount ?? 0;
+  const scoped = validations.filter((v) => (v.reworkCount ?? 0) === currentRework);
+  const repoLatest = scoped[scoped.length - 1]?.result ?? null;
   const podLatest = pod.lastValidationResult;
   if (!repoLatest) return podLatest;
   if (!podLatest) return repoLatest;

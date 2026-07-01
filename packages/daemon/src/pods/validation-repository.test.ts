@@ -62,8 +62,8 @@ describe('ValidationRepository', () => {
     const result1 = makeResult('sess-1', 1);
     const result2 = makeResult('sess-1', 2);
 
-    repo.insert('sess-1', 1, result1);
-    repo.insert('sess-1', 2, result2);
+    repo.insert('sess-1', 1, result1, 0);
+    repo.insert('sess-1', 2, result2, 0);
 
     const history = repo.getForSession('sess-1');
     expect(history).toHaveLength(2);
@@ -91,7 +91,7 @@ describe('ValidationRepository', () => {
     result.smoke.status = 'fail';
     result.overall = 'fail';
 
-    repo.insert('sess-2', 1, result);
+    repo.insert('sess-2', 1, result, 0);
 
     const [stored] = repo.getForSession('sess-2');
     expect(stored?.result.smoke.status).toBe('fail');
@@ -112,9 +112,9 @@ describe('ValidationRepository', () => {
     ).run();
 
     const repo = createValidationRepository(db);
-    repo.insert('sess-2', 1, makeResult('sess-2', 1));
-    repo.insert('sess-2', 2, makeResult('sess-2', 2));
-    repo.insert('sess-other', 1, makeResult('sess-other', 1));
+    repo.insert('sess-2', 1, makeResult('sess-2', 1), 0);
+    repo.insert('sess-2', 2, makeResult('sess-2', 2), 0);
+    repo.insert('sess-other', 1, makeResult('sess-other', 1), 0);
 
     const advisoryRef: ScreenshotRef = {
       podId: 'sess-2',
@@ -140,8 +140,8 @@ describe('ValidationRepository', () => {
       durationMs: 1234,
     };
 
-    expect(repo.updateResult('sess-2', 2, updated)).toBe(true);
-    expect(repo.updateResult('sess-missing', 2, updated)).toBe(false);
+    expect(repo.updateResult('sess-2', 2, updated, 0)).toBe(true);
+    expect(repo.updateResult('sess-missing', 2, updated, 0)).toBe(false);
 
     const history = repo.getForSession('sess-2');
     expect(history).toHaveLength(2);
@@ -207,7 +207,7 @@ describe('ValidationRepository', () => {
     };
 
     const repo = createValidationRepository(db);
-    repo.insert('sess-3', 1, result);
+    repo.insert('sess-3', 1, result, 0);
 
     const [stored] = repo.getForSession('sess-3');
     // ScreenshotRef on smoke page survived roundtrip
@@ -222,6 +222,61 @@ describe('ValidationRepository', () => {
     expect(raw.match(/[A-Za-z0-9+/]{50,}/)).toBeNull(); // no long base64 blobs
   });
 
+  it('scopes rows by rework and keeps attempts distinct across reworks', () => {
+    const db = setupDb();
+    db.prepare(
+      `INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+       VALUES ('sess-rw', 'test-profile', 'test task', 'opus', 'claude', 'main', 'user-1')`,
+    ).run();
+    const repo = createValidationRepository(db);
+
+    // Rework 0 failed across three attempts; rework 1 passed on its first attempt.
+    const fail = (attempt: number) => {
+      const r = makeResult('sess-rw', attempt);
+      r.smoke.status = 'fail';
+      r.overall = 'fail';
+      return r;
+    };
+    repo.insert('sess-rw', 1, fail(1), 0);
+    repo.insert('sess-rw', 2, fail(2), 0);
+    repo.insert('sess-rw', 3, fail(3), 0);
+    repo.insert('sess-rw', 1, makeResult('sess-rw', 1), 1);
+
+    const history = repo.getForSession('sess-rw');
+    expect(history).toHaveLength(4);
+    // Ordered by (rework, attempt): rework 0's three attempts, then rework 1's attempt 1.
+    expect(history.map((v) => [v.reworkCount, v.attempt])).toEqual([
+      [0, 1],
+      [0, 2],
+      [0, 3],
+      [1, 1],
+    ]);
+    expect(history[3]?.result.overall).toBe('pass');
+  });
+
+  it('updateResult targets the row for a specific rework, not just the attempt number', () => {
+    const db = setupDb();
+    db.prepare(
+      `INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+       VALUES ('sess-rw2', 'test-profile', 'test task', 'opus', 'claude', 'main', 'user-1')`,
+    ).run();
+    const repo = createValidationRepository(db);
+
+    repo.insert('sess-rw2', 1, makeResult('sess-rw2', 1), 0);
+    repo.insert('sess-rw2', 1, makeResult('sess-rw2', 1), 1);
+
+    const updated = makeResult('sess-rw2', 1);
+    updated.overall = 'fail';
+    // Updating rework 1's attempt 1 must not touch rework 0's identically-numbered row.
+    expect(repo.updateResult('sess-rw2', 1, updated, 1)).toBe(true);
+
+    const history = repo.getForSession('sess-rw2');
+    const rework0 = history.find((v) => v.reworkCount === 0);
+    const rework1 = history.find((v) => v.reworkCount === 1);
+    expect(rework0?.result.overall).toBe('pass');
+    expect(rework1?.result.overall).toBe('fail');
+  });
+
   it('does not reference the screenshots column', () => {
     const db = setupDb();
     db.prepare(
@@ -230,7 +285,7 @@ describe('ValidationRepository', () => {
     ).run();
     const repo = createValidationRepository(db);
     // Should not throw even though the screenshots column was dropped by migration 091
-    expect(() => repo.insert('sess-4', 1, makeResult('sess-4', 1))).not.toThrow();
+    expect(() => repo.insert('sess-4', 1, makeResult('sess-4', 1), 0)).not.toThrow();
     const [v] = repo.getForSession('sess-4');
     // StoredValidation no longer has a screenshots field
     expect((v as Record<string, unknown>).screenshots).toBeUndefined();

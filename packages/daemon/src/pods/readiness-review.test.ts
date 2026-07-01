@@ -484,6 +484,48 @@ describe('deriveSeriesReadiness', () => {
 });
 
 describe('createReadinessService', () => {
+  it('scopes latest validation to the current rework, ignoring stale higher-numbered attempts', () => {
+    // Rework 0 failed after many attempts (attempt 9); rework 1 passed on attempt 1.
+    // Attempt numbers reset per rework, so the stale fail has a HIGHER attempt number
+    // than the fresh pass. Readiness must reflect rework 1, not rework 0.
+    const reworkedPod = pod({ reworkCount: 1, lastValidationResult: null });
+    const podRepo = {
+      getOrThrow: () => reworkedPod,
+      update: () => undefined,
+      getPodsBySeries: () => [],
+    } as unknown as PodRepository;
+    const validationRepo = {
+      // Ordered as the repository returns them: (rework ASC, attempt ASC).
+      getForSession: () => [
+        {
+          id: 'v-rework0-attempt9',
+          podId: reworkedPod.id,
+          attempt: 9,
+          reworkCount: 0,
+          result: validation({ attempt: 9, smoke: { ...validation().smoke, status: 'fail' }, overall: 'fail' }),
+          createdAt: NOW,
+        },
+        {
+          id: 'v-rework1-attempt1',
+          podId: reworkedPod.id,
+          attempt: 1,
+          reworkCount: 1,
+          result: validation({ attempt: 1, overall: 'pass' }),
+          createdAt: NOW,
+        },
+      ],
+    } as unknown as ValidationRepository;
+
+    const service = createReadinessService({ podRepo, validationRepo });
+    const result = service.computePodReadiness(reworkedPod.id);
+
+    const validationArea = result.areas.find((a) => a.area === 'validation');
+    expect(validationArea?.status).toBe('ready');
+    expect(result.findings).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'validation-failed' })]),
+    );
+  });
+
   it('uses pod-row advisory QA when validation history lacks the deferred merge', () => {
     const podWithAdvisory = pod({
       lastValidationResult: validation({

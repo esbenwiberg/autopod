@@ -466,9 +466,9 @@ describe('computeQualitySignals', () => {
 
     it('returns true when at least one of multiple runs passed', () => {
       podRepo.insert(basePod());
-      validationRepo.insert(POD_ID, 1, validationResult('fail'));
-      validationRepo.insert(POD_ID, 2, validationResult('fail'));
-      validationRepo.insert(POD_ID, 3, validationResult('pass'));
+      validationRepo.insert(POD_ID, 1, validationResult('fail'), 0);
+      validationRepo.insert(POD_ID, 2, validationResult('fail'), 0);
+      validationRepo.insert(POD_ID, 3, validationResult('pass'), 0);
 
       const signals = computeQualitySignals(POD_ID, depsWithValidation);
 
@@ -477,8 +477,8 @@ describe('computeQualitySignals', () => {
 
     it('returns false when all runs failed', () => {
       podRepo.insert(basePod());
-      validationRepo.insert(POD_ID, 1, validationResult('fail'));
-      validationRepo.insert(POD_ID, 2, validationResult('fail'));
+      validationRepo.insert(POD_ID, 1, validationResult('fail'), 0);
+      validationRepo.insert(POD_ID, 2, validationResult('fail'), 0);
 
       const signals = computeQualitySignals(POD_ID, depsWithValidation);
 

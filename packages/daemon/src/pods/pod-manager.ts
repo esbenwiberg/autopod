@@ -4342,7 +4342,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         ...blockingResult,
         advisoryBrowserQa: advisoryResult,
       };
-      validationRepo?.updateResult(podId, blockingResult.attempt, storedResult);
+      validationRepo?.updateResult(
+        podId,
+        blockingResult.attempt,
+        storedResult,
+        current.reworkCount ?? 0,
+      );
 
       const currentResult = current.lastValidationResult ?? blockingResult;
       if (currentResult.attempt !== blockingResult.attempt) {
@@ -4423,7 +4428,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // Always persist the advisory result into validation history regardless of
       // whether a newer validation attempt has superseded the live lastValidationResult.
       const storedResult = { ...blockingResult, advisoryBrowserQa: advisoryResult };
-      validationRepo?.updateResult(podId, blockingResult.attempt, storedResult);
+      validationRepo?.updateResult(
+        podId,
+        blockingResult.attempt,
+        storedResult,
+        current.reworkCount ?? 0,
+      );
 
       const currentResult = current.lastValidationResult ?? blockingResult;
       if (currentResult.attempt !== blockingResult.attempt) {
@@ -9688,8 +9698,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
         }
 
-        // Persist every attempt to validation history
-        validationRepo?.insert(podId, attempt, result);
+        // Persist every attempt to validation history, stamped with the
+        // current rework so readiness can scope to the right rework's attempts.
+        validationRepo?.insert(podId, attempt, result, podRepo.getOrThrow(podId).reworkCount ?? 0);
 
         eventBus.emit({
           type: 'pod.validation_completed',
@@ -9751,9 +9762,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Detect recurring findings and auto-hoist / escalate to human
         if (effectiveResult.overall === 'fail' && attempt >= 2) {
+          const currentRework = podRepo.getOrThrow(podId).reworkCount ?? 0;
           const previousValidations = validationRepo?.getForSession(podId);
           const previousResult = previousValidations
-            ?.filter((v) => v.attempt < attempt)
+            ?.filter((v) => (v.reworkCount ?? 0) === currentRework && v.attempt < attempt)
             ?.sort((a, b) => b.attempt - a.attempt)?.[0]?.result;
 
           if (previousResult) {
@@ -9795,7 +9807,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 logger.info({ podId }, 'Auto-hoist resolved recurring findings');
                 // Update stored result with the hoisted one
                 podRepo.update(podId, { lastValidationResult: hoistedResult });
-                validationRepo?.insert(podId, attempt, hoistedResult);
+                validationRepo?.insert(
+                  podId,
+                  attempt,
+                  hoistedResult,
+                  podRepo.getOrThrow(podId).reworkCount ?? 0,
+                );
               } else {
                 // Deeper review still flags same findings — escalate to human
                 const hoistedFindings = hoistedResult
@@ -10511,7 +10528,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
         }
 
-        validationRepo?.insert(podId, attempt, result);
+        validationRepo?.insert(podId, attempt, result, podRepo.getOrThrow(podId).reworkCount ?? 0);
 
         eventBus.emit({
           type: 'pod.validation_completed',

@@ -103,7 +103,7 @@ describe('history-exporter', () => {
     seedSession(db, { status: 'complete', costUsd: 0.3 });
 
     // Add a validation for pod 2
-    validationRepo.insert(id2, 1, makeValidationResult('fail'));
+    validationRepo.insert(id2, 1, makeValidationResult('fail'), 0);
 
     // Add an escalation for pod 2
     db.prepare(`
@@ -259,7 +259,7 @@ describe('history-exporter', () => {
     const progressEventRepo = createProgressEventRepository(db);
 
     const id = seedSession(db, { status: 'validated' });
-    validationRepo.insert(id, 1, makeValidationResult('pass'));
+    validationRepo.insert(id, 1, makeValidationResult('pass'), 0);
 
     const exporter = createHistoryExporter({
       podRepo,

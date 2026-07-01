@@ -670,7 +670,7 @@ describe('reconcileLocalSessions', () => {
       worktreePath: '/tmp/worktree/val-1',
       prUrl: 'https://example.com/pr/42',
     });
-    validationRepo.insert('val-1', 1, makePassingValidationResult('val-1', 1));
+    validationRepo.insert('val-1', 1, makePassingValidationResult('val-1', 1), 0);
 
     mockedAccess.mockResolvedValue(undefined);
 
@@ -714,7 +714,7 @@ describe('reconcileLocalSessions', () => {
       worktreePath: '/tmp/worktree/val-2',
       prUrl: null, // no PR yet — crash happened between validation-pass and PR creation
     });
-    validationRepo.insert('val-2', 1, makePassingValidationResult('val-2', 1));
+    validationRepo.insert('val-2', 1, makePassingValidationResult('val-2', 1), 0);
 
     mockedAccess.mockResolvedValue(undefined);
 
@@ -787,7 +787,7 @@ describe('reconcileLocalSessions', () => {
       worktreePath: '/tmp/worktree/val-4',
       prUrl: 'https://example.com/pr/44',
     });
-    validationRepo.insert('val-4', 1, makeFailingValidationResult('val-4', 1));
+    validationRepo.insert('val-4', 1, makeFailingValidationResult('val-4', 1), 0);
 
     mockedAccess.mockResolvedValue(undefined);
 
