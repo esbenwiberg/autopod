@@ -13,6 +13,7 @@ import type {
   ReviewFeedbackReplyResult,
 } from '../interfaces/pr-manager.js';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
+import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
 import { buildAdoAttachmentRef } from '../validation/screenshot-collector.js';
 import { buildPrBody } from './pr-body-builder.js';
 import {
@@ -61,6 +62,8 @@ export interface AdoPrManagerConfig {
    * and the PR description is patched with the returned attachment URLs.
    */
   screenshotStore?: ScreenshotStore;
+  /** Stores so PR-body LLM helpers resolve live provider-account credentials. */
+  llmDeps?: ProfileLlmClientDeps;
 }
 
 /**
@@ -135,6 +138,7 @@ export class AdoPrManager implements PrManager {
   private readonly authHeader: string;
   private readonly logger: Logger;
   private readonly screenshotStore: ScreenshotStore | undefined;
+  private readonly llmDeps: ProfileLlmClientDeps | undefined;
 
   constructor(config: AdoPrManagerConfig) {
     this.orgUrl = config.orgUrl.replace(/\/$/, '');
@@ -143,6 +147,7 @@ export class AdoPrManager implements PrManager {
     this.authHeader = `Basic ${Buffer.from(`:${config.pat}`).toString('base64')}`;
     this.logger = config.logger;
     this.screenshotStore = config.screenshotStore;
+    this.llmDeps = config.llmDeps;
   }
 
   private get baseUrl(): string {
@@ -250,6 +255,7 @@ export class AdoPrManager implements PrManager {
       profile: config.profile,
       podModel: config.podModel,
       handoffInstructions: config.handoffInstructions,
+      deps: this.llmDeps,
     };
     const [titleResult, narrativeResult] = await Promise.all([
       generatePrTitle(descInput, this.logger),

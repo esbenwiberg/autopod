@@ -217,6 +217,7 @@ describe('generatePrTitle', () => {
       expect.objectContaining({ name: 'test-profile' }),
       'sonnet',
       logger,
+      undefined,
     );
   });
 

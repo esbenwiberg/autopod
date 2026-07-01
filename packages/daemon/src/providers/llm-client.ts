@@ -8,7 +8,11 @@ import type {
   ProviderCredentials,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { ProfileStore } from '../profiles/index.js';
+import type { ProviderAccountStore } from '../provider-accounts/index.js';
+import { type CredentialOwner, resolveProviderAuth } from './auth-resolution.js';
 import { getAzureToken } from './azure-token.js';
+import { refreshAndPersistMaxCredentials } from './credential-persistence.js';
 import { refreshOAuthToken } from './credential-refresh.js';
 
 const FOUNDRY_TOKEN_SCOPE = 'https://cognitiveservices.azure.com/.default';
@@ -59,7 +63,26 @@ export type ProfileLlmClientUnavailableReason =
   | 'no_anthropic_api_key'
   | 'no_credentials'
   | 'foundry_openai_surface'
-  | 'provider_not_callable';
+  | 'provider_not_callable'
+  | 'refresh_failed';
+
+/**
+ * Optional stores that let daemon-side LLM helpers resolve the *effective*
+ * credentials a profile authenticates with — the same path the agent container
+ * uses (`resolveProviderAuth`). Without these, callers fall back to the
+ * profile's own `providerCredentials` column, which is stale (or absent) for
+ * profiles linked to a shared provider account.
+ */
+export interface ProfileLlmClientDeps {
+  profileStore?: ProfileStore;
+  providerAccountStore?: ProviderAccountStore;
+}
+
+function isMaxRefreshProviderCreds(
+  creds: ProviderCredentials | null | undefined,
+): creds is MaxRefreshCredentials {
+  return creds?.provider === 'max' && isMaxRefreshCredentials(creds);
+}
 
 export type ProfileLlmClientResult =
   | { ok: true; client: Anthropic; model: string }
@@ -111,11 +134,25 @@ export async function createProviderAnthropicClient(
       );
       return { ok: false, reason: 'no_credentials' };
     }
-    const authToken = isMaxSetupTokenCredentials(creds)
-      ? creds.oauthToken
-      : isMaxRefreshCredentials(creds)
-        ? (await refreshOAuthToken(creds, logger)).accessToken
-        : null;
+    let authToken: string | null;
+    if (isMaxSetupTokenCredentials(creds)) {
+      authToken = creds.oauthToken;
+    } else if (isMaxRefreshCredentials(creds)) {
+      try {
+        // Refresh here is best-effort and non-persisting. Callers that pass a
+        // profileStore (via createProfileAnthropicClient) refresh-and-persist
+        // under the owner lock first, leaving this a no-op grace-window read.
+        authToken = (await refreshOAuthToken(creds, logger)).accessToken;
+      } catch (err) {
+        logger.warn(
+          { profile: profileName, provider, reason: 'refresh_failed', err },
+          'MAX OAuth refresh failed for daemon-side LLM helper — falling back to templates',
+        );
+        return { ok: false, reason: 'refresh_failed' };
+      }
+    } else {
+      authToken = null;
+    }
     if (!authToken) {
       logger.warn(
         { profile: profileName, reason: 'no_credentials' },
@@ -148,7 +185,16 @@ export async function createProviderAnthropicClient(
       );
       return { ok: false, reason: 'foundry_openai_surface' };
     }
-    const apiKey = creds.apiKey ?? (await getAzureToken(FOUNDRY_TOKEN_SCOPE, logger)).token;
+    let apiKey: string;
+    try {
+      apiKey = creds.apiKey ?? (await getAzureToken(FOUNDRY_TOKEN_SCOPE, logger)).token;
+    } catch (err) {
+      logger.warn(
+        { profile: profileName, provider, reason: 'refresh_failed', err },
+        'Foundry token acquisition failed for daemon-side LLM helper — falling back to templates',
+      );
+      return { ok: false, reason: 'refresh_failed' };
+    }
     return {
       ok: true,
       client: new Anthropic({ apiKey, baseURL: creds.endpoint }),
@@ -178,11 +224,58 @@ export async function createProfileAnthropicClient(
   profile: Profile,
   podModel: string,
   logger: Logger,
+  deps: ProfileLlmClientDeps = {},
 ): Promise<ProfileLlmClientResult> {
+  let provider = profile.modelProvider;
+  let credentials = profile.providerCredentials;
+  let owner: CredentialOwner | null = null;
+
+  // Resolve the *effective* credentials the agent actually authenticates with.
+  // For profiles linked to a shared provider account the live, rotation-tracked
+  // tokens live on the account — the profile's own `providerCredentials` column
+  // is a stale snapshot (or null) left from before the link. Only attempt this
+  // when a provider-account store is available: resolveProviderAuth throws for a
+  // linked profile without one.
+  if (deps.profileStore || deps.providerAccountStore) {
+    try {
+      const auth = resolveProviderAuth(profile, deps);
+      provider = auth.provider;
+      credentials = auth.credentials;
+      owner = auth.owner;
+    } catch (err) {
+      logger.warn(
+        { profile: profile.name, err },
+        'Failed to resolve provider auth for daemon-side LLM helper — falling back to profile credentials',
+      );
+    }
+  }
+
+  // MAX rotates refresh tokens on every use. Refresh and persist under the
+  // credential-owner lock so this daemon-side call doesn't burn the shared
+  // refresh token that the next pod (or the container readback) depends on.
+  if (provider === 'max' && deps.profileStore && isMaxRefreshProviderCreds(credentials)) {
+    try {
+      const refreshed = await refreshAndPersistMaxCredentials(
+        deps.profileStore,
+        profile.name,
+        credentials,
+        logger,
+        { providerAccountStore: deps.providerAccountStore, owner: owner ?? undefined },
+      );
+      credentials = refreshed.credentials;
+    } catch (err) {
+      logger.warn(
+        { profile: profile.name, reason: 'refresh_failed', err },
+        'MAX credential refresh/persist failed for daemon-side LLM helper — falling back to templates',
+      );
+      return { ok: false, reason: 'refresh_failed' };
+    }
+  }
+
   return createProviderAnthropicClient(
     {
-      provider: profile.modelProvider,
-      credentials: profile.providerCredentials,
+      provider,
+      credentials,
       model: podModel,
       profileName: profile.name,
     },
