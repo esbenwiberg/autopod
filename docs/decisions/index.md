@@ -36,3 +36,4 @@
 | `ADR-029` | ADR-029: Validation setup is a first-class blocking phase | Proposed | Some profiles need to install validation tooling before lint, SAST, build, or |
 | `ADR-030` | ADR-030: Readiness Review as the approval decision surface | Proposed | Autopod already stores release-relevant evidence across validation history, |
 | `ADR-031` | ADR-031: Azure Container Apps Sandboxes backend | Accepted | Autopod needs a cloud execution target that preserves the important parts of the |
+| `ADR-032` | ADR-032: Prompt-only helper containers for daemon LLM helpers | Proposed | Autopod already has live pod container reviewer paths for validation, |

@@ -1,0 +1,48 @@
+contract_version: 1
+title: "Route PR metadata and auto-commit through helpers"
+depends_on: [01-add-helper-contract, 02-add-helper-container-runner]
+scenarios:
+  - id: pr-metadata-container-first
+    given:
+      - "a pod is creating a PR with a live or helper container available"
+    when:
+      - "PR title and narrative are generated"
+    then:
+      - "the shared helper provides the result before any daemon API client is constructed"
+  - id: auto-commit-container-first
+    given:
+      - "the daemon needs an auto-commit message for pending agent changes"
+    when:
+      - "the message is generated"
+    then:
+      - "the shared helper is preferred and heuristic fallback reason codes are preserved"
+  - id: approval-retry-helper-container
+    given:
+      - "approval retry creates a PR after the main container has stopped"
+    when:
+      - "PR metadata is generated"
+    then:
+      - "a prompt-only helper container can supply metadata before template fallback"
+required_facts:
+  - id: fact-pr-metadata-container-first
+    proves: [pr-metadata-container-first]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/worktrees/pr-description-generator.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pr-description-generator.test.ts -t "container first"
+  - id: fact-auto-commit-container-first
+    proves: [auto-commit-container-first]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/worktrees/auto-commit-message.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- auto-commit-message.test.ts -t "container first"
+  - id: fact-approval-retry-helper-container
+    proves: [approval-retry-helper-container]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts -t "approval retry.*helper container"
+human_review: []

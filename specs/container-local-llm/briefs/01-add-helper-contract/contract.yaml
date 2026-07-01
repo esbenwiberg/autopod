@@ -1,0 +1,48 @@
+contract_version: 1
+title: "Add shared container-first helper contract"
+depends_on: []
+scenarios:
+  - id: live-container-first
+    given:
+      - "a best-effort helper task has a running pod container"
+    when:
+      - "the shared helper runs"
+    then:
+      - "the live container produces the output and no later fallback is constructed"
+  - id: helper-container-second
+    given:
+      - "the live pod container is unavailable and helper containers are allowed"
+    when:
+      - "the shared helper runs"
+    then:
+      - "the short-lived helper container can produce the output with stage metadata"
+  - id: daemon-fallback-last
+    given:
+      - "container execution is unavailable or fails"
+    when:
+      - "the shared helper exhausts container stages"
+    then:
+      - "the caller's daemon/template fallback returns a stable reason code"
+required_facts:
+  - id: fact-live-container-first
+    proves: [live-container-first]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/providers/container-first-llm-helper.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- container-first-llm-helper.test.ts -t "live container first"
+  - id: fact-helper-container-second
+    proves: [helper-container-second]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/providers/container-first-llm-helper.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- container-first-llm-helper.test.ts -t "helper container second"
+  - id: fact-daemon-fallback-last
+    proves: [daemon-fallback-last]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/providers/container-first-llm-helper.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- container-first-llm-helper.test.ts -t "daemon fallback last"
+human_review: []

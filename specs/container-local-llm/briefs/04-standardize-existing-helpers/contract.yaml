@@ -1,0 +1,48 @@
+contract_version: 1
+title: "Standardize existing best-effort helpers"
+depends_on: [01-add-helper-contract, 02-add-helper-container-runner]
+scenarios:
+  - id: memory-helper-first
+    given:
+      - "memory selection needs reviewer ranking"
+    when:
+      - "the memory reviewer is available in a container"
+    then:
+      - "the shared helper path is used before deterministic fallback"
+  - id: advisory-helper-first
+    given:
+      - "advisory browser QA needs an AI opinion"
+    when:
+      - "the advisory reviewer runs"
+    then:
+      - "helper token usage is recorded and uncertain/manual output occurs only after reviewer paths degrade"
+  - id: mcp-live-container-helper
+    given:
+      - "a pod invokes ask_ai or browser script generation through MCP"
+    when:
+      - "the daemon calls the reviewer model"
+    then:
+      - "the live pod container requirement remains in force and the shared helper path is used"
+required_facts:
+  - id: fact-memory-helper-first
+    proves: [memory-helper-first]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/providers/memory-reviewer.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- memory-reviewer.test.ts -t "shared helper first"
+  - id: fact-advisory-helper-first
+    proves: [advisory-helper-first]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/advisory-browser-qa-runner.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- advisory-browser-qa-runner.test.ts -t "shared helper first"
+  - id: fact-mcp-live-container-helper
+    proves: [mcp-live-container-helper]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-bridge-validation.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-bridge-validation.test.ts
+human_review: []

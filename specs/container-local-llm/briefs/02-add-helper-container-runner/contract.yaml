@@ -1,0 +1,48 @@
+contract_version: 1
+title: "Add prompt-only helper container runner"
+depends_on: [01-add-helper-contract]
+scenarios:
+  - id: local-prompt-only-helper
+    given:
+      - "a local Docker profile needs post-container helper execution"
+    when:
+      - "the helper runner spawns a helper container"
+    then:
+      - "it writes only prompt input, avoids repo mounts and preview sidecars, and cleans up"
+  - id: sandbox-prompt-only-helper
+    given:
+      - "a sandbox profile needs post-container helper execution"
+    when:
+      - "the helper runner spawns a helper container"
+    then:
+      - "it uses the sandbox ContainerManager contract without Docker-only assumptions"
+  - id: helper-auth-injected
+    given:
+      - "reviewer/provider credentials are available for the pod"
+    when:
+      - "the helper prompt executes"
+    then:
+      - "the same reviewer env and secret-file inputs are present before execution"
+required_facts:
+  - id: fact-local-prompt-only-helper
+    proves: [local-prompt-only-helper]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/helper-container-runner.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- helper-container-runner.test.ts -t "local prompt-only helper"
+  - id: fact-sandbox-prompt-only-helper
+    proves: [sandbox-prompt-only-helper]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/helper-container-runner.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- helper-container-runner.test.ts -t "sandbox prompt-only helper"
+  - id: fact-helper-auth-injected
+    proves: [helper-auth-injected]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/helper-container-runner.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- helper-container-runner.test.ts -t "helper auth injected"
+human_review: []

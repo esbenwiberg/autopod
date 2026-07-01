@@ -1,0 +1,48 @@
+contract_version: 1
+title: "Preserve validation review boundaries"
+depends_on: [01-add-helper-contract]
+scenarios:
+  - id: validation-review-attribution
+    given:
+      - "blocking task review runs during validation"
+    when:
+      - "token usage is recorded"
+    then:
+      - "the usage is attributed to review, not helper"
+  - id: presubmit-live-pod-review
+    given:
+      - "pre_submit_review is invoked while the pod container is live"
+    when:
+      - "the daemon reviews the diff"
+    then:
+      - "the live pod container path remains in use"
+  - id: validation-routing-unchanged
+    given:
+      - "OpenAI or Foundry validation review routing is configured"
+    when:
+      - "blocking validation review runs"
+    then:
+      - "the existing validation runner selection remains unchanged"
+required_facts:
+  - id: fact-validation-review-attribution
+    proves: [validation-review-attribution]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/local-validation-engine.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- local-validation-engine.test.ts -t "review.*phaseTokenUsage"
+  - id: fact-presubmit-live-pod-review
+    proves: [presubmit-live-pod-review]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/pod-bridge-validation.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-bridge-validation.test.ts
+  - id: fact-validation-routing-unchanged
+    proves: [validation-routing-unchanged]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/local-validation-engine.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- local-validation-engine.test.ts -t "Foundry|OpenAI"
+human_review: []
