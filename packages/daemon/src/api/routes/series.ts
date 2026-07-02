@@ -270,6 +270,41 @@ function parseSingleBrief(
   return brief;
 }
 
+function validateSeriesDependencyGraph(briefs: ParsedBrief[]): void {
+  const allTitles = new Set<string>();
+  for (const brief of briefs) {
+    if (allTitles.has(brief.title)) {
+      throw new AutopodError(
+        `Duplicate brief title in series: "${brief.title}"`,
+        'DUPLICATE_SERIES_BRIEF_TITLE',
+        400,
+      );
+    }
+    allTitles.add(brief.title);
+  }
+
+  const seenTitles = new Set<string>();
+  for (const brief of briefs) {
+    for (const dep of brief.dependsOn) {
+      if (!allTitles.has(dep)) {
+        throw new AutopodError(
+          `Brief "${brief.title}" depends on unknown brief "${dep}"`,
+          'UNKNOWN_SERIES_DEPENDENCY',
+          400,
+        );
+      }
+      if (!seenTitles.has(dep)) {
+        throw new AutopodError(
+          `Brief "${brief.title}" depends on "${dep}", but dependencies must appear earlier in the series order`,
+          'SERIES_DEPENDENCY_ORDER',
+          400,
+        );
+      }
+    }
+    seenTitles.add(brief.title);
+  }
+}
+
 export function seriesRoutes(
   app: FastifyInstance,
   podManager: PodManager,
@@ -294,6 +329,16 @@ export function seriesRoutes(
     const prMode = body.prMode ?? 'single';
     const userId = request.user.oid;
 
+    try {
+      validateSeriesDependencyGraph(body.briefs);
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message, code: err.code };
+      }
+      throw err;
+    }
+
     // Resolve brief title → pod ID in creation order (topological).
     // Briefs must be ordered such that each brief's dependsOn references only
     // earlier briefs (numeric-prefix ordering from ap series create guarantees this).
@@ -311,8 +356,8 @@ export function seriesRoutes(
       const isLast = i === body.briefs.length - 1;
 
       // Resolve all parent titles to pod IDs — enables fan-in (a pod can wait
-      // on multiple parents). Unresolved titles are dropped rather than throwing
-      // so partial briefs don't break the whole series.
+      // on multiple parents). The graph was preflighted above, so every title
+      // must resolve here.
       const briefDependsOnPodIds: string[] = brief.dependsOn
         .map((t) => titleToId.get(t))
         .filter((id): id is string => typeof id === 'string');

@@ -1319,6 +1319,56 @@ describe('Integration', () => {
       expect(merge.dependsOnPodIds).toEqual([a.id, b.id]);
     });
 
+    it('POST /pods/series rejects unknown dependencies without creating partial pods', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/pods/series',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          seriesName: 'bad-diamond',
+          profile: 'test-app',
+          prMode: 'stacked',
+          briefs: [
+            { title: '01-base', task: 'Base task', dependsOn: [] },
+            { title: '02-a', task: 'Branch A', dependsOn: ['01-base'] },
+            { title: '03-merge', task: 'Merge branches', dependsOn: ['02-a', '02-missing'] },
+          ],
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({
+        code: 'UNKNOWN_SERIES_DEPENDENCY',
+        error: 'Brief "03-merge" depends on unknown brief "02-missing"',
+      });
+      expect(podRepo.list().filter((pod) => pod.seriesName === 'bad-diamond')).toEqual([]);
+    });
+
+    it('POST /pods/series rejects dependencies that point forward in the order', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/pods/series',
+        headers: { authorization: 'Bearer test-token' },
+        payload: {
+          seriesName: 'forward-dep',
+          profile: 'test-app',
+          prMode: 'stacked',
+          briefs: [
+            { title: '02-child', task: 'Child task', dependsOn: ['01-parent'] },
+            { title: '01-parent', task: 'Parent task', dependsOn: [] },
+          ],
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({
+        code: 'SERIES_DEPENDENCY_ORDER',
+        error:
+          'Brief "02-child" depends on "01-parent", but dependencies must appear earlier in the series order',
+      });
+      expect(podRepo.list().filter((pod) => pod.seriesName === 'forward-dep')).toEqual([]);
+    });
+
     it('POST /pods/series chains single-mode siblings so they serialize on the shared branch', async () => {
       const res = await app.inject({
         method: 'POST',
