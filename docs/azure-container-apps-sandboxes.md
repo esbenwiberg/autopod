@@ -238,7 +238,14 @@ unset AZURE_SANDBOX_IMAGE_PULL_IDENTITY_RESOURCE_ID
 node scripts/smoke-sandbox-adapter.mjs
 ```
 
-The smoke creates one sandbox from the warm image, proves exec, file write/read, workspace upload into staging, copy into writable `/workspace`, workspace sync-back, restricted egress-policy refresh, and then destroys the sandbox plus its disk image.
+The smoke creates one sandbox from the warm image, proves buffered exec, WebSocket streaming
+exec (chunk arrival timing + non-zero exit code propagation — see the `exec_stream=` line),
+file write/read, workspace upload into staging, copy into writable `/workspace`, workspace
+sync-back, restricted egress-policy refresh, and then destroys the sandbox plus its disk image.
+
+> The streaming-exec leg is the live proof for the reverse-engineered `/exec/stream`
+> transport. It has **not** been run against Azure from CI — run this smoke once in a
+> credentialed environment before relying on `executionTarget: sandbox` for agent pods.
 
 ## Cleanup Checks
 
