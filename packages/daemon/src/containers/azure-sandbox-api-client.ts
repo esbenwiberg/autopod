@@ -7,6 +7,7 @@ import type {
   SandboxApiClient,
   SandboxDirListing,
   SandboxEgressPolicy,
+  SandboxExecChunk,
   SandboxExecOptions,
   SandboxExecResult,
   SandboxFileInfo,
@@ -34,6 +35,21 @@ interface TokenCredentialLike {
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 export type ImageDigestResolver = (image: string) => Promise<string | undefined>;
 
+/**
+ * Structural mirror of the WHATWG `WebSocket` (Node ≥22 global). The daemon's
+ * tsconfig has no DOM lib, and tests need a seam, so we type only what we use.
+ */
+export interface WebSocketLike {
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+  onopen: ((event: unknown) => void) | null;
+  onmessage: ((event: { data: unknown }) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  onclose: ((event: { code?: number; reason?: string }) => void) | null;
+}
+
+export type WebSocketFactory = (url: string, headers: Record<string, string>) => WebSocketLike;
+
 export interface AzureSandboxApiClientConfig {
   /** Azure subscription ID. */
   subscriptionId: string;
@@ -53,6 +69,8 @@ export interface AzureSandboxApiClientConfig {
   credential?: TokenCredentialLike;
   /** Test seam. Defaults to global fetch. */
   fetch?: FetchLike;
+  /** Test seam. Defaults to the global WebSocket constructor (Node ≥22). */
+  webSocket?: WebSocketFactory;
   /** Resolve mutable image tags to their current manifest digest for persistent disk-image keys. */
   resolveImageDigest?: ImageDigestResolver;
   /** Test seam. Defaults to 3s to match the Python SDK poller. */
@@ -126,6 +144,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private readonly logger: Logger;
   private readonly credential: TokenCredentialLike;
   private readonly fetchFn: FetchLike;
+  private readonly webSocketFactory: WebSocketFactory;
   private readonly resolveImageDigest?: ImageDigestResolver;
   private readonly pollIntervalMs: number;
   private readonly dataEndpoint: string;
@@ -144,6 +163,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.logger = logger.child({ component: 'azure-sandbox-api-client' });
     this.credential = config.credential ?? new DefaultAzureCredential();
     this.fetchFn = config.fetch ?? globalThis.fetch.bind(globalThis);
+    this.webSocketFactory = config.webSocket ?? defaultWebSocketFactory;
     this.resolveImageDigest = config.resolveImageDigest;
     this.pollIntervalMs = config.pollIntervalMs ?? 3000;
     this.dataEndpoint = endpointForRegion(config.location);
@@ -197,6 +217,152 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       stderr: String(response.stderr ?? ''),
       exitCode: Number(response.exitCode ?? response.exit_code ?? 0),
     };
+  }
+
+  /**
+   * Native streaming exec over the data plane's WebSocket endpoint
+   * (`wss://…/sandboxes/{id}/exec/stream`).
+   *
+   * Wire protocol (mirrors `@azure/containerapps-sandbox` 1.0.0-beta.1's
+   * `ExecStreamSession`): the client sends a `{"type":"start","start":{…}}`
+   * frame on open, then the server streams `{"type":"stdout"|"stderr","data":
+   * "<base64>"}` frames and finishes with `{"type":"exit_code","exitCode":N}`.
+   * `stdin`/`resize` frames exist for interactive TTY sessions but are not
+   * needed for the runtime-stream contract. The reference SDK sends no
+   * `api-version` query parameter on this endpoint.
+   */
+  async *execStream(
+    sandboxId: string,
+    command: string[],
+    options?: SandboxExecOptions,
+  ): AsyncIterable<SandboxExecChunk> {
+    if (options?.user) {
+      // The start frame has no user field (unlike buffered executeShellCommand).
+      throw new AutopodError(
+        'Sandbox streaming exec cannot run as a specific user; drop the user option or use buffered exec',
+        'AZURE_SANDBOX_EXEC_USER',
+        400,
+      );
+    }
+
+    const token = await this.getAzureToken(DATA_SCOPE, 'data access token', 'AZURE_AUTH');
+    const wsUrl = `${this.dataEndpoint.replace(/^https:/, 'wss:')}${this.sandboxPath(
+      sandboxId,
+    )}/exec/stream`;
+    const socket = this.webSocketFactory(wsUrl, { Authorization: `Bearer ${token.token}` });
+
+    const queue: SandboxExecChunk[] = [];
+    let failure: Error | null = null;
+    let exitReceived = false;
+    let closed = false;
+    let notify: (() => void) | null = null;
+    const wake = () => {
+      const pending = notify;
+      notify = null;
+      pending?.();
+    };
+    const fail = (err: Error) => {
+      failure ??= err;
+      wake();
+    };
+
+    const timeoutTimer = options?.timeoutMs
+      ? setTimeout(() => {
+          fail(
+            new AutopodError(
+              `Sandbox streaming exec on ${sandboxId} timed out after ${options.timeoutMs}ms`,
+              'AZURE_SANDBOX_TIMEOUT',
+              504,
+            ),
+          );
+          socket.close();
+        }, options.timeoutMs)
+      : null;
+
+    socket.onopen = () => {
+      socket.send(
+        JSON.stringify({
+          type: 'start',
+          start: {
+            command: streamExecCommandText(command, options?.cwd),
+            environment: { TERM: 'xterm-256color', LANG: 'C.UTF-8', ...options?.env },
+            tty: false,
+            stdin: false,
+            height: 24,
+            width: 80,
+          },
+        }),
+      );
+    };
+    socket.onmessage = (event) => {
+      try {
+        const frame = JSON.parse(String(event.data)) as {
+          type?: string;
+          data?: string;
+          exitCode?: number;
+        };
+        if (frame.type === 'stdout' || frame.type === 'stderr') {
+          const text = Buffer.from(frame.data ?? '', 'base64').toString('utf-8');
+          queue.push(frame.type === 'stdout' ? { stdout: text } : { stderr: text });
+        } else if (frame.type === 'exit_code') {
+          exitReceived = true;
+          queue.push({ exitCode: Number(frame.exitCode ?? 0) });
+          socket.close();
+        } else if (frame.type === 'error') {
+          fail(
+            new AutopodError(
+              `Sandbox streaming exec on ${sandboxId} reported an error: ${String(event.data)}`,
+              'AZURE_SANDBOX_EXEC_STREAM',
+              502,
+            ),
+          );
+        }
+      } catch (err) {
+        fail(err instanceof Error ? err : new Error(String(err)));
+      }
+      wake();
+    };
+    socket.onerror = () => {
+      fail(
+        new AutopodError(
+          `Sandbox streaming exec WebSocket failed for ${sandboxId}`,
+          'AZURE_SANDBOX_EXEC_STREAM',
+          502,
+        ),
+      );
+    };
+    socket.onclose = () => {
+      if (!exitReceived) {
+        fail(
+          new AutopodError(
+            `Sandbox streaming exec on ${sandboxId} closed before reporting an exit code`,
+            'AZURE_SANDBOX_EXEC_STREAM',
+            502,
+          ),
+        );
+      }
+      closed = true;
+      wake();
+    };
+
+    try {
+      while (true) {
+        const chunk = queue.shift();
+        if (chunk) {
+          yield chunk;
+          if (chunk.exitCode !== undefined) return;
+          continue;
+        }
+        if (failure) throw failure;
+        if (closed) return;
+        await new Promise<void>((resolve) => {
+          notify = resolve;
+        });
+      }
+    } finally {
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      socket.close();
+    }
   }
 
   async writeFile(sandboxId: string, path: string, content: Buffer): Promise<void> {
@@ -830,6 +996,33 @@ function toWireEgressPolicy(policy: SandboxEgressPolicy): {
     defaultAction: policy.defaultAction,
     ...(policy.hostRules.length > 0 ? { hostRules: policy.hostRules } : {}),
   };
+}
+
+function defaultWebSocketFactory(url: string, headers: Record<string, string>): WebSocketLike {
+  const ctor = (
+    globalThis as {
+      WebSocket?: new (url: string, options?: { headers: Record<string, string> }) => WebSocketLike;
+    }
+  ).WebSocket;
+  if (!ctor) {
+    throw new AutopodError(
+      'Global WebSocket is unavailable; Node 22+ is required for sandbox streaming exec',
+      'AZURE_SANDBOX_EXEC_STREAM',
+      500,
+    );
+  }
+  // Node's undici WebSocket accepts a non-standard `headers` option in the
+  // second argument — the same mechanism the reference SDK uses for auth.
+  return new ctor(url, { headers });
+}
+
+/**
+ * The exec-stream start frame has `environment` but no working-directory field,
+ * so `cwd` is folded into the (shell-interpreted) command string.
+ */
+function streamExecCommandText(command: string[], cwd?: string): string {
+  const commandText = command.map(shellQuote).join(' ');
+  return cwd ? `cd ${shellQuote(cwd)} && ${commandText}` : commandText;
 }
 
 function commandToShell(command: string[], env?: Record<string, string>): string {

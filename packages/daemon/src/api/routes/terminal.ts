@@ -81,7 +81,7 @@ export function terminalRoutes(
       if (pod.executionTarget !== 'local') {
         socket.close(
           4004,
-          'Sandbox interactive terminal is unsupported: Azure Sandboxes do not provide bidirectional TTY streaming yet',
+          'Sandbox interactive terminal is not wired up yet: the sandbox exec-stream WebSocket supports TTY, but this route is Docker-only',
         );
         return;
       }

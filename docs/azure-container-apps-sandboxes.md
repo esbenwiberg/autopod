@@ -1,25 +1,48 @@
 # Azure Container Apps Sandboxes
 
 Autopod can provision `executionTarget: sandbox` containers in Azure Container Apps Sandboxes.
-This target is production-supported only with Autopod warm images published to ACR, and agent
-runtime execution remains gated until the sandbox data plane exposes native streaming.
+This target is production-supported only with Autopod warm images published to ACR.
 
 ## Current Contract
 
 Supported:
 
 - Short, buffered command execution through the sandbox data plane.
+- Streaming command execution (agent runtimes) over the data plane's WebSocket endpoint
+  (`wss://…/sandboxes/{id}/exec/stream`), the same transport used by the
+  `@azure/containerapps-sandbox` reference SDK's `createExecStreamSession`.
 - File upload/download/list operations.
 - Snapshot workspace sync-in and sync-back through `/workspace`.
 - Container-local validation probes for health and pages at `http://127.0.0.1:3000`.
 - Stop/resume and native sandbox egress-policy refresh.
 
-Explicitly unsupported until the Azure Sandboxes data plane exposes the missing primitive:
+Explicitly unsupported until Autopod wires up the remaining pieces:
 
-- Interactive pods (`ap shell`, `ap workspace`, `ap attach`, daemon terminal WebSocket). Reason: the data plane does not provide bidirectional TTY streaming.
-- Host preview URLs such as `http://127.0.0.1:<hostPort>`. Reason: sandboxes do not provide Docker-style host port forwarding or an Autopod tunnel yet.
+- Interactive pods (`ap shell`, `ap workspace`, `ap attach`, daemon terminal WebSocket). Reason:
+  the exec-stream WebSocket protocol supports TTY (`tty`, `stdin`, `resize` frames), but the
+  daemon's terminal route is still Dockerode-only and has not been wired to the sandbox transport.
+- Host preview URLs such as `http://127.0.0.1:<hostPort>`. Reason: sandboxes do not provide Docker-style host port forwarding or an Autopod tunnel yet. (The data plane can expose sandbox ports with public URLs, Entra/anonymous auth, and source-IP ACLs — a candidate replacement for the tunnel proof below.)
 - Sidecars. Reason: current sidecars require a Docker bridge network shared with the pod container.
-- Long-running runtime `execStreaming` without native streaming. Reason: buffered exec cannot preserve progress, cancellation, or watchdog semantics for agent runtimes.
+
+## Exec Streaming Transport
+
+The preview Python SDK (`azure-containerapps-sandbox==0.1.0b3`) only exposes buffered
+`exec()`. The streaming transport below was confirmed from the newer JS reference SDK
+(`@azure/containerapps-sandbox@1.0.0-beta.1`, shipped inside `@acaexpress/containerapps-cli`),
+which uses it for both one-shot streaming exec and interactive `sandbox shell`:
+
+- Endpoint: `wss://management.<region>.azuredevcompute.io/subscriptions/{sub}/resourceGroups/{rg}/sandboxGroups/{group}/sandboxes/{id}/exec/stream` (no `api-version` query parameter).
+- Auth: `Authorization: Bearer <token>` header on the WebSocket upgrade.
+- Client → server frames (JSON text):
+  - `{"type":"start","start":{"command":"…","environment":{…},"tty":bool,"stdin":bool,"height":N,"width":N}}` — sent once on open. No working-directory or user field; Autopod folds `cwd` into the shell-interpreted command.
+  - `{"type":"stdin","data":"<base64>"}` — interactive input (TTY sessions).
+  - `{"type":"resize","width":N,"height":N}` — terminal resize (TTY sessions).
+- Server → client frames: `{"type":"stdout"|"stderr","data":"<base64>"}`, terminal
+  `{"type":"exit_code","exitCode":N}`, and `{"type":"error",…}`.
+
+Autopod's `AzureSandboxApiClient.execStream()` implements the non-TTY variant, which flips
+`SandboxContainerManager.supportsStreamingExec` to `true` and unblocks agent runtimes on
+this target. The TTY variant is available for a future interactive-terminal integration.
 
 ## Preview Tunnel Proof
 

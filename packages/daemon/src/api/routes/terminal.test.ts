@@ -75,7 +75,7 @@ describe('terminalRoutes', () => {
     expect(docker.getContainer).not.toHaveBeenCalled();
     expect(socket.close).toHaveBeenCalledWith(
       4004,
-      expect.stringContaining('Sandbox interactive terminal is unsupported'),
+      expect.stringContaining('Sandbox interactive terminal is not wired up yet'),
     );
   });
 

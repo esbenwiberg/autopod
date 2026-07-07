@@ -194,8 +194,14 @@ Current preview caveats:
 - RBAC: `Container Apps SandboxGroup Data Owner` is data-plane only. Creating or reading the
   sandbox group also needs control-plane rights such as resource-group `Contributor`/`Owner`, or
   set `AZURE_SANDBOX_ASSUME_GROUP_EXISTS=1` for a pre-created group.
-- Exec is buffered in `azure-containerapps-sandbox==0.1.0b3`; no native streaming method was
-  exposed by the spike.
+- Streaming exec runs over the data plane's WebSocket endpoint
+  (`wss://…/sandboxes/{id}/exec/stream`) — protocol documented in
+  `docs/azure-container-apps-sandboxes.md`. The preview Python SDK
+  (`azure-containerapps-sandbox==0.1.0b3`) still only exposes buffered exec; the WS shape
+  comes from the JS reference SDK (`@azure/containerapps-sandbox@1.0.0-beta.1`). The
+  non-TTY variant is implemented in `AzureSandboxApiClient.execStream()`; interactive TTY
+  (`stdin`/`resize` frames) is supported by the wire protocol but not wired to the daemon's
+  terminal route yet.
 - Sandboxes do not support Docker bind mounts. The supported workspace model is snapshot upload at
   spawn, pod provisioning copies `/mnt/worktree` staging into writable `/workspace`, and sync-back
   extracts `/workspace` through `extractDirectoryFromContainer`. Host edits after spawn are not

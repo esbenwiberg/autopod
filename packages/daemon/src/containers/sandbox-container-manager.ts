@@ -73,7 +73,9 @@ export interface SandboxContainerManagerConfig {
  *
  * The Azure adapter uses the preview data-plane shape confirmed by
  * `spikes/aca-sandbox/probe.py`: buffered exec, file read/write, host-rule egress,
- * directory list/read extraction, and stop/resume lifecycle.
+ * directory list/read extraction, and stop/resume lifecycle — plus WebSocket
+ * streaming exec (`/exec/stream`), confirmed from the JS reference SDK and
+ * documented in `docs/azure-container-apps-sandboxes.md`.
  */
 export class SandboxContainerManager implements ContainerManager {
   private readonly client: SandboxApiClient;

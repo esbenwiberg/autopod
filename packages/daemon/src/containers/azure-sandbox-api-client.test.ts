@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import pino from 'pino';
 import { describe, expect, it } from 'vitest';
-import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
+import { AzureSandboxApiClient, type WebSocketLike } from './azure-sandbox-api-client.js';
+import type { SandboxExecChunk } from './sandbox-api-client.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -64,6 +65,53 @@ function makeClient(
     ),
     requests,
   };
+}
+
+class MockWebSocket implements WebSocketLike {
+  sent: string[] = [];
+  closed = false;
+  onopen: ((event: unknown) => void) | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onerror: ((event: unknown) => void) | null = null;
+  onclose: ((event: { code?: number; reason?: string }) => void) | null = null;
+
+  send(data: string): void {
+    this.sent.push(data);
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.onclose?.({});
+  }
+
+  /** Deliver a server frame as a JSON text message. */
+  emit(frame: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(frame) });
+  }
+}
+
+function makeStreamingClient(script: (socket: MockWebSocket) => void): {
+  client: AzureSandboxApiClient;
+  sockets: MockWebSocket[];
+  wsUrls: string[];
+  wsHeaders: Record<string, string>[];
+} {
+  const sockets: MockWebSocket[] = [];
+  const wsUrls: string[] = [];
+  const wsHeaders: Record<string, string>[] = [];
+  const { client } = makeClient([], {
+    webSocket: (url, headers) => {
+      wsUrls.push(url);
+      wsHeaders.push(headers);
+      const socket = new MockWebSocket();
+      sockets.push(socket);
+      // Run the server script after execStream has attached its handlers.
+      queueMicrotask(() => script(socket));
+      return socket;
+    },
+  });
+  return { client, sockets, wsUrls, wsHeaders };
 }
 
 function jsonBody(request: CapturedRequest): unknown {
@@ -325,6 +373,92 @@ describe('AzureSandboxApiClient', () => {
       workingDirectory: '/workspace',
       user: 'root',
     });
+  });
+
+  it('streams stdout/stderr and exit code over the exec WebSocket', async () => {
+    const { client, sockets, wsUrls, wsHeaders } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+      socket.emit({ type: 'stdout', data: Buffer.from('hello').toString('base64') });
+      socket.emit({ type: 'stderr', data: Buffer.from('warn').toString('base64') });
+      socket.emit({ type: 'exit_code', exitCode: 3 });
+    });
+
+    const chunks: SandboxExecChunk[] = [];
+    for await (const chunk of client.execStream('sbx-1', ['echo', 'hello'], {
+      cwd: '/workspace',
+      env: { FOO: 'bar baz' },
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(wsUrls).toEqual([
+      'wss://management.swedencentral.azuredevcompute.io/subscriptions/sub-1/resourceGroups/rg-1/sandboxGroups/autopod-spike/sandboxes/sbx-1/exec/stream',
+    ]);
+    expect(wsHeaders[0]).toEqual({ Authorization: 'Bearer test-token' });
+    expect(JSON.parse(sockets[0]?.sent[0] ?? '{}')).toEqual({
+      type: 'start',
+      start: {
+        command: 'cd /workspace && echo hello',
+        environment: { TERM: 'xterm-256color', LANG: 'C.UTF-8', FOO: 'bar baz' },
+        tty: false,
+        stdin: false,
+        height: 24,
+        width: 80,
+      },
+    });
+    expect(chunks).toEqual([{ stdout: 'hello' }, { stderr: 'warn' }, { exitCode: 3 }]);
+    expect(sockets[0]?.closed).toBe(true);
+  });
+
+  it('fails the exec stream when the socket closes before an exit code', async () => {
+    const { client } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+      socket.emit({ type: 'stdout', data: Buffer.from('partial').toString('base64') });
+      socket.close();
+    });
+
+    const chunks: SandboxExecChunk[] = [];
+    await expect(
+      (async () => {
+        for await (const chunk of client.execStream('sbx-1', ['sleep', '60'])) {
+          chunks.push(chunk);
+        }
+      })(),
+    ).rejects.toThrow(/closed before reporting an exit code/);
+    expect(chunks).toEqual([{ stdout: 'partial' }]);
+  });
+
+  it('fails the exec stream on an error frame', async () => {
+    const { client } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+      socket.emit({ type: 'error', message: 'boom' });
+    });
+
+    const drained: SandboxExecChunk[] = [];
+    await expect(
+      (async () => {
+        for await (const chunk of client.execStream('sbx-1', ['true'])) {
+          drained.push(chunk);
+        }
+      })(),
+    ).rejects.toThrow(/reported an error/);
+    expect(drained).toEqual([]);
+  });
+
+  it('rejects streaming exec with a user option', async () => {
+    const { client } = makeStreamingClient(() => {
+      throw new Error('socket should not be created');
+    });
+
+    const drained: SandboxExecChunk[] = [];
+    await expect(
+      (async () => {
+        for await (const chunk of client.execStream('sbx-1', ['true'], { user: 'root' })) {
+          drained.push(chunk);
+        }
+      })(),
+    ).rejects.toThrow(/cannot run as a specific user/);
+    expect(drained).toEqual([]);
   });
 
   it('writes, reads, lists, stats files, and updates egress policy through the data plane', async () => {
