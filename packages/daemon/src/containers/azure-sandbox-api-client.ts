@@ -14,6 +14,7 @@ import type {
   SandboxFileInfo,
   SandboxPortAuth,
   SandboxRegistryCredentials,
+  SandboxSnapshot,
   SandboxStatus,
   SandboxTerminalOptions,
   SandboxTerminalSession,
@@ -212,6 +213,52 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       okStatuses: [200, 202, 204, 404],
     });
     await this.pollDeleted(() => this.getSandbox(sandboxId), `sandbox ${sandboxId}`);
+  }
+
+  async createSnapshot(sandboxId: string, name?: string): Promise<SandboxSnapshot> {
+    const response = await this.requestData<SandboxResponse>(
+      'POST',
+      `${this.sandboxPath(sandboxId)}/snapshot`,
+      {
+        json: name ? { labels: { name } } : {},
+        okStatuses: [200, 201, 202],
+        timeoutMs: CREATE_REQUEST_TIMEOUT_MS,
+      },
+    );
+    return { id: requiredId(response, 'snapshot') };
+  }
+
+  async createFromSnapshot(snapshotId: string): Promise<string> {
+    await this.ensureSandboxGroup();
+    this.logger.info({ snapshotId }, 'Creating Azure sandbox from snapshot');
+    // Snapshot creates accept only `sourcesRef` — the data plane rejects
+    // resources/lifecycle/environment/egress (the snapshot carries them).
+    const initial = await this.requestData<SandboxResponse>(
+      'PUT',
+      `${this.groupPath()}/sandboxes`,
+      {
+        json: {
+          sourcesRef: { snapshot: { id: snapshotId } },
+          labels: { purpose: 'autopod-sandbox' },
+        },
+        timeoutMs: CREATE_REQUEST_TIMEOUT_MS,
+      },
+    );
+    const id = requiredId(initial, 'sandbox');
+    this.logger.info({ sandboxId: id, snapshotId }, 'Azure sandbox create-from-snapshot accepted');
+    const running = await this.pollState(
+      () => this.getSandbox(id),
+      (sandbox) => sandbox.state === 'Running',
+      `sandbox ${id}`,
+      (sandbox) => sandbox.state === 'Failed' || sandbox.state === 'Deleting',
+    );
+    return requiredId(running, 'sandbox');
+  }
+
+  async deleteSnapshot(snapshotId: string): Promise<void> {
+    await this.requestData('DELETE', `${this.groupPath()}/snapshots/${seg(snapshotId)}`, {
+      okStatuses: [200, 202, 204, 404],
+    });
   }
 
   async exec(

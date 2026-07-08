@@ -96,6 +96,26 @@ supervisor probes app reachability **inside** the sandbox (`curl localhost:3000`
 probe of the Entra-gated URL would just see 401. `removePort` runs on preview teardown. Local
 (Docker) pods are unaffected — they keep their `http://127.0.0.1:<hostPort>` path.
 
+## Snapshot Warm-Starts
+
+Snapshots let a second pod for the same profile skip cold disk-image boot + dependency install.
+`SandboxApiClient.createSnapshot(sandboxId, name?)` / `createFromSnapshot(snapshotId)` /
+`deleteSnapshot(snapshotId)`:
+
+- `POST {sandboxPath}/snapshot` (optional `{ labels: { name } }`) → snapshot id.
+- Create from snapshot: `PUT {group}/sandboxes` with **only** `sourcesRef: { snapshot: { id } }` —
+  the data plane rejects `resources`/`lifecycle`/`environment`/`egressPolicy` on snapshot creates
+  (the snapshot carries them), so pod-specific env (e.g. `POD_ID`) and egress must be re-applied
+  post-resume rather than at create time.
+- `DELETE {group}/snapshots/{id}` (idempotent).
+
+**Validated live 2026-07-08** (`swedencentral`): a marker file written before `createSnapshot` was
+present in a sandbox provisioned via `createFromSnapshot` (state carried), and the warm create
+(~1.4s, skipping disk-image build) beat the cold spawn. This is the client **capability**;
+provisioning-loop integration (snapshot-after-provision, keying by image digest + lockfile hash,
+credential scrubbing before snapshot since it outlives the pod, and a GC policy) is the tracked
+follow-up for #190.
+
 ## Preview Tunnel Proof
 
 Sandbox app preview needs an outbound reverse tunnel because Azure Sandboxes do

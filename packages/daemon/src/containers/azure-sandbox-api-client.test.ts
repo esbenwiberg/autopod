@@ -675,6 +675,43 @@ describe('AzureSandboxApiClient', () => {
     expect(jsonBody(requests[1] ?? failRequest())).toEqual({ port: 3000 });
   });
 
+  it('creates a snapshot and returns its id', async () => {
+    const { client, requests } = makeClient([{ status: 200, body: { id: 'snap-1' } }]);
+
+    const snapshot = await client.createSnapshot('sbx-1', 'warm-node22');
+
+    expect(snapshot).toEqual({ id: 'snap-1' });
+    expect(requests[0]?.url).toContain('/sandboxes/sbx-1/snapshot');
+    expect(jsonBody(requests[0] ?? failRequest())).toEqual({ labels: { name: 'warm-node22' } });
+  });
+
+  it('provisions a sandbox from a snapshot with only sourcesRef, polling to Running', async () => {
+    const { client, requests } = makeClient(
+      [
+        { status: 200, body: { id: 'sbx-2', state: 'Creating' } }, // PUT sandboxes
+        { status: 200, body: { id: 'sbx-2', state: 'Running' } }, // poll
+      ],
+      { assumeGroupExists: true },
+    );
+
+    const id = await client.createFromSnapshot('snap-1');
+
+    expect(id).toBe('sbx-2');
+    const putReq = requests[0] ?? failRequest();
+    expect(putReq.url).toContain('/sandboxGroups/autopod-spike/sandboxes');
+    expect(jsonBody(putReq)).toEqual({
+      sourcesRef: { snapshot: { id: 'snap-1' } },
+      labels: { purpose: 'autopod-sandbox' },
+    });
+  });
+
+  it('deletes a snapshot idempotently', async () => {
+    const { client, requests } = makeClient([{ status: 404 }]);
+
+    await expect(client.deleteSnapshot('snap-1')).resolves.toBeUndefined();
+    expect(requests[0]?.url).toContain('/sandboxGroups/autopod-spike/snapshots/snap-1');
+  });
+
   it('treats existing directories as successful mkdirs', async () => {
     const { client, requests } = makeClient([
       { status: 409, body: { title: 'FileAlreadyExists', detail: 'directory already exists' } },

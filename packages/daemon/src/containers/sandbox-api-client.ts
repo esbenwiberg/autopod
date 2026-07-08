@@ -126,6 +126,11 @@ export interface SandboxExposedPort {
   url?: string;
 }
 
+/** A point-in-time snapshot of a sandbox, usable as a create source. */
+export interface SandboxSnapshot {
+  id: string;
+}
+
 export type SandboxStatus = 'running' | 'stopped' | 'unknown';
 
 export interface SandboxApiClient {
@@ -172,6 +177,19 @@ export interface SandboxApiClient {
   addPort?(sandboxId: string, port: number, auth?: SandboxPortAuth): Promise<SandboxExposedPort>;
   /** Remove a previously exposed port. Idempotent — a missing port is a no-op. */
   removePort?(sandboxId: string, port: number): Promise<void>;
+  /**
+   * Snapshot a provisioned sandbox for warm-start reuse. Optional — omitted by
+   * clients without snapshot support. `name` is stored as a label.
+   */
+  createSnapshot?(sandboxId: string, name?: string): Promise<SandboxSnapshot>;
+  /**
+   * Provision a new sandbox from a snapshot (warm resume). The snapshot carries
+   * resources/env/egress — the data plane rejects those fields on snapshot
+   * creates, so this takes only the snapshot id. Returns the new sandbox id.
+   */
+  createFromSnapshot?(snapshotId: string): Promise<string>;
+  /** Delete a snapshot. Idempotent — a missing snapshot is a no-op. */
+  deleteSnapshot?(snapshotId: string): Promise<void>;
   /** Snapshot-suspend the sandbox (maps to ContainerManager.stop). */
   suspend(sandboxId: string, mode?: 'memory' | 'disk'): Promise<void>;
   /** Resume a suspended sandbox (maps to ContainerManager.start). */
