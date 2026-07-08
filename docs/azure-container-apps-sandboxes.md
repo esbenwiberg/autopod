@@ -15,13 +15,21 @@ Supported:
 - Snapshot workspace sync-in and sync-back through `/workspace`.
 - Container-local validation probes for health and pages at `http://127.0.0.1:3000`.
 - Stop/resume and native sandbox egress-policy refresh.
+- Interactive terminal (`ap shell` / `ap attach`, `WS /pods/:podId/terminal`) over the exec-stream
+  WebSocket TTY variant (`tty`/`stdin`/`resize` frames), with tmux-reattach parity where the warm
+  image ships tmux. Validated live 2026-07-08.
+- Host preview URLs, two modes (see "Native Port Exposure" below):
+  - **Default**: daemon-side exec proxy (`sandbox-preview-proxy.ts`) → a daemon-local
+    `http://127.0.0.1:<hostPort>` URL.
+  - **Opt-in**: set `AUTOPOD_SANDBOX_NATIVE_PREVIEW_EMAILS` and sandbox pods instead expose their
+    app port on the platform's native public URL (`*.adcproxy.io`), Entra-gated to those emails.
+    Native-first with automatic fallback to the exec proxy; reachability is then probed inside the
+    sandbox (the Entra gate makes a host-side probe return 401). Local (Docker) pods are unaffected.
 
 Explicitly unsupported until Autopod wires up the remaining pieces:
 
-- Interactive pods (`ap shell`, `ap workspace`, `ap attach`, daemon terminal WebSocket). Reason:
-  the exec-stream WebSocket protocol supports TTY (`tty`, `stdin`, `resize` frames), but the
-  daemon's terminal route is still Dockerode-only and has not been wired to the sandbox transport.
-- Host preview URLs such as `http://127.0.0.1:<hostPort>`. Reason: sandboxes do not provide Docker-style host port forwarding or an Autopod tunnel yet. (The data plane can expose sandbox ports with public URLs, Entra/anonymous auth, and source-IP ACLs — a candidate replacement for the tunnel proof below.)
+- Source-IP ACLs (`ipAccessControl`) on exposed ports — the reference SDK's `addPort` doesn't model
+  them yet.
 - Sidecars. Reason: current sidecars require a Docker bridge network shared with the pod container.
 
 ## Exec Streaming Transport
@@ -34,15 +42,79 @@ which uses it for both one-shot streaming exec and interactive `sandbox shell`:
 - Endpoint: `wss://management.<region>.azuredevcompute.io/subscriptions/{sub}/resourceGroups/{rg}/sandboxGroups/{group}/sandboxes/{id}/exec/stream` (no `api-version` query parameter).
 - Auth: `Authorization: Bearer <token>` header on the WebSocket upgrade.
 - Client → server frames (JSON text):
-  - `{"type":"start","start":{"command":"…","environment":{…},"tty":bool,"stdin":bool,"height":N,"width":N}}` — sent once on open. No working-directory or user field; Autopod folds `cwd` into the shell-interpreted command.
+  - `{"type":"start","start":{"command":"…","environment":{…},"tty":bool,"stdin":bool,"height":N,"width":N}}` — sent once on open. No working-directory or user field.
   - `{"type":"stdin","data":"<base64>"}` — interactive input (TTY sessions).
   - `{"type":"resize","width":N,"height":N}` — terminal resize (TTY sessions).
 - Server → client frames: `{"type":"stdout"|"stderr","data":"<base64>"}`, terminal
   `{"type":"exit_code","exitCode":N}`, and `{"type":"error",…}`.
 
+**`start.command` is a single path, `execve`d literally — not a shell string.** Live
+validation (2026-07-08, `swedencentral`) showed the runtime treats `command` as `argv[0]`
+with no shell interpretation and no arguments: a joined `sh -lc '…'` string fails with
+`executable file not found in $PATH`. The reference SDK only ever sends a bare binary
+(`/bin/bash`) here and drives real work through stdin. To run an arbitrary argv with
+streaming output, `AzureSandboxApiClient.execStream()` stages the command as an executable
+`#!/bin/sh` wrapper script (writeFile → the files API writes it as `root:0644`, so a
+`chmod 0755` as `root` follows → so the non-root sandbox process can `execve` it) and sends
+that script path as `command`. `cwd` is folded into the wrapper (`cd … || exit 1`); `env`
+rides the start frame's `environment`.
+
 Autopod's `AzureSandboxApiClient.execStream()` implements the non-TTY variant, which flips
 `SandboxContainerManager.supportsStreamingExec` to `true` and unblocks agent runtimes on
-this target. The TTY variant is available for a future interactive-terminal integration.
+this target. The TTY variant is available for a future interactive-terminal integration
+(daemon terminal route — see the interactive-pods caveat above).
+
+The data-plane token scope is `https://dynamicsessions.io/.default` for both the HTTPS
+data plane and the WebSocket upgrade — the live run confirmed no per-endpoint scope split is
+needed. The exec-stream WebSocket accepts the Bearer token via undici's `headers` option on
+the upgrade, against the regional `management.<region>.azuredevcompute.io` endpoint, with no
+`api-version` query parameter.
+
+## Native Port Exposure
+
+The data plane can expose an in-sandbox port on a public URL, an alternative to the daemon-side
+exec proxy. `SandboxApiClient.addPort(sandboxId, port, auth?)` / `removePort(sandboxId, port)`:
+
+- `POST {sandboxPath}/ports/add` with `{ "port": N }` plus optional
+  `{ "auth": { "entraId": { "enabled": true, "emails": [...] } } }` or `{ "auth": { "anonymous": true } }`.
+  Autopod defaults to **Entra** auth — never silently anonymous.
+- The public URL is assigned **asynchronously**: the POST response has no `url`; it surfaces on the
+  sandbox object's `ports[].url` a few seconds later, so `addPort` polls `getSandbox` for it. URL
+  shape: `https://<sandboxId>--<port>.<region>.adcproxy.io`.
+- `POST {sandboxPath}/ports/remove` with `{ "port": N }` (idempotent).
+
+**Validated live 2026-07-08** (`swedencentral`): an Entra-gated port yielded
+`https://…--3000.swedencentral.adcproxy.io`; an unauthenticated request returned **401** (gated, no
+leak), and after `removePort` the URL returned **404**. Source-IP ACLs (`ipAccessControl`) are not
+yet modeled — the reference SDK's `addPort` doesn't set them; tracked as a follow-up.
+
+**Preview integration.** `pod-manager`'s `ensureSandboxPreviewProxy` prefers native exposure when
+`AUTOPOD_SANDBOX_NATIVE_PREVIEW_EMAILS` is set (comma/space-separated Entra allowlist — this is both
+the enable switch and where you put your own UPN/email), and falls back to the exec proxy if unset
+or on any failure. When native is active, `pod.previewUrl` is the `adcproxy.io` URL and the preview
+supervisor probes app reachability **inside** the sandbox (`curl localhost:3000`) since a host-side
+probe of the Entra-gated URL would just see 401. `removePort` runs on preview teardown. Local
+(Docker) pods are unaffected — they keep their `http://127.0.0.1:<hostPort>` path.
+
+## Snapshot Warm-Starts
+
+Snapshots let a second pod for the same profile skip cold disk-image boot + dependency install.
+`SandboxApiClient.createSnapshot(sandboxId, name?)` / `createFromSnapshot(snapshotId)` /
+`deleteSnapshot(snapshotId)`:
+
+- `POST {sandboxPath}/snapshot` (optional `{ labels: { name } }`) → snapshot id.
+- Create from snapshot: `PUT {group}/sandboxes` with **only** `sourcesRef: { snapshot: { id } }` —
+  the data plane rejects `resources`/`lifecycle`/`environment`/`egressPolicy` on snapshot creates
+  (the snapshot carries them), so pod-specific env (e.g. `POD_ID`) and egress must be re-applied
+  post-resume rather than at create time.
+- `DELETE {group}/snapshots/{id}` (idempotent).
+
+**Validated live 2026-07-08** (`swedencentral`): a marker file written before `createSnapshot` was
+present in a sandbox provisioned via `createFromSnapshot` (state carried), and the warm create
+(~1.4s, skipping disk-image build) beat the cold spawn. This is the client **capability**;
+provisioning-loop integration (snapshot-after-provision, keying by image digest + lockfile hash,
+credential scrubbing before snapshot since it outlives the pod, and a GC policy) is the tracked
+follow-up for #190.
 
 ## Preview Tunnel Proof
 
@@ -243,9 +315,15 @@ exec (chunk arrival timing + non-zero exit code propagation — see the `exec_st
 file write/read, workspace upload into staging, copy into writable `/workspace`, workspace
 sync-back, restricted egress-policy refresh, and then destroys the sandbox plus its disk image.
 
-> The streaming-exec leg is the live proof for the reverse-engineered `/exec/stream`
-> transport. It has **not** been run against Azure from CI — run this smoke once in a
-> credentialed environment before relying on `executionTarget: sandbox` for agent pods.
+> **Validated live on 2026-07-08** (`ewi-sandboxes` / `swedencentral` / group `autopod-spike`,
+> warm image `autopod/autopod-self:latest`). The full smoke passed: buffered exec, streaming
+> exec (`exec_stream={"exitCode":7,"chunks":4,"spreadMs":3006,…}` — three 1s-spaced echoes
+> arrived spread over 3s, confirming true streaming rather than a single buffered burst),
+> file I/O, workspace sync-in/out, and egress refresh. The run required the caller identity to
+> hold the `Container Apps SandboxGroup Data Owner` data-plane role (a `Contributor`-only login
+> gets 403 on the data plane). It also surfaced and fixed a real bug: the exec-stream
+> `start.command` is `execve`d literally, so `execStream()` now stages an executable wrapper
+> script instead of sending a shell string (see "Exec Streaming Transport" above).
 
 ## Cleanup Checks
 

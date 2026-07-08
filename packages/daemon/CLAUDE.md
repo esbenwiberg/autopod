@@ -199,9 +199,13 @@ Current preview caveats:
   `docs/azure-container-apps-sandboxes.md`. The preview Python SDK
   (`azure-containerapps-sandbox==0.1.0b3`) still only exposes buffered exec; the WS shape
   comes from the JS reference SDK (`@azure/containerapps-sandbox@1.0.0-beta.1`). The
-  non-TTY variant is implemented in `AzureSandboxApiClient.execStream()`; interactive TTY
-  (`stdin`/`resize` frames) is supported by the wire protocol but not wired to the daemon's
-  terminal route yet.
+  non-TTY variant is `AzureSandboxApiClient.execStream()`; the interactive TTY variant is
+  `AzureSandboxApiClient.attachTerminal()` (`stdin`/`resize` frames), surfaced through
+  `SandboxContainerManager.attachTerminal()` and the `ContainerManager.attachTerminal?()` seam,
+  and wired to the daemon terminal route (`WS /pods/:podId/terminal`) for sandbox pods. Both
+  stage the command as an executable wrapper script because the exec-stream `start.command` is
+  `execve`d literally (not shell-interpreted); the files API writes it as `root:0644`, so it is
+  `chmod 0755`'d as root before exec.
 - Sandboxes do not support Docker bind mounts. The supported workspace model is snapshot upload at
   spawn, pod provisioning copies `/mnt/worktree` staging into writable `/workspace`, and sync-back
   extracts `/workspace` through `extractDirectoryFromContainer`. Host edits after spawn are not

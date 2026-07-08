@@ -22,7 +22,9 @@ import type {
   SandboxExecChunk,
   SandboxExecOptions,
   SandboxExecResult,
+  SandboxExposedPort,
   SandboxFileInfo,
+  SandboxPortAuth,
   SandboxStatus,
 } from './sandbox-api-client.js';
 import {
@@ -127,6 +129,22 @@ class FakeSandboxApiClient implements SandboxApiClient {
 
   async updateEgress(sandboxId: string, policy: SandboxEgressPolicy): Promise<void> {
     this.egressUpdates.push({ id: sandboxId, policy });
+  }
+
+  readonly addPortCalls: Array<{ id: string; port: number; auth?: SandboxPortAuth }> = [];
+  readonly removePortCalls: Array<{ id: string; port: number }> = [];
+
+  async addPort(
+    sandboxId: string,
+    port: number,
+    auth?: SandboxPortAuth,
+  ): Promise<SandboxExposedPort> {
+    this.addPortCalls.push({ id: sandboxId, port, auth });
+    return { port, url: `https://${sandboxId}--${port}.test.adcproxy.io` };
+  }
+
+  async removePort(sandboxId: string, port: number): Promise<void> {
+    this.removePortCalls.push({ id: sandboxId, port });
   }
 
   async suspend(sandboxId: string): Promise<void> {
@@ -490,6 +508,41 @@ describe('SandboxContainerManager', () => {
       expect(out).toBe('chunk-1 chunk-2');
       expect(err).toBe('warn');
       expect(code).toBe(7);
+    });
+  });
+
+  describe('exposePort', () => {
+    it('exposes a port with an Entra allowlist and returns the URL', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+
+      const exposed = await mgr.exposePort(id, 3000, { entraEmails: ['ewi@projectum.com'] });
+
+      expect(exposed.url).toBe(`https://${id}--3000.test.adcproxy.io`);
+      expect(client.addPortCalls).toEqual([
+        { id, port: 3000, auth: { mode: 'entra', emails: ['ewi@projectum.com'] } },
+      ]);
+    });
+
+    it('exposes anonymously only when explicitly requested', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+
+      await mgr.exposePort(id, 8080, { anonymous: true });
+
+      expect(client.addPortCalls[0]?.auth).toEqual({ mode: 'anonymous' });
+    });
+
+    it('unexposePort delegates to the client', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+
+      await mgr.unexposePort(id, 3000);
+
+      expect(client.removePortCalls).toEqual([{ id, port: 3000 }]);
     });
   });
 

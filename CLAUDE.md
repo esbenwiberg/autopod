@@ -298,6 +298,7 @@ Each runtime (`claude-runtime.ts`, `codex-runtime.ts`, `copilot-runtime.ts`) has
 | `AZURE_LOCATION` | `westeurope` | no | Region for Sandbox placement |
 | `AUTOPOD_CONTAINER_HOST` | — | no | Override host for MCP base URL inside containers |
 | `AUTOPOD_MOBILE_DIST` | — | no | Override mobile PWA dist dir (default: `packages/mobile-web/dist`). See `docs/mobile.md`. |
+| `AUTOPOD_SANDBOX_NATIVE_PREVIEW_EMAILS` | — | no | Comma/space-separated Entra emails. When set, sandbox pod previews use the platform's native public URL (Entra-gated to these addresses) instead of the daemon exec proxy. Falls back to the proxy if unset or on failure. See `docs/azure-container-apps-sandboxes.md`. |
 
 ## Environment Gotchas
 

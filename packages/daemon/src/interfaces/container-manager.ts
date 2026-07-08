@@ -60,6 +60,33 @@ export interface StreamingExecResult {
   kill(): Promise<void>;
 }
 
+export interface TerminalSessionOptions {
+  /** Initial terminal width in columns. */
+  cols: number;
+  /** Initial terminal height in rows. */
+  rows: number;
+}
+
+/**
+ * An interactive TTY session attached to a running container — the backend for
+ * the `WS /pods/:podId/terminal` route (`ap shell` / `ap attach`). TTY output
+ * merges stdout and stderr into a single stream, mirroring a real terminal.
+ */
+export interface TerminalSession {
+  /** Subscribe to merged TTY output bytes. */
+  onData(listener: (chunk: Buffer) => void): void;
+  /** Fired once when the remote shell exits, with its exit code. */
+  onExit(listener: (exitCode: number) => void): void;
+  /** Fired on a transport-level error. */
+  onError(listener: (err: Error) => void): void;
+  /** Write raw stdin bytes to the shell. */
+  write(data: Buffer): void;
+  /** Resize the TTY. Values are clamped by the caller. */
+  resize(cols: number, rows: number): void;
+  /** Close the session and release the transport. Idempotent. */
+  close(): void;
+}
+
 export interface ContainerManager {
   /**
    * Whether `execStreaming()` supports long-lived stdout/stderr streams for agent runtimes.
@@ -104,4 +131,33 @@ export interface ContainerManager {
     command: string[],
     options?: ExecOptions,
   ): Promise<StreamingExecResult>;
+  /**
+   * Attach an interactive TTY session for the terminal route. Optional — a
+   * manager without interactive support omits it, and the terminal route rejects
+   * the connection. Docker uses a hijacked TTY exec inline in the route; the
+   * Sandboxes backend implements this over the exec-stream WebSocket TTY variant.
+   */
+  attachTerminal?(containerId: string, options: TerminalSessionOptions): Promise<TerminalSession>;
+  /**
+   * Expose an in-container port on a publicly-reachable URL. Optional — only the
+   * Sandboxes backend supports it (Docker pods use daemon-local host ports). The
+   * returned `url` may be undefined if the backend assigns it asynchronously and
+   * it did not materialize in time.
+   */
+  exposePort?(containerId: string, port: number, options?: ExposePortOptions): Promise<ExposedPort>;
+  /** Remove a previously exposed port. Idempotent. Optional (see `exposePort`). */
+  unexposePort?(containerId: string, port: number): Promise<void>;
+}
+
+export interface ExposePortOptions {
+  /** Entra ID email allowlist — the exposed URL requires sign-in by one of these. */
+  entraEmails?: string[];
+  /** Open the port with no auth (public internet). Opt-in only; never a default. */
+  anonymous?: boolean;
+}
+
+export interface ExposedPort {
+  port: number;
+  /** Public URL for the port, if the backend assigned one. */
+  url?: string;
 }
