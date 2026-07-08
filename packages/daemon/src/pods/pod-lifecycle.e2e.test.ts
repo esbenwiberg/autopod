@@ -1,3 +1,4 @@
+import { PendingRequests } from '@autopod/escalation-mcp';
 import type {
   ActionPolicy,
   AgentEscalationEvent,
@@ -301,6 +302,46 @@ describe('Pod Lifecycle E2E', () => {
         'ctr-1',
         undefined, // no provider env for default anthropic provider
       );
+    });
+
+    it('queues a check_messages fallback when an MCP response stream detached', async () => {
+      const pendingRequests = new PendingRequests();
+      const responsePromise = pendingRequests.waitForResponse('esc-1', 5000);
+      pendingRequests.markDetached('esc-1', 'mcp_response_stream_closed');
+
+      const runtime = createMockRuntime({
+        resume: vi.fn(async function* () {
+          yield completeEvent('Should not resume via runtime');
+        } as () => AsyncIterable<AgentEvent>),
+      });
+
+      const ctx = createTestContext({ runtime });
+      const pendingRequestsByPod = new Map<string, PendingRequests>();
+      ctx.deps.pendingRequestsByPod = pendingRequestsByPod;
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add database support', skipValidation: true },
+        'user-1',
+      );
+      pendingRequestsByPod.set(pod.id, pendingRequests);
+
+      ctx.podRepo.update(pod.id, {
+        status: 'awaiting_input',
+        containerId: 'ctr-1',
+        pendingEscalation: { id: 'esc-1', type: 'ask_human', question: 'Which DB?' },
+      });
+
+      await manager.sendMessage(pod.id, 'Use PostgreSQL');
+
+      await expect(responsePromise).resolves.toBe('Use PostgreSQL');
+      expect(runtime.resume).not.toHaveBeenCalled();
+
+      const queued = ctx.nudgeRepo.listPending(pod.id);
+      expect(queued).toHaveLength(1);
+      expect(queued[0]?.message).toContain('Fallback response for the previous ask_human MCP call');
+      expect(queued[0]?.message).toContain('Use PostgreSQL');
+      expect(queued[0]?.message).toContain('original MCP response stream closed');
     });
   });
 
