@@ -618,6 +618,63 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
+  it('exposes an Entra-gated port and maps the returned public URL', async () => {
+    const { client, requests } = makeClient([
+      {
+        status: 200,
+        body: {
+          port: 3000,
+          protocol: 'Http',
+          url: 'https://sbx-1-3000.swedencentral.azurecontainerapps.io',
+        },
+      },
+    ]);
+
+    const exposed = await client.addPort('sbx-1', 3000, {
+      mode: 'entra',
+      emails: ['ewi@projectum.com'],
+    });
+
+    expect(exposed).toEqual({
+      port: 3000,
+      hostPort: undefined,
+      protocol: 'Http',
+      url: 'https://sbx-1-3000.swedencentral.azurecontainerapps.io',
+    });
+    expect(requests[0]?.url).toContain('/sandboxes/sbx-1/ports/add');
+    expect(jsonBody(requests[0] ?? failRequest())).toEqual({
+      port: 3000,
+      auth: { entraId: { enabled: true, emails: ['ewi@projectum.com'] } },
+    });
+  });
+
+  it('exposes an anonymous port when explicitly opted in', async () => {
+    const { client, requests } = makeClient([
+      { status: 201, body: { port: 8080, url: 'https://x' } },
+    ]);
+
+    await client.addPort('sbx-1', 8080, { mode: 'anonymous' });
+
+    expect(jsonBody(requests[0] ?? failRequest())).toEqual({
+      port: 8080,
+      auth: { anonymous: true },
+    });
+  });
+
+  it('omits auth when none is given (platform default) and removes ports idempotently', async () => {
+    const { client, requests } = makeClient([
+      { status: 200, body: { port: 3000, url: 'https://y' } },
+      { status: 404 },
+    ]);
+
+    await client.addPort('sbx-1', 3000);
+    expect(jsonBody(requests[0] ?? failRequest())).toEqual({ port: 3000 });
+
+    await expect(client.removePort('sbx-1', 3000)).resolves.toBeUndefined();
+    expect(requests[1]?.url).toContain('/sandboxes/sbx-1/ports/remove');
+    expect(jsonBody(requests[1] ?? failRequest())).toEqual({ port: 3000 });
+  });
+
   it('treats existing directories as successful mkdirs', async () => {
     const { client, requests } = makeClient([
       { status: 409, body: { title: 'FileAlreadyExists', detail: 'directory already exists' } },

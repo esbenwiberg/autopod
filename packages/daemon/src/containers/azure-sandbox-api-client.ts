@@ -10,7 +10,9 @@ import type {
   SandboxExecChunk,
   SandboxExecOptions,
   SandboxExecResult,
+  SandboxExposedPort,
   SandboxFileInfo,
+  SandboxPortAuth,
   SandboxRegistryCredentials,
   SandboxStatus,
   SandboxTerminalOptions,
@@ -25,6 +27,8 @@ const ACR_DOCKER_USERNAME = '00000000-0000-0000-0000-000000000000';
 const ACR_EXCHANGE_TIMEOUT_MS = 30_000;
 const AZURE_TOKEN_TIMEOUT_MS = 30_000;
 const CREATE_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+/** Max polls for a freshly-added port's public URL to surface on the sandbox. */
+const PORT_URL_POLL_ATTEMPTS = 20;
 
 interface AccessToken {
   token: string;
@@ -107,6 +111,7 @@ interface SandboxResponse {
   id?: string;
   state?: string;
   sourcesRef?: { diskImage?: { id?: string } };
+  ports?: WireSandboxPort[];
 }
 
 interface ExecResponse {
@@ -131,6 +136,15 @@ interface WireSandboxFileInfo {
 interface WireSandboxDirListing {
   path?: string;
   entries?: WireSandboxFileInfo[];
+}
+
+type WirePortAuth = { anonymous: true } | { entraId: { enabled: true; emails: string[] } };
+
+interface WireSandboxPort {
+  port?: number;
+  hostPort?: number;
+  protocol?: string;
+  url?: string;
 }
 
 export class AzureSandboxApiClient implements SandboxApiClient {
@@ -564,6 +578,52 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     await this.requestData('POST', `${this.sandboxPath(sandboxId)}/egresspolicy`, {
       json: toWireEgressPolicy(policy),
       okStatuses: [200, 201, 204],
+    });
+  }
+
+  async addPort(
+    sandboxId: string,
+    port: number,
+    auth?: SandboxPortAuth,
+  ): Promise<SandboxExposedPort> {
+    const body: { port: number; auth?: WirePortAuth } = { port };
+    if (auth?.mode === 'anonymous') {
+      body.auth = { anonymous: true };
+    } else if (auth?.mode === 'entra') {
+      body.auth = { entraId: { enabled: true, emails: auth.emails } };
+    }
+    const response = await this.requestData<WireSandboxPort>(
+      'POST',
+      `${this.sandboxPath(sandboxId)}/ports/add`,
+      { json: body, okStatuses: [200, 201, 202] },
+    );
+    let resolved: WireSandboxPort = response;
+    // The public URL is assigned asynchronously (confirmed live: the POST response
+    // has no `url`; it appears on the sandbox's `ports[]` a few seconds later), so
+    // poll the sandbox until the URL for this port materializes.
+    if (!resolved.url) {
+      for (let attempt = 0; attempt < PORT_URL_POLL_ATTEMPTS; attempt++) {
+        await sleep(this.pollIntervalMs);
+        const sandbox = await this.getSandbox(sandboxId).catch(() => null);
+        const match = sandbox?.ports?.find((p) => Number(p.port) === port && p.url);
+        if (match) {
+          resolved = match;
+          break;
+        }
+      }
+    }
+    return {
+      port: Number(resolved.port ?? port),
+      hostPort: resolved.hostPort,
+      protocol: resolved.protocol,
+      url: resolved.url,
+    };
+  }
+
+  async removePort(sandboxId: string, port: number): Promise<void> {
+    await this.requestData('POST', `${this.sandboxPath(sandboxId)}/ports/remove`, {
+      json: { port },
+      okStatuses: [200, 202, 204, 404],
     });
   }
 

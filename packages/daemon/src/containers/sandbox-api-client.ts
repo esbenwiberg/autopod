@@ -107,6 +107,25 @@ export interface SandboxTerminalSession {
   close(): void;
 }
 
+/**
+ * Auth mode for an exposed sandbox port. `anonymous` opens the public URL to the
+ * internet (opt-in, ideally IP-fenced); `entra` requires Entra ID sign-in from
+ * one of `emails`.
+ */
+export type SandboxPortAuth = { mode: 'anonymous' } | { mode: 'entra'; emails: string[] };
+
+/** A port exposed on a sandbox, with the platform-assigned public URL. */
+export interface SandboxExposedPort {
+  /** The in-sandbox application port. */
+  port: number;
+  /** Host-side port, when the platform reports one. */
+  hostPort?: number;
+  /** `Http` | `Http2`. */
+  protocol?: string;
+  /** Public URL the platform assigned for this port. */
+  url?: string;
+}
+
 export type SandboxStatus = 'running' | 'stopped' | 'unknown';
 
 export interface SandboxApiClient {
@@ -145,6 +164,14 @@ export interface SandboxApiClient {
   mkdir?(sandboxId: string, path: string): Promise<void>;
   /** Replace the sandbox's egress policy at runtime. */
   updateEgress(sandboxId: string, policy: SandboxEgressPolicy): Promise<void>;
+  /**
+   * Expose an in-sandbox port and return its public URL. Optional — omitted by
+   * clients without native inbound-port support. `auth` defaults to Entra when
+   * omitted (never silently anonymous).
+   */
+  addPort?(sandboxId: string, port: number, auth?: SandboxPortAuth): Promise<SandboxExposedPort>;
+  /** Remove a previously exposed port. Idempotent — a missing port is a no-op. */
+  removePort?(sandboxId: string, port: number): Promise<void>;
   /** Snapshot-suspend the sandbox (maps to ContainerManager.stop). */
   suspend(sandboxId: string, mode?: 'memory' | 'disk'): Promise<void>;
   /** Resume a suspended sandbox (maps to ContainerManager.start). */

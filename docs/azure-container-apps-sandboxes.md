@@ -21,7 +21,14 @@ Supported:
 
 Explicitly unsupported until Autopod wires up the remaining pieces:
 
-- Host preview URLs such as `http://127.0.0.1:<hostPort>`. Reason: sandboxes do not provide Docker-style host port forwarding or an Autopod tunnel yet. (The data plane can expose sandbox ports with public URLs, Entra/anonymous auth, and source-IP ACLs — a candidate replacement for the tunnel proof below.)
+- Host preview URLs such as `http://127.0.0.1:<hostPort>` for sandbox pods still route through the
+  daemon-side exec proxy (`sandbox-preview-proxy.ts`) by default. Native inbound port exposure is
+  now available as a client capability (`SandboxApiClient.addPort`/`removePort`, validated live
+  2026-07-08 — see "Native Port Exposure" below), but is **not yet wired into the default preview
+  path**: the native URL is a public `*.adcproxy.io` address (Entra-gated by default), which changes
+  the preview access model versus the daemon-local proxy URL and would break daemon-side
+  reachability probes that expect a `200`. Complementary integration (native-first with proxy
+  fallback) is the tracked follow-up.
 - Sidecars. Reason: current sidecars require a Docker bridge network shared with the pod container.
 
 ## Exec Streaming Transport
@@ -61,6 +68,24 @@ data plane and the WebSocket upgrade — the live run confirmed no per-endpoint 
 needed. The exec-stream WebSocket accepts the Bearer token via undici's `headers` option on
 the upgrade, against the regional `management.<region>.azuredevcompute.io` endpoint, with no
 `api-version` query parameter.
+
+## Native Port Exposure
+
+The data plane can expose an in-sandbox port on a public URL, an alternative to the daemon-side
+exec proxy. `SandboxApiClient.addPort(sandboxId, port, auth?)` / `removePort(sandboxId, port)`:
+
+- `POST {sandboxPath}/ports/add` with `{ "port": N }` plus optional
+  `{ "auth": { "entraId": { "enabled": true, "emails": [...] } } }` or `{ "auth": { "anonymous": true } }`.
+  Autopod defaults to **Entra** auth — never silently anonymous.
+- The public URL is assigned **asynchronously**: the POST response has no `url`; it surfaces on the
+  sandbox object's `ports[].url` a few seconds later, so `addPort` polls `getSandbox` for it. URL
+  shape: `https://<sandboxId>--<port>.<region>.adcproxy.io`.
+- `POST {sandboxPath}/ports/remove` with `{ "port": N }` (idempotent).
+
+**Validated live 2026-07-08** (`swedencentral`): an Entra-gated port yielded
+`https://…--3000.swedencentral.adcproxy.io`; an unauthenticated request returned **401** (gated, no
+leak), and after `removePort` the URL returned **404**. Source-IP ACLs (`ipAccessControl`) are not
+yet modeled — the reference SDK's `addPort` doesn't set them; tracked as a follow-up.
 
 ## Preview Tunnel Proof
 
