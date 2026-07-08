@@ -52,7 +52,7 @@ USER autopod
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 # Allow bare imports of globally installed packages (e.g. playwright in validation scripts)
-ENV NODE_PATH=/usr/local/lib/node_modules
+ENV NODE_PATH=/usr/lib/node_modules
 # Turborepo cache dir — /workspace/.turbo may not be writable depending on how
 # the worktree is mounted, so use /tmp which is always writable.
 ENV TURBO_CACHE_DIR=/tmp/.turbo

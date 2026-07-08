@@ -28,6 +28,33 @@ describe('PendingRequests', () => {
     expect(pending.size).toBe(0);
   });
 
+  it('reports when a resolved request had a detached response stream', async () => {
+    const promise = pending.waitForResponse('esc-1', 5000);
+
+    expect(pending.markDetached('esc-1', 'stream closed')).toBe(true);
+    expect(pending.isDetached('esc-1')).toBe(true);
+
+    const result = pending.resolveWithState('esc-1', 'got it');
+
+    expect(result).toEqual({
+      resolved: true,
+      detached: true,
+      detachedReason: 'stream closed',
+    });
+    await expect(promise).resolves.toBe('got it');
+    expect(pending.size).toBe(0);
+  });
+
+  it('marks all pending requests detached', () => {
+    pending.waitForResponse('esc-a', 5000).catch(() => {});
+    pending.waitForResponse('esc-b', 5000).catch(() => {});
+
+    expect(pending.markAllDetached('response closed')).toBe(2);
+    expect(pending.isDetached('esc-a')).toBe(true);
+    expect(pending.isDetached('esc-b')).toBe(true);
+    expect(pending.markAllDetached('response closed again')).toBe(0);
+  });
+
   it('should reject a pending request', async () => {
     const promise = pending.waitForResponse('esc-2', 5000);
 

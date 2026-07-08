@@ -223,6 +223,20 @@ function formatRetryDelay(delayMs: number): string {
   return delayMs % 1_000 === 0 ? `${delayMs / 1_000}s` : `${delayMs}ms`;
 }
 
+function buildDetachedMcpFallbackMessage(
+  escalationType: string | undefined,
+  response: string,
+): string {
+  const label = escalationType ? `${escalationType} MCP call` : 'MCP call';
+  return [
+    `Fallback response for the previous ${label}:`,
+    '',
+    response,
+    '',
+    'The original MCP response stream closed before this answer could be delivered. If you already received the same answer directly from the tool call, ignore this duplicate.',
+  ].join('\n');
+}
+
 function failedValidationPhases(result: ValidationResult | null): string[] {
   if (!result) return [];
   const failed: string[] = [];
@@ -8090,7 +8104,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         transition(pod, 'running', { pendingEscalation: null });
         emitActivityStatus(podId, `Credential injected for ${payload.service} — resuming agent…`);
 
-        deps.pendingRequestsByPod?.get(podId)?.resolve(escalationId, authMessage);
+        const resolveResult = deps.pendingRequestsByPod
+          ?.get(podId)
+          ?.resolveWithState(escalationId, authMessage);
+        if (resolveResult?.detached) {
+          nudgeRepo.queue(
+            podId,
+            buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, authMessage),
+          );
+          emitActivityStatus(
+            podId,
+            'MCP response stream was closed — queued credential result for check_messages',
+          );
+        }
         return;
       }
 
@@ -8179,8 +8205,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // The container's agent event stream is still active — no need to call runtime.resume().
       const pendingForSession = deps.pendingRequestsByPod?.get(podId);
       if (pendingForSession && pod.pendingEscalation?.id) {
-        const resolved = pendingForSession.resolve(pod.pendingEscalation.id, message);
-        if (resolved) {
+        const resolveResult = pendingForSession.resolveWithState(pod.pendingEscalation.id, message);
+        if (resolveResult.resolved) {
+          if (resolveResult.detached) {
+            nudgeRepo.queue(
+              podId,
+              buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, message),
+            );
+            emitActivityStatus(
+              podId,
+              'MCP response stream was closed — queued human reply for check_messages',
+            );
+          }
           // The MCP ask_human call has been unblocked — processPod's consumeAgentEvents
           // loop will continue picking up events from the still-running container.
           return;

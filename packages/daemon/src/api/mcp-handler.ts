@@ -79,6 +79,22 @@ export function mcpHandler(
       return;
     }
 
+    let responseFinished = false;
+    reply.raw.once('finish', () => {
+      responseFinished = true;
+    });
+    reply.raw.once('close', () => {
+      if (responseFinished) return;
+
+      const detachedCount = pendingRequests.markAllDetached('mcp_response_stream_closed');
+      if (detachedCount > 0) {
+        logger.warn(
+          { podId, detachedCount },
+          'MCP response stream closed before pending request delivery',
+        );
+      }
+    });
+
     try {
       // Tell Fastify we're handling the response manually via reply.raw
       // so it doesn't try to send its own response after the transport writes.
