@@ -91,16 +91,28 @@ class MockWebSocket implements WebSocketLike {
   }
 }
 
-function makeStreamingClient(script: (socket: MockWebSocket) => void): {
+// execStream stages the command as an executable wrapper script (writeFile PUT +
+// chmod exec POST) before opening the WebSocket, so callers that reach the socket
+// must supply those two HTTP responses.
+const STREAM_SETUP_RESPONSES: MockHttpResponse[] = [
+  { status: 204 }, // writeFile: PUT /files
+  { status: 200, body: { stdout: '', stderr: '', exitCode: 0 } }, // chmod +x
+];
+
+function makeStreamingClient(
+  script: (socket: MockWebSocket) => void,
+  responses: MockHttpResponse[] = STREAM_SETUP_RESPONSES,
+): {
   client: AzureSandboxApiClient;
   sockets: MockWebSocket[];
   wsUrls: string[];
   wsHeaders: Record<string, string>[];
+  requests: CapturedRequest[];
 } {
   const sockets: MockWebSocket[] = [];
   const wsUrls: string[] = [];
   const wsHeaders: Record<string, string>[] = [];
-  const { client } = makeClient([], {
+  const { client, requests } = makeClient(responses, {
     webSocket: (url, headers) => {
       wsUrls.push(url);
       wsHeaders.push(headers);
@@ -111,7 +123,7 @@ function makeStreamingClient(script: (socket: MockWebSocket) => void): {
       return socket;
     },
   });
-  return { client, sockets, wsUrls, wsHeaders };
+  return { client, sockets, wsUrls, wsHeaders, requests };
 }
 
 function jsonBody(request: CapturedRequest): unknown {
@@ -375,8 +387,8 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
-  it('streams stdout/stderr and exit code over the exec WebSocket', async () => {
-    const { client, sockets, wsUrls, wsHeaders } = makeStreamingClient((socket) => {
+  it('stages a wrapper script then streams stdout/stderr and exit code over the exec WebSocket', async () => {
+    const { client, sockets, wsUrls, wsHeaders, requests } = makeStreamingClient((socket) => {
       socket.onopen?.({});
       socket.emit({ type: 'stdout', data: Buffer.from('hello').toString('base64') });
       socket.emit({ type: 'stderr', data: Buffer.from('warn').toString('base64') });
@@ -391,6 +403,21 @@ describe('AzureSandboxApiClient', () => {
       chunks.push(chunk);
     }
 
+    // The command is `execve`d as a single argv[0], so it is staged as an
+    // executable wrapper script and the start frame execs that path.
+    const writeReq = requests[0] ?? failRequest();
+    expect(writeReq.url).toContain('/sandboxes/sbx-1/files');
+    const scriptPath = new URL(writeReq.url).searchParams.get('path') ?? '';
+    expect(scriptPath).toMatch(/^\/tmp\/\.autopod-execstream-\d+-\d+\.sh$/);
+    expect(String(writeReq.init?.body)).toBe(
+      '#!/bin/sh\ncd /workspace || exit 1\nexec echo hello\n',
+    );
+    // The files API writes the wrapper as root:0644, so it is chmod-ed executable as root.
+    expect(jsonBody(requests[1] ?? failRequest())).toEqual({
+      command: `chmod 0755 ${scriptPath}`,
+      user: 'root',
+    });
+
     expect(wsUrls).toEqual([
       'wss://management.swedencentral.azuredevcompute.io/subscriptions/sub-1/resourceGroups/rg-1/sandboxGroups/autopod-spike/sandboxes/sbx-1/exec/stream',
     ]);
@@ -398,7 +425,7 @@ describe('AzureSandboxApiClient', () => {
     expect(JSON.parse(sockets[0]?.sent[0] ?? '{}')).toEqual({
       type: 'start',
       start: {
-        command: 'cd /workspace && echo hello',
+        command: scriptPath,
         environment: { TERM: 'xterm-256color', LANG: 'C.UTF-8', FOO: 'bar baz' },
         tty: false,
         stdin: false,
@@ -459,6 +486,70 @@ describe('AzureSandboxApiClient', () => {
       })(),
     ).rejects.toThrow(/cannot run as a specific user/);
     expect(drained).toEqual([]);
+  });
+
+  it('opens an interactive TTY terminal session, proxying stdin/resize/output', async () => {
+    const { client, sockets, requests } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+    });
+
+    const session = await client.attachTerminal('sbx-1', {
+      cols: 100,
+      rows: 30,
+      shellCommand: 'exec /bin/bash -l',
+      env: { FOO: 'bar' },
+    });
+
+    // The shell one-liner is staged as an executable wrapper (writeFile + root chmod).
+    const writeReq = requests[0] ?? failRequest();
+    const scriptPath = new URL(writeReq.url).searchParams.get('path') ?? '';
+    expect(scriptPath).toMatch(/^\/tmp\/\.autopod-execstream-\d+-\d+\.sh$/);
+    expect(String(writeReq.init?.body)).toBe('#!/bin/sh\nexec /bin/bash -l\n');
+    expect(jsonBody(requests[1] ?? failRequest())).toEqual({
+      command: `chmod 0755 ${scriptPath}`,
+      user: 'root',
+    });
+
+    // The start frame runs the wrapper with a TTY and stdin enabled.
+    expect(JSON.parse(sockets[0]?.sent[0] ?? '{}')).toEqual({
+      type: 'start',
+      start: {
+        command: scriptPath,
+        environment: { TERM: 'xterm-256color', LANG: 'C.UTF-8', FOO: 'bar' },
+        tty: true,
+        stdin: true,
+        height: 30,
+        width: 100,
+      },
+    });
+
+    const output: string[] = [];
+    session.onData((chunk) => output.push(chunk.toString('utf-8')));
+    let exitCode: number | undefined;
+    session.onExit((code) => {
+      exitCode = code;
+    });
+
+    session.write(Buffer.from('ls\n'));
+    expect(JSON.parse(sockets[0]?.sent[1] ?? '{}')).toEqual({
+      type: 'stdin',
+      data: Buffer.from('ls\n').toString('base64'),
+    });
+
+    session.resize(120, 40);
+    expect(JSON.parse(sockets[0]?.sent[2] ?? '{}')).toEqual({
+      type: 'resize',
+      width: 120,
+      height: 40,
+    });
+
+    sockets[0]?.emit({ type: 'stdout', data: Buffer.from('hi').toString('base64') });
+    sockets[0]?.emit({ type: 'stderr', data: Buffer.from('!').toString('base64') });
+    expect(output).toEqual(['hi', '!']);
+
+    sockets[0]?.emit({ type: 'exit_code', exitCode: 0 });
+    expect(exitCode).toBe(0);
+    expect(sockets[0]?.closed).toBe(true);
   });
 
   it('writes, reads, lists, stats files, and updates egress policy through the data plane', async () => {

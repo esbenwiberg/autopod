@@ -18,6 +18,8 @@ import type {
   ExecOptions,
   ExecResult,
   StreamingExecResult,
+  TerminalSession,
+  TerminalSessionOptions,
 } from '../interfaces/container-manager.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
 import {
@@ -260,6 +262,34 @@ export class SandboxContainerManager implements ContainerManager {
     throw new Error(
       'Sandbox streaming exec is not supported by the Azure Sandboxes data plane yet. Buffered exec is available for short commands, but agent runtimes and terminals require native streaming/TTY support.',
     );
+  }
+
+  async attachTerminal(
+    containerId: string,
+    options: TerminalSessionOptions,
+  ): Promise<TerminalSession> {
+    if (!this.client.attachTerminal) {
+      throw new Error(
+        'Sandbox interactive terminal is not supported by this data-plane client (no exec-stream TTY support).',
+      );
+    }
+    // Mirror the Docker terminal: cd into the workspace, then prefer a persistent
+    // tmux session ("new-session -A -s main" creates or reattaches, so WebSocket
+    // reconnects resume where the user left off) and fall back to a login bash.
+    // The `\;` stays literal in the wrapper script so tmux (not the shell) parses
+    // it as its command separator. The one-liner is staged as an executable
+    // wrapper because the exec-stream `command` is `execve`d literally.
+    const shellCommand =
+      'cd /workspace 2>/dev/null; ' +
+      'command -v tmux >/dev/null 2>&1 && ' +
+      'exec tmux new-session -A -s main \\; set -g mouse on || ' +
+      'exec /bin/bash -l';
+    return this.client.attachTerminal(containerId, {
+      cols: options.cols,
+      rows: options.rows,
+      shellCommand,
+      env: { COLUMNS: String(options.cols), LINES: String(options.rows) },
+    });
   }
 
   /** Native streaming path — pipe SDK chunks into stdout/stderr streams. */

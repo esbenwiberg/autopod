@@ -81,6 +81,32 @@ export interface SandboxDirListing {
   entries: SandboxFileInfo[];
 }
 
+export interface SandboxTerminalOptions {
+  cols: number;
+  rows: number;
+  /**
+   * Shell one-liner to run as the interactive session (e.g. the tmux-reattach
+   * command). Staged as an executable wrapper script because the exec-stream
+   * `command` field is `execve`d literally, not shell-interpreted. Defaults to
+   * a bare `/bin/bash` login shell.
+   */
+  shellCommand?: string;
+  env?: Record<string, string>;
+}
+
+/**
+ * Bidirectional interactive TTY session over the exec-stream WebSocket. Output
+ * is the merged TTY stream (stdout+stderr).
+ */
+export interface SandboxTerminalSession {
+  onData(listener: (chunk: Buffer) => void): void;
+  onExit(listener: (exitCode: number) => void): void;
+  onError(listener: (err: Error) => void): void;
+  write(data: Buffer): void;
+  resize(cols: number, rows: number): void;
+  close(): void;
+}
+
 export type SandboxStatus = 'running' | 'stopped' | 'unknown';
 
 export interface SandboxApiClient {
@@ -103,6 +129,15 @@ export interface SandboxApiClient {
     command: string[],
     options?: SandboxExecOptions,
   ): AsyncIterable<SandboxExecChunk>;
+  /**
+   * Open an interactive TTY session over the exec-stream WebSocket. Optional:
+   * omitted by clients without streaming support (the terminal route then
+   * rejects sandbox connections).
+   */
+  attachTerminal?(
+    sandboxId: string,
+    options: SandboxTerminalOptions,
+  ): Promise<SandboxTerminalSession>;
   writeFile(sandboxId: string, path: string, content: Buffer): Promise<void>;
   readFile(sandboxId: string, path: string): Promise<Buffer>;
   listFiles(sandboxId: string, path: string): Promise<SandboxDirListing>;

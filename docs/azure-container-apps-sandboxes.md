@@ -15,12 +15,12 @@ Supported:
 - Snapshot workspace sync-in and sync-back through `/workspace`.
 - Container-local validation probes for health and pages at `http://127.0.0.1:3000`.
 - Stop/resume and native sandbox egress-policy refresh.
+- Interactive terminal (`ap shell` / `ap attach`, `WS /pods/:podId/terminal`) over the exec-stream
+  WebSocket TTY variant (`tty`/`stdin`/`resize` frames), with tmux-reattach parity where the warm
+  image ships tmux. Validated live 2026-07-08.
 
 Explicitly unsupported until Autopod wires up the remaining pieces:
 
-- Interactive pods (`ap shell`, `ap workspace`, `ap attach`, daemon terminal WebSocket). Reason:
-  the exec-stream WebSocket protocol supports TTY (`tty`, `stdin`, `resize` frames), but the
-  daemon's terminal route is still Dockerode-only and has not been wired to the sandbox transport.
 - Host preview URLs such as `http://127.0.0.1:<hostPort>`. Reason: sandboxes do not provide Docker-style host port forwarding or an Autopod tunnel yet. (The data plane can expose sandbox ports with public URLs, Entra/anonymous auth, and source-IP ACLs — a candidate replacement for the tunnel proof below.)
 - Sidecars. Reason: current sidecars require a Docker bridge network shared with the pod container.
 
@@ -34,15 +34,33 @@ which uses it for both one-shot streaming exec and interactive `sandbox shell`:
 - Endpoint: `wss://management.<region>.azuredevcompute.io/subscriptions/{sub}/resourceGroups/{rg}/sandboxGroups/{group}/sandboxes/{id}/exec/stream` (no `api-version` query parameter).
 - Auth: `Authorization: Bearer <token>` header on the WebSocket upgrade.
 - Client → server frames (JSON text):
-  - `{"type":"start","start":{"command":"…","environment":{…},"tty":bool,"stdin":bool,"height":N,"width":N}}` — sent once on open. No working-directory or user field; Autopod folds `cwd` into the shell-interpreted command.
+  - `{"type":"start","start":{"command":"…","environment":{…},"tty":bool,"stdin":bool,"height":N,"width":N}}` — sent once on open. No working-directory or user field.
   - `{"type":"stdin","data":"<base64>"}` — interactive input (TTY sessions).
   - `{"type":"resize","width":N,"height":N}` — terminal resize (TTY sessions).
 - Server → client frames: `{"type":"stdout"|"stderr","data":"<base64>"}`, terminal
   `{"type":"exit_code","exitCode":N}`, and `{"type":"error",…}`.
 
+**`start.command` is a single path, `execve`d literally — not a shell string.** Live
+validation (2026-07-08, `swedencentral`) showed the runtime treats `command` as `argv[0]`
+with no shell interpretation and no arguments: a joined `sh -lc '…'` string fails with
+`executable file not found in $PATH`. The reference SDK only ever sends a bare binary
+(`/bin/bash`) here and drives real work through stdin. To run an arbitrary argv with
+streaming output, `AzureSandboxApiClient.execStream()` stages the command as an executable
+`#!/bin/sh` wrapper script (writeFile → the files API writes it as `root:0644`, so a
+`chmod 0755` as `root` follows → so the non-root sandbox process can `execve` it) and sends
+that script path as `command`. `cwd` is folded into the wrapper (`cd … || exit 1`); `env`
+rides the start frame's `environment`.
+
 Autopod's `AzureSandboxApiClient.execStream()` implements the non-TTY variant, which flips
 `SandboxContainerManager.supportsStreamingExec` to `true` and unblocks agent runtimes on
-this target. The TTY variant is available for a future interactive-terminal integration.
+this target. The TTY variant is available for a future interactive-terminal integration
+(daemon terminal route — see the interactive-pods caveat above).
+
+The data-plane token scope is `https://dynamicsessions.io/.default` for both the HTTPS
+data plane and the WebSocket upgrade — the live run confirmed no per-endpoint scope split is
+needed. The exec-stream WebSocket accepts the Bearer token via undici's `headers` option on
+the upgrade, against the regional `management.<region>.azuredevcompute.io` endpoint, with no
+`api-version` query parameter.
 
 ## Preview Tunnel Proof
 
@@ -243,9 +261,15 @@ exec (chunk arrival timing + non-zero exit code propagation — see the `exec_st
 file write/read, workspace upload into staging, copy into writable `/workspace`, workspace
 sync-back, restricted egress-policy refresh, and then destroys the sandbox plus its disk image.
 
-> The streaming-exec leg is the live proof for the reverse-engineered `/exec/stream`
-> transport. It has **not** been run against Azure from CI — run this smoke once in a
-> credentialed environment before relying on `executionTarget: sandbox` for agent pods.
+> **Validated live on 2026-07-08** (`ewi-sandboxes` / `swedencentral` / group `autopod-spike`,
+> warm image `autopod/autopod-self:latest`). The full smoke passed: buffered exec, streaming
+> exec (`exec_stream={"exitCode":7,"chunks":4,"spreadMs":3006,…}` — three 1s-spaced echoes
+> arrived spread over 3s, confirming true streaming rather than a single buffered burst),
+> file I/O, workspace sync-in/out, and egress refresh. The run required the caller identity to
+> hold the `Container Apps SandboxGroup Data Owner` data-plane role (a `Contributor`-only login
+> gets 403 on the data plane). It also surfaced and fixed a real bug: the exec-stream
+> `start.command` is `execve`d literally, so `execStream()` now stages an executable wrapper
+> script instead of sending a shell string (see "Exec Streaming Transport" above).
 
 ## Cleanup Checks
 

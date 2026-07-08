@@ -13,6 +13,8 @@ import type {
   SandboxFileInfo,
   SandboxRegistryCredentials,
   SandboxStatus,
+  SandboxTerminalOptions,
+  SandboxTerminalSession,
 } from './sandbox-api-client.js';
 
 const API_VERSION = '2026-02-01-preview';
@@ -149,6 +151,8 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private readonly pollIntervalMs: number;
   private readonly dataEndpoint: string;
   private groupReady: Promise<void> | null = null;
+  /** Monotonic counter for unique per-exec streaming wrapper-script paths. */
+  private execStreamSeq = 0;
 
   constructor(config: AzureSandboxApiClientConfig, logger: Logger) {
     this.config = {
@@ -245,6 +249,17 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       );
     }
 
+    // The exec-stream `start.command` is a single string the sandbox runtime
+    // `execve`s literally as argv[0] — it is NOT shell-interpreted and carries
+    // no arguments (confirmed live: a joined `sh -lc '…'` string fails with
+    // "executable file not found in $PATH"). To run an arbitrary argv with
+    // streaming output we stage the command as an executable wrapper script and
+    // exec that single path instead. cwd/env fold into the script + start frame.
+    const scriptPath = await this.stageExecutableWrapper(
+      sandboxId,
+      streamExecScript(command, options?.cwd),
+    );
+
     const token = await this.getAzureToken(DATA_SCOPE, 'data access token', 'AZURE_AUTH');
     const wsUrl = `${this.dataEndpoint.replace(/^https:/, 'wss:')}${this.sandboxPath(
       sandboxId,
@@ -284,7 +299,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         JSON.stringify({
           type: 'start',
           start: {
-            command: streamExecCommandText(command, options?.cwd),
+            command: scriptPath,
             environment: { TERM: 'xterm-256color', LANG: 'C.UTF-8', ...options?.env },
             tty: false,
             stdin: false,
@@ -363,6 +378,139 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       if (timeoutTimer) clearTimeout(timeoutTimer);
       socket.close();
     }
+  }
+
+  /**
+   * Stage `scriptBody` as an executable wrapper under `/tmp` and return its path.
+   * The files API writes as `root:0644`, so the non-root sandbox process can
+   * neither `execve` nor chmod it itself — we `chmod 0755` as root and verify,
+   * since a silent failure here resurfaces later as an opaque "permission
+   * denied" execve error. Shared by `execStream` and `attachTerminal`, both of
+   * which need `command` to be a single executable path.
+   */
+  private async stageExecutableWrapper(sandboxId: string, scriptBody: string): Promise<string> {
+    const scriptPath = `/tmp/.autopod-execstream-${Date.now()}-${this.execStreamSeq++}.sh`;
+    await this.writeFile(sandboxId, scriptPath, Buffer.from(scriptBody, 'utf-8'));
+    const chmod = await this.exec(sandboxId, ['chmod', '0755', scriptPath], { user: 'root' });
+    if (chmod.exitCode !== 0) {
+      throw new AutopodError(
+        `Failed to stage sandbox exec-stream wrapper ${scriptPath}: chmod exited ${chmod.exitCode} ${chmod.stderr.trim()}`,
+        'AZURE_SANDBOX_EXEC_STREAM',
+        502,
+      );
+    }
+    return scriptPath;
+  }
+
+  /**
+   * Open an interactive TTY session over the exec-stream WebSocket (`tty:true`,
+   * `stdin:true`). The shell one-liner is staged as an executable wrapper (the
+   * `command` field is `execve`d literally — see `execStream`), then driven via
+   * `stdin`/`resize` frames; the server merges stdout+stderr into TTY output.
+   */
+  async attachTerminal(
+    sandboxId: string,
+    options: SandboxTerminalOptions,
+  ): Promise<SandboxTerminalSession> {
+    const shellCommand = options.shellCommand ?? 'exec /bin/bash -l';
+    const scriptPath = await this.stageExecutableWrapper(sandboxId, `#!/bin/sh\n${shellCommand}\n`);
+
+    const token = await this.getAzureToken(DATA_SCOPE, 'data access token', 'AZURE_AUTH');
+    const wsUrl = `${this.dataEndpoint.replace(/^https:/, 'wss:')}${this.sandboxPath(
+      sandboxId,
+    )}/exec/stream`;
+    const socket = this.webSocketFactory(wsUrl, { Authorization: `Bearer ${token.token}` });
+
+    const dataListeners: ((chunk: Buffer) => void)[] = [];
+    const exitListeners: ((code: number) => void)[] = [];
+    const errorListeners: ((err: Error) => void)[] = [];
+    let exited = false;
+    let closed = false;
+
+    const emitExit = (code: number) => {
+      if (exited) return;
+      exited = true;
+      for (const listener of exitListeners) listener(code);
+    };
+    const emitError = (err: Error) => {
+      for (const listener of errorListeners) listener(err);
+    };
+
+    socket.onopen = () => {
+      socket.send(
+        JSON.stringify({
+          type: 'start',
+          start: {
+            command: scriptPath,
+            environment: { TERM: 'xterm-256color', LANG: 'C.UTF-8', ...options.env },
+            tty: true,
+            stdin: true,
+            height: options.rows,
+            width: options.cols,
+          },
+        }),
+      );
+    };
+    socket.onmessage = (event) => {
+      try {
+        const frame = JSON.parse(String(event.data)) as {
+          type?: string;
+          data?: string;
+          exitCode?: number;
+        };
+        if (frame.type === 'stdout' || frame.type === 'stderr') {
+          const buf = Buffer.from(frame.data ?? '', 'base64');
+          for (const listener of dataListeners) listener(buf);
+        } else if (frame.type === 'exit_code') {
+          emitExit(Number(frame.exitCode ?? 0));
+          socket.close();
+        } else if (frame.type === 'error') {
+          emitError(
+            new AutopodError(
+              `Sandbox terminal on ${sandboxId} reported an error: ${String(event.data)}`,
+              'AZURE_SANDBOX_EXEC_STREAM',
+              502,
+            ),
+          );
+        }
+      } catch (err) {
+        emitError(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+    socket.onerror = () => {
+      emitError(
+        new AutopodError(
+          `Sandbox terminal WebSocket failed for ${sandboxId}`,
+          'AZURE_SANDBOX_EXEC_STREAM',
+          502,
+        ),
+      );
+    };
+    socket.onclose = () => {
+      closed = true;
+      // A clean shell exit sends `exit_code` first; if the socket closes without
+      // one, still surface a terminal exit so the route can close the client.
+      emitExit(0);
+    };
+
+    return {
+      onData: (listener) => dataListeners.push(listener),
+      onExit: (listener) => exitListeners.push(listener),
+      onError: (listener) => errorListeners.push(listener),
+      write: (data) => {
+        if (closed) return;
+        socket.send(JSON.stringify({ type: 'stdin', data: Buffer.from(data).toString('base64') }));
+      },
+      resize: (cols, rows) => {
+        if (closed) return;
+        socket.send(JSON.stringify({ type: 'resize', width: cols, height: rows }));
+      },
+      close: () => {
+        if (closed) return;
+        closed = true;
+        socket.close();
+      },
+    };
   }
 
   async writeFile(sandboxId: string, path: string, content: Buffer): Promise<void> {
@@ -1017,12 +1165,18 @@ function defaultWebSocketFactory(url: string, headers: Record<string, string>): 
 }
 
 /**
- * The exec-stream start frame has `environment` but no working-directory field,
- * so `cwd` is folded into the (shell-interpreted) command string.
+ * The exec-stream `start.command` is `execve`d literally as a single argv[0]
+ * (not shell-interpreted, no arguments), so an arbitrary argv can only be run
+ * by staging it as an executable wrapper script and exec-ing that path. This
+ * builds that script: a `#!/bin/sh` shebang, an optional `cd` into `cwd`, then
+ * `exec <argv>` so the command's exit code propagates as the script's own.
  */
-function streamExecCommandText(command: string[], cwd?: string): string {
-  const commandText = command.map(shellQuote).join(' ');
-  return cwd ? `cd ${shellQuote(cwd)} && ${commandText}` : commandText;
+function streamExecScript(command: string[], cwd?: string): string {
+  const argv = command.map(shellQuote).join(' ');
+  const lines = ['#!/bin/sh'];
+  if (cwd) lines.push(`cd ${shellQuote(cwd)} || exit 1`);
+  lines.push(`exec ${argv}`);
+  return `${lines.join('\n')}\n`;
 }
 
 function commandToShell(command: string[], env?: Record<string, string>): string {
