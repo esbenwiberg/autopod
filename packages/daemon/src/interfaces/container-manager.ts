@@ -138,4 +138,26 @@ export interface ContainerManager {
    * Sandboxes backend implements this over the exec-stream WebSocket TTY variant.
    */
   attachTerminal?(containerId: string, options: TerminalSessionOptions): Promise<TerminalSession>;
+  /**
+   * Expose an in-container port on a publicly-reachable URL. Optional — only the
+   * Sandboxes backend supports it (Docker pods use daemon-local host ports). The
+   * returned `url` may be undefined if the backend assigns it asynchronously and
+   * it did not materialize in time.
+   */
+  exposePort?(containerId: string, port: number, options?: ExposePortOptions): Promise<ExposedPort>;
+  /** Remove a previously exposed port. Idempotent. Optional (see `exposePort`). */
+  unexposePort?(containerId: string, port: number): Promise<void>;
+}
+
+export interface ExposePortOptions {
+  /** Entra ID email allowlist — the exposed URL requires sign-in by one of these. */
+  entraEmails?: string[];
+  /** Open the port with no auth (public internet). Opt-in only; never a default. */
+  anonymous?: boolean;
+}
+
+export interface ExposedPort {
+  port: number;
+  /** Public URL for the port, if the backend assigned one. */
+  url?: string;
 }

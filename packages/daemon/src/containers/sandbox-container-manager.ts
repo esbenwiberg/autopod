@@ -17,11 +17,14 @@ import type {
   ContainerSpawnConfig,
   ExecOptions,
   ExecResult,
+  ExposePortOptions,
+  ExposedPort,
   StreamingExecResult,
   TerminalSession,
   TerminalSessionOptions,
 } from '../interfaces/container-manager.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
+import type { SandboxPortAuth } from './sandbox-api-client.js';
 import {
   type SandboxApiClient,
   type SandboxExecOptions,
@@ -290,6 +293,29 @@ export class SandboxContainerManager implements ContainerManager {
       shellCommand,
       env: { COLUMNS: String(options.cols), LINES: String(options.rows) },
     });
+  }
+
+  async exposePort(
+    containerId: string,
+    port: number,
+    options?: ExposePortOptions,
+  ): Promise<ExposedPort> {
+    if (!this.client.addPort) {
+      throw new Error('Sandbox port exposure is not supported by this data-plane client.');
+    }
+    let auth: SandboxPortAuth | undefined;
+    if (options?.anonymous) {
+      auth = { mode: 'anonymous' };
+    } else if (options?.entraEmails?.length) {
+      auth = { mode: 'entra', emails: options.entraEmails };
+    }
+    const exposed = await this.client.addPort(containerId, port, auth);
+    return { port: exposed.port, url: exposed.url };
+  }
+
+  async unexposePort(containerId: string, port: number): Promise<void> {
+    if (!this.client.removePort) return;
+    await this.client.removePort(containerId, port);
   }
 
   /** Native streaming path — pipe SDK chunks into stdout/stderr streams. */

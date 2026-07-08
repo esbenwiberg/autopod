@@ -18,17 +18,18 @@ Supported:
 - Interactive terminal (`ap shell` / `ap attach`, `WS /pods/:podId/terminal`) over the exec-stream
   WebSocket TTY variant (`tty`/`stdin`/`resize` frames), with tmux-reattach parity where the warm
   image ships tmux. Validated live 2026-07-08.
+- Host preview URLs, two modes (see "Native Port Exposure" below):
+  - **Default**: daemon-side exec proxy (`sandbox-preview-proxy.ts`) → a daemon-local
+    `http://127.0.0.1:<hostPort>` URL.
+  - **Opt-in**: set `AUTOPOD_SANDBOX_NATIVE_PREVIEW_EMAILS` and sandbox pods instead expose their
+    app port on the platform's native public URL (`*.adcproxy.io`), Entra-gated to those emails.
+    Native-first with automatic fallback to the exec proxy; reachability is then probed inside the
+    sandbox (the Entra gate makes a host-side probe return 401). Local (Docker) pods are unaffected.
 
 Explicitly unsupported until Autopod wires up the remaining pieces:
 
-- Host preview URLs such as `http://127.0.0.1:<hostPort>` for sandbox pods still route through the
-  daemon-side exec proxy (`sandbox-preview-proxy.ts`) by default. Native inbound port exposure is
-  now available as a client capability (`SandboxApiClient.addPort`/`removePort`, validated live
-  2026-07-08 — see "Native Port Exposure" below), but is **not yet wired into the default preview
-  path**: the native URL is a public `*.adcproxy.io` address (Entra-gated by default), which changes
-  the preview access model versus the daemon-local proxy URL and would break daemon-side
-  reachability probes that expect a `200`. Complementary integration (native-first with proxy
-  fallback) is the tracked follow-up.
+- Source-IP ACLs (`ipAccessControl`) on exposed ports — the reference SDK's `addPort` doesn't model
+  them yet.
 - Sidecars. Reason: current sidecars require a Docker bridge network shared with the pod container.
 
 ## Exec Streaming Transport
@@ -86,6 +87,14 @@ exec proxy. `SandboxApiClient.addPort(sandboxId, port, auth?)` / `removePort(san
 `https://…--3000.swedencentral.adcproxy.io`; an unauthenticated request returned **401** (gated, no
 leak), and after `removePort` the URL returned **404**. Source-IP ACLs (`ipAccessControl`) are not
 yet modeled — the reference SDK's `addPort` doesn't set them; tracked as a follow-up.
+
+**Preview integration.** `pod-manager`'s `ensureSandboxPreviewProxy` prefers native exposure when
+`AUTOPOD_SANDBOX_NATIVE_PREVIEW_EMAILS` is set (comma/space-separated Entra allowlist — this is both
+the enable switch and where you put your own UPN/email), and falls back to the exec proxy if unset
+or on any failure. When native is active, `pod.previewUrl` is the `adcproxy.io` URL and the preview
+supervisor probes app reachability **inside** the sandbox (`curl localhost:3000`) since a host-side
+probe of the Entra-gated URL would just see 401. `removePort` runs on preview teardown. Local
+(Docker) pods are unaffected — they keep their `http://127.0.0.1:<hostPort>` path.
 
 ## Preview Tunnel Proof
 

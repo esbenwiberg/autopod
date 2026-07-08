@@ -494,6 +494,20 @@ function allocateHostPort(): number {
 /** Default container port for app servers (matches Dockerfile HEALTHCHECK). */
 const CONTAINER_APP_PORT = 3000;
 
+/**
+ * Entra email allowlist for native sandbox preview URLs. When set (comma/space
+ * separated), sandbox pods expose their app port through the platform's native
+ * public URL (Entra-gated to these addresses) instead of the daemon-side exec
+ * proxy; unset preserves the exec-proxy behavior. This is both the enable switch
+ * and the "where do I put my email" answer for native preview.
+ */
+function nativePreviewEmails(): string[] {
+  return (process.env.AUTOPOD_SANDBOX_NATIVE_PREVIEW_EMAILS ?? '')
+    .split(/[,\s]+/)
+    .map((email) => email.trim())
+    .filter(Boolean);
+}
+
 /** Path to the agent shim script inside every pod container. */
 export const AGENT_SHIM_PATH = '/run/autopod/agent-shim.sh';
 export const AGENT_ENV_PATH = '/run/autopod/agent-env.sh';
@@ -2007,6 +2021,48 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     string,
     { containerId: string; proxy: SandboxPreviewProxy }
   >();
+  // Pods whose preview is served by a native platform port (not the exec proxy).
+  const nativePreviewPorts = new Map<string, { containerId: string; port: number; url: string }>();
+
+  /**
+   * Try to expose the app port on the platform's native public URL (Entra-gated
+   * to the configured allowlist). Returns the URL on success, or null to fall
+   * back to the daemon-side exec proxy. Never throws — a native failure must not
+   * break preview, which has a working fallback.
+   */
+  async function tryNativeSandboxPreview(pod: Pod, containerId: string): Promise<string | null> {
+    const emails = nativePreviewEmails();
+    if (emails.length === 0) return null;
+    const cm = containerManagerFactory.get('sandbox');
+    if (!cm.exposePort) return null;
+
+    const cached = nativePreviewPorts.get(pod.id);
+    if (cached?.containerId === containerId) return cached.url;
+    if (cached) nativePreviewPorts.delete(pod.id);
+
+    try {
+      const exposed = await cm.exposePort(containerId, CONTAINER_APP_PORT, { entraEmails: emails });
+      if (!exposed.url) {
+        logger.warn(
+          { podId: pod.id },
+          'Native sandbox port exposed but no URL assigned; falling back to preview proxy',
+        );
+        return null;
+      }
+      nativePreviewPorts.set(pod.id, { containerId, port: CONTAINER_APP_PORT, url: exposed.url });
+      if (pod.previewUrl !== exposed.url) {
+        podRepo.update(pod.id, { previewUrl: exposed.url });
+      }
+      logger.info({ podId: pod.id, url: exposed.url }, 'Native sandbox preview URL exposed');
+      return exposed.url;
+    } catch (err) {
+      logger.warn(
+        { err, podId: pod.id },
+        'Native sandbox port exposure failed; falling back to preview proxy',
+      );
+      return null;
+    }
+  }
 
   async function ensureSandboxPreviewProxy(pod: Pod): Promise<string> {
     if (pod.executionTarget !== 'sandbox') {
@@ -2024,7 +2080,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       );
     }
 
+    // Prefer the platform's native public port when configured; fall back to the
+    // daemon-side exec proxy otherwise (or on failure).
+    const nativeUrl = await tryNativeSandboxPreview(pod, pod.containerId);
+    if (nativeUrl) {
+      // A native URL supersedes any previously-started exec proxy for this pod.
+      if (sandboxPreviewProxies.has(pod.id)) await stopSandboxPreviewProxy(pod.id);
+      return nativeUrl;
+    }
+
     let previewUrl = pod.previewUrl;
+    // A stale native URL (native since disabled/failed) must not be reused as a
+    // proxy host-port — reset it so a fresh 127.0.0.1 URL is allocated below.
+    if (previewUrl && !previewUrl.startsWith('http://127.0.0.1')) {
+      previewUrl = null;
+    }
     if (!previewUrl) {
       previewUrl = `http://127.0.0.1:${allocateHostPort()}`;
       podRepo.update(pod.id, { previewUrl });
@@ -2055,6 +2125,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   }
 
   async function stopSandboxPreviewProxy(podId: string): Promise<void> {
+    const native = nativePreviewPorts.get(podId);
+    if (native) {
+      nativePreviewPorts.delete(podId);
+      const cm = containerManagerFactory.get('sandbox');
+      await cm.unexposePort?.(native.containerId, native.port).catch((err) => {
+        logger.warn({ err, podId }, 'Failed to remove native sandbox preview port');
+      });
+    }
     const existing = sandboxPreviewProxies.get(podId);
     if (!existing) return;
     sandboxPreviewProxies.delete(podId);
@@ -11054,7 +11132,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           : // biome-ignore lint/style/noNonNullAssertion: checked before status probe
             pod.previewUrl!;
 
-      // Exec four parallel reads inside the container + HTTP probe from the host.
+      // A native sandbox preview URL is Entra-gated, so a host-side fetch just
+      // gets 401 — probe the app from inside the container instead (the real
+      // liveness signal). The daemon-local proxy URL (127.0.0.1) is fetched
+      // directly as before.
+      const isNativePreview =
+        pod.executionTarget === 'sandbox' && !previewUrl.startsWith('http://127.0.0.1');
+
+      // Exec parallel reads inside the container + an HTTP probe.
       const [pidResult, restartCountResult, logTailResult, httpProbeResult] = await Promise.all([
         cm
           .execInContainer(
@@ -11077,9 +11162,27 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             {},
           )
           .catch(() => null),
-        fetch(previewUrl, { signal: AbortSignal.timeout(3_000) })
-          .then((r) => r.status)
-          .catch(() => null),
+        isNativePreview
+          ? cm
+              .execInContainer(
+                pod.containerId,
+                [
+                  'sh',
+                  '-c',
+                  // Prefer curl for the exact status code; fall back to wget (treat
+                  // a 2xx/3xx success as 200) so leaner warm images still probe.
+                  `code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://localhost:${CONTAINER_APP_PORT} 2>/dev/null); if [ -n "$code" ] && [ "$code" != "000" ]; then echo "$code"; elif wget -q -T 3 -O /dev/null http://localhost:${CONTAINER_APP_PORT} 2>/dev/null; then echo 200; fi`,
+                ],
+                {},
+              )
+              .then((r) => {
+                const code = Number.parseInt(r.stdout.trim(), 10);
+                return Number.isFinite(code) && code > 0 ? code : null;
+              })
+              .catch(() => null)
+          : fetch(previewUrl, { signal: AbortSignal.timeout(3_000) })
+              .then((r) => r.status)
+              .catch(() => null),
       ]);
 
       // Check PID liveness: if we got a PID string, verify the process is still alive.
