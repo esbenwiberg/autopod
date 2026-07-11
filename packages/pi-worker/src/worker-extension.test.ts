@@ -139,4 +139,28 @@ describe('Pi worker extension', () => {
     expect(clients[0]?.closed).toEqual([true]);
     expect(clients[1]?.closed).toEqual([true]);
   });
+
+  it('closes discovered MCP clients when native Pi registration fails', async () => {
+    const clients = [
+      new FakeMcpClient('autopod', [{ name: 'ask_human', inputSchema: { type: 'object' } }]),
+      new FakeMcpClient('nav', [{ name: 'find_symbol', inputSchema: { type: 'object' } }]),
+    ];
+
+    await expect(
+      initializePiWorkerExtension(
+        config(['autopod', 'nav']),
+        {
+          registerTool: (tool) => {
+            if (tool.name === 'find_symbol') throw new Error('Pi rejected the tool');
+          },
+        },
+        { clients },
+      ),
+    ).rejects.toMatchObject({
+      name: 'PiWorkerStartupError',
+      code: 'server_initialization_failed',
+    });
+    expect(clients[0]?.closed).toEqual([true]);
+    expect(clients[1]?.closed).toEqual([true]);
+  });
 });

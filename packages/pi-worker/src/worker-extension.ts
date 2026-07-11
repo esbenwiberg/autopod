@@ -61,13 +61,22 @@ export async function initializePiWorkerExtension(
     names.set(tool.piName, tool.serverName);
   }
 
-  for (const tool of discovered.tools) {
-    await registry.registerTool({
-      name: tool.piName,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-      call: (args, callOptions) => tool.call(args, callOptions?.signal),
-    });
+  try {
+    for (const tool of discovered.tools) {
+      await registry.registerTool({
+        name: tool.piName,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        call: (args, callOptions) => tool.call(args, callOptions?.signal),
+      });
+    }
+  } catch (error) {
+    await closeClients(discovered.clients);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new PiWorkerStartupError(
+      `Failed to register mandatory MCP tool surface: ${message}`,
+      'server_initialization_failed',
+    );
   }
 }
 
