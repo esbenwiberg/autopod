@@ -113,6 +113,7 @@ export async function buildProviderEnv(
 }
 
 const SECRET_DIR = '/run/autopod';
+const CODEX_HOME_DIR = `${CONTAINER_HOME_DIR}/.codex`;
 
 function isMaxSetupTokenCredentials(creds: MaxCredentials): creds is MaxSetupTokenCredentials {
   return (
@@ -163,10 +164,10 @@ function buildOpenAiEnv(auth: ProviderAuthResolution): ProviderEnvResult {
   const creds = auth.credentials;
   if (creds?.provider === 'openai' && creds.authJson) {
     return {
-      env: withRuntimeTelemetryOptOutEnv(),
+      env: withRuntimeTelemetryOptOutEnv({ CODEX_HOME: CODEX_HOME_DIR }),
       containerFiles: [
         ...buildClaudeConfigFiles(),
-        { path: `${CONTAINER_HOME_DIR}/.codex/auth.json`, content: creds.authJson },
+        { path: `${CODEX_HOME_DIR}/auth.json`, content: creds.authJson },
       ],
       secretFiles: [],
       requiresPostExecPersistence: true,
@@ -175,7 +176,7 @@ function buildOpenAiEnv(auth: ProviderAuthResolution): ProviderEnvResult {
     };
   }
 
-  const env = withRuntimeTelemetryOptOutEnv();
+  const env = withRuntimeTelemetryOptOutEnv({ CODEX_HOME: CODEX_HOME_DIR });
   const secretFiles: ProviderEnvResult['secretFiles'] = [];
 
   const apiKey = process.env.OPENAI_API_KEY;
@@ -338,7 +339,10 @@ function buildOpenRouterEnv(profile: Profile, auth: ProviderAuthResolution): Pro
     process.env.OPENROUTER_API_KEY;
 
   const filePath = `${SECRET_DIR}/openrouter-api-key`;
-  const env = withRuntimeTelemetryOptOutEnv({ OPENAI_BASE_URL: baseUrl });
+  const env = withRuntimeTelemetryOptOutEnv({
+    CODEX_HOME: CODEX_HOME_DIR,
+    OPENAI_BASE_URL: baseUrl,
+  });
   const secretFiles: ProviderEnvResult['secretFiles'] = [];
 
   if (apiKey) {
@@ -437,6 +441,7 @@ function buildFoundryOpenAiEnv(
 ): ProviderEnvResult {
   const filePath = `${SECRET_DIR}/foundry-openai-key`;
   const env = withRuntimeTelemetryOptOutEnv({
+    CODEX_HOME: CODEX_HOME_DIR,
     OPENAI_BASE_URL: creds.endpoint,
     OPENAI_API_KEY_FILE: filePath,
     AZURE_OPENAI_ENDPOINT: creds.endpoint,

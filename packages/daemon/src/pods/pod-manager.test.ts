@@ -8866,6 +8866,7 @@ describe('worker startup diagnostics', () => {
     );
     expect(runtime.spawn).toHaveBeenCalled();
     const spawnConfig = vi.mocked(runtime.spawn).mock.calls[0]?.[0];
+    expect(spawnConfig?.env.CODEX_HOME).toBe('/home/autopod/.codex');
     expect(spawnConfig?.customInstructions).toContain('report_plan');
     expect(spawnConfig?.customInstructions).toContain('report_task_summary');
   });

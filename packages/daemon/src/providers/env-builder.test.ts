@@ -129,6 +129,7 @@ describe('buildProviderEnv', () => {
 
       const result = await buildProviderEnv(profile, 'pod-1', logger);
 
+      expect(result.env.CODEX_HOME).toBe('/home/autopod/.codex');
       expect(result.env.OPENAI_API_KEY_FILE).toBeUndefined();
       expect(result.secretFiles).toHaveLength(0);
       expect(result.containerFiles).toEqual(
@@ -170,6 +171,7 @@ describe('buildProviderEnv', () => {
 
       const result = await buildProviderEnv(profile, 'pod-1', logger, { providerAccountStore });
 
+      expect(result.env.CODEX_HOME).toBe('/home/autopod/.codex');
       expect(providerAccountStore.touchLastUsed).toHaveBeenCalledWith('team-openai');
       expect(result.containerFiles).toEqual(
         expect.arrayContaining([
@@ -211,6 +213,7 @@ describe('buildProviderEnv', () => {
 
       const result = await buildProviderEnv(profile, 'pod-1', logger);
 
+      expect(result.env.CODEX_HOME).toBe('/home/autopod/.codex');
       expect(result.env.OPENAI_API_KEY).toBeUndefined();
       expect(result.env.OPENAI_API_KEY_FILE).toBe('/run/autopod/openai-api-key');
       expect(result.env.ANTHROPIC_API_KEY_FILE).toBeUndefined();
@@ -427,6 +430,7 @@ describe('buildProviderEnv', () => {
 
       const result = await buildProviderEnv(profile, 'pod-1', logger);
 
+      expect(result.env.CODEX_HOME).toBe('/home/autopod/.codex');
       expect(result.env.OPENAI_BASE_URL).toBe('https://openrouter.ai/api/v1');
       expect(result.env.OPENAI_API_KEY_FILE).toBe('/run/autopod/openrouter-api-key');
       // Raw key must NOT be in env
@@ -482,6 +486,7 @@ describe('buildProviderEnv', () => {
 
       const result = await buildProviderEnv(profile, 'pod-1', logger);
 
+      expect(result.env.CODEX_HOME).toBe('/home/autopod/.codex');
       expect(result.env.OPENAI_BASE_URL).toBe('https://openrouter.ai/api/v1');
       expect(result.env.OPENAI_API_KEY_FILE).toBeUndefined();
       expect(result.secretFiles).toHaveLength(0);
@@ -526,6 +531,7 @@ describe('buildProviderEnv', () => {
       expect(result.env.ANTHROPIC_API_KEY_FILE).toBeUndefined();
 
       // OpenAI/Azure-OpenAI env vars set instead
+      expect(result.env.CODEX_HOME).toBe('/home/autopod/.codex');
       expect(result.env.OPENAI_BASE_URL).toBe('https://my-foundry.openai.azure.com');
       expect(result.env.AZURE_OPENAI_ENDPOINT).toBe('https://my-foundry.openai.azure.com');
       expect(result.env.OPENAI_API_KEY_FILE).toBe('/run/autopod/foundry-openai-key');
