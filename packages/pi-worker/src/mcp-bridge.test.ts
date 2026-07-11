@@ -38,6 +38,7 @@ async function startHttpMcpServer(options: {
   const calls: RecordedHttpCall[] = [];
   let aborted = false;
   let longCallStarted: (() => void) | undefined;
+  const sessionId = 'test-session-id';
   const longCall = new Promise<void>((resolve) => {
     longCallStarted = resolve;
   });
@@ -46,7 +47,13 @@ async function startHttpMcpServer(options: {
     calls.push({ method: req.method ?? 'GET', headers: req.headers, body });
     const rpc = body as { id?: string | number; method?: string; params?: { name?: string } };
     if (rpc.method === 'initialize') {
+      res.setHeader('Mcp-Session-Id', sessionId);
       sendJson(res, { jsonrpc: '2.0', id: rpc.id, result: { protocolVersion: '2025-06-18' } });
+      return;
+    }
+    if (req.headers['mcp-session-id'] !== sessionId) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('missing MCP session header');
       return;
     }
     if (rpc.method === 'notifications/initialized') {
@@ -83,13 +90,25 @@ async function startHttpMcpServer(options: {
       return;
     }
     if (rpc.method === 'tools/call') {
-      sendJson(res, {
-        jsonrpc: '2.0',
-        id: rpc.id,
-        result: {
-          content: [{ type: 'text', text: `${options.resultText}:${JSON.stringify(rpc.params)}` }],
-        },
-      });
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(
+        `event: message\ndata: ${JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'notifications/progress',
+          params: { progress: 1 },
+        })}\n\n`,
+      );
+      res.end(
+        `event: message\ndata: ${JSON.stringify({
+          jsonrpc: '2.0',
+          id: rpc.id,
+          result: {
+            content: [
+              { type: 'text', text: `${options.resultText}:${JSON.stringify(rpc.params)}` },
+            ],
+          },
+        })}\n\n`,
+      );
       return;
     }
     sendJson(res, { jsonrpc: '2.0', id: rpc.id, result: {} });
@@ -206,6 +225,9 @@ describe('MCP bridge', () => {
       );
       expect(String(http.calls[0]?.headers.authorization)).toBe('Bearer test-token');
       expect(String(http.calls[0]?.headers['x-autopod-pod'])).toBe('lucky-kiwi');
+      expect(http.calls.some((call) => call.headers['mcp-session-id'] === 'test-session-id')).toBe(
+        true,
+      );
       expect((await stdio.readLog()).some((entry) => entry.method === 'tools/call')).toBe(true);
       await Promise.all(clients.map((client) => client.close()));
     } finally {

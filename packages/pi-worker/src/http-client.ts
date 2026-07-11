@@ -23,6 +23,7 @@ export class HttpMcpClient implements McpClient {
   private readonly url: string;
   private readonly headers: Record<string, string>;
   private readonly maxResultBytes: number | undefined;
+  private sessionId?: string;
 
   constructor(config: {
     serverName: string;
@@ -64,19 +65,22 @@ export class HttpMcpClient implements McpClient {
         headers: {
           Accept: 'application/json, text/event-stream',
           'Content-Type': 'application/json',
+          ...(this.sessionId ? { 'Mcp-Session-Id': this.sessionId } : {}),
           ...this.headers,
         },
         body: JSON.stringify(payload),
         signal,
       });
       const text = await response.text();
+      this.sessionId = response.headers.get('mcp-session-id') ?? this.sessionId;
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${text.slice(0, 300)}`);
       }
       if (text.trim().length === 0) {
         return { jsonrpc: '2.0' as const, id: 0, result: {} };
       }
-      return parseHttpJsonRpcPayload(text);
+      const expectedId = isJsonRpcRequest(payload) ? payload.id : undefined;
+      return parseHttpJsonRpcPayload(text, expectedId);
     } catch (error) {
       if (signal?.aborted) throw error;
       const detail = sanitizeTransportDetail(error);
@@ -87,4 +91,13 @@ export class HttpMcpClient implements McpClient {
       );
     }
   }
+}
+
+function isJsonRpcRequest(payload: unknown): payload is { id: string | number } {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    'id' in payload &&
+    (typeof payload.id === 'string' || typeof payload.id === 'number')
+  );
 }

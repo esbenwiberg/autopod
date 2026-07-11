@@ -131,11 +131,13 @@ export function parseCallToolResult(
   return result as McpCallToolResult;
 }
 
-export function parseHttpJsonRpcPayload(text: string): JsonRpcResponse {
+export function parseHttpJsonRpcPayload(
+  text: string,
+  expectedId?: string | number,
+): JsonRpcResponse {
   const trimmed = text.trim();
   if (trimmed.startsWith('event:') || trimmed.startsWith('data:')) {
-    const data = parseSseData(trimmed);
-    return parseJsonRpcResponse(JSON.parse(data));
+    return parseSseResponse(trimmed, expectedId);
   }
   return parseJsonRpcResponse(JSON.parse(trimmed));
 }
@@ -148,15 +150,29 @@ export function sanitizeTransportDetail(detail: unknown): string {
     .slice(0, 500);
 }
 
-function parseSseData(payload: string): string {
-  const lines = payload.split(/\r?\n/);
-  const dataLines = lines
+function parseSseResponse(payload: string, expectedId?: string | number): JsonRpcResponse {
+  const responses: JsonRpcResponse[] = [];
+  for (const event of payload.split(/\r?\n\r?\n/)) {
+    const data = parseSseEventData(event);
+    if (!data) continue;
+    try {
+      const response = parseJsonRpcResponse(JSON.parse(data));
+      responses.push(response);
+      if (expectedId === undefined || response.id === expectedId) return response;
+    } catch {}
+  }
+  if (responses.length === 0) {
+    throw new Error('MCP HTTP SSE response did not contain a JSON-RPC response');
+  }
+  throw new Error(`MCP HTTP SSE response did not contain response id ${String(expectedId)}`);
+}
+
+function parseSseEventData(event: string): string | undefined {
+  const dataLines = event
+    .split(/\r?\n/)
     .filter((line) => line.startsWith('data:'))
     .map((line) => line.slice('data:'.length).trimStart());
-  if (dataLines.length === 0) {
-    throw new Error('MCP HTTP response contained SSE without data');
-  }
-  return dataLines.join('\n');
+  return dataLines.length > 0 ? dataLines.join('\n') : undefined;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
