@@ -25,7 +25,6 @@ import {
 interface PendingRequest {
   resolve(response: JsonRpcResponse): void;
   reject(error: Error): void;
-  abort?: () => void;
 }
 
 export class StdioMcpClient implements McpClient {

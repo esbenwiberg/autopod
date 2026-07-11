@@ -41,21 +41,26 @@ export async function discoverMcpTools(
   const tools: RegisteredMcpTool[] = [];
   const prefix = config.toolNamePrefix ?? '';
 
-  for (const client of clients) {
-    await client.initialize(options.signal);
-    const definitions = await client.listTools(options.signal);
-    for (const definition of definitions) {
-      const piName = `${prefix}${definition.name}`;
-      tools.push({
-        serverName: client.serverName,
-        mcpName: definition.name,
-        piName,
-        description: definition.description,
-        inputSchema: definition.inputSchema ?? { type: 'object', properties: {} },
-        call: (args: JsonObject, signal?: AbortSignal) =>
-          client.callTool(definition.name, args, signal),
-      });
+  try {
+    for (const client of clients) {
+      await client.initialize(options.signal);
+      const definitions = await client.listTools(options.signal);
+      for (const definition of definitions) {
+        const piName = `${prefix}${definition.name}`;
+        tools.push({
+          serverName: client.serverName,
+          mcpName: definition.name,
+          piName,
+          description: definition.description,
+          inputSchema: definition.inputSchema ?? { type: 'object', properties: {} },
+          call: (args: JsonObject, signal?: AbortSignal) =>
+            client.callTool(definition.name, args, signal),
+        });
+      }
     }
+  } catch (error) {
+    await Promise.all(clients.map((client) => client.close().catch(() => undefined)));
+    throw error;
   }
 
   return { tools, clients };

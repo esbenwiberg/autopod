@@ -30,7 +30,6 @@ export async function initializePiWorkerExtension(
   try {
     discovered = await discoverMcpTools(config, options);
   } catch (error) {
-    await closeClients(options.clients);
     const message = error instanceof Error ? error.message : String(error);
     throw new PiWorkerStartupError(
       `Failed to initialize mandatory MCP tool surface: ${message}`,
