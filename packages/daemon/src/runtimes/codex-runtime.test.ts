@@ -1087,6 +1087,50 @@ describe('CodexRuntime', () => {
       expect(written).not.toContain('command =');
     });
 
+    it('makes the generated config private and readable by the autopod user', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await callWriteMcpConfig(runtime)('c1', [
+        {
+          name: 'escalation',
+          url: 'http://host.docker.internal:3100/mcp/abc',
+          headers: { Authorization: 'Bearer tok123' },
+        },
+      ]);
+
+      expect(cm.execInContainer).toHaveBeenCalledWith(
+        'c1',
+        [
+          'sh',
+          '-c',
+          "chown autopod:autopod '/home/autopod/.codex/config.toml' && chmod 0600 '/home/autopod/.codex/config.toml'",
+        ],
+        { timeout: 5_000, user: 'root' },
+      );
+    });
+
+    it('fails closed when the generated config permissions cannot be secured', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      vi.mocked(cm.execInContainer).mockResolvedValueOnce({
+        stdout: '',
+        stderr: 'Operation not permitted',
+        exitCode: 1,
+      });
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await expect(
+        callWriteMcpConfig(runtime)('c1', [
+          {
+            name: 'escalation',
+            url: 'http://host.docker.internal:3100/mcp/abc',
+          },
+        ]),
+      ).rejects.toThrow('Failed to secure Codex MCP config');
+    });
+
     it('emits stdio entries with command/args/env (not url)', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);

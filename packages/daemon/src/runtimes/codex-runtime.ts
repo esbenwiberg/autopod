@@ -2,7 +2,7 @@ import { type Dirent, createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
-import { CONTAINER_HOME_DIR } from '@autopod/shared';
+import { CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/shared';
 import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
@@ -569,6 +569,20 @@ export class CodexRuntime implements Runtime {
       MCP_CONFIG_PATH,
       `${sections.join('\n\n')}\n`,
     );
+    const secureConfig = await this.containerManager.execInContainer(
+      containerId,
+      [
+        'sh',
+        '-c',
+        `chown ${CONTAINER_USER}:${CONTAINER_USER} '${MCP_CONFIG_PATH}' && chmod 0600 '${MCP_CONFIG_PATH}'`,
+      ],
+      { timeout: 5_000, user: 'root' },
+    );
+    if (secureConfig.exitCode !== 0) {
+      throw new Error(
+        `Failed to secure Codex MCP config (exit ${secureConfig.exitCode}): ${secureConfig.stderr}`,
+      );
+    }
   }
 }
 
