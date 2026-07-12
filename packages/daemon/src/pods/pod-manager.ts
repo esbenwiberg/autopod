@@ -5186,11 +5186,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         resolvedPod.validationSuite = 'off';
       }
       if (resolvedPod.agentMode === 'interactive' && executionTarget !== 'local') {
-        throw new AutopodError(
-          'Interactive pods only support local execution target',
-          'INVALID_CONFIGURATION',
-          400,
-        );
+        const interactiveCm = containerManagerFactory.get(executionTarget);
+        if (!interactiveCm.attachTerminal) {
+          throw new AutopodError(
+            `Interactive pods on execution target '${executionTarget}' require a container backend with interactive terminal support (attachTerminal)`,
+            'INVALID_CONFIGURATION',
+            400,
+          );
+        }
       }
       if (executionTarget === 'sandbox') {
         if (!profile.warmImageTag) {

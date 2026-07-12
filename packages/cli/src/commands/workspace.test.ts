@@ -64,6 +64,7 @@ describe('workspace commands', () => {
   let program: Command;
   let mockClient: AutopodClient;
   let attachSession: ReturnType<typeof vi.fn>;
+  let terminalSession: ReturnType<typeof vi.fn>;
   let pickProfile: ReturnType<typeof vi.fn>;
   let sleep: ReturnType<typeof vi.fn>;
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -74,11 +75,13 @@ describe('workspace commands', () => {
     program.exitOverride();
     mockClient = createMockClient();
     attachSession = vi.fn().mockResolvedValue(0);
+    terminalSession = vi.fn().mockResolvedValue(0);
     pickProfile = vi.fn().mockResolvedValue('picked-profile');
     sleep = vi.fn().mockResolvedValue(undefined);
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     registerWorkspaceCommands(program, () => mockClient, {
       runAttachSession: attachSession,
+      runTerminalSession: terminalSession,
       pickProfile,
       sleep,
     });
@@ -173,31 +176,42 @@ describe('workspace commands', () => {
     expect(attachSession).toHaveBeenCalledWith('autopod-abcd1234');
   });
 
-  it('shell rejects sandbox-profile defaults before creating a workspace pod', async () => {
-    vi.mocked(mockClient.getProfile).mockResolvedValueOnce({
-      name: 'test-profile',
+  it('shell attaches to sandbox pods through the daemon terminal session', async () => {
+    const sandboxPod = makePod({
       executionTarget: 'sandbox',
-    } as Awaited<ReturnType<AutopodClient['getProfile']>>);
+      status: 'running',
+      containerId: 'sbx-1',
+    });
+    vi.mocked(mockClient.createSession).mockResolvedValueOnce(sandboxPod);
+    vi.mocked(mockClient.getSession).mockResolvedValue(sandboxPod);
 
-    await expect(program.parseAsync(['node', 'ap', 'shell', 'test-profile'])).rejects.toThrow(
-      /Sandbox interactive pods are not supported/,
+    await program.parseAsync(['node', 'ap', 'shell', 'test-profile']);
+
+    expect(mockClient.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ profileName: 'test-profile', outputMode: 'workspace' }),
     );
-
-    expect(mockClient.createSession).not.toHaveBeenCalled();
+    expect(terminalSession).toHaveBeenCalledWith(mockClient, 'abcd1234');
     expect(attachSession).not.toHaveBeenCalled();
   });
 
-  it('workspace rejects sandbox-profile defaults before creating an interactive pod', async () => {
-    vi.mocked(mockClient.getProfile).mockResolvedValueOnce({
-      name: 'test-profile',
+  it('attach uses the daemon terminal session for sandbox pods', async () => {
+    const sandboxPod = makePod({
       executionTarget: 'sandbox',
-    } as Awaited<ReturnType<AutopodClient['getProfile']>>);
+      status: 'running',
+      containerId: 'sbx-1',
+    });
+    vi.mocked(mockClient.getSession).mockResolvedValue(sandboxPod);
 
-    await expect(program.parseAsync(['node', 'ap', 'workspace', 'test-profile'])).rejects.toThrow(
-      /Sandbox interactive pods are not supported/,
-    );
+    await program.parseAsync(['node', 'ap', 'attach', 'abcd1234']);
 
-    expect(mockClient.createSession).not.toHaveBeenCalled();
+    expect(terminalSession).toHaveBeenCalledWith(mockClient, 'abcd1234');
     expect(attachSession).not.toHaveBeenCalled();
+  });
+
+  it('attach keeps the docker exec path for local pods', async () => {
+    await program.parseAsync(['node', 'ap', 'attach', 'abcd1234']);
+
+    expect(attachSession).toHaveBeenCalledWith('autopod-abcd1234');
+    expect(terminalSession).not.toHaveBeenCalled();
   });
 });

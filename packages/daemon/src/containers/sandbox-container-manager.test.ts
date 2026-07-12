@@ -26,6 +26,8 @@ import type {
   SandboxFileInfo,
   SandboxPortAuth,
   SandboxStatus,
+  SandboxTerminalOptions,
+  SandboxTerminalSession,
 } from './sandbox-api-client.js';
 import {
   SandboxContainerManager,
@@ -213,6 +215,35 @@ class StreamingFakeClient extends FakeSandboxApiClient {
   }
 }
 
+/** A client variant exposing an interactive TTY session. */
+class TerminalFakeClient extends FakeSandboxApiClient {
+  readonly attachCalls: Array<{ id: string; options: SandboxTerminalOptions }> = [];
+  readonly resumeCalls: string[] = [];
+
+  override async resume(sandboxId: string): Promise<void> {
+    this.resumeCalls.push(sandboxId);
+    await super.resume(sandboxId);
+  }
+
+  async attachTerminal(
+    sandboxId: string,
+    options: SandboxTerminalOptions,
+  ): Promise<SandboxTerminalSession> {
+    if ((await this.getStatus(sandboxId)) !== 'running') {
+      throw new Error(`sandbox ${sandboxId} is not running`);
+    }
+    this.attachCalls.push({ id: sandboxId, options });
+    return {
+      onData: () => {},
+      onExit: () => {},
+      onError: () => {},
+      write: () => {},
+      resize: () => {},
+      close: () => {},
+    };
+  }
+}
+
 function readStream(stream: Readable): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -394,6 +425,31 @@ describe('SandboxContainerManager', () => {
     it('getStatus returns unknown for a missing sandbox', async () => {
       const mgr = new SandboxContainerManager(new FakeSandboxApiClient(), logger);
       expect(await mgr.getStatus('nope')).toBe('unknown');
+    });
+
+    it('attachTerminal resumes an auto-suspended sandbox before attaching', async () => {
+      const client = new TerminalFakeClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      await mgr.stop(id);
+
+      const session = await mgr.attachTerminal?.(id, { cols: 120, rows: 40 });
+
+      expect(session).toBeDefined();
+      expect(client.resumeCalls).toEqual([id]);
+      expect(await mgr.getStatus(id)).toBe('running');
+      expect(client.attachCalls).toHaveLength(1);
+      expect(client.attachCalls[0]?.options.shellCommand).toContain('tmux new-session -A -s main');
+      expect(client.attachCalls[0]?.options.env).toEqual({ COLUMNS: '120', LINES: '40' });
+    });
+
+    it('attachTerminal rejects when the data-plane client has no TTY support', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      await expect(mgr.attachTerminal?.(id, { cols: 80, rows: 24 })).rejects.toThrow(
+        /no exec-stream TTY support/,
+      );
     });
 
     it('refreshFirewall reapplies the last known policy by default', async () => {

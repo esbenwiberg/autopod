@@ -302,6 +302,14 @@ function createMockContainerManager(): ContainerManager {
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
     execStreaming: vi.fn(),
+    attachTerminal: vi.fn(async () => ({
+      onData: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+    })),
   };
 }
 
@@ -785,11 +793,27 @@ describe('PodManager', () => {
       expect(ctx.podRepo.list()).toHaveLength(0);
     });
 
-    it('rejects interactive workspace pods when the profile default target is sandbox', () => {
+    it('allows interactive workspace pods on sandbox when the backend supports terminals', () => {
       const ctx = createTestContext(undefined, {
         executionTarget: 'sandbox',
         warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
       });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Workspace', outputMode: 'workspace' },
+        'user-1',
+      );
+      expect(pod.executionTarget).toBe('sandbox');
+      expect(ctx.podRepo.list()).toHaveLength(1);
+    });
+
+    it('rejects interactive sandbox pods when the backend has no terminal support', () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      Object.assign(ctx.containerManager, { attachTerminal: undefined });
       const manager = createPodManager(ctx.deps);
 
       expect(() =>
@@ -797,7 +821,7 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Workspace', outputMode: 'workspace' },
           'user-1',
         ),
-      ).toThrow(/Interactive pods only support local execution target/);
+      ).toThrow(/interactive terminal support/);
       expect(ctx.podRepo.list()).toHaveLength(0);
     });
 

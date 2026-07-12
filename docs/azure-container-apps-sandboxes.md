@@ -18,6 +18,12 @@ Supported:
 - Interactive terminal (`ap shell` / `ap attach`, `WS /pods/:podId/terminal`) over the exec-stream
   WebSocket TTY variant (`tty`/`stdin`/`resize` frames), with tmux-reattach parity where the warm
   image ships tmux. Validated live 2026-07-08.
+- Interactive workspace pods (`ap shell` / `ap workspace` on a sandbox profile). The CLI attaches
+  through the daemon terminal WebSocket instead of `docker exec`; `attachTerminal` resumes an
+  auto-suspended sandbox before attaching (the platform memory-snapshots idle sandboxes after
+  ~15 min, and tmux carries the session across reconnects). Caveats vs local workspace pods:
+  no host bind mount (host edits after spawn are not live inside the sandbox) and no
+  image-paste-to-container support in `ap attach`.
 - Host preview URLs, two modes (see "Native Port Exposure" below):
   - **Default**: daemon-side exec proxy (`sandbox-preview-proxy.ts`) → a daemon-local
     `http://127.0.0.1:<hostPort>` URL.
@@ -61,8 +67,9 @@ rides the start frame's `environment`.
 
 Autopod's `AzureSandboxApiClient.execStream()` implements the non-TTY variant, which flips
 `SandboxContainerManager.supportsStreamingExec` to `true` and unblocks agent runtimes on
-this target. The TTY variant is available for a future interactive-terminal integration
-(daemon terminal route — see the interactive-pods caveat above).
+this target. The TTY variant is `AzureSandboxApiClient.attachTerminal()`, surfaced as
+`SandboxContainerManager.attachTerminal()` and consumed by the daemon terminal route
+(`WS /pods/:podId/terminal`) — the transport behind `ap shell` / `ap attach` for sandbox pods.
 
 The data-plane token scope is `https://dynamicsessions.io/.default` for both the HTTPS
 data plane and the WebSocket upgrade — the live run confirmed no per-endpoint scope split is

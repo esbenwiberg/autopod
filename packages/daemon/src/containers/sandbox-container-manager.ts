@@ -276,6 +276,10 @@ export class SandboxContainerManager implements ContainerManager {
         'Sandbox interactive terminal is not supported by this data-plane client (no exec-stream TTY support).',
       );
     }
+    // The platform auto-suspends idle sandboxes (memory snapshot after ~15 min),
+    // which a human workspace session will routinely hit. resume() is idempotent —
+    // it early-returns when the sandbox is already Running.
+    await this.client.resume(containerId);
     // Mirror the Docker terminal: cd into the workspace, then prefer a persistent
     // tmux session ("new-session -A -s main" creates or reattaches, so WebSocket
     // reconnects resume where the user left off) and fall back to a login bash.

@@ -145,6 +145,14 @@ export function createMockContainerManager(): ContainerManager {
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
     execStreaming: vi.fn(),
+    attachTerminal: vi.fn(async () => ({
+      onData: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+    })),
   };
 }
 
