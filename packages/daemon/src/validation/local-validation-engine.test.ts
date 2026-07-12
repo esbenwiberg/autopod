@@ -2797,6 +2797,51 @@ describe('runBuild — warning policy', () => {
     expect(result.smoke.build.output).not.toContain('--- build output ---');
   });
 
+  it('repairs root-owned package binaries as root before building as autopod', async () => {
+    let binaryRepaired = false;
+    const execInContainer = vi.fn(
+      async (
+        _containerId: string,
+        command: string[],
+        options?: { user?: string },
+      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+        const shell = command.join(' ');
+        if (shell.includes('-empty -print')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('node_modules/.bin') && shell.includes('chmod')) {
+          binaryRepaired = options?.user === 'root' && shell.includes('chmod a+rx');
+          return {
+            stdout: '',
+            stderr: binaryRepaired ? '' : 'Operation not permitted',
+            exitCode: binaryRepaired ? 0 : 1,
+          };
+        }
+        if (shell.includes('pnpm build')) {
+          return binaryRepaired
+            ? { stdout: 'Build succeeded.', stderr: '', exitCode: 0 }
+            : {
+                stdout: '',
+                stderr:
+                  "EACCES: permission denied, open '/workspace/packages/pi-worker/node_modules/.bin/tsup'",
+                exitCode: 1,
+              };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    );
+    const cm = {
+      ...containerManagerWithBuildOutput('', 0),
+      execInContainer,
+    } as unknown as ContainerManager;
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(baseConfigForBuild('npx pnpm build'));
+
+    expect(result.smoke.build.status).toBe('pass');
+    expect(binaryRepaired).toBe(true);
+  });
+
   it("keeps status 'pass' when exit 0 and no warnings", async () => {
     const cm = containerManagerWithBuildOutput('Build succeeded.\n  0 Warning(s)\n  0 Error(s)', 0);
     const engine = createLocalValidationEngine(cm);
