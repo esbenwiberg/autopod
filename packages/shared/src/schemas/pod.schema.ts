@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_HANDOFF_INSTRUCTIONS_LENGTH } from '../constants.js';
 import { partialPodOptionsSchema } from './action-definition.schema.js';
 import { withCanonicalModelIdPolicy } from './model.schema.js';
 
@@ -129,6 +130,17 @@ export const createPodRequestSchema = z
     outputMode: z.enum(['pr', 'artifact', 'workspace']).optional(),
     startBranch: branchNameSchema.optional(),
     baseBranch: branchNameSchema.optional(),
+    // Durable handoff instructions persisted on the pod at creation (Pi →
+    // interactive workspace). Non-empty and bounded. Zod strips unknown
+    // fields, so without this entry the POST /pods handler would silently
+    // drop it even though the Pod type + repository persist it. Reject empty
+    // after trimming so a whitespace-only handoff can't masquerade as present.
+    handoffInstructions: z
+      .string()
+      .trim()
+      .min(1, 'handoffInstructions must not be empty')
+      .max(MAX_HANDOFF_INSTRUCTIONS_LENGTH)
+      .optional(),
     specFiles: z.array(specFileSchema).max(200).optional(),
     specContextFiles: z.array(specFileSchema).max(200).optional(),
     linkedPodId: z.string().min(1).max(64).optional(),

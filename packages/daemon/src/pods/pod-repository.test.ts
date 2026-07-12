@@ -242,6 +242,18 @@ describe('PodRepository', () => {
       expect(pod.creatorName).toBe("O'Brien, Alice");
     });
 
+    it('persists handoffInstructions at creation and reads it back immediately', () => {
+      repo.insert({ ...validSession, id: 'sess-handoff', handoffInstructions: 'Pi handoff body' });
+      const pod = repo.getOrThrow('sess-handoff');
+      expect(pod.handoffInstructions).toBe('Pi handoff body');
+    });
+
+    it('defaults handoffInstructions to null when not provided (legacy path unchanged)', () => {
+      repo.insert(validSession);
+      const pod = repo.getOrThrow('sess-001');
+      expect(pod.handoffInstructions).toBeNull();
+    });
+
     it('should default creator email and name to null when not provided', () => {
       repo.insert(validSession);
       const pod = repo.getOrThrow('sess-001');

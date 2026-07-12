@@ -478,7 +478,18 @@ export class LocalWorktreeManager implements WorktreeManager {
       // claude needs project-level discovery); the per-worktree info/exclude makes git
       // ignore it so it can never be staged. This is per-clone, not committed, and
       // invisible to the user.
-      await this.appendWorktreeExcludes(worktreePath, ['.mcp.json']).catch((err) => {
+      //
+      // `.autopod/pi-handoff.md` is the mirrored copy of the pod's handoff
+      // instructions (Pi → workspace). Excluding it here keeps it out of the
+      // host-side auto-commit paths — both the plain `ap complete` push
+      // (`mergeBranch`) and the promote-time `commitPendingChanges` run
+      // `git add -A` in this worktree and honour this shared info/exclude — so
+      // the handoff can never accidentally ship. The user can still stage it
+      // deliberately with `git add -f`.
+      await this.appendWorktreeExcludes(worktreePath, [
+        '.mcp.json',
+        '.autopod/pi-handoff.md',
+      ]).catch((err) => {
         this.logger.warn(
           { err, worktreePath },
           'Failed to write info/exclude — daemon artifacts may leak into commits',
