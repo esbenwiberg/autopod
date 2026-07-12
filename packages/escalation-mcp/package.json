@@ -21,7 +21,7 @@
   "dependencies": {
     "@autopod/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "pino": "^9.6.0",
+    "pino": "^10.3.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
