@@ -575,6 +575,31 @@ describe('SandboxContainerManager', () => {
         rmSync(hostDir, { recursive: true, force: true });
       }
     });
+
+    it('round-trips runtime state through extract and next spawn', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-runtime-state-'));
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const firstId = await mgr.spawn(baseConfig);
+      const containerPath = '/home/autopod/.codex/sessions';
+      const rolloutPath = `${containerPath}/2026/07/12/rollout-thread-123.jsonl`;
+
+      try {
+        client.seedFile(firstId, rolloutPath, Buffer.from('{"type":"session_meta"}\n'));
+
+        await mgr.extractDirectoryFromContainer(firstId, containerPath, hostDir);
+        const secondId = await mgr.spawn({
+          ...baseConfig,
+          volumes: [{ host: hostDir, container: containerPath }],
+        });
+
+        expect(client.sandboxes.get(secondId)?.files.get(rolloutPath)?.toString('utf-8')).toBe(
+          '{"type":"session_meta"}\n',
+        );
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('withAzureClient', () => {

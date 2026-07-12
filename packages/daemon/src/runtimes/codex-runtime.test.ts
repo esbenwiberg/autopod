@@ -238,7 +238,7 @@ describe('CodexRuntime', () => {
           expect.objectContaining({
             type: 'error',
             fatal: true,
-            message: expect.stringContaining('without task_complete'),
+            message: expect.stringContaining('without terminal completion'),
           }),
         ]),
       );
@@ -589,6 +589,113 @@ describe('CodexRuntime', () => {
           delete process.env.AUTOPOD_CODEX_STATE_DIR;
         } else {
           process.env.AUTOPOD_CODEX_STATE_DIR = previousStateDir;
+        }
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('emits one completion when stdout and rollout both finish', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousPollMs = process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-runtime-dual-complete-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = '10';
+
+      try {
+        const podId = 'dual-complete';
+        const rolloutDir = join(tmpRoot, podId, '2026', '07', '12');
+        await mkdir(rolloutDir, { recursive: true });
+        await writeFile(
+          join(rolloutDir, 'rollout-2026-07-12T15-00-00-thread-123.jsonl'),
+          [
+            JSON.stringify({
+              timestamp: '2026-07-12T15:00:00.000Z',
+              type: 'event_msg',
+              payload: {
+                type: 'token_count',
+                info: { total_token_usage: { input_tokens: 120, output_tokens: 30 } },
+              },
+            }),
+            JSON.stringify({
+              timestamp: '2026-07-12T15:00:01.000Z',
+              type: 'event_msg',
+              payload: { type: 'task_complete', last_agent_message: 'Finished from rollout.' },
+            }),
+          ].join('\n'),
+        );
+
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+        const iterator = runtime
+          .spawn({
+            podId,
+            task: 'Finish once',
+            model: 'gpt-5.5',
+            workDir: '/workspace',
+            containerId: 'container-123',
+            env: {},
+          })
+          [Symbol.asyncIterator]();
+
+        const first = await withTimeout(iterator.next(), 1_000);
+        expect(first.value).toMatchObject({ type: 'complete', result: 'Finished from rollout.' });
+
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({ type: 'thread.started', thread_id: 'thread-123' })}\n`,
+        );
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({
+            type: 'item.completed',
+            item: { id: 'item-1', type: 'agent_message', text: 'Finished from stdout.' },
+          })}\n`,
+        );
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({
+            type: 'turn.completed',
+            usage: {
+              input_tokens: 120,
+              cached_input_tokens: 20,
+              output_tokens: 30,
+              reasoning_output_tokens: 5,
+            },
+          })}\n`,
+        );
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(0);
+
+        const events: AgentEvent[] = [first.value as AgentEvent];
+        for (;;) {
+          const next = await iterator.next();
+          if (next.done) break;
+          events.push(next.value);
+        }
+
+        const completions = events.filter((event) => event.type === 'complete');
+        expect(completions).toHaveLength(1);
+        expect(completions[0]).toMatchObject({
+          totalInputTokens: 120,
+          totalOutputTokens: 30,
+          costUsd: expect.any(Number),
+        });
+        expect(events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: 'status', sessionId: 'thread-123' }),
+            expect.objectContaining({ type: 'reasoning', text: 'Finished from stdout.' }),
+          ]),
+        );
+      } finally {
+        if (previousStateDir === undefined) {
+          // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
+          delete process.env.AUTOPOD_CODEX_STATE_DIR;
+        } else {
+          process.env.AUTOPOD_CODEX_STATE_DIR = previousStateDir;
+        }
+        if (previousPollMs === undefined) {
+          // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
+          delete process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
+        } else {
+          process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = previousPollMs;
         }
         await rm(tmpRoot, { recursive: true, force: true });
       }
