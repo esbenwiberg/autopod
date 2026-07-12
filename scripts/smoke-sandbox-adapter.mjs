@@ -71,6 +71,38 @@ try {
     throw new Error('exec smoke failed');
   }
 
+  if (!manager.supportsStreamingExec) {
+    throw new Error('streaming exec smoke failed: manager reports supportsStreamingExec=false');
+  }
+  const streamed = await manager.execStreaming(sandboxId, [
+    'sh',
+    '-lc',
+    'for i in 1 2 3; do echo chunk-$i; sleep 1; done; echo TS-STREAM-DONE; exit 7',
+  ]);
+  const arrivals = [];
+  let streamedOut = '';
+  let streamedErr = '';
+  streamed.stdout.on('data', (chunk) => {
+    streamedOut += String(chunk);
+    arrivals.push(Date.now());
+  });
+  streamed.stderr.on('data', (chunk) => {
+    streamedErr += String(chunk);
+  });
+  const streamExit = await streamed.exitCode;
+  const spreadMs = arrivals.length > 1 ? arrivals[arrivals.length - 1] - arrivals[0] : 0;
+  console.log(
+    `exec_stream=${JSON.stringify({ exitCode: streamExit, chunks: arrivals.length, spreadMs, stdout: streamedOut, stderr: streamedErr })}`,
+  );
+  if (streamExit !== 7 || !streamedOut.includes('TS-STREAM-DONE')) {
+    throw new Error('streaming exec smoke failed');
+  }
+  if (spreadMs < 1000) {
+    // Three 1s-spaced echoes should arrive over ~2s of wall clock. A single
+    // burst means the transport buffered — still functional, but flag it.
+    console.warn('exec_stream_warning=chunks arrived in one burst; transport may be buffering');
+  }
+
   await manager.writeFile(sandboxId, '/tmp/autopod-smoke.txt', 'hello from ts');
   const file = await manager.readFile(sandboxId, '/tmp/autopod-smoke.txt');
   console.log(`file=${file}`);

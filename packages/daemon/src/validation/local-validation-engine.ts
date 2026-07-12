@@ -851,9 +851,9 @@ async function runBuild(
       [
         'sh',
         '-c',
-        `find ${buildCwd} \\( -path "*/node_modules/.bin/*" -o -path "*/node_modules/*/bin/*" \\) -type f -not -empty -not -perm /111 -exec chmod +x {} + 2>/dev/null || true`,
+        `find ${buildCwd} \\( -path "*/node_modules/.bin/*" -o -path "*/node_modules/*/bin/*" \\) -type f -not -empty -not -perm /111 -exec chmod a+rx {} + 2>/dev/null || true`,
       ],
-      { timeout: 10_000 },
+      { timeout: 10_000, user: 'root' },
     )
     .catch(() => null);
 

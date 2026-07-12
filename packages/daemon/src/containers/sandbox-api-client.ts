@@ -81,6 +81,56 @@ export interface SandboxDirListing {
   entries: SandboxFileInfo[];
 }
 
+export interface SandboxTerminalOptions {
+  cols: number;
+  rows: number;
+  /**
+   * Shell one-liner to run as the interactive session (e.g. the tmux-reattach
+   * command). Staged as an executable wrapper script because the exec-stream
+   * `command` field is `execve`d literally, not shell-interpreted. Defaults to
+   * a bare `/bin/bash` login shell.
+   */
+  shellCommand?: string;
+  env?: Record<string, string>;
+}
+
+/**
+ * Bidirectional interactive TTY session over the exec-stream WebSocket. Output
+ * is the merged TTY stream (stdout+stderr).
+ */
+export interface SandboxTerminalSession {
+  onData(listener: (chunk: Buffer) => void): void;
+  onExit(listener: (exitCode: number) => void): void;
+  onError(listener: (err: Error) => void): void;
+  write(data: Buffer): void;
+  resize(cols: number, rows: number): void;
+  close(): void;
+}
+
+/**
+ * Auth mode for an exposed sandbox port. `anonymous` opens the public URL to the
+ * internet (opt-in, ideally IP-fenced); `entra` requires Entra ID sign-in from
+ * one of `emails`.
+ */
+export type SandboxPortAuth = { mode: 'anonymous' } | { mode: 'entra'; emails: string[] };
+
+/** A port exposed on a sandbox, with the platform-assigned public URL. */
+export interface SandboxExposedPort {
+  /** The in-sandbox application port. */
+  port: number;
+  /** Host-side port, when the platform reports one. */
+  hostPort?: number;
+  /** `Http` | `Http2`. */
+  protocol?: string;
+  /** Public URL the platform assigned for this port. */
+  url?: string;
+}
+
+/** A point-in-time snapshot of a sandbox, usable as a create source. */
+export interface SandboxSnapshot {
+  id: string;
+}
+
 export type SandboxStatus = 'running' | 'stopped' | 'unknown';
 
 export interface SandboxApiClient {
@@ -103,6 +153,15 @@ export interface SandboxApiClient {
     command: string[],
     options?: SandboxExecOptions,
   ): AsyncIterable<SandboxExecChunk>;
+  /**
+   * Open an interactive TTY session over the exec-stream WebSocket. Optional:
+   * omitted by clients without streaming support (the terminal route then
+   * rejects sandbox connections).
+   */
+  attachTerminal?(
+    sandboxId: string,
+    options: SandboxTerminalOptions,
+  ): Promise<SandboxTerminalSession>;
   writeFile(sandboxId: string, path: string, content: Buffer): Promise<void>;
   readFile(sandboxId: string, path: string): Promise<Buffer>;
   listFiles(sandboxId: string, path: string): Promise<SandboxDirListing>;
@@ -110,6 +169,27 @@ export interface SandboxApiClient {
   mkdir?(sandboxId: string, path: string): Promise<void>;
   /** Replace the sandbox's egress policy at runtime. */
   updateEgress(sandboxId: string, policy: SandboxEgressPolicy): Promise<void>;
+  /**
+   * Expose an in-sandbox port and return its public URL. Optional — omitted by
+   * clients without native inbound-port support. `auth` defaults to Entra when
+   * omitted (never silently anonymous).
+   */
+  addPort?(sandboxId: string, port: number, auth?: SandboxPortAuth): Promise<SandboxExposedPort>;
+  /** Remove a previously exposed port. Idempotent — a missing port is a no-op. */
+  removePort?(sandboxId: string, port: number): Promise<void>;
+  /**
+   * Snapshot a provisioned sandbox for warm-start reuse. Optional — omitted by
+   * clients without snapshot support. `name` is stored as a label.
+   */
+  createSnapshot?(sandboxId: string, name?: string): Promise<SandboxSnapshot>;
+  /**
+   * Provision a new sandbox from a snapshot (warm resume). The snapshot carries
+   * resources/env/egress — the data plane rejects those fields on snapshot
+   * creates, so this takes only the snapshot id. Returns the new sandbox id.
+   */
+  createFromSnapshot?(snapshotId: string): Promise<string>;
+  /** Delete a snapshot. Idempotent — a missing snapshot is a no-op. */
+  deleteSnapshot?(snapshotId: string): Promise<void>;
   /** Snapshot-suspend the sandbox (maps to ContainerManager.stop). */
   suspend(sandboxId: string, mode?: 'memory' | 'disk'): Promise<void>;
   /** Resume a suspended sandbox (maps to ContainerManager.start). */

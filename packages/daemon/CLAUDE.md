@@ -194,8 +194,23 @@ Current preview caveats:
 - RBAC: `Container Apps SandboxGroup Data Owner` is data-plane only. Creating or reading the
   sandbox group also needs control-plane rights such as resource-group `Contributor`/`Owner`, or
   set `AZURE_SANDBOX_ASSUME_GROUP_EXISTS=1` for a pre-created group.
-- Exec is buffered in `azure-containerapps-sandbox==0.1.0b3`; no native streaming method was
-  exposed by the spike.
+- Streaming exec runs over the data plane's WebSocket endpoint
+  (`wss://…/sandboxes/{id}/exec/stream`) — protocol documented in
+  `docs/azure-container-apps-sandboxes.md`. The preview Python SDK
+  (`azure-containerapps-sandbox==0.1.0b3`) still only exposes buffered exec; the WS shape
+  comes from the JS reference SDK (`@azure/containerapps-sandbox@1.0.0-beta.1`). The
+  non-TTY variant is `AzureSandboxApiClient.execStream()`; the interactive TTY variant is
+  `AzureSandboxApiClient.attachTerminal()` (`stdin`/`resize` frames), surfaced through
+  `SandboxContainerManager.attachTerminal()` and the `ContainerManager.attachTerminal?()` seam,
+  and wired to the daemon terminal route (`WS /pods/:podId/terminal`) for sandbox pods. Both
+  stage the command as an executable wrapper script because the exec-stream `start.command` is
+  `execve`d literally (not shell-interpreted); the files API writes it as `root:0644`, so it is
+  `chmod 0755`'d as root before exec.
+- Interactive workspace pods (`ap shell` / `ap workspace`) are supported on sandbox: pod creation
+  requires the target's `ContainerManager.attachTerminal` capability (the old local-only gate is
+  gone), the CLI attaches through the daemon terminal WebSocket instead of `docker exec`, and
+  `attachTerminal` resumes an auto-suspended sandbox first (the platform memory-snapshots idle
+  sandboxes after ~15 min; tmux carries the session across reconnects).
 - Sandboxes do not support Docker bind mounts. The supported workspace model is snapshot upload at
   spawn, pod provisioning copies `/mnt/worktree` staging into writable `/workspace`, and sync-back
   extracts `/workspace` through `extractDirectoryFromContainer`. Host edits after spawn are not

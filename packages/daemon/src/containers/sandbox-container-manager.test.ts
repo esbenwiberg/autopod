@@ -22,8 +22,12 @@ import type {
   SandboxExecChunk,
   SandboxExecOptions,
   SandboxExecResult,
+  SandboxExposedPort,
   SandboxFileInfo,
+  SandboxPortAuth,
   SandboxStatus,
+  SandboxTerminalOptions,
+  SandboxTerminalSession,
 } from './sandbox-api-client.js';
 import {
   SandboxContainerManager,
@@ -129,6 +133,22 @@ class FakeSandboxApiClient implements SandboxApiClient {
     this.egressUpdates.push({ id: sandboxId, policy });
   }
 
+  readonly addPortCalls: Array<{ id: string; port: number; auth?: SandboxPortAuth }> = [];
+  readonly removePortCalls: Array<{ id: string; port: number }> = [];
+
+  async addPort(
+    sandboxId: string,
+    port: number,
+    auth?: SandboxPortAuth,
+  ): Promise<SandboxExposedPort> {
+    this.addPortCalls.push({ id: sandboxId, port, auth });
+    return { port, url: `https://${sandboxId}--${port}.test.adcproxy.io` };
+  }
+
+  async removePort(sandboxId: string, port: number): Promise<void> {
+    this.removePortCalls.push({ id: sandboxId, port });
+  }
+
   async suspend(sandboxId: string): Promise<void> {
     this.sandbox(sandboxId).status = 'stopped';
   }
@@ -192,6 +212,35 @@ class StreamingFakeClient extends FakeSandboxApiClient {
     yield { stdout: 'chunk-2' };
     yield { stderr: 'warn' };
     yield { exitCode: 7 };
+  }
+}
+
+/** A client variant exposing an interactive TTY session. */
+class TerminalFakeClient extends FakeSandboxApiClient {
+  readonly attachCalls: Array<{ id: string; options: SandboxTerminalOptions }> = [];
+  readonly resumeCalls: string[] = [];
+
+  override async resume(sandboxId: string): Promise<void> {
+    this.resumeCalls.push(sandboxId);
+    await super.resume(sandboxId);
+  }
+
+  async attachTerminal(
+    sandboxId: string,
+    options: SandboxTerminalOptions,
+  ): Promise<SandboxTerminalSession> {
+    if ((await this.getStatus(sandboxId)) !== 'running') {
+      throw new Error(`sandbox ${sandboxId} is not running`);
+    }
+    this.attachCalls.push({ id: sandboxId, options });
+    return {
+      onData: () => {},
+      onExit: () => {},
+      onError: () => {},
+      write: () => {},
+      resize: () => {},
+      close: () => {},
+    };
   }
 }
 
@@ -378,6 +427,31 @@ describe('SandboxContainerManager', () => {
       expect(await mgr.getStatus('nope')).toBe('unknown');
     });
 
+    it('attachTerminal resumes an auto-suspended sandbox before attaching', async () => {
+      const client = new TerminalFakeClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      await mgr.stop(id);
+
+      const session = await mgr.attachTerminal?.(id, { cols: 120, rows: 40 });
+
+      expect(session).toBeDefined();
+      expect(client.resumeCalls).toEqual([id]);
+      expect(await mgr.getStatus(id)).toBe('running');
+      expect(client.attachCalls).toHaveLength(1);
+      expect(client.attachCalls[0]?.options.shellCommand).toContain('tmux new-session -A -s main');
+      expect(client.attachCalls[0]?.options.env).toEqual({ COLUMNS: '120', LINES: '40' });
+    });
+
+    it('attachTerminal rejects when the data-plane client has no TTY support', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      await expect(mgr.attachTerminal?.(id, { cols: 80, rows: 24 })).rejects.toThrow(
+        /no exec-stream TTY support/,
+      );
+    });
+
     it('refreshFirewall reapplies the last known policy by default', async () => {
       const client = new FakeSandboxApiClient();
       const mgr = new SandboxContainerManager(client, logger);
@@ -493,6 +567,41 @@ describe('SandboxContainerManager', () => {
     });
   });
 
+  describe('exposePort', () => {
+    it('exposes a port with an Entra allowlist and returns the URL', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+
+      const exposed = await mgr.exposePort(id, 3000, { entraEmails: ['ewi@projectum.com'] });
+
+      expect(exposed.url).toBe(`https://${id}--3000.test.adcproxy.io`);
+      expect(client.addPortCalls).toEqual([
+        { id, port: 3000, auth: { mode: 'entra', emails: ['ewi@projectum.com'] } },
+      ]);
+    });
+
+    it('exposes anonymously only when explicitly requested', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+
+      await mgr.exposePort(id, 8080, { anonymous: true });
+
+      expect(client.addPortCalls[0]?.auth).toEqual({ mode: 'anonymous' });
+    });
+
+    it('unexposePort delegates to the client', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+
+      await mgr.unexposePort(id, 3000);
+
+      expect(client.removePortCalls).toEqual([{ id, port: 3000 }]);
+    });
+  });
+
   describe('extractDirectoryFromContainer', () => {
     it('mirrors a sandbox directory back to the host through list/read', async () => {
       const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-extract-'));
@@ -517,6 +626,31 @@ describe('SandboxContainerManager', () => {
         expect(existsSync(join(hostDir, 'node_modules', 'left-pad.js'))).toBe(false);
         expect(readFileSync(join(hostDir, 'node_modules', 'local-cache.txt'), 'utf-8')).toBe(
           'keep excluded',
+        );
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
+
+    it('round-trips runtime state through extract and next spawn', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-runtime-state-'));
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const firstId = await mgr.spawn(baseConfig);
+      const containerPath = '/home/autopod/.codex/sessions';
+      const rolloutPath = `${containerPath}/2026/07/12/rollout-thread-123.jsonl`;
+
+      try {
+        client.seedFile(firstId, rolloutPath, Buffer.from('{"type":"session_meta"}\n'));
+
+        await mgr.extractDirectoryFromContainer(firstId, containerPath, hostDir);
+        const secondId = await mgr.spawn({
+          ...baseConfig,
+          volumes: [{ host: hostDir, container: containerPath }],
+        });
+
+        expect(client.sandboxes.get(secondId)?.files.get(rolloutPath)?.toString('utf-8')).toBe(
+          '{"type":"session_meta"}\n',
         );
       } finally {
         rmSync(hostDir, { recursive: true, force: true });

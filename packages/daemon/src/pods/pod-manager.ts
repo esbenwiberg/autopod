@@ -115,8 +115,16 @@ import type {
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { RUNTIME_TELEMETRY_OPT_OUT_ENV } from '../runtime-env.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
-import { cleanupClaudeState, ensureClaudeStateDir } from '../runtimes/claude-state-store.js';
-import { cleanupCodexState, ensureCodexStateDir } from '../runtimes/codex-state-store.js';
+import {
+  claudeStateDirForPod,
+  cleanupClaudeState,
+  ensureClaudeStateDir,
+} from '../runtimes/claude-state-store.js';
+import {
+  cleanupCodexState,
+  codexStateDirForPod,
+  ensureCodexStateDir,
+} from '../runtimes/codex-state-store.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
@@ -221,6 +229,20 @@ function summarizeValidationPhases(result: ValidationResult): string {
 
 function formatRetryDelay(delayMs: number): string {
   return delayMs % 1_000 === 0 ? `${delayMs / 1_000}s` : `${delayMs}ms`;
+}
+
+function buildDetachedMcpFallbackMessage(
+  escalationType: string | undefined,
+  response: string,
+): string {
+  const label = escalationType ? `${escalationType} MCP call` : 'MCP call';
+  return [
+    `Fallback response for the previous ${label}:`,
+    '',
+    response,
+    '',
+    'The original MCP response stream closed before this answer could be delivered. If you already received the same answer directly from the tool call, ignore this duplicate.',
+  ].join('\n');
 }
 
 function failedValidationPhases(result: ValidationResult | null): string[] {
@@ -493,6 +515,20 @@ function allocateHostPort(): number {
 
 /** Default container port for app servers (matches Dockerfile HEALTHCHECK). */
 const CONTAINER_APP_PORT = 3000;
+
+/**
+ * Entra email allowlist for native sandbox preview URLs. When set (comma/space
+ * separated), sandbox pods expose their app port through the platform's native
+ * public URL (Entra-gated to these addresses) instead of the daemon-side exec
+ * proxy; unset preserves the exec-proxy behavior. This is both the enable switch
+ * and the "where do I put my email" answer for native preview.
+ */
+function nativePreviewEmails(): string[] {
+  return (process.env.AUTOPOD_SANDBOX_NATIVE_PREVIEW_EMAILS ?? '')
+    .split(/[,\s]+/)
+    .map((email) => email.trim())
+    .filter(Boolean);
+}
 
 /** Path to the agent shim script inside every pod container. */
 export const AGENT_SHIM_PATH = '/run/autopod/agent-shim.sh';
@@ -1638,6 +1674,44 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
   }
 
+  async function syncSandboxRuntimeSessionState(podId: string): Promise<void> {
+    let pod: Pod;
+    try {
+      pod = podRepo.getOrThrow(podId);
+    } catch {
+      return;
+    }
+    if (pod.executionTarget !== 'sandbox' || !pod.containerId) return;
+
+    const statePaths =
+      pod.runtime === 'claude'
+        ? {
+            container: `${CONTAINER_HOME_DIR}/.claude/projects`,
+            host: claudeStateDirForPod(podId),
+          }
+        : pod.runtime === 'codex'
+          ? {
+              container: `${CONTAINER_HOME_DIR}/.codex/sessions`,
+              host: codexStateDirForPod(podId),
+            }
+          : null;
+    if (!statePaths) return;
+
+    try {
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      await cm.extractDirectoryFromContainer(
+        pod.containerId,
+        statePaths.container,
+        statePaths.host,
+      );
+    } catch (err) {
+      logger.warn(
+        { err, podId, runtime: pod.runtime },
+        'Failed to sync sandbox runtime session state — future recovery may restart fresh',
+      );
+    }
+  }
+
   /**
    * Sequential merge queue keyed by `repo+baseBranch`.
    *
@@ -2007,6 +2081,48 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     string,
     { containerId: string; proxy: SandboxPreviewProxy }
   >();
+  // Pods whose preview is served by a native platform port (not the exec proxy).
+  const nativePreviewPorts = new Map<string, { containerId: string; port: number; url: string }>();
+
+  /**
+   * Try to expose the app port on the platform's native public URL (Entra-gated
+   * to the configured allowlist). Returns the URL on success, or null to fall
+   * back to the daemon-side exec proxy. Never throws — a native failure must not
+   * break preview, which has a working fallback.
+   */
+  async function tryNativeSandboxPreview(pod: Pod, containerId: string): Promise<string | null> {
+    const emails = nativePreviewEmails();
+    if (emails.length === 0) return null;
+    const cm = containerManagerFactory.get('sandbox');
+    if (!cm.exposePort) return null;
+
+    const cached = nativePreviewPorts.get(pod.id);
+    if (cached?.containerId === containerId) return cached.url;
+    if (cached) nativePreviewPorts.delete(pod.id);
+
+    try {
+      const exposed = await cm.exposePort(containerId, CONTAINER_APP_PORT, { entraEmails: emails });
+      if (!exposed.url) {
+        logger.warn(
+          { podId: pod.id },
+          'Native sandbox port exposed but no URL assigned; falling back to preview proxy',
+        );
+        return null;
+      }
+      nativePreviewPorts.set(pod.id, { containerId, port: CONTAINER_APP_PORT, url: exposed.url });
+      if (pod.previewUrl !== exposed.url) {
+        podRepo.update(pod.id, { previewUrl: exposed.url });
+      }
+      logger.info({ podId: pod.id, url: exposed.url }, 'Native sandbox preview URL exposed');
+      return exposed.url;
+    } catch (err) {
+      logger.warn(
+        { err, podId: pod.id },
+        'Native sandbox port exposure failed; falling back to preview proxy',
+      );
+      return null;
+    }
+  }
 
   async function ensureSandboxPreviewProxy(pod: Pod): Promise<string> {
     if (pod.executionTarget !== 'sandbox') {
@@ -2024,7 +2140,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       );
     }
 
+    // Prefer the platform's native public port when configured; fall back to the
+    // daemon-side exec proxy otherwise (or on failure).
+    const nativeUrl = await tryNativeSandboxPreview(pod, pod.containerId);
+    if (nativeUrl) {
+      // A native URL supersedes any previously-started exec proxy for this pod.
+      if (sandboxPreviewProxies.has(pod.id)) await stopSandboxPreviewProxy(pod.id);
+      return nativeUrl;
+    }
+
     let previewUrl = pod.previewUrl;
+    // A stale native URL (native since disabled/failed) must not be reused as a
+    // proxy host-port — reset it so a fresh 127.0.0.1 URL is allocated below.
+    if (previewUrl && !previewUrl.startsWith('http://127.0.0.1')) {
+      previewUrl = null;
+    }
     if (!previewUrl) {
       previewUrl = `http://127.0.0.1:${allocateHostPort()}`;
       podRepo.update(pod.id, { previewUrl });
@@ -2055,6 +2185,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   }
 
   async function stopSandboxPreviewProxy(podId: string): Promise<void> {
+    const native = nativePreviewPorts.get(podId);
+    if (native) {
+      nativePreviewPorts.delete(podId);
+      const cm = containerManagerFactory.get('sandbox');
+      await cm.unexposePort?.(native.containerId, native.port).catch((err) => {
+        logger.warn({ err, podId }, 'Failed to remove native sandbox preview port');
+      });
+    }
     const existing = sandboxPreviewProxies.get(podId);
     if (!existing) return;
     sandboxPreviewProxies.delete(podId);
@@ -5048,11 +5186,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         resolvedPod.validationSuite = 'off';
       }
       if (resolvedPod.agentMode === 'interactive' && executionTarget !== 'local') {
-        throw new AutopodError(
-          'Interactive pods only support local execution target',
-          'INVALID_CONFIGURATION',
-          400,
-        );
+        const interactiveCm = containerManagerFactory.get(executionTarget);
+        if (!interactiveCm.attachTerminal) {
+          throw new AutopodError(
+            `Interactive pods on execution target '${executionTarget}' require a container backend with interactive terminal support (attachTerminal)`,
+            'INVALID_CONFIGURATION',
+            400,
+          );
+        }
       }
       if (executionTarget === 'sandbox') {
         if (!profile.warmImageTag) {
@@ -7162,6 +7303,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             customInstructions: runtimeInstructions,
             env: secretEnv,
             mcpServers,
+            executionTarget: pod.executionTarget,
           });
 
           // Clear rework reason now that it's been consumed (one-shot)
@@ -7220,6 +7362,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 customInstructions: customInstructionsRef,
                 env: secretEnvRef,
                 mcpServers: mcpServersRef,
+                executionTarget: podRef.executionTarget,
               });
             }
           })();
@@ -7250,6 +7393,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             customInstructions: runtimeInstructions,
             env: secretEnv,
             mcpServers,
+            executionTarget: pod.executionTarget,
           });
         } else {
           // Normal path
@@ -7262,6 +7406,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             customInstructions: runtimeInstructions,
             env: secretEnv,
             mcpServers,
+            executionTarget: pod.executionTarget,
           });
         }
 
@@ -7533,6 +7678,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
       } finally {
+        await syncSandboxRuntimeSessionState(podId);
         stopCommitPolling(podId);
         lastEventWriteAt.delete(podId);
       }
@@ -8012,7 +8158,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         transition(pod, 'running', { pendingEscalation: null });
         emitActivityStatus(podId, `Credential injected for ${payload.service} — resuming agent…`);
 
-        deps.pendingRequestsByPod?.get(podId)?.resolve(escalationId, authMessage);
+        const resolveResult = deps.pendingRequestsByPod
+          ?.get(podId)
+          ?.resolveWithState(escalationId, authMessage);
+        if (resolveResult?.detached) {
+          nudgeRepo.queue(
+            podId,
+            buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, authMessage),
+          );
+          emitActivityStatus(
+            podId,
+            'MCP response stream was closed — queued credential result for check_messages',
+          );
+        }
         return;
       }
 
@@ -8101,8 +8259,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // The container's agent event stream is still active — no need to call runtime.resume().
       const pendingForSession = deps.pendingRequestsByPod?.get(podId);
       if (pendingForSession && pod.pendingEscalation?.id) {
-        const resolved = pendingForSession.resolve(pod.pendingEscalation.id, message);
-        if (resolved) {
+        const resolveResult = pendingForSession.resolveWithState(pod.pendingEscalation.id, message);
+        if (resolveResult.resolved) {
+          if (resolveResult.detached) {
+            nudgeRepo.queue(
+              podId,
+              buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, message),
+            );
+            emitActivityStatus(
+              podId,
+              'MCP response stream was closed — queued human reply for check_messages',
+            );
+          }
           // The MCP ask_human call has been unblocked — processPod's consumeAgentEvents
           // loop will continue picking up events from the still-running container.
           return;
@@ -11054,7 +11222,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           : // biome-ignore lint/style/noNonNullAssertion: checked before status probe
             pod.previewUrl!;
 
-      // Exec four parallel reads inside the container + HTTP probe from the host.
+      // A native sandbox preview URL is Entra-gated, so a host-side fetch just
+      // gets 401 — probe the app from inside the container instead (the real
+      // liveness signal). The daemon-local proxy URL (127.0.0.1) is fetched
+      // directly as before.
+      const isNativePreview =
+        pod.executionTarget === 'sandbox' && !previewUrl.startsWith('http://127.0.0.1');
+
+      // Exec parallel reads inside the container + an HTTP probe.
       const [pidResult, restartCountResult, logTailResult, httpProbeResult] = await Promise.all([
         cm
           .execInContainer(
@@ -11077,9 +11252,27 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             {},
           )
           .catch(() => null),
-        fetch(previewUrl, { signal: AbortSignal.timeout(3_000) })
-          .then((r) => r.status)
-          .catch(() => null),
+        isNativePreview
+          ? cm
+              .execInContainer(
+                pod.containerId,
+                [
+                  'sh',
+                  '-c',
+                  // Prefer curl for the exact status code; fall back to wget (treat
+                  // a 2xx/3xx success as 200) so leaner warm images still probe.
+                  `code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://localhost:${CONTAINER_APP_PORT} 2>/dev/null); if [ -n "$code" ] && [ "$code" != "000" ]; then echo "$code"; elif wget -q -T 3 -O /dev/null http://localhost:${CONTAINER_APP_PORT} 2>/dev/null; then echo 200; fi`,
+                ],
+                {},
+              )
+              .then((r) => {
+                const code = Number.parseInt(r.stdout.trim(), 10);
+                return Number.isFinite(code) && code > 0 ? code : null;
+              })
+              .catch(() => null)
+          : fetch(previewUrl, { signal: AbortSignal.timeout(3_000) })
+              .then((r) => r.status)
+              .catch(() => null),
       ]);
 
       // Check PID liveness: if we got a PID string, verify the process is still alive.

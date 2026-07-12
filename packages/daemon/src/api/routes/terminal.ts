@@ -78,16 +78,7 @@ export function terminalRoutes(
         return;
       }
 
-      if (pod.executionTarget !== 'local') {
-        socket.close(
-          4004,
-          'Sandbox interactive terminal is unsupported: Azure Sandboxes do not provide bidirectional TTY streaming yet',
-        );
-        return;
-      }
-
       const containerId = pod.containerId;
-      const container = docker.getContainer(containerId);
 
       // Evict any existing terminal connection for this pod — two tmux
       // clients on the same pod cause output duplication / feedback loops.
@@ -98,7 +89,9 @@ export function terminalRoutes(
       }
       activeTerminals.set(podId, socket);
 
-      let stream: TerminalStream | undefined;
+      // Backend-specific teardown (Docker exec stream destroy / sandbox session
+      // close), registered once the backend attaches.
+      let closeBackend: (() => void) | undefined;
       let cleanedUp = false;
       const cleanupTerminal = () => {
         if (cleanedUp) return;
@@ -107,7 +100,7 @@ export function terminalRoutes(
           activeTerminals.delete(podId);
         }
         try {
-          stream?.destroy?.();
+          closeBackend?.();
         } catch {
           // Best effort cleanup
         }
@@ -117,6 +110,75 @@ export function terminalRoutes(
       socket.on('error', (err: Error) => {
         request.log.error({ err, podId }, 'Terminal WebSocket error');
       });
+
+      const clampDimension = (value: number): number => Math.max(1, Math.min(value, 500));
+
+      // Sandbox (non-local) pods have no Docker exec — proxy the terminal over
+      // the container manager's TTY session (exec-stream WebSocket).
+      if (pod.executionTarget !== 'local') {
+        const cm = containerManagerFactory.get(pod.executionTarget);
+        if (!cm.attachTerminal) {
+          socket.close(
+            4004,
+            `Interactive terminal not supported for target ${pod.executionTarget}`,
+          );
+          cleanupTerminal();
+          return;
+        }
+        try {
+          const session = await cm.attachTerminal(containerId, { cols, rows });
+          closeBackend = () => session.close();
+          if (cleanedUp) {
+            session.close();
+            return;
+          }
+
+          session.onData((chunk) => {
+            if (socket.readyState === socket.OPEN) socket.send(chunk, { binary: true });
+          });
+          session.onExit((exitCode) => {
+            socket.close(1000, `exit:${exitCode}`);
+          });
+          session.onError((err) => {
+            request.log.error({ err, podId }, 'Sandbox terminal session error');
+            socket.close(1011, 'Stream error');
+          });
+
+          socket.on('message', (rawData: Buffer, isBinary: boolean) => {
+            if (!isBinary) {
+              const text = rawData.toString('utf8');
+              try {
+                const msg = JSON.parse(text);
+                if (
+                  msg.type === 'resize' &&
+                  typeof msg.cols === 'number' &&
+                  typeof msg.rows === 'number'
+                ) {
+                  session.resize(clampDimension(msg.cols), clampDimension(msg.rows));
+                  return;
+                }
+              } catch {
+                // Not JSON — treat as text input
+              }
+              session.write(Buffer.from(text, 'utf8'));
+            } else {
+              session.write(rawData);
+            }
+          });
+
+          request.log.info(
+            { podId, containerId, cols, rows, target: pod.executionTarget },
+            'Sandbox terminal session started',
+          );
+        } catch (err) {
+          request.log.error({ err, podId }, 'Failed to start sandbox terminal');
+          cleanupTerminal();
+          socket.close(1011, 'Failed to start terminal');
+        }
+        return;
+      }
+
+      const container = docker.getContainer(containerId);
 
       // Create exec with TTY
       const startTerminal = async () => {
@@ -144,7 +206,7 @@ export function terminalRoutes(
             stdin: true,
             Tty: true,
           })) as TerminalStream;
-          stream = startedStream;
+          closeBackend = () => startedStream.destroy?.();
           if (cleanedUp) {
             startedStream.destroy?.();
             return;

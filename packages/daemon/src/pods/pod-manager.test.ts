@@ -302,6 +302,14 @@ function createMockContainerManager(): ContainerManager {
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
     execStreaming: vi.fn(),
+    attachTerminal: vi.fn(async () => ({
+      onData: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+    })),
   };
 }
 
@@ -785,11 +793,27 @@ describe('PodManager', () => {
       expect(ctx.podRepo.list()).toHaveLength(0);
     });
 
-    it('rejects interactive workspace pods when the profile default target is sandbox', () => {
+    it('allows interactive workspace pods on sandbox when the backend supports terminals', () => {
       const ctx = createTestContext(undefined, {
         executionTarget: 'sandbox',
         warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
       });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Workspace', outputMode: 'workspace' },
+        'user-1',
+      );
+      expect(pod.executionTarget).toBe('sandbox');
+      expect(ctx.podRepo.list()).toHaveLength(1);
+    });
+
+    it('rejects interactive sandbox pods when the backend has no terminal support', () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      Object.assign(ctx.containerManager, { attachTerminal: undefined });
       const manager = createPodManager(ctx.deps);
 
       expect(() =>
@@ -797,7 +821,7 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Workspace', outputMode: 'workspace' },
           'user-1',
         ),
-      ).toThrow(/Interactive pods only support local execution target/);
+      ).toThrow(/interactive terminal support/);
       expect(ctx.podRepo.list()).toHaveLength(0);
     });
 
@@ -919,6 +943,127 @@ describe('PodManager', () => {
       expect(fallbackResult.unavailableReason).toBe('reviewer_model_client_unavailable');
       expect(fallbackResult.selected.map((entry) => entry.memory.id)).toEqual(['mem-auth-refresh']);
       expect(fallbackResult.selected[0]?.relevanceReason).toContain('Reviewer ranking unavailable');
+    });
+  });
+
+  describe('sandbox runtime session state sync', () => {
+    it.each([
+      {
+        runtime: 'claude' as const,
+        containerPath: '/home/autopod/.claude/projects',
+        hostFolder: 'claude-state',
+      },
+      {
+        runtime: 'codex' as const,
+        containerPath: '/home/autopod/.codex/sessions',
+        hostFolder: 'codex-state',
+      },
+    ])('syncs $runtime sandbox session state after agent turns', async (testCase) => {
+      const ctx = createTestContext(undefined, {
+        defaultRuntime: testCase.runtime,
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Persist session state', skipValidation: true },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'sandbox-123' });
+
+      async function* events(): AsyncIterable<AgentEvent> {
+        yield {
+          type: 'complete',
+          timestamp: '2026-07-12T15:00:00.000Z',
+          result: 'done',
+        };
+      }
+
+      await manager.consumeAgentEvents(pod.id, events());
+
+      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledWith(
+        'sandbox-123',
+        testCase.containerPath,
+        path.join(os.homedir(), '.autopod', testCase.hostFolder, pod.id),
+      );
+    });
+
+    it.each([
+      { runtime: 'claude' as const, executionTarget: 'local' as const },
+      { runtime: 'copilot' as const, executionTarget: 'sandbox' as const },
+    ])(
+      'does not extract session state for $runtime on $executionTarget',
+      async ({ runtime, executionTarget }) => {
+        const ctx = createTestContext(undefined, {
+          defaultRuntime: runtime,
+          executionTarget,
+          warmImageTag:
+            executionTarget === 'sandbox' ? 'example.azurecr.io/autopod/test-profile:latest' : null,
+        });
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'No session sync', skipValidation: true },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'container-123' });
+
+        async function* events(): AsyncIterable<AgentEvent> {
+          yield {
+            type: 'complete',
+            timestamp: '2026-07-12T15:00:00.000Z',
+            result: 'done',
+          };
+        }
+
+        await manager.consumeAgentEvents(pod.id, events());
+
+        expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+      },
+    );
+
+    it('sandbox session state sync failure does not fail completed work', async () => {
+      const ctx = createTestContext(undefined, {
+        defaultRuntime: 'codex',
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValueOnce(
+        new Error('sandbox file API unavailable'),
+      );
+      const warnSpy = vi.spyOn(logger, 'warn');
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Complete despite sync warning',
+          skipValidation: true,
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'sandbox-123' });
+
+      async function* events(): AsyncIterable<AgentEvent> {
+        yield {
+          type: 'task_summary',
+          timestamp: '2026-07-12T15:00:00.000Z',
+          actualSummary: 'Work completed.',
+          deviations: [],
+        };
+        yield {
+          type: 'complete',
+          timestamp: '2026-07-12T15:00:01.000Z',
+          result: 'done',
+        };
+      }
+
+      await expect(manager.consumeAgentEvents(pod.id, events())).resolves.toBe('completed');
+
+      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledOnce();
+      expect(manager.getSession(pod.id).taskSummary?.actualSummary).toBe('Work completed.');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ podId: pod.id, runtime: 'codex' }),
+        'Failed to sync sandbox runtime session state — future recovery may restart fresh',
+      );
     });
   });
 
@@ -8866,6 +9011,7 @@ describe('worker startup diagnostics', () => {
     );
     expect(runtime.spawn).toHaveBeenCalled();
     const spawnConfig = vi.mocked(runtime.spawn).mock.calls[0]?.[0];
+    expect(spawnConfig?.env.CODEX_HOME).toBe('/home/autopod/.codex');
     expect(spawnConfig?.customInstructions).toContain('report_plan');
     expect(spawnConfig?.customInstructions).toContain('report_task_summary');
   });

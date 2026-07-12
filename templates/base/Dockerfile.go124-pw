@@ -97,7 +97,7 @@ USER autopod
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 # Allow bare imports of globally installed packages (e.g. playwright in validation scripts)
-ENV NODE_PATH=/usr/local/lib/node_modules
+ENV NODE_PATH=/usr/lib/node_modules
 ENV TURBO_CACHE_DIR=/tmp/.turbo
 ENV npm_config_nodedir=/usr/local
 RUN echo "nodedir=/usr/local" >> /home/autopod/.npmrc

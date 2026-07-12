@@ -2,8 +2,8 @@ import { type Dirent, createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
-import { CONTAINER_HOME_DIR } from '@autopod/shared';
-import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
+import { CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/shared';
+import type { AgentEvent, ExecutionTarget, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import type { PodRepository } from '../pods/pod-repository.js';
@@ -95,7 +95,7 @@ export class CodexRuntime implements Runtime {
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
     // Write Codex's config.toml so the CLI picks up escalation + profile MCP servers
     // from disk. Codex reads `~/.codex/config.toml` automatically — no flag required.
-    await this.writeMcpConfig(config.containerId, config.mcpServers);
+    await this.writeMcpConfig(config.containerId, config.mcpServers, config.executionTarget);
     this.mcpServersBySession.set(config.podId, config.mcpServers);
     if (config.customInstructions?.trim()) {
       this.customInstructionsBySession.set(config.podId, config.customInstructions);
@@ -125,7 +125,7 @@ export class CodexRuntime implements Runtime {
     this.handles.set(config.podId, handle);
 
     const outputState: OutputState = { events: 0, nonStatusEvents: 0, sawComplete: false };
-    const enriched = this.parseWithRolloutFallback(handle, config.podId, outputState);
+    const enriched = this.parseWithRolloutFallback(handle, config.podId, outputState, config.model);
 
     try {
       yield* withPostCompleteGrace(
@@ -158,14 +158,20 @@ export class CodexRuntime implements Runtime {
     containerId: string,
     env?: Record<string, string>,
   ): AsyncIterable<AgentEvent> {
+    // Prefer in-memory shortcut; fall back to durable DB source across daemon restarts.
+    const pod = this.podRepo.getOrThrow(podId);
+
     // Re-write the Codex config into the (potentially new) container before launching codex.
     // Crash recovery spawns a fresh container that has no config file on disk; without this
     // re-write the agent loses access to escalation and profile MCP tools after recovery.
-    await this.writeMcpConfig(containerId, this.mcpServersBySession.get(podId));
+    // Pass the pod's execution target so sandbox recovery keeps the config world-readable.
+    await this.writeMcpConfig(
+      containerId,
+      this.mcpServersBySession.get(podId),
+      pod.executionTarget,
+    );
 
-    // Prefer in-memory shortcut; fall back to durable DB source across daemon restarts.
-    const sessionId =
-      this.codexSessionIds.get(podId) ?? this.podRepo.getOrThrow(podId).codexSessionId;
+    const sessionId = this.codexSessionIds.get(podId) ?? pod.codexSessionId;
 
     const prompt = sessionId
       ? message
@@ -207,14 +213,17 @@ export class CodexRuntime implements Runtime {
 
     try {
       yield* withPostCompleteGrace(
-        withIdleLivenessProbe(this.parseWithRolloutFallback(handle, podId, outputState), {
-          streams: [handle.stdout, handle.stderr],
-          runtimeName: 'codex-runtime',
-          podId,
-          logger: this.logger,
-          containerManager: this.containerManager,
-          containerId,
-        }),
+        withIdleLivenessProbe(
+          this.parseWithRolloutFallback(handle, podId, outputState, pod.model),
+          {
+            streams: [handle.stdout, handle.stderr],
+            runtimeName: 'codex-runtime',
+            podId,
+            logger: this.logger,
+            containerManager: this.containerManager,
+            containerId,
+          },
+        ),
         {
           streams: [handle.stdout, handle.stderr],
           runtimeName: 'codex-runtime',
@@ -286,13 +295,14 @@ export class CodexRuntime implements Runtime {
     handle: StreamingExecResult,
     podId: string,
     outputState: OutputState,
+    modelHint?: string,
   ): AsyncIterable<AgentEvent> {
     const seen = new Set<string>();
     const abortLiveRollout = new AbortController();
-    const stdoutIterator = this.parseCodexLines(handle.stdout, podId, seen, outputState)[
+    const stdoutIterator = this.parseCodexLines(handle.stdout, podId, seen, outputState, modelHint)[
       Symbol.asyncIterator
     ]();
-    const rolloutIterator = this.pollLatestRollout(podId, abortLiveRollout.signal)[
+    const rolloutIterator = this.pollLatestRollout(podId, abortLiveRollout.signal, modelHint)[
       Symbol.asyncIterator
     ]();
 
@@ -310,7 +320,7 @@ export class CodexRuntime implements Runtime {
             if (readyRollout && !readyRollout.result.done) {
               const event = readyRollout.result.value;
               const key = dedupeKey(event);
-              if (!seen.has(key)) {
+              if (!shouldSkipMergedEvent(event, key, seen, outputState)) {
                 seen.add(key);
                 recordOutputEvent(outputState, event);
                 yield event;
@@ -329,7 +339,7 @@ export class CodexRuntime implements Runtime {
         } else {
           const event = next.result.value;
           const key = dedupeKey(event);
-          if (seen.has(key)) {
+          if (shouldSkipMergedEvent(event, key, seen, outputState)) {
             rolloutNext = nextFrom('rollout', rolloutIterator);
             continue;
           }
@@ -346,7 +356,7 @@ export class CodexRuntime implements Runtime {
 
     if (stdoutStats.sawComplete && stdoutStats.nonStatusEvents > 0) return;
 
-    yield* this.replayLatestRollout(podId, seen, stdoutStats, outputState);
+    yield* this.replayLatestRollout(podId, seen, stdoutStats, outputState, modelHint);
   }
 
   private async codexExitError(
@@ -390,7 +400,8 @@ export class CodexRuntime implements Runtime {
       return {
         type: 'error',
         timestamp: new Date().toISOString(),
-        message: 'Codex exited without task_complete — refusing to mark pod complete',
+        message:
+          'Codex exited without terminal completion (turn.completed/task_complete) — refusing to mark pod complete',
         fatal: true,
       };
     }
@@ -412,15 +423,16 @@ export class CodexRuntime implements Runtime {
     podId: string,
     seen: Set<string>,
     outputState: OutputState,
+    modelHint?: string,
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
-    const iterator = this.parseCodexLinesRaw(lines, podId)[Symbol.asyncIterator]();
+    const iterator = this.parseCodexLinesRaw(lines, podId, modelHint)[Symbol.asyncIterator]();
     for (;;) {
       const next = await iterator.next();
       if (next.done) return next.value;
 
       const event = next.value;
       const key = dedupeKey(event);
-      if (seen.has(key)) continue;
+      if (shouldSkipMergedEvent(event, key, seen, outputState)) continue;
       seen.add(key);
       recordOutputEvent(outputState, event);
       yield event;
@@ -430,10 +442,11 @@ export class CodexRuntime implements Runtime {
   private async *parseCodexLinesRaw(
     lines: Readable,
     podId: string,
+    modelHint?: string,
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
     const stats: ParseStats = { events: 0, nonStatusEvents: 0, sawComplete: false };
 
-    for await (const event of CodexStreamParser.parse(lines, podId, this.logger)) {
+    for await (const event of CodexStreamParser.parse(lines, podId, this.logger, modelHint)) {
       stats.events += 1;
       if (event.type !== 'status') stats.nonStatusEvents += 1;
       if (event.type === 'complete') stats.sawComplete = true;
@@ -452,6 +465,7 @@ export class CodexRuntime implements Runtime {
     seen: Set<string>,
     stdoutStats: ParseStats,
     outputState: OutputState,
+    modelHint?: string,
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
     const rolloutPath = await findLatestCodexRolloutFile(codexStateDirForPod(podId));
     if (!rolloutPath) {
@@ -480,12 +494,19 @@ export class CodexRuntime implements Runtime {
       'Codex stdout stream ended without complete activity — replaying rollout JSONL',
     );
 
-    return yield* this.parseCodexLines(createReadStream(rolloutPath), podId, seen, outputState);
+    return yield* this.parseCodexLines(
+      createReadStream(rolloutPath),
+      podId,
+      seen,
+      outputState,
+      modelHint,
+    );
   }
 
   private async *pollLatestRollout(
     podId: string,
     signal: AbortSignal,
+    modelHint?: string,
   ): AsyncGenerator<AgentEvent, void, void> {
     let lastSignature: string | null = null;
 
@@ -496,7 +517,7 @@ export class CodexRuntime implements Runtime {
           const signature = `${rollout.path}:${rollout.mtimeMs}:${rollout.size}`;
           if (signature !== lastSignature) {
             lastSignature = signature;
-            yield* this.parseCodexLinesRaw(createReadStream(rollout.path), podId);
+            yield* this.parseCodexLinesRaw(createReadStream(rollout.path), podId, modelHint);
           }
         }
       } catch (err) {
@@ -525,6 +546,7 @@ export class CodexRuntime implements Runtime {
   private async writeMcpConfig(
     containerId: string,
     mcpServers: SpawnConfig['mcpServers'],
+    executionTarget?: ExecutionTarget,
   ): Promise<void> {
     if (!mcpServers || mcpServers.length === 0) return;
 
@@ -554,6 +576,29 @@ export class CodexRuntime implements Runtime {
       MCP_CONFIG_PATH,
       `${sections.join('\n\n')}\n`,
     );
+    // On sandbox the files API writes root-owned files and exec runs as a
+    // non-root, non-`autopod` user (the same reason secret files use 0444 and
+    // build binaries are repaired to a+rx). A 0600 `autopod`-only config would
+    // then be unreadable by the reviewer's `codex exec` — it runs via buffered
+    // executeShellCommand, not the agent's exec-stream — and the pre-submit
+    // review dies with "config.toml: Permission denied". Use world-readable 0644
+    // there; the sandbox is single-tenant and OPENAI_API_KEY is already 0444.
+    // Docker keeps 0600 (single `autopod` user; exec runs as `autopod`).
+    const configMode = executionTarget === 'sandbox' ? '0644' : '0600';
+    const secureConfig = await this.containerManager.execInContainer(
+      containerId,
+      [
+        'sh',
+        '-c',
+        `chown ${CONTAINER_USER}:${CONTAINER_USER} '${MCP_CONFIG_PATH}' && chmod ${configMode} '${MCP_CONFIG_PATH}'`,
+      ],
+      { timeout: 5_000, user: 'root' },
+    );
+    if (secureConfig.exitCode !== 0) {
+      throw new Error(
+        `Failed to secure Codex MCP config (exit ${secureConfig.exitCode}): ${secureConfig.stderr}`,
+      );
+    }
   }
 }
 
@@ -575,6 +620,15 @@ function composePrompt(task: string, customInstructions?: string): string {
 
 function dedupeKey(event: AgentEvent): string {
   return JSON.stringify(event);
+}
+
+function shouldSkipMergedEvent(
+  event: AgentEvent,
+  key: string,
+  seen: Set<string>,
+  outputState: OutputState,
+): boolean {
+  return seen.has(key) || (event.type === 'complete' && outputState.sawComplete);
 }
 
 function recordOutputEvent(state: OutputState, event: AgentEvent): void {

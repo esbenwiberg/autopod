@@ -51,7 +51,11 @@ RUN chown autopod:autopod /workspace
 USER autopod
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
-# Allow bare imports of globally installed packages (e.g. playwright in validation scripts)
+# Allow bare imports of globally installed packages (e.g. playwright in validation scripts).
+# This image is FROM node:22-slim, whose npm global prefix is /usr/local — globals live in
+# /usr/local/lib/node_modules (NOT /usr/lib, which is where the NodeSource-based go124-pw image
+# puts them). Pointing NODE_PATH at /usr/lib here would make bare require() of globals (and the
+# playwright launch check below) fail.
 ENV NODE_PATH=/usr/local/lib/node_modules
 # Turborepo cache dir — /workspace/.turbo may not be writable depending on how
 # the worktree is mounted, so use /tmp which is always writable.

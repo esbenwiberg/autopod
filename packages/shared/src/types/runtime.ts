@@ -1,4 +1,5 @@
 import type { FactEvidence } from './contract.js';
+import type { ExecutionTarget } from './profile.js';
 import type { MemoryOutcomeItem, ReviewFeedbackResponseItem } from './task-summary.js';
 
 export type RuntimeType = 'claude' | 'codex' | 'copilot';
@@ -25,6 +26,13 @@ export interface SpawnConfig {
   customInstructions?: string;
   env: Record<string, string>;
   mcpServers?: McpServerConfig[];
+  /**
+   * Execution backend for this pod. Runtimes use it to pick file permissions that
+   * work on the target: on `sandbox`, the Azure files API materializes uploads as
+   * root-owned and exec runs as a non-root, non-`autopod` user, so agent-visible
+   * config must be owner-neutral (world-readable) rather than `autopod`-only.
+   */
+  executionTarget?: ExecutionTarget;
 }
 
 export type McpServerConfig = HttpMcpServerConfig | StdioMcpServerConfig;

@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import pino from 'pino';
 import { describe, expect, it } from 'vitest';
-import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
+import { AzureSandboxApiClient, type WebSocketLike } from './azure-sandbox-api-client.js';
+import type { SandboxExecChunk } from './sandbox-api-client.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -64,6 +65,65 @@ function makeClient(
     ),
     requests,
   };
+}
+
+class MockWebSocket implements WebSocketLike {
+  sent: string[] = [];
+  closed = false;
+  onopen: ((event: unknown) => void) | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onerror: ((event: unknown) => void) | null = null;
+  onclose: ((event: { code?: number; reason?: string }) => void) | null = null;
+
+  send(data: string): void {
+    this.sent.push(data);
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.onclose?.({});
+  }
+
+  /** Deliver a server frame as a JSON text message. */
+  emit(frame: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(frame) });
+  }
+}
+
+// execStream stages the command as an executable wrapper script (writeFile PUT +
+// chmod exec POST) before opening the WebSocket, so callers that reach the socket
+// must supply those two HTTP responses.
+const STREAM_SETUP_RESPONSES: MockHttpResponse[] = [
+  { status: 204 }, // writeFile: PUT /files
+  { status: 200, body: { stdout: '', stderr: '', exitCode: 0 } }, // chmod +x
+];
+
+function makeStreamingClient(
+  script: (socket: MockWebSocket) => void,
+  responses: MockHttpResponse[] = STREAM_SETUP_RESPONSES,
+): {
+  client: AzureSandboxApiClient;
+  sockets: MockWebSocket[];
+  wsUrls: string[];
+  wsHeaders: Record<string, string>[];
+  requests: CapturedRequest[];
+} {
+  const sockets: MockWebSocket[] = [];
+  const wsUrls: string[] = [];
+  const wsHeaders: Record<string, string>[] = [];
+  const { client, requests } = makeClient(responses, {
+    webSocket: (url, headers) => {
+      wsUrls.push(url);
+      wsHeaders.push(headers);
+      const socket = new MockWebSocket();
+      sockets.push(socket);
+      // Run the server script after execStream has attached its handlers.
+      queueMicrotask(() => script(socket));
+      return socket;
+    },
+  });
+  return { client, sockets, wsUrls, wsHeaders, requests };
 }
 
 function jsonBody(request: CapturedRequest): unknown {
@@ -327,6 +387,171 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
+  it('stages a wrapper script then streams stdout/stderr and exit code over the exec WebSocket', async () => {
+    const { client, sockets, wsUrls, wsHeaders, requests } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+      socket.emit({ type: 'stdout', data: Buffer.from('hello').toString('base64') });
+      socket.emit({ type: 'stderr', data: Buffer.from('warn').toString('base64') });
+      socket.emit({ type: 'exit_code', exitCode: 3 });
+    });
+
+    const chunks: SandboxExecChunk[] = [];
+    for await (const chunk of client.execStream('sbx-1', ['echo', 'hello'], {
+      cwd: '/workspace',
+      env: { FOO: 'bar baz' },
+    })) {
+      chunks.push(chunk);
+    }
+
+    // The command is `execve`d as a single argv[0], so it is staged as an
+    // executable wrapper script and the start frame execs that path.
+    const writeReq = requests[0] ?? failRequest();
+    expect(writeReq.url).toContain('/sandboxes/sbx-1/files');
+    const scriptPath = new URL(writeReq.url).searchParams.get('path') ?? '';
+    expect(scriptPath).toMatch(/^\/tmp\/\.autopod-execstream-\d+-\d+\.sh$/);
+    expect(String(writeReq.init?.body)).toBe(
+      '#!/bin/sh\ncd /workspace || exit 1\nexec echo hello\n',
+    );
+    // The files API writes the wrapper as root:0644, so it is chmod-ed executable as root.
+    expect(jsonBody(requests[1] ?? failRequest())).toEqual({
+      command: `chmod 0755 ${scriptPath}`,
+      user: 'root',
+    });
+
+    expect(wsUrls).toEqual([
+      'wss://management.swedencentral.azuredevcompute.io/subscriptions/sub-1/resourceGroups/rg-1/sandboxGroups/autopod-spike/sandboxes/sbx-1/exec/stream',
+    ]);
+    expect(wsHeaders[0]).toEqual({ Authorization: 'Bearer test-token' });
+    expect(JSON.parse(sockets[0]?.sent[0] ?? '{}')).toEqual({
+      type: 'start',
+      start: {
+        command: scriptPath,
+        environment: { TERM: 'xterm-256color', LANG: 'C.UTF-8', FOO: 'bar baz' },
+        tty: false,
+        stdin: false,
+        height: 24,
+        width: 80,
+      },
+    });
+    expect(chunks).toEqual([{ stdout: 'hello' }, { stderr: 'warn' }, { exitCode: 3 }]);
+    expect(sockets[0]?.closed).toBe(true);
+  });
+
+  it('fails the exec stream when the socket closes before an exit code', async () => {
+    const { client } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+      socket.emit({ type: 'stdout', data: Buffer.from('partial').toString('base64') });
+      socket.close();
+    });
+
+    const chunks: SandboxExecChunk[] = [];
+    await expect(
+      (async () => {
+        for await (const chunk of client.execStream('sbx-1', ['sleep', '60'])) {
+          chunks.push(chunk);
+        }
+      })(),
+    ).rejects.toThrow(/closed before reporting an exit code/);
+    expect(chunks).toEqual([{ stdout: 'partial' }]);
+  });
+
+  it('fails the exec stream on an error frame', async () => {
+    const { client } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+      socket.emit({ type: 'error', message: 'boom' });
+    });
+
+    const drained: SandboxExecChunk[] = [];
+    await expect(
+      (async () => {
+        for await (const chunk of client.execStream('sbx-1', ['true'])) {
+          drained.push(chunk);
+        }
+      })(),
+    ).rejects.toThrow(/reported an error/);
+    expect(drained).toEqual([]);
+  });
+
+  it('rejects streaming exec with a user option', async () => {
+    const { client } = makeStreamingClient(() => {
+      throw new Error('socket should not be created');
+    });
+
+    const drained: SandboxExecChunk[] = [];
+    await expect(
+      (async () => {
+        for await (const chunk of client.execStream('sbx-1', ['true'], { user: 'root' })) {
+          drained.push(chunk);
+        }
+      })(),
+    ).rejects.toThrow(/cannot run as a specific user/);
+    expect(drained).toEqual([]);
+  });
+
+  it('opens an interactive TTY terminal session, proxying stdin/resize/output', async () => {
+    const { client, sockets, requests } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+    });
+
+    const session = await client.attachTerminal('sbx-1', {
+      cols: 100,
+      rows: 30,
+      shellCommand: 'exec /bin/bash -l',
+      env: { FOO: 'bar' },
+    });
+
+    // The shell one-liner is staged as an executable wrapper (writeFile + root chmod).
+    const writeReq = requests[0] ?? failRequest();
+    const scriptPath = new URL(writeReq.url).searchParams.get('path') ?? '';
+    expect(scriptPath).toMatch(/^\/tmp\/\.autopod-execstream-\d+-\d+\.sh$/);
+    expect(String(writeReq.init?.body)).toBe('#!/bin/sh\nexec /bin/bash -l\n');
+    expect(jsonBody(requests[1] ?? failRequest())).toEqual({
+      command: `chmod 0755 ${scriptPath}`,
+      user: 'root',
+    });
+
+    // The start frame runs the wrapper with a TTY and stdin enabled.
+    expect(JSON.parse(sockets[0]?.sent[0] ?? '{}')).toEqual({
+      type: 'start',
+      start: {
+        command: scriptPath,
+        environment: { TERM: 'xterm-256color', LANG: 'C.UTF-8', FOO: 'bar' },
+        tty: true,
+        stdin: true,
+        height: 30,
+        width: 100,
+      },
+    });
+
+    const output: string[] = [];
+    session.onData((chunk) => output.push(chunk.toString('utf-8')));
+    let exitCode: number | undefined;
+    session.onExit((code) => {
+      exitCode = code;
+    });
+
+    session.write(Buffer.from('ls\n'));
+    expect(JSON.parse(sockets[0]?.sent[1] ?? '{}')).toEqual({
+      type: 'stdin',
+      data: Buffer.from('ls\n').toString('base64'),
+    });
+
+    session.resize(120, 40);
+    expect(JSON.parse(sockets[0]?.sent[2] ?? '{}')).toEqual({
+      type: 'resize',
+      width: 120,
+      height: 40,
+    });
+
+    sockets[0]?.emit({ type: 'stdout', data: Buffer.from('hi').toString('base64') });
+    sockets[0]?.emit({ type: 'stderr', data: Buffer.from('!').toString('base64') });
+    expect(output).toEqual(['hi', '!']);
+
+    sockets[0]?.emit({ type: 'exit_code', exitCode: 0 });
+    expect(exitCode).toBe(0);
+    expect(sockets[0]?.closed).toBe(true);
+  });
+
   it('writes, reads, lists, stats files, and updates egress policy through the data plane', async () => {
     const { client, requests } = makeClient([
       { status: 204 },
@@ -391,6 +616,100 @@ describe('AzureSandboxApiClient', () => {
       defaultAction: 'Deny',
       hostRules: [{ pattern: 'api.github.com', action: 'Allow' }],
     });
+  });
+
+  it('exposes an Entra-gated port and maps the returned public URL', async () => {
+    const { client, requests } = makeClient([
+      {
+        status: 200,
+        body: {
+          port: 3000,
+          protocol: 'Http',
+          url: 'https://sbx-1-3000.swedencentral.azurecontainerapps.io',
+        },
+      },
+    ]);
+
+    const exposed = await client.addPort('sbx-1', 3000, {
+      mode: 'entra',
+      emails: ['ewi@projectum.com'],
+    });
+
+    expect(exposed).toEqual({
+      port: 3000,
+      hostPort: undefined,
+      protocol: 'Http',
+      url: 'https://sbx-1-3000.swedencentral.azurecontainerapps.io',
+    });
+    expect(requests[0]?.url).toContain('/sandboxes/sbx-1/ports/add');
+    expect(jsonBody(requests[0] ?? failRequest())).toEqual({
+      port: 3000,
+      auth: { entraId: { enabled: true, emails: ['ewi@projectum.com'] } },
+    });
+  });
+
+  it('exposes an anonymous port when explicitly opted in', async () => {
+    const { client, requests } = makeClient([
+      { status: 201, body: { port: 8080, url: 'https://x' } },
+    ]);
+
+    await client.addPort('sbx-1', 8080, { mode: 'anonymous' });
+
+    expect(jsonBody(requests[0] ?? failRequest())).toEqual({
+      port: 8080,
+      auth: { anonymous: true },
+    });
+  });
+
+  it('omits auth when none is given (platform default) and removes ports idempotently', async () => {
+    const { client, requests } = makeClient([
+      { status: 200, body: { port: 3000, url: 'https://y' } },
+      { status: 404 },
+    ]);
+
+    await client.addPort('sbx-1', 3000);
+    expect(jsonBody(requests[0] ?? failRequest())).toEqual({ port: 3000 });
+
+    await expect(client.removePort('sbx-1', 3000)).resolves.toBeUndefined();
+    expect(requests[1]?.url).toContain('/sandboxes/sbx-1/ports/remove');
+    expect(jsonBody(requests[1] ?? failRequest())).toEqual({ port: 3000 });
+  });
+
+  it('creates a snapshot and returns its id', async () => {
+    const { client, requests } = makeClient([{ status: 200, body: { id: 'snap-1' } }]);
+
+    const snapshot = await client.createSnapshot('sbx-1', 'warm-node22');
+
+    expect(snapshot).toEqual({ id: 'snap-1' });
+    expect(requests[0]?.url).toContain('/sandboxes/sbx-1/snapshot');
+    expect(jsonBody(requests[0] ?? failRequest())).toEqual({ labels: { name: 'warm-node22' } });
+  });
+
+  it('provisions a sandbox from a snapshot with only sourcesRef, polling to Running', async () => {
+    const { client, requests } = makeClient(
+      [
+        { status: 200, body: { id: 'sbx-2', state: 'Creating' } }, // PUT sandboxes
+        { status: 200, body: { id: 'sbx-2', state: 'Running' } }, // poll
+      ],
+      { assumeGroupExists: true },
+    );
+
+    const id = await client.createFromSnapshot('snap-1');
+
+    expect(id).toBe('sbx-2');
+    const putReq = requests[0] ?? failRequest();
+    expect(putReq.url).toContain('/sandboxGroups/autopod-spike/sandboxes');
+    expect(jsonBody(putReq)).toEqual({
+      sourcesRef: { snapshot: { id: 'snap-1' } },
+      labels: { purpose: 'autopod-sandbox' },
+    });
+  });
+
+  it('deletes a snapshot idempotently', async () => {
+    const { client, requests } = makeClient([{ status: 404 }]);
+
+    await expect(client.deleteSnapshot('snap-1')).resolves.toBeUndefined();
+    expect(requests[0]?.url).toContain('/sandboxGroups/autopod-spike/snapshots/snap-1');
   });
 
   it('treats existing directories as successful mkdirs', async () => {
