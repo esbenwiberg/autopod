@@ -11,6 +11,7 @@ import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
 import { saveClipboardImage } from '../utils/clipboard.js';
 import { resolvePodId } from '../utils/id-resolver.js';
+import { runRemoteTerminalSession } from '../utils/remote-terminal.js';
 
 const IMAGE_EXTENSIONS = new Set([
   '.png',
@@ -29,12 +30,14 @@ const ATTACH_POLL_INTERVAL_MS = 1_500;
 const TERMINAL_STATUSES = new Set<PodStatus>(['complete', 'killed', 'failed']);
 
 type AttachSessionRunner = (containerName: string) => Promise<number>;
+type TerminalSessionRunner = (client: AutopodClient, podId: string) => Promise<number>;
 type ProfilePicker = (client: AutopodClient) => Promise<string>;
 type SleepFn = (ms: number) => Promise<void>;
 type NowFn = () => number;
 
 interface WorkspaceCommandDeps {
   runAttachSession?: AttachSessionRunner;
+  runTerminalSession?: TerminalSessionRunner;
   pickProfile?: ProfilePicker;
   sleep?: SleepFn;
   now?: NowFn;
@@ -42,6 +45,7 @@ interface WorkspaceCommandDeps {
 
 interface ResolvedWorkspaceCommandDeps {
   attachSession: AttachSessionRunner;
+  terminalSession: TerminalSessionRunner;
   pickProfile: ProfilePicker;
   sleep: SleepFn;
   now: NowFn;
@@ -67,6 +71,7 @@ export function registerWorkspaceCommands(
   deps: WorkspaceCommandDeps = {},
 ): void {
   const attachSession = deps.runAttachSession ?? runAttachSession;
+  const terminalSession = deps.runTerminalSession ?? runRemoteTerminalSession;
   const pickProfile = deps.pickProfile ?? pickProfileInteractively;
   const sleep =
     deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -83,6 +88,7 @@ export function registerWorkspaceCommands(
       const client = getClient();
       await createWorkspacePod(client, profile, label, opts, {
         attachSession,
+        terminalSession,
         pickProfile,
         sleep,
         now,
@@ -102,6 +108,7 @@ export function registerWorkspaceCommands(
       { ...opts, attach: true },
       {
         attachSession,
+        terminalSession,
         pickProfile,
         sleep,
         now,
@@ -112,13 +119,15 @@ export function registerWorkspaceCommands(
   // ap attach <id>
   program
     .command('attach <id>')
-    .description('Attach to a running workspace pod via docker exec')
+    .description(
+      'Attach to a running workspace pod (docker exec locally, daemon terminal for sandbox pods)',
+    )
     .action(async (id: string) => {
       const client = getClient();
       const resolvedId = await resolvePodId(client, id);
       const pod = await client.getSession(resolvedId);
 
-      await attachToRunningPod(client, pod, attachSession);
+      await attachToRunningPod(client, pod, { attachSession, terminalSession });
     });
 
   // ap complete <id>
@@ -460,8 +469,6 @@ async function createWorkspacePod(
   opts: WorkspaceCreateOptions,
   deps: ResolvedWorkspaceCommandDeps,
 ): Promise<void> {
-  await assertInteractiveProfileSupported(client, profile);
-
   const label = opts.label ?? positionalLabel ?? 'Workspace pod';
   const pod = await withSpinner('Creating workspace pod...', () =>
     client.createSession({
@@ -489,19 +496,7 @@ async function createWorkspacePod(
     () => waitForPodRunning(client, pod, opts.timeout ?? DEFAULT_ATTACH_TIMEOUT_MS, deps),
   );
 
-  await attachToRunningPod(client, runningPod, deps.attachSession);
-}
-
-async function assertInteractiveProfileSupported(
-  client: AutopodClient,
-  profileName: string,
-): Promise<void> {
-  const profile = await client.getProfile(profileName);
-  if (profile.executionTarget === 'sandbox') {
-    throw new Error(
-      `Sandbox interactive pods are not supported for profile "${profileName}" because Azure Sandboxes do not provide bidirectional TTY streaming yet. Use a local execution profile for ap shell/workspace, or run a non-interactive sandbox pod.`,
-    );
-  }
+  await attachToRunningPod(client, runningPod, deps);
 }
 
 function printWorkspaceSummary(pod: Pod): void {
@@ -550,7 +545,7 @@ function isInteractivePod(pod: Pod): boolean {
 async function attachToRunningPod(
   client: AutopodClient,
   pod: Pod,
-  attachSession: AttachSessionRunner,
+  deps: Pick<ResolvedWorkspaceCommandDeps, 'attachSession' | 'terminalSession'>,
 ): Promise<void> {
   if (!isInteractivePod(pod)) {
     console.error(chalk.red(`Pod ${pod.id} is not an interactive pod.`));
@@ -562,20 +557,19 @@ async function attachToRunningPod(
     process.exit(1);
   }
 
-  if (pod.executionTarget !== 'local') {
-    console.error(
-      chalk.red(
-        `Pod ${pod.id} uses executionTarget=${pod.executionTarget}; ap attach only supports local Docker pods because sandbox TTY streaming is unavailable.`,
-      ),
-    );
-    process.exit(1);
+  let exitCode: number;
+  if (pod.executionTarget === 'local') {
+    const containerName = `autopod-${pod.id}`;
+    console.log(chalk.dim(`Attaching to ${containerName}…`));
+    console.log(chalk.dim('Type "exit" to detach. Run "ap complete <id>" when done.\n'));
+    exitCode = await deps.attachSession(containerName);
+  } else {
+    // Remote container (Azure Sandbox) — no local docker exec; proxy the TTY
+    // through the daemon terminal WebSocket instead.
+    console.log(chalk.dim(`Attaching to ${pod.executionTarget} pod ${pod.id.slice(0, 8)}…`));
+    console.log(chalk.dim('Type "exit" to detach. Run "ap complete <id>" when done.\n'));
+    exitCode = await deps.terminalSession(client, pod.id);
   }
-
-  const containerName = `autopod-${pod.id}`;
-  console.log(chalk.dim(`Attaching to ${containerName}…`));
-  console.log(chalk.dim('Type "exit" to detach. Run "ap complete <id>" when done.\n'));
-
-  const exitCode = await attachSession(containerName);
 
   console.log();
 
