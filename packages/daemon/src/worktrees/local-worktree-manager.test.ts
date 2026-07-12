@@ -1615,9 +1615,11 @@ describe('LocalWorktreeManager', () => {
       );
       expect(excludeWrite).toBeDefined();
       expect(String(excludeWrite?.[1])).toContain('.mcp.json');
+      // The Pi handoff mirror is excluded from the host-side auto-commit here.
+      expect(String(excludeWrite?.[1])).toContain('.autopod/pi-handoff.md');
     });
 
-    it('does not duplicate .mcp.json when info/exclude already lists it', async () => {
+    it('does not duplicate excludes when info/exclude already lists them', async () => {
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
           const cb = resolveCallback(arg3, arg4);
@@ -1632,7 +1634,7 @@ describe('LocalWorktreeManager', () => {
           return {} as ChildProcess;
         },
       );
-      fsReadFileMock.mockResolvedValueOnce('# pre-existing\n.mcp.json\n');
+      fsReadFileMock.mockResolvedValueOnce('# pre-existing\n.mcp.json\n.autopod/pi-handoff.md\n');
 
       await manager.create({
         repoUrl: 'https://github.com/org/repo.git',
@@ -1640,7 +1642,7 @@ describe('LocalWorktreeManager', () => {
         baseBranch: 'main',
       });
 
-      // Already listed → no write needed
+      // Both already listed → no write needed
       expect(fsWriteFileMock).not.toHaveBeenCalled();
     });
 
@@ -1669,6 +1671,36 @@ describe('LocalWorktreeManager', () => {
           baseBranch: 'gone-branch',
         }),
       ).rejects.toThrow('baseBranch "gone-branch" not found on remote or locally');
+    });
+
+    it('throws when a distinct startBranch is unresolvable — no fallback to base/default', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('rev-parse --git-dir')) {
+            cb(null, { stdout: '.', stderr: '' });
+          } else if (cmd.includes('fetch') && cmd.includes('pi/gone')) {
+            cb(new Error("fatal: couldn't find remote ref"));
+          } else if (cmd.includes('rev-parse --verify refs/heads/pi/gone')) {
+            cb(new Error('fatal: Needed a single revision'));
+          } else {
+            // baseBranch (main) resolves fine — proving there is no silent
+            // fallback to it (or the profile default) when startBranch is missing.
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await expect(
+        manager.create({
+          repoUrl: 'https://github.com/org/repo.git',
+          branch: 'autopod/new-pod',
+          baseBranch: 'main',
+          startBranch: 'pi/gone',
+        }),
+      ).rejects.toThrow('startBranch "pi/gone" not found on remote or locally');
     });
 
     it('stores PAT in cache for later push operations', async () => {

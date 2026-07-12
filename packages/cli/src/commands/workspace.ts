@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
-import { stat, unlink } from 'node:fs/promises';
+import { readFile, stat, unlink } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { createInterface } from 'node:readline/promises';
+import { MAX_HANDOFF_INSTRUCTIONS_LENGTH } from '@autopod/shared';
 import type { Pod, PodStatus, PublicProfile } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
@@ -54,6 +55,10 @@ interface ResolvedWorkspaceCommandDeps {
 interface WorkspaceCreateOptions {
   attach?: boolean;
   branch?: string;
+  baseBranch?: string;
+  startBranch?: string;
+  instructions?: string;
+  instructionsFile?: string;
   label?: string;
   pimGroup?: string[];
   timeout?: number;
@@ -143,7 +148,7 @@ export function registerWorkspaceCommands(
     .option('--none', 'Hand off to the agent ephemerally (no push)')
     .option(
       '-i, --instructions <text>',
-      'Handoff instructions for the agent (only used with --pr/--artifact/--none)',
+      'Handoff instructions for the agent (only used with --pr/--artifact/--none). REPLACES any instructions persisted at workspace creation; when omitted, the persisted handoff is reused as-is.',
     )
     .option(
       '--skip-agent',
@@ -357,9 +362,22 @@ export function registerWorkspaceCommands(
 
 function addWorkspaceOptions(command: Command): Command {
   return command
+    .option('-b, --branch <name>', 'Name for the new working branch (defaults to autopod/<id>).')
     .option(
-      '-b, --branch <name>',
-      'Name for the new working branch (defaults to autopod/<id>). Pass --base-branch on "ap run" for the handoff, not here.',
+      '--base-branch <ref>',
+      'Remote ref to start the workspace from AND target as the merge base (must exist on the remote; no fallback to the profile default).',
+    )
+    .option(
+      '--start-branch <ref>',
+      'Remote ref to start the workspace from while the eventual PR still targets the profile default (use instead of --base-branch to keep the merge base as main).',
+    )
+    .option(
+      '-i, --instructions <text>',
+      'Durable handoff instructions to persist on the pod and mirror to /workspace/.autopod/pi-handoff.md (mutually exclusive with --instructions-file).',
+    )
+    .option(
+      '--instructions-file <path>',
+      'Read durable handoff instructions from a local file (mutually exclusive with --instructions).',
     )
     .option(
       '--pim-group <spec>',
@@ -403,6 +421,52 @@ function parsePimGroups(specs: string[] | undefined):
       displayName: spec.slice(colonIdx + 1),
     };
   });
+}
+
+/**
+ * Resolve the handoff instructions from the mutually-exclusive `--instructions`
+ * / `--instructions-file` flags. Reads the file locally, rejects empty (after
+ * trim), and enforces {@link MAX_HANDOFF_INSTRUCTIONS_LENGTH}. Every error is
+ * actionable and mentions only sizes/paths — never the instruction body — so
+ * handoff content can't leak into logs or terminal scrollback on failure.
+ *
+ * Exported for unit testing.
+ */
+export async function resolveHandoffInstructions(opts: {
+  instructions?: string;
+  instructionsFile?: string;
+}): Promise<string | undefined> {
+  if (opts.instructions != null && opts.instructionsFile != null) {
+    throw new Error('Choose at most one of --instructions or --instructions-file.');
+  }
+
+  let raw: string | undefined;
+  if (opts.instructions != null) {
+    raw = opts.instructions;
+  } else if (opts.instructionsFile != null) {
+    try {
+      raw = await readFile(opts.instructionsFile, 'utf8');
+    } catch (err) {
+      throw new Error(
+        `Cannot read --instructions-file "${opts.instructionsFile}": ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  if (raw == null) return undefined;
+
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    throw new Error('Handoff instructions must not be empty.');
+  }
+  if (trimmed.length > MAX_HANDOFF_INSTRUCTIONS_LENGTH) {
+    throw new Error(
+      `Handoff instructions are too large (${trimmed.length} characters; limit ${MAX_HANDOFF_INSTRUCTIONS_LENGTH}). Trim the content or hand off a summary.`,
+    );
+  }
+  return trimmed;
 }
 
 async function pickProfileInteractively(client: AutopodClient): Promise<string> {
@@ -470,12 +534,23 @@ async function createWorkspacePod(
   deps: ResolvedWorkspaceCommandDeps,
 ): Promise<void> {
   const label = opts.label ?? positionalLabel ?? 'Workspace pod';
+  // Resolve + validate the handoff before creating anything, so an empty,
+  // unreadable, or oversized file fails fast with an actionable message and
+  // never mints a pod. Never logs the body.
+  const handoffInstructions = await resolveHandoffInstructions(opts);
   const pod = await withSpinner('Creating workspace pod...', () =>
     client.createSession({
       profileName: profile,
       task: label,
       outputMode: 'workspace',
       branch: opts.branch,
+      // --base-branch → both start point and merge base; --start-branch → start
+      // point only (PR still targets the profile default). Passed straight
+      // through to the same fields worker pods use; the daemon resolves and the
+      // worktree layer fails closed if a requested ref can't be fetched.
+      baseBranch: opts.baseBranch,
+      startBranch: opts.startBranch,
+      handoffInstructions,
       pimGroups: parsePimGroups(opts.pimGroup),
     }),
   );

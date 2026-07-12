@@ -54,6 +54,7 @@ import {
   CONTAINER_HOME_DIR,
   DEFAULT_CONTAINER_MEMORY_GB,
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
+  WORKSPACE_PI_HANDOFF_PATH,
   generateId,
   generatePodId,
   mergeValidationPhaseSkips,
@@ -460,6 +461,22 @@ function shellQuote(s: string): string {
 
 const WORKSPACE_RUNTIME_CACHE_EXCLUDES = ['node_modules', '.serena', '.roslyn-codelens'];
 const WORKSPACE_SYNC_EXCLUDES = ['.git', ...WORKSPACE_RUNTIME_CACHE_EXCLUDES];
+
+/** Render the in-workspace pi-handoff.md file body. A short managed-file banner
+ * makes clear to the human/agent that it is Autopod-managed and git-excluded,
+ * followed by the raw persisted instructions verbatim. */
+function renderPiHandoffFile(instructions: string): string {
+  return [
+    "<!-- Autopod-managed: a copy of this pod's handoff instructions.",
+    '     Git-excluded — edits here are not tracked and will not be committed',
+    '     unless you `git add -f` this path. -->',
+    '',
+    '# Pi handoff',
+    '',
+    instructions.trim(),
+    '',
+  ].join('\n');
+}
 
 function workspaceMirrorPruneExpression(excludes: string[]): string {
   const predicates = excludes.map((name) => `-name ${shellQuote(name)}`).join(' -o ');
@@ -5361,6 +5378,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             outputMode: effectiveOutputMode,
             startBranch: effectiveStartBranch !== effectiveBaseBranch ? effectiveStartBranch : null,
             baseBranch: effectiveBaseBranch,
+            // Persist durable handoff instructions immediately so they survive
+            // independently of the originating Pi session and are visible on the
+            // pod the moment it is created. Trimmed (schema already rejects empty).
+            handoffInstructions: request.handoffInstructions?.trim() || null,
             specFiles: request.specFiles && request.specFiles.length > 0 ? request.specFiles : null,
             specContextFiles:
               request.specContextFiles && request.specContextFiles.length > 0
@@ -5684,7 +5705,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                     'Treat the human as a collaborator, not noise — their commits encode intent, ' +
                     'and their instructions (if any) take precedence over inferences from the diff alone.',
                   '',
-                  '### Human instructions',
+                  // Three clearly-separated parts so the agent can tell the human's
+                  // authoritative handoff apart from the machine-generated activity
+                  // summary. Per the documented replacement rule, "Handoff
+                  // instructions" is the initial handoff captured at creation (the
+                  // Pi → workspace flow) UNLESS a promotion-time `--instructions`
+                  // correction replaced it in `promoteToAuto` — either way it is the
+                  // single authoritative instruction, never a blend of both.
+                  '### Handoff instructions',
                   hasInstructions
                     ? (pod.handoffInstructions as string)
                     : '(none provided — infer the remaining work from the session summary and original brief)',
@@ -6391,6 +6419,48 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                   cachePaths,
                 },
                 'Failed to install code-intel cache exclusions in /workspace/.git/info/exclude',
+              );
+            }
+          }
+
+          // Mirror the pod's durable handoff instructions into the workspace at
+          // /workspace/.autopod/pi-handoff.md so the interactive session (and,
+          // after promotion, the agent) can read the Pi handoff without leaving
+          // the container. Written *after* the populate/restore/clean sequence
+          // so nothing clobbers it. Kept out of commits by two layers: the
+          // shared worktree info/exclude (host-side auto-commit) set at worktree
+          // creation, plus this in-container info/exclude entry — the container's
+          // reconstructed /workspace/.git does NOT inherit the shared exclude, so
+          // without this an in-container `git add -A` would still sweep it in.
+          // Fail closed: a workspace that cannot surface or protect its handoff
+          // is an inconsistent handoff, so both the write and the exclude throw.
+          if (pod.handoffInstructions) {
+            emitStatus('Writing handoff…');
+            await containerManager.writeFile(
+              containerId,
+              WORKSPACE_PI_HANDOFF_PATH,
+              renderPiHandoffFile(pod.handoffInstructions),
+            );
+            const marker = '# autopod: pi handoff';
+            const guard = await containerManager.execInContainer(
+              containerId,
+              [
+                'sh',
+                '-c',
+                [
+                  'set -e',
+                  'mkdir -p /workspace/.git/info',
+                  'touch /workspace/.git/info/exclude',
+                  `if ! grep -qF ${shellQuote(marker)} /workspace/.git/info/exclude; then`,
+                  `  printf '\\n%s\\n%s\\n' ${shellQuote(marker)} ${shellQuote('.autopod/pi-handoff.md')} >> /workspace/.git/info/exclude`,
+                  'fi',
+                ].join('\n'),
+              ],
+              { timeout: 10_000 },
+            );
+            if (guard.exitCode !== 0) {
+              throw new Error(
+                `Failed to exclude pi-handoff.md from workspace commits (exit ${guard.exitCode}): ${guard.stderr}`,
               );
             }
           }
@@ -9044,6 +9114,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // them after `syncWorkspaceBack()` completes and composes `handoffContext`.
       // (When skipAgent is set the agent never sees these — the field stays on
       // the pod for audit/UI purposes only.)
+      //
+      // DETERMINISTIC PROMOTION RULE — REPLACEMENT (not append/merge):
+      // A non-empty promotion-time correction *replaces* whatever
+      // `handoffInstructions` the pod already carried (e.g. the initial Pi
+      // handoff persisted at creation). When no correction is supplied, the
+      // existing value is reused verbatim. We never concatenate the two, so a
+      // large initial handoff can't be silently duplicated. The composed
+      // `## Handoff` section always shows the single authoritative instruction
+      // (initial OR correction) distinct from the machine-generated summary.
       const trimmedInstructions = options?.instructions?.trim();
       if (trimmedInstructions && trimmedInstructions.length > 0) {
         podRepo.update(podId, { handoffInstructions: trimmedInstructions });

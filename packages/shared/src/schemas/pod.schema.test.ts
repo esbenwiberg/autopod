@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_HANDOFF_INSTRUCTIONS_LENGTH } from '../constants.js';
 import { createPodRequestSchema, podResponseSchema } from './pod.schema.js';
 
 describe('createPodRequestSchema', () => {
@@ -40,6 +41,36 @@ describe('createPodRequestSchema', () => {
       { url: 'https://github.com/org/lib', sourceProfile: 'duck' },
       { url: 'https://github.com/org/other' },
     ]);
+  });
+
+  it('preserves and trims handoffInstructions on a workspace pod (empty task allowed)', () => {
+    const parsed = createPodRequestSchema.parse({
+      profileName: 'primary',
+      task: '',
+      outputMode: 'workspace',
+      handoffInstructions: '  continue the Pi plan  ',
+    });
+    expect(parsed.handoffInstructions).toBe('continue the Pi plan');
+  });
+
+  it('rejects empty / whitespace-only handoffInstructions', () => {
+    const result = createPodRequestSchema.safeParse({
+      profileName: 'primary',
+      task: '',
+      outputMode: 'workspace',
+      handoffInstructions: '   \n\t ',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects handoffInstructions over the size cap', () => {
+    const result = createPodRequestSchema.safeParse({
+      profileName: 'primary',
+      task: '',
+      outputMode: 'workspace',
+      handoffInstructions: 'a'.repeat(MAX_HANDOFF_INSTRUCTIONS_LENGTH + 1),
+    });
+    expect(result.success).toBe(false);
   });
 
   it('accepts validation suite per-pod overrides', () => {

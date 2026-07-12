@@ -14,7 +14,12 @@ import type {
   StackTemplate,
   ValidationResult,
 } from '@autopod/shared';
-import { AutopodError, InvalidStateTransitionError, PodNotFoundError } from '@autopod/shared';
+import {
+  AutopodError,
+  InvalidStateTransitionError,
+  PodNotFoundError,
+  WORKSPACE_PI_HANDOFF_PATH,
+} from '@autopod/shared';
 import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1156,6 +1161,38 @@ describe('PodManager', () => {
 
       expect(pod.startBranch).toBe('docs/spec-help-modal');
       expect(pod.baseBranch).toBe('main');
+    });
+
+    it('creates a workspace pod from a non-default base branch with handoff instructions', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Workspace pod',
+          outputMode: 'workspace',
+          baseBranch: 'pi/feature-x',
+          handoffInstructions: '  Continue the Pi plan.  ',
+        },
+        'user-1',
+      );
+
+      // Persisted immediately, trimmed, and readable on the freshly created pod.
+      expect(manager.getSession(pod.id).handoffInstructions).toBe('Continue the Pi plan.');
+      expect(pod.baseBranch).toBe('pi/feature-x');
+    });
+
+    it('leaves handoffInstructions null for the unchanged legacy workspace path', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Workspace pod', outputMode: 'workspace' },
+        'user-1',
+      );
+
+      expect(manager.getSession(pod.id).handoffInstructions).toBeNull();
     });
 
     it('persists local spec files for pre-agent branch materialization', () => {
@@ -2989,6 +3026,78 @@ describe('PodManager', () => {
           baseBranch: 'main',
         }),
       );
+    });
+
+    it('mirrors handoff instructions into /workspace/.autopod/pi-handoff.md during provisioning (local)', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Workspace pod',
+          outputMode: 'workspace',
+          handoffInstructions: 'INITIAL PI HANDOFF',
+        },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      expect(ctx.containerManager.writeFile).toHaveBeenCalledWith(
+        'container-123',
+        WORKSPACE_PI_HANDOFF_PATH,
+        expect.stringContaining('INITIAL PI HANDOFF'),
+      );
+      // In-container info/exclude so an in-container `git add -A` can't sweep it in.
+      const excludeCall = vi
+        .mocked(ctx.containerManager.execInContainer)
+        .mock.calls.find((c) =>
+          (c[1] as string[]).some(
+            (a) => typeof a === 'string' && a.includes('.autopod/pi-handoff.md'),
+          ),
+        );
+      expect(excludeCall).toBeDefined();
+    });
+
+    it('mirrors handoff instructions into the workspace on the sandbox target (mocked Azure)', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Workspace pod',
+          outputMode: 'workspace',
+          handoffInstructions: 'SANDBOX PI HANDOFF',
+        },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      expect(ctx.containerManager.writeFile).toHaveBeenCalledWith(
+        'container-123',
+        WORKSPACE_PI_HANDOFF_PATH,
+        expect.stringContaining('SANDBOX PI HANDOFF'),
+      );
+    });
+
+    it('writes no pi-handoff.md when the workspace pod has no handoff instructions', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Workspace pod', outputMode: 'workspace' },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      const wrotePiHandoff = vi
+        .mocked(ctx.containerManager.writeFile)
+        .mock.calls.some((c) => c[1] === WORKSPACE_PI_HANDOFF_PATH);
+      expect(wrotePiHandoff).toBe(false);
     });
 
     it('materializes local spec files onto the pod branch before agent work starts', async () => {
@@ -5783,6 +5892,62 @@ describe('PodManager', () => {
         expect(ctx.containerManager.stop).not.toHaveBeenCalled();
         expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
         expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      });
+
+      function createRunningWorkspaceWithHandoff(ctx: TestContext, handoff: string) {
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace pod',
+            outputMode: 'workspace',
+            handoffInstructions: handoff,
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-workspace',
+          worktreePath: '/tmp/worktree/abc',
+          startedAt: new Date().toISOString(),
+        });
+        return { manager, pod };
+      }
+
+      it('reuses the creation-time handoff when promotion supplies no instructions', async () => {
+        const ctx = createTestContext({ overall: 'pass' });
+        const { manager, pod } = createRunningWorkspaceWithHandoff(ctx, 'INITIAL PI HANDOFF');
+
+        await manager.promoteToAuto(pod.id, 'pr');
+
+        expect(manager.getSession(pod.id).handoffInstructions).toBe('INITIAL PI HANDOFF');
+      });
+
+      it('replaces the creation-time handoff with an explicit promotion-time correction', async () => {
+        const ctx = createTestContext({ overall: 'pass' });
+        const { manager, pod } = createRunningWorkspaceWithHandoff(ctx, 'INITIAL PI HANDOFF');
+
+        await manager.promoteToAuto(pod.id, 'pr', { instructions: 'PROMOTION CORRECTION' });
+
+        // Deterministic replacement rule — no concatenation, no duplication.
+        expect(manager.getSession(pod.id).handoffInstructions).toBe('PROMOTION CORRECTION');
+      });
+
+      it('composes handoffContext from the persisted handoff with distinct, labeled sections and keeps the branch', async () => {
+        const ctx = createTestContext({ overall: 'pass' });
+        const { manager, pod } = createRunningWorkspaceWithHandoff(ctx, 'INITIAL PI HANDOFF');
+        const originalBranch = manager.getSession(pod.id).branch;
+        // A committed delta so the handoff isn't blocked as "no changes".
+        vi.mocked(ctx.worktreeManager.commitPendingChanges).mockResolvedValue(true);
+
+        await manager.promoteToAuto(pod.id, 'pr');
+        await manager.processPod(pod.id);
+
+        const result = manager.getSession(pod.id);
+        expect(result.branch).toBe(originalBranch);
+        expect(result.handoffContext).toContain('### Handoff instructions');
+        expect(result.handoffContext).toContain('INITIAL PI HANDOFF');
+        expect(result.handoffContext).toContain('### Session summary');
       });
 
       it('submit-as-is opens a PR after validation but does not auto-merge', async () => {
