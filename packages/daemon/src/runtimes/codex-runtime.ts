@@ -125,7 +125,7 @@ export class CodexRuntime implements Runtime {
     this.handles.set(config.podId, handle);
 
     const outputState: OutputState = { events: 0, nonStatusEvents: 0, sawComplete: false };
-    const enriched = this.parseWithRolloutFallback(handle, config.podId, outputState);
+    const enriched = this.parseWithRolloutFallback(handle, config.podId, outputState, config.model);
 
     try {
       yield* withPostCompleteGrace(
@@ -164,8 +164,8 @@ export class CodexRuntime implements Runtime {
     await this.writeMcpConfig(containerId, this.mcpServersBySession.get(podId));
 
     // Prefer in-memory shortcut; fall back to durable DB source across daemon restarts.
-    const sessionId =
-      this.codexSessionIds.get(podId) ?? this.podRepo.getOrThrow(podId).codexSessionId;
+    const pod = this.podRepo.getOrThrow(podId);
+    const sessionId = this.codexSessionIds.get(podId) ?? pod.codexSessionId;
 
     const prompt = sessionId
       ? message
@@ -207,14 +207,17 @@ export class CodexRuntime implements Runtime {
 
     try {
       yield* withPostCompleteGrace(
-        withIdleLivenessProbe(this.parseWithRolloutFallback(handle, podId, outputState), {
-          streams: [handle.stdout, handle.stderr],
-          runtimeName: 'codex-runtime',
-          podId,
-          logger: this.logger,
-          containerManager: this.containerManager,
-          containerId,
-        }),
+        withIdleLivenessProbe(
+          this.parseWithRolloutFallback(handle, podId, outputState, pod.model),
+          {
+            streams: [handle.stdout, handle.stderr],
+            runtimeName: 'codex-runtime',
+            podId,
+            logger: this.logger,
+            containerManager: this.containerManager,
+            containerId,
+          },
+        ),
         {
           streams: [handle.stdout, handle.stderr],
           runtimeName: 'codex-runtime',
@@ -286,13 +289,14 @@ export class CodexRuntime implements Runtime {
     handle: StreamingExecResult,
     podId: string,
     outputState: OutputState,
+    modelHint?: string,
   ): AsyncIterable<AgentEvent> {
     const seen = new Set<string>();
     const abortLiveRollout = new AbortController();
-    const stdoutIterator = this.parseCodexLines(handle.stdout, podId, seen, outputState)[
+    const stdoutIterator = this.parseCodexLines(handle.stdout, podId, seen, outputState, modelHint)[
       Symbol.asyncIterator
     ]();
-    const rolloutIterator = this.pollLatestRollout(podId, abortLiveRollout.signal)[
+    const rolloutIterator = this.pollLatestRollout(podId, abortLiveRollout.signal, modelHint)[
       Symbol.asyncIterator
     ]();
 
@@ -310,7 +314,7 @@ export class CodexRuntime implements Runtime {
             if (readyRollout && !readyRollout.result.done) {
               const event = readyRollout.result.value;
               const key = dedupeKey(event);
-              if (!seen.has(key)) {
+              if (!shouldSkipMergedEvent(event, key, seen, outputState)) {
                 seen.add(key);
                 recordOutputEvent(outputState, event);
                 yield event;
@@ -329,7 +333,7 @@ export class CodexRuntime implements Runtime {
         } else {
           const event = next.result.value;
           const key = dedupeKey(event);
-          if (seen.has(key)) {
+          if (shouldSkipMergedEvent(event, key, seen, outputState)) {
             rolloutNext = nextFrom('rollout', rolloutIterator);
             continue;
           }
@@ -346,7 +350,7 @@ export class CodexRuntime implements Runtime {
 
     if (stdoutStats.sawComplete && stdoutStats.nonStatusEvents > 0) return;
 
-    yield* this.replayLatestRollout(podId, seen, stdoutStats, outputState);
+    yield* this.replayLatestRollout(podId, seen, stdoutStats, outputState, modelHint);
   }
 
   private async codexExitError(
@@ -390,7 +394,8 @@ export class CodexRuntime implements Runtime {
       return {
         type: 'error',
         timestamp: new Date().toISOString(),
-        message: 'Codex exited without task_complete — refusing to mark pod complete',
+        message:
+          'Codex exited without terminal completion (turn.completed/task_complete) — refusing to mark pod complete',
         fatal: true,
       };
     }
@@ -412,15 +417,16 @@ export class CodexRuntime implements Runtime {
     podId: string,
     seen: Set<string>,
     outputState: OutputState,
+    modelHint?: string,
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
-    const iterator = this.parseCodexLinesRaw(lines, podId)[Symbol.asyncIterator]();
+    const iterator = this.parseCodexLinesRaw(lines, podId, modelHint)[Symbol.asyncIterator]();
     for (;;) {
       const next = await iterator.next();
       if (next.done) return next.value;
 
       const event = next.value;
       const key = dedupeKey(event);
-      if (seen.has(key)) continue;
+      if (shouldSkipMergedEvent(event, key, seen, outputState)) continue;
       seen.add(key);
       recordOutputEvent(outputState, event);
       yield event;
@@ -430,10 +436,11 @@ export class CodexRuntime implements Runtime {
   private async *parseCodexLinesRaw(
     lines: Readable,
     podId: string,
+    modelHint?: string,
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
     const stats: ParseStats = { events: 0, nonStatusEvents: 0, sawComplete: false };
 
-    for await (const event of CodexStreamParser.parse(lines, podId, this.logger)) {
+    for await (const event of CodexStreamParser.parse(lines, podId, this.logger, modelHint)) {
       stats.events += 1;
       if (event.type !== 'status') stats.nonStatusEvents += 1;
       if (event.type === 'complete') stats.sawComplete = true;
@@ -452,6 +459,7 @@ export class CodexRuntime implements Runtime {
     seen: Set<string>,
     stdoutStats: ParseStats,
     outputState: OutputState,
+    modelHint?: string,
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
     const rolloutPath = await findLatestCodexRolloutFile(codexStateDirForPod(podId));
     if (!rolloutPath) {
@@ -480,12 +488,19 @@ export class CodexRuntime implements Runtime {
       'Codex stdout stream ended without complete activity — replaying rollout JSONL',
     );
 
-    return yield* this.parseCodexLines(createReadStream(rolloutPath), podId, seen, outputState);
+    return yield* this.parseCodexLines(
+      createReadStream(rolloutPath),
+      podId,
+      seen,
+      outputState,
+      modelHint,
+    );
   }
 
   private async *pollLatestRollout(
     podId: string,
     signal: AbortSignal,
+    modelHint?: string,
   ): AsyncGenerator<AgentEvent, void, void> {
     let lastSignature: string | null = null;
 
@@ -496,7 +511,7 @@ export class CodexRuntime implements Runtime {
           const signature = `${rollout.path}:${rollout.mtimeMs}:${rollout.size}`;
           if (signature !== lastSignature) {
             lastSignature = signature;
-            yield* this.parseCodexLinesRaw(createReadStream(rollout.path), podId);
+            yield* this.parseCodexLinesRaw(createReadStream(rollout.path), podId, modelHint);
           }
         }
       } catch (err) {
@@ -575,6 +590,15 @@ function composePrompt(task: string, customInstructions?: string): string {
 
 function dedupeKey(event: AgentEvent): string {
   return JSON.stringify(event);
+}
+
+function shouldSkipMergedEvent(
+  event: AgentEvent,
+  key: string,
+  seen: Set<string>,
+  outputState: OutputState,
+): boolean {
+  return seen.has(key) || (event.type === 'complete' && outputState.sawComplete);
 }
 
 function recordOutputEvent(state: OutputState, event: AgentEvent): void {

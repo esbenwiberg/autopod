@@ -115,8 +115,16 @@ import type {
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { RUNTIME_TELEMETRY_OPT_OUT_ENV } from '../runtime-env.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
-import { cleanupClaudeState, ensureClaudeStateDir } from '../runtimes/claude-state-store.js';
-import { cleanupCodexState, ensureCodexStateDir } from '../runtimes/codex-state-store.js';
+import {
+  claudeStateDirForPod,
+  cleanupClaudeState,
+  ensureClaudeStateDir,
+} from '../runtimes/claude-state-store.js';
+import {
+  cleanupCodexState,
+  codexStateDirForPod,
+  ensureCodexStateDir,
+} from '../runtimes/codex-state-store.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
@@ -1663,6 +1671,44 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'until sandbox streaming is available.',
       ].join(' ');
       throw new AutopodError(message, 'UNSUPPORTED_SANDBOX_STREAMING_EXEC', 400);
+    }
+  }
+
+  async function syncSandboxRuntimeSessionState(podId: string): Promise<void> {
+    let pod: Pod;
+    try {
+      pod = podRepo.getOrThrow(podId);
+    } catch {
+      return;
+    }
+    if (pod.executionTarget !== 'sandbox' || !pod.containerId) return;
+
+    const statePaths =
+      pod.runtime === 'claude'
+        ? {
+            container: `${CONTAINER_HOME_DIR}/.claude/projects`,
+            host: claudeStateDirForPod(podId),
+          }
+        : pod.runtime === 'codex'
+          ? {
+              container: `${CONTAINER_HOME_DIR}/.codex/sessions`,
+              host: codexStateDirForPod(podId),
+            }
+          : null;
+    if (!statePaths) return;
+
+    try {
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      await cm.extractDirectoryFromContainer(
+        pod.containerId,
+        statePaths.container,
+        statePaths.host,
+      );
+    } catch (err) {
+      logger.warn(
+        { err, podId, runtime: pod.runtime },
+        'Failed to sync sandbox runtime session state — future recovery may restart fresh',
+      );
     }
   }
 
@@ -7625,6 +7671,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
       } finally {
+        await syncSandboxRuntimeSessionState(podId);
         stopCommitPolling(podId);
         lastEventWriteAt.delete(podId);
       }
