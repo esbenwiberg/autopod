@@ -3,7 +3,7 @@ import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/shared';
-import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
+import type { AgentEvent, ExecutionTarget, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import type { PodRepository } from '../pods/pod-repository.js';
@@ -95,7 +95,7 @@ export class CodexRuntime implements Runtime {
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
     // Write Codex's config.toml so the CLI picks up escalation + profile MCP servers
     // from disk. Codex reads `~/.codex/config.toml` automatically — no flag required.
-    await this.writeMcpConfig(config.containerId, config.mcpServers);
+    await this.writeMcpConfig(config.containerId, config.mcpServers, config.executionTarget);
     this.mcpServersBySession.set(config.podId, config.mcpServers);
     if (config.customInstructions?.trim()) {
       this.customInstructionsBySession.set(config.podId, config.customInstructions);
@@ -158,13 +158,19 @@ export class CodexRuntime implements Runtime {
     containerId: string,
     env?: Record<string, string>,
   ): AsyncIterable<AgentEvent> {
+    // Prefer in-memory shortcut; fall back to durable DB source across daemon restarts.
+    const pod = this.podRepo.getOrThrow(podId);
+
     // Re-write the Codex config into the (potentially new) container before launching codex.
     // Crash recovery spawns a fresh container that has no config file on disk; without this
     // re-write the agent loses access to escalation and profile MCP tools after recovery.
-    await this.writeMcpConfig(containerId, this.mcpServersBySession.get(podId));
+    // Pass the pod's execution target so sandbox recovery keeps the config world-readable.
+    await this.writeMcpConfig(
+      containerId,
+      this.mcpServersBySession.get(podId),
+      pod.executionTarget,
+    );
 
-    // Prefer in-memory shortcut; fall back to durable DB source across daemon restarts.
-    const pod = this.podRepo.getOrThrow(podId);
     const sessionId = this.codexSessionIds.get(podId) ?? pod.codexSessionId;
 
     const prompt = sessionId
@@ -540,6 +546,7 @@ export class CodexRuntime implements Runtime {
   private async writeMcpConfig(
     containerId: string,
     mcpServers: SpawnConfig['mcpServers'],
+    executionTarget?: ExecutionTarget,
   ): Promise<void> {
     if (!mcpServers || mcpServers.length === 0) return;
 
@@ -569,12 +576,21 @@ export class CodexRuntime implements Runtime {
       MCP_CONFIG_PATH,
       `${sections.join('\n\n')}\n`,
     );
+    // On sandbox the files API writes root-owned files and exec runs as a
+    // non-root, non-`autopod` user (the same reason secret files use 0444 and
+    // build binaries are repaired to a+rx). A 0600 `autopod`-only config would
+    // then be unreadable by the reviewer's `codex exec` — it runs via buffered
+    // executeShellCommand, not the agent's exec-stream — and the pre-submit
+    // review dies with "config.toml: Permission denied". Use world-readable 0644
+    // there; the sandbox is single-tenant and OPENAI_API_KEY is already 0444.
+    // Docker keeps 0600 (single `autopod` user; exec runs as `autopod`).
+    const configMode = executionTarget === 'sandbox' ? '0644' : '0600';
     const secureConfig = await this.containerManager.execInContainer(
       containerId,
       [
         'sh',
         '-c',
-        `chown ${CONTAINER_USER}:${CONTAINER_USER} '${MCP_CONFIG_PATH}' && chmod 0600 '${MCP_CONFIG_PATH}'`,
+        `chown ${CONTAINER_USER}:${CONTAINER_USER} '${MCP_CONFIG_PATH}' && chmod ${configMode} '${MCP_CONFIG_PATH}'`,
       ],
       { timeout: 5_000, user: 'root' },
     );

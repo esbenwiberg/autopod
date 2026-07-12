@@ -1047,7 +1047,11 @@ describe('CodexRuntime', () => {
   // ---------------------------------------------------------------------------
 
   describe('writeMcpConfig', () => {
-    type WriteMcp = (containerId: string, mcpServers: SpawnConfig['mcpServers']) => Promise<void>;
+    type WriteMcp = (
+      containerId: string,
+      mcpServers: SpawnConfig['mcpServers'],
+      executionTarget?: SpawnConfig['executionTarget'],
+    ) => Promise<void>;
 
     function callWriteMcpConfig(runtime: CodexRuntime): WriteMcp {
       return (runtime as unknown as { writeMcpConfig: WriteMcp }).writeMcpConfig.bind(runtime);
@@ -1087,7 +1091,7 @@ describe('CodexRuntime', () => {
       expect(written).not.toContain('command =');
     });
 
-    it('makes the generated config private and readable by the autopod user', async () => {
+    it('locks the generated config to the autopod user (0600) on local/Docker', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
@@ -1106,6 +1110,38 @@ describe('CodexRuntime', () => {
           'sh',
           '-c',
           "chown autopod:autopod '/home/autopod/.codex/config.toml' && chmod 0600 '/home/autopod/.codex/config.toml'",
+        ],
+        { timeout: 5_000, user: 'root' },
+      );
+    });
+
+    it('makes the generated config world-readable (0644) on sandbox', async () => {
+      // On sandbox the reviewer's `codex exec` runs as a non-root, non-autopod
+      // user, so a 0600 autopod-only config is unreadable and the pre-submit
+      // review dies with "config.toml: Permission denied". World-read matches the
+      // sandbox posture (secret files are already 0444) and keeps the reviewer working.
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await callWriteMcpConfig(runtime)(
+        'c1',
+        [
+          {
+            name: 'escalation',
+            url: 'http://host.docker.internal:3100/mcp/abc',
+            headers: { Authorization: 'Bearer tok123' },
+          },
+        ],
+        'sandbox',
+      );
+
+      expect(cm.execInContainer).toHaveBeenCalledWith(
+        'c1',
+        [
+          'sh',
+          '-c',
+          "chown autopod:autopod '/home/autopod/.codex/config.toml' && chmod 0644 '/home/autopod/.codex/config.toml'",
         ],
         { timeout: 5_000, user: 'root' },
       );

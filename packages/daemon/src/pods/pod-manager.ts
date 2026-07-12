@@ -7303,6 +7303,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             customInstructions: runtimeInstructions,
             env: secretEnv,
             mcpServers,
+            executionTarget: pod.executionTarget,
           });
 
           // Clear rework reason now that it's been consumed (one-shot)
@@ -7361,6 +7362,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 customInstructions: customInstructionsRef,
                 env: secretEnvRef,
                 mcpServers: mcpServersRef,
+                executionTarget: podRef.executionTarget,
               });
             }
           })();
@@ -7391,6 +7393,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             customInstructions: runtimeInstructions,
             env: secretEnv,
             mcpServers,
+            executionTarget: pod.executionTarget,
           });
         } else {
           // Normal path
@@ -7403,6 +7406,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             customInstructions: runtimeInstructions,
             env: secretEnv,
             mcpServers,
+            executionTarget: pod.executionTarget,
           });
         }
 
