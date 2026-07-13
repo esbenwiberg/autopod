@@ -23,7 +23,6 @@ import type {
 } from '../interfaces/validation-engine.js';
 import { buildSupervisorCommand } from '../pods/preview-supervisor.js';
 import { wrapValidationExecCommand } from '../pods/registry-injector.js';
-import { getAzureToken } from '../providers/azure-token.js';
 import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { runAdvisoryBrowserQa } from './advisory-browser-qa-runner.js';
@@ -31,45 +30,17 @@ import { runContainerReviewer } from './container-reviewer-runner.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 import { runAgenticReview } from './review-agentic-runner.js';
-import { CodexReviewError } from './review-codex-runner.js';
+import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
 import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
 import { applyDiffFilterToParsed } from './review-finding-filter.js';
 import { runToolUseReview } from './review-tool-runner.js';
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
-const DEFAULT_OPENAI_REVIEWER_MODEL = 'gpt-5-mini';
-const DEFAULT_FOUNDRY_OPENAI_API_VERSION = '2024-10-21';
-const FOUNDRY_TOKEN_SCOPE = 'https://cognitiveservices.azure.com/.default';
 
 interface PackageJsonManifest {
   scripts?: Record<string, string>;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
-}
-
-interface OpenAiChatCompletionResponse {
-  choices?: Array<{
-    message?: {
-      content?: string | null;
-    };
-  }>;
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    input_tokens?: number;
-    output_tokens?: number;
-    prompt_tokens_details?: {
-      cached_tokens?: number;
-    };
-    cached_input_tokens?: number;
-  };
-}
-
-interface OpenAiReviewRequestConfig {
-  url: string;
-  headers: Record<string, string>;
-  model: string;
 }
 
 /**
@@ -2635,14 +2606,18 @@ async function runTaskReview(
         // ── Tier 1: Single-shot review with enriched context ──────────────
         let stdout: string;
         if (reviewRunner === 'codex') {
-          const openAiReview = await runProfileBoundOpenAiReview(
-            config,
+          const codexReview = await runCodexReview({
+            podId: config.podId,
+            attempt: config.attempt,
+            containerId: config.containerId,
+            containerManager,
+            model: config.reviewerModel,
             prompt,
-            reviewTimeout,
-            log,
-          );
-          stdout = openAiReview.stdout;
-          tier1TokenUsage = openAiReview.tokenUsage;
+            timeout: reviewTimeout,
+            ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
+          });
+          stdout = codexReview.stdout;
+          tier1TokenUsage = codexReview.tokenUsage;
         } else if (reviewRunner === 'container-claude') {
           const containerReview = await runContainerReviewer({
             podId: config.podId,
@@ -2937,7 +2912,10 @@ function canReuseCachedPreSubmitForTier1(
   config: ValidationEngineConfig,
   reviewRunner: 'claude' | 'container-claude' | 'codex',
 ): boolean {
-  return reviewRunner === 'claude' && !shouldUseProfileBoundAnthropicReviewer(config);
+  return (
+    reviewRunner === 'codex' ||
+    (reviewRunner === 'claude' && !shouldUseProfileBoundAnthropicReviewer(config))
+  );
 }
 
 async function runProfileBoundAnthropicReview(
@@ -2986,177 +2964,6 @@ async function runProfileBoundAnthropicReview(
         : {}),
     },
   };
-}
-
-async function runProfileBoundOpenAiReview(
-  config: ValidationEngineConfig,
-  prompt: string,
-  timeout: number,
-  log?: Logger,
-): Promise<{
-  stdout: string;
-  tokenUsage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
-}> {
-  const reviewer = await resolveProfileBoundOpenAiReviewConfig(config, log);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-
-  try {
-    const response = await fetch(reviewer.url, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...reviewer.headers,
-      },
-      body: JSON.stringify({
-        model: reviewer.model,
-        max_tokens: 8192,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new CodexReviewError({
-        kind: 'non-zero-exit',
-        message: `openai review failed (http ${response.status}): ${text.slice(0, 500)}`,
-        exitCode: response.status,
-        stderr: text,
-      });
-    }
-
-    const json = (await response.json()) as OpenAiChatCompletionResponse;
-    const stdout = json.choices?.[0]?.message?.content?.trim();
-    if (!stdout) {
-      throw new CodexReviewError({
-        kind: 'exec-error',
-        message: 'openai review failed: openai_reviewer_empty_response',
-      });
-    }
-
-    return {
-      stdout,
-      tokenUsage: openAiTokenUsage(json.usage),
-    };
-  } catch (err) {
-    if (err instanceof CodexReviewError) throw err;
-    if (isAbortLikeError(err)) {
-      throw new CodexReviewError({
-        kind: 'timeout',
-        message: `openai review timed out after ${timeout}ms`,
-        cause: err,
-      });
-    }
-    const message = err instanceof Error ? err.message : String(err);
-    throw new CodexReviewError({
-      kind: 'exec-error',
-      message: `openai review failed: ${message}`,
-      cause: err,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function resolveProfileBoundOpenAiReviewConfig(
-  config: ValidationEngineConfig,
-  log?: Logger,
-): Promise<OpenAiReviewRequestConfig> {
-  if (config.reviewerProvider === 'openai') {
-    const token =
-      process.env.OPENAI_API_KEY ??
-      (config.reviewerProviderCredentials?.provider === 'openai'
-        ? parseOpenAiAuthJson(config.reviewerProviderCredentials.authJson)
-        : null);
-    if (!token) {
-      throw new CodexReviewError({
-        kind: 'exec-error',
-        message: 'openai review failed: Reviewer provider unavailable: openai_auth_unavailable',
-      });
-    }
-
-    return {
-      url: `${trimTrailingSlash(process.env.OPENAI_BASE_URL ?? DEFAULT_OPENAI_BASE_URL)}/chat/completions`,
-      headers: { authorization: `Bearer ${token}` },
-      model: resolveOpenAiReviewModel(config.reviewerModel),
-    };
-  }
-
-  const creds = config.reviewerProviderCredentials;
-  if (
-    config.reviewerProvider !== 'foundry' ||
-    creds?.provider !== 'foundry' ||
-    (creds.apiSurface ?? 'anthropic') !== 'openai'
-  ) {
-    throw new CodexReviewError({
-      kind: 'exec-error',
-      message: `openai review failed: provider ${config.reviewerProvider} is not supported by the OpenAI reviewer`,
-    });
-  }
-
-  const secret =
-    creds.apiKey ?? (await getAzureToken(FOUNDRY_TOKEN_SCOPE, log ?? noopLogger)).token;
-  const apiVersion = creds.apiVersion ?? DEFAULT_FOUNDRY_OPENAI_API_VERSION;
-  const model = resolveOpenAiReviewModel(config.reviewerModel);
-  const headers = creds.apiKey ? { 'api-key': secret } : { authorization: `Bearer ${secret}` };
-
-  return {
-    url: `${trimTrailingSlash(creds.endpoint)}/openai/deployments/${encodeURIComponent(
-      model,
-    )}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`,
-    headers,
-    model,
-  };
-}
-
-function resolveOpenAiReviewModel(model: string | undefined): string {
-  return model && model !== 'auto' ? model : DEFAULT_OPENAI_REVIEWER_MODEL;
-}
-
-function parseOpenAiAuthJson(authJson: string | undefined): string | null {
-  if (!authJson) return null;
-  try {
-    const parsed = JSON.parse(authJson) as {
-      OPENAI_API_KEY?: string | null;
-      tokens?: {
-        access_token?: string | null;
-      };
-    };
-    return parsed.OPENAI_API_KEY ?? parsed.tokens?.access_token ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function trimTrailingSlash(url: string): string {
-  return url.endsWith('/') ? url.slice(0, -1) : url;
-}
-
-function openAiTokenUsage(
-  usage: OpenAiChatCompletionResponse['usage'],
-): { inputTokens: number; outputTokens: number; cachedInputTokens?: number } | undefined {
-  if (!usage) return undefined;
-  const inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
-  const outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
-  const cachedInputTokens =
-    typeof usage.prompt_tokens_details?.cached_tokens === 'number'
-      ? usage.prompt_tokens_details.cached_tokens
-      : usage.cached_input_tokens;
-  return {
-    inputTokens,
-    outputTokens,
-    ...(typeof cachedInputTokens === 'number' ? { cachedInputTokens } : {}),
-  };
-}
-
-function isAbortLikeError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  return (
-    err.name === 'AbortError' ||
-    err.name === 'TimeoutError' ||
-    /aborted|timed out|timeout/i.test(err.message)
-  );
 }
 
 const noopLogger = {

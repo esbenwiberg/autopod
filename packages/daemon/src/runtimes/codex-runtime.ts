@@ -579,10 +579,11 @@ export class CodexRuntime implements Runtime {
     // On sandbox the files API writes root-owned files and exec runs as a
     // non-root, non-`autopod` user (the same reason secret files use 0444 and
     // build binaries are repaired to a+rx). A 0600 `autopod`-only config would
-    // then be unreadable by the reviewer's `codex exec` — it runs via buffered
-    // executeShellCommand, not the agent's exec-stream — and the pre-submit
-    // review dies with "config.toml: Permission denied". Use world-readable 0644
-    // there; the sandbox is single-tenant and OPENAI_API_KEY is already 0444.
+    // then be unreadable by the reviewer's `codex exec`. Both the native stream
+    // and buffered fallback run as the sandbox-assigned non-root user, so the
+    // pre-submit review dies with "config.toml: Permission denied". Use
+    // world-readable 0644 there; the sandbox is single-tenant and
+    // OPENAI_API_KEY is already 0444.
     // Docker keeps 0600 (single `autopod` user; exec runs as `autopod`).
     const configMode = executionTarget === 'sandbox' ? '0644' : '0600';
     const secureConfig = await this.containerManager.execInContainer(

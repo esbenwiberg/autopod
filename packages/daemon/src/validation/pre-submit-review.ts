@@ -18,7 +18,7 @@ export interface PreSubmitReviewOpts {
   podId?: string;
   containerId?: string | null;
   containerManager?: ContainerManager;
-  /** Defaults to 90s — the agent is waiting on this synchronously. */
+  /** Defaults to 90s, or 5m for container Codex reviews. */
   timeoutMs?: number;
   /** Optional preview of the agent's planned task summary. */
   plannedSummary?: string;
@@ -84,8 +84,8 @@ export async function runPreSubmitReview(
   }
 
   const prompt = buildPrompt(opts);
-  const timeoutMs = opts.timeoutMs ?? 90_000;
   const reviewerRunner = resolvePreSubmitRunner(opts);
+  const timeoutMs = opts.timeoutMs ?? (reviewerRunner === 'codex' ? 300_000 : 90_000);
   if (reviewerRunner === 'unsupported') {
     return skipped(
       'cli-error',

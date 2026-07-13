@@ -1,4 +1,9 @@
-import type { ContainerManager } from '../interfaces/container-manager.js';
+import type {
+  ContainerManager,
+  ExecOptions,
+  ExecResult,
+  StreamingExecResult,
+} from '../interfaces/container-manager.js';
 
 export type CodexReviewErrorKind = 'non-zero-exit' | 'timeout' | 'exec-error';
 
@@ -31,7 +36,6 @@ export interface CodexReviewConfig {
   prompt: string;
   env?: Record<string, string>;
   timeout: number;
-  env?: Record<string, string>;
 }
 
 export interface CodexReviewTokenUsage {
@@ -87,21 +91,26 @@ export async function runCodexReview(
   ].join('\n');
 
   try {
-    const result = await config.containerManager.execInContainer(
+    const options: ExecOptions = {
+      cwd: '/workspace',
+      ...(config.env ? { env: config.env } : {}),
+      timeout: config.timeout,
+    };
+    const result = await execReviewCommand(
+      config.containerManager,
       config.containerId,
       ['sh', '-c', command],
-      {
-        cwd: '/workspace',
-        ...(config.env ? { env: config.env } : {}),
-        timeout: config.timeout,
-        ...(config.env ? { env: config.env } : {}),
-      },
+      options,
     );
 
     if (result.exitCode !== 0) {
+      const output = result.stdout || result.stderr;
+      const timedOut = /timed? out|timeout/i.test(output);
       throw new CodexReviewError({
-        kind: 'non-zero-exit',
-        message: `codex review failed (exit=${result.exitCode}): ${result.stdout || result.stderr}`,
+        kind: timedOut ? 'timeout' : 'non-zero-exit',
+        message: timedOut
+          ? `codex review timed out: ${output}`
+          : `codex review failed (exit=${result.exitCode}): ${output}`,
         exitCode: result.exitCode,
         stderr: result.stderr,
       });
@@ -124,6 +133,68 @@ export async function runCodexReview(
       cause: err,
     });
   }
+}
+
+async function execReviewCommand(
+  containerManager: ContainerManager,
+  containerId: string,
+  command: string[],
+  options: ExecOptions,
+): Promise<ExecResult> {
+  if (
+    containerManager.supportsStreamingExec === false ||
+    typeof containerManager.execStreaming !== 'function'
+  ) {
+    return containerManager.execInContainer(containerId, command, options);
+  }
+
+  let handle: StreamingExecResult;
+  try {
+    handle = await containerManager.execStreaming(containerId, command, options);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/streaming exec is not supported/i.test(message)) {
+      return containerManager.execInContainer(containerId, command, options);
+    }
+    throw err;
+  }
+
+  return collectStreamingExec(handle, options.timeout);
+}
+
+async function collectStreamingExec(
+  handle: StreamingExecResult,
+  timeout: number | undefined,
+): Promise<ExecResult> {
+  const completed = Promise.all([
+    readStream(handle.stdout),
+    readStream(handle.stderr),
+    handle.exitCode,
+  ]).then(([stdout, stderr, exitCode]) => ({ stdout, stderr, exitCode }));
+
+  if (!timeout) return completed;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      void handle.kill().catch(() => {});
+      reject(new Error(`container review timed out after ${timeout}ms`));
+    }, timeout);
+  });
+
+  try {
+    return await Promise.race([completed, timedOut]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function readStream(stream: StreamingExecResult['stdout']): Promise<string> {
+  let output = '';
+  for await (const chunk of stream) {
+    output += Buffer.isBuffer(chunk) ? chunk.toString('utf-8') : String(chunk);
+  }
+  return output;
 }
 
 function safePathPart(value: string): string {

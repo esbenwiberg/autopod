@@ -1217,6 +1217,7 @@ function withReviewerExecEnv(
   if (!reviewerExecEnv) return containerManager;
 
   return {
+    supportsStreamingExec: containerManager.supportsStreamingExec,
     spawn(config) {
       return containerManager.spawn(config);
     },
@@ -1259,7 +1260,10 @@ function withReviewerExecEnv(
       });
     },
     execStreaming(containerId, command, options) {
-      return containerManager.execStreaming(containerId, command, options);
+      return containerManager.execStreaming(containerId, command, {
+        ...options,
+        env: { ...reviewerExecEnv, ...options?.env },
+      });
     },
   };
 }

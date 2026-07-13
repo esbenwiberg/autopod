@@ -638,6 +638,7 @@ describe('PodBridge.runPreSubmitReview', () => {
     podId: string;
     podRepo: ReturnType<typeof createTestDb>['prepare'];
     containerExecMock: ReturnType<typeof vi.fn>;
+    containerStreamingExecMock: ReturnType<typeof vi.fn>;
     worktreeGetDiffMock: ReturnType<typeof vi.fn>;
   } {
     const db = createTestDb();
@@ -691,6 +692,12 @@ describe('PodBridge.runPreSubmitReview', () => {
       }
       return { stdout: '', stderr: '', exitCode: 0 };
     });
+    const containerStreamingExecMock = vi.fn().mockResolvedValue({
+      stdout: null,
+      stderr: null,
+      exitCode: Promise.resolve(0),
+      kill: vi.fn(),
+    });
 
     const podRepo = {
       update: vi.fn(),
@@ -705,7 +712,11 @@ describe('PodBridge.runPreSubmitReview', () => {
       nudgeRepo: stub,
       profileStore,
       containerManagerFactory: {
-        get: vi.fn().mockReturnValue({ execInContainer: containerExecMock }),
+        get: vi.fn().mockReturnValue({
+          supportsStreamingExec: true,
+          execInContainer: containerExecMock,
+          execStreaming: containerStreamingExecMock,
+        }),
       } as unknown as Deps['containerManagerFactory'],
       pendingRequestsByPod: new Map(),
       logger,
@@ -717,6 +728,7 @@ describe('PodBridge.runPreSubmitReview', () => {
       podId,
       podRepo: podRepo as never,
       containerExecMock,
+      containerStreamingExecMock,
       worktreeGetDiffMock,
     };
   }
@@ -1056,6 +1068,52 @@ describe('PodBridge.runPreSubmitReview', () => {
           EXISTING: 'kept',
         },
       }),
+    );
+  });
+
+  it('passes fresh reviewer exec env into streaming pre-submit review', async () => {
+    const reviewerExecEnv = {
+      CODEX_HOME: '/run/autopod/codex-home',
+      OPENAI_API_KEY_FILE: '/run/autopod/openai-api-key',
+    };
+    const runResult = {
+      status: 'pass',
+      reasoning: 'ok',
+      issues: [],
+      model: 'gpt-5',
+      diffHash: 'h',
+      durationMs: 1,
+    } satisfies Awaited<ReturnType<typeof runPreSubmitReview>>;
+
+    mockRunPreSubmitReview.mockImplementationOnce(async (opts) => {
+      await opts.containerManager?.execStreaming('container-abc', ['sh', '-c', 'codex exec'], {
+        cwd: '/workspace',
+        timeout: 300_000,
+        env: { EXISTING: 'kept' },
+      });
+      return runResult;
+    });
+
+    const { bridge, podId, containerStreamingExecMock } = buildBridgeWithWorktree({
+      containerDiff: SAMPLE_DIFF,
+      reviewerExecEnv,
+      runResult,
+    });
+
+    await bridge.runPreSubmitReview(podId, {});
+
+    expect(containerStreamingExecMock).toHaveBeenCalledWith(
+      'container-abc',
+      ['sh', '-c', 'codex exec'],
+      {
+        cwd: '/workspace',
+        timeout: 300_000,
+        env: {
+          CODEX_HOME: '/run/autopod/codex-home',
+          OPENAI_API_KEY_FILE: '/run/autopod/openai-api-key',
+          EXISTING: 'kept',
+        },
+      },
     );
   });
 });
