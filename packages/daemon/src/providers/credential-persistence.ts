@@ -3,6 +3,8 @@ import type {
   MaxCredentials,
   MaxRefreshCredentials,
   OpenAiCredentials,
+  PiOAuthCredentials,
+  PiOAuthProviderId,
   ProviderCredentials,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
@@ -17,6 +19,8 @@ import type { MaxCredentialLineage } from './types.js';
 const CREDENTIALS_PATH = `${CONTAINER_HOME_DIR}/.claude/.credentials.json`;
 /** Path where Codex stores ChatGPT/OpenAI auth inside the container. */
 const CODEX_AUTH_PATH = `${CONTAINER_HOME_DIR}/.codex/auth.json`;
+/** Path where Pi stores provider OAuth entries inside the container. */
+const PI_AUTH_PATH = `${CONTAINER_HOME_DIR}/.pi/agent/auth.json`;
 
 /**
  * In-process serialization keyed by credential owner. When multiple pods share
@@ -424,6 +428,123 @@ export async function persistOpenAiAuthJson(
     logger.info(
       { profileName, ...ownerLogFields(owner) },
       'Persisted Codex auth.json to credential owner',
+    );
+  });
+}
+
+function parseSinglePiCredential(
+  rawContent: string,
+  profileName: string,
+  logger: Logger,
+): PiOAuthCredentials | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawContent);
+  } catch (err) {
+    logger.warn({ err, profileName }, 'Failed to parse Pi auth.json from container');
+    return null;
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    logger.warn({ profileName }, 'Pi auth.json was not a provider credential object');
+    return null;
+  }
+
+  const entries = parsed as Record<string, unknown>;
+  const providerIds = Object.keys(entries);
+  if (providerIds.length !== 1) {
+    logger.warn({ profileName, providerCount: providerIds.length }, 'Pi auth.json must hold one provider entry');
+    return null;
+  }
+
+  const providerId = providerIds[0] as PiOAuthProviderId;
+  if (
+    providerId !== 'anthropic' &&
+    providerId !== 'openai-codex' &&
+    providerId !== 'github-copilot'
+  ) {
+    logger.warn({ profileName, providerId }, 'Pi auth.json contained unsupported provider id');
+    return null;
+  }
+
+  const credential = entries[providerId];
+  if (!credential || typeof credential !== 'object' || Array.isArray(credential)) {
+    logger.warn({ profileName, providerId }, 'Pi auth.json provider entry was malformed');
+    return null;
+  }
+
+  return {
+    provider: 'pi',
+    providerId,
+    credential: credential as Record<string, unknown>,
+  };
+}
+
+export async function persistPiAuthJson(
+  containerId: string,
+  containerManager: ContainerManager,
+  profileStore: ProfileStore,
+  profileName: string,
+  logger: Logger,
+  options: CredentialPersistenceOptions = {},
+): Promise<void> {
+  const owner = resolveExistingAuthOwner(profileStore, profileName, options);
+  if (!owner) {
+    logger.debug({ profileName }, 'Skipping Pi auth.json persist because no auth owner exists');
+    return;
+  }
+
+  let rawContent: string;
+  try {
+    rawContent = await containerManager.readFile(containerId, PI_AUTH_PATH);
+  } catch (err) {
+    logger.debug({ err, containerId, profileName }, 'Could not read Pi auth.json from container');
+    return;
+  }
+
+  const updated = parseSinglePiCredential(rawContent, profileName, logger);
+  if (!updated) return;
+
+  const ownerKey = credentialOwnerKey(owner);
+  await withOwnerLock(ownerKey, async () => {
+    const currentCreds = getOwnerCredentials(profileStore, options.providerAccountStore, owner);
+    if (!currentCreds || currentCreds.provider !== 'pi') {
+      logger.warn(
+        {
+          profileName,
+          ...ownerLogFields(owner),
+          ownerProvider: currentCreds?.provider ?? null,
+        },
+        'Skipping Pi auth.json persist because credential owner is not Pi',
+      );
+      return;
+    }
+
+    if (currentCreds.providerId !== updated.providerId) {
+      logger.warn(
+        {
+          profileName,
+          ...ownerLogFields(owner),
+          ownerPiProviderId: currentCreds.providerId,
+          containerPiProviderId: updated.providerId,
+        },
+        'Skipping Pi auth.json persist because provider id changed',
+      );
+      return;
+    }
+
+    if (JSON.stringify(currentCreds.credential) === JSON.stringify(updated.credential)) {
+      logger.debug(
+        { profileName, ...ownerLogFields(owner), providerId: updated.providerId },
+        'Pi auth.json already matches credential owner — skipping persist',
+      );
+      return;
+    }
+
+    updateOwnerCredentials(profileStore, options.providerAccountStore, owner, updated);
+    logger.info(
+      { profileName, ...ownerLogFields(owner), providerId: updated.providerId },
+      'Persisted Pi auth.json to credential owner',
     );
   });
 }

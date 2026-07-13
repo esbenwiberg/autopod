@@ -105,6 +105,7 @@ import {
   buildClaudeConfigFiles,
   buildProviderEnv,
   persistOpenAiAuthJson,
+  persistPiAuthJson,
   persistRefreshedCredentials,
 } from '../providers/index.js';
 import type {
@@ -3224,6 +3225,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    *  - `openai` — Codex may rotate/update ~/.codex/auth.json during use;
    *    persist the container's latest auth file back to the owner, then
    *    rewrite it before resume.
+   *  - `pi` — Pi may refresh its selected provider auth entry in auth.json;
+   *    persist the one-entry file before resume, then rewrite it.
    *  - `foundry` (token-auth) — Entra access tokens last ~60-90 minutes,
    *    so for long-running pods the secret file goes stale. Re-acquire via
    *    `getAzureToken` (cached if still valid) and rewrite the secret file.
@@ -3232,7 +3235,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   async function getResumeEnv(pod: Pod): Promise<Record<string, string> | undefined> {
     const profile = profileStore.get(pod.profileName);
     const provider = profile.modelProvider;
-    if (provider !== 'max' && provider !== 'foundry' && provider !== 'openai') return undefined;
+    if (provider !== 'max' && provider !== 'foundry' && provider !== 'openai' && provider !== 'pi') {
+      return undefined;
+    }
 
     // Foundry only needs refresh when using bearer-token auth (no static apiKey).
     if (provider === 'foundry') {
@@ -3284,6 +3289,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     }
 
+    if (provider === 'pi' && pod.containerId) {
+      try {
+        await persistPiAuthJson(
+          pod.containerId,
+          containerManagerFactory.get(pod.executionTarget),
+          profileStore,
+          pod.profileName,
+          logger,
+          { providerAccountStore },
+        );
+      } catch (err) {
+        logger.warn(
+          { err, podId: pod.id },
+          'Could not recover Pi auth.json from container before resume',
+        );
+      }
+    }
+
     const result = await buildProviderEnv(profile, pod.id, logger, {
       profileStore,
       providerAccountStore,
@@ -3309,7 +3332,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const pod = podRepo.getOrThrow(podId);
     if (!pod.containerId) return;
     const profile = profileStore.get(pod.profileName);
-    if (profile.modelProvider !== 'max' && profile.modelProvider !== 'openai') return;
+    if (
+      profile.modelProvider !== 'max' &&
+      profile.modelProvider !== 'openai' &&
+      profile.modelProvider !== 'pi'
+    ) {
+      return;
+    }
 
     try {
       if (profile.modelProvider === 'max') {
@@ -3322,8 +3351,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           maxCredentialLineageByPod.get(podId),
           { providerAccountStore },
         );
-      } else {
+      } else if (profile.modelProvider === 'openai') {
         await persistOpenAiAuthJson(
+          pod.containerId,
+          containerManagerFactory.get(pod.executionTarget),
+          profileStore,
+          pod.profileName,
+          logger,
+          { providerAccountStore },
+        );
+      } else {
+        await persistPiAuthJson(
           pod.containerId,
           containerManagerFactory.get(pod.executionTarget),
           profileStore,

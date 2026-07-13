@@ -3,6 +3,7 @@ export { buildClaudeConfigFiles, buildProviderEnv } from './env-builder.js';
 export { refreshOAuthToken } from './credential-refresh.js';
 export {
   persistOpenAiAuthJson,
+  persistPiAuthJson,
   persistRefreshedCredentials,
   refreshAndPersistMaxCredentials,
 } from './credential-persistence.js';

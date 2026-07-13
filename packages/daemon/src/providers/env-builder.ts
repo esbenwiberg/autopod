@@ -4,6 +4,7 @@ import type {
   MaxCredentials,
   MaxRefreshCredentials,
   MaxSetupTokenCredentials,
+  PiOAuthCredentials,
   Profile,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
@@ -106,6 +107,9 @@ export async function buildProviderEnv(
     case 'openrouter':
       return buildOpenRouterEnv(profile, auth);
 
+    case 'pi':
+      return buildPiEnv(profile, auth);
+
     default:
       // Exhaustiveness check
       throw new Error(`Unknown model provider: ${provider as string}`);
@@ -114,6 +118,8 @@ export async function buildProviderEnv(
 
 const SECRET_DIR = '/run/autopod';
 const CODEX_HOME_DIR = `${CONTAINER_HOME_DIR}/.codex`;
+const PI_AGENT_DIR = `${CONTAINER_HOME_DIR}/.pi/agent`;
+const PI_AUTH_PATH = `${PI_AGENT_DIR}/auth.json`;
 
 function isMaxSetupTokenCredentials(creds: MaxCredentials): creds is MaxSetupTokenCredentials {
   return (
@@ -308,6 +314,48 @@ function buildCopilotEnv(profile: Profile, auth: ProviderAuthResolution): Provid
     containerFiles: buildClaudeConfigFiles(),
     secretFiles: [{ path: filePath, content: creds.token }],
     requiresPostExecPersistence: false,
+    credentialOwner: auth.owner ?? undefined,
+  };
+}
+
+function isPiOAuthCredentials(creds: unknown): creds is PiOAuthCredentials {
+  return (
+    !!creds &&
+    typeof creds === 'object' &&
+    !Array.isArray(creds) &&
+    (creds as { provider?: unknown }).provider === 'pi' &&
+    typeof (creds as { providerId?: unknown }).providerId === 'string' &&
+    !!(creds as { credential?: unknown }).credential &&
+    typeof (creds as { credential?: unknown }).credential === 'object' &&
+    !Array.isArray((creds as { credential?: unknown }).credential)
+  );
+}
+
+function buildPiEnv(profile: Profile, auth: ProviderAuthResolution): ProviderEnvResult {
+  const creds = auth.credentials;
+
+  if (!isPiOAuthCredentials(creds)) {
+    throw new Error(
+      `Profile "${profile.name}" has modelProvider=pi but missing or mismatched providerCredentials`,
+    );
+  }
+
+  const authJson = JSON.stringify({ [creds.providerId]: creds.credential }, null, 2);
+
+  return {
+    env: withRuntimeTelemetryOptOutEnv({
+      PI_CODING_AGENT_DIR: PI_AGENT_DIR,
+    }),
+    containerFiles: [
+      ...buildClaudeConfigFiles(),
+      {
+        path: PI_AUTH_PATH,
+        content: authJson,
+      },
+    ],
+    secretFiles: [],
+    requiresPostExecPersistence: true,
+    requiresPiAuthJsonPersistence: true,
     credentialOwner: auth.owner ?? undefined,
   };
 }
