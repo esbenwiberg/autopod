@@ -26,6 +26,18 @@ describe('resolvePodRuntime', () => {
     expect(resolvePodRuntime(profile({ defaultRuntime: 'claude' }), undefined)).toBe('claude');
   });
 
+  it('defaults legacy profiles without a runtime to Claude', () => {
+    expect(resolvePodRuntime(profile({ defaultRuntime: null }), undefined)).toBe('claude');
+  });
+
+  it('keeps explicit Pi selection for Anthropic profiles', () => {
+    expect(resolvePodRuntime(profile({ defaultRuntime: 'pi' }), undefined)).toBe('pi');
+  });
+
+  it('keeps requested Pi selection for OpenAI profiles', () => {
+    expect(resolvePodRuntime(profile({ modelProvider: 'openai' }), 'pi')).toBe('pi');
+  });
+
   it('forces Codex for OpenAI profiles even when the stored default is Claude', () => {
     expect(resolvePodRuntime(profile({ modelProvider: 'openai' }), undefined)).toBe('codex');
   });
@@ -34,10 +46,14 @@ describe('resolvePodRuntime', () => {
     expect(resolvePodRuntime(profile({ modelProvider: 'openai' }), 'claude')).toBe('codex');
   });
 
-  it('forces Codex for OpenRouter profiles regardless of the requested runtime', () => {
+  it('forces Codex for OpenRouter profiles with legacy runtime requests', () => {
     expect(resolvePodRuntime(profile({ modelProvider: 'openrouter' }), undefined)).toBe('codex');
     expect(resolvePodRuntime(profile({ modelProvider: 'openrouter' }), 'claude')).toBe('codex');
     expect(resolvePodRuntime(profile({ modelProvider: 'openrouter' }), 'codex')).toBe('codex');
+  });
+
+  it('keeps requested Pi selection for OpenRouter profiles', () => {
+    expect(resolvePodRuntime(profile({ modelProvider: 'openrouter' }), 'pi')).toBe('pi');
   });
 
   it('forces Codex for Foundry OpenAI-surface profiles', () => {

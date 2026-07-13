@@ -2,6 +2,13 @@ import { spawn as cpSpawn, execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import type { PiOAuthProviderId, ProviderCredentials } from '@autopod/shared';
+
+const PI_OAUTH_PROVIDER_IDS = ['anthropic', 'openai-codex', 'github-copilot'] as const;
+
+export function isPiOAuthProviderId(value: string): value is PiOAuthProviderId {
+  return PI_OAUTH_PROVIDER_IDS.includes(value as PiOAuthProviderId);
+}
 
 export function extractClaudeOauthToken(output: string): string | null {
   const patterns = [
@@ -60,17 +67,23 @@ function spawnInherit(command: string, args: string[], env: Record<string, strin
   });
 }
 
+function buildIsolatedEnv(blockedKeys: string[]): Record<string, string> {
+  const blocked = new Set(blockedKeys);
+  const spawnEnv: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && !blocked.has(key)) {
+      spawnEnv[key] = value;
+    }
+  }
+  return spawnEnv;
+}
+
 export async function runOpenAiCodexLogin(): Promise<string> {
   const token = Math.random().toString(36).slice(2, 10);
   const codexHome = path.join(os.tmpdir(), `autopod-codex-auth-${token}`);
   fs.mkdirSync(codexHome, { recursive: true });
 
-  const spawnEnv: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v !== undefined && k !== 'OPENAI_API_KEY' && k !== 'CODEX_ACCESS_TOKEN') {
-      spawnEnv[k] = v;
-    }
-  }
+  const spawnEnv = buildIsolatedEnv(['OPENAI_API_KEY', 'CODEX_ACCESS_TOKEN']);
   spawnEnv.CODEX_HOME = codexHome;
 
   try {
@@ -98,17 +111,7 @@ export async function runCopilotLogin(): Promise<string> {
   const configDir = path.join(os.tmpdir(), `autopod-copilot-auth-${token}`);
   fs.mkdirSync(configDir, { recursive: true });
 
-  const spawnEnv: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (
-      v !== undefined &&
-      k !== 'COPILOT_GITHUB_TOKEN' &&
-      k !== 'GH_TOKEN' &&
-      k !== 'GITHUB_TOKEN'
-    ) {
-      spawnEnv[k] = v;
-    }
-  }
+  const spawnEnv = buildIsolatedEnv(['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN']);
 
   try {
     await spawnInherit('copilot', ['login', '--config-dir', configDir], spawnEnv);
@@ -147,6 +150,81 @@ export async function runCopilotLogin(): Promise<string> {
   } finally {
     try {
       fs.rmSync(configDir, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
+export function extractPiCredential(
+  authJson: string,
+  providerId: PiOAuthProviderId,
+): ProviderCredentials {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(authJson);
+  } catch {
+    throw new Error('Pi auth.json was not valid JSON.');
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Pi auth.json must contain a provider credential object.');
+  }
+
+  const entries = parsed as Record<string, unknown>;
+  const selected = entries[providerId];
+  if (!selected) {
+    throw new Error(`Pi auth.json did not contain credentials for provider "${providerId}".`);
+  }
+  if (typeof selected !== 'object' || Array.isArray(selected)) {
+    throw new Error(`Pi credential for provider "${providerId}" was malformed.`);
+  }
+
+  return {
+    provider: 'pi',
+    providerId,
+    credential: selected as Record<string, unknown>,
+  };
+}
+
+export async function runPiLogin(providerId: PiOAuthProviderId): Promise<ProviderCredentials> {
+  const token = Math.random().toString(36).slice(2, 10);
+  const piAgentDir = path.join(os.tmpdir(), `autopod-pi-auth-${token}`);
+  fs.mkdirSync(piAgentDir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(piAgentDir, 0o700);
+
+  const spawnEnv = buildIsolatedEnv([
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'OPENAI_API_KEY',
+    'CODEX_ACCESS_TOKEN',
+    'COPILOT_GITHUB_TOKEN',
+    'GH_TOKEN',
+    'GITHUB_TOKEN',
+  ]);
+  spawnEnv.PI_CODING_AGENT_DIR = piAgentDir;
+
+  try {
+    try {
+      await spawnInherit('pi', ['/login'], spawnEnv);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(
+          'Pi CLI not found. Install @earendil-works/pi-coding-agent@0.80.6 and retry.',
+        );
+      }
+      throw error;
+    }
+
+    const authPath = path.join(piAgentDir, 'auth.json');
+    if (!fs.existsSync(authPath)) {
+      throw new Error('No Pi auth.json found. Login may not have completed.');
+    }
+
+    return extractPiCredential(fs.readFileSync(authPath, 'utf-8'), providerId);
+  } finally {
+    try {
+      fs.rmSync(piAgentDir, { recursive: true, force: true });
     } catch {
       /* best-effort */
     }

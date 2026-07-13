@@ -9,8 +9,16 @@
  * - `copilot`: GitHub Copilot CLI via OAuth token (`COPILOT_GITHUB_TOKEN`)
  * - `openrouter`: OpenRouter aggregator — uses Codex runtime with a custom base URL.
  *   Experimental: only models that pass the spike telemetry contract should be used.
+ * - `pi`: Pi subscription OAuth entry captured from Pi auth.json.
  */
-export type ModelProvider = 'anthropic' | 'max' | 'openai' | 'foundry' | 'copilot' | 'openrouter';
+export type ModelProvider =
+  | 'anthropic'
+  | 'max'
+  | 'openai'
+  | 'foundry'
+  | 'copilot'
+  | 'openrouter'
+  | 'pi';
 
 /** Anthropic API key provider — uses daemon env `ANTHROPIC_API_KEY`. No per-profile creds. */
 export interface AnthropicCredentials {
@@ -147,10 +155,20 @@ export interface OpenRouterCredentials {
   baseUrl?: string;
 }
 
+export type PiOAuthProviderId = 'anthropic' | 'openai-codex' | 'github-copilot';
+
+export interface PiOAuthCredentials {
+  provider: 'pi';
+  providerId: PiOAuthProviderId;
+  /** Opaque provider entry extracted from Pi's auth.json for providerId. */
+  credential: Record<string, unknown>;
+}
+
 export type ProviderCredentials =
   | AnthropicCredentials
   | OpenAiCredentials
   | MaxCredentials
   | FoundryCredentials
   | CopilotCredentials
-  | OpenRouterCredentials;
+  | OpenRouterCredentials
+  | PiOAuthCredentials;

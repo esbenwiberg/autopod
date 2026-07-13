@@ -45,7 +45,14 @@ RUN groupadd --gid 1000 autopod && \
 RUN npm install -g pnpm@9
 
 # Agent CLIs
-RUN npm install -g @anthropic-ai/claude-code @openai/codex @github/copilot
+RUN npm install -g @anthropic-ai/claude-code @openai/codex @github/copilot @earendil-works/pi-coding-agent@0.80.6
+
+# Trusted Autopod Pi worker extension
+COPY packages/pi-worker/package.json /opt/autopod/pi-worker/package.json
+COPY packages/pi-worker/dist /opt/autopod/pi-worker/dist
+RUN npm install -g /opt/autopod/pi-worker \
+    && test -x /usr/local/bin/pi \
+    && test -f /usr/local/lib/node_modules/@autopod/pi-worker/dist/index.js
 
 # Pre-install Playwright + Chromium so the agent can self-validate via the
 # validate_in_browser MCP tool. `playwright install --with-deps` pulls the full

@@ -180,6 +180,11 @@ describe('ProfileValidator', () => {
     expect(result.errors[0]).toContain('claude');
   });
 
+  it('should accept Pi as an additive runtime', () => {
+    const result = validateProfile({ ...validInput, defaultRuntime: 'pi' });
+    expect(result.valid).toBe(true);
+  });
+
   it('should reject maxValidationAttempts out of range', () => {
     const result = validateProfile({ ...validInput, maxValidationAttempts: 0 });
     expect(result.valid).toBe(false);

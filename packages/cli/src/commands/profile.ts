@@ -26,9 +26,11 @@ import { withSpinner } from '../output/spinner.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
 import {
   extractClaudeOauthToken,
+  isPiOAuthProviderId,
   runClaudeSetupToken,
   runCopilotLogin,
   runOpenAiCodexLogin,
+  runPiLogin,
 } from './provider-auth.js';
 
 const profileColumns: ColumnDef<Profile>[] = [
@@ -492,6 +494,54 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
     });
 
   // ────────────────────────────────────────────────────────────────────────────
+
+  profile
+    .command('auth-pi <name> <provider>')
+    .description(
+      'Authenticate a profile with a Pi subscription provider (anthropic|openai-codex|github-copilot)',
+    )
+    .action(async (name: string, provider: string) => {
+      if (!isPiOAuthProviderId(provider)) {
+        console.error(
+          chalk.red('provider must be one of: anthropic, openai-codex, github-copilot'),
+        );
+        process.exit(1);
+      }
+
+      const client = getClient();
+
+      try {
+        await client.getProfile(name);
+      } catch (error) {
+        if (error instanceof ProfileNotFoundError) {
+          console.error(chalk.red(`Profile "${name}" not found.`));
+        } else {
+          console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+        }
+        process.exit(1);
+      }
+
+      console.log(chalk.cyan(`\nStarting Pi login for profile "${name}" (${provider})...`));
+      console.log(chalk.dim('Follow the Pi subscription login flow.\n'));
+
+      let providerCredentials;
+      try {
+        providerCredentials = await runPiLogin(provider);
+      } catch (error) {
+        console.error(chalk.red(`\n${error instanceof Error ? error.message : String(error)}`));
+        process.exit(1);
+      }
+
+      await withSpinner(`Saving Pi credentials for "${name}"...`, () =>
+        client.setProfileCredentials(name, {
+          defaultRuntime: 'pi',
+          modelProvider: 'pi',
+          providerCredentials,
+        }),
+      );
+
+      console.log(chalk.green(`\nProfile "${name}" is now authenticated with Pi (${provider}).`));
+    });
 
   profile
     .command('auth-openai <name>')

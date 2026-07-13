@@ -6,7 +6,7 @@ export interface ProfileValidationResult {
   errors: string[];
 }
 
-const KNOWN_RUNTIMES = ['claude', 'codex', 'copilot'];
+const KNOWN_RUNTIMES = ['claude', 'codex', 'copilot', 'pi'];
 const VALID_TEMPLATES: StackTemplate[] = [
   'node22',
   'node22-pw',

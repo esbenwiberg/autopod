@@ -97,6 +97,10 @@ describe('base image templates', () => {
       expect(content, dockerfile).toContain('@anthropic-ai/claude-code');
       expect(content, dockerfile).toContain('@openai/codex');
       expect(content, dockerfile).toContain('@github/copilot');
+      expect(content, dockerfile).toContain('@earendil-works/pi-coding-agent@0.80.6');
+      expect(content, dockerfile).toContain('COPY packages/pi-worker/dist');
+      expect(content, dockerfile).toContain('npm install -g /opt/autopod/pi-worker');
+      expect(content, dockerfile).not.toContain('@earendil-works/pi-coding-agent@latest');
     }
   });
 });
@@ -258,7 +262,9 @@ describe('generateDockerfile', () => {
       gitCredentials: 'none',
     });
 
-    expect(df).not.toContain('@anthropic-ai/claude-code @openai/codex @github/copilot');
+    expect(df).not.toContain('@anthropic-ai/claude-code');
+    expect(df).not.toContain('@earendil-works/pi-coding-agent');
+    expect(df).not.toContain('@autopod/pi-worker');
   });
 
   it('uses sha256 digest in FROM when imageDigests map is provided', () => {

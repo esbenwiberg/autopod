@@ -38,6 +38,10 @@ export function resolvePodRuntime(
 ): RuntimeType {
   const runtime = requestedRuntime ?? profile.defaultRuntime ?? 'claude';
 
+  if (runtime === 'pi') {
+    return runtime;
+  }
+
   if (usesOpenAiSurface(profile) && runtime !== 'codex') {
     logger?.warn(
       { profile: profile.name, modelProvider: profile.modelProvider, requestedRuntime: runtime },

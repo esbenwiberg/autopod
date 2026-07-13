@@ -23,6 +23,7 @@ export const providerAccountProviderSchema = z.enum([
   'foundry',
   'copilot',
   'openrouter',
+  'pi',
 ]);
 
 const anthropicCredentialsSchema = z.object({
@@ -73,6 +74,12 @@ const openRouterCredentialsSchema = z.object({
   baseUrl: z.string().url().optional(),
 });
 
+const piOAuthCredentialsSchema = z.object({
+  provider: z.literal('pi'),
+  providerId: z.enum(['anthropic', 'openai-codex', 'github-copilot']),
+  credential: z.record(z.unknown()),
+});
+
 const providerAccountCredentialsSchema = z.union([
   anthropicCredentialsSchema,
   openAiCredentialsSchema,
@@ -81,6 +88,7 @@ const providerAccountCredentialsSchema = z.union([
   foundryCredentialsSchema,
   copilotCredentialsSchema,
   openRouterCredentialsSchema,
+  piOAuthCredentialsSchema,
 ]);
 
 export const createProviderAccountSchema = z
