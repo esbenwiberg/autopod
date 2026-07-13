@@ -61,9 +61,12 @@ with no shell interpretation and no arguments: a joined `sh -lc '…'` string fa
 (`/bin/bash`) here and drives real work through stdin. To run an arbitrary argv with
 streaming output, `AzureSandboxApiClient.execStream()` stages the command as an executable
 `#!/bin/sh` wrapper script (writeFile → the files API writes it as `root:0644`, so a
-`chmod 0755` as `root` follows → so the non-root sandbox process can `execve` it) and sends
-that script path as `command`. `cwd` is folded into the wrapper (`cd … || exit 1`); `env`
-rides the start frame's `environment`.
+`chmod 0755` as `root` follows) and sends that script path as `command`. Azure may start
+the exec-stream wrapper as root even when buffered `executeShellCommand` calls run as the
+image user. The wrapper therefore drops a root-started stream to `autopod` before running
+the requested command; this keeps agent, terminal, and validation artifacts under one
+filesystem identity. `cwd` is folded into the wrapper (`cd … || exit 1`); `env` rides the
+start frame's `environment`.
 
 Autopod's `AzureSandboxApiClient.execStream()` implements the non-TTY variant, which flips
 `SandboxContainerManager.supportsStreamingExec` to `true` and unblocks agent runtimes on

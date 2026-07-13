@@ -410,7 +410,15 @@ describe('AzureSandboxApiClient', () => {
     const scriptPath = new URL(writeReq.url).searchParams.get('path') ?? '';
     expect(scriptPath).toMatch(/^\/tmp\/\.autopod-execstream-\d+-\d+\.sh$/);
     expect(String(writeReq.init?.body)).toBe(
-      '#!/bin/sh\ncd /workspace || exit 1\nexec echo hello\n',
+      [
+        '#!/bin/sh',
+        'if [ "$(id -u)" = "0" ]; then',
+        "  exec env HOME=/home/autopod USER=autopod LOGNAME=autopod su -m -s /bin/sh autopod -c 'cd /workspace || exit 1\nexec echo hello'",
+        'fi',
+        'cd /workspace || exit 1',
+        'exec echo hello',
+        '',
+      ].join('\n'),
     );
     // The files API writes the wrapper as root:0644, so it is chmod-ed executable as root.
     expect(jsonBody(requests[1] ?? failRequest())).toEqual({
@@ -504,7 +512,16 @@ describe('AzureSandboxApiClient', () => {
     const writeReq = requests[0] ?? failRequest();
     const scriptPath = new URL(writeReq.url).searchParams.get('path') ?? '';
     expect(scriptPath).toMatch(/^\/tmp\/\.autopod-execstream-\d+-\d+\.sh$/);
-    expect(String(writeReq.init?.body)).toBe('#!/bin/sh\nexec /bin/bash -l\n');
+    expect(String(writeReq.init?.body)).toBe(
+      [
+        '#!/bin/sh',
+        'if [ "$(id -u)" = "0" ]; then',
+        "  exec env HOME=/home/autopod USER=autopod LOGNAME=autopod su -m -s /bin/sh autopod -c 'exec /bin/bash -l'",
+        'fi',
+        'exec /bin/bash -l',
+        '',
+      ].join('\n'),
+    );
     expect(jsonBody(requests[1] ?? failRequest())).toEqual({
       command: `chmod 0755 ${scriptPath}`,
       user: 'root',

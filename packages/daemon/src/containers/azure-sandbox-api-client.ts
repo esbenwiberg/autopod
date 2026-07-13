@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { AutopodError } from '@autopod/shared';
+import { AutopodError, CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/shared';
 import { DefaultAzureCredential } from '@azure/identity';
 import type { Logger } from 'pino';
 import type {
@@ -443,11 +443,11 @@ export class AzureSandboxApiClient implements SandboxApiClient {
 
   /**
    * Stage `scriptBody` as an executable wrapper under `/tmp` and return its path.
-   * The files API writes as `root:0644`, so the non-root sandbox process can
-   * neither `execve` nor chmod it itself — we `chmod 0755` as root and verify,
-   * since a silent failure here resurfaces later as an opaque "permission
-   * denied" execve error. Shared by `execStream` and `attachTerminal`, both of
-   * which need `command` to be a single executable path.
+   * The files API writes as `root:0644`, so the sandbox runtime cannot exec it
+   * until we `chmod 0755` as root. Verify that step because a silent failure
+   * resurfaces later as an opaque "permission denied" execve error. Shared by
+   * `execStream` and `attachTerminal`, both of which need `command` to be a
+   * single executable path.
    */
   private async stageExecutableWrapper(sandboxId: string, scriptBody: string): Promise<string> {
     const scriptPath = `/tmp/.autopod-execstream-${Date.now()}-${this.execStreamSeq++}.sh`;
@@ -474,7 +474,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     options: SandboxTerminalOptions,
   ): Promise<SandboxTerminalSession> {
     const shellCommand = options.shellCommand ?? 'exec /bin/bash -l';
-    const scriptPath = await this.stageExecutableWrapper(sandboxId, `#!/bin/sh\n${shellCommand}\n`);
+    const scriptPath = await this.stageExecutableWrapper(
+      sandboxId,
+      sandboxRuntimeUserScript(shellCommand),
+    );
 
     const token = await this.getAzureToken(DATA_SCOPE, 'data access token', 'AZURE_AUTH');
     const wsUrl = `${this.dataEndpoint.replace(/^https:/, 'wss:')}${this.sandboxPath(
@@ -1275,15 +1278,35 @@ function defaultWebSocketFactory(url: string, headers: Record<string, string>): 
  * The exec-stream `start.command` is `execve`d literally as a single argv[0]
  * (not shell-interpreted, no arguments), so an arbitrary argv can only be run
  * by staging it as an executable wrapper script and exec-ing that path. This
- * builds that script: a `#!/bin/sh` shebang, an optional `cd` into `cwd`, then
+ * builds that script: a `#!/bin/sh` shebang, a privilege guard for Azure
+ * exec-stream sessions that start as root, an optional `cd` into `cwd`, then
  * `exec <argv>` so the command's exit code propagates as the script's own.
  */
 function streamExecScript(command: string[], cwd?: string): string {
   const argv = command.map(shellQuote).join(' ');
-  const lines = ['#!/bin/sh'];
+  const lines: string[] = [];
   if (cwd) lines.push(`cd ${shellQuote(cwd)} || exit 1`);
   lines.push(`exec ${argv}`);
-  return `${lines.join('\n')}\n`;
+  return sandboxRuntimeUserScript(lines.join('\n'));
+}
+
+/**
+ * Azure's exec-stream frame has no user field and can start the wrapper as
+ * root even though buffered validation execs run as the image user. Drop
+ * root-started streams to the container's canonical user before they touch the
+ * workspace, otherwise agent/test caches become root-owned and later
+ * validation fails with EACCES. Non-root streams retain their existing user.
+ */
+function sandboxRuntimeUserScript(scriptBody: string): string {
+  const identity = `HOME=${shellQuote(CONTAINER_HOME_DIR)} USER=${shellQuote(CONTAINER_USER)} LOGNAME=${shellQuote(CONTAINER_USER)}`;
+  return [
+    '#!/bin/sh',
+    'if [ "$(id -u)" = "0" ]; then',
+    `  exec env ${identity} su -m -s /bin/sh ${shellQuote(CONTAINER_USER)} -c ${shellQuote(scriptBody)}`,
+    'fi',
+    scriptBody,
+    '',
+  ].join('\n');
 }
 
 function commandToShell(command: string[], env?: Record<string, string>): string {
