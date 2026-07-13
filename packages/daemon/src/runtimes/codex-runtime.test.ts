@@ -404,11 +404,12 @@ describe('CodexRuntime', () => {
       expect((errorEvent as any).fatal).toBe(true);
     });
 
-    it('terminates within grace window when stdout never closes after task_complete', async () => {
+    it('fails closed and terminates the exec when exit never resolves after task_complete', async () => {
       // Wedged-container parity with claude-runtime: emit the parser's
       // `complete` event then deliberately leave stdout open and exit code
-      // unresolved. The grace timer should end stdout and the bounded
-      // exit-code wait should fall through with a non-fatal error.
+      // unresolved. The grace timer should end stdout, then the runtime must
+      // terminate the still-live exec and emit a fatal error so validation
+      // cannot overlap with a process that may still mutate the workspace.
       process.env.AUTOPOD_POST_COMPLETE_GRACE_MS = '50';
       process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '50';
 
@@ -450,10 +451,11 @@ describe('CodexRuntime', () => {
         const wedgeError = events.find(
           (e) =>
             e.type === 'error' &&
-            (e as AgentErrorEvent).fatal === false &&
+            (e as AgentErrorEvent).fatal === true &&
             (e as AgentErrorEvent).message.includes('Codex exit code did not resolve'),
         );
         expect(wedgeError).toBeDefined();
+        expect(handle.kill).toHaveBeenCalledOnce();
       } finally {
         // biome-ignore lint/performance/noDelete: must actually unset, `= undefined` stringifies to "undefined"
         delete process.env.AUTOPOD_POST_COMPLETE_GRACE_MS;
@@ -1232,7 +1234,7 @@ describe('CodexRuntime', () => {
   });
 
   describe('resume', () => {
-    it('recovers live progress when a reachable sandbox Codex stream stops emitting', async () => {
+    it('recovers live progress but fails closed when the sandbox exec never exits', async () => {
       const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
       const previousIdleRecovery = process.env.AUTOPOD_CODEX_SANDBOX_IDLE_RECOVERY_MS;
       const previousExitTimeout = process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
@@ -1320,7 +1322,7 @@ describe('CodexRuntime', () => {
       }
 
       expect(cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
-      expect(handle.kill).not.toHaveBeenCalled();
+      expect(handle.kill).toHaveBeenCalledOnce();
       expect(events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1331,6 +1333,11 @@ describe('CodexRuntime', () => {
           expect.objectContaining({
             type: 'complete',
             result: 'Recovered terminal completion.',
+          }),
+          expect.objectContaining({
+            type: 'error',
+            fatal: true,
+            message: expect.stringContaining('refusing validation'),
           }),
         ]),
       );

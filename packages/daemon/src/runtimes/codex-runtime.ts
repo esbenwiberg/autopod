@@ -27,6 +27,7 @@ const DEFAULT_ROLLOUT_POLL_MS = 1_000;
 const DEFAULT_SUMMARY_GRACE_MS = 30_000;
 const DEFAULT_SUMMARY_RECOVERY_TIMEOUT_MS = 30_000;
 const DEFAULT_SANDBOX_IDLE_RECOVERY_MS = 60_000;
+const DEFAULT_STALLED_EXEC_KILL_TIMEOUT_MS = 5_000;
 const CONTAINER_CODEX_SESSIONS_PATH = `${CONTAINER_HOME_DIR}/.codex/sessions`;
 
 const TOML_BARE_KEY = /^[A-Za-z0-9_-]+$/;
@@ -178,7 +179,7 @@ export class CodexRuntime implements Runtime {
       this.handles.delete(config.podId);
     }
 
-    const exitError = await this.codexExitError(config.podId, handle.exitCode, outputState);
+    const exitError = await this.codexExitError(config.podId, handle, outputState);
     if (exitError) yield exitError;
   }
 
@@ -271,7 +272,7 @@ export class CodexRuntime implements Runtime {
       this.handles.delete(podId);
     }
 
-    const exitError = await this.codexExitError(podId, handle.exitCode, outputState);
+    const exitError = await this.codexExitError(podId, handle, outputState);
     if (exitError) yield exitError;
   }
 
@@ -645,27 +646,39 @@ export class CodexRuntime implements Runtime {
 
   private async codexExitError(
     podId: string,
-    exitCode: Promise<number>,
+    handle: StreamingExecResult,
     outputState: OutputState,
   ): Promise<AgentEvent | null> {
     if (outputState.sawFatal) return null;
 
     // Bounded exit-code wait — wedged dockerd would otherwise hang us here
     // even after the stream-grace timer destroyed stdout.
-    const exitResult = await awaitExitCodeBounded(exitCode, {
+    const exitResult = await awaitExitCodeBounded(handle.exitCode, {
       runtimeName: 'codex-runtime',
       podId,
       logger: this.logger,
     });
 
     if (exitResult.timedOut) {
+      const killResult = await settlePromiseWithin(handle.kill(), stalledExecKillTimeoutMs());
+      if (killResult.status !== 'fulfilled') {
+        this.logger.warn(
+          {
+            component: 'codex-runtime',
+            podId,
+            status: killResult.status,
+            ...(killResult.status === 'rejected' ? { err: killResult.reason } : {}),
+          },
+          'Failed to terminate stalled Codex exec after unresolved exit code',
+        );
+      }
       return {
         type: 'error',
         timestamp: new Date().toISOString(),
         message: outputState.sawComplete
-          ? 'Codex exit code did not resolve — container may be unresponsive'
+          ? 'Codex exit code did not resolve after task completion — requested stalled-exec termination and refusing validation'
           : 'Codex exit code did not resolve before task completion — refusing to mark pod complete',
-        fatal: !outputState.sawComplete,
+        fatal: true,
       };
     }
 
@@ -986,6 +999,13 @@ function summaryRecoveryTimeoutMs(): number {
 
 function sandboxIdleRecoveryPeriodMs(): number {
   return positiveEnvMs('AUTOPOD_CODEX_SANDBOX_IDLE_RECOVERY_MS', DEFAULT_SANDBOX_IDLE_RECOVERY_MS);
+}
+
+function stalledExecKillTimeoutMs(): number {
+  return positiveEnvMs(
+    'AUTOPOD_CODEX_STALLED_EXEC_KILL_TIMEOUT_MS',
+    DEFAULT_STALLED_EXEC_KILL_TIMEOUT_MS,
+  );
 }
 
 function positiveEnvMs(name: string, fallback: number): number {
