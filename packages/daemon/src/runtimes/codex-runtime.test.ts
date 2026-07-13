@@ -404,12 +404,12 @@ describe('CodexRuntime', () => {
       expect((errorEvent as any).fatal).toBe(true);
     });
 
-    it('fails closed and terminates the exec when exit never resolves after task_complete', async () => {
-      // Wedged-container parity with claude-runtime: emit the parser's
-      // `complete` event then deliberately leave stdout open and exit code
-      // unresolved. The grace timer should end stdout, then the runtime must
-      // terminate the still-live exec and emit a fatal error so validation
-      // cannot overlap with a process that may still mutate the workspace.
+    it('terminates the stalled exec but proceeds to validation when exit never resolves after task_complete', async () => {
+      // Emit the parser's `complete` event then deliberately leave stdout open
+      // and the exit code unresolved. The grace timer ends stdout; the runtime
+      // kills the exec as best-effort insurance but must NOT fail closed — we
+      // already have terminal completion proof, so the pod proceeds to
+      // validation (a stalled exit code is not lost work).
       process.env.AUTOPOD_POST_COMPLETE_GRACE_MS = '50';
       process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '50';
 
@@ -451,7 +451,7 @@ describe('CodexRuntime', () => {
         const wedgeError = events.find(
           (e) =>
             e.type === 'error' &&
-            (e as AgentErrorEvent).fatal === true &&
+            (e as AgentErrorEvent).fatal === false &&
             (e as AgentErrorEvent).message.includes('Codex exit code did not resolve'),
         );
         expect(wedgeError).toBeDefined();
@@ -1234,7 +1234,7 @@ describe('CodexRuntime', () => {
   });
 
   describe('resume', () => {
-    it('recovers live progress but fails closed when the sandbox exec never exits', async () => {
+    it('recovers live progress and proceeds to validation when the sandbox exec never exits', async () => {
       const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
       const previousIdleRecovery = process.env.AUTOPOD_CODEX_SANDBOX_IDLE_RECOVERY_MS;
       const previousExitTimeout = process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
@@ -1336,8 +1336,8 @@ describe('CodexRuntime', () => {
           }),
           expect.objectContaining({
             type: 'error',
-            fatal: true,
-            message: expect.stringContaining('refusing validation'),
+            fatal: false,
+            message: expect.stringContaining('proceeding to validation'),
           }),
         ]),
       );
