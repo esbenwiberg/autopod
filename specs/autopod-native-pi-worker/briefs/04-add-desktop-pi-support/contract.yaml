@@ -1,0 +1,48 @@
+contract_version: 1
+title: "Add Pi runtime and subscription support to desktop"
+depends_on: [03-package-cli-profile-support]
+scenarios:
+  - id: desktop-selects-pi
+    given:
+      - "the desktop edits a normal or inherited profile"
+    when:
+      - "the user selects Pi as the runtime"
+    then:
+      - "the profile maps Pi to the daemon contract and presents Pi-compatible model defaults that differ appropriately from vendor runtime defaults"
+  - id: desktop-authenticates-one-pi-provider
+    given:
+      - "the user chooses one Pi subscription provider in the existing Providers section"
+    when:
+      - "the isolated Terminal login succeeds, fails, or is cancelled"
+    then:
+      - "success patches only the selected provider entry while failure and cancellation patch nothing and expose no credential material"
+  - id: desktop-preserves-existing-runtimes
+    given:
+      - "profiles select Claude, Codex, or Copilot"
+    when:
+      - "the updated desktop loads, edits, and saves those profiles"
+    then:
+      - "their runtime mappings and compatible model behavior remain unchanged"
+required_facts:
+  - id: fact-desktop-runtime-model-behavior
+    proves: [desktop-selects-pi, desktop-preserves-existing-runtimes]
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodUITests/RuntimeModelOptionsTests.swift
+      change: create
+    command: cd packages/desktop && swift test --filter RuntimeModelOptionsTests
+  - id: fact-desktop-pi-auth-isolation
+    proves: [desktop-authenticates-one-pi-provider]
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodDesktopTests/ProfileAuthenticatorTests.swift
+      change: create
+    command: cd packages/desktop && swift test --filter ProfileAuthenticatorTests
+  - id: fact-desktop-pi-api-mapping
+    proves: [desktop-selects-pi, desktop-preserves-existing-runtimes]
+    kind: contract-test
+    artifact:
+      path: packages/desktop/Tests/AutopodClientTests/DaemonAPITests.swift
+      change: update
+    command: cd packages/desktop && swift test --filter DaemonAPITests
+human_review: []

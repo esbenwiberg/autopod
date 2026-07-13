@@ -1,0 +1,48 @@
+contract_version: 1
+title: "Build the trusted Pi MCP worker bridge"
+depends_on: []
+scenarios:
+  - id: bridge-http-and-stdio-tools
+    given:
+      - "configured HTTP and stdio MCP servers expose tools with different schemas and behavior"
+    when:
+      - "the trusted Pi worker extension initializes and calls those tools"
+    then:
+      - "each tool is registered with its own schema and forwards its server headers, arguments, and distinct result"
+  - id: bridge-fails-closed
+    given:
+      - "the required Autopod MCP server is unavailable or two servers expose the same tool name"
+    when:
+      - "the managed worker initializes"
+    then:
+      - "initialization fails explicitly without starting a reduced or shadowed tool surface"
+  - id: bridge-cancels-long-calls
+    given:
+      - "an MCP tool call is long-running and receives an abort signal"
+    when:
+      - "Pi cancels the tool call"
+    then:
+      - "the bridge propagates cancellation while otherwise allowing approval-duration calls to remain open"
+required_facts:
+  - id: fact-mcp-transport-parity
+    proves: [bridge-http-and-stdio-tools]
+    kind: integration-test
+    artifact:
+      path: packages/pi-worker/src/mcp-bridge.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/pi-worker test -- mcp-bridge.test.ts -t "forwards HTTP and stdio tools"
+  - id: fact-mcp-fail-closed
+    proves: [bridge-fails-closed]
+    kind: unit-test
+    artifact:
+      path: packages/pi-worker/src/worker-extension.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/pi-worker test -- worker-extension.test.ts
+  - id: fact-mcp-cancellation
+    proves: [bridge-cancels-long-calls]
+    kind: integration-test
+    artifact:
+      path: packages/pi-worker/src/mcp-bridge.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/pi-worker test -- mcp-bridge.test.ts -t "cancels long-running calls"
+human_review: []
