@@ -52,7 +52,7 @@ RUN curl -fsSL https://aka.ms/install-artifacts-credprovider.sh | bash \
 ENV NUGET_CREDENTIALPROVIDER_SESSIONTOKENCACHE_ENABLED=true
 
 # Agent CLIs
-RUN npm install -g @anthropic-ai/claude-code @openai/codex @github/copilot
+RUN npm install -g @anthropic-ai/claude-code @openai/codex@0.144.3 @github/copilot
 
 # Dagger CLI — pre-installed so pods with restricted/deny-all network policies
 # can still use Dagger modules (runtime install from dl.dagger.io would fail).

@@ -83,6 +83,21 @@ enum RuntimeModelOptions {
             cachedInputPer1M: 0.1,
             outputPer1M: 5
         ),
+        "gpt-5.6-sol": RuntimeModelPrice(
+            inputPer1M: 5,
+            cachedInputPer1M: 0.5,
+            outputPer1M: 30
+        ),
+        "gpt-5.6-terra": RuntimeModelPrice(
+            inputPer1M: 2.5,
+            cachedInputPer1M: 0.25,
+            outputPer1M: 15
+        ),
+        "gpt-5.6-luna": RuntimeModelPrice(
+            inputPer1M: 1,
+            cachedInputPer1M: 0.1,
+            outputPer1M: 6
+        ),
         "gpt-5.5": RuntimeModelPrice(
             inputPer1M: 5,
             cachedInputPer1M: 0.5,
@@ -142,6 +157,9 @@ enum RuntimeModelOptions {
         "claude-sonnet-4-6": "Sonnet 4.6",
         "claude-sonnet-4-5": "Sonnet 4.5",
         "claude-haiku-4-5": "Haiku 4.5",
+        "gpt-5.6-sol": "GPT-5.6 Sol",
+        "gpt-5.6-terra": "GPT-5.6 Terra",
+        "gpt-5.6-luna": "GPT-5.6 Luna",
     ]
 
     static func options(
@@ -242,6 +260,9 @@ enum RuntimeModelOptions {
         case .codex:
             return [
                 RuntimeModelOption(value: "auto", label: "Auto"),
+                RuntimeModelOption(value: "gpt-5.6-sol", label: "GPT-5.6 Sol"),
+                RuntimeModelOption(value: "gpt-5.6-terra", label: "GPT-5.6 Terra"),
+                RuntimeModelOption(value: "gpt-5.6-luna", label: "GPT-5.6 Luna"),
                 RuntimeModelOption(value: "gpt-5.3-codex", label: "GPT-5.3-Codex"),
                 RuntimeModelOption(value: "gpt-5.5", label: "GPT-5.5"),
                 RuntimeModelOption(value: "gpt-5", label: "GPT-5"),

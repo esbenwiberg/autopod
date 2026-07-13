@@ -18,6 +18,9 @@ describe('MODEL_PRICING', () => {
   });
 
   it('contains gpt model IDs', () => {
+    expect(MODEL_PRICING['gpt-5.6-sol']).toBeDefined();
+    expect(MODEL_PRICING['gpt-5.6-terra']).toBeDefined();
+    expect(MODEL_PRICING['gpt-5.6-luna']).toBeDefined();
     expect(MODEL_PRICING['gpt-5.5']).toBeDefined();
     expect(MODEL_PRICING['gpt-5']).toBeDefined();
     expect(MODEL_PRICING['gpt-5-mini']).toBeDefined();
@@ -65,6 +68,18 @@ describe('computeCost', () => {
 });
 
 describe('computeCostWithCache', () => {
+  it('computes GPT-5.6 family costs with cached input discounts', () => {
+    expect(computeCostWithCache('gpt-5.6-sol', 1_000_000, 500_000, 250_000)).toBe(
+      0.75 * 5.0 + 0.25 * 0.5 + 0.5 * 30.0,
+    );
+    expect(computeCostWithCache('gpt-5.6-terra', 1_000_000, 500_000, 250_000)).toBe(
+      0.75 * 2.5 + 0.25 * 0.25 + 0.5 * 15.0,
+    );
+    expect(computeCostWithCache('gpt-5.6-luna', 1_000_000, 500_000, 250_000)).toBe(
+      0.75 * 1.0 + 0.25 * 0.1 + 0.5 * 6.0,
+    );
+  });
+
   it('computes Codex cost with cached input discount', () => {
     expect(computeCostWithCache('gpt-5.3-codex', 1_000_000, 500_000, 250_000)).toBe(
       0.75 * 1.75 + 0.25 * 0.175 + 0.5 * 14.0,

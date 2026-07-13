@@ -34,7 +34,7 @@ RUN userdel --remove node 2>/dev/null; groupdel node 2>/dev/null; \
 RUN npm install -g pnpm@9
 
 # Agent CLIs
-RUN npm install -g @anthropic-ai/claude-code @openai/codex @github/copilot
+RUN npm install -g @anthropic-ai/claude-code @openai/codex@0.144.3 @github/copilot
 
 # Working directory
 WORKDIR /workspace

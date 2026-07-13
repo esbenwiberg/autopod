@@ -4,7 +4,16 @@ import Testing
 @Test func codexModelOptionsExposeRepoKnownModels() {
     let options = RuntimeModelOptions.options(for: .codex, role: .defaultModel).map(\.value)
 
-    #expect(options == ["auto", "gpt-5.3-codex", "gpt-5.5", "gpt-5", "gpt-5-mini"])
+    #expect(options == [
+        "auto",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.3-codex",
+        "gpt-5.5",
+        "gpt-5",
+        "gpt-5-mini",
+    ])
     #expect(!options.contains("opus"))
     #expect(!options.contains("sonnet"))
 }
@@ -67,7 +76,17 @@ import Testing
     ).map(\.value)
 
     #expect(
-        options == ["auto", "gpt-5.3-codex", "gpt-5.5", "gpt-5", "gpt-5-mini", "gpt-5.2-codex"]
+        options == [
+            "auto",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.3-codex",
+            "gpt-5.5",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5.2-codex",
+        ]
     )
 }
 
@@ -83,6 +102,18 @@ import Testing
 }
 
 @Test func modelPricingSummariesCoverPickerModels() {
+    #expect(
+        RuntimeModelOptions.priceSummary(for: "gpt-5.6-sol", runtime: .codex)
+            == "$5 in / $0.50 cached / $30 out per 1M"
+    )
+    #expect(
+        RuntimeModelOptions.priceSummary(for: "gpt-5.6-terra", runtime: .codex)
+            == "$2.5 in / $0.25 cached / $15 out per 1M"
+    )
+    #expect(
+        RuntimeModelOptions.priceSummary(for: "gpt-5.6-luna", runtime: .codex)
+            == "$1 in / $0.10 cached / $6 out per 1M"
+    )
     #expect(
         RuntimeModelOptions.priceSummary(for: "gpt-5.5", runtime: .codex)
             == "$5 in / $0.50 cached / $30 out per 1M"
