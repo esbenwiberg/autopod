@@ -172,6 +172,11 @@ export function extractPiCredential(
   }
 
   const entries = parsed as Record<string, unknown>;
+  const providerKeys = Object.keys(entries);
+  if (providerKeys.length !== 1 || providerKeys[0] !== providerId) {
+    throw new Error(`Pi auth.json must contain exactly one credential for provider "${providerId}".`);
+  }
+
   const selected = entries[providerId];
   if (!selected) {
     throw new Error(`Pi auth.json did not contain credentials for provider "${providerId}".`);
