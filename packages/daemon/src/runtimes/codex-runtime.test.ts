@@ -2,10 +2,17 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import type { AgentErrorEvent, AgentEvent, AgentStatusEvent, SpawnConfig } from '@autopod/shared';
+import type {
+  AgentErrorEvent,
+  AgentEvent,
+  AgentStatusEvent,
+  SpawnConfig,
+  SystemEvent,
+} from '@autopod/shared';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
+import type { EventBus } from '../pods/event-bus.js';
 import type { PodRepository } from '../pods/pod-repository.js';
 import { CodexRuntime } from './codex-runtime.js';
 
@@ -44,9 +51,47 @@ function createMockContainerManager(handle: StreamingExecResult): ContainerManag
     spawn: vi.fn(async () => 'container-123'),
     kill: vi.fn(async () => {}),
     writeFile: vi.fn(async () => {}),
+    extractDirectoryFromContainer: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
     execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
     execStreaming: vi.fn(async () => handle),
+  };
+}
+
+function createTaskSummaryEventBus(): {
+  eventBus: EventBus;
+  emitTaskSummary(podId: string): void;
+} {
+  let subscriber: ((event: SystemEvent) => void) | null = null;
+  const eventBus: EventBus = {
+    emit: vi.fn((event: SystemEvent) => {
+      subscriber?.(event);
+      return 1;
+    }),
+    subscribe: vi.fn(() => () => {}),
+    subscribeToSession: vi.fn((_podId, nextSubscriber) => {
+      subscriber = nextSubscriber;
+      return () => {
+        subscriber = null;
+      };
+    }),
+  };
+
+  return {
+    eventBus,
+    emitTaskSummary(podId: string): void {
+      eventBus.emit({
+        type: 'pod.agent_activity',
+        podId,
+        timestamp: new Date().toISOString(),
+        event: {
+          type: 'task_summary',
+          timestamp: new Date().toISOString(),
+          actualSummary: 'Implementation complete.',
+          deviations: [],
+        },
+      });
+    },
   };
 }
 
@@ -84,6 +129,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
       },
     );
   });
+}
+
+function restoreEnv(name: string, previous: string | undefined): void {
+  if (previous === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = previous;
+  }
 }
 
 describe('CodexRuntime', () => {
@@ -401,6 +454,372 @@ describe('CodexRuntime', () => {
         delete process.env.AUTOPOD_POST_COMPLETE_GRACE_MS;
         // biome-ignore lint/performance/noDelete: must actually unset, `= undefined` stringifies to "undefined"
         delete process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+      }
+    });
+
+    it('recovers sandbox completion after final task summary when stdout stalls', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousSummaryGrace = process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS;
+      const previousExitTimeout = process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-summary-recovery-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS = '20';
+      process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '20';
+
+      try {
+        const podId = 'summary-recovery';
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const extract = vi.mocked(cm.extractDirectoryFromContainer);
+        extract.mockImplementation(async (_containerId, _containerPath, hostPath) => {
+          const rolloutDir = join(hostPath, '2026', '07', '13');
+          await mkdir(rolloutDir, { recursive: true });
+          await writeFile(
+            join(rolloutDir, 'rollout-2026-07-13T18-00-00-thread-summary.jsonl'),
+            [
+              JSON.stringify({
+                timestamp: '2026-07-13T18:00:00.000Z',
+                type: 'event_msg',
+                payload: {
+                  type: 'task_complete',
+                  last_agent_message: 'Recovered from sandbox rollout.',
+                },
+              }),
+            ].join('\n'),
+          );
+        });
+        const summaryEvents = createTaskSummaryEventBus();
+        const runtime = new CodexRuntime(logger, cm, createMockPodRepo(), summaryEvents.eventBus);
+
+        setTimeout(() => {
+          (handle.stdout as PassThrough).write(
+            `${JSON.stringify({
+              type: 'thread.started',
+              thread_id: 'thread-summary',
+            })}\n`,
+          );
+          summaryEvents.emitTaskSummary(podId);
+        }, 10);
+
+        const events: AgentEvent[] = [];
+        const run = (async () => {
+          for await (const event of runtime.spawn({
+            podId,
+            task: 'Finish after the summary.',
+            model: 'gpt-5.5',
+            workDir: '/workspace',
+            containerId: 'container-123',
+            executionTarget: 'sandbox',
+            env: {},
+          })) {
+            events.push(event);
+          }
+        })();
+
+        try {
+          await withTimeout(run, 250);
+        } finally {
+          // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+          (handle as any).finish(0);
+        }
+
+        expect(extract).toHaveBeenCalledWith(
+          'container-123',
+          '/home/autopod/.codex/sessions',
+          join(tmpRoot, podId),
+        );
+        expect(events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              type: 'complete',
+              result: 'Recovered from sandbox rollout.',
+            }),
+          ]),
+        );
+        expect(events.filter((event) => event.type === 'complete')).toHaveLength(1);
+      } finally {
+        if (previousStateDir === undefined) {
+          // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
+          delete process.env.AUTOPOD_CODEX_STATE_DIR;
+        } else {
+          process.env.AUTOPOD_CODEX_STATE_DIR = previousStateDir;
+        }
+        if (previousSummaryGrace === undefined) {
+          // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
+          delete process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS;
+        } else {
+          process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS = previousSummaryGrace;
+        }
+        if (previousExitTimeout === undefined) {
+          // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
+          delete process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+        } else {
+          process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = previousExitTimeout;
+        }
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('fails bounded when final task summary has no terminal proof', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousSummaryGrace = process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS;
+      const previousExitTimeout = process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-summary-missing-terminal-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS = '20';
+      process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '20';
+
+      try {
+        const podId = 'summary-missing-terminal';
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        vi.mocked(cm.extractDirectoryFromContainer).mockImplementation(
+          async (_containerId, _containerPath, hostPath) => {
+            const rolloutDir = join(hostPath, '2026', '07', '13');
+            await mkdir(rolloutDir, { recursive: true });
+            await writeFile(
+              join(rolloutDir, 'rollout-2026-07-13T18-00-00-thread-incomplete.jsonl'),
+              JSON.stringify({
+                timestamp: '2026-07-13T18:00:00.000Z',
+                type: 'event_msg',
+                payload: {
+                  type: 'token_count',
+                  info: { total_token_usage: { input_tokens: 25, output_tokens: 5 } },
+                },
+              }),
+            );
+          },
+        );
+        const summaryEvents = createTaskSummaryEventBus();
+        const runtime = new CodexRuntime(logger, cm, createMockPodRepo(), summaryEvents.eventBus);
+
+        setTimeout(() => {
+          (handle.stdout as PassThrough).write(
+            `${JSON.stringify({ type: 'thread.started', thread_id: 'thread-incomplete' })}\n`,
+          );
+          summaryEvents.emitTaskSummary(podId);
+        }, 10);
+
+        const events: AgentEvent[] = [];
+        const run = (async () => {
+          for await (const event of runtime.spawn({
+            podId,
+            task: 'Finish without terminal proof.',
+            model: 'gpt-5.5',
+            workDir: '/workspace',
+            containerId: 'container-123',
+            executionTarget: 'sandbox',
+            env: {},
+          })) {
+            events.push(event);
+          }
+        })();
+
+        try {
+          await withTimeout(run, 250);
+        } finally {
+          // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+          (handle as any).finish(0);
+        }
+
+        expect(events.filter((event) => event.type === 'complete')).toHaveLength(0);
+        expect(events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              type: 'error',
+              fatal: true,
+              message: expect.stringContaining(
+                'active sandbox rollout contained no terminal completion proof',
+              ),
+            }),
+          ]),
+        );
+      } finally {
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previousStateDir);
+        restoreEnv('AUTOPOD_CODEX_SUMMARY_GRACE_MS', previousSummaryGrace);
+        restoreEnv('AUTOPOD_EXIT_CODE_TIMEOUT_MS', previousExitTimeout);
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('deduplicates recovered and delayed live completion', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousSummaryGrace = process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS;
+      const previousExitTimeout = process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-summary-race-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS = '20';
+      process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '20';
+
+      try {
+        const podId = 'summary-race';
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        vi.mocked(cm.extractDirectoryFromContainer).mockImplementation(
+          async (_containerId, _containerPath, hostPath) => {
+            const rolloutDir = join(hostPath, '2026', '07', '13');
+            await mkdir(rolloutDir, { recursive: true });
+            await writeFile(
+              join(rolloutDir, 'rollout-2026-07-13T18-00-00-thread-race.jsonl'),
+              [
+                JSON.stringify({
+                  timestamp: '2026-07-13T18:00:00.000Z',
+                  type: 'event_msg',
+                  payload: {
+                    type: 'token_count',
+                    info: { total_token_usage: { input_tokens: 111, output_tokens: 22 } },
+                  },
+                }),
+                JSON.stringify({
+                  timestamp: '2026-07-13T18:00:01.000Z',
+                  type: 'event_msg',
+                  payload: { type: 'task_complete', last_agent_message: 'Recovered once.' },
+                }),
+              ].join('\n'),
+            );
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({
+                type: 'turn.completed',
+                usage: {
+                  input_tokens: 111,
+                  cached_input_tokens: 10,
+                  output_tokens: 22,
+                  reasoning_output_tokens: 3,
+                },
+              })}\n`,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 5));
+          },
+        );
+        const summaryEvents = createTaskSummaryEventBus();
+        const runtime = new CodexRuntime(logger, cm, createMockPodRepo(), summaryEvents.eventBus);
+
+        setTimeout(() => {
+          (handle.stdout as PassThrough).write(
+            `${JSON.stringify({ type: 'thread.started', thread_id: 'thread-race' })}\n`,
+          );
+          summaryEvents.emitTaskSummary(podId);
+        }, 10);
+
+        const events: AgentEvent[] = [];
+        const run = (async () => {
+          for await (const event of runtime.spawn({
+            podId,
+            task: 'Finish once despite a delayed stream event.',
+            model: 'gpt-5.5',
+            workDir: '/workspace',
+            containerId: 'container-123',
+            executionTarget: 'sandbox',
+            env: {},
+          })) {
+            events.push(event);
+          }
+        })();
+
+        try {
+          await withTimeout(run, 250);
+        } finally {
+          // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+          (handle as any).finish(0);
+        }
+
+        const completions = events.filter((event) => event.type === 'complete');
+        expect(completions).toHaveLength(1);
+        expect(completions[0]).toMatchObject({
+          result: 'Recovered once.',
+          totalInputTokens: 111,
+          totalOutputTokens: 22,
+          costUsd: expect.any(Number),
+        });
+      } finally {
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previousStateDir);
+        restoreEnv('AUTOPOD_CODEX_SUMMARY_GRACE_MS', previousSummaryGrace);
+        restoreEnv('AUTOPOD_EXIT_CODE_TIMEOUT_MS', previousExitTimeout);
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('recovers only the active Codex turn rollout', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousSummaryGrace = process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS;
+      const previousExitTimeout = process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-active-rollout-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS = '20';
+      process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '20';
+
+      try {
+        const podId = 'active-rollout';
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        vi.mocked(cm.extractDirectoryFromContainer).mockImplementation(
+          async (_containerId, _containerPath, hostPath) => {
+            const rolloutDir = join(hostPath, '2026', '07', '13');
+            await mkdir(rolloutDir, { recursive: true });
+            await writeFile(
+              join(rolloutDir, 'rollout-2026-07-13T18-00-00-thread-current.jsonl'),
+              JSON.stringify({
+                timestamp: '2026-07-13T18:00:00.000Z',
+                type: 'event_msg',
+                payload: { type: 'task_complete', last_agent_message: 'Current turn.' },
+              }),
+            );
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            await writeFile(
+              join(rolloutDir, 'rollout-2026-07-13T18-05-00-thread-older.jsonl'),
+              JSON.stringify({
+                timestamp: '2026-07-13T18:05:00.000Z',
+                type: 'event_msg',
+                payload: { type: 'task_complete', last_agent_message: 'Wrong older turn.' },
+              }),
+            );
+          },
+        );
+        const summaryEvents = createTaskSummaryEventBus();
+        const runtime = new CodexRuntime(logger, cm, createMockPodRepo(), summaryEvents.eventBus);
+
+        setTimeout(() => {
+          (handle.stdout as PassThrough).write(
+            `${JSON.stringify({ type: 'thread.started', thread_id: 'thread-current' })}\n`,
+          );
+          summaryEvents.emitTaskSummary(podId);
+        }, 10);
+
+        const events: AgentEvent[] = [];
+        const run = (async () => {
+          for await (const event of runtime.spawn({
+            podId,
+            task: 'Recover the active rollout only.',
+            model: 'gpt-5.5',
+            workDir: '/workspace',
+            containerId: 'container-123',
+            executionTarget: 'sandbox',
+            env: {},
+          })) {
+            events.push(event);
+          }
+        })();
+
+        try {
+          await withTimeout(run, 250);
+        } finally {
+          // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+          (handle as any).finish(0);
+        }
+
+        expect(events.filter((event) => event.type === 'complete')).toEqual([
+          expect.objectContaining({ result: 'Current turn.' }),
+        ]);
+        expect(events).not.toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: 'complete', result: 'Wrong older turn.' }),
+          ]),
+        );
+      } finally {
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previousStateDir);
+        restoreEnv('AUTOPOD_CODEX_SUMMARY_GRACE_MS', previousSummaryGrace);
+        restoreEnv('AUTOPOD_EXIT_CODE_TIMEOUT_MS', previousExitTimeout);
+        await rm(tmpRoot, { recursive: true, force: true });
       }
     });
 

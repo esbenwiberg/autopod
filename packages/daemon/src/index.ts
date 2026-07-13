@@ -614,7 +614,7 @@ const validationEngine = createLocalValidationEngine(
 
 const runtimeRegistry = createRuntimeRegistry([
   new ClaudeRuntime(logger, runtimeContainerManager),
-  new CodexRuntime(logger, runtimeContainerManager, podRepo),
+  new CodexRuntime(logger, runtimeContainerManager, podRepo, eventBus),
   new CopilotRuntime(logger, runtimeContainerManager),
 ]);
 

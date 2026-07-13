@@ -6,6 +6,7 @@ import { CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/shared';
 import type { AgentEvent, ExecutionTarget, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
+import type { EventBus } from '../pods/event-bus.js';
 import type { PodRepository } from '../pods/pod-repository.js';
 import { codexStateDirForPod } from './codex-state-store.js';
 import { CodexStreamParser } from './codex-stream-parser.js';
@@ -23,6 +24,9 @@ const EXTERNAL_SANDBOX_ARGS = ['--dangerously-bypass-approvals-and-sandbox'] as 
 // above the daemon's default 1h human-response timeout.
 const CODEX_MCP_TOOL_TIMEOUT_SEC = 3900;
 const DEFAULT_ROLLOUT_POLL_MS = 1_000;
+const DEFAULT_SUMMARY_GRACE_MS = 30_000;
+const DEFAULT_SUMMARY_RECOVERY_TIMEOUT_MS = 30_000;
+const CONTAINER_CODEX_SESSIONS_PATH = `${CONTAINER_HOME_DIR}/.codex/sessions`;
 
 const TOML_BARE_KEY = /^[A-Za-z0-9_-]+$/;
 const ROLLOUT_FILE_RE = /^rollout-.*\.jsonl$/;
@@ -37,6 +41,11 @@ interface OutputState {
   events: number;
   nonStatusEvents: number;
   sawComplete: boolean;
+  sawFatal: boolean;
+}
+
+interface SandboxSummaryRecovery {
+  containerId: string;
 }
 
 interface RolloutCandidate {
@@ -85,11 +94,18 @@ export class CodexRuntime implements Runtime {
   private logger: Logger;
   private containerManager: ContainerManager;
   private podRepo: PodRepository;
+  private eventBus?: EventBus;
 
-  constructor(logger: Logger, containerManager: ContainerManager, podRepo: PodRepository) {
+  constructor(
+    logger: Logger,
+    containerManager: ContainerManager,
+    podRepo: PodRepository,
+    eventBus?: EventBus,
+  ) {
     this.logger = logger;
     this.containerManager = containerManager;
     this.podRepo = podRepo;
+    this.eventBus = eventBus;
   }
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
@@ -124,8 +140,21 @@ export class CodexRuntime implements Runtime {
 
     this.handles.set(config.podId, handle);
 
-    const outputState: OutputState = { events: 0, nonStatusEvents: 0, sawComplete: false };
-    const enriched = this.parseWithRolloutFallback(handle, config.podId, outputState, config.model);
+    const outputState: OutputState = {
+      events: 0,
+      nonStatusEvents: 0,
+      sawComplete: false,
+      sawFatal: false,
+    };
+    const recovery =
+      config.executionTarget === 'sandbox' ? { containerId: config.containerId } : undefined;
+    const enriched = this.parseWithRolloutFallback(
+      handle,
+      config.podId,
+      outputState,
+      config.model,
+      recovery,
+    );
 
     try {
       yield* withPostCompleteGrace(
@@ -209,12 +238,18 @@ export class CodexRuntime implements Runtime {
 
     this.handles.set(podId, handle);
 
-    const outputState: OutputState = { events: 0, nonStatusEvents: 0, sawComplete: false };
+    const outputState: OutputState = {
+      events: 0,
+      nonStatusEvents: 0,
+      sawComplete: false,
+      sawFatal: false,
+    };
+    const recovery = pod.executionTarget === 'sandbox' ? { containerId } : undefined;
 
     try {
       yield* withPostCompleteGrace(
         withIdleLivenessProbe(
-          this.parseWithRolloutFallback(handle, podId, outputState, pod.model),
+          this.parseWithRolloutFallback(handle, podId, outputState, pod.model, recovery),
           {
             streams: [handle.stdout, handle.stderr],
             runtimeName: 'codex-runtime',
@@ -296,9 +331,30 @@ export class CodexRuntime implements Runtime {
     podId: string,
     outputState: OutputState,
     modelHint?: string,
+    summaryRecovery?: SandboxSummaryRecovery,
   ): AsyncIterable<AgentEvent> {
     const seen = new Set<string>();
     const abortLiveRollout = new AbortController();
+    const abortSummaryGrace = new AbortController();
+    let taskSummaryObserved = false;
+    let resolveTaskSummary: (() => void) | null = null;
+    const taskSummarySignal = new Promise<void>((resolve) => {
+      resolveTaskSummary = resolve;
+    });
+    const unsubscribeTaskSummary =
+      summaryRecovery && this.eventBus
+        ? this.eventBus.subscribeToSession(podId, (event) => {
+            if (
+              taskSummaryObserved ||
+              event.type !== 'pod.agent_activity' ||
+              event.event.type !== 'task_summary'
+            ) {
+              return;
+            }
+            taskSummaryObserved = true;
+            resolveTaskSummary?.();
+          })
+        : null;
     const stdoutIterator = this.parseCodexLines(handle.stdout, podId, seen, outputState, modelHint)[
       Symbol.asyncIterator
     ]();
@@ -310,10 +366,49 @@ export class CodexRuntime implements Runtime {
     let stdoutDone = false;
     let stdoutNext = nextFrom('stdout', stdoutIterator);
     let rolloutNext = nextFrom('rollout', rolloutIterator);
+    let taskSummaryNext = unsubscribeTaskSummary
+      ? taskSummarySignal.then(() => ({ source: 'task-summary' as const }))
+      : neverRuntimeSignal<'task-summary'>();
+    let summaryRecoveryNext = neverRuntimeSignal<'summary-recovery'>();
 
     try {
       while (!stdoutDone) {
-        const next = await Promise.race([stdoutNext, rolloutNext]);
+        const next = await Promise.race([
+          stdoutNext,
+          rolloutNext,
+          taskSummaryNext,
+          summaryRecoveryNext,
+        ]);
+        if (next.source === 'task-summary') {
+          taskSummaryNext = neverRuntimeSignal<'task-summary'>();
+          if (!outputState.sawComplete) {
+            const graceMs = summaryGracePeriodMs();
+            this.logger.info(
+              { component: 'codex-runtime', podId, graceMs },
+              'Codex reported its final task summary — awaiting terminal stream proof',
+            );
+            summaryRecoveryNext = sleep(graceMs, abortSummaryGrace.signal).then(() => ({
+              source: 'summary-recovery' as const,
+            }));
+          }
+          continue;
+        }
+        if (next.source === 'summary-recovery') {
+          if (outputState.sawComplete) {
+            summaryRecoveryNext = neverRuntimeSignal<'summary-recovery'>();
+            continue;
+          }
+          if (summaryRecovery) {
+            yield* this.recoverSandboxAfterTaskSummary(
+              summaryRecovery,
+              podId,
+              seen,
+              outputState,
+              modelHint,
+            );
+          }
+          return;
+        }
         if (next.source === 'stdout') {
           if (next.result.done) {
             const readyRollout = await settledOrNull(rolloutNext);
@@ -322,14 +417,24 @@ export class CodexRuntime implements Runtime {
               const key = dedupeKey(event);
               if (!shouldSkipMergedEvent(event, key, seen, outputState)) {
                 seen.add(key);
-                recordOutputEvent(outputState, event);
                 yield event;
+                recordOutputEvent(outputState, event);
               }
               rolloutNext = nextFrom('rollout', rolloutIterator);
               continue;
             }
             stdoutDone = true;
             stdoutStats = next.result.value;
+            if (taskSummaryObserved && !outputState.sawComplete && summaryRecovery) {
+              yield* this.recoverSandboxAfterTaskSummary(
+                summaryRecovery,
+                podId,
+                seen,
+                outputState,
+                modelHint,
+              );
+              return;
+            }
           } else {
             yield next.result.value;
             stdoutNext = nextFrom('stdout', stdoutIterator);
@@ -344,13 +449,15 @@ export class CodexRuntime implements Runtime {
             continue;
           }
           seen.add(key);
-          recordOutputEvent(outputState, event);
           yield event;
+          recordOutputEvent(outputState, event);
           rolloutNext = nextFrom('rollout', rolloutIterator);
         }
       }
     } finally {
       abortLiveRollout.abort();
+      abortSummaryGrace.abort();
+      unsubscribeTaskSummary?.();
       await rolloutIterator.return?.();
     }
 
@@ -359,11 +466,97 @@ export class CodexRuntime implements Runtime {
     yield* this.replayLatestRollout(podId, seen, stdoutStats, outputState, modelHint);
   }
 
+  private async *recoverSandboxAfterTaskSummary(
+    recovery: SandboxSummaryRecovery,
+    podId: string,
+    seen: Set<string>,
+    outputState: OutputState,
+    modelHint?: string,
+  ): AsyncIterable<AgentEvent> {
+    const hostSessionsPath = codexStateDirForPod(podId);
+    const timeoutMs = summaryRecoveryTimeoutMs();
+
+    this.logger.warn(
+      { component: 'codex-runtime', podId, containerId: recovery.containerId, timeoutMs },
+      'Codex terminal stream stalled after final task summary — extracting sandbox session state',
+    );
+
+    const extraction = await settlePromiseWithin(
+      this.containerManager.extractDirectoryFromContainer(
+        recovery.containerId,
+        CONTAINER_CODEX_SESSIONS_PATH,
+        hostSessionsPath,
+      ),
+      timeoutMs,
+    );
+    if (extraction.status === 'timed-out') {
+      yield summaryRecoveryError(
+        outputState,
+        'Codex reported its final task summary, but sandbox session extraction timed out before terminal completion',
+      );
+      return;
+    }
+    if (extraction.status === 'rejected') {
+      yield summaryRecoveryError(
+        outputState,
+        `Codex reported its final task summary, but sandbox session extraction failed before terminal completion: ${errorMessage(extraction.reason)}`,
+      );
+      return;
+    }
+
+    const sessionId = this.codexSessionIds.get(podId);
+    if (!sessionId) {
+      yield summaryRecoveryError(
+        outputState,
+        'Codex reported its final task summary, but no active session ID was available for safe rollout recovery',
+      );
+      return;
+    }
+
+    try {
+      const rolloutPath = await findLatestCodexRolloutFile(hostSessionsPath, sessionId);
+      if (!rolloutPath) {
+        yield summaryRecoveryError(
+          outputState,
+          'Codex reported its final task summary, but the extracted sandbox state had no rollout for the active session',
+        );
+        return;
+      }
+
+      this.logger.warn(
+        { component: 'codex-runtime', podId, sessionId, rolloutPath },
+        'Replaying the active Codex sandbox rollout to recover terminal completion',
+      );
+      yield* this.parseCodexLines(
+        createReadStream(rolloutPath),
+        podId,
+        seen,
+        outputState,
+        modelHint,
+      );
+    } catch (err) {
+      yield summaryRecoveryError(
+        outputState,
+        `Codex reported its final task summary, but the active sandbox rollout could not be replayed: ${errorMessage(err)}`,
+      );
+      return;
+    }
+
+    if (!outputState.sawComplete) {
+      yield summaryRecoveryError(
+        outputState,
+        'Codex reported its final task summary, but the active sandbox rollout contained no terminal completion proof',
+      );
+    }
+  }
+
   private async codexExitError(
     podId: string,
     exitCode: Promise<number>,
     outputState: OutputState,
   ): Promise<AgentEvent | null> {
+    if (outputState.sawFatal) return null;
+
     // Bounded exit-code wait — wedged dockerd would otherwise hang us here
     // even after the stream-grace timer destroyed stdout.
     const exitResult = await awaitExitCodeBounded(exitCode, {
@@ -434,8 +627,8 @@ export class CodexRuntime implements Runtime {
       const key = dedupeKey(event);
       if (shouldSkipMergedEvent(event, key, seen, outputState)) continue;
       seen.add(key);
-      recordOutputEvent(outputState, event);
       yield event;
+      recordOutputEvent(outputState, event);
     }
   }
 
@@ -636,6 +829,18 @@ function recordOutputEvent(state: OutputState, event: AgentEvent): void {
   state.events += 1;
   if (event.type !== 'status') state.nonStatusEvents += 1;
   if (event.type === 'complete') state.sawComplete = true;
+  if (event.type === 'error' && event.fatal) state.sawFatal = true;
+}
+
+function summaryRecoveryError(state: OutputState, message: string): AgentEvent {
+  const event: AgentEvent = {
+    type: 'error',
+    timestamp: new Date().toISOString(),
+    message,
+    fatal: true,
+  };
+  recordOutputEvent(state, event);
+  return event;
 }
 
 function nextFrom<Source extends 'stdout' | 'rollout'>(
@@ -655,6 +860,12 @@ function neverSettles<Source extends 'stdout' | 'rollout'>(): Promise<{
   return new Promise(() => {});
 }
 
+function neverRuntimeSignal<Source extends 'task-summary' | 'summary-recovery'>(): Promise<{
+  source: Source;
+}> {
+  return new Promise(() => {});
+}
+
 function settledOrNull<T>(promise: Promise<T>): Promise<T | null> {
   return Promise.race([promise, Promise.resolve(null)]);
 }
@@ -665,6 +876,22 @@ function rolloutPollIntervalMs(): number {
     10,
   );
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_ROLLOUT_POLL_MS;
+}
+
+function summaryGracePeriodMs(): number {
+  return positiveEnvMs('AUTOPOD_CODEX_SUMMARY_GRACE_MS', DEFAULT_SUMMARY_GRACE_MS);
+}
+
+function summaryRecoveryTimeoutMs(): number {
+  return positiveEnvMs(
+    'AUTOPOD_CODEX_SUMMARY_RECOVERY_TIMEOUT_MS',
+    DEFAULT_SUMMARY_RECOVERY_TIMEOUT_MS,
+  );
+}
+
+function positiveEnvMs(name: string, fallback: number): number {
+  const configured = Number.parseInt(process.env[name] ?? String(fallback), 10);
+  return Number.isFinite(configured) && configured > 0 ? configured : fallback;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -680,16 +907,55 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-async function findLatestCodexRolloutFile(rootDir: string): Promise<string | null> {
-  const latest = await findLatestCodexRollout(rootDir);
+type PromiseSettlement<T> =
+  | { status: 'fulfilled'; value: T }
+  | { status: 'rejected'; reason: unknown }
+  | { status: 'timed-out' };
+
+async function settlePromiseWithin<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<PromiseSettlement<T>> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<{ status: 'timed-out' }>((resolve) => {
+    timer = setTimeout(() => resolve({ status: 'timed-out' }), timeoutMs);
+    timer.unref?.();
+  });
+  const settlement = promise.then<PromiseSettlement<T>>(
+    (value) => ({ status: 'fulfilled', value }),
+    (reason: unknown) => ({ status: 'rejected', reason }),
+  );
+
+  try {
+    return await Promise.race([settlement, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function findLatestCodexRolloutFile(
+  rootDir: string,
+  sessionId?: string,
+): Promise<string | null> {
+  const latest = await findLatestCodexRollout(rootDir, sessionId);
   return latest?.path ?? null;
 }
 
-async function findLatestCodexRollout(rootDir: string): Promise<RolloutCandidate | null> {
+async function findLatestCodexRollout(
+  rootDir: string,
+  sessionId?: string,
+): Promise<RolloutCandidate | null> {
   const candidates: RolloutCandidate[] = [];
   await collectRolloutFiles(rootDir, candidates);
-  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return candidates[0] ?? null;
+  const eligible = sessionId
+    ? candidates.filter((candidate) => path.basename(candidate.path).includes(sessionId))
+    : candidates;
+  eligible.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return eligible[0] ?? null;
 }
 
 async function collectRolloutFiles(dir: string, candidates: RolloutCandidate[]): Promise<void> {
