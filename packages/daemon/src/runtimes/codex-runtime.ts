@@ -26,6 +26,7 @@ const CODEX_MCP_TOOL_TIMEOUT_SEC = 3900;
 const DEFAULT_ROLLOUT_POLL_MS = 1_000;
 const DEFAULT_SUMMARY_GRACE_MS = 30_000;
 const DEFAULT_SUMMARY_RECOVERY_TIMEOUT_MS = 30_000;
+const DEFAULT_SANDBOX_IDLE_RECOVERY_MS = 60_000;
 const CONTAINER_CODEX_SESSIONS_PATH = `${CONTAINER_HOME_DIR}/.codex/sessions`;
 
 const TOML_BARE_KEY = /^[A-Za-z0-9_-]+$/;
@@ -44,7 +45,7 @@ interface OutputState {
   sawFatal: boolean;
 }
 
-interface SandboxSummaryRecovery {
+interface SandboxRolloutRecovery {
   containerId: string;
 }
 
@@ -331,7 +332,7 @@ export class CodexRuntime implements Runtime {
     podId: string,
     outputState: OutputState,
     modelHint?: string,
-    summaryRecovery?: SandboxSummaryRecovery,
+    summaryRecovery?: SandboxRolloutRecovery,
   ): AsyncIterable<AgentEvent> {
     const seen = new Set<string>();
     const abortLiveRollout = new AbortController();
@@ -370,6 +371,12 @@ export class CodexRuntime implements Runtime {
       ? taskSummarySignal.then(() => ({ source: 'task-summary' as const }))
       : neverRuntimeSignal<'task-summary'>();
     let summaryRecoveryNext = neverRuntimeSignal<'summary-recovery'>();
+    let lastMergedEventAt = Date.now();
+    let sandboxIdleRecoveryNext = summaryRecovery
+      ? sleep(sandboxIdleRecoveryPeriodMs(), abortLiveRollout.signal).then(() => ({
+          source: 'sandbox-idle-recovery' as const,
+        }))
+      : neverRuntimeSignal<'sandbox-idle-recovery'>();
 
     try {
       while (!stdoutDone) {
@@ -378,10 +385,12 @@ export class CodexRuntime implements Runtime {
           rolloutNext,
           taskSummaryNext,
           summaryRecoveryNext,
+          sandboxIdleRecoveryNext,
         ]);
         if (next.source === 'task-summary') {
           taskSummaryNext = neverRuntimeSignal<'task-summary'>();
           if (!outputState.sawComplete) {
+            lastMergedEventAt = Date.now();
             const graceMs = summaryGracePeriodMs();
             this.logger.info(
               { component: 'codex-runtime', podId, graceMs },
@@ -409,6 +418,32 @@ export class CodexRuntime implements Runtime {
           }
           return;
         }
+        if (next.source === 'sandbox-idle-recovery') {
+          const recoveryPeriodMs = sandboxIdleRecoveryPeriodMs();
+          const remainingMs = recoveryPeriodMs - (Date.now() - lastMergedEventAt);
+          if (remainingMs > 0) {
+            sandboxIdleRecoveryNext = sleep(remainingMs, abortLiveRollout.signal).then(() => ({
+              source: 'sandbox-idle-recovery' as const,
+            }));
+            continue;
+          }
+
+          if (summaryRecovery) {
+            yield* this.recoverSandboxLiveProgress(
+              summaryRecovery,
+              podId,
+              seen,
+              outputState,
+              modelHint,
+            );
+          }
+          lastMergedEventAt = Date.now();
+          if (outputState.sawComplete) return;
+          sandboxIdleRecoveryNext = sleep(recoveryPeriodMs, abortLiveRollout.signal).then(() => ({
+            source: 'sandbox-idle-recovery' as const,
+          }));
+          continue;
+        }
         if (next.source === 'stdout') {
           if (next.result.done) {
             const readyRollout = await settledOrNull(rolloutNext);
@@ -419,6 +454,7 @@ export class CodexRuntime implements Runtime {
                 seen.add(key);
                 yield event;
                 recordOutputEvent(outputState, event);
+                lastMergedEventAt = Date.now();
               }
               rolloutNext = nextFrom('rollout', rolloutIterator);
               continue;
@@ -437,6 +473,7 @@ export class CodexRuntime implements Runtime {
             }
           } else {
             yield next.result.value;
+            lastMergedEventAt = Date.now();
             stdoutNext = nextFrom('stdout', stdoutIterator);
           }
         } else if (next.result.done) {
@@ -451,6 +488,7 @@ export class CodexRuntime implements Runtime {
           seen.add(key);
           yield event;
           recordOutputEvent(outputState, event);
+          lastMergedEventAt = Date.now();
           rolloutNext = nextFrom('rollout', rolloutIterator);
         }
       }
@@ -467,7 +505,7 @@ export class CodexRuntime implements Runtime {
   }
 
   private async *recoverSandboxAfterTaskSummary(
-    recovery: SandboxSummaryRecovery,
+    recovery: SandboxRolloutRecovery,
     podId: string,
     seen: Set<string>,
     outputState: OutputState,
@@ -546,6 +584,61 @@ export class CodexRuntime implements Runtime {
       yield summaryRecoveryError(
         outputState,
         'Codex reported its final task summary, but the active sandbox rollout contained no terminal completion proof',
+      );
+    }
+  }
+
+  private async *recoverSandboxLiveProgress(
+    recovery: SandboxRolloutRecovery,
+    podId: string,
+    seen: Set<string>,
+    outputState: OutputState,
+    modelHint?: string,
+  ): AsyncIterable<AgentEvent> {
+    const hostSessionsPath = codexStateDirForPod(podId);
+    const timeoutMs = summaryRecoveryTimeoutMs();
+    const extraction = await settlePromiseWithin(
+      this.containerManager.extractDirectoryFromContainer(
+        recovery.containerId,
+        CONTAINER_CODEX_SESSIONS_PATH,
+        hostSessionsPath,
+      ),
+      timeoutMs,
+    );
+    if (extraction.status !== 'fulfilled') {
+      this.logger.warn(
+        {
+          component: 'codex-runtime',
+          podId,
+          containerId: recovery.containerId,
+          status: extraction.status,
+        },
+        'Could not snapshot idle Codex sandbox rollout — will retry while the stream stays silent',
+      );
+      return;
+    }
+
+    const sessionId = this.codexSessionIds.get(podId);
+    if (!sessionId) return;
+    try {
+      const rolloutPath = await findLatestCodexRolloutFile(hostSessionsPath, sessionId);
+      if (!rolloutPath) return;
+
+      this.logger.warn(
+        { component: 'codex-runtime', podId, sessionId, rolloutPath },
+        'Codex sandbox stream is idle — replaying active rollout progress',
+      );
+      yield* this.parseCodexLines(
+        createReadStream(rolloutPath),
+        podId,
+        seen,
+        outputState,
+        modelHint,
+      );
+    } catch (err) {
+      this.logger.warn(
+        { err, component: 'codex-runtime', podId, sessionId },
+        'Could not replay idle Codex sandbox rollout — will retry if the stream stays silent',
       );
     }
   }
@@ -860,7 +953,9 @@ function neverSettles<Source extends 'stdout' | 'rollout'>(): Promise<{
   return new Promise(() => {});
 }
 
-function neverRuntimeSignal<Source extends 'task-summary' | 'summary-recovery'>(): Promise<{
+function neverRuntimeSignal<
+  Source extends 'task-summary' | 'summary-recovery' | 'sandbox-idle-recovery',
+>(): Promise<{
   source: Source;
 }> {
   return new Promise(() => {});
@@ -887,6 +982,10 @@ function summaryRecoveryTimeoutMs(): number {
     'AUTOPOD_CODEX_SUMMARY_RECOVERY_TIMEOUT_MS',
     DEFAULT_SUMMARY_RECOVERY_TIMEOUT_MS,
   );
+}
+
+function sandboxIdleRecoveryPeriodMs(): number {
+  return positiveEnvMs('AUTOPOD_CODEX_SANDBOX_IDLE_RECOVERY_MS', DEFAULT_SANDBOX_IDLE_RECOVERY_MS);
 }
 
 function positiveEnvMs(name: string, fallback: number): number {

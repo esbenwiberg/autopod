@@ -95,10 +95,15 @@ function createTaskSummaryEventBus(): {
   };
 }
 
-function createMockPodRepo(codexSessionId: string | null = null): PodRepository {
+function createMockPodRepo(
+  codexSessionId: string | null = null,
+  overrides: Record<string, unknown> = {},
+): PodRepository {
   return {
     insert: vi.fn(),
-    getOrThrow: vi.fn(() => ({ codexSessionId }) as ReturnType<PodRepository['getOrThrow']>),
+    getOrThrow: vi.fn(
+      () => ({ codexSessionId, ...overrides }) as ReturnType<PodRepository['getOrThrow']>,
+    ),
     update: vi.fn(),
     delete: vi.fn(),
     list: vi.fn(() => []),
@@ -1227,6 +1232,110 @@ describe('CodexRuntime', () => {
   });
 
   describe('resume', () => {
+    it('recovers live progress when a reachable sandbox Codex stream stops emitting', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousIdleRecovery = process.env.AUTOPOD_CODEX_SANDBOX_IDLE_RECOVERY_MS;
+      const previousExitTimeout = process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-live-recovery-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_SANDBOX_IDLE_RECOVERY_MS = '20';
+      process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '20';
+
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      let extractionCount = 0;
+      vi.mocked(cm.extractDirectoryFromContainer).mockImplementation(
+        async (_containerId, _containerPath, hostPath) => {
+          extractionCount += 1;
+          const rolloutDir = join(hostPath, '2026', '07', '13');
+          await mkdir(rolloutDir, { recursive: true });
+          const records = [
+            JSON.stringify({
+              timestamp: '2026-07-13T21:53:14.000Z',
+              type: 'event_msg',
+              payload: {
+                type: 'patch_apply_end',
+                changes: { 'lib/control-plane.ts': { type: 'update' } },
+              },
+            }),
+          ];
+          if (extractionCount >= 2) {
+            records.push(
+              JSON.stringify({
+                timestamp: '2026-07-13T22:18:36.000Z',
+                type: 'event_msg',
+                payload: {
+                  type: 'task_complete',
+                  last_agent_message: 'Recovered terminal completion.',
+                },
+              }),
+            );
+          }
+          await writeFile(
+            join(rolloutDir, 'rollout-2026-07-13T21-53-14-sandbox-session.jsonl'),
+            records.join('\n'),
+          );
+        },
+      );
+      const runtime = new CodexRuntime(
+        logger,
+        cm,
+        createMockPodRepo('sandbox-session', {
+          executionTarget: 'sandbox',
+          model: 'auto',
+          status: 'running',
+        }),
+      );
+      const events: AgentEvent[] = [];
+      const run = (async () => {
+        for await (const event of runtime.resume(
+          'stalled-resume',
+          'Fix the validation findings',
+          'sandbox-123',
+        )) {
+          events.push(event);
+        }
+      })();
+
+      setTimeout(() => {
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({ type: 'thread.started', thread_id: 'sandbox-session' })}\n`,
+        );
+        (handle.stdout as PassThrough).write(`${JSON.stringify({ type: 'turn.started' })}\n`);
+        // The sandbox and its control plane remain reachable, but the active
+        // Codex exec never emits another event or closes its stream.
+      }, 5);
+
+      try {
+        await withTimeout(run, 250);
+      } finally {
+        // Let a failing implementation unwind after the assertion times out.
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(0);
+        await run.catch(() => {});
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previousStateDir);
+        restoreEnv('AUTOPOD_CODEX_SANDBOX_IDLE_RECOVERY_MS', previousIdleRecovery);
+        restoreEnv('AUTOPOD_EXIT_CODE_TIMEOUT_MS', previousExitTimeout);
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
+
+      expect(cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
+      expect(handle.kill).not.toHaveBeenCalled();
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'file_change',
+            path: 'lib/control-plane.ts',
+            action: 'modify',
+          }),
+          expect.objectContaining({
+            type: 'complete',
+            result: 'Recovered terminal completion.',
+          }),
+        ]),
+      );
+    });
+
     it('redacts large message in resume log args (no session ID — full-auto path)', async () => {
       const bigStr = 'X'.repeat(50_000);
       const infoSpy = vi.spyOn(logger, 'info');
