@@ -43,6 +43,8 @@ function buildBridge(opts: BuildOpts = {}): {
   bridge: PodBridge;
   execMock: ReturnType<typeof vi.fn>;
   podId: string;
+  eventEmit: ReturnType<typeof vi.fn>;
+  touchHeartbeat: ReturnType<typeof vi.fn>;
 } {
   const db = createTestDb();
   const podId = 'sess-1';
@@ -76,6 +78,7 @@ function buildBridge(opts: BuildOpts = {}): {
     }),
   } as unknown as Deps['profileStore'];
 
+  const touchHeartbeat = vi.fn();
   const podManager = {
     getSession: vi.fn(() => ({
       id: podId,
@@ -83,11 +86,12 @@ function buildBridge(opts: BuildOpts = {}): {
       containerId,
       executionTarget: opts.executionTarget ?? 'local',
     })),
-    touchHeartbeat: vi.fn(),
+    touchHeartbeat,
     getReviewerExecEnv: vi.fn().mockResolvedValue(opts.reviewerExecEnv),
   } as unknown as Deps['podManager'];
 
-  const eventBus = { emit: vi.fn(), subscribe: vi.fn() } as unknown as Deps['eventBus'];
+  const eventEmit = vi.fn();
+  const eventBus = { emit: eventEmit, subscribe: vi.fn() } as unknown as Deps['eventBus'];
   const cm = {
     execInContainer: execMock,
     getStatus: vi.fn().mockResolvedValue(opts.containerStatus ?? 'running'),
@@ -110,7 +114,21 @@ function buildBridge(opts: BuildOpts = {}): {
     logger,
   });
 
-  return { bridge, execMock, podId };
+  return { bridge, execMock, podId, eventEmit, touchHeartbeat };
+}
+
+function validationActivityMessages(eventEmit: ReturnType<typeof vi.fn>): string[] {
+  return eventEmit.mock.calls.flatMap(([rawEvent]) => {
+    const event = rawEvent as {
+      type?: string;
+      event?: { type?: string; message?: string };
+    };
+    return event.type === 'pod.agent_activity' &&
+      event.event?.type === 'status' &&
+      typeof event.event.message === 'string'
+      ? [event.event.message]
+      : [];
+  });
 }
 
 describe('PodBridge.runValidationPhase', () => {
@@ -144,6 +162,52 @@ describe('PodBridge.runValidationPhase', () => {
       ['sh', '-c', 'npm run build'],
       expect.objectContaining({ cwd: '/workspace', timeout: 300_000 }),
     );
+  });
+
+  it('emits replayable start, in-progress, and completion activity for a long phase', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveExec!: (result: { stdout: string; stderr: string; exitCode: number }) => void;
+      const execResult = new Promise<{ stdout: string; stderr: string; exitCode: number }>(
+        (resolve) => {
+          resolveExec = resolve;
+        },
+      );
+      const { bridge, podId, eventEmit, touchHeartbeat } = buildBridge({
+        profileOverrides: { buildCommand: 'npm run build', buildTimeout: 90 },
+        execImpl: async () => execResult,
+      });
+
+      const phaseResult = bridge.runValidationPhase(podId, 'build');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(validationActivityMessages(eventEmit)).toEqual(['Self-validation build started']);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(validationActivityMessages(eventEmit)).toContain(
+        'Self-validation build still running (60s elapsed)',
+      );
+      expect(touchHeartbeat).toHaveBeenCalledTimes(2);
+
+      // The configured phase timeout is 90s. A pending backend call must not
+      // keep refreshing the heartbeat forever after that budget has elapsed.
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(touchHeartbeat).toHaveBeenCalledTimes(2);
+
+      resolveExec({ stdout: 'built ok', stderr: '', exitCode: 0 });
+      await expect(phaseResult).resolves.toMatchObject({ passed: true });
+
+      expect(validationActivityMessages(eventEmit)).toContain(
+        'Self-validation build passed (180s elapsed)',
+      );
+      expect(touchHeartbeat).toHaveBeenCalledTimes(3);
+
+      const eventCountAfterCompletion = eventEmit.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(eventEmit).toHaveBeenCalledTimes(eventCountAfterCompletion);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('runs setup with validationSetupCommand and the build timeout', async () => {
@@ -185,7 +249,7 @@ describe('PodBridge.runValidationPhase', () => {
   });
 
   it('reports passed=false with output on a non-zero exit', async () => {
-    const { bridge, podId } = buildBridge({
+    const { bridge, podId, eventEmit } = buildBridge({
       profileOverrides: { testCommand: 'npm test' },
       execImpl: async () => ({
         stdout: '',
@@ -199,6 +263,32 @@ describe('PodBridge.runValidationPhase', () => {
     expect(result.passed).toBe(false);
     expect(result.exitCode).toBe(1);
     expect(result.output).toContain('AssertionError');
+    expect(validationActivityMessages(eventEmit)).toContain(
+      'Self-validation tests failed (0s elapsed, exit 1)',
+    );
+  });
+
+  it.each([
+    {
+      error: new Error('Sandbox streaming exec timed out after 90000ms'),
+      expected: 'Self-validation build timed out (0s elapsed)',
+    },
+    {
+      error: new Error('Sandbox streaming exec closed unexpectedly'),
+      expected: 'Self-validation build errored (0s elapsed)',
+    },
+  ])('emits a terminal activity event when validation $expected', async ({ error, expected }) => {
+    const { bridge, podId, eventEmit } = buildBridge({
+      profileOverrides: { buildCommand: 'npm run build' },
+      execImpl: async () => {
+        throw error;
+      },
+    });
+
+    const result = await bridge.runValidationPhase(podId, 'build');
+
+    expect(result).toMatchObject({ passed: false, exitCode: null });
+    expect(validationActivityMessages(eventEmit)).toContain(expected);
   });
 
   it('uses /workspace/<buildWorkDir> as cwd when set', async () => {

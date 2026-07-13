@@ -12365,15 +12365,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // drives the container directly. They will never emit agent events,
             // so silence-based timeout cannot apply.
             if (pod.options?.agentMode === 'interactive') continue;
-            // Reference is the most recent of (lastAgentEventAt, startedAt) —
-            // both are real liveness signals scoped to the current run.
+            // Reference is the most recent of (lastAgentEventAt, lastHeartbeatAt,
+            // startedAt) — all are real liveness signals scoped to the current run.
+            // MCP tools can legitimately stay open while validation runs without
+            // producing an agent-stream event, so their heartbeat must defer the
+            // watchdog just like an agent event does.
             // `startedAt` is reset on every transition into provisioning, so it
             // acts as a freshness floor that prevents a stale `lastAgentEventAt`
-            // (from a prior life of the same pod, e.g. across recovery) from
-            // dragging the reference back across the threshold.
-            // Fall back to updatedAt/createdAt only when both primary signals
+            // or `lastHeartbeatAt` (from a prior life of the same pod, e.g. across
+            // recovery) from dragging the reference back across the threshold.
+            // Fall back to updatedAt/createdAt only when all primary signals
             // are missing (pods predating the migration that added these fields).
-            const primary = [pod.lastAgentEventAt, pod.startedAt]
+            const primary = [pod.lastAgentEventAt, pod.lastHeartbeatAt, pod.startedAt]
               .filter((t): t is string => typeof t === 'string')
               .map((t) => new Date(t).getTime())
               .filter((ms) => !Number.isNaN(ms));

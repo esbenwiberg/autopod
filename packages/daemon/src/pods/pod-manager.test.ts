@@ -8207,6 +8207,42 @@ describe('PodManager', () => {
       }
     });
 
+    it('leaves a pod with a fresh MCP heartbeat alone when agent events are stale', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'run full self-validation' },
+          'user-1',
+        );
+        const stale = new Date(Date.now() - 35 * 60 * 1000).toISOString();
+        const freshHeartbeat = new Date(Date.now() - 60 * 1000).toISOString();
+        ctx.podRepo.update(pod.id, {
+          status: 'provisioning',
+          worktreePath: '/tmp/worktree/active-validation',
+          containerId: 'container-validating',
+          startedAt: stale,
+        });
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          lastAgentEventAt: stale,
+          lastHeartbeatAt: freshHeartbeat,
+        });
+
+        manager.startStuckPodWatchdog({ intervalMs: 50, thresholdMs: 30 * 60 * 1000 });
+        await vi.advanceTimersByTimeAsync(60);
+        await vi.advanceTimersByTimeAsync(0);
+        manager.stopStuckPodWatchdog();
+
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id).status).toBe('running');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('does not auto-fail interactive workspace pods even when silent', async () => {
       vi.useFakeTimers();
       try {

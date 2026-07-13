@@ -69,6 +69,8 @@ export interface SessionBridgeDependencies {
   screenshotStore?: import('./screenshot-store.js').ScreenshotStore;
 }
 
+const VALIDATION_ACTIVITY_INTERVAL_MS = 60_000;
+
 export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge {
   const {
     podManager,
@@ -100,6 +102,16 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     throw new Error(
       `${toolName} is only accepted while the pod is running (current status: ${pod.status}).`,
     );
+  }
+
+  function emitValidationActivity(podId: string, message: string): void {
+    const timestamp = new Date().toISOString();
+    eventBus.emit({
+      type: 'pod.agent_activity',
+      timestamp,
+      podId,
+      event: { type: 'status', timestamp, message },
+    });
   }
 
   return {
@@ -997,6 +1009,22 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       const cm = containerManagerFactory.get(pod.executionTarget);
 
       const startedAt = Date.now();
+      emitValidationActivity(podId, `Self-validation ${phase} started`);
+      let activityTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
+        const elapsedMs = Date.now() - startedAt;
+        if (elapsedMs >= phaseConfig.timeoutMs) {
+          if (activityTimer) clearInterval(activityTimer);
+          activityTimer = null;
+          return;
+        }
+        podManager.touchHeartbeat(podId);
+        emitValidationActivity(
+          podId,
+          `Self-validation ${phase} still running (${formatElapsedSeconds(elapsedMs)} elapsed)`,
+        );
+      }, VALIDATION_ACTIVITY_INTERVAL_MS);
+      activityTimer.unref?.();
+
       try {
         const result = await cm.execInContainer(
           pod.containerId,
@@ -1009,6 +1037,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         );
         const durationMs = Date.now() - startedAt;
         const combined = `${result.stdout}\n${result.stderr}`.trim();
+        podManager.touchHeartbeat(podId);
+        emitValidationActivity(
+          podId,
+          result.exitCode === 0
+            ? `Self-validation ${phase} passed (${formatElapsedSeconds(durationMs)} elapsed)`
+            : `Self-validation ${phase} failed (${formatElapsedSeconds(durationMs)} elapsed, exit ${result.exitCode})`,
+        );
         return {
           phase,
           configured: true,
@@ -1022,6 +1057,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         const durationMs = Date.now() - startedAt;
         const message = err instanceof Error ? err.message : String(err);
         const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
+        podManager.touchHeartbeat(podId);
+        emitValidationActivity(
+          podId,
+          `Self-validation ${phase} ${isTimeoutMessage(message) ? 'timed out' : 'errored'} (${formatElapsedSeconds(durationMs)} elapsed)`,
+        );
         return {
           phase,
           configured: true,
@@ -1033,6 +1073,8 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
             partial ? `${message}\n\n--- partial output ---\n${partial}` : message,
           ),
         };
+      } finally {
+        if (activityTimer) clearInterval(activityTimer);
       }
     },
 
@@ -1286,6 +1328,14 @@ function truncateOutput(text: string): string {
   const head = text.slice(0, headLen);
   const tail = text.slice(text.length - tailLen);
   return `${head}\n\n... [truncated ${omitted} chars in the middle] ...\n\n${tail}`;
+}
+
+function formatElapsedSeconds(elapsedMs: number): string {
+  return `${Math.max(0, Math.floor(elapsedMs / 1_000))}s`;
+}
+
+function isTimeoutMessage(message: string): boolean {
+  return /timed?\s*out|timeout/i.test(message);
 }
 
 interface ResolvedPhase {
