@@ -862,6 +862,8 @@ public struct ProfileEditorView: View {
                     profile.pod.validate = newValue != "off"
                 }
             }
+        }
+        HStack(spacing: 24) {
             fieldRow("Advisory Browser QA", help: "Evidence-only browser QA during validation. Auto leaves the profile unset so derived profiles can inherit or use the daemon default.") {
                 Picker("", selection: advisoryBrowserQaModeBinding) {
                     ForEach(AdvisoryBrowserQaMode.allCases, id: \.self) { mode in
