@@ -200,6 +200,64 @@ describe('createProfileMemoryReviewer', () => {
     );
   });
 
+  it('maps auto to gpt-5-mini for the container reviewer on API-key OpenAI auth', async () => {
+    vi.mocked(runContainerReviewer).mockResolvedValue({ stdout: '{"selected":[]}' });
+
+    const result = await createProfileMemoryReviewer(makeProfile(), 'auto', logger, {
+      container: {
+        podId: 'pod-1',
+        containerId: 'container-1',
+        containerManager: {} as never,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.model).toBe('gpt-5-mini');
+    await result.reviewer.generateText({
+      systemPrompt: 'system',
+      userMessage: 'user',
+      maxTokens: 64,
+    });
+    expect(runContainerReviewer).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'gpt-5-mini' }),
+    );
+  });
+
+  it('keeps auto (no gpt-5-mini) for the container reviewer on ChatGPT-auth Codex', async () => {
+    vi.mocked(runContainerReviewer).mockResolvedValue({ stdout: '{"selected":[]}' });
+
+    const result = await createProfileMemoryReviewer(
+      makeProfile({
+        providerCredentials: {
+          provider: 'openai',
+          authMode: 'chatgpt',
+          authJson: JSON.stringify({ tokens: { access_token: 'chatgpt-access' } }),
+        } as never,
+      }),
+      'auto',
+      logger,
+      {
+        container: {
+          podId: 'pod-1',
+          containerId: 'container-1',
+          containerManager: {} as never,
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // gpt-5-mini is rejected by Codex on a ChatGPT account, so we must not force it.
+    expect(result.model).toBe('auto');
+    await result.reviewer.generateText({
+      systemPrompt: 'system',
+      userMessage: 'user',
+      maxTokens: 64,
+    });
+    expect(runContainerReviewer).toHaveBeenCalledWith(expect.objectContaining({ model: 'auto' }));
+  });
+
   it('falls back to the daemon reviewer when the live container reviewer fails', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'sk-test');
     vi.mocked(runContainerReviewer).mockRejectedValue(new Error('container timed out'));
