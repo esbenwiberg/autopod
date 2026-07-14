@@ -159,6 +159,18 @@ function isOpenAiSurface(creds: ProviderCredentials | null | undefined): boolean
   return creds?.provider === 'foundry' && (creds.apiSurface ?? 'anthropic') === 'openai';
 }
 
+/**
+ * Codex on a ChatGPT (OAuth) account rejects most explicit `--model` values —
+ * e.g. `gpt-5-mini` / `gpt-5-codex` fail with "model is not supported when using
+ * Codex with a ChatGPT account". For that auth mode we must leave the reviewer
+ * model as 'auto' so the container Codex runner omits `--model` and lets the CLI
+ * pick the account's supported default instead of forcing an unsupported one.
+ */
+function usesChatGptReviewerAuth(profile: Profile): boolean {
+  const creds = profile.providerCredentials;
+  return creds?.provider === 'openai' && creds.authMode === 'chatgpt';
+}
+
 export async function createProfileMemoryReviewer(
   profile: Profile,
   reviewerModel: string,
@@ -203,8 +215,13 @@ async function createContainerFirstMemoryReviewer(
     };
   }
 
+  // Only substitute the concrete OpenAI reviewer model for 'auto' when the
+  // account can actually run it. ChatGPT-auth Codex rejects `gpt-5-mini`, so we
+  // keep 'auto' and let the container Codex runner fall back to the CLI default.
   const model =
-    reviewerModel === 'auto' && profile.modelProvider === 'openai'
+    reviewerModel === 'auto' &&
+    profile.modelProvider === 'openai' &&
+    !usesChatGptReviewerAuth(profile)
       ? DEFAULT_OPENAI_REVIEWER_MODEL
       : reviewerModel;
 
