@@ -20,6 +20,7 @@ import type {
   WorktreeManager,
   WorktreeResult,
 } from '../interfaces/worktree-manager.js';
+import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import { agentToolingCachePaths } from '../pods/agent-tooling-cache-paths.js';
 import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
 import { KeyedPromiseQueue } from '../util/keyed-promise-queue.js';
@@ -180,8 +181,10 @@ export function classifyGitError(err: unknown, op: string): unknown {
   const isCredential = CREDENTIAL_ERROR_PATTERNS.some((re) => re.test(blob));
   if (!isCredential) return err;
   const service = inferGitService(stderr, cmd);
-  const wrapped = new GitCredentialError(
-    `git ${op} rejected: credentials missing or unauthorized for ${service}. Update the profile PAT (it must have write access to the target repo) and resume the pod.`,
+    const wrapped = new GitCredentialError(
+    service === 'github'
+      ? `git ${op} rejected: daemon GitHub CLI authentication is missing or unauthorized. Log in as the daemon service account with gh auth login and resume the pod.`
+      : `git ${op} rejected: credentials missing or unauthorized for ${service}. Update the profile PAT (it must have write access to the target repo) and resume the pod.`,
     service,
     op,
     stderr.slice(0, 500),
@@ -301,6 +304,7 @@ export interface LocalWorktreeManagerConfig {
   logger: Logger;
   /** Stores so the auto-commit LLM helper resolves live provider-account credentials. */
   llmDeps?: ProfileLlmClientDeps;
+  githubAuth?: DaemonGitHubAuth;
 }
 
 /**
@@ -319,12 +323,14 @@ export class LocalWorktreeManager implements WorktreeManager {
   private repoLocks = new KeyedPromiseQueue();
 
   /**
-   * In-memory PAT cache keyed by bare repo path.
-   * PATs are never written to the git remote URL — remote stays clean so containers
-   * that mount the bare repo cannot read the credential. Host-side git operations
-   * (fetch, push) use the auth URL constructed from this cache at call time only.
+   * In-memory credential cache keyed by bare repo path.
+   * Credentials are never written to the git remote URL — remote stays clean so
+   * containers that mount the bare repo cannot read them. Host-side git
+   * operations (fetch, push) use the auth URL constructed from this cache at
+   * call time only.
    */
   private patCache = new Map<string, string>();
+  private githubAuth?: DaemonGitHubAuth;
 
   constructor(config: LocalWorktreeManagerConfig) {
     this.cacheDir =
@@ -337,6 +343,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       path.join(os.homedir(), '.autopod', 'worktrees');
     this.logger = config.logger;
     this.llmDeps = config.llmDeps;
+    this.githubAuth = config.githubAuth;
   }
 
   async create(config: WorktreeCreateConfig): Promise<WorktreeResult> {
@@ -344,7 +351,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     const startBranch = config.startBranch ?? baseBranch;
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
-    const authUrl = pat ? this.injectPat(repoUrl, pat) : repoUrl;
+    const authUrl = await this.getAuthUrlForRepo(repoUrl, bareRepoPath, pat);
 
     await fs.mkdir(this.cacheDir, { recursive: true });
     await fs.mkdir(this.worktreeDir, { recursive: true });
@@ -699,7 +706,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     const { repoUrl, branch, baseBranch, pat, maxLength = 200_000 } = config;
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
-    const authUrl = pat ? this.injectPat(repoUrl, pat) : repoUrl;
+    const authUrl = await this.getAuthUrlForRepo(repoUrl, bareRepoPath, pat);
     if (pat) this.patCache.set(bareRepoPath, pat);
 
     await fs.mkdir(this.cacheDir, { recursive: true });
@@ -1385,7 +1392,7 @@ export class LocalWorktreeManager implements WorktreeManager {
 
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
-    const authUrl = pat ? this.injectPat(repoUrl, pat) : repoUrl;
+    const authUrl = await this.getAuthUrlForRepo(repoUrl, bareRepoPath, pat);
     if (pat) this.patCache.set(bareRepoPath, pat);
 
     await fs.mkdir(this.cacheDir, { recursive: true });
