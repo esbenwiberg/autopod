@@ -31,6 +31,8 @@ export interface ContainerSpawnConfig {
    * unit). E.g. `2 * 1e9` caps the container at 2 cores. Omit for no limit.
    */
   nanoCpus?: number;
+  /** Optional provisioning progress callback for backends with multi-stage startup. */
+  onProgress?: (message: string) => void;
 }
 
 export interface ExecResult {
