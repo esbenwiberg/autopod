@@ -6389,7 +6389,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (pod.executionTarget === 'sandbox') {
           await verifySandboxWarmImageAccess(profile, spawnImage, deps.warmImageExists);
         }
-        emitStatus(`Spawning container (${profile.template})…`);
+        emitStatus(
+          pod.executionTarget === 'sandbox'
+            ? `Creating sandbox (${profile.template})…`
+            : `Spawning container (${profile.template})…`,
+        );
         logger.info(
           { podId, image: spawnImage, warm: Boolean(profile.warmImageTag) },
           'Spawning pod container',
@@ -6493,6 +6497,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             memoryBytes:
               (profile.containerMemoryGb ?? DEFAULT_CONTAINER_MEMORY_GB) * 1024 * 1024 * 1024,
             nanoCpus: resolveContainerNanoCpus(process.env.CONTAINER_CPUS),
+            onProgress: emitStatus,
           });
         } catch (err) {
           // Pod container failed to spawn — tear down sidecars we already

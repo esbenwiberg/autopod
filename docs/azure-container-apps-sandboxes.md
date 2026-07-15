@@ -287,7 +287,7 @@ The sandbox data plane then proves the image can be pulled by creating the disk 
 
 Sandboxes do not support Docker bind mounts. Autopod uses a snapshot model:
 
-- Sync-in: configured host volumes are uploaded into the sandbox at spawn as source snapshots. For pod worktrees, `/mnt/worktree` is staging only; provisioning copies it into writable `/workspace`, matching Docker's existing overlayfs workspace flow.
+- Sync-in: each configured host volume is packed as one gzip-compressed tar archive, uploaded in bounded chunks (one file API request for archives up to 64 MiB), and extracted inside the sandbox. This avoids the Sandboxes data-plane 600 requests/minute limit that a file-by-file worktree upload can exhaust. For pod worktrees, `/mnt/worktree` is staging only; provisioning copies it into writable `/workspace`, matching Docker's existing overlayfs workspace flow.
 - Runtime: the sandbox mutates `/workspace`, not the uploaded staging tree.
 - Sync-back: `extractDirectoryFromContainer` lists runtime sandbox files recursively through the file API, reads file contents, writes into a staging directory, then mirrors staging back to the host while honoring excludes such as `node_modules` and `.autopod-*` staging directories.
 
