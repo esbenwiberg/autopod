@@ -1139,6 +1139,26 @@ const AGENT_CLI_BY_RUNTIME: Record<Pod['runtime'], string> = {
   copilot: 'copilot',
 };
 
+const MIN_CODEX_CLI_VERSION = '0.144.4';
+
+function parseCliVersion(output: string): [number, number, number] | null {
+  const match = output.match(/\b(\d+)\.(\d+)\.(\d+)\b/);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function isVersionBelow(
+  version: [number, number, number],
+  minimum: [number, number, number],
+): boolean {
+  for (let index = 0; index < version.length; index += 1) {
+    const current = version[index] ?? 0;
+    const required = minimum[index] ?? 0;
+    if (current !== required) return current < required;
+  }
+  return false;
+}
+
 async function verifyAgentCli(
   containerManager: ContainerManager,
   containerId: string,
@@ -1156,6 +1176,27 @@ async function verifyAgentCli(
     throw new Error(
       `Agent CLI missing: ${cli} is not installed in this image. Rebuild the ${runtime} base/warm image.${detail ? ` ${detail}` : ''}`,
     );
+  }
+
+  if (runtime === 'codex') {
+    const versionResult = await containerManager.execInContainer(
+      containerId,
+      ['codex', '--version'],
+      { timeout: 10_000 },
+    );
+    const output = (versionResult.stdout || versionResult.stderr).trim();
+    const version = parseCliVersion(output);
+    const minimum = parseCliVersion(MIN_CODEX_CLI_VERSION);
+    if (versionResult.exitCode !== 0 || !version || !minimum) {
+      throw new Error(
+        `Unable to verify the Codex CLI version${output ? ` (${output})` : ''}. Rebuild the codex base/warm image with Codex CLI ${MIN_CODEX_CLI_VERSION} or newer.`,
+      );
+    }
+    if (isVersionBelow(version, minimum)) {
+      throw new Error(
+        `Codex CLI ${version.join('.')} is incompatible; Autopod requires ${MIN_CODEX_CLI_VERSION} or newer. Rebuild the codex base/warm image.`,
+      );
+    }
   }
 
   return result.stdout.trim();
@@ -4536,7 +4577,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       `Pre-push security scan blocked: ${findings.length} ${findingLabel}.`,
       false,
     );
-
     const visibleFindings = findings.slice(0, SECURITY_SCAN_FINDING_LOG_LIMIT);
     for (const [index, finding] of visibleFindings.entries()) {
       const rule = sanitizeSecurityScanLogValue(finding.ruleId, 'unknown');
@@ -4570,18 +4610,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   type OperatorFailurePhase = 'setup' | 'agent' | 'completion';
 
-  function operatorErrorMessage(err: unknown, phase: OperatorFailurePhase): string {
-    const raw = err instanceof Error && err.message.trim().length > 0 ? err.message : String(err);
-    const sanitized = processContent(raw.slice(0, 1200), {
+  function sanitizeFailureReason(raw: unknown, prefix: string): string {
+    const message =
+      raw instanceof Error && raw.message.trim().length > 0 ? raw.message : String(raw);
+    const sanitized = processContent(message.slice(0, 1200), {
       sanitization: { preset: 'standard' },
     }).text.trim();
+    return `${prefix}: ${sanitized || 'unknown error'}`;
+  }
+
+  function operatorErrorMessage(err: unknown, phase: OperatorFailurePhase): string {
     const prefix =
       phase === 'setup'
         ? 'Pod setup failed before the agent could finish'
         : phase === 'completion'
           ? 'Pod failed while finalizing after the agent run'
           : 'Pod failed while the agent was running';
-    return `${prefix}: ${sanitized || 'unknown error'}`;
+    return sanitizeFailureReason(err, prefix);
   }
 
   function describeSyncFailure(err: unknown): string {
@@ -6067,6 +6112,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // intact; recoverWorktree() owns clearing it on that path.)
         const provisioningUpdates: Partial<PodUpdates> = {
           startedAt: new Date().toISOString(),
+          failureReason: null,
         };
         if (!isRecovery && pod.worktreeCompromised) {
           provisioningUpdates.worktreeCompromised = false;
@@ -7811,7 +7857,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       } catch (err) {
         logger.error({ err, podId }, 'Pod processing error');
-        emitActivityError(podId, operatorErrorMessage(err, visibleFailurePhase), true);
+        const failureReason = operatorErrorMessage(err, visibleFailurePhase);
+        emitActivityError(podId, failureReason, true);
         // Best-effort: recover runtime credentials before the failure path
         // tears the container down. The happy-path persist at the end of the
         // try block was bypassed, so without this latest auth state can die
@@ -7833,7 +7880,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           pod = podRepo.getOrThrow(podId);
           if (!isTerminalState(pod.status)) {
             if (canFail(pod.status)) {
-              transition(pod, 'failed', { completedAt: new Date().toISOString() });
+              transition(pod, 'failed', {
+                completedAt: new Date().toISOString(),
+                failureReason,
+              });
             } else if (canKill(pod.status)) {
               // Fallback for states not yet reachable via 'failed' (validated, review_required, etc.)
               transition(pod, 'killing');
@@ -8052,8 +8102,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           } else if (event.type === 'error' && event.fatal) {
             const pod = podRepo.getOrThrow(podId);
             if (pod.status === 'running') {
-              emitActivityStatus(podId, `Agent failed: ${event.message}`);
-              transition(pod, 'failed', { completedAt: new Date().toISOString() });
+              const failureReason = sanitizeFailureReason(event.message, 'Agent failed');
+              emitActivityStatus(podId, failureReason);
+              transition(pod, 'failed', {
+                completedAt: new Date().toISOString(),
+                failureReason,
+              });
             }
             outcome = 'failed';
             break;
@@ -9915,6 +9969,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           recoveryCount: 0,
           preSubmitReview: null,
           completedAt: null,
+          failureReason: null,
           ...(failedBeforeAgentWork
             ? {
                 filesChanged: 0,

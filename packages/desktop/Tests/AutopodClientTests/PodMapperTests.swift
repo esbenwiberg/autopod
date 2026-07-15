@@ -1340,6 +1340,19 @@ private let minimalSessionJson = """
   #expect(pod.hasWebUi == false)
 }
 
+@Test func mapsPersistedFailureReasonAfterRefreshWithoutValidation() throws {
+  let json = (minimalSessionJson
+    .replacingOccurrences(of: #""status": "running""#, with: #""status": "failed""#)
+    + #", "failureReason": "Agent failed: Codex CLI 0.144.3 is incompatible" }"#
+  ).data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+
+  #expect(pod.errorSummary == "Agent failed: Codex CLI 0.144.3 is incompatible")
+  #expect(pod.latestActivity == "Agent failed: Codex CLI 0.144.3 is incompatible")
+}
+
 @Test func mapperMapsSetupFailureAsBlockingValidationPhase() throws {
   let validation = #"""
   {
