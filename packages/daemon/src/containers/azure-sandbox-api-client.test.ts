@@ -635,6 +635,60 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
+  it('honors a data-plane 429 (retryAfterSeconds) and retries the request', async () => {
+    const { client, requests } = makeClient(
+      [
+        {
+          status: 429,
+          body: {
+            title: 'Rate limit exceeded',
+            status: 429,
+            detail: 'API request rate limit exceeded (limit 600 requests/min).',
+            retryAfterSeconds: 30,
+          },
+        },
+        { status: 200, rawText: 'hello-after-retry' },
+      ],
+      { retry: { maxDelayMs: 0 } },
+    );
+
+    const read = await client.readFile('sbx-1', '/tmp/hello.txt');
+
+    expect(read.toString('utf-8')).toBe('hello-after-retry');
+    // First attempt 429, retried once → 2 requests to the same files endpoint.
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.url).toContain('/sandboxes/sbx-1/files');
+    expect(requests[1]?.url).toContain('/sandboxes/sbx-1/files');
+  });
+
+  it('honors the Retry-After header when the body has no retryAfterSeconds', async () => {
+    const { client, requests } = makeClient(
+      [
+        { status: 429, rawText: 'slow down', headers: { 'retry-after': '1' } },
+        { status: 200, body: { path: '/tmp', entries: [] } },
+      ],
+      { retry: { maxDelayMs: 0 } },
+    );
+
+    const list = await client.listFiles('sbx-1', '/tmp');
+    expect(list.entries).toEqual([]);
+    expect(requests).toHaveLength(2);
+  });
+
+  it('gives up after the retry budget is exhausted on persistent 429s', async () => {
+    const rateLimited = () => ({
+      status: 429,
+      body: { status: 429, retryAfterSeconds: 30 },
+    });
+    const { client, requests } = makeClient([rateLimited(), rateLimited(), rateLimited()], {
+      retry: { maxAttempts: 3, maxDelayMs: 0 },
+    });
+
+    await expect(client.readFile('sbx-1', '/tmp/hello.txt')).rejects.toThrow(/429/);
+    // maxAttempts=3 → 3 tries then throw (no infinite loop).
+    expect(requests).toHaveLength(3);
+  });
+
   it('exposes an Entra-gated port and maps the returned public URL', async () => {
     const { client, requests } = makeClient([
       {

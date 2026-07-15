@@ -35,7 +35,14 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # Non-blocking: pnpm 9.15's `audit` POSTs to npm's `/-/npm/v1/security/audits`
+      # endpoint, which npm retired (HTTP 410, "use the bulk advisory endpoint").
+      # That makes the step fail on every run regardless of the dependency tree, so
+      # it must not gate merges. Findings still surface in the step log. Durable fix:
+      # upgrade pnpm to a version that uses the bulk advisories endpoint, then drop
+      # `continue-on-error`.
       - name: Dependency audit
+        continue-on-error: true
         run: pnpm audit --prod --audit-level high
 
   secret-scan:
