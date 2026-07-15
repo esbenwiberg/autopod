@@ -81,17 +81,7 @@ function deferred<T>() {
 }
 
 async function waitForAssertion(assertion: () => void): Promise<void> {
-  let lastError: unknown;
-  for (let i = 0; i < 100; i++) {
-    try {
-      assertion();
-      return;
-    } catch (err) {
-      lastError = err;
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-  }
-  throw lastError;
+  await vi.waitFor(assertion, { timeout: 3_000, interval: 10 });
 }
 
 function mockExecFileSuccess(): void {
@@ -545,6 +535,7 @@ function insertApprovedMemory(
 
 function reviewInfrastructureFailureResult(
   reviewSkipKind: 'review-failed' | 'review-timeout' = 'review-timeout',
+  overrides: Partial<ValidationResult> = {},
 ): Partial<ValidationResult> {
   return {
     overall: 'fail',
@@ -569,6 +560,7 @@ function reviewInfrastructureFailureResult(
       reviewSkipKind === 'review-timeout'
         ? 'Review timed out: Command timed out after 300000ms'
         : 'Review failed: reviewer process exited with code 2',
+    ...overrides,
   };
 }
 
@@ -5112,6 +5104,33 @@ describe('PodManager', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it('does not retry deterministic reviewer invalid-request failures', async () => {
+      const ctx = createTestContext(
+        reviewInfrastructureFailureResult('review-failed', {
+          reviewSkipReason:
+            'Review failed: {"type":"invalid_request_error","message":"The model requires a newer version of Codex."}',
+        }),
+      );
+      ctx.deps.reviewInfrastructureRetryBackoffMs = [0];
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).status).toBe('review_required');
     });
 
     it('moves pending fact deviations to review_required without retrying the agent', async () => {
