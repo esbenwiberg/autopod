@@ -53,21 +53,6 @@ interface ChatCompletionResponse {
   }>;
 }
 
-function parseOpenAiAuthJson(authJson: string | undefined): string | null {
-  if (!authJson) return null;
-  try {
-    const parsed = JSON.parse(authJson) as {
-      OPENAI_API_KEY?: string | null;
-      tokens?: {
-        access_token?: string | null;
-      };
-    };
-    return parsed.OPENAI_API_KEY ?? parsed.tokens?.access_token ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function trimTrailingSlash(url: string): string {
   return url.endsWith('/') ? url.slice(0, -1) : url;
 }
@@ -180,6 +165,12 @@ export async function createProfileMemoryReviewer(
   if (options.container) {
     return createContainerFirstMemoryReviewer(profile, reviewerModel, logger, options.container);
   }
+  if (usesChatGptReviewerAuth(profile)) {
+    return {
+      ok: false,
+      reason: 'container_reviewer_unavailable: ChatGPT-auth review requires a live pod container',
+    };
+  }
   return createDaemonMemoryReviewer(profile, reviewerModel, logger);
 }
 
@@ -204,6 +195,12 @@ async function createContainerFirstMemoryReviewer(
   }
 
   if (!container.containerId) {
+    if (usesChatGptReviewerAuth(profile)) {
+      return {
+        ok: false,
+        reason: 'container_reviewer_unavailable: pod has no live container',
+      };
+    }
     const daemonResult = await safeCreateDaemonMemoryReviewer(profile, reviewerModel, logger);
     if (daemonResult.ok) return daemonResult;
     return {
@@ -250,6 +247,9 @@ async function createContainerFirstMemoryReviewer(
             { podId: container.podId, reason: containerReason },
             'Container memory reviewer unavailable',
           );
+          if (usesChatGptReviewerAuth(profile)) {
+            throw new ContainerReviewerUnavailableError(containerReason, { cause: err });
+          }
           const daemonResult = await safeCreateDaemonMemoryReviewer(profile, reviewerModel, logger);
           if (daemonResult.ok) {
             return daemonResult.reviewer.generateText(input);
@@ -288,10 +288,7 @@ async function createDaemonMemoryReviewer(
   logger: Logger,
 ): Promise<MemoryReviewerResult> {
   if (profile.modelProvider === 'openai') {
-    const creds = profile.providerCredentials;
-    const token =
-      process.env.OPENAI_API_KEY ??
-      (creds?.provider === 'openai' ? parseOpenAiAuthJson(creds.authJson) : null);
+    const token = process.env.OPENAI_API_KEY;
     if (!token) return { ok: false, reason: 'openai_auth_unavailable' };
     return {
       ok: true,

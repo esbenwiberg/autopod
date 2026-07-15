@@ -156,4 +156,23 @@ describe('runContainerReviewer', () => {
       }),
     ).rejects.toThrow(ContainerReviewerUnavailableError);
   });
+
+  it('attempts the review when the sandbox status probe is transiently unknown', async () => {
+    mockRunCodexReview.mockResolvedValueOnce({ stdout: '{"selected":[]}' });
+    const cm = containerManager();
+    vi.mocked(cm.getStatus).mockResolvedValue('unknown');
+
+    await expect(
+      runContainerReviewer({
+        podId: 'sess-1',
+        containerId: 'container-abc',
+        containerManager: cm,
+        profile: profile({ modelProvider: 'openai' }),
+        model: 'auto',
+        prompt: 'Rank memory',
+        timeout: 20_000,
+      }),
+    ).resolves.toEqual({ stdout: '{"selected":[]}' });
+    expect(mockRunCodexReview).toHaveBeenCalledOnce();
+  });
 });
