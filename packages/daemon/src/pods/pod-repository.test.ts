@@ -330,6 +330,16 @@ describe('PodRepository', () => {
       expect(repo.getOrThrow('sess-001').lastValidationResult).toBeNull();
     });
 
+    it('persists and clears a durable pod failure reason', () => {
+      repo.insert(validSession);
+      repo.update('sess-001', { failureReason: 'Agent failed: Codex turn aborted' });
+
+      expect(repo.getOrThrow('sess-001').failureReason).toBe('Agent failed: Codex turn aborted');
+
+      repo.update('sess-001', { failureReason: null });
+      expect(repo.getOrThrow('sess-001').failureReason).toBeNull();
+    });
+
     it('should store and retrieve validationWaiver as JSON', () => {
       repo.insert(validSession);
       repo.update('sess-001', {

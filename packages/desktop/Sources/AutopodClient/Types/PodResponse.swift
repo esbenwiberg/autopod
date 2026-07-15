@@ -93,6 +93,7 @@ public struct SessionResponse: Codable, Sendable {
   public let startedAt: String?
   public let runningAt: String?
   public let completedAt: String?
+  public let failureReason: String?
   public let updatedAt: String
   public let userId: String
   public let filesChanged: Int
@@ -182,7 +183,7 @@ public struct SessionResponse: Codable, Sendable {
     case id, profileName, task, status, model, runtime, executionTarget, branch
     case containerId, worktreePath, validationAttempts, maxValidationAttempts, reworkCount
     case lastValidationResult, validationWaiver, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
-    case createdAt, startedAt, runningAt, completedAt, updatedAt, userId
+    case createdAt, startedAt, runningAt, completedAt, failureReason, updatedAt, userId
     case filesChanged, linesAdded, linesRemoved, previewUrl, hasWebUi, prUrl
     case mergeBlockReason, plan, progress, contract, claudeSessionId
     case outputMode

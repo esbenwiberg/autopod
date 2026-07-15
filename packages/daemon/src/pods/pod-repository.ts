@@ -126,6 +126,7 @@ export interface PodUpdates {
   escalationCount?: number;
   startedAt?: string | null;
   completedAt?: string | null;
+  failureReason?: string | null;
   filesChanged?: number;
   linesAdded?: number;
   linesRemoved?: number;
@@ -314,6 +315,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     createdAt: row.created_at as string,
     startedAt: (row.started_at as string) ?? null,
     completedAt: (row.completed_at as string) ?? null,
+    failureReason: (row.failure_reason as string) ?? null,
     updatedAt: row.updated_at as string,
     userId: row.user_id as string,
     creatorEmail: (row.creator_email as string) ?? null,
@@ -585,6 +587,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.completedAt !== undefined) {
         setClauses.push('completed_at = @completedAt');
         params.completedAt = changes.completedAt;
+      }
+      if (changes.failureReason !== undefined) {
+        setClauses.push('failure_reason = @failureReason');
+        params.failureReason = changes.failureReason;
       }
       if (changes.filesChanged !== undefined) {
         setClauses.push('files_changed = @filesChanged');

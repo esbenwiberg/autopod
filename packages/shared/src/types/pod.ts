@@ -138,6 +138,8 @@ export interface Pod {
   startedAt: string | null;
   runningAt: string | null;
   completedAt: string | null;
+  /** Sanitized durable explanation for the latest terminal failure. */
+  failureReason: string | null;
   updatedAt: string;
   userId: string;
   /**

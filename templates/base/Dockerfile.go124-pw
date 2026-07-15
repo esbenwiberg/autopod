@@ -35,7 +35,7 @@ RUN groupadd --gid 1000 autopod && \
 RUN npm install -g pnpm@9
 
 # Agent CLIs
-RUN npm install -g @anthropic-ai/claude-code @openai/codex@0.144.3 @github/copilot
+RUN npm install -g @anthropic-ai/claude-code @openai/codex@0.144.4 @github/copilot
 
 # Dagger version — single source of truth for CLI, SDK, and the engine digest
 # users pin on their profile. Leaving any of the three on rolling-latest causes

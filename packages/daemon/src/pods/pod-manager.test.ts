@@ -305,7 +305,12 @@ function createMockContainerManager(): ContainerManager {
     readFile: vi.fn(async () => ''),
     extractDirectoryFromContainer: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
-    execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+    execInContainer: vi.fn(async (_containerId, command) => {
+      if (command.join(' ') === 'codex --version') {
+        return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    }),
     execStreaming: vi.fn(),
     attachTerminal: vi.fn(async () => ({
       onData: vi.fn(),
@@ -2757,8 +2762,12 @@ describe('PodManager', () => {
       ctx.deps.providerAccountStore = providerAccountStore;
       vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
         async (_containerId, command) => {
-          if (command.join(' ').includes('command -v codex')) {
+          const rendered = command.join(' ');
+          if (rendered.includes('command -v codex')) {
             return { stdout: '/usr/local/bin/codex\n', stderr: '', exitCode: 0 };
+          }
+          if (rendered === 'codex --version') {
+            return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
           }
           return { stdout: '', stderr: '', exitCode: 0 };
         },
@@ -4664,6 +4673,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'failed',
+        failureReason: 'Agent failed: stale reason',
         containerId: 'ctr-1',
         worktreePath: '/tmp/wt',
       });
@@ -5627,6 +5637,7 @@ describe('PodManager', () => {
       expect(result.status).toBe('queued');
       expect(result.containerId).toBeNull();
       expect(result.validationAttempts).toBe(0);
+      expect(result.failureReason).toBeNull();
       expect(result.recoveryWorktreePath).toBe('/tmp/worktrees/test-branch');
       // claudeSessionId should be cleared so we get a fresh spawn, not a stale resume
       expect(result.claudeSessionId).toBeNull();
@@ -9305,8 +9316,12 @@ describe('worker startup diagnostics', () => {
     ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
     vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
       async (_containerId, command) => {
-        if (command.join(' ').includes('command -v codex')) {
+        const rendered = command.join(' ');
+        if (rendered.includes('command -v codex')) {
           return { stdout: '/usr/local/bin/codex\n', stderr: '', exitCode: 0 };
+        }
+        if (rendered === 'codex --version') {
+          return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
         }
         return { stdout: '', stderr: '', exitCode: 0 };
       },
@@ -9361,6 +9376,71 @@ describe('worker startup diagnostics', () => {
     expect(statusMessages(ctx, pod.id)).toContain(
       'Agent CLI missing: codex is not installed in this image. Rebuild the codex base/warm image. codex: not found',
     );
+  });
+
+  it('fails before spawn when the Codex CLI is below the supported compatibility floor', async () => {
+    const runtime = createMockRuntime();
+    runtime.type = 'codex';
+    const ctx = createTestContext(undefined, {
+      defaultModel: 'auto',
+      defaultRuntime: 'codex',
+      modelProvider: 'openai',
+    });
+    ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+    vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+      async (_containerId, command) => {
+        const rendered = command.join(' ');
+        if (rendered.includes('command -v codex')) {
+          return { stdout: '/usr/local/bin/codex\n', stderr: '', exitCode: 0 };
+        }
+        if (rendered === 'codex --version') {
+          return { stdout: 'codex-cli 0.144.3\n', stderr: '', exitCode: 0 };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    );
+
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget', runtime: 'codex', skipValidation: true },
+      'user-1',
+    );
+
+    await manager.processPod(pod.id);
+
+    const failed = manager.getSession(pod.id);
+    expect(failed.status).toBe('failed');
+    expect(runtime.spawn).not.toHaveBeenCalled();
+    expect(failed.failureReason).toContain(
+      'Codex CLI 0.144.3 is incompatible; Autopod requires 0.144.4 or newer',
+    );
+  });
+
+  it('persists a sanitized fatal runtime failure reason', async () => {
+    const runtime = createMockRuntime();
+    vi.mocked(runtime.spawn).mockImplementation(async function* () {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'Codex turn aborted with token ghp_1234567890abcdefghijklmnopqrstuvwxyz1234',
+        fatal: true,
+      };
+    });
+    const ctx = createTestContext();
+    ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget', skipValidation: true },
+      'user-1',
+    );
+
+    await manager.processPod(pod.id);
+
+    const failed = manager.getSession(pod.id);
+    expect(failed.status).toBe('failed');
+    expect(failed.failureReason).toContain('Agent failed: Codex turn aborted');
+    expect(failed.failureReason).toContain('[API_KEY_REDACTED]');
+    expect(failed.failureReason).not.toContain('ghp_1234567890');
   });
 
   it('pre-agent setup failure emits a visible fatal activity', async () => {

@@ -143,7 +143,12 @@ export function createMockContainerManager(): ContainerManager {
     readFileBinary: vi.fn(async () => Buffer.alloc(0)),
     extractDirectoryFromContainer: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
-    execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+    execInContainer: vi.fn(async (_containerId, command) => {
+      if (command.join(' ') === 'codex --version') {
+        return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    }),
     execStreaming: vi.fn(),
     attachTerminal: vi.fn(async () => ({
       onData: vi.fn(),
