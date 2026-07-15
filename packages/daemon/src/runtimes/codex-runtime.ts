@@ -1,7 +1,7 @@
 import { type Dirent, createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { Readable } from 'node:stream';
+import { Readable } from 'node:stream';
 import { CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/shared';
 import type { AgentEvent, ExecutionTarget, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
@@ -54,6 +54,12 @@ interface RolloutCandidate {
   path: string;
   mtimeMs: number;
   size: number;
+}
+
+interface RolloutTailState {
+  path: string | null;
+  offset: number;
+  carry: Buffer;
 }
 
 function escapeTomlString(s: string): string {
@@ -338,6 +344,7 @@ export class CodexRuntime implements Runtime {
     const seen = new Set<string>();
     const abortLiveRollout = new AbortController();
     const abortSummaryGrace = new AbortController();
+    const rolloutTail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) };
     let taskSummaryObserved = false;
     let resolveTaskSummary: (() => void) | null = null;
     const taskSummarySignal = new Promise<void>((resolve) => {
@@ -360,9 +367,12 @@ export class CodexRuntime implements Runtime {
     const stdoutIterator = this.parseCodexLines(handle.stdout, podId, seen, outputState, modelHint)[
       Symbol.asyncIterator
     ]();
-    const rolloutIterator = this.pollLatestRollout(podId, abortLiveRollout.signal, modelHint)[
-      Symbol.asyncIterator
-    ]();
+    const rolloutIterator = this.pollLatestRollout(
+      podId,
+      abortLiveRollout.signal,
+      modelHint,
+      rolloutTail,
+    )[Symbol.asyncIterator]();
 
     let stdoutStats: ParseStats = { events: 0, nonStatusEvents: 0, sawComplete: false };
     let stdoutDone = false;
@@ -415,6 +425,7 @@ export class CodexRuntime implements Runtime {
               seen,
               outputState,
               modelHint,
+              rolloutTail,
             );
           }
           return;
@@ -436,6 +447,7 @@ export class CodexRuntime implements Runtime {
               seen,
               outputState,
               modelHint,
+              rolloutTail,
             );
           }
           lastMergedEventAt = Date.now();
@@ -469,6 +481,7 @@ export class CodexRuntime implements Runtime {
                 seen,
                 outputState,
                 modelHint,
+                rolloutTail,
               );
               return;
             }
@@ -502,7 +515,7 @@ export class CodexRuntime implements Runtime {
 
     if (stdoutStats.sawComplete && stdoutStats.nonStatusEvents > 0) return;
 
-    yield* this.replayLatestRollout(podId, seen, stdoutStats, outputState, modelHint);
+    yield* this.replayLatestRollout(podId, seen, stdoutStats, outputState, modelHint, rolloutTail);
   }
 
   private async *recoverSandboxAfterTaskSummary(
@@ -511,6 +524,7 @@ export class CodexRuntime implements Runtime {
     seen: Set<string>,
     outputState: OutputState,
     modelHint?: string,
+    rolloutTail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) },
   ): AsyncIterable<AgentEvent> {
     const hostSessionsPath = codexStateDirForPod(podId);
     const timeoutMs = summaryRecoveryTimeoutMs();
@@ -553,8 +567,8 @@ export class CodexRuntime implements Runtime {
     }
 
     try {
-      const rolloutPath = await findLatestCodexRolloutFile(hostSessionsPath, sessionId);
-      if (!rolloutPath) {
+      const rollout = await findLatestCodexRollout(hostSessionsPath, sessionId);
+      if (!rollout) {
         yield summaryRecoveryError(
           outputState,
           'Codex reported its final task summary, but the extracted sandbox state had no rollout for the active session',
@@ -563,16 +577,13 @@ export class CodexRuntime implements Runtime {
       }
 
       this.logger.warn(
-        { component: 'codex-runtime', podId, sessionId, rolloutPath },
+        { component: 'codex-runtime', podId, sessionId, rolloutPath: rollout.path },
         'Replaying the active Codex sandbox rollout to recover terminal completion',
       );
-      yield* this.parseCodexLines(
-        createReadStream(rolloutPath),
-        podId,
-        seen,
-        outputState,
-        modelHint,
-      );
+      const complete = await readRolloutDelta(rollout, rolloutTail);
+      if (complete.length > 0) {
+        yield* this.parseCodexLines(Readable.from([complete]), podId, seen, outputState, modelHint);
+      }
     } catch (err) {
       yield summaryRecoveryError(
         outputState,
@@ -595,6 +606,7 @@ export class CodexRuntime implements Runtime {
     seen: Set<string>,
     outputState: OutputState,
     modelHint?: string,
+    rolloutTail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) },
   ): AsyncIterable<AgentEvent> {
     const hostSessionsPath = codexStateDirForPod(podId);
     const timeoutMs = summaryRecoveryTimeoutMs();
@@ -622,20 +634,17 @@ export class CodexRuntime implements Runtime {
     const sessionId = this.codexSessionIds.get(podId);
     if (!sessionId) return;
     try {
-      const rolloutPath = await findLatestCodexRolloutFile(hostSessionsPath, sessionId);
-      if (!rolloutPath) return;
+      const rollout = await findLatestCodexRollout(hostSessionsPath, sessionId);
+      if (!rollout) return;
 
       this.logger.warn(
-        { component: 'codex-runtime', podId, sessionId, rolloutPath },
+        { component: 'codex-runtime', podId, sessionId, rolloutPath: rollout.path },
         'Codex sandbox stream is idle — replaying active rollout progress',
       );
-      yield* this.parseCodexLines(
-        createReadStream(rolloutPath),
-        podId,
-        seen,
-        outputState,
-        modelHint,
-      );
+      const complete = await readRolloutDelta(rollout, rolloutTail);
+      if (complete.length > 0) {
+        yield* this.parseCodexLines(Readable.from([complete]), podId, seen, outputState, modelHint);
+      }
     } catch (err) {
       this.logger.warn(
         { err, component: 'codex-runtime', podId, sessionId },
@@ -770,9 +779,10 @@ export class CodexRuntime implements Runtime {
     stdoutStats: ParseStats,
     outputState: OutputState,
     modelHint?: string,
+    rolloutTail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) },
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
-    const rolloutPath = await findLatestCodexRolloutFile(codexStateDirForPod(podId));
-    if (!rolloutPath) {
+    const rollout = await findLatestCodexRollout(codexStateDirForPod(podId));
+    if (!rollout) {
       this.logger.warn(
         {
           component: 'codex-runtime',
@@ -790,7 +800,7 @@ export class CodexRuntime implements Runtime {
       {
         component: 'codex-runtime',
         podId,
-        rolloutPath,
+        rolloutPath: rollout.path,
         stdoutEvents: stdoutStats.events,
         stdoutNonStatusEvents: stdoutStats.nonStatusEvents,
         stdoutSawComplete: stdoutStats.sawComplete,
@@ -798,8 +808,12 @@ export class CodexRuntime implements Runtime {
       'Codex stdout stream ended without complete activity — replaying rollout JSONL',
     );
 
+    const complete = await readRolloutDelta(rollout, rolloutTail);
+    if (complete.length === 0) {
+      return { events: 0, nonStatusEvents: 0, sawComplete: false };
+    }
     return yield* this.parseCodexLines(
-      createReadStream(rolloutPath),
+      Readable.from([complete]),
       podId,
       seen,
       outputState,
@@ -811,17 +825,15 @@ export class CodexRuntime implements Runtime {
     podId: string,
     signal: AbortSignal,
     modelHint?: string,
+    tail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) },
   ): AsyncGenerator<AgentEvent, void, void> {
-    let lastSignature: string | null = null;
-
     while (!signal.aborted) {
       try {
         const rollout = await findLatestCodexRollout(codexStateDirForPod(podId));
         if (rollout) {
-          const signature = `${rollout.path}:${rollout.mtimeMs}:${rollout.size}`;
-          if (signature !== lastSignature) {
-            lastSignature = signature;
-            yield* this.parseCodexLinesRaw(createReadStream(rollout.path), podId, modelHint);
+          const complete = await readRolloutDelta(rollout, tail);
+          if (complete.length > 0) {
+            yield* this.parseCodexLinesRaw(Readable.from([complete]), podId, modelHint);
           }
         }
       } catch (err) {
@@ -1061,12 +1073,69 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-async function findLatestCodexRolloutFile(
-  rootDir: string,
-  sessionId?: string,
-): Promise<string | null> {
-  const latest = await findLatestCodexRollout(rootDir, sessionId);
-  return latest?.path ?? null;
+async function readRolloutDelta(
+  rollout: RolloutCandidate,
+  tail: RolloutTailState,
+): Promise<string> {
+  if (tail.path !== rollout.path || rollout.size < tail.offset) {
+    tail.path = rollout.path;
+    tail.offset = 0;
+    tail.carry = Buffer.alloc(0);
+  }
+  if (rollout.size <= tail.offset) return '';
+
+  const appended = await readRolloutAppend(rollout.path, tail.offset, rollout.size);
+  const parsed = splitCompleteJsonLines(Buffer.concat([tail.carry, appended]));
+  tail.offset = rollout.size;
+  tail.carry = parsed.carry;
+  return parsed.complete;
+}
+
+async function readRolloutAppend(pathname: string, start: number, size: number): Promise<Buffer> {
+  if (size <= start) return Buffer.alloc(0);
+  const stream = createReadStream(pathname, { start, end: size - 1 });
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+function splitCompleteJsonLines(content: Buffer): { complete: string; carry: Buffer } {
+  const lines: string[] = [];
+  let lineStart = 0;
+  for (let index = 0; index < content.length; index += 1) {
+    if (content[index] !== 0x0a) continue;
+    const line = content.subarray(lineStart, index).toString('utf8');
+    if (line.trim().length > 0) lines.push(line);
+    lineStart = index + 1;
+  }
+  let carry = content.subarray(lineStart);
+
+  // Codex rollout snapshots do not always end with a newline. A syntactically
+  // complete trailing JSON value is safe to consume; an incomplete write must
+  // stay buffered as bytes until a later poll supplies the rest of the record.
+  // Keeping bytes also prevents a poll split inside a multibyte UTF-8 scalar
+  // from being decoded to a replacement character and lost permanently.
+  const trailing = carry.toString('utf8');
+  if (trailing.trim().length > 0 && isCompleteJsonRecord(trailing)) {
+    lines.push(trailing);
+    carry = Buffer.alloc(0);
+  }
+
+  return {
+    complete: lines.length > 0 ? `${lines.join('\n')}\n` : '',
+    carry,
+  };
+}
+
+function isCompleteJsonRecord(line: string): boolean {
+  try {
+    JSON.parse(line);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function findLatestCodexRollout(

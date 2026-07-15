@@ -441,12 +441,7 @@ public final class EventStream {
     historical: [AgentEvent],
     live: [AgentEvent]
   ) -> [AgentEvent] {
-    let historicalIds = Set(historical.map(\.id))
-    return (historical + live.filter { !historicalIds.contains($0.id) })
-      .sorted { lhs, rhs in
-        if lhs.timestamp == rhs.timestamp { return lhs.id < rhs.id }
-        return lhs.timestamp < rhs.timestamp
-      }
+    appendDeduped(historical, live)
   }
 
   public nonisolated static func appendDeduped(
@@ -459,7 +454,18 @@ public final class EventStream {
       result.append(event)
       seen.insert(event.id)
     }
-    return result
+
+    // Current daemon events carry positive, monotonically increasing persisted
+    // IDs. They are the authoritative order when REST history and live
+    // WebSocket batches interleave. Legacy responses use negative local IDs;
+    // if any are present, retain deterministic timestamp ordering instead.
+    if result.allSatisfy({ $0.id > 0 }) {
+      return result.sorted { $0.id < $1.id }
+    }
+    return result.sorted { lhs, rhs in
+      if lhs.timestamp == rhs.timestamp { return lhs.id < rhs.id }
+      return lhs.timestamp < rhs.timestamp
+    }
   }
 
   private func mapAgentEvent(_ response: AgentEventResponse, id: Int) -> AgentEvent {

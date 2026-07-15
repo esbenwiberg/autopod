@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -1228,6 +1228,175 @@ describe('CodexRuntime', () => {
         } else {
           process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = previousPollMs;
         }
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('emits timestamp-less growing rollout records once', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousPollMs = process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-runtime-growing-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = '10';
+
+      try {
+        const podId = 'growing-rollout';
+        const rolloutDir = join(tmpRoot, podId, '2026', '07', '15');
+        const rolloutPath = join(rolloutDir, 'rollout-2026-07-15T20-00-00-thread-grow.jsonl');
+        await mkdir(rolloutDir, { recursive: true });
+        await writeFile(
+          rolloutPath,
+          `${JSON.stringify({
+            type: 'response_item',
+            payload: {
+              type: 'function_call',
+              name: 'exec_command',
+              call_id: 'call-first',
+              arguments: JSON.stringify({ cmd: 'git status --short' }),
+            },
+          })}\n`,
+        );
+
+        const handle = createMockHandle();
+        const runtime = new CodexRuntime(
+          logger,
+          createMockContainerManager(handle),
+          createMockPodRepo(),
+        );
+        const iterator = runtime
+          .spawn({
+            podId,
+            task: 'Tail a growing rollout once',
+            model: 'gpt-5.5',
+            workDir: '/workspace',
+            containerId: 'container-123',
+            env: {},
+          })
+          [Symbol.asyncIterator]();
+
+        const first = await withTimeout(iterator.next(), 1_000);
+        expect(first.value).toMatchObject({
+          type: 'tool_use',
+          input: expect.objectContaining({ call_id: 'call-first' }),
+        });
+
+        await appendFile(
+          rolloutPath,
+          `${[
+            JSON.stringify({
+              type: 'response_item',
+              payload: {
+                type: 'function_call',
+                name: 'exec_command',
+                call_id: 'call-second',
+                arguments: JSON.stringify({ cmd: 'git diff --stat' }),
+              },
+            }),
+            JSON.stringify({
+              type: 'event_msg',
+              payload: { type: 'task_complete', last_agent_message: 'Tail complete.' },
+            }),
+          ].join('\n')}\n`,
+        );
+
+        const second = await withTimeout(iterator.next(), 1_000);
+        expect(second.value).toMatchObject({
+          type: 'tool_use',
+          input: expect.objectContaining({ call_id: 'call-second' }),
+        });
+        const complete = await withTimeout(iterator.next(), 1_000);
+        expect(complete.value).toMatchObject({ type: 'complete', result: 'Tail complete.' });
+
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(0);
+        const events = [first.value, second.value, complete.value] as AgentEvent[];
+        for (;;) {
+          const next = await iterator.next();
+          if (next.done) break;
+          events.push(next.value);
+        }
+
+        const callIds = events.flatMap((event) => {
+          if (event.type !== 'tool_use') return [];
+          const callId = event.input.call_id;
+          return typeof callId === 'string' ? [callId] : [];
+        });
+        expect(callIds).toEqual(['call-first', 'call-second']);
+      } finally {
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previousStateDir);
+        restoreEnv('AUTOPOD_CODEX_ROLLOUT_POLL_MS', previousPollMs);
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves partial and repeated rollout records', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousPollMs = process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-runtime-partial-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = '10';
+
+      const abort = new AbortController();
+      try {
+        const podId = 'partial-rollout';
+        const rolloutDir = join(tmpRoot, podId, '2026', '07', '15');
+        const rolloutPath = join(rolloutDir, 'rollout-2026-07-15T20-00-00-thread-partial.jsonl');
+        const repeated = JSON.stringify({
+          type: 'response_item',
+          payload: {
+            type: 'function_call',
+            name: 'exec_command',
+            call_id: 'call-repeat',
+            arguments: JSON.stringify({ cmd: 'git status --short' }),
+          },
+        });
+        const split = JSON.stringify({
+          type: 'response_item',
+          payload: {
+            type: 'function_call',
+            name: 'exec_command',
+            call_id: 'call-split',
+            arguments: JSON.stringify({ cmd: 'git diff --stat' }),
+          },
+        });
+        const splitAt = Math.floor(split.length / 2);
+        await mkdir(rolloutDir, { recursive: true });
+        await writeFile(rolloutPath, `${repeated}\n${split.slice(0, splitAt)}`);
+
+        const runtime = new CodexRuntime(
+          logger,
+          createMockContainerManager(createMockHandle()),
+          createMockPodRepo(),
+        );
+        // biome-ignore lint/suspicious/noExplicitAny: focused coverage of the rollout tailer
+        const iterator = (runtime as any)
+          .pollLatestRollout(podId, abort.signal, 'gpt-5.5')
+          [Symbol.asyncIterator]() as AsyncIterator<AgentEvent>;
+
+        const first = await withTimeout(iterator.next(), 1_000);
+        expect(first.value).toMatchObject({
+          type: 'tool_use',
+          input: expect.objectContaining({ call_id: 'call-repeat' }),
+        });
+
+        await appendFile(rolloutPath, `${split.slice(splitAt)}\n${repeated}\n`);
+
+        const second = await withTimeout(iterator.next(), 1_000);
+        const third = await withTimeout(iterator.next(), 1_000);
+        expect([second.value, third.value]).toEqual([
+          expect.objectContaining({
+            type: 'tool_use',
+            input: expect.objectContaining({ call_id: 'call-split' }),
+          }),
+          expect.objectContaining({
+            type: 'tool_use',
+            input: expect.objectContaining({ call_id: 'call-repeat' }),
+          }),
+        ]);
+      } finally {
+        abort.abort();
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previousStateDir);
+        restoreEnv('AUTOPOD_CODEX_ROLLOUT_POLL_MS', previousPollMs);
         await rm(tmpRoot, { recursive: true, force: true });
       }
     });
