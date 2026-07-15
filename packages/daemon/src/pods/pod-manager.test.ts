@@ -4694,6 +4694,59 @@ describe('PodManager', () => {
       );
     });
 
+    it('re-provisions a fresh container (validation-only) when a force resume cannot sync the reused container', async () => {
+      const hostHead = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      const containerHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      // Host worktree HEAD is the recovered auto-commit; the reused (cold) container
+      // reports a divergent HEAD that is neither ancestor of the other.
+      mockedExecFile.mockImplementation((...args: unknown[]) => {
+        const gitArgs = Array.isArray(args[1]) ? (args[1] as string[]) : [];
+        const callback = args[args.length - 1] as (
+          err: Error | null,
+          result: { stdout: string; stderr: string },
+        ) => void;
+        const stdout = gitArgs[0] === 'rev-parse' && gitArgs[1] === 'HEAD' ? `${hostHead}\n` : '';
+        callback(null, { stdout, stderr: '' });
+        return undefined as never;
+      });
+
+      const ctx = createTestContext({ overall: 'pass' });
+      ctx.containerManager.execInContainer = vi.fn(async (_containerId, command) => {
+        if (command[0] === 'git' && command[3] === 'rev-parse') {
+          return { stdout: `${containerHead}\n`, stderr: '', exitCode: 0 };
+        }
+        if (command[0] === 'git' && command[3] === 'merge-base') {
+          // Neither direction is an ancestor → true divergence on the reused container.
+          return { stdout: '', stderr: '', exitCode: 1 };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'ctr-stale',
+        worktreePath: '/tmp/wt',
+      });
+
+      const result = await manager.revalidateSession(pod.id, { force: true });
+
+      expect(result).toEqual({ newCommits: false, result: 'fail' });
+      const refreshed = manager.getSession(pod.id);
+      // Fresh re-provision for validation-only — NOT parked as compromised.
+      expect(refreshed.worktreeCompromised).toBe(false);
+      expect(refreshed.status).toBe('queued');
+      expect(refreshed.containerId).toBeNull();
+      expect(refreshed.skipAgent).toBe(true);
+      expect(refreshed.recoveryWorktreePath).toBe('/tmp/wt');
+      // We did not fall back to validating against the stale container.
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+    });
+
     it('resets a stale validation container to host HEAD instead of mirroring it back', async () => {
       const hostHead = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
       const containerHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';

@@ -10828,6 +10828,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             );
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to sync workspace before revalidation');
+            // Under an explicit operator resume (force), a workspace-sync failure
+            // against the *reused* container is almost always a cold/expired sandbox
+            // that can no longer serve /workspace (or an in-place reconcile that can't
+            // engage). The committed work lives in the recovery worktree, so the robust
+            // move is to re-provision a fresh container from it and validate the existing
+            // commits — a fresh container starts at the worktree HEAD, so there is no
+            // divergence to reconcile — rather than parking the pod as compromised.
+            if (force) {
+              // Drop back to `failed` first — requeueValidationOnly re-queues from a
+              // terminal state, and `validating → queued` is not a legal transition.
+              transition(podRepo.getOrThrow(podId), 'failed');
+              return requeueValidationOnly(
+                'Resume: reused container could not serve workspace — re-provisioning fresh for validation only',
+              );
+            }
             validationSyncOk =
               err instanceof ValidationWorkspaceReconcileError
                 ? false

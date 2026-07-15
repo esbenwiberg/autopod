@@ -1,0 +1,89 @@
+contract_version: 1
+title: "Use daemon GitHub CLI authentication instead of profile PATs"
+scenarios:
+  - id: daemon-gh-authorizes-github-lifecycle
+    given:
+      - "the daemon service account has valid GitHub CLI authentication and a GitHub-backed profile has no GitHub PAT"
+    when:
+      - "Autopod performs authenticated repository and pull-request lifecycle operations"
+    then:
+      - "the operations use an explicit credential resolved from daemon GitHub CLI authentication without enabling ambient Git credential helpers"
+  - id: legacy-github-pat-is-not-authority
+    given:
+      - "a profile retains a legacy encrypted GitHub PAT while daemon GitHub CLI authentication is unavailable or uses a different credential"
+    when:
+      - "Autopod resolves authentication for GitHub work"
+    then:
+      - "the legacy profile PAT is ignored and cannot serve as an operational fallback or mask the daemon-authentication failure"
+  - id: github-actions-preserve-policy-boundary
+    given:
+      - "a GitHub action request is subject to enabled-action, resource, approval, sanitization, quarantine, and audit policy"
+    when:
+      - "the action executes using the daemon GitHub identity"
+    then:
+      - "authentication changes without bypassing or weakening any existing action-control-plane decision or audit record"
+  - id: github-workspace-injection-remains-explicit
+    given:
+      - "a running pod has not received an approved or direct explicit GitHub credential-injection request"
+    when:
+      - "the pod starts and performs ordinary managed work"
+    then:
+      - "no daemon GitHub credential is placed in the container, while an explicit injection request can source it without logging the token"
+  - id: profile-ux-no-longer-manages-github-pats
+    given:
+      - "an operator views or edits a GitHub-backed profile through current CLI or Desktop surfaces"
+    when:
+      - "GitHub authentication configuration and status are presented"
+    then:
+      - "the product reports daemon GitHub CLI readiness and setup guidance without asking for, exposing, or evaluating a profile GitHub PAT or expiry date"
+  - id: non-github-auth-remains-unchanged
+    given:
+      - "an ADO-backed profile or a Copilot model-provider credential is configured"
+    when:
+      - "the GitHub authentication migration is applied"
+    then:
+      - "ADO PAT behavior and the separate Copilot credential contract continue unchanged"
+required_facts:
+  - id: fact-daemon-gh-resolution-is-explicit-and-fail-closed
+    proves: [daemon-gh-authorizes-github-lifecycle, legacy-github-pat-is-not-authority]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/github/daemon-github-auth.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- daemon-github-auth.test.ts
+  - id: fact-worktree-auth-keeps-ambient-helpers-disabled
+    proves: [daemon-gh-authorizes-github-lifecycle, legacy-github-pat-is-not-authority]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/worktrees/local-worktree-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- local-worktree-manager.test.ts
+  - id: fact-action-policy-survives-daemon-auth-migration
+    proves: [github-actions-preserve-policy-boundary]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/actions/action-engine.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- action-engine.test.ts
+  - id: fact-github-injection-is-explicit-and-secret-safe
+    proves: [github-workspace-injection-remains-explicit]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts
+  - id: fact-profile-surfaces-remove-github-pat-management
+    proves: [profile-ux-no-longer-manages-github-pats, non-github-auth-remains-unchanged]
+    kind: integration-test
+    artifact:
+      path: packages/cli/src/commands/profile.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/cli test -- profile.test.ts
+  - id: fact-desktop-profile-auth-ui-migrates-without-ado-regression
+    proves: [profile-ux-no-longer-manages-github-pats, non-github-auth-remains-unchanged]
+    kind: integration-test
+    artifact:
+      path: packages/desktop/Tests/AutopodUITests/ProfileEditorTests.swift
+      change: create
+    command: cd packages/desktop && swift test --filter ProfileEditorTests
+human_review: []
