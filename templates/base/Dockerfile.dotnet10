@@ -55,11 +55,17 @@ ENV NUGET_CREDENTIALPROVIDER_SESSIONTOKENCACHE_ENABLED=true
 RUN npm install -g @anthropic-ai/claude-code @openai/codex @github/copilot @earendil-works/pi-coding-agent@0.80.6
 
 # Trusted Autopod Pi worker extension
-COPY packages/pi-worker/package.json /opt/autopod/pi-worker/package.json
-COPY packages/pi-worker/dist /opt/autopod/pi-worker/dist
-RUN npm install -g /opt/autopod/pi-worker \
+COPY tsconfig.base.json /opt/autopod/tsconfig.base.json
+COPY packages/pi-worker/package.json /opt/autopod/packages/pi-worker/package.json
+COPY packages/pi-worker/tsconfig.json /opt/autopod/packages/pi-worker/tsconfig.json
+COPY packages/pi-worker/src /opt/autopod/packages/pi-worker/src
+RUN cd /opt/autopod/packages/pi-worker \
+    && npm install \
+    && npm run build \
+    && npm install -g . \
     && test -x /usr/local/bin/pi \
-    && test -f /usr/local/lib/node_modules/@autopod/pi-worker/dist/index.js
+    && test -f /usr/local/lib/node_modules/@autopod/pi-worker/dist/index.js \
+    && rm -rf node_modules /root/.npm
 
 # Dagger CLI — pre-installed so pods with restricted/deny-all network policies
 # can still use Dagger modules (runtime install from dl.dagger.io would fail).

@@ -684,7 +684,7 @@ export function podRoutes(
       limit?: string;
     };
     return qualityScoreRepo.list({
-      runtime: query.runtime as 'claude' | 'codex' | 'copilot' | undefined,
+      runtime: query.runtime as 'claude' | 'codex' | 'copilot' | 'pi' | undefined,
       model: query.model,
       profileName: query.profileName,
       since: query.since,

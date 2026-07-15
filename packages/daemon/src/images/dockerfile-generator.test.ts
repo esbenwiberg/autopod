@@ -98,8 +98,12 @@ describe('base image templates', () => {
       expect(content, dockerfile).toContain('@openai/codex');
       expect(content, dockerfile).toContain('@github/copilot');
       expect(content, dockerfile).toContain('@earendil-works/pi-coding-agent@0.80.6');
-      expect(content, dockerfile).toContain('COPY packages/pi-worker/dist');
-      expect(content, dockerfile).toContain('npm install -g /opt/autopod/pi-worker');
+      expect(content, dockerfile).toContain(
+        'COPY packages/pi-worker/src /opt/autopod/packages/pi-worker/src',
+      );
+      expect(content, dockerfile).toContain('npm run build');
+      expect(content, dockerfile).toContain('npm install -g .');
+      expect(content, dockerfile).not.toContain('COPY packages/pi-worker/dist');
       expect(content, dockerfile).not.toContain('@earendil-works/pi-coding-agent@latest');
     }
   });

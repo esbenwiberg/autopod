@@ -1,5 +1,4 @@
 import {
-  AutopodError,
   type ModelProvider,
   type Profile,
   type RuntimeType,
@@ -40,11 +39,7 @@ export function resolvePodRuntime(
   const runtime = requestedRuntime ?? profile.defaultRuntime ?? 'claude';
 
   if (runtime === 'pi') {
-    throw new AutopodError(
-      'Pi runtime is not available yet: no Pi runtime adapter is registered in this daemon build',
-      'UNSUPPORTED_RUNTIME',
-      400,
-    );
+    return runtime;
   }
 
   if (usesOpenAiSurface(profile) && runtime !== 'codex') {
