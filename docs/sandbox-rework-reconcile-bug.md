@@ -63,7 +63,70 @@ before re-committing the synced-back working tree, orphaning the container's pri
 auto-commit (`f2ec13fb`) so the new host commit shares no path to it. Needs confirmation
 by tracing the resume/rework host-worktree prep + the order of sync-back vs. auto-commit.
 
-## Fix (shipped)
+## Status
+
+- **Reconcile now transfers the target commit into the sandbox before resetting** (corrected fix,
+  implemented). `reconcileDivergedSandboxWorkspace` decides the reconciled target host-side (host
+  is normally linearly ahead → target = hostHead; true divergence → graft host tree onto container
+  HEAD), then bundles that commit across the store boundary
+  (`worktrees/sandbox-reconcile.ts::transferCommitToContainer`) so it is resolvable in the sandbox's
+  isolated store, then resets. Covered by an isolated-store real-git test (`sandbox-reconcile.test.ts`)
+  — the exact gap that let the first cut ship broken.
+- **Cold-sandbox resume** re-provisions fresh (PR #207) — verified live.
+
+### History: why the first cut (host-side graft) failed on sandbox
+
+The host-side graft (below) is correct for Docker but **failed on sandbox** at the last step.
+Confirmed live from the daemon journal (PR #206 + #207 deployed as `d48a6143`):
+
+```
+"Sandbox workspace HEADs diverged — attempting recoverable reconcile (graft host tree onto container HEAD)"
+ValidationWorkspaceReconcileError: Could not reset validation container to host HEAD c1c1782c…:
+  fatal: Could not parse object 'c1c1782c…'
+    at resetContainerWorkspaceToHead
+    at reconcileDivergedSandboxWorkspace
+    at prepareWorkspaceForValidation
+```
+
+**Root cause of the incompleteness:** the graft creates the reconciled commit in the *host* bare
+object store, then `resetContainerWorkspaceToHead` tries to point the container at it. Docker
+shares the bare via bind mount, so the container resolves the commit. **Sandbox containers have an
+isolated git object store** — they cannot resolve a commit that exists only in the host bare, so
+`git reset --hard <grafted>` fails with "Could not parse object." The graft's lineage logging
+(added deliberately) is what surfaced this.
+
+**Test gap that let it ship:** `graft-reconcile.test.ts` uses a single shared repo, and the
+pod-manager reconcile test mocks `execInContainer` to always succeed — neither models the isolated
+object stores that are the defining property of sandbox. Any real fix must add a test whose host
+and container have *separate* object stores.
+
+### Corrected direction (implemented)
+
+Bridge the two object stores instead of asking the sandbox to resolve a host-only commit:
+- Pick the reconciled `target` host-side (host-ahead → `hostHead`; true divergence → graft).
+- `git bundle` the target incrementally on `containerHead` (which the sandbox already has), write
+  the bundle bytes into the container (`ContainerManager.writeFile` takes a `Buffer`), and
+  `git fetch` it inside the container so `target` lands in the container's own store.
+- Then `resetContainerWorkspaceToHead(target)` succeeds because the object is now local.
+
+(An earlier idea — `git add -A && commit` inside the container — was rejected: it would re-commit
+daemon-injected operational files the host auto-commit deliberately excluded, tripping the
+protected-operational-paths guard.)
+
+### Also uncovered during recovery (separate issues)
+
+1. **Operator resume reused a cold sandbox** and died before reconcile — fixed in PR #207
+   (`revalidateSession` now re-provisions fresh on a reused-container sync failure under `force`).
+   Verified live: pods now reach `validating` on a fresh sandbox instead of instantly re-quarantining.
+2. **Concurrent fresh provisions hit Azure Sandboxes 429** (600 req/min data-plane limit) during
+   worktree file upload — recover pods one at a time, or add client-side throttling/retry.
+3. **CI `Dependency audit` step is broken** — npm retired the `/security/audits` endpoint (HTTP 410).
+   Blocks every PR's `build-and-test` (non-required, so merges still pass). Needs the audit script
+   moved to the bulk advisory endpoint or made non-blocking.
+
+---
+
+## Original fix (Docker-correct, sandbox-incomplete)
 
 Implemented the recoverable-path direction: on **sandbox** pods, `prepareWorkspaceForValidation`
 no longer quarantines on true divergence. Instead it **grafts** the host worktree's tree onto

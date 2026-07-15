@@ -139,6 +139,7 @@ import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import { graftHostTreeOntoBase } from '../worktrees/graft-reconcile.js';
 import { DeletionGuardError, GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
+import { transferCommitToContainer } from '../worktrees/sandbox-reconcile.js';
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
@@ -3719,6 +3720,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     };
 
+    const containerGit = async (args: string[]) => {
+      const r = await cm.execInContainer(
+        containerId,
+        ['git', '-c', 'safe.directory=/workspace', '-C', '/workspace', ...args],
+        { timeout: 30_000 },
+      );
+      return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode };
+    };
+
     // Capture the full lineage before touching anything — this is the repro data
     // that pins down *why* the auto-commit diverged (see sandbox-rework-reconcile-bug.md).
     const [mergeBase, hostTree, containerTree] = await Promise.all([
@@ -3734,7 +3744,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     ]);
     logger.warn(
       { podId, hostHead, containerHead, mergeBase, hostTree, containerTree },
-      'Sandbox workspace HEADs diverged — attempting recoverable reconcile (graft host tree onto container HEAD)',
+      'Sandbox workspace HEADs diverged — attempting recoverable reconcile',
     );
 
     // Derive the bare repo path up front — needed both to push the container HEAD
@@ -3819,29 +3829,84 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return true;
     };
 
+    const hostBundlePath = path.join(
+      os.tmpdir(),
+      `autopod-reconcile-${podId}-${Date.now()}.bundle`,
+    );
+    const containerBundlePath = `/tmp/autopod-reconcile-${podId}.bundle`;
     try {
+      // Both HEADs must be visible host-side to compute the target. containerHead is
+      // normally already on the host bare (sync-back pushed it); ensure it if not.
       if (!(await ensureContainerHeadReachable())) return false;
 
-      // Re-parent the host worktree's tree onto the container HEAD (linear child),
-      // preserving the exact agent working-tree content.
-      const graft = await graftHostTreeOntoBase(hostGit, containerHead);
-      if (!graft.ok) {
+      // Decide the reconciled target commit HOST-SIDE, where both HEADs resolve.
+      // The common case is "host ahead" — the daemon's auto-commit sits linearly on
+      // top of the container HEAD, so the host commit is already the target. Only on
+      // true divergence (neither an ancestor of the other) do we graft the host tree
+      // onto the container HEAD to synthesise a linear target.
+      const containerAncestorOfHost =
+        (await hostGit(['merge-base', '--is-ancestor', containerHead, hostHead])).exitCode === 0;
+      let target = hostHead;
+      if (!containerAncestorOfHost) {
+        const graft = await graftHostTreeOntoBase(hostGit, containerHead);
+        if (!graft.ok) {
+          logger.warn(
+            { podId, hostHead, containerHead, reason: graft.reason },
+            'Reconcile graft failed',
+          );
+          return false;
+        }
+        target = graft.head;
+      }
+
+      if (target === containerHead) {
+        // Trees were identical — the HEADs already agree in content. Nothing to move.
+        logger.info(
+          { podId, hostHead, containerHead },
+          'Reconciled diverged sandbox workspace — host and container already share the target tree',
+        );
+        return true;
+      }
+
+      // The sandbox container has an ISOLATED object store and cannot resolve the
+      // host-created `target`. Bundle it across (incremental on containerHead, which
+      // the container already has) so `target` becomes a real object in the container
+      // BEFORE we reset the workspace to it. Resetting to a host-only commit is exactly
+      // what broke the first cut of this fix ("Could not parse object").
+      const transfer = await transferCommitToContainer({
+        hostGit,
+        containerGit,
+        transferBundle: async (fromHostPath, toContainerPath) => {
+          const bytes = await readFile(fromHostPath);
+          await cm.writeFile(containerId, toContainerPath, bytes);
+        },
+        hostBundlePath,
+        containerBundlePath,
+        transferRef: `refs/autopod-xfer/${podId}`,
+        target,
+        base: containerHead,
+      });
+      if (!transfer.ok) {
         logger.warn(
-          { podId, hostHead, containerHead, reason: graft.reason },
-          'Reconcile graft failed',
+          { podId, hostHead, containerHead, target, reason: transfer.reason },
+          'Reconcile failed to transfer target commit into the sandbox container',
         );
         return false;
       }
 
-      // Container is now strictly behind the (possibly grafted) host HEAD; align it.
-      await resetContainerWorkspaceToHead(containerId, cm, graft.head);
+      // `target` now resolves in the container's own store, so this succeeds on sandbox.
+      await resetContainerWorkspaceToHead(containerId, cm, target);
       logger.info(
-        { podId, hostHead, containerHead, graftedHead: graft.head, committed: graft.committed },
-        'Reconciled diverged sandbox workspace by grafting host tree onto container HEAD',
+        { podId, hostHead, containerHead, target },
+        'Reconciled diverged sandbox workspace by transferring target commit into the container',
       );
       return true;
     } finally {
       await cleanupReconcileRef();
+      await rm(hostBundlePath, { force: true }).catch(() => {});
+      await cm
+        .execInContainer(containerId, ['rm', '-f', containerBundlePath], { timeout: 5_000 })
+        .catch(() => {});
     }
   }
 
