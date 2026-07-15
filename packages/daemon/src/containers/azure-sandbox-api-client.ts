@@ -82,6 +82,13 @@ export interface AzureSandboxApiClientConfig {
   resolveImageDigest?: ImageDigestResolver;
   /** Test seam. Defaults to 3s to match the Python SDK poller. */
   pollIntervalMs?: number;
+  /**
+   * Retry/backoff for the Azure Sandboxes data-plane rate limiter (HTTP 429,
+   * 600 req/min). The platform returns `retryAfterSeconds`; we honor it (clamped
+   * to `maxDelayMs`) before retrying, up to `maxAttempts`. Test seam: set
+   * `maxDelayMs: 0` to retry instantly.
+   */
+  retry?: { maxAttempts?: number; maxDelayMs?: number; baseDelayMs?: number };
 }
 
 interface DiskImageResponse {
@@ -164,6 +171,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private readonly webSocketFactory: WebSocketFactory;
   private readonly resolveImageDigest?: ImageDigestResolver;
   private readonly pollIntervalMs: number;
+  private readonly retryMaxAttempts: number;
+  private readonly retryMaxDelayMs: number;
+  private readonly retryBaseDelayMs: number;
   private readonly dataEndpoint: string;
   private groupReady: Promise<void> | null = null;
   /** Monotonic counter for unique per-exec streaming wrapper-script paths. */
@@ -185,6 +195,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.webSocketFactory = config.webSocket ?? defaultWebSocketFactory;
     this.resolveImageDigest = config.resolveImageDigest;
     this.pollIntervalMs = config.pollIntervalMs ?? 3000;
+    this.retryMaxAttempts = config.retry?.maxAttempts ?? 6;
+    this.retryMaxDelayMs = config.retry?.maxDelayMs ?? 30_000;
+    this.retryBaseDelayMs = config.retry?.baseDelayMs ?? 1000;
     this.dataEndpoint = endpointForRegion(config.location);
     this.logger.info(
       {
@@ -1084,37 +1097,59 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     );
 
     const url = withQuery(baseUrl, options.params);
-    const headers = new Headers(options.headers);
-    headers.set('Authorization', `Bearer ${token.token}`);
-    if (options.json !== undefined) {
-      headers.set('Content-Type', 'application/json');
-    }
+    const okStatuses = options.okStatuses ?? [200, 201, 202, 204];
 
-    const controller = options.timeoutMs ? new AbortController() : null;
-    const timeout = controller ? setTimeout(() => controller.abort(), options.timeoutMs) : null;
-    try {
-      const response = await this.fetchFn(url, {
-        method,
-        headers,
-        body: options.json !== undefined ? JSON.stringify(options.json) : options.body,
-        signal: controller?.signal,
-      });
-      const okStatuses = options.okStatuses ?? [200, 201, 202, 204];
+    // Retry loop for the data-plane rate limiter. A 429 means the request was NOT
+    // processed, so retrying any method is safe. We honor the platform's
+    // `retryAfterSeconds` (clamped) so we back off exactly as long as it asks,
+    // then give up after `retryMaxAttempts` rather than hanging forever.
+    for (let attempt = 1; ; attempt++) {
+      const headers = new Headers(options.headers);
+      headers.set('Authorization', `Bearer ${token.token}`);
+      if (options.json !== undefined) {
+        headers.set('Content-Type', 'application/json');
+      }
+
+      const controller = options.timeoutMs ? new AbortController() : null;
+      const timeout = controller ? setTimeout(() => controller.abort(), options.timeoutMs) : null;
+      let response: Response;
+      try {
+        response = await this.fetchFn(url, {
+          method,
+          headers,
+          body: options.json !== undefined ? JSON.stringify(options.json) : options.body,
+          signal: controller?.signal,
+        });
+      } catch (err) {
+        if (controller && isAbortError(err)) {
+          throw new AutopodError(
+            `Azure Sandboxes ${method} ${url} timed out after ${options.timeoutMs}ms`,
+            'AZURE_SANDBOX_TIMEOUT',
+            504,
+          );
+        }
+        throw err;
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+
+      if (response.status === 429 && attempt < this.retryMaxAttempts) {
+        const waitMs = Math.min(
+          await retryAfterMs(response, attempt, this.retryBaseDelayMs),
+          this.retryMaxDelayMs,
+        );
+        this.logger.warn(
+          { plane, method, url, attempt, maxAttempts: this.retryMaxAttempts, waitMs },
+          'Azure Sandboxes data plane rate-limited (429) — backing off and retrying',
+        );
+        await sleep(waitMs);
+        continue;
+      }
+
       if (!okStatuses.includes(response.status)) {
         await throwAzureHttpError(response, method, url);
       }
       return response;
-    } catch (err) {
-      if (controller && isAbortError(err)) {
-        throw new AutopodError(
-          `Azure Sandboxes ${method} ${url} timed out after ${options.timeoutMs}ms`,
-          'AZURE_SANDBOX_TIMEOUT',
-          504,
-        );
-      }
-      throw err;
-    } finally {
-      if (timeout) clearTimeout(timeout);
     }
   }
 
@@ -1420,4 +1455,33 @@ function isAbortError(err: unknown): boolean {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * How long to wait before retrying a 429. Prefer the platform's own signal — the
+ * `Retry-After` header (seconds or HTTP-date) or the body's `retryAfterSeconds`
+ * — and fall back to exponential backoff. The caller clamps the result to a cap.
+ */
+async function retryAfterMs(response: Response, attempt: number, baseMs: number): Promise<number> {
+  const header = response.headers.get('retry-after');
+  if (header) {
+    const secs = Number(header);
+    if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+    const when = Date.parse(header);
+    if (!Number.isNaN(when)) return Math.max(0, when - Date.now());
+  }
+  // Body carries `{"retryAfterSeconds": N}`; reading it is safe here — a 429 response
+  // is always discarded (we retry, never return it).
+  try {
+    const text = await response.text();
+    if (text) {
+      const parsed = JSON.parse(text) as { retryAfterSeconds?: unknown };
+      if (typeof parsed.retryAfterSeconds === 'number') {
+        return Math.max(0, parsed.retryAfterSeconds * 1000);
+      }
+    }
+  } catch {
+    // Fall through to backoff.
+  }
+  return baseMs * 2 ** (attempt - 1);
 }
