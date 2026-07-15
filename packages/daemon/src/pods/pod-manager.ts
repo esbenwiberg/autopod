@@ -34,6 +34,7 @@ import type {
   RequestCredentialPayload,
   ReviewFeedbackResponseItem,
   SastResult,
+  ScanFinding,
   SetupResult,
   SpawnFixResponse,
   SpecFile,
@@ -788,6 +789,7 @@ export function buildActionableFailureSummary(status: PrMergeStatus, profile: Pr
 
 const REVIEW_FEEDBACK_REPLY_MAX_CHARS = 2000;
 const REVIEW_INFRA_RETRY_BACKOFF_MS = [10_000, 30_000, 90_000] as const;
+const SECURITY_SCAN_FINDING_LOG_LIMIT = 20;
 
 function formatReviewFeedbackReply(response: ReviewFeedbackResponseItem): string {
   const outcomeLabel: Record<ReviewFeedbackResponseItem['outcome'], string> = {
@@ -2061,6 +2063,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'Pre-push security scan completed',
       );
       if (scan.decision === 'block') {
+        emitBlockingSecurityScanFindings(pod.id, scan.findings);
         throw new AutopodError(
           `Pre-push security scan blocked (${scan.findings.length} finding(s))`,
           'SECURITY_SCAN_BLOCKED',
@@ -4514,6 +4517,45 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       event: { type: 'error', timestamp, message, fatal },
     });
     bumpActivityTimestamp(podId);
+  }
+
+  function emitBlockingSecurityScanFindings(podId: string, findings: ScanFinding[]): void {
+    const findingLabel = findings.length === 1 ? 'finding' : 'findings';
+    emitActivityError(
+      podId,
+      `Pre-push security scan blocked: ${findings.length} ${findingLabel}.`,
+      false,
+    );
+
+    const visibleFindings = findings.slice(0, SECURITY_SCAN_FINDING_LOG_LIMIT);
+    for (const [index, finding] of visibleFindings.entries()) {
+      const rule = sanitizeSecurityScanLogValue(finding.ruleId, 'unknown');
+      const file = sanitizeSecurityScanLogValue(finding.file, 'unknown');
+      const location = finding.line ? `${file}:${finding.line}` : file;
+      emitActivityError(
+        podId,
+        `Security finding ${index + 1}/${findings.length}: severity=${finding.severity} ` +
+          `detector=${finding.detector} rule=${rule} location=${location}`,
+        false,
+      );
+    }
+
+    const omitted = findings.length - visibleFindings.length;
+    if (omitted > 0) {
+      const omittedSummary = `${omitted} additional security ${
+        omitted === 1 ? 'finding was' : 'findings were'
+      } omitted from logs; inspect the security evidence for the complete result.`;
+      emitActivityError(podId, omittedSummary, false);
+    }
+  }
+
+  function sanitizeSecurityScanLogValue(value: string | undefined, fallback: string): string {
+    const normalized = value?.replace(/\s+/g, ' ').trim().slice(0, 400);
+    if (!normalized) return fallback;
+    const sanitized = processContent(normalized, {
+      sanitization: { preset: 'standard' },
+    }).text.trim();
+    return sanitized || fallback;
   }
 
   type OperatorFailurePhase = 'setup' | 'agent' | 'completion';

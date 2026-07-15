@@ -2664,6 +2664,66 @@ describe('PodManager', () => {
       expect(processed.worktreePath).toBe('/tmp/worktree/abc');
     });
 
+    it('surfaces secret-safe finding details when the pre-push security scan blocks', async () => {
+      const ctx = createTestContext();
+      ctx.deps.repoScanner = {
+        scan: vi.fn(async (checkpoint) => ({
+          podId: 'scan-pod',
+          checkpoint,
+          startedAt: 1,
+          completedAt: 2,
+          filesScanned: 1,
+          filesSkipped: 0,
+          scanIncomplete: false,
+          findings:
+            checkpoint === 'push'
+              ? [
+                  {
+                    detector: 'secrets' as const,
+                    severity: 'critical' as const,
+                    file: 'src/config.ts',
+                    line: 42,
+                    ruleId: '@secretlint/rule-basicauth',
+                    snippet: 'http...[REDACTED]',
+                  },
+                  {
+                    detector: 'injection' as const,
+                    severity: 'high' as const,
+                    file: 'docs/prompt.md',
+                    snippet: 'RAW MATCH MUST NOT REACH LOGS',
+                  },
+                ]
+              : [],
+          decision: checkpoint === 'push' ? ('block' as const) : ('pass' as const),
+          warningSection: null,
+        })),
+      };
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      expect(manager.getSession(pod.id).status).toBe('failed');
+      const messages = ctx.eventRepo
+        .getForSession(pod.id, { type: 'pod.agent_activity' })
+        .map((event) => (event.payload as never as { event?: { message?: string } }).event?.message)
+        .filter((message): message is string => Boolean(message));
+      expect(messages).toContain('Pre-push security scan blocked: 2 findings.');
+      expect(messages).toContain(
+        'Security finding 1/2: severity=critical detector=secrets ' +
+          'rule=@secretlint/rule-basicauth location=src/config.ts:42',
+      );
+      expect(messages).toContain(
+        'Security finding 2/2: severity=high detector=injection ' +
+          'rule=unknown location=docs/prompt.md',
+      );
+      expect(messages.join('\n')).not.toContain('RAW MATCH MUST NOT REACH LOGS');
+      expect(messages.join('\n')).not.toContain('http...[REDACTED]');
+    });
+
     it('persists Codex auth.json back to a linked OpenAI provider account after agent run', async () => {
       const accountId = 'team-openai';
       const oldAuthJson = JSON.stringify({ token: 'old' });
