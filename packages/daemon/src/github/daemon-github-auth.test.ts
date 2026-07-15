@@ -23,23 +23,29 @@ describe('GhCliDaemonGitHubAuth', () => {
   });
 
   it('reports missing gh with setup guidance and no token output', async () => {
-    const runGh = vi.fn<GhRunner>().mockRejectedValue(Object.assign(new Error('spawn gh ENOENT'), {
-      code: 'ENOENT',
-      stdout: 'gho_secret_should_not_leak',
-      stderr: 'gho_secret_should_not_leak',
-    }));
+    const runGh = vi.fn<GhRunner>().mockRejectedValue(
+      Object.assign(new Error('spawn gh ENOENT'), {
+        code: 'ENOENT',
+        stdout: 'gho_secret_should_not_leak',
+        stderr: 'gho_secret_should_not_leak',
+      }),
+    );
     await expect(authWith(runGh).resolveCredential()).rejects.toMatchObject({
       code: 'GH_MISSING',
       message: expect.stringContaining(DAEMON_GITHUB_AUTH_SETUP),
     });
-    await expect(authWith(runGh).resolveCredential()).rejects.not.toThrow('gho_secret_should_not_leak');
+    await expect(authWith(runGh).resolveCredential()).rejects.not.toThrow(
+      'gho_secret_should_not_leak',
+    );
   });
 
   it('reports unauthenticated gh state distinctly', async () => {
-    const runGh = vi.fn<GhRunner>().mockRejectedValue(Object.assign(new Error('exit 1'), {
-      code: 1,
-      stderr: 'not logged in to github.com',
-    }));
+    const runGh = vi.fn<GhRunner>().mockRejectedValue(
+      Object.assign(new Error('exit 1'), {
+        code: 1,
+        stderr: 'not logged in to github.com',
+      }),
+    );
     await expect(authWith(runGh).resolveCredential()).rejects.toMatchObject({
       code: 'GH_UNAUTHENTICATED',
     });
@@ -62,10 +68,12 @@ describe('GhCliDaemonGitHubAuth', () => {
   });
 
   it('reports timeout distinctly', async () => {
-    const runGh = vi.fn<GhRunner>().mockRejectedValue(Object.assign(new Error('timed out'), {
-      killed: true,
-      signal: 'SIGTERM',
-    }));
+    const runGh = vi.fn<GhRunner>().mockRejectedValue(
+      Object.assign(new Error('timed out'), {
+        killed: true,
+        signal: 'SIGTERM',
+      }),
+    );
     await expect(authWith(runGh).resolveCredential()).rejects.toMatchObject({
       code: 'GH_TIMEOUT',
     });
@@ -91,4 +99,3 @@ describe('GhCliDaemonGitHubAuth', () => {
     expect(err.code).toBe('GH_UNAUTHENTICATED');
   });
 });
-

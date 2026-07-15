@@ -99,11 +99,11 @@ describe('resolveRefRepoPat', () => {
     expect(store.get).not.toHaveBeenCalled();
   });
 
-  it('returns the github PAT for a github URL when prProvider=github', () => {
+  it('does not return the legacy github PAT for a github URL when prProvider=github', () => {
     const profile = makeProfile({ githubPat: 'gh_token', prProvider: 'github' });
     const store = { get: vi.fn().mockReturnValue(profile) };
     const repo = { ...repoBase, sourceProfile: 'duck' };
-    expect(resolveRefRepoPat(repo, store)).toBe('gh_token');
+    expect(resolveRefRepoPat(repo, store)).toBeUndefined();
   });
 
   it('returns the ADO PAT when prProvider=ado', () => {

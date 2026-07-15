@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Logger } from 'pino';
+import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import type {
   BranchDiffConfig,
   BranchFolderContents,
@@ -20,7 +21,6 @@ import type {
   WorktreeManager,
   WorktreeResult,
 } from '../interfaces/worktree-manager.js';
-import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import { agentToolingCachePaths } from '../pods/agent-tooling-cache-paths.js';
 import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
 import { KeyedPromiseQueue } from '../util/keyed-promise-queue.js';
@@ -109,7 +109,7 @@ function git(args: string[], options: { cwd?: string; timeout?: number; maxBuffe
 
 /**
  * Thrown when a git remote operation fails because the daemon either has no
- * PAT for this repo or the PAT it has is rejected by the remote. Distinct
+ * explicit credential for this repo or the credential is rejected by the remote. Distinct
  * from generic git errors so the pod manager can park the pod in
  * `awaiting_input` (operator updates the profile, daemon retries) instead of
  * failing terminally.
@@ -181,7 +181,7 @@ export function classifyGitError(err: unknown, op: string): unknown {
   const isCredential = CREDENTIAL_ERROR_PATTERNS.some((re) => re.test(blob));
   if (!isCredential) return err;
   const service = inferGitService(stderr, cmd);
-    const wrapped = new GitCredentialError(
+  const wrapped = new GitCredentialError(
     service === 'github'
       ? `git ${op} rejected: daemon GitHub CLI authentication is missing or unauthorized. Log in as the daemon service account with gh auth login and resume the pod.`
       : `git ${op} rejected: credentials missing or unauthorized for ${service}. Update the profile PAT (it must have write access to the target repo) and resume the pod.`,
@@ -356,7 +356,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     await fs.mkdir(this.cacheDir, { recursive: true });
     await fs.mkdir(this.worktreeDir, { recursive: true });
 
-    // Update in-memory PAT cache (PAT is never written to the remote URL).
+    // Update in-memory credential cache (credential is never written to the remote URL).
     if (pat) {
       this.patCache.set(bareRepoPath, pat);
     }
@@ -1686,15 +1686,36 @@ export class LocalWorktreeManager implements WorktreeManager {
       cwd: bareRepoPath,
     });
     const cleanUrl = remoteUrl.trim();
+    return this.getAuthUrlForRepo(cleanUrl, bareRepoPath, pat);
+  }
+
+  private async getAuthUrlForRepo(
+    repoUrl: string,
+    bareRepoPath: string,
+    pat?: string,
+  ): Promise<string> {
+    if (this.isGitHubUrl(repoUrl)) {
+      if (!this.githubAuth) {
+        this.logger.warn(
+          { bareRepoPath },
+          'No daemon GitHub auth provider is configured — git push/fetch will fail without credentials.',
+        );
+        return repoUrl;
+      }
+      const credential = await this.githubAuth.resolveCredential();
+      this.patCache.set(bareRepoPath, credential.token);
+      return this.injectCredential(repoUrl, credential.username, credential.token);
+    }
+
     const authPat = pat ?? this.patCache.get(bareRepoPath);
     if (!authPat) {
       this.logger.warn(
         { bareRepoPath },
         'No PAT cached for this repo — git push/fetch will fail without credentials. ' +
-          'Add a GitHub PAT to the profile.',
+          'Add an ADO PAT to the profile if this repo requires authentication.',
       );
     }
-    return authPat ? this.injectPat(cleanUrl, authPat) : cleanUrl;
+    return authPat ? this.injectPat(repoUrl, authPat) : repoUrl;
   }
 
   /** Inject a PAT into an https remote URL: https://host/... → https://x-access-token:PAT@host/...
@@ -1702,7 +1723,15 @@ export class LocalWorktreeManager implements WorktreeManager {
    * compatible with classic PATs too.
    * Strips any existing userinfo first so stale credentials in the stored URL don't double-inject. */
   private injectPat(url: string, pat: string): string {
-    return url.replace(/^https:\/\/([^@]*@)?/, `https://x-access-token:${pat}@`);
+    return this.injectCredential(url, 'x-access-token', pat);
+  }
+
+  private injectCredential(url: string, username: string, password: string): string {
+    return url.replace(/^https:\/\/([^@]*@)?/, `https://${username}:${password}@`);
+  }
+
+  private isGitHubUrl(url: string): boolean {
+    return /^https:\/\/([^@/]+@)?github\.com\//i.test(url);
   }
 
   /** A bare repo is valid if it has been cloned (packed-refs or non-empty refs/). */

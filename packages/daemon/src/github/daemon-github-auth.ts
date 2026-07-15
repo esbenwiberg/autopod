@@ -123,7 +123,10 @@ function mapGhFailure(err: unknown): DaemonGitHubAuthError {
     message?: unknown;
   };
   if (record.code === 'ENOENT') {
-    return new DaemonGitHubAuthError('GitHub CLI (`gh`) is not installed or not on PATH', 'GH_MISSING');
+    return new DaemonGitHubAuthError(
+      'GitHub CLI (`gh`) is not installed or not on PATH',
+      'GH_MISSING',
+    );
   }
   if (record.signal === 'SIGTERM' || record.killed === true) {
     return new DaemonGitHubAuthError('GitHub CLI authentication timed out', 'GH_TIMEOUT');
@@ -149,4 +152,3 @@ function mapGhFailure(err: unknown): DaemonGitHubAuthError {
     'GH_UNAUTHENTICATED',
   );
 }
-

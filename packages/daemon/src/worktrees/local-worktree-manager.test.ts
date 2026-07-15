@@ -1,6 +1,7 @@
 import type { ChildProcess } from 'node:child_process';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import {
   DeletionGuardError,
   GitCredentialError,
@@ -10,6 +11,17 @@ import {
 } from './local-worktree-manager.js';
 
 const logger = pino({ level: 'silent' });
+
+function fakeGitHubAuth(token = 'daemon-gh-token'): DaemonGitHubAuth {
+  return {
+    async resolveCredential() {
+      return { token, username: 'x-access-token' };
+    },
+    async getStatus() {
+      return { available: true, login: 'autopod-dev', setup: 'setup gh auth' };
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Hoist mock fns so they're available inside vi.mock factories
@@ -1245,7 +1257,13 @@ describe('LocalWorktreeManager', () => {
   });
 
   describe('pullBranch', () => {
-    it('uses an explicit profile PAT instead of relying only on the in-memory cache', async () => {
+    it('uses daemon GitHub auth instead of an explicit legacy profile PAT', async () => {
+      manager = new LocalWorktreeManager({
+        cacheDir,
+        worktreeDir,
+        logger,
+        githubAuth: fakeGitHubAuth(),
+      });
       const calls: string[][] = [];
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
@@ -1272,7 +1290,7 @@ describe('LocalWorktreeManager', () => {
       const fetchCall = calls.find((args) => args[0] === 'fetch');
       expect(fetchCall).toEqual([
         'fetch',
-        'https://x-access-token:profile-pat@github.com/org/repo.git',
+        'https://x-access-token:daemon-gh-token@github.com/org/repo.git',
         'feat/security',
       ]);
     });
@@ -1521,7 +1539,13 @@ describe('LocalWorktreeManager', () => {
       expect(cmds.some((c: string) => c.includes('clone --bare'))).toBe(false);
     });
 
-    it('injects PAT into clone URL but resets origin to clean URL', async () => {
+    it('injects daemon GitHub credential into clone URL but resets origin to clean URL', async () => {
+      manager = new LocalWorktreeManager({
+        cacheDir,
+        worktreeDir,
+        logger,
+        githubAuth: fakeGitHubAuth(),
+      });
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
           const cb = resolveCallback(arg3, arg4);
@@ -1546,11 +1570,13 @@ describe('LocalWorktreeManager', () => {
 
       const cloneCmd = cmds.find((c: string) => c.includes('clone --bare'));
       expect(cloneCmd).toBeDefined();
-      expect(cloneCmd).toContain('super-secret-token');
+      expect(cloneCmd).toContain('daemon-gh-token');
+      expect(cloneCmd).not.toContain('super-secret-token');
 
       const setUrlCmd = cmds.find((c: string) => c.includes('remote set-url'));
       expect(setUrlCmd).toBeDefined();
       expect(setUrlCmd).not.toContain('super-secret-token');
+      expect(setUrlCmd).not.toContain('daemon-gh-token');
     });
 
     it('falls back to local baseBranch ref when remote fetch fails (fork scenario)', async () => {

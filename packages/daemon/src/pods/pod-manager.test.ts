@@ -2034,12 +2034,7 @@ describe('PodManager', () => {
       expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
     });
 
-    // Regression: approval-time mergeBranch sites used to omit the PAT, so a daemon
-    // restart between worktree create and approval (or a recovery pod that mounts an
-    // existing worktree) left the in-memory PAT cache cold. ADO clone URLs of the
-    // form https://<org>@dev.azure.com/... then prompted for a password, and with
-    // GIT_TERMINAL_PROMPT=0 the push died with "could not read Password".
-    it('forwards profile PAT into mergeBranch on approval-time PR creation retry', async () => {
+    it('does not forward legacy GitHub PAT into mergeBranch on approval-time PR creation retry', async () => {
       const ctx = createTestContext(undefined, { githubPat: 'ghp_test_pat_12345' });
       const manager = createPodManager(ctx.deps);
 
@@ -2056,11 +2051,11 @@ describe('PodManager', () => {
       await manager.approveSession(pod.id);
 
       expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({ pat: 'ghp_test_pat_12345' }),
+        expect.objectContaining({ pat: undefined }),
       );
     });
 
-    it('forwards profile PAT into mergeBranch on approval-time fallback push (no prManager)', async () => {
+    it('does not forward legacy GitHub PAT into mergeBranch on approval-time fallback push', async () => {
       const ctx = createTestContext(undefined, { githubPat: 'ghp_test_pat_67890' });
       ctx.deps.prManagerFactory = undefined;
       const manager = createPodManager(ctx.deps);
@@ -2078,7 +2073,7 @@ describe('PodManager', () => {
       await manager.approveSession(pod.id);
 
       expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({ pat: 'ghp_test_pat_67890' }),
+        expect.objectContaining({ pat: undefined }),
       );
     });
 
@@ -7500,7 +7495,7 @@ describe('PodManager', () => {
       const result = await manager.resumePod(fix.id);
 
       expect(result).toEqual({ action: 'retry-fix-delivery' });
-      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith('/tmp/worktree/fix', 'test-pat');
+      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith('/tmp/worktree/fix', undefined);
       expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalledWith(
         expect.objectContaining({
           worktreePath: '/tmp/worktree/fix',
@@ -7736,7 +7731,7 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).status).toBe('validated');
     });
 
-    it('Path 2: passes the profile PAT when pulling during forced revalidation', async () => {
+    it('Path 2: ignores legacy GitHub PAT when pulling during forced revalidation', async () => {
       const ctx = createTestContext(undefined, { githubPat: 'test-github-pat' });
       const { manager, pod } = setupFailedPod(ctx, {
         validationOverall: 'fail',
@@ -7745,10 +7740,7 @@ describe('PodManager', () => {
 
       await manager.revalidateSession(pod.id, { force: true });
 
-      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith(
-        '/tmp/worktree/abc',
-        'test-github-pat',
-      );
+      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith('/tmp/worktree/abc', undefined);
     });
 
     it('Path 2: forced revalidation without new commits uses validation-only status text', async () => {

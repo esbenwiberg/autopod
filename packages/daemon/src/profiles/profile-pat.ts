@@ -12,5 +12,5 @@ import type { Profile } from '@autopod/shared';
  */
 export function selectGitPat(profile: Profile): string | undefined {
   if (profile.prProvider === 'ado') return profile.adoPat ?? undefined;
-  return profile.adoPat ?? undefined;
+  return undefined;
 }
