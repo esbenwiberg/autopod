@@ -820,6 +820,16 @@ function isReviewInfrastructureOnlyFailure(result: ValidationResult): boolean {
   return result.overall === 'fail';
 }
 
+function isRetryableReviewInfrastructureFailure(result: ValidationResult): boolean {
+  if (!isReviewInfrastructureOnlyFailure(result)) return false;
+  if (result.reviewSkipKind === 'review-timeout') return true;
+
+  // Provider-declared invalid requests are deterministic. Re-running the same
+  // build/test/facts/review pipeline cannot repair an unsupported model or old
+  // client, so park for operator action after the first validation pass.
+  return !/invalid_request_error/i.test(result.reviewSkipReason ?? '');
+}
+
 function reviewInfrastructureFailureLabel(result: ValidationResult): string {
   return result.reviewSkipKind === 'review-timeout'
     ? 'Review infrastructure timeout'
@@ -5220,11 +5230,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     };
 
     let result = await runValidation();
+    let retryCount = 0;
     for (let retryIndex = 0; retryIndex < reviewInfrastructureRetryBackoffMs.length; retryIndex++) {
-      if (!isReviewInfrastructureOnlyFailure(result)) break;
+      if (!isRetryableReviewInfrastructureFailure(result)) break;
 
       const delayMs = reviewInfrastructureRetryBackoffMs[retryIndex] ?? 0;
       const retryNumber = retryIndex + 1;
+      retryCount = retryNumber;
       emitActivityStatus(
         podId,
         `Review infrastructure failure — retrying in ${formatRetryDelay(delayMs)} (${retryNumber}/${reviewInfrastructureRetryBackoffMs.length})`,
@@ -5254,7 +5266,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (isReviewInfrastructureOnlyFailure(result)) {
       emitActivityStatus(
         podId,
-        `Review infrastructure failed after ${reviewInfrastructureRetryBackoffMs.length} retries — needs human review`,
+        retryCount === 0
+          ? `${reviewInfrastructureFailureLabel(result)} — needs human review`
+          : `Review infrastructure failed after ${retryCount} retries — needs human review`,
       );
     }
 
