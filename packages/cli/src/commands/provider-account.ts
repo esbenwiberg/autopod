@@ -299,7 +299,13 @@ export function registerProviderAccountCommands(
       await requireAccountProvider(client, id, 'pi');
       console.log(chalk.cyan(`\nStarting Pi login for provider account "${id}" (${provider})...`));
       console.log(chalk.dim('Follow the Pi subscription login flow.\n'));
-      const credentials = await runPiLogin(provider);
+      let credentials: ProviderCredentials;
+      try {
+        credentials = await runPiLogin(provider);
+      } catch (error) {
+        console.error(chalk.red(`\n${error instanceof Error ? error.message : String(error)}`));
+        process.exit(1);
+      }
       await withSpinner(`Saving Pi credentials for "${id}"...`, () =>
         client.updateProviderAccount(id, { credentials }),
       );
