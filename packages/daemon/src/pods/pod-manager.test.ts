@@ -81,17 +81,7 @@ function deferred<T>() {
 }
 
 async function waitForAssertion(assertion: () => void): Promise<void> {
-  let lastError: unknown;
-  for (let i = 0; i < 100; i++) {
-    try {
-      assertion();
-      return;
-    } catch (err) {
-      lastError = err;
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-  }
-  throw lastError;
+  await vi.waitFor(assertion, { timeout: 3_000, interval: 10 });
 }
 
 function mockExecFileSuccess(): void {
