@@ -1,6 +1,6 @@
 import type { ReferenceRepo } from '@autopod/shared';
 import type { Logger } from 'pino';
-import { selectGitPat } from '../profiles/profile-pat.js';
+import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import type { ProfileStore } from '../profiles/profile-store.js';
 
 function deriveMountName(url: string): string {
@@ -40,11 +40,12 @@ export function deriveReferenceRepos(
  * `adoPat` per `prProvider`). Ad-hoc URLs and missing/empty profile PATs
  * fall through to undefined, which the clone path treats as "public/SSH".
  */
-export function resolveRefRepoPat(
+export async function resolveRefRepoPat(
   repo: ReferenceRepo,
   profileStore: Pick<ProfileStore, 'get'>,
+  githubAuth?: DaemonGitHubAuth,
   logger?: Pick<Logger, 'warn'>,
-): string | undefined {
+): Promise<string | undefined> {
   if (!repo.sourceProfile) return undefined;
   const profile = profileStore.get(repo.sourceProfile);
   if (!profile) {
@@ -54,5 +55,6 @@ export function resolveRefRepoPat(
     );
     return undefined;
   }
-  return selectGitPat(profile);
+  if (profile.prProvider === 'ado') return profile.adoPat ?? undefined;
+  return (await githubAuth?.resolveCredential())?.token;
 }

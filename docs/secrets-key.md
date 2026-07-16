@@ -12,7 +12,7 @@ The following SQLite columns in the `profiles` table are encrypted with AES-256-
 |---|---|
 | `provider_credentials` | Anthropic/MAX/Foundry API keys |
 | `ado_pat` | Azure DevOps Personal Access Token |
-| `github_pat` | GitHub Personal Access Token |
+| `github_pat` | Legacy GitHub PAT retained for rollback/rolling-client compatibility; ignored by current GitHub operations |
 | `registry_pat` | Private container registry PAT |
 
 Each ciphertext is stored as `hex(iv):hex(authTag):hex(ciphertext)`. The GCM auth tag covers both the IV and ciphertext, so tampering is detected on decryption.

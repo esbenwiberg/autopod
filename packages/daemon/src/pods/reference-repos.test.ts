@@ -93,20 +93,20 @@ describe('resolveRefRepoPat', () => {
     mountPath: 'repo',
   };
 
-  it('returns undefined when sourceProfile is unset', () => {
+  it('returns undefined when sourceProfile is unset', async () => {
     const store = { get: vi.fn() };
-    expect(resolveRefRepoPat(repoBase, store)).toBeUndefined();
+    expect(await resolveRefRepoPat(repoBase, store)).toBeUndefined();
     expect(store.get).not.toHaveBeenCalled();
   });
 
-  it('does not return the legacy github PAT for a github URL when prProvider=github', () => {
+  it('does not return the legacy github PAT for a github URL when prProvider=github', async () => {
     const profile = makeProfile({ githubPat: 'gh_token', prProvider: 'github' });
     const store = { get: vi.fn().mockReturnValue(profile) };
     const repo = { ...repoBase, sourceProfile: 'duck' };
-    expect(resolveRefRepoPat(repo, store)).toBeUndefined();
+    expect(await resolveRefRepoPat(repo, store)).toBeUndefined();
   });
 
-  it('returns the ADO PAT when prProvider=ado', () => {
+  it('returns the ADO PAT when prProvider=ado', async () => {
     const profile = makeProfile({
       adoPat: 'ado_token',
       githubPat: 'should_not_be_used',
@@ -114,21 +114,25 @@ describe('resolveRefRepoPat', () => {
     });
     const store = { get: vi.fn().mockReturnValue(profile) };
     const repo = { ...repoBase, sourceProfile: 'duck' };
-    expect(resolveRefRepoPat(repo, store)).toBe('ado_token');
+    expect(await resolveRefRepoPat(repo, store)).toBe('ado_token');
   });
 
-  it('warns and returns undefined when the source profile is missing', () => {
+  it('warns and returns undefined when the source profile is missing', async () => {
     const store = { get: vi.fn().mockReturnValue(undefined) };
     const logger = { warn: vi.fn() };
     const repo = { ...repoBase, sourceProfile: 'ghost' };
-    expect(resolveRefRepoPat(repo, store, logger)).toBeUndefined();
+    expect(await resolveRefRepoPat(repo, store, undefined, logger)).toBeUndefined();
     expect(logger.warn).toHaveBeenCalledTimes(1);
   });
 
-  it('returns undefined when the resolved PAT field is empty', () => {
+  it('uses daemon auth instead of the resolved legacy PAT field', async () => {
     const profile = makeProfile({ githubPat: null, prProvider: 'github' });
     const store = { get: vi.fn().mockReturnValue(profile) };
     const repo = { ...repoBase, sourceProfile: 'duck' };
-    expect(resolveRefRepoPat(repo, store)).toBeUndefined();
+    const githubAuth = {
+      resolveCredential: vi.fn(async () => ({ token: 'daemon-token', username: 'x-access-token' })),
+      getStatus: vi.fn(),
+    };
+    expect(await resolveRefRepoPat(repo, store, githubAuth)).toBe('daemon-token');
   });
 });

@@ -2141,11 +2141,9 @@ public struct ProfileEditorView: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(.blue.opacity(0.15), lineWidth: 0.5))
 
-        patRow("GitHub PAT", value: $profile.githubPat, expiresAt: $profile.githubPatExpiresAt,
-               expiryStatus: profile.githubPatExpiryStatus, isSet: profile.hasGithubPat,
-               isInherited: inheritedFields.contains("githubPat"),
-               isExpiryInherited: inheritedFields.contains("githubPatExpiresAt"),
-               help: "Personal access token for GitHub — needed for PR creation and private repo cloning.")
+        Text("GitHub uses the daemon service account's GitHub CLI login. Configure it on the daemon host with `sudo -u <daemon-user> gh auth login --hostname github.com --git-protocol https`.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         patRow("ADO PAT", value: $profile.adoPat, expiresAt: $profile.adoPatExpiresAt,
                expiryStatus: profile.adoPatExpiryStatus, isSet: profile.hasAdoPat,
                isInherited: inheritedFields.contains("adoPat"),

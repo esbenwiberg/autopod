@@ -115,12 +115,18 @@ describe('WarmImageMaintenanceJob', () => {
     vi.useRealTimers();
   });
 
-  it('builds stale sandbox profiles with stored profile credentials', async () => {
+  it('builds stale sandbox profiles with daemon GitHub credentials', async () => {
     const profile = mockProfile({
       githubPat: 'ghp_secret',
       registryPat: 'registry_secret',
     });
-    const deps = createDeps([profile]);
+    const deps = {
+      ...createDeps([profile]),
+      githubAuth: {
+        resolveCredential: vi.fn(async () => ({ token: 'daemon-gh-token', username: 'x-access-token' })),
+        getStatus: vi.fn(),
+      },
+    };
     const job = createWarmImageMaintenanceJob(deps);
 
     const result = await job.runOnce();
@@ -128,7 +134,7 @@ describe('WarmImageMaintenanceJob', () => {
     expect(result.built).toBe(1);
     expect(result.failed).toBe(0);
     expect(deps.imageBuilder.buildWarmImage).toHaveBeenCalledWith(profile, {
-      gitPat: 'ghp_secret',
+      gitPat: 'daemon-gh-token',
       registryPat: 'registry_secret',
     });
   });

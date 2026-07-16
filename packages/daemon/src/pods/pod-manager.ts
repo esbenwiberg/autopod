@@ -99,7 +99,6 @@ import type {
   ValidationEngine,
   WorktreeManager,
 } from '../interfaces/index.js';
-import { selectGitPat } from '../profiles/index.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { assertNoExpiredPat } from '../profiles/pat-expiry.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
@@ -193,6 +192,7 @@ import {
 } from './state-machine.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
 import type { ValidationRepository } from './validation-repository.js';
+import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import {
   buildBashrcHintBlock,
   buildWorkspaceToolsDoc,
@@ -1231,6 +1231,8 @@ export interface PodManagerDependencies {
   validationRepo?: ValidationRepository;
   progressEventRepo?: ProgressEventRepository;
   profileStore: ProfileStore;
+  /** Canonical credential source for every GitHub operation. Legacy profile PATs are ignored. */
+  githubAuth?: DaemonGitHubAuth;
   providerAccountStore?: ProviderAccountStore;
   eventBus: EventBus;
   containerManagerFactory: ContainerManagerFactory;
@@ -1725,6 +1727,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   } = deps;
   const reviewInfrastructureRetryBackoffMs =
     deps.reviewInfrastructureRetryBackoffMs ?? REVIEW_INFRA_RETRY_BACKOFF_MS;
+
+  async function resolveGitCredential(profile: Profile): Promise<string | undefined> {
+    if (profile.prProvider === 'ado') return profile.adoPat ?? undefined;
+    return (await deps.githubAuth?.resolveCredential())?.token;
+  }
 
   function assertSandboxAgentStreamingExecSupported(
     profile: Pick<Profile, 'name'>,
@@ -2894,7 +2901,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const rebaseResult = await worktreeManager.rebaseOntoBase({
             worktreePath,
             baseBranch,
-            pat: selectGitPat(profile),
+            pat: await resolveGitCredential(profile),
           });
 
           if (!rebaseResult.rebased) {
@@ -2915,13 +2922,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           if (!rebaseResult.alreadyUpToDate) {
             await worktreeManager.pushBranch(worktreePath, branch, {
               force: true,
-              pat: selectGitPat(profile),
+              pat: await resolveGitCredential(profile),
             });
             branchPushed = true;
             emitActivityStatus(podId, 'Rebased fix branch pushed');
           } else {
             await worktreeManager.pushBranch(worktreePath, branch, {
-              pat: selectGitPat(profile),
+              pat: await resolveGitCredential(profile),
             });
             branchPushed = true;
             emitActivityStatus(podId, 'Fix branch pushed');
@@ -2992,7 +2999,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const rebaseResult = await worktreeManager.rebaseOntoBase({
       worktreePath: pod.worktreePath,
       baseBranch,
-      pat: selectGitPat(profile),
+      pat: await resolveGitCredential(profile),
     });
 
     const freshPod = podRepo.getOrThrow(podId);
@@ -3156,7 +3163,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               const result = await worktreeManager.rebaseOntoBase({
                 worktreePath,
                 baseBranch,
-                pat: selectGitPat(profile),
+                pat: await resolveGitCredential(profile),
               });
               if (!result.rebased) {
                 const blockReason = formatRebaseConflictReason(baseBranch, result.conflicts);
@@ -3173,7 +3180,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               if (!result.alreadyUpToDate) {
                 await worktreeManager.pushBranch(worktreePath, branch, {
                   force: true,
-                  pat: selectGitPat(profile),
+                  pat: await resolveGitCredential(profile),
                 });
                 logger.info(
                   { podId, baseBranch },
@@ -4375,10 +4382,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const pod = podRepo.getOrThrow(podId);
     const profile = profileStore.get(pod.profileName);
 
-    const pat = service === 'github' ? profile.githubPat : profile.adoPat;
+    const pat =
+      service === 'github'
+        ? (await deps.githubAuth?.resolveCredential())?.token
+        : profile.adoPat;
     if (!pat) {
       throw new AutopodError(
-        `No ${service} PAT configured in profile '${pod.profileName}'. Add one via ap profile update.`,
+        service === 'github'
+          ? `Daemon GitHub CLI authentication is unavailable for profile '${pod.profileName}'.`
+          : `No ADO PAT configured in profile '${pod.profileName}'. Add one via ap profile update.`,
         'MISSING_CREDENTIAL',
         400,
       );
@@ -5059,7 +5071,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         worktreePath: pod.worktreePath,
         branch: baseBranch,
         sourceRef: `refs/heads/${baseBranch}`,
-        pat: selectGitPat(profile),
+        pat: await resolveGitCredential(profile),
       });
       if (result.created) {
         emitActivityStatus(pod.id, `Base branch published: ${baseBranch}`);
@@ -5101,7 +5113,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
 
     const baseBranch = resolvePrBaseBranch(pod, profile);
-    const pat = selectGitPat(profile);
+    const pat = await resolveGitCredential(profile);
     try {
       await worktreeManager.mergeBranch({
         worktreePath: pod.worktreePath,
@@ -6188,7 +6200,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               branch: pod.branch,
               baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
               startBranch: pod.startBranch ?? undefined,
-              pat: selectGitPat(profile),
+              pat: await resolveGitCredential(profile),
               sessionId: pod.id,
             });
             worktreePath = result.worktreePath;
@@ -6860,7 +6872,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
           for (const repo of referenceRepos) {
             const destPath = `/repos/${repo.mountPath}`;
-            const refPat = resolveRefRepoPat(repo, profileStore, logger);
+            const refPat = await resolveRefRepoPat(repo, profileStore, deps.githubAuth, logger);
             try {
               if (refPat) {
                 // Use a git credential helper script to avoid embedding the PAT in the
@@ -8170,7 +8182,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             emitActivityStatus(podId, 'Pushing artifact branch…');
             const tempWorktreeParent = path.join(dataDir, 'artifact-worktrees');
             await mkdir(tempWorktreeParent, { recursive: true });
-            const pat = selectGitPat(profile);
+            const pat = await resolveGitCredential(profile);
             const worktreeResult = await worktreeManager.create({
               repoUrl: profile.repoUrl,
               branch: repoBranch,
@@ -8445,7 +8457,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // updated profile PAT.
         if (payload.source === 'host_push') {
           const profile = profileStore.get(pod.profileName);
-          const pat = selectGitPat(profile);
+          const pat = await resolveGitCredential(profile);
           if (!pat) {
             throw new AutopodError(
               `Profile '${pod.profileName}' still has no PAT for ${payload.service}. Add the ${payload.service === 'github' ? 'githubPat' : 'adoPat'} to the profile (must have write access to the target repo) and try again.`,
@@ -8895,7 +8907,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const useForce = forceWithLeaseAllowances.has(podId);
           try {
             await worktreeManager.pushBranch(worktreePath, branch, {
-              pat: selectGitPat(approveProfile),
+              pat: await resolveGitCredential(approveProfile),
               ...(useForce ? { force: true } : {}),
             });
             forceWithLeaseAllowances.delete(podId);
@@ -8920,7 +8932,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const rebaseResult = await worktreeManager.rebaseOntoBase({
             worktreePath,
             baseBranch: mergeBaseBranch,
-            pat: selectGitPat(approveProfile),
+            pat: await resolveGitCredential(approveProfile),
           });
 
           if (!rebaseResult.rebased) {
@@ -8944,7 +8956,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             try {
               await worktreeManager.pushBranch(worktreePath, branch, {
                 force: true,
-                pat: selectGitPat(approveProfile),
+                pat: await resolveGitCredential(approveProfile),
               });
               emitActivityStatus(podId, 'Rebased branch pushed');
             } catch (pushErr) {
@@ -9051,7 +9063,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             targetBranch: pod.branch,
             // Pass the PAT explicitly — approval retry runs post-container, so the
             // in-memory PAT cache may be cold after a daemon restart.
-            pat: selectGitPat(retryProfile),
+            pat: await resolveGitCredential(retryProfile),
             // Post-container retry: sync-back already happened (or failed silently) upstream;
             // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
             maxDeletions: 0,
@@ -9158,7 +9170,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             targetBranch: pod.branch,
             // Pass the PAT explicitly — fallback push runs post-container, so the
             // in-memory PAT cache may be cold after a daemon restart.
-            pat: selectGitPat(profile),
+            pat: await resolveGitCredential(profile),
             // Post-container fallback push: don't let a stale worktree commit a phantom mass-delete.
             maxDeletions: 0,
             podTask: pod.task,
@@ -9666,7 +9678,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               // Pass the PAT explicitly — workspace pods auto-push on container exit,
               // possibly hours/days after the worktree was created. The in-memory PAT
               // cache may be cold after a daemon restart in between.
-              pat: selectGitPat(pushScanProfile),
+              pat: await resolveGitCredential(pushScanProfile),
               maxDeletions: workspaceSyncOk ? 100 : 0,
               commitMessage,
             });
@@ -9850,7 +9862,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
 
         await worktreeManager.pushBranch(pod.worktreePath, pod.branch, {
-          pat: selectGitPat(profile),
+          pat: await resolveGitCredential(profile),
         });
 
         const headAfter = await worktreeManager
@@ -10562,7 +10574,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 // restart or for recovery pods that mount an existing worktree without
                 // re-warming via create(). Without this, ADO URLs of the form
                 // https://<org>@dev.azure.com/... cause git to prompt for a password.
-                pat: selectGitPat(profile),
+                pat: await resolveGitCredential(profile),
                 maxDeletions: validationSyncOk ? 100 : 0,
                 podTask: pod.task,
                 profile,
@@ -10904,7 +10916,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       try {
         const pullResult = await worktreeManager.pullBranch(
           pod.worktreePath,
-          selectGitPat(profile),
+          await resolveGitCredential(profile),
         );
         newCommits = pullResult.newCommits;
       } catch (err) {
@@ -11191,7 +11203,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 targetBranch: s2.branch,
                 // Pass the PAT explicitly — revalidation often runs after a daemon restart,
                 // when the in-memory PAT cache for this bare repo is cold.
-                pat: selectGitPat(profile),
+                pat: await resolveGitCredential(profile),
                 maxDeletions: 0,
                 podTask: pod.task,
                 profile,
@@ -12180,7 +12192,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const rebaseResult = await worktreeManager.rebaseOntoBase({
         worktreePath: pod.worktreePath,
         baseBranch,
-        pat: selectGitPat(profile),
+        pat: await resolveGitCredential(profile),
       });
 
       if (rebaseResult.alreadyUpToDate) {
@@ -12552,7 +12564,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, 'Resume: checking remote fix branch before retry…');
         const validated = transition(pod, 'validated', { mergeBlockReason: null });
         try {
-          await worktreeManager.pullBranch(pod.worktreePath, selectGitPat(profile));
+          await worktreeManager.pullBranch(pod.worktreePath, await resolveGitCredential(profile));
         } catch (err) {
           parkFixPodDeliveryFailure(podRepo.getOrThrow(podId), err);
           return { action: 'retry-fix-delivery' };

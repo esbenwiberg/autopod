@@ -108,7 +108,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
           console.log(`${chalk.bold('Extends:')}    ${data.extends}`);
         }
         const patExpiries = [
-          hasGithubPat(data) ? `GitHub ${data.githubPatExpiresAt ?? '(no expiry)'}` : null,
           hasAdoPat(data) ? `ADO ${data.adoPatExpiresAt ?? '(no expiry)'}` : null,
           hasRegistryPat(data) ? `Registry ${data.registryPatExpiresAt ?? '(no expiry)'}` : null,
         ].filter(Boolean);
@@ -207,7 +206,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         mcpServers: [],
         claudeMdSections: [],
         extends: null,
-        githubPatExpiresAt: null,
         adoPatExpiresAt: null,
         registryPatExpiresAt: null,
         providerAccountId: null,
@@ -256,6 +254,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         hasAdoPat: _hap,
         hasRegistryPat: _hrp,
         githubPat: _gp,
+        githubPatExpiresAt: _gpe,
         adoPat: _ap,
         registryPat: _rp,
         ...editable
@@ -654,10 +653,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
 type ProfileWithOptionalPresence = Profile &
   Partial<Pick<PublicProfile, 'hasGithubPat' | 'hasAdoPat' | 'hasRegistryPat'>>;
 
-function hasGithubPat(profile: ProfileWithOptionalPresence): boolean {
-  return profile.hasGithubPat ?? profile.githubPat !== null;
-}
-
 function hasAdoPat(profile: ProfileWithOptionalPresence): boolean {
   return profile.hasAdoPat ?? profile.adoPat !== null;
 }
@@ -675,7 +670,10 @@ function prepareProfileEditUpdates(edited: Record<string, unknown>): Record<stri
     ...updates
   } = edited;
 
-  for (const field of ['githubPat', 'adoPat', 'registryPat'] as const) {
+  delete updates.githubPat;
+  delete updates.githubPatExpiresAt;
+
+  for (const field of ['adoPat', 'registryPat'] as const) {
     if (typeof updates[field] !== 'string' || updates[field].length === 0) {
       delete updates[field];
     }

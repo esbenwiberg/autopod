@@ -1,4 +1,5 @@
 import type { Profile } from '@autopod/shared';
+import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import { parseAdoRepoUrl } from '../worktrees/ado-pr-manager.js';
 import { parseGitHubRepoUrl } from '../worktrees/pr-manager.js';
 import { AdoIssueClient } from './ado-issue-client.js';
@@ -21,7 +22,10 @@ export interface IssueClient {
   addComment(issueId: string, body: string): Promise<void>;
 }
 
-export function createIssueClient(profile: Profile): IssueClient {
+export async function createIssueClient(
+  profile: Profile,
+  githubAuth?: DaemonGitHubAuth,
+): Promise<IssueClient> {
   if (!profile.repoUrl) {
     throw new Error(
       `Profile '${profile.name}' has no repoUrl — cannot create an issue client for artifact-mode profiles`,
@@ -29,7 +33,9 @@ export function createIssueClient(profile: Profile): IssueClient {
   }
   if (profile.prProvider === 'github') {
     const { owner, repo } = parseGitHubRepoUrl(profile.repoUrl);
-    return new GitHubIssueClient({ owner, repo, pat: profile.githubPat ?? '' });
+    const credential = await githubAuth?.resolveCredential();
+    if (!credential) throw new Error('Daemon GitHub authentication is not configured');
+    return new GitHubIssueClient({ owner, repo, pat: credential.token });
   }
   const { orgUrl, project } = parseAdoRepoUrl(profile.repoUrl);
   return new AdoIssueClient({ orgUrl, project, pat: profile.adoPat ?? '' });

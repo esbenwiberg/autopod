@@ -24,6 +24,7 @@ import { createPodTokenIssuer } from './crypto/pod-tokens.js';
 import { createDbBackupManager } from './db/backup.js';
 import { createDatabase } from './db/connection.js';
 import { runMigrations } from './db/migrate.js';
+import { GhCliDaemonGitHubAuth } from './github/daemon-github-auth.js';
 import type {
   WarmImageMaintenanceJob,
   WarmImageMaintenanceScope,
@@ -78,7 +79,7 @@ import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
-import { GhPrManager, GitHubApiPrManager } from './worktrees/pr-manager.js';
+import { GhPrManager } from './worktrees/pr-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -151,6 +152,7 @@ const PINO_BASE_OPTIONS = {
 const logger = IS_DEV
   ? pino(PINO_BASE_OPTIONS, (await import('pino-pretty')).build({ colorize: true }))
   : pino(PINO_BASE_OPTIONS);
+const githubAuth = new GhCliDaemonGitHubAuth();
 
 // Node's `fetch` (undici) calls `performance.mark()` per request for the
 // Resource Timing API. Over a long-running daemon (PR polling, issue watcher,
@@ -335,7 +337,7 @@ function parseWarmImageMaintenanceScope(value: string | undefined): WarmImageMai
 
 const authModule: AuthModule = createConfiguredAuthModule();
 
-const worktreeManager = new LocalWorktreeManager({ logger, llmDeps });
+const worktreeManager = new LocalWorktreeManager({ logger, llmDeps, githubAuth });
 
 const MOCK_DOCKER = process.env.AUTOPOD_MOCK_DOCKER === 'true';
 
@@ -482,6 +484,7 @@ if (warmImageMaintenanceEnabled) {
       logger: logger.child({ component: 'warm-image-maintenance' }),
       intervalMs,
       scope,
+      githubAuth,
     });
     logger.info({ intervalMs, scope }, 'Warm-image maintenance configured');
   }
@@ -657,9 +660,6 @@ function prManagerFactory(
       return null;
     }
   }
-  if (profile.githubPat) {
-    return new GitHubApiPrManager({ pat: profile.githubPat, logger, llmDeps });
-  }
   return ghPrManager;
 }
 
@@ -675,6 +675,7 @@ podManager = createPodManager({
   validationRepo,
   progressEventRepo,
   profileStore,
+  githubAuth,
   providerAccountStore,
   eventBus,
   eventRepo,
@@ -723,10 +724,10 @@ function makeActionEngine(profile: import('@autopod/shared').Profile) {
     getSecret: (ref: string) => {
       const envVal = process.env[ref];
       if (envVal) return envVal;
-      if (ref === 'github-pat' || ref === 'GITHUB_TOKEN') return profile.githubPat ?? undefined;
       if (ref === 'ado-pat' || ref === 'ADO_PAT') return profile.adoPat ?? undefined;
       return undefined;
     },
+    getGitHubToken: async () => (await githubAuth.resolveCredential()).token,
   });
 }
 
@@ -830,6 +831,7 @@ const issueWatcherService = createIssueWatcherService({
   safetyEventsRepo,
   logger,
   pollIntervalMs: ISSUE_WATCHER_POLL_INTERVAL,
+  githubAuth,
 });
 issueWatcherService.start();
 
@@ -854,6 +856,7 @@ const app = await createServer({
   podQueue,
   maxConcurrency: MAX_CONCURRENCY,
   imageBuilder,
+  githubAuth,
   actionRegistry,
   actionAuditRepo,
   sessionTokenIssuer,

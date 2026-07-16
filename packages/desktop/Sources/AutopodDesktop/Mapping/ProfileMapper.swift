@@ -297,11 +297,9 @@ public enum ProfileMapper {
     if let v = profile.mergePollIntervalSec { d["mergePollIntervalSec"] = v }
     else { d["mergePollIntervalSec"] = NSNull() }
     if let v = profile.containerMemoryGb { d["containerMemoryGb"] = v }
-    if let v = profile.githubPat { d["githubPat"] = v }
     if let v = profile.adoPat { d["adoPat"] = v }
     if let v = profile.openrouterApiKey { d["openrouterApiKey"] = v }
     if let v = profile.registryPat { d["registryPat"] = v }
-    d["githubPatExpiresAt"] = profile.githubPatExpiresAt ?? NSNull()
     d["adoPatExpiresAt"] = profile.adoPatExpiresAt ?? NSNull()
     d["registryPatExpiresAt"] = profile.registryPatExpiresAt ?? NSNull()
     if let v = profile.extendsProfile { d["extends"] = v }

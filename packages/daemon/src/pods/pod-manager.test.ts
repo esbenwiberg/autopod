@@ -730,6 +730,10 @@ function createTestContext(
     fixFeedbackRepo,
     eventRepo,
     profileStore,
+    githubAuth: {
+      resolveCredential: vi.fn(async () => ({ token: 'daemon-gh-token', username: 'x-access-token' })),
+      getStatus: vi.fn(async () => ({ available: true, login: 'autopod-dev', setup: 'setup' })),
+    },
     eventBus,
     containerManagerFactory: { get: vi.fn(() => containerManager) },
     worktreeManager,
@@ -2051,7 +2055,7 @@ describe('PodManager', () => {
       await manager.approveSession(pod.id);
 
       expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({ pat: undefined }),
+        expect.objectContaining({ pat: 'daemon-gh-token' }),
       );
     });
 
@@ -2073,7 +2077,7 @@ describe('PodManager', () => {
       await manager.approveSession(pod.id);
 
       expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({ pat: undefined }),
+        expect.objectContaining({ pat: 'daemon-gh-token' }),
       );
     });
 
@@ -7495,7 +7499,7 @@ describe('PodManager', () => {
       const result = await manager.resumePod(fix.id);
 
       expect(result).toEqual({ action: 'retry-fix-delivery' });
-      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith('/tmp/worktree/fix', undefined);
+      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith('/tmp/worktree/fix', 'daemon-gh-token');
       expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalledWith(
         expect.objectContaining({
           worktreePath: '/tmp/worktree/fix',
@@ -7740,7 +7744,7 @@ describe('PodManager', () => {
 
       await manager.revalidateSession(pod.id, { force: true });
 
-      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith('/tmp/worktree/abc', undefined);
+      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith('/tmp/worktree/abc', 'daemon-gh-token');
     });
 
     it('Path 2: forced revalidation without new commits uses validation-only status text', async () => {
@@ -9719,6 +9723,7 @@ describe('updateFromBase', () => {
     await manager.triggerValidation(pod.id);
 
     // The retry path consumed the intent, ran the rebase, and scheduled follow-up
+    await new Promise((r) => setImmediate(r));
     expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalled();
     // Flush setImmediate so follow-up triggerValidation fires
     await new Promise((r) => setImmediate(r));

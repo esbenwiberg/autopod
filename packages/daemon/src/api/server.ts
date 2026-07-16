@@ -11,6 +11,7 @@ import type { ActionRegistry } from '../actions/action-registry.js';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
 import type { ImageBuilder } from '../images/index.js';
+import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import type { AuthModule } from '../interfaces/index.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { IssueWatcherRepository } from '../issue-watcher/issue-watcher-repository.js';
@@ -82,6 +83,7 @@ export interface ServerDependencies {
   podQueue?: PodQueue;
   maxConcurrency?: number;
   imageBuilder?: ImageBuilder;
+  githubAuth?: DaemonGitHubAuth;
   actionRegistry?: ActionRegistry;
   actionAuditRepo?: ActionAuditRepository;
   sessionTokenIssuer?: PodTokenIssuer;
@@ -179,6 +181,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     (profileName) => deps.podManager.refreshNetworkPolicy(profileName),
     deps.imageBuilder,
     deps.providerAccountStore,
+    deps.githubAuth,
   );
   if (deps.providerAccountStore) {
     providerAccountRoutes(app, deps.providerAccountStore, deps.profileStore);
