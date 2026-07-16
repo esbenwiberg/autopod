@@ -3074,21 +3074,6 @@ public struct ProfileEditorView: View {
                 parent: editorPayload?.parent?.mergePollIntervalSec,
                 placeholder: "60")
         // MARK: Credentials
-        case "githubPat":
-            patCard(field,
-                value: Binding(
-                    get: { profile.githubPat ?? "" },
-                    set: { profile.githubPat = $0.isEmpty ? nil : $0 }
-                ),
-                isSet: profile.hasGithubPat)
-        case "githubPatExpiresAt":
-            dateOnlyCard(field,
-                value: Binding(
-                    get: { profile.githubPatExpiresAt ?? "" },
-                    set: { profile.githubPatExpiresAt = $0.isEmpty ? nil : $0 }
-                ),
-                parent: editorPayload?.parent?.githubPatExpiresAt ?? "",
-                status: profile.githubPatExpiryStatus)
         case "adoPat":
             patCard(field,
                 value: Binding(

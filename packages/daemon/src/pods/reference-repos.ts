@@ -35,10 +35,9 @@ export function deriveReferenceRepos(
 }
 
 /**
- * Resolve the PAT to use when cloning a reference repo. When the repo was
- * picked from a profile, we authenticate as that profile (its `githubPat` /
- * `adoPat` per `prProvider`). Ad-hoc URLs and missing/empty profile PATs
- * fall through to undefined, which the clone path treats as "public/SSH".
+ * Resolve the explicit credential for cloning a profile-selected reference
+ * repo. GitHub uses the daemon identity; ADO continues to use the profile PAT.
+ * Ad-hoc URLs remain unauthenticated and may use public/SSH access.
  */
 export async function resolveRefRepoPat(
   repo: ReferenceRepo,
