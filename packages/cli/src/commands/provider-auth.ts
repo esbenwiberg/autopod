@@ -231,10 +231,11 @@ export async function runPiLogin(providerId: PiOAuthProviderId): Promise<Provide
 
     return extractPiCredential(fs.readFileSync(authPath, 'utf-8'), providerId);
   } finally {
-    try {
-      fs.rmSync(piAgentDir, { recursive: true, force: true });
-    } catch {
-      /* best-effort */
-    }
+    fs.rmSync(piAgentDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
   }
 }
