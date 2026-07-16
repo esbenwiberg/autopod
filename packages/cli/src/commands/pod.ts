@@ -168,7 +168,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .command('run <profile> <task>')
     .description('Start a new coding pod')
     .option('-m, --model <model>', 'AI model to use')
-    .option('-r, --runtime <runtime>', 'Runtime (claude or codex)')
+    .option('-r, --runtime <runtime>', 'Runtime (claude, codex, copilot, or pi)')
     .option('--execution-target <target>', executionTargetHelp)
     .option('-b, --branch <branch>', 'Target branch name')
     .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
@@ -208,7 +208,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             profileName: profile,
             task,
             model: opts.model,
-            runtime: opts.runtime as 'claude' | 'codex' | undefined,
+            runtime: opts.runtime as 'claude' | 'codex' | 'copilot' | 'pi' | undefined,
             executionTarget,
             branch: opts.branch,
             branchPrefix: opts.branchPrefix,
@@ -244,7 +244,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('--no-validate', 'Skip validation')
     .option('--validation-suite <suite>', validationSuiteHelp)
     .option('-m, --model <model>', 'AI model to use')
-    .option('-r, --runtime <runtime>', 'Runtime (claude or codex)')
+    .option('-r, --runtime <runtime>', 'Runtime (claude, codex, copilot, or pi)')
     .option('--execution-target <target>', executionTargetHelp)
     .option('-b, --branch <branch>', 'Target branch name')
     .option('--branch-prefix <prefix>', 'Override branch prefix (e.g. hotfix/)')
@@ -341,7 +341,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             profileName: profile,
             task: task ?? '',
             model: opts.model,
-            runtime: opts.runtime as 'claude' | 'codex' | undefined,
+            runtime: opts.runtime as 'claude' | 'codex' | 'copilot' | 'pi' | undefined,
             executionTarget,
             branch: opts.branch,
             branchPrefix: opts.branchPrefix,
@@ -822,7 +822,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     )
     .option('--no-spec-context', 'do not expose --spec folder files as runtime-only context')
     .option('-m, --model <model>', 'AI model to use')
-    .option('-r, --runtime <runtime>', 'runtime (claude | codex)')
+    .option('-r, --runtime <runtime>', 'runtime (claude | codex | copilot | pi)')
     .option('-b, --branch <branch>', 'target branch name')
     .option('--branch-prefix <prefix>', 'override branch prefix (e.g. hotfix/)')
     .option('--start-branch <branch>', 'branch/ref to start from while targeting --base-branch')
@@ -916,7 +916,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
             task: resolvedTask,
             contract,
             model: opts.model,
-            runtime: opts.runtime as 'claude' | 'codex' | undefined,
+            runtime: opts.runtime as 'claude' | 'codex' | 'copilot' | 'pi' | undefined,
             executionTarget,
             branch: opts.branch,
             branchPrefix: opts.branchPrefix,

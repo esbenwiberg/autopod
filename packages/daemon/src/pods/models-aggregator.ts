@@ -39,7 +39,7 @@ const STAGES: ValidationStage[] = [
   'taskReview',
 ];
 
-const RUNTIMES = ['claude', 'codex', 'copilot'] as const;
+const RUNTIMES = ['claude', 'codex', 'copilot', 'pi'] as const;
 
 // ── Cohort clause ──────────────────────────────────────────────────────────────
 

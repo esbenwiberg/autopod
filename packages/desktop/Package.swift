@@ -47,5 +47,10 @@ let package = Package(
             dependencies: ["AutopodUI", "AutopodClient"],
             path: "Tests/AutopodUITests"
         ),
+        .testTarget(
+            name: "AutopodDesktopTests",
+            dependencies: ["AutopodDesktop", "AutopodClient"],
+            path: "Tests/AutopodDesktopTests"
+        ),
     ]
 )

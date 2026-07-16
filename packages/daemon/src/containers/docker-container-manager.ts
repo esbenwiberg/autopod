@@ -193,6 +193,7 @@ export class DockerContainerManager implements ContainerManager {
   private docker: Dockerode;
   private logger: Logger;
   private imagePuller: ImagePuller | null;
+  private streamingExecSeq = 0;
 
   constructor({ docker, logger, imagePuller }: DockerContainerManagerOptions) {
     this.docker = docker ?? new Dockerode();
@@ -862,9 +863,18 @@ export class DockerContainerManager implements ContainerManager {
       ? Object.entries(options.env).map(([k, v]) => `${k}=${v}`)
       : undefined;
 
+    const pidPath = `/tmp/.autopod-stream-exec-${process.pid}-${this.streamingExecSeq++}.pid`;
+    const wrappedCommand = [
+      'sh',
+      '-c',
+      `umask 077; echo $$ > ${pidPath}; exec "$@"`,
+      'autopod-stream-exec',
+      ...command,
+    ];
     const exec = await boundedDockerCall(
       container.exec({
-        Cmd: command,
+        Cmd: wrappedCommand,
+        AttachStdin: options?.stdin === true,
         AttachStdout: true,
         AttachStderr: true,
         ...(options?.cwd ? { WorkingDir: options.cwd } : {}),
@@ -878,7 +888,8 @@ export class DockerContainerManager implements ContainerManager {
       },
     );
 
-    const muxStream = await boundedDockerCall(exec.start({ hijack: true, stdin: false }), {
+    const attachStdin = options?.stdin === true;
+    const muxStream = await boundedDockerCall(exec.start({ hijack: true, stdin: attachStdin }), {
       label: 'exec.start (execStreaming)',
       timeoutMs: DOCKER_CALL_TIMEOUTS.execStart,
       logger: this.logger,
@@ -951,18 +962,29 @@ export class DockerContainerManager implements ContainerManager {
     });
 
     const kill = async () => {
-      // Destroy the mux stream to abort the exec
-      const destroyable = muxStream as NodeJS.ReadableStream & { destroy?: () => void };
-      if (typeof destroyable.destroy === 'function') {
-        destroyable.destroy();
+      try {
+        await this.execInContainer(containerId, ['sh', '-c', terminatePidFileScript(pidPath)], {
+          timeout: 5_000,
+        });
+      } finally {
+        const destroyable = muxStream as NodeJS.ReadableStream & { destroy?: () => void };
+        if (typeof destroyable.destroy === 'function') {
+          destroyable.destroy();
+        }
+        stdoutStream.destroy();
+        stderrStream.destroy();
       }
-      stdoutStream.destroy();
-      stderrStream.destroy();
     };
 
     this.logger.info({ containerId, command: safeCommand }, 'Streaming exec started');
 
-    return { stdout: stdoutStream, stderr: stderrStream, exitCode, kill };
+    return {
+      stdout: stdoutStream,
+      stderr: stderrStream,
+      ...(attachStdin && { stdin: muxStream as unknown as NodeJS.WritableStream }),
+      exitCode,
+      kill,
+    };
   }
 
   async refreshFirewall(containerId: string, script: string): Promise<void> {
@@ -1088,6 +1110,19 @@ interface DemuxWriterContext {
   containerId: string;
   command: string[];
   logger: Logger;
+}
+
+function terminatePidFileScript(pidPath: string): string {
+  return [
+    `pid_file=${pidPath}`,
+    '[ -s "$pid_file" ] || exit 0',
+    'pid=$(cat "$pid_file")',
+    'kill -TERM "$pid" 2>/dev/null || exit 0',
+    'i=0',
+    'while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
+    'kill -KILL "$pid" 2>/dev/null || true',
+    'rm -f "$pid_file"',
+  ].join('; ');
 }
 
 function createGuardedDemuxWriter(

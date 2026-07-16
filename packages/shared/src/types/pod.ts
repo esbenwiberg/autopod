@@ -176,6 +176,7 @@ export interface Pod {
   contract?: SpecContract | null;
   claudeSessionId: string | null;
   codexSessionId: string | null;
+  piSessionId: string | null;
   /**
    * Orthogonal axes describing how this pod is driven and where its output
    * goes. Replaces the legacy `outputMode` enum.

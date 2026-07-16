@@ -217,6 +217,8 @@ enum RuntimeModelOptions {
                 return "Uses the Codex account default; pricing varies"
             case .copilot:
                 return "Controlled by Copilot credentials"
+            case .pi:
+                return "Uses the selected Pi provider subscription; pricing varies"
             }
         }
 
@@ -234,6 +236,8 @@ enum RuntimeModelOptions {
             return model == "auto" || !isClaudeModel(model)
         case .copilot:
             return model == "auto"
+        case .pi:
+            return model == "auto" || model.contains("/")
         }
     }
 
@@ -271,6 +275,22 @@ enum RuntimeModelOptions {
         case .copilot:
             return [
                 RuntimeModelOption(value: "auto", label: "Auto"),
+            ]
+        case .pi:
+            return [
+                RuntimeModelOption(value: "auto", label: "Auto"),
+                RuntimeModelOption(
+                    value: "anthropic/claude-sonnet-4",
+                    label: "Anthropic · Claude Sonnet 4"
+                ),
+                RuntimeModelOption(
+                    value: "openai-codex/gpt-5.3-codex",
+                    label: "OpenAI Codex · GPT-5.3-Codex"
+                ),
+                RuntimeModelOption(
+                    value: "github-copilot/gpt-5.2-codex",
+                    label: "GitHub Copilot · GPT-5.2-Codex"
+                ),
             ]
         }
     }

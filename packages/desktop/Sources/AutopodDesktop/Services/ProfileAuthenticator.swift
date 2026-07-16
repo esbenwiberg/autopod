@@ -6,6 +6,12 @@ import AutopodClient
 /// then patches the profile via the daemon API.
 public final class ProfileAuthenticator: Sendable {
 
+  public enum PiOAuthProvider: String, CaseIterable, Sendable {
+    case anthropic
+    case openAICodex = "openai-codex"
+    case githubCopilot = "github-copilot"
+  }
+
   private let api: DaemonAPI
 
   public init(api: DaemonAPI) {
@@ -303,6 +309,178 @@ public final class ProfileAuthenticator: Sendable {
       "provider": "copilot",
       "token": authToken,
     ]
+  }
+
+  // MARK: - Pi subscriptions
+
+  /// Authenticate one Pi subscription provider. Pi's complete auth bundle is never uploaded.
+  public func authenticatePi(
+    profileName: String,
+    providerId: PiOAuthProvider
+  ) async throws -> String {
+    let authData = try await collectPiAuthData(providerId: providerId)
+    return try await authenticatePi(
+      profileName: profileName,
+      providerId: providerId,
+      authData: authData
+    )
+  }
+
+  /// Separated from Terminal collection so tests can prove malformed credentials never patch.
+  func authenticatePi(
+    profileName: String,
+    providerId: PiOAuthProvider,
+    authData: Data
+  ) async throws -> String {
+    let providerCredentials = try Self.extractPiCredentials(
+      providerId: providerId,
+      authData: authData
+    )
+    _ = try await api.patchProfile(profileName, fields: [
+      "defaultRuntime": "pi",
+      "modelProvider": "pi",
+      "providerCredentials": providerCredentials,
+    ])
+    return "Authenticated Pi subscription with \(Self.piProviderLabel(providerId))"
+  }
+
+  private func collectPiAuthData(providerId: PiOAuthProvider) async throws -> Data {
+    let tag = UUID().uuidString.prefix(8)
+    let agentDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("autopod-pi-auth-\(tag)")
+    let cancellationPath = FileManager.default.temporaryDirectory
+      .appendingPathComponent("autopod-pi-auth-cancel-\(tag)")
+    try FileManager.default.createDirectory(
+      at: agentDir,
+      withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700]
+    )
+    defer {
+      Self.cancelPiLogin(agentDir: agentDir, cancellationPath: cancellationPath)
+    }
+
+    guard let piPath = Self.findExecutable("pi") else {
+      throw AuthError.cliNotFound("pi")
+    }
+
+    let statusPath = agentDir.appendingPathComponent(".auth-status")
+    let script = """
+    #!/bin/bash
+    export PI_CODING_AGENT_DIR="\(agentDir.path)"
+    unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENAI_API_KEY CODEX_ACCESS_TOKEN
+    unset COPILOT_GITHUB_TOKEN GH_TOKEN GITHUB_TOKEN
+    echo ""
+    echo "=== Autopod: Pi \(Self.piProviderLabel(providerId)) Authentication ==="
+    echo "Choose \(providerId.rawValue) in Pi's login flow. Only that provider will be saved."
+    \(providerId == .anthropic ? "echo \"Note: Pi Anthropic OAuth uses billed extra usage, not Claude Code plan usage.\"" : "")
+    echo ""
+    "\(piPath.path)" /login &
+    pi_pid=$!
+    (
+      while [ ! -e "\(cancellationPath.path)" ]; do sleep 0.1; done
+      kill -TERM "$pi_pid" 2>/dev/null || true
+      for _ in {1..10}; do
+        kill -0 "$pi_pid" 2>/dev/null || exit 0
+        sleep 0.1
+      done
+      kill -KILL "$pi_pid" 2>/dev/null || true
+    ) &
+    watcher_pid=$!
+    wait "$pi_pid"
+    status=$?
+    kill "$watcher_pid" 2>/dev/null || true
+    wait "$watcher_pid" 2>/dev/null || true
+    echo "$status" > "\(statusPath.path)"
+    if [ -e "\(cancellationPath.path)" ]; then
+      rm -rf "\(agentDir.path)"
+      rm -f "\(cancellationPath.path)"
+      exit "$status"
+    fi
+    echo ""
+    if [ "$status" -eq 0 ]; then
+      echo "Authentication complete. You can close this window."
+    else
+      echo "Authentication cancelled or failed. You can close this window."
+    fi
+    exit "$status"
+    """
+    let scriptPath = agentDir.appendingPathComponent("auth.sh")
+    try script.write(to: scriptPath, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o700],
+      ofItemAtPath: scriptPath.path
+    )
+    Self.openInTerminal(scriptPath)
+
+    let timeout: TimeInterval = 600
+    let start = Date()
+    while Date().timeIntervalSince(start) < timeout {
+      try await Task.sleep(for: .seconds(2))
+      if FileManager.default.fileExists(atPath: statusPath.path) { break }
+    }
+
+    guard let status = try? String(contentsOf: statusPath, encoding: .utf8)
+      .trimmingCharacters(in: .whitespacesAndNewlines) else {
+      throw AuthError.noCredentials("Pi login did not complete.")
+    }
+    guard status == "0" else {
+      throw AuthError.noCredentials("Pi login was cancelled or failed.")
+    }
+
+    let authPath = agentDir.appendingPathComponent("auth.json")
+    guard let authData = try? Data(contentsOf: authPath) else {
+      throw AuthError.noCredentials("No Pi auth.json found — login may not have completed.")
+    }
+    return authData
+  }
+
+  static func extractPiCredentials(
+    providerId: PiOAuthProvider,
+    authData: Data
+  ) throws -> [String: Any] {
+    guard let auth = try? JSONSerialization.jsonObject(with: authData) as? [String: Any],
+          let credential = auth[providerId.rawValue] as? [String: Any],
+          ["access", "accessToken", "token"].contains(where: {
+            (credential[$0] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+          }) else {
+      throw AuthError.noCredentials(
+        "Pi credentials for \(providerId.rawValue) were missing or malformed."
+      )
+    }
+    return [
+      "provider": "pi",
+      "providerId": providerId.rawValue,
+      "credential": credential,
+    ]
+  }
+
+  static func cancelPiLogin(agentDir: URL, cancellationPath: URL) {
+    // The Terminal process is independent of the Swift task. Its watcher terminates Pi;
+    // wait for the shell's status record before deleting secrets so Pi cannot recreate them.
+    FileManager.default.createFile(atPath: cancellationPath.path, contents: Data())
+    let statusPath = agentDir.appendingPathComponent(".auth-status")
+    var terminationConfirmed = false
+    for _ in 0..<40 {
+      if FileManager.default.fileExists(atPath: statusPath.path) {
+        terminationConfirmed = true
+        break
+      }
+      Thread.sleep(forTimeInterval: 0.05)
+    }
+    try? FileManager.default.removeItem(at: agentDir)
+    // If Terminal has not launched yet, leave the non-secret marker behind. The delayed
+    // script will observe it, kill Pi before it can persist credentials, and remove it.
+    if terminationConfirmed {
+      try? FileManager.default.removeItem(at: cancellationPath)
+    }
+  }
+
+  private static func piProviderLabel(_ providerId: PiOAuthProvider) -> String {
+    switch providerId {
+    case .anthropic: "Anthropic"
+    case .openAICodex: "OpenAI Codex"
+    case .githubCopilot: "GitHub Copilot"
+    }
   }
 
   // MARK: - Types

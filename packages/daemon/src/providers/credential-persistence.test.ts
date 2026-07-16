@@ -6,6 +6,7 @@ import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import {
   persistOpenAiAuthJson,
+  persistPiAuthJson,
   persistRefreshedCredentials,
   refreshAndPersistMaxCredentials,
 } from './credential-persistence.js';
@@ -451,6 +452,35 @@ describe('persistRefreshedCredentials', () => {
     });
     expect(second.credentials.refreshToken).toBe('new-refresh');
     expect(storedCreds.refreshToken).toBe('new-refresh');
+  });
+});
+
+describe('persistPiAuthJson', () => {
+  it('persists only the current owner provider from a multi-provider auth file', async () => {
+    const cm = makeContainerManager(
+      JSON.stringify({
+        anthropic: { accessToken: 'refreshed' },
+        'openai-codex': { accessToken: 'unrelated' },
+      }),
+    );
+    const ps = makeOpenAiProfileStore({
+      credentialOwner: 'owner-profile',
+      ownerCredentials: {
+        provider: 'pi',
+        providerId: 'anthropic',
+        credential: { accessToken: 'original' },
+      },
+    });
+
+    await persistPiAuthJson('ctr-1', cm, ps, 'test-profile', logger);
+
+    expect(ps.update).toHaveBeenCalledWith('owner-profile', {
+      providerCredentials: {
+        provider: 'pi',
+        providerId: 'anthropic',
+        credential: { accessToken: 'refreshed' },
+      },
+    });
   });
 });
 

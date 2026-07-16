@@ -412,6 +412,8 @@ describe('AzureSandboxApiClient', () => {
     expect(String(writeReq.init?.body)).toBe(
       [
         '#!/bin/sh',
+        'umask 077',
+        'echo $$ > "$0.pid"',
         'if [ "$(id -u)" = "0" ]; then',
         "  exec env HOME=/home/autopod USER=autopod LOGNAME=autopod su -m -s /bin/sh autopod -c 'cd /workspace || exit 1\nexec echo hello'",
         'fi',
@@ -443,6 +445,95 @@ describe('AzureSandboxApiClient', () => {
     });
     expect(chunks).toEqual([{ stdout: 'hello' }, { stderr: 'warn' }, { exitCode: 3 }]);
     expect(sockets[0]?.closed).toBe(true);
+  });
+
+  it('sends exec stdin frames over the native WebSocket when requested', async () => {
+    const { client, sockets } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+      socket.emit({ type: 'exit_code', exitCode: 0 });
+    });
+
+    const chunks: SandboxExecChunk[] = [];
+    for await (const chunk of client.execStream('sbx-1', ['cat'], {
+      stdin: true,
+      onStdinWriter: (write) => {
+        write(Buffer.from('hello\n'));
+      },
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(JSON.parse(sockets[0]?.sent[0] ?? '{}')).toEqual({
+      type: 'start',
+      start: {
+        command: expect.stringMatching(/^\/tmp\/\.autopod-execstream-\d+-\d+\.sh$/),
+        environment: { TERM: 'xterm-256color', LANG: 'C.UTF-8' },
+        tty: false,
+        stdin: true,
+        height: 24,
+        width: 80,
+      },
+    });
+
+    expect(JSON.parse(sockets[0]?.sent[1] ?? '{}')).toEqual({
+      type: 'stdin',
+      data: Buffer.from('hello\n').toString('base64'),
+    });
+    expect(chunks).toEqual([{ exitCode: 0 }]);
+  });
+
+  it('cancels a streaming exec by killing its recorded process and closing the socket', async () => {
+    let cancel: (() => Promise<void>) | undefined;
+    const { client, sockets, requests } = makeStreamingClient(
+      (socket) => {
+        socket.onopen?.({});
+      },
+      [...STREAM_SETUP_RESPONSES, { status: 200, body: { stdout: '', stderr: '', exitCode: 0 } }],
+    );
+    const iterator = client
+      .execStream('sbx-1', ['pi', 'rpc'], {
+        stdin: true,
+        onCancelReady: (callback) => {
+          cancel = callback;
+        },
+      })
+      [Symbol.asyncIterator]();
+    const pending = iterator.next();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await cancel?.();
+
+    await expect(pending).rejects.toThrow(/closed before reporting an exit code/);
+    expect(sockets[0]?.closed).toBe(true);
+    const killRequest = requests[2] ?? failRequest();
+    const killBody = JSON.stringify(jsonBody(killRequest));
+    expect(killBody).toMatch(/\.autopod-execstream-\d+-\d+\.sh\.pid/);
+    expect(killBody).toContain('kill -TERM');
+    expect(killBody).toContain('kill -KILL');
+  });
+
+  it('terminates the recorded process when a streaming exec times out', async () => {
+    const { client, sockets, requests } = makeStreamingClient(
+      (socket) => {
+        socket.onopen?.({});
+      },
+      [...STREAM_SETUP_RESPONSES, { status: 200, body: { stdout: '', stderr: '', exitCode: 0 } }],
+    );
+
+    await expect(
+      (async () => {
+        for await (const _chunk of client.execStream('sbx-1', ['pi', 'rpc'], {
+          timeoutMs: 1,
+        })) {
+          // No output is expected before timeout.
+        }
+      })(),
+    ).rejects.toThrow(/timed out/);
+
+    expect(sockets[0]?.closed).toBe(true);
+    const killBody = JSON.stringify(jsonBody(requests[2] ?? failRequest()));
+    expect(killBody).toContain('kill -TERM');
+    expect(killBody).toContain('kill -KILL');
   });
 
   it('fails the exec stream when the socket closes before an exit code', async () => {

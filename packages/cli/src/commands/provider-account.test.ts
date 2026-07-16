@@ -1,3 +1,6 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { Command } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
@@ -10,13 +13,6 @@ vi.mock('ora', () => ({
     fail: vi.fn().mockReturnThis(),
     stop: vi.fn().mockReturnThis(),
   }),
-}));
-
-vi.mock('./provider-auth.js', () => ({
-  extractClaudeOauthToken: vi.fn(() => 'env-token'),
-  runClaudeSetupToken: vi.fn(async () => 'CLAUDE_CODE_OAUTH_TOKEN=setup-token'),
-  runCopilotLogin: vi.fn(async () => 'copilot-token'),
-  runOpenAiCodexLogin: vi.fn(async () => '{"token":"codex"}'),
 }));
 
 function createAccount(overrides: Record<string, unknown> = {}) {
@@ -63,11 +59,23 @@ function createMockClient() {
   } as unknown as AutopodClient;
 }
 
+function installFakePi(scriptBody: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-test-pi-bin-'));
+  const piPath = path.join(dir, 'pi');
+  fs.writeFileSync(piPath, `#!/bin/sh\n${scriptBody}\n`, 'utf-8');
+  fs.chmodSync(piPath, 0o755);
+  return dir;
+}
+
 describe('provider-account commands', () => {
   let program: Command;
   let mockClient: AutopodClient;
   let logSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
   const originalClaudeToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const originalPath = process.env.PATH;
+  let tempDirs: string[] = [];
+  let exitSpy: ReturnType<typeof vi.spyOn> | null = null;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -76,10 +84,19 @@ describe('provider-account commands', () => {
     mockClient = createMockClient();
     registerProviderAccountCommands(program, () => mockClient);
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    tempDirs = [];
   });
 
   afterEach(() => {
     logSpy.mockRestore();
+    errorSpy.mockRestore();
+    exitSpy?.mockRestore();
+    exitSpy = null;
+    process.env.PATH = originalPath;
+    for (const dir of tempDirs) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
     if (originalClaudeToken === undefined) {
       process.env.CLAUDE_CODE_OAUTH_TOKEN = undefined;
     } else {
@@ -181,5 +198,128 @@ describe('provider-account commands', () => {
         oauthToken: 'setup-token',
       },
     });
+  });
+
+  it('captures exactly the requested Pi provider into a provider account', async () => {
+    vi.mocked(mockClient.getProviderAccount).mockResolvedValueOnce(
+      createAccount({ id: 'team-pi', provider: 'pi' }),
+    );
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-pi-logs-'));
+    tempDirs.push(logDir);
+    const dirLog = path.join(logDir, 'dir.txt');
+    const modeLog = path.join(logDir, 'mode.txt');
+    const fakeBin = installFakePi(`
+test "$1" = "/login" || exit 2
+test -n "$PI_CODING_AGENT_DIR" || exit 3
+echo "$PI_CODING_AGENT_DIR" > "${dirLog}"
+if ! stat -f "%Lp" "$PI_CODING_AGENT_DIR" > "${modeLog}" 2>/dev/null; then
+  stat -c "%a" "$PI_CODING_AGENT_DIR" > "${modeLog}"
+fi
+cat > "$PI_CODING_AGENT_DIR/auth.json" <<'JSON'
+{"github-copilot":{"accessToken":"selected"},"anthropic":{"accessToken":"unrelated"}}
+JSON
+`);
+    tempDirs.push(fakeBin);
+    process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
+
+    await program.parseAsync([
+      'node',
+      'ap',
+      'provider-account',
+      'auth-pi',
+      'team-pi',
+      'github-copilot',
+    ]);
+
+    expect(mockClient.updateProviderAccount).toHaveBeenCalledWith('team-pi', {
+      credentials: {
+        provider: 'pi',
+        providerId: 'github-copilot',
+        credential: { accessToken: 'selected' },
+      },
+    });
+    expect(fs.readFileSync(modeLog, 'utf-8').trim()).toBe('700');
+    const piDir = fs.readFileSync(dirLog, 'utf-8').trim();
+    expect(fs.existsSync(piDir)).toBe(false);
+  });
+
+  it('leaves provider account credentials unchanged when Pi auth has the wrong provider', async () => {
+    vi.mocked(mockClient.getProviderAccount).mockResolvedValueOnce(
+      createAccount({ id: 'team-pi', provider: 'pi' }),
+    );
+    const fakeBin = installFakePi(`
+mkdir -p "$PI_CODING_AGENT_DIR"
+cat > "$PI_CODING_AGENT_DIR/auth.json" <<'JSON'
+{"anthropic":{"accessToken":"selected"}}
+JSON
+`);
+    tempDirs.push(fakeBin);
+    process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+      throw new Error(`process.exit ${code}`);
+    });
+
+    await expect(
+      program.parseAsync(['node', 'ap', 'provider-account', 'auth-pi', 'team-pi', 'openai-codex']),
+    ).rejects.toThrow('process.exit 1');
+
+    expect(mockClient.updateProviderAccount).not.toHaveBeenCalled();
+  });
+
+  it('leaves provider account credentials unchanged when Pi auth is malformed', async () => {
+    vi.mocked(mockClient.getProviderAccount).mockResolvedValueOnce(
+      createAccount({ id: 'team-pi', provider: 'pi' }),
+    );
+    const fakeBin = installFakePi(`
+mkdir -p "$PI_CODING_AGENT_DIR"
+printf 'not-json' > "$PI_CODING_AGENT_DIR/auth.json"
+`);
+    tempDirs.push(fakeBin);
+    process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+      throw new Error(`process.exit ${code}`);
+    });
+
+    await expect(
+      program.parseAsync(['node', 'ap', 'provider-account', 'auth-pi', 'team-pi', 'anthropic']),
+    ).rejects.toThrow('process.exit 1');
+
+    expect(mockClient.updateProviderAccount).not.toHaveBeenCalled();
+  });
+
+  it('leaves provider account credentials unchanged when Pi login is cancelled', async () => {
+    vi.mocked(mockClient.getProviderAccount).mockResolvedValueOnce(
+      createAccount({ id: 'team-pi', provider: 'pi' }),
+    );
+    const fakeBin = installFakePi('exit 130');
+    tempDirs.push(fakeBin);
+    process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+      throw new Error(`process.exit ${code}`);
+    });
+
+    await expect(
+      program.parseAsync(['node', 'ap', 'provider-account', 'auth-pi', 'team-pi', 'anthropic']),
+    ).rejects.toThrow('process.exit 1');
+
+    expect(mockClient.updateProviderAccount).not.toHaveBeenCalled();
+  });
+
+  it('leaves provider account credentials unchanged when the Pi executable is missing', async () => {
+    vi.mocked(mockClient.getProviderAccount).mockResolvedValueOnce(
+      createAccount({ id: 'team-pi', provider: 'pi' }),
+    );
+    const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-empty-bin-'));
+    tempDirs.push(emptyBin);
+    process.env.PATH = emptyBin;
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+      throw new Error(`process.exit ${code}`);
+    });
+
+    await expect(
+      program.parseAsync(['node', 'ap', 'provider-account', 'auth-pi', 'team-pi', 'anthropic']),
+    ).rejects.toThrow('process.exit 1');
+
+    expect(mockClient.updateProviderAccount).not.toHaveBeenCalled();
   });
 });

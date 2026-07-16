@@ -532,7 +532,7 @@ public enum StackTemplate: String, CaseIterable, Sendable {
 }
 
 public enum RuntimeType: String, CaseIterable, Sendable {
-    case claude, codex, copilot
+    case claude, codex, copilot, pi
 }
 
 public enum ExecutionTarget: String, CaseIterable, Sendable {
@@ -546,7 +546,7 @@ public enum ExecutionTarget: String, CaseIterable, Sendable {
 }
 
 public enum ModelProvider: String, CaseIterable, Sendable {
-    case anthropic, max, openai, foundry, copilot, openrouter
+    case anthropic, max, openai, foundry, copilot, openrouter, pi
 
     public var label: String {
         switch self {
@@ -556,6 +556,7 @@ public enum ModelProvider: String, CaseIterable, Sendable {
         case .foundry:     "Foundry"
         case .copilot:     "Copilot"
         case .openrouter:  "OpenRouter"
+        case .pi:          "Pi Subscription"
         }
     }
 }

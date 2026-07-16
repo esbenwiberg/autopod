@@ -1057,7 +1057,7 @@ public struct ProfileEditorView: View {
                         .frame(width: 210)
                 }
             }
-            fieldRow("Runtime", help: "AI runtime engine — Claude Code, OpenAI Codex, or GitHub Copilot.") {
+            fieldRow("Runtime", help: "AI runtime engine — Claude Code, OpenAI Codex, GitHub Copilot, or Pi.") {
                 Picker("", selection: $profile.defaultRuntime) {
                     ForEach(RuntimeType.allCases, id: \.self) { r in
                         Text(r.rawValue.capitalized).tag(r)
@@ -1107,6 +1107,8 @@ public struct ProfileEditorView: View {
             "Codex model for generation pods. GPT-5.3-Codex is coding-optimized; GPT-5.5 is frontier general reasoning."
         case .copilot:
             "Copilot model selection is controlled by the Copilot provider credentials."
+        case .pi:
+            "Pi supports provider-qualified models from the selected API-key or subscription provider."
         }
     }
 
@@ -1118,6 +1120,8 @@ public struct ProfileEditorView: View {
             "Codex model used for required-facts review and task review. Auto follows the Codex account default."
         case .copilot:
             "Copilot review model follows the provider/runtime configuration."
+        case .pi:
+            "Pi review models are provider-qualified and use the selected Pi provider credentials."
         }
     }
 
@@ -1510,8 +1514,8 @@ public struct ProfileEditorView: View {
             }
         }
 
-        // OAuth/auth buttons for MAX, OpenAI Codex, and Copilot
-        if !isNew && profile.providerAccountId == nil && (profile.modelProvider == .max || profile.modelProvider == .openai || profile.modelProvider == .copilot) {
+        // OAuth/auth buttons for MAX, OpenAI Codex, Copilot, and Pi subscriptions.
+        if !isNew && profile.providerAccountId == nil && (profile.modelProvider == .max || profile.modelProvider == .openai || profile.modelProvider == .copilot || profile.modelProvider == .pi) {
             HStack(spacing: 12) {
                 if profile.modelProvider == .max {
                     Button {
@@ -1548,6 +1552,23 @@ public struct ProfileEditorView: View {
                     }
                     .disabled(onAuthenticate == nil || isAuthenticating)
                     .help("Opens GitHub Copilot login. Token is saved to this profile.")
+                }
+                if profile.modelProvider == .pi {
+                    Menu {
+                        Button("Anthropic") {
+                            startAuth(provider: "pi:anthropic", label: "Pi · Anthropic")
+                        }
+                        Button("OpenAI Codex") {
+                            startAuth(provider: "pi:openai-codex", label: "Pi · OpenAI Codex")
+                        }
+                        Button("GitHub Copilot") {
+                            startAuth(provider: "pi:github-copilot", label: "Pi · GitHub Copilot")
+                        }
+                    } label: {
+                        Label("Authenticate Pi Subscription", systemImage: "person.badge.key")
+                    }
+                    .disabled(onAuthenticate == nil || isAuthenticating)
+                    .help("Opens Pi login with isolated configuration and saves only the selected provider entry.")
                 }
             }
 
@@ -2642,14 +2663,18 @@ public struct ProfileEditorView: View {
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
-                    Button {
-                        startAuth(provider: resolvedProvider, label: providerAuthLabel(resolvedProvider))
-                    } label: {
-                        Label("Authenticate here (break inheritance)", systemImage: "person.crop.circle.badge.plus")
-                            .font(.caption)
+                    if resolvedProvider == "pi" {
+                        piAuthenticationMenu("Authenticate here (break inheritance)")
+                    } else {
+                        Button {
+                            startAuth(provider: resolvedProvider, label: providerAuthLabel(resolvedProvider))
+                        } label: {
+                            Label("Authenticate here (break inheritance)", systemImage: "person.crop.circle.badge.plus")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                     Spacer()
                 }
                 authStatusView
@@ -2664,13 +2689,17 @@ public struct ProfileEditorView: View {
                     Spacer()
                 }
                 if providerNeedsAuth(resolvedProvider) {
-                    Button {
-                        startAuth(provider: resolvedProvider, label: providerAuthLabel(resolvedProvider))
-                    } label: {
-                        Label("Authenticate with \(providerAuthLabel(resolvedProvider))", systemImage: "person.crop.circle.badge.plus")
-                            .font(.callout)
+                    if resolvedProvider == "pi" {
+                        piAuthenticationMenu("Authenticate Pi Subscription")
+                    } else {
+                        Button {
+                            startAuth(provider: resolvedProvider, label: providerAuthLabel(resolvedProvider))
+                        } label: {
+                            Label("Authenticate with \(providerAuthLabel(resolvedProvider))", systemImage: "person.crop.circle.badge.plus")
+                                .font(.callout)
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.bordered)
                     authStatusView
                 }
             } else {
@@ -2684,14 +2713,18 @@ public struct ProfileEditorView: View {
                     Spacer()
                 }
                 if providerNeedsAuth(resolvedProvider) {
-                    Button {
-                        startAuth(provider: resolvedProvider, label: providerAuthLabel(resolvedProvider))
-                    } label: {
-                        Label("Re-authenticate with \(providerAuthLabel(resolvedProvider))", systemImage: "arrow.clockwise")
-                            .font(.caption)
+                    if resolvedProvider == "pi" {
+                        piAuthenticationMenu("Re-authenticate Pi Subscription")
+                    } else {
+                        Button {
+                            startAuth(provider: resolvedProvider, label: providerAuthLabel(resolvedProvider))
+                        } label: {
+                            Label("Re-authenticate with \(providerAuthLabel(resolvedProvider))", systemImage: "arrow.clockwise")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                     authStatusView
                 }
             }
@@ -2708,7 +2741,7 @@ public struct ProfileEditorView: View {
     }
 
     private func providerNeedsAuth(_ provider: String) -> Bool {
-        provider == "max" || provider == "openai" || provider == "copilot"
+        provider == "max" || provider == "openai" || provider == "copilot" || provider == "pi"
     }
 
     private func providerAuthLabel(_ provider: String) -> String {
@@ -2716,8 +2749,31 @@ public struct ProfileEditorView: View {
         case "max":     return "Claude MAX"
         case "openai":  return "OpenAI Pro"
         case "copilot": return "GitHub Copilot"
+        case "pi":      return "Pi Subscription"
         default:        return provider
         }
+    }
+
+    @ViewBuilder
+    private func piAuthenticationMenu(_ title: String) -> some View {
+        Menu {
+            Button("Anthropic") {
+                startAuth(provider: "pi:anthropic", label: "Pi · Anthropic")
+            }
+            Button("OpenAI Codex") {
+                startAuth(provider: "pi:openai-codex", label: "Pi · OpenAI Codex")
+            }
+            Button("GitHub Copilot") {
+                startAuth(provider: "pi:github-copilot", label: "Pi · GitHub Copilot")
+            }
+        } label: {
+            Label(title, systemImage: "person.crop.circle.badge.plus")
+                .font(.caption)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .disabled(onAuthenticate == nil || isAuthenticating)
+        .help("Uses isolated Pi configuration and saves only the selected provider entry.")
     }
 
     @ViewBuilder

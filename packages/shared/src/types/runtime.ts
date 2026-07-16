@@ -2,7 +2,7 @@ import type { FactEvidence } from './contract.js';
 import type { ExecutionTarget } from './profile.js';
 import type { MemoryOutcomeItem, ReviewFeedbackResponseItem } from './task-summary.js';
 
-export type RuntimeType = 'claude' | 'codex' | 'copilot';
+export type RuntimeType = 'claude' | 'codex' | 'copilot' | 'pi';
 
 export interface Runtime {
   type: RuntimeType;

@@ -98,9 +98,9 @@ public struct PerRuntimeAggregate: Decodable, Equatable, Sendable {
     public let escalationRate: Double
 }
 
-/// Runtime engine — exactly 3 values matching the TS RuntimeType union.
+/// Runtime engine matching the TS RuntimeType union.
 public enum ModelsRuntimeKind: String, Decodable, CaseIterable, Sendable {
-    case claude, codex, copilot
+    case claude, codex, copilot, pi
 }
 
 // MARK: - Failure-stage matrix

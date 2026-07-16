@@ -131,3 +131,36 @@ import Testing
             == "Uses the Codex account default; pricing varies"
     )
 }
+
+@Test func piModelsAreProviderQualifiedAndDistinctFromVendorDefaults() {
+    let piOptions = RuntimeModelOptions.options(for: .pi, role: .defaultModel).map(\.value)
+
+    #expect(piOptions == [
+        "auto",
+        "anthropic/claude-sonnet-4",
+        "openai-codex/gpt-5.3-codex",
+        "github-copilot/gpt-5.2-codex",
+    ])
+    #expect(RuntimeModelOptions.fallback(for: .pi, role: .defaultModel) == "auto")
+    #expect(RuntimeModelOptions.fallback(for: .claude, role: .defaultModel) != "auto")
+    #expect(RuntimeModelOptions.options(for: .codex, role: .defaultModel).map(\.value) != piOptions)
+    #expect(RuntimeModelOptions.options(for: .copilot, role: .defaultModel).map(\.value) != piOptions)
+}
+
+@Test func switchingRuntimesPreservesOnlyCompatibleSelections() {
+    #expect(
+        RuntimeModelOptions.normalized(
+            "anthropic/claude-sonnet-4",
+            for: .pi,
+            role: .defaultModel
+        ) == "anthropic/claude-sonnet-4"
+    )
+    #expect(
+        RuntimeModelOptions.normalized("claude-opus-4-8", for: .pi, role: .defaultModel) == "auto"
+    )
+    #expect(
+        RuntimeModelOptions.normalized("anthropic/claude-sonnet-4", for: .claude, role: .defaultModel)
+            == "claude-opus-4-8"
+    )
+    #expect(RuntimeModelOptions.normalized("auto", for: .copilot, role: .defaultModel) == "auto")
+}

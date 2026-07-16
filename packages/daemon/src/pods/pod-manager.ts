@@ -33,6 +33,7 @@ import type {
   ReadinessStatus,
   RequestCredentialPayload,
   ReviewFeedbackResponseItem,
+  Runtime,
   SastResult,
   ScanFinding,
   SetupResult,
@@ -107,6 +108,7 @@ import {
   buildClaudeConfigFiles,
   buildProviderEnv,
   persistOpenAiAuthJson,
+  persistPiAuthJson,
   persistRefreshedCredentials,
 } from '../providers/index.js';
 import type {
@@ -127,6 +129,7 @@ import {
   codexStateDirForPod,
   ensureCodexStateDir,
 } from '../runtimes/codex-state-store.js';
+import type { PiRuntime } from '../runtimes/pi-runtime.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
@@ -1767,6 +1770,61 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
   }
 
+  function primePiRuntimeForResume(
+    pod: Pod,
+    runtime: Runtime,
+    containerId: string,
+    env: Record<string, string> | undefined,
+  ): void {
+    if (pod.runtime !== 'pi') return;
+
+    const piRuntime = runtime as PiRuntime;
+    if (pod.piSessionId) piRuntime.setPiSessionId(pod.id, pod.piSessionId);
+
+    const profile = profileStore.get(pod.profileName);
+    const mcpUrl = `${mcpBaseUrl}/mcp/${pod.id}`;
+    const mcpSessionToken = deps.sessionTokenIssuer?.generate(pod.id);
+    const escalationHeaders = mcpSessionToken
+      ? { Authorization: `Bearer ${mcpSessionToken}` }
+      : undefined;
+    const httpMcpServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers).filter(
+      (server) => server.type !== 'stdio',
+    );
+    const mcpServers: McpServerConfig[] = [
+      { type: 'http', name: 'escalation', url: mcpUrl, headers: escalationHeaders },
+      ...httpMcpServers.map(
+        (server) =>
+          ({
+            type: 'http',
+            name: server.name,
+            url: `${mcpBaseUrl}/mcp-proxy/${encodeURIComponent(server.name)}/${pod.id}`,
+            headers: escalationHeaders,
+          }) satisfies McpServerConfig,
+      ),
+      ...buildCodeIntelligenceServers(profile).map(
+        (server) =>
+          ({
+            type: 'stdio',
+            name: server.name,
+            command: server.command,
+            ...(server.args && { args: server.args }),
+            ...(server.env && { env: server.env }),
+          }) satisfies McpServerConfig,
+      ),
+    ];
+
+    piRuntime.setPiResumeConfig({
+      podId: pod.id,
+      task: '',
+      model: pod.model,
+      workDir: '/workspace',
+      containerId,
+      customInstructions: 'resume',
+      env: env ?? {},
+      mcpServers,
+    });
+  }
+
   async function syncSandboxRuntimeSessionState(podId: string): Promise<void> {
     let pod: Pod;
     try {
@@ -2733,6 +2791,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         startedAt: null,
         completedAt: null,
         claudeSessionId: null,
+        codexSessionId: null,
+        piSessionId: null,
         preSubmitReview: null,
         // report_task_summary is locked-on-first-write in pod-bridge-impl,
         // so the recycled fix pod must drop the prior round's summary to let
@@ -3364,6 +3424,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    *  - `openai` — Codex may rotate/update ~/.codex/auth.json during use;
    *    persist the container's latest auth file back to the owner, then
    *    rewrite it before resume.
+   *  - `pi` — Pi may refresh its selected provider auth entry in auth.json;
+   *    persist the one-entry file before resume, then rewrite it.
    *  - `foundry` (token-auth) — Entra access tokens last ~60-90 minutes,
    *    so for long-running pods the secret file goes stale. Re-acquire via
    *    `getAzureToken` (cached if still valid) and rewrite the secret file.
@@ -3372,7 +3434,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   async function getResumeEnv(pod: Pod): Promise<Record<string, string> | undefined> {
     const profile = profileStore.get(pod.profileName);
     const provider = profile.modelProvider;
-    if (provider !== 'max' && provider !== 'foundry' && provider !== 'openai') return undefined;
+    if (
+      provider !== 'max' &&
+      provider !== 'foundry' &&
+      provider !== 'openai' &&
+      provider !== 'pi'
+    ) {
+      return undefined;
+    }
 
     // Foundry only needs refresh when using bearer-token auth (no static apiKey).
     if (provider === 'foundry') {
@@ -3424,9 +3493,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     }
 
+    if (provider === 'pi' && pod.containerId) {
+      try {
+        await persistPiAuthJson(
+          pod.containerId,
+          containerManagerFactory.get(pod.executionTarget),
+          profileStore,
+          pod.profileName,
+          logger,
+          { providerAccountStore },
+        );
+      } catch (err) {
+        logger.warn(
+          { err, podId: pod.id },
+          'Could not recover Pi auth.json from container before resume',
+        );
+      }
+    }
+
     const result = await buildProviderEnv(profile, pod.id, logger, {
       profileStore,
       providerAccountStore,
+      runtime: pod.runtime,
     });
     rememberMaxCredentialLineage(pod.id, result);
     // Re-write credential files to container in case tokens were rotated.
@@ -3449,7 +3537,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const pod = podRepo.getOrThrow(podId);
     if (!pod.containerId) return;
     const profile = profileStore.get(pod.profileName);
-    if (profile.modelProvider !== 'max' && profile.modelProvider !== 'openai') return;
+    if (
+      profile.modelProvider !== 'max' &&
+      profile.modelProvider !== 'openai' &&
+      profile.modelProvider !== 'pi'
+    ) {
+      return;
+    }
 
     try {
       if (profile.modelProvider === 'max') {
@@ -3462,8 +3556,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           maxCredentialLineageByPod.get(podId),
           { providerAccountStore },
         );
-      } else {
+      } else if (profile.modelProvider === 'openai') {
         await persistOpenAiAuthJson(
+          pod.containerId,
+          containerManagerFactory.get(pod.executionTarget),
+          profileStore,
+          pod.profileName,
+          logger,
+          { providerAccountStore },
+        );
+      } else {
+        await persistPiAuthJson(
           pod.containerId,
           containerManagerFactory.get(pod.executionTarget),
           profileStore,
@@ -7481,6 +7584,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const providerResult = await buildProviderEnv(profile, podId, logger, {
           profileStore,
           providerAccountStore,
+          runtime: pod.runtime,
         });
         rememberMaxCredentialLineage(podId, providerResult);
         const secretEnv: Record<string, string> = {
@@ -7873,6 +7977,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
           const codexContinuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
           events = runtime.resume(podId, codexContinuationPrompt, containerId, secretEnv);
+        } else if (isRecovery && pod.runtime === 'pi' && pod.piSessionId) {
+          emitStatus('Resuming Pi pod…');
+          primePiRuntimeForResume(pod, runtime, containerId, secretEnv);
+          // biome-ignore lint/style/noNonNullAssertion: recovery pods have a worktree
+          const piContinuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
+          events = runtime.resume(podId, piContinuationPrompt, containerId, secretEnv);
         } else if (isRecovery) {
           // Non-Claude/Codex runtime or no session ID — fresh spawn with recovery context
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
@@ -8061,6 +8171,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const sessionUpdate: PodUpdates = {};
             if (sessionPod.runtime === 'claude') sessionUpdate.claudeSessionId = event.sessionId;
             else if (sessionPod.runtime === 'codex') sessionUpdate.codexSessionId = event.sessionId;
+            else if (sessionPod.runtime === 'pi') sessionUpdate.piSessionId = event.sessionId;
             if (Object.keys(sessionUpdate).length > 0) podRepo.update(podId, sessionUpdate);
           } else if (event.type === 'complete') {
             outcome = 'completed';
@@ -8740,6 +8851,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const resumeEnv = await getResumeEnv(pod);
             const runtime = runtimeRegistry.get(pod.runtime);
             if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
+            primePiRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
             const events = runtime.resume(podId, correctionMessage, pod.containerId, resumeEnv);
             const outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
             await persistRuntimeCredentialsForPod(
@@ -8797,6 +8909,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const resumeEnv = await getResumeEnv(pod);
         const runtime = runtimeRegistry.get(pod.runtime);
         if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
+        primePiRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
         const events = runtime.resume(podId, message, pod.containerId, resumeEnv);
         const outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
         await persistRuntimeCredentialsForPod(
@@ -9337,6 +9450,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Resume agent with rejection feedback
         const resumeEnv = await getResumeEnv(pod);
         const runtime = runtimeRegistry.get(pod.runtime);
+        primePiRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
         const events = runtime.resume(podId, rejectionMessage, pod.containerId, resumeEnv);
         const outcome = await this.consumeAgentEvents(
           podId,
@@ -10011,6 +10125,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           pod.taskSummary === null &&
           pod.claudeSessionId === null &&
           pod.codexSessionId === null &&
+          pod.piSessionId === null &&
           pod.prUrl === null;
         const recoveryWorktreePath = failedBeforeAgentWork ? null : (pod.worktreePath ?? null);
 
@@ -10035,6 +10150,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           worktreePath: recoveryWorktreePath,
           claudeSessionId: null,
           codexSessionId: null,
+          piSessionId: null,
           recoveryWorktreePath,
           reworkReason,
           reworkCount: (pod.reworkCount ?? 0) + 1,
@@ -10855,6 +10971,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const resumeEnv = await getResumeEnv(s2);
           const runtime = runtimeRegistry.get(s2.runtime);
           if (!s2.containerId) throw new Error(`Pod ${podId} has no container`);
+          primePiRuntimeForResume(s2, runtime, s2.containerId, resumeEnv);
           const events = runtime.resume(podId, correctionMessage, s2.containerId, resumeEnv);
           const outcome = await this.consumeAgentEvents(podId, events, attempt);
           await persistRuntimeCredentialsForPod(

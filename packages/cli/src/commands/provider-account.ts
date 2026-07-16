@@ -12,9 +12,11 @@ import { withSpinner } from '../output/spinner.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
 import {
   extractClaudeOauthToken,
+  isPiOAuthProviderId,
   runClaudeSetupToken,
   runCopilotLogin,
   runOpenAiCodexLogin,
+  runPiLogin,
 } from './provider-auth.js';
 
 const accountColumns: ColumnDef<PublicProviderAccount>[] = [
@@ -279,6 +281,38 @@ export function registerProviderAccountCommands(
         });
       },
     );
+
+  accounts
+    .command('auth-pi <id> <provider>')
+    .description(
+      'Authenticate a Pi provider account with a subscription provider (anthropic|openai-codex|github-copilot)',
+    )
+    .action(async (id: string, provider: string) => {
+      if (!isPiOAuthProviderId(provider)) {
+        console.error(
+          chalk.red('provider must be one of: anthropic, openai-codex, github-copilot'),
+        );
+        process.exit(1);
+      }
+
+      const client = getClient();
+      await requireAccountProvider(client, id, 'pi');
+      console.log(chalk.cyan(`\nStarting Pi login for provider account "${id}" (${provider})...`));
+      console.log(chalk.dim('Follow the Pi subscription login flow.\n'));
+      let credentials: ProviderCredentials;
+      try {
+        credentials = await runPiLogin(provider);
+      } catch (error) {
+        console.error(chalk.red(`\n${error instanceof Error ? error.message : String(error)}`));
+        process.exit(1);
+      }
+      await withSpinner(`Saving Pi credentials for "${id}"...`, () =>
+        client.updateProviderAccount(id, { credentials }),
+      );
+      console.log(
+        chalk.green(`\nProvider account "${id}" is authenticated with Pi (${provider}).`),
+      );
+    });
 
   accounts
     .command('auth-openai <id>')

@@ -34,7 +34,22 @@ RUN userdel --remove node 2>/dev/null; groupdel node 2>/dev/null; \
 RUN npm install -g pnpm@9
 
 # Agent CLIs
-RUN npm install -g @anthropic-ai/claude-code @openai/codex@0.144.4 @github/copilot
+RUN npm install -g @anthropic-ai/claude-code @openai/codex@0.144.4 @github/copilot @earendil-works/pi-coding-agent@0.80.6
+
+# Trusted Autopod Pi worker extension
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml /opt/autopod/
+COPY tsconfig.base.json /opt/autopod/tsconfig.base.json
+COPY packages/pi-worker/package.json /opt/autopod/packages/pi-worker/package.json
+COPY packages/pi-worker/tsconfig.json /opt/autopod/packages/pi-worker/tsconfig.json
+COPY packages/pi-worker/src /opt/autopod/packages/pi-worker/src
+RUN cd /opt/autopod \
+    && pnpm --filter @autopod/pi-worker install --frozen-lockfile \
+    && pnpm --filter @autopod/pi-worker build \
+    && cd /opt/autopod/packages/pi-worker \
+    && npm install -g . \
+    && test -x /usr/local/bin/pi \
+    && test -f /usr/local/lib/node_modules/@autopod/pi-worker/dist/index.js \
+    && rm -rf node_modules /root/.npm
 
 # Working directory
 WORKDIR /workspace

@@ -124,7 +124,7 @@ describe('computeModelsAnalytics', () => {
     expect(result.summary.mostUsedDailySparkline.every((s) => s.count === 0)).toBe(true);
     expect(result.summary.cheapestDollarPerPrDelta).toEqual({ value: 0, direction: 'flat' });
     expect(result.byModel).toHaveLength(0);
-    expect(result.byRuntime).toHaveLength(3);
+    expect(result.byRuntime).toHaveLength(4);
     expect(result.byRuntime.every((r) => r.podCount === 0)).toBe(true);
     expect(result.failureStageMatrix).toHaveLength(0);
     expect(result.unknownModels).toHaveLength(0);
@@ -279,19 +279,22 @@ describe('computeModelsAnalytics', () => {
     expect(result.summary.mostUsedModel).toBe('<unknown>');
   });
 
-  // ── byRuntime always length 3 ────────────────────────────────────────────
+  // ── byRuntime always length 4 ────────────────────────────────────────────
 
-  it('byRuntime always 3 entries in claude/codex/copilot order', () => {
+  it('byRuntime always includes Pi after the legacy runtimes', () => {
     insertPod(db, { runtime: 'claude' });
+    insertPod(db, { runtime: 'pi' });
 
     const result = computeModelsAnalytics(db, 30);
 
-    expect(result.byRuntime).toHaveLength(3);
+    expect(result.byRuntime).toHaveLength(4);
     expect(result.byRuntime[0]?.runtime).toBe('claude');
     expect(result.byRuntime[1]?.runtime).toBe('codex');
     expect(result.byRuntime[2]?.runtime).toBe('copilot');
+    expect(result.byRuntime[3]?.runtime).toBe('pi');
     expect(result.byRuntime[1]?.podCount).toBe(0);
     expect(result.byRuntime[2]?.podCount).toBe(0);
+    expect(result.byRuntime[3]?.podCount).toBe(1);
     expect(result.byRuntime[1]?.avgQuality).toBeNull();
   });
 

@@ -27,6 +27,24 @@ function usesChatGptAuth(profile: Profile): boolean {
   return creds?.provider === 'openai' && creds.authMode === 'chatgpt';
 }
 
+function assertPiProviderCompatible(profile: Profile): void {
+  if (usesChatGptAuth(profile)) {
+    throw new Error(
+      'Pi runtime cannot use Codex ChatGPT credentials; authenticate this profile with auth-pi',
+    );
+  }
+
+  if (
+    profile.modelProvider === 'max' ||
+    profile.modelProvider === 'copilot' ||
+    profile.modelProvider === 'foundry'
+  ) {
+    throw new Error(
+      `Pi runtime does not support legacy ${profile.modelProvider} provider credentials; use Pi OAuth or a supported API-key provider`,
+    );
+  }
+}
+
 function isClaudeModel(model: string): boolean {
   return CLAUDE_MODEL_ALIASES.has(model) || model.startsWith('claude-');
 }
@@ -37,6 +55,11 @@ export function resolvePodRuntime(
   logger?: Logger,
 ): RuntimeType {
   const runtime = requestedRuntime ?? profile.defaultRuntime ?? 'claude';
+
+  if (runtime === 'pi') {
+    assertPiProviderCompatible(profile);
+    return runtime;
+  }
 
   if (usesOpenAiSurface(profile) && runtime !== 'codex') {
     logger?.warn(

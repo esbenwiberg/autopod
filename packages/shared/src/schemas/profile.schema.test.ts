@@ -263,6 +263,19 @@ describe('createProfileSchema model validation', () => {
     expect(updateProfileSchema.safeParse({ providerAccountId: 'Team OpenAI' }).success).toBe(false);
     expect(updateProfileSchema.safeParse({ providerAccountId: '-openai' }).success).toBe(false);
   });
+
+  it('rejects empty Pi OAuth credentials on profiles', () => {
+    expect(
+      createProfileSchema.safeParse({
+        name: 'empty-pi-auth',
+        providerCredentials: {
+          provider: 'pi',
+          providerId: 'anthropic',
+          credential: {},
+        },
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe('provider account schemas', () => {
@@ -305,6 +318,20 @@ describe('provider account schemas', () => {
       provider: 'max',
     });
     expect(created.name).toBe('Claude Max');
+  });
+
+  it('rejects empty Pi OAuth credentials on provider accounts', () => {
+    expect(
+      createProviderAccountSchema.safeParse({
+        name: 'Empty Pi Auth',
+        provider: 'pi',
+        credentials: {
+          provider: 'pi',
+          providerId: 'anthropic',
+          credential: {},
+        },
+      }).success,
+    ).toBe(false);
   });
 });
 

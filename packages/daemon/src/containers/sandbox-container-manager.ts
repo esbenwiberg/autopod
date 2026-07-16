@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
-import { Readable } from 'node:stream';
+import { Readable, Writable } from 'node:stream';
 import { createGzip } from 'node:zlib';
 import type { Logger } from 'pino';
 import { type Headers as TarHeaders, type Pack as TarPack, pack as tarPack } from 'tar-stream';
@@ -341,17 +341,55 @@ export class SandboxContainerManager implements ContainerManager {
   private streamNative(
     containerId: string,
     command: string[],
-    options: SandboxExecOptions,
+    options: SandboxExecOptions = {},
   ): StreamingExecResult {
     const stdout = new Readable({ read() {} });
     const stderr = new Readable({ read() {} });
     let cancelled = false;
+    let cancelRemote: (() => Promise<void>) | null = null;
+    let resolveCancelReady: ((cancel: () => Promise<void>) => void) | null = null;
+    const cancelReady = new Promise<() => Promise<void>>((resolve) => {
+      resolveCancelReady = resolve;
+    });
+    let writeRemoteStdin: ((data: Buffer) => void) | null = null;
+    const pendingStdin: Buffer[] = [];
+    const stdin =
+      options.stdin === true
+        ? new Writable({
+            write(chunk: Buffer | string, _encoding, callback) {
+              const data = Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk);
+              if (writeRemoteStdin) {
+                writeRemoteStdin(data);
+              } else {
+                pendingStdin.push(data);
+              }
+              callback();
+            },
+          })
+        : undefined;
+    const streamOptions: SandboxExecOptions = {
+      ...options,
+      onCancelReady: (cancel) => {
+        cancelRemote = cancel;
+        resolveCancelReady?.(cancel);
+        resolveCancelReady = null;
+      },
+      onStdinWriter: stdin
+        ? (write) => {
+            writeRemoteStdin = write;
+            while (pendingStdin.length > 0) {
+              const data = pendingStdin.shift();
+              if (data) write(data);
+            }
+          }
+        : undefined,
+    };
 
     const exitCode = (async () => {
       let code = 0;
       try {
         // biome-ignore lint/style/noNonNullAssertion: guarded by caller (execStream defined)
-        for await (const chunk of this.client.execStream!(containerId, command, options)) {
+        for await (const chunk of this.client.execStream!(containerId, command, streamOptions)) {
           if (cancelled) break;
           if (chunk.stdout) stdout.push(chunk.stdout);
           if (chunk.stderr) stderr.push(chunk.stderr);
@@ -370,9 +408,19 @@ export class SandboxContainerManager implements ContainerManager {
     return {
       stdout,
       stderr,
+      stdin,
       exitCode,
       kill: async () => {
         cancelled = true;
+        stdin?.destroy();
+        try {
+          const cancel =
+            cancelRemote ?? (await Promise.race([cancelReady, exitCode.then(() => null)]));
+          if (cancel) await cancel();
+        } finally {
+          stdout.push(null);
+          stderr.push(null);
+        }
       },
     };
   }
@@ -598,6 +646,7 @@ function toSandboxExecOptions(options?: ExecOptions): SandboxExecOptions | undef
     timeoutMs: options.timeout,
     user: options.user,
     env: options.env,
+    stdin: options.stdin,
   };
 }
 

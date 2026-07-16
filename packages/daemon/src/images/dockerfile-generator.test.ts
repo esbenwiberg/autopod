@@ -97,6 +97,21 @@ describe('base image templates', () => {
       expect(content, dockerfile).toContain('@anthropic-ai/claude-code');
       expect(content, dockerfile).toContain('@openai/codex@0.144.4');
       expect(content, dockerfile).toContain('@github/copilot');
+      expect(content, dockerfile).toContain('@earendil-works/pi-coding-agent@0.80.6');
+      expect(content, dockerfile).toContain(
+        'COPY packages/pi-worker/src /opt/autopod/packages/pi-worker/src',
+      );
+      expect(content, dockerfile).toContain(
+        'COPY package.json pnpm-lock.yaml pnpm-workspace.yaml /opt/autopod/',
+      );
+      expect(content, dockerfile).toContain(
+        'pnpm --filter @autopod/pi-worker install --frozen-lockfile',
+      );
+      expect(content, dockerfile).toContain('pnpm --filter @autopod/pi-worker build');
+      expect(content, dockerfile).toContain('npm install -g .');
+      expect(content, dockerfile).not.toContain('&& npm install \\');
+      expect(content, dockerfile).not.toContain('COPY packages/pi-worker/dist');
+      expect(content, dockerfile).not.toContain('@earendil-works/pi-coding-agent@latest');
     }
   });
 });
@@ -258,7 +273,9 @@ describe('generateDockerfile', () => {
       gitCredentials: 'none',
     });
 
-    expect(df).not.toContain('@anthropic-ai/claude-code @openai/codex @github/copilot');
+    expect(df).not.toContain('@anthropic-ai/claude-code');
+    expect(df).not.toContain('@earendil-works/pi-coding-agent');
+    expect(df).not.toContain('@autopod/pi-worker');
   });
 
   it('uses sha256 digest in FROM when imageDigests map is provided', () => {

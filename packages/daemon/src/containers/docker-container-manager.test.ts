@@ -991,18 +991,24 @@ describe('DockerContainerManager', () => {
       muxStream.end();
     });
 
-    it('kill() destroys the mux stream', async () => {
+    it('kill() terminates the remote exec process before destroying the mux stream', async () => {
       const muxStream = new PassThrough();
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
         inspect: vi.fn().mockResolvedValue({ ExitCode: 1 }),
       };
       container.exec.mockResolvedValue(mockExec);
+      const terminate = vi
+        .spyOn(manager, 'execInContainer')
+        .mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
 
       const result = await manager.execStreaming('abc123', ['cmd']);
       await result.kill();
 
-      // Stream should be destroyed
+      const terminateCommand = vi.mocked(terminate).mock.calls[0]?.[1][2] ?? '';
+      expect(terminateCommand).toMatch(/\.autopod-stream-exec-\d+-\d+\.pid/);
+      expect(terminateCommand).toContain('kill -TERM');
+      expect(terminateCommand).toContain('kill -KILL');
       expect(muxStream.destroyed).toBe(true);
     });
 

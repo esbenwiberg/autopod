@@ -358,6 +358,17 @@ public struct AppRootView: View {
                 msg = try await authenticator.authenticateOpenAI(profileName: name)
               case "copilot":
                 msg = try await authenticator.authenticateCopilot(profileName: name)
+              case let value where value.hasPrefix("pi:"):
+                guard let provider = ProfileAuthenticator.PiOAuthProvider(
+                  rawValue: String(value.dropFirst(3))
+                ) else {
+                  completion("Unknown Pi provider")
+                  return
+                }
+                msg = try await authenticator.authenticatePi(
+                  profileName: name,
+                  providerId: provider
+                )
               default:
                 completion("Unknown provider: \(provider)")
                 return

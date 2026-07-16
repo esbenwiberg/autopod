@@ -420,7 +420,7 @@ export interface ModelsAnalyticsResponse {
   summary: ModelsSummary;
   /** Sorted by podCount DESC, ties by model ASC. */
   byModel: PerModelAggregate[];
-  /** Always 3 entries: claude / codex / copilot (in that order). */
+  /** Always 4 entries: claude / codex / copilot / pi (in that order). */
   byRuntime: PerRuntimeAggregate[];
   /** One row per canonical model appearing in byModel (same sort order). */
   failureStageMatrix: FailureStageRow[];

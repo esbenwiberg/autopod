@@ -305,9 +305,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
    * `ExecStreamSession`): the client sends a `{"type":"start","start":{…}}`
    * frame on open, then the server streams `{"type":"stdout"|"stderr","data":
    * "<base64>"}` frames and finishes with `{"type":"exit_code","exitCode":N}`.
-   * `stdin`/`resize` frames exist for interactive TTY sessions but are not
-   * needed for the runtime-stream contract. The reference SDK sends no
-   * `api-version` query parameter on this endpoint.
+   * When requested, stdin is sent with the same base64 `stdin` frames as
+   * interactive TTY sessions. The reference SDK sends no `api-version` query
+   * parameter on this endpoint.
    */
   async *execStream(
     sandboxId: string,
@@ -333,12 +333,25 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       sandboxId,
       streamExecScript(command, options?.cwd),
     );
+    const pidPath = `${scriptPath}.pid`;
 
     const token = await this.getAzureToken(DATA_SCOPE, 'data access token', 'AZURE_AUTH');
     const wsUrl = `${this.dataEndpoint.replace(/^https:/, 'wss:')}${this.sandboxPath(
       sandboxId,
     )}/exec/stream`;
     const socket = this.webSocketFactory(wsUrl, { Authorization: `Bearer ${token.token}` });
+    let cancellation: Promise<void> | null = null;
+    const cancelRemote = () => {
+      cancellation ??= (async () => {
+        try {
+          await this.exec(sandboxId, ['sh', '-c', terminatePidFileScript(pidPath)]);
+        } finally {
+          socket.close();
+        }
+      })();
+      return cancellation;
+    };
+    options?.onCancelReady?.(cancelRemote);
 
     const queue: SandboxExecChunk[] = [];
     let failure: Error | null = null;
@@ -364,7 +377,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
               504,
             ),
           );
-          socket.close();
+          void cancelRemote().catch((err) => {
+            this.logger.warn({ err, sandboxId }, 'Failed to terminate timed-out sandbox exec');
+          });
         }, options.timeoutMs)
       : null;
 
@@ -376,12 +391,18 @@ export class AzureSandboxApiClient implements SandboxApiClient {
             command: scriptPath,
             environment: { TERM: 'xterm-256color', LANG: 'C.UTF-8', ...options?.env },
             tty: false,
-            stdin: false,
+            stdin: options?.stdin === true,
             height: 24,
             width: 80,
           },
         }),
       );
+      if (options?.stdin) {
+        options.onStdinWriter?.((data) => {
+          if (closed) return;
+          socket.send(JSON.stringify({ type: 'stdin', data: data.toString('base64') }));
+        });
+      }
     };
     socket.onmessage = (event) => {
       try {
@@ -1322,7 +1343,7 @@ function streamExecScript(command: string[], cwd?: string): string {
   const lines: string[] = [];
   if (cwd) lines.push(`cd ${shellQuote(cwd)} || exit 1`);
   lines.push(`exec ${argv}`);
-  return sandboxRuntimeUserScript(lines.join('\n'));
+  return sandboxRuntimeUserScript(lines.join('\n'), ['umask 077', 'echo $$ > "$0.pid"']);
 }
 
 /**
@@ -1332,16 +1353,29 @@ function streamExecScript(command: string[], cwd?: string): string {
  * workspace, otherwise agent/test caches become root-owned and later
  * validation fails with EACCES. Non-root streams retain their existing user.
  */
-function sandboxRuntimeUserScript(scriptBody: string): string {
+function sandboxRuntimeUserScript(scriptBody: string, prelude: string[] = []): string {
   const identity = `HOME=${shellQuote(CONTAINER_HOME_DIR)} USER=${shellQuote(CONTAINER_USER)} LOGNAME=${shellQuote(CONTAINER_USER)}`;
   return [
     '#!/bin/sh',
+    ...prelude,
     'if [ "$(id -u)" = "0" ]; then',
     `  exec env ${identity} su -m -s /bin/sh ${shellQuote(CONTAINER_USER)} -c ${shellQuote(scriptBody)}`,
     'fi',
     scriptBody,
     '',
   ].join('\n');
+}
+
+function terminatePidFileScript(pidPath: string): string {
+  return [
+    `pid_file=${shellQuote(pidPath)}`,
+    '[ -s "$pid_file" ] || exit 0',
+    'pid=$(cat "$pid_file")',
+    'kill -TERM "$pid" 2>/dev/null || exit 0',
+    'i=0',
+    'while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
+    'kill -KILL "$pid" 2>/dev/null || true',
+  ].join('; ');
 }
 
 function commandToShell(command: string[], env?: Record<string, string>): string {

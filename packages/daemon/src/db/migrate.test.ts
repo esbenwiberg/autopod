@@ -15,6 +15,15 @@ function hasColumn(db: Database.Database, table: string, column: string): boolea
   return rows.some((r) => r.name === column);
 }
 
+function latestMigrationVersion(): number {
+  return Math.max(
+    ...fs
+      .readdirSync(MIGRATIONS_DIR)
+      .filter((file) => file.endsWith('.sql'))
+      .map((file) => Number.parseInt(file.split('_', 1)[0] ?? '', 10)),
+  );
+}
+
 describe('runMigrations — @allow-duplicate-columns', () => {
   let migrationsDir: string;
 
@@ -214,7 +223,7 @@ describe('runMigrations — migration 122 (failure reason repair)', () => {
       const version = db.prepare('SELECT MAX(version) as v FROM schema_version').get() as {
         v: number;
       };
-      expect(version.v).toBe(122);
+      expect(version.v).toBe(latestMigrationVersion());
     } finally {
       fs.rmSync(pre121Dir, { recursive: true, force: true });
     }
