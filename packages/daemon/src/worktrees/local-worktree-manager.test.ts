@@ -1498,21 +1498,10 @@ describe('LocalWorktreeManager', () => {
   // -------------------------------------------------------------------------
 
   describe('create', () => {
-    const credentialUrls = [
-      (() => {
-        const url = new URL('https://github.com/org/repo.git');
-        url.username = 'embedded-secret';
-        return url.toString();
-      })(),
-      (() => {
-        const url = new URL('https://github.com/org/repo.git');
-        url.username = 'user';
-        url.password = 'embedded-secret';
-        return url.toString();
-      })(),
-    ];
-
-    it.each(credentialUrls)('rejects credential-bearing remote %s before any side effect', async (repoUrl) => {
+    it.each([
+      'https://embedded-secret@github.com/org/repo.git',
+      'https://user:embedded-secret@github.com/org/repo.git',
+    ])('rejects credential-bearing remote %s before any side effect', async (repoUrl) => {
       const githubAuth = fakeGitHubAuth();
       const resolveCredential = vi.spyOn(githubAuth, 'resolveCredential');
       manager = new LocalWorktreeManager({ cacheDir, worktreeDir, logger, githubAuth });
