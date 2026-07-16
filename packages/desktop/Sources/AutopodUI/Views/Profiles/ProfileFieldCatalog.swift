@@ -179,7 +179,7 @@ public enum ProfileOverrideCatalog {
             key: "defaultRuntime",
             label: "Default Runtime",
             section: .agent,
-            help: "Claude / Codex / Copilot."
+            help: "Claude / Codex / Copilot / Pi."
         ),
         .init(
             key: "customInstructions",
@@ -199,7 +199,7 @@ public enum ProfileOverrideCatalog {
             key: "modelProvider",
             label: "Model Provider",
             section: .providers,
-            help: "anthropic / max / openai / foundry / copilot / openrouter. Credentials are tied to this choice."
+            help: "anthropic / max / openai / foundry / copilot / openrouter / pi. Credentials are tied to this choice."
         ),
         .init(
             key: "providerAccountId",

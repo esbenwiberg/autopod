@@ -1,6 +1,8 @@
 import Foundation
 import Testing
 @testable import AutopodClient
+import AutopodDesktop
+import AutopodUI
 
 // MARK: - Basic init
 
@@ -204,6 +206,26 @@ import Testing
   #expect(profile.githubPatExpiresAt == "2026-06-01")
   #expect(profile.containerMemoryGb == 4.0)
   #expect(profile.providerAccountId == "team-anthropic")
+}
+
+@Test func piRuntimeAndProfileContractDecode() throws {
+  let runtime = try JSONDecoder().decode(ModelsRuntimeKind.self, from: Data(#""pi""#.utf8))
+  #expect(runtime == .pi)
+
+  let profile = try JSONDecoder().decode(
+    ProfileResponse.self,
+    from: Data(#"{"name":"pi-profile","defaultRuntime":"pi","modelProvider":"pi","defaultModel":"anthropic/claude-sonnet-4"}"#.utf8)
+  )
+  #expect(profile.defaultRuntime == "pi")
+  #expect(profile.modelProvider == "pi")
+  #expect(profile.defaultModel == "anthropic/claude-sonnet-4")
+
+  let mapped = ProfileMapper.map(profile)
+  #expect(mapped.defaultRuntime == .pi)
+  #expect(mapped.modelProvider == .pi)
+  let fields = ProfileMapper.mapToFields(mapped)
+  #expect(fields["defaultRuntime"] as? String == "pi")
+  #expect(fields["modelProvider"] as? String == "pi")
 }
 
 private actor RequestRecorder {
