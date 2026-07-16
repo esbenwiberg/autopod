@@ -1730,6 +1730,98 @@ describe('CodexRuntime', () => {
       }
     });
 
+    it('skips prior records when the resumed rollout appears after launch', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousPollMs = process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
+      const previousGraceMs = process.env.AUTOPOD_POST_COMPLETE_GRACE_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-late-resume-rollout-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = '5';
+      process.env.AUTOPOD_POST_COMPLETE_GRACE_MS = '20';
+
+      try {
+        const podId = 'resume-late-rollout';
+        const rolloutDir = join(tmpRoot, podId, '2026', '07', '16');
+        const rolloutPath = join(rolloutDir, 'rollout-2026-07-16T08-00-00-current-session.jsonl');
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const runtime = new CodexRuntime(
+          logger,
+          cm,
+          createMockPodRepo('current-session', { model: 'gpt-5.6-sol' }),
+        );
+
+        setTimeout(() => {
+          void mkdir(rolloutDir, { recursive: true }).then(() =>
+            writeFile(
+              rolloutPath,
+              JSON.stringify({
+                timestamp: '2026-07-16T08:00:00.000Z',
+                type: 'event_msg',
+                payload: {
+                  type: 'task_complete',
+                  last_agent_message: 'Previous late completion.',
+                },
+              }),
+            ),
+          );
+        }, 5);
+        setTimeout(() => {
+          if (!(handle.stdout as PassThrough).writableEnded) {
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({ type: 'thread.started', thread_id: 'current-session' })}\n`,
+            );
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({
+                type: 'item.completed',
+                item: {
+                  id: 'current-late-message',
+                  type: 'agent_message',
+                  text: 'Current late completion.',
+                },
+              })}\n`,
+            );
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({
+                type: 'turn.completed',
+                usage: {
+                  input_tokens: 10,
+                  cached_input_tokens: 0,
+                  output_tokens: 5,
+                  reasoning_output_tokens: 1,
+                },
+              })}\n`,
+            );
+          }
+          // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+          (handle as any).finish(0);
+        }, 60);
+
+        const events: AgentEvent[] = [];
+        for await (const event of runtime.resume(
+          podId,
+          'Continue after the rollout mount appears.',
+          'container-123',
+        )) {
+          events.push(event);
+        }
+
+        expect(events.filter((event) => event.type === 'complete')).toEqual([
+          expect.objectContaining({ result: 'Current late completion.' }),
+        ]);
+        expect(events).not.toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: 'complete', result: 'Previous late completion.' }),
+          ]),
+        );
+      } finally {
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previousStateDir);
+        restoreEnv('AUTOPOD_CODEX_ROLLOUT_POLL_MS', previousPollMs);
+        restoreEnv('AUTOPOD_POST_COMPLETE_GRACE_MS', previousGraceMs);
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
+
     it('recovers live progress and proceeds to validation when the sandbox exec never exits', async () => {
       const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
       const previousIdleRecovery = process.env.AUTOPOD_CODEX_SANDBOX_IDLE_RECOVERY_MS;
@@ -1749,15 +1841,27 @@ describe('CodexRuntime', () => {
           await mkdir(rolloutDir, { recursive: true });
           const records = [
             JSON.stringify({
-              timestamp: '2026-07-13T21:53:14.000Z',
+              timestamp: '2026-07-13T21:00:00.000Z',
               type: 'event_msg',
               payload: {
-                type: 'patch_apply_end',
-                changes: { 'lib/control-plane.ts': { type: 'update' } },
+                type: 'task_complete',
+                last_agent_message: 'Previous turn completion.',
               },
             }),
           ];
           if (extractionCount >= 2) {
+            records.push(
+              JSON.stringify({
+                timestamp: '2026-07-13T21:53:14.000Z',
+                type: 'event_msg',
+                payload: {
+                  type: 'patch_apply_end',
+                  changes: { 'lib/control-plane.ts': { type: 'update' } },
+                },
+              }),
+            );
+          }
+          if (extractionCount >= 3) {
             records.push(
               JSON.stringify({
                 timestamp: '2026-07-13T22:18:36.000Z',
@@ -1817,7 +1921,7 @@ describe('CodexRuntime', () => {
         await rm(tmpRoot, { recursive: true, force: true });
       }
 
-      expect(cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
+      expect(cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(3);
       expect(handle.kill).toHaveBeenCalledOnce();
       expect(events).toEqual(
         expect.arrayContaining([

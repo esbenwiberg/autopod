@@ -219,6 +219,25 @@ export class CodexRuntime implements Runtime {
       // newer on disk, but only this resumed session is allowed to contribute events.
       this.codexSessionIds.set(podId, sessionId);
     }
+    if (sessionId && pod.executionTarget === 'sandbox') {
+      // Fresh sandbox containers can hold the durable resumed session before it
+      // appears in the daemon's host-side state directory. Snapshot it before
+      // launching the new turn so the byte baseline excludes all prior turns.
+      const snapshot = await settlePromiseWithin(
+        this.containerManager.extractDirectoryFromContainer(
+          containerId,
+          CONTAINER_CODEX_SESSIONS_PATH,
+          codexStateDirForPod(podId),
+        ),
+        summaryRecoveryTimeoutMs(),
+      );
+      if (snapshot.status !== 'fulfilled') {
+        this.logger.warn(
+          { component: 'codex-runtime', podId, status: snapshot.status },
+          'Could not snapshot Codex session before resume — first discovered rollout will establish the baseline',
+        );
+      }
+    }
     // A resumed Codex session appends multiple turns to the same rollout file.
     // Start at the current end before launching the new turn so live polling
     // cannot replay the previous turn's task_complete and close this exec early.
@@ -1119,6 +1138,15 @@ async function readRolloutDelta(
   rollout: RolloutCandidate,
   tail: RolloutTailState,
 ): Promise<string> {
+  if (tail.path === null && tail.offset === -1) {
+    // A resumed session may not have been copied/mounted into the host state
+    // directory when the turn starts. The first discovered snapshot belongs to
+    // prior turns; establish the baseline at its end and consume only appends.
+    tail.path = rollout.path;
+    tail.offset = rollout.size;
+    tail.carry = Buffer.alloc(0);
+    return '';
+  }
   if (tail.path !== rollout.path || rollout.size < tail.offset) {
     tail.path = rollout.path;
     tail.offset = 0;
@@ -1201,7 +1229,7 @@ async function createResumeRolloutTail(
   const rollout = await findLatestCodexRollout(codexStateDirForPod(podId), sessionId);
   return rollout
     ? { path: rollout.path, offset: rollout.size, carry: Buffer.alloc(0) }
-    : { path: null, offset: 0, carry: Buffer.alloc(0) };
+    : { path: null, offset: -1, carry: Buffer.alloc(0) };
 }
 
 async function collectRolloutFiles(dir: string, candidates: RolloutCandidate[]): Promise<void> {
