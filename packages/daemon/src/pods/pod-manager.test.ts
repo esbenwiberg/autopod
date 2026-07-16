@@ -5669,6 +5669,44 @@ describe('PodManager', () => {
       expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
     });
 
+    it('re-queues force rework when sandbox container deletion never resolves', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext(undefined, {
+          executionTarget: 'sandbox',
+          warmImageTag: 'registry.azurecr.io/autopod/test-profile:latest',
+        });
+        const manager = createPodManager(ctx.deps);
+        vi.mocked(ctx.containerManager.kill).mockReturnValue(new Promise(() => {}));
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Add feature' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'failed',
+          containerId: 'sandbox-1',
+          worktreePath: '/tmp/worktrees/test-branch',
+          validationAttempts: 3,
+        });
+
+        let settled = false;
+        const rework = manager.triggerValidation(pod.id, { force: true }).then(() => {
+          settled = true;
+        });
+
+        await vi.advanceTimersByTimeAsync(15_001);
+        await Promise.resolve();
+
+        expect(settled).toBe(true);
+        await rework;
+        expect(manager.getSession(pod.id).status).toBe('queued');
+        expect(ctx.enqueuedSessions).toContain(pod.id);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('does not reuse stale worktree state when force retrying a setup-only failure', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);

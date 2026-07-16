@@ -9917,17 +9917,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (force && fromTerminal && (pod.worktreePath || isInteractive || !pod.containerId)) {
         emitActivityStatus(podId, 'Re-provisioning pod with fresh container…');
 
-        // Kill the old container (best-effort — it may already be dead)
+        // Kill the old container with the same hard ceiling used by terminal cleanup.
+        // Azure sandbox deletion can stall while polling the data plane; rework must
+        // still clear the stale container reference and return to the provisioning queue.
         await killSidecarsForPod(podId);
         await cleanupTestRunBranches(podId);
-        if (pod.containerId) {
-          try {
-            const cm = containerManagerFactory.get(pod.executionTarget);
-            await cm.kill(pod.containerId);
-          } catch {
-            // Container may already be removed — that's fine
-          }
-        }
+        await cleanupContainer(pod, 'Rework');
         // The new container will be attached to a freshly-created per-pod
         // bridge below; blow away any stale bridge from the prior attempt.
         await destroyPodNetwork(podId);
