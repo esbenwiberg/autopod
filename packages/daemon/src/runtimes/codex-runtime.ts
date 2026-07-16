@@ -117,6 +117,11 @@ export class CodexRuntime implements Runtime {
   }
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
+    // A fresh spawn must not inherit the prior turn's durable rollout selector.
+    // The new thread.started event will repopulate this map before live rollout
+    // polling begins, keeping stale completed sessions from closing the new stream.
+    this.codexSessionIds.delete(config.podId);
+
     // Write Codex's config.toml so the CLI picks up escalation + profile MCP servers
     // from disk. Codex reads `~/.codex/config.toml` automatically — no flag required.
     await this.writeMcpConfig(config.containerId, config.mcpServers, config.executionTarget);
@@ -209,6 +214,11 @@ export class CodexRuntime implements Runtime {
     );
 
     const sessionId = this.codexSessionIds.get(podId) ?? pod.codexSessionId;
+    if (sessionId) {
+      // Seed the active selector before stdout starts. A previous rollout may be
+      // newer on disk, but only this resumed session is allowed to contribute events.
+      this.codexSessionIds.set(podId, sessionId);
+    }
 
     const prompt = sessionId
       ? message
@@ -781,7 +791,8 @@ export class CodexRuntime implements Runtime {
     modelHint?: string,
     rolloutTail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) },
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
-    const rollout = await findLatestCodexRollout(codexStateDirForPod(podId));
+    const activeSessionId = this.codexSessionIds.get(podId);
+    const rollout = await findLatestCodexRollout(codexStateDirForPod(podId), activeSessionId);
     if (!rollout) {
       this.logger.warn(
         {
@@ -829,7 +840,13 @@ export class CodexRuntime implements Runtime {
   ): AsyncGenerator<AgentEvent, void, void> {
     while (!signal.aborted) {
       try {
-        const rollout = await findLatestCodexRollout(codexStateDirForPod(podId));
+        // Do not replay anything until stdout identifies the active thread (spawn)
+        // or resume pre-seeds it. Otherwise an older completed rollout can arm the
+        // post-complete grace timer and terminate the live Codex exec.
+        const activeSessionId = this.codexSessionIds.get(podId);
+        const rollout = activeSessionId
+          ? await findLatestCodexRollout(codexStateDirForPod(podId), activeSessionId)
+          : null;
         if (rollout) {
           const complete = await readRolloutDelta(rollout, tail);
           if (complete.length > 0) {
