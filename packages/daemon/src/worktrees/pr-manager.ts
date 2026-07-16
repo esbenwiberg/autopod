@@ -184,6 +184,10 @@ async function fetchGitHubReviewThreadCommentsWithGh(config: {
   repo: string;
   number: number;
   worktreePath?: string;
+  execGh: (
+    args: string[],
+    options: { cwd?: string; timeout: number },
+  ) => Promise<{ stdout: string }>;
 }): Promise<ReviewCommentDetail[]> {
   const comments: ReviewCommentDetail[] = [];
   let after: string | null = null;
@@ -205,7 +209,7 @@ async function fetchGitHubReviewThreadCommentsWithGh(config: {
       args.push('-F', `after=${after}`);
     }
 
-    const { stdout } = await execFileAsync('gh', args, {
+    const { stdout } = await config.execGh(args, {
       cwd: config.worktreePath,
       timeout: 15_000,
     });
@@ -273,7 +277,8 @@ export interface GhPrManagerConfig {
  *
  * Runs `gh` commands from the worktree directory so it inherits
  * the correct git remote context. Requires `gh` to be authenticated
- * on the daemon host (via `gh auth login` or `GH_TOKEN` env var).
+ * for the daemon service account. Every invocation receives the credential
+ * resolved by DaemonGitHubAuth and discards ambient token variables.
  */
 export class GhPrManager implements PrManager {
   private logger: Logger;
@@ -286,7 +291,7 @@ export class GhPrManager implements PrManager {
     this.githubAuth = config.githubAuth ?? new GhCliDaemonGitHubAuth();
   }
 
-  private async execGh(args: string[], options: { cwd: string; timeout: number }) {
+  private async execGh(args: string[], options: { cwd?: string; timeout: number }) {
     const credential = await this.githubAuth.resolveCredential();
     const { GH_TOKEN: _ambientGh, GITHUB_TOKEN: _ambientGitHub, ...hostEnv } = process.env;
     const env = { ...hostEnv, GH_TOKEN: credential.token };
@@ -489,8 +494,7 @@ export class GhPrManager implements PrManager {
     if (pr.reviewDecision === 'CHANGES_REQUESTED') {
       reasons.push('Changes requested');
       try {
-        const { stdout: reviewOut } = await execFileAsync(
-          'gh',
+        const { stdout: reviewOut } = await this.execGh(
           ['pr', 'view', config.prUrl, '--json', 'reviews'],
           { cwd: config.worktreePath, timeout: 15_000 },
         );
@@ -525,13 +529,13 @@ export class GhPrManager implements PrManager {
             repo,
             number,
             worktreePath: config.worktreePath,
+            execGh: (args, options) => this.execGh(args, options),
           })),
         );
       } catch {
         try {
           const { owner, repo, number } = parsePrUrl(config.prUrl);
-          const { stdout: commentsOut } = await execFileAsync(
-            'gh',
+          const { stdout: commentsOut } = await this.execGh(
             ['api', `repos/${owner}/${repo}/pulls/${number}/comments`],
             { cwd: config.worktreePath, timeout: 15_000 },
           );
@@ -593,8 +597,7 @@ export class GhPrManager implements PrManager {
       }
 
       try {
-        await execFileAsync(
-          'gh',
+        await this.execGh(
           [
             'api',
             '--method',
@@ -613,8 +616,7 @@ export class GhPrManager implements PrManager {
 
       if (response.outcome === 'fixed' && threadRef) {
         try {
-          await execFileAsync(
-            'gh',
+          await this.execGh(
             [
               'api',
               'graphql',
@@ -634,8 +636,7 @@ export class GhPrManager implements PrManager {
 
     if (fallbackBodies.length > 0) {
       try {
-        await execFileAsync(
-          'gh',
+        await this.execGh(
           [
             'api',
             '--method',

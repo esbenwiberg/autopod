@@ -902,12 +902,25 @@ For **Copilot**, use `ap profile auth-copilot <name>` for interactive OAuth setu
 
 ### Daemon GitHub identity
 
-All GitHub-backed profiles use the single GitHub identity authenticated through `gh` under the
-daemon service account. On the daemon host, run:
+All GitHub-backed profiles use the single GitHub identity authenticated through `gh` as the
+account that runs the daemon. For a host-installed daemon service, run:
 
 ```bash
 sudo -u <daemon-user> gh auth login --hostname github.com --git-protocol https
 ```
+
+For the supported Docker Compose deployment, `gh` is installed in the daemon image and its
+configuration is retained in the restricted `daemon-gh-config` volume. Authenticate that exact
+container identity instead:
+
+```bash
+docker compose exec daemon gh auth login --hostname github.com --git-protocol https
+```
+
+For another container orchestrator, mount a persistent, daemon-user-only directory at the
+runtime user's GitHub CLI config path (`/home/autopod/.config/gh` in the production image), then
+run the login command inside the running container. Authenticating only the host account does not
+make its GitHub CLI state available inside a container.
 
 Use a dedicated, lower-privilege development account and restrict its repository permissions.
 Autopod resolves its credential explicitly for host Git, PRs, brokered GitHub actions, issue

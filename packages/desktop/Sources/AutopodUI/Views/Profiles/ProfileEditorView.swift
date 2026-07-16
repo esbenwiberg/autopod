@@ -165,6 +165,7 @@ struct HelpBadge: View {
 /// Parameters: profile name, provider ("max", "openai", or "copilot"), completion callback (error message or nil).
 public typealias ProfileAuthHandler = (String, String, @escaping (String?) -> Void) -> Void
 public typealias ProviderAccountsLoadHandler = (String?) async throws -> [PublicProviderAccountResponse]
+public typealias DaemonGitHubAuthStatusLoadHandler = () async throws -> DaemonGitHubAuthStatusResponse
 
 /// Profile editor — settings-style layout with sidebar section navigation and inline help.
 public struct ProfileEditorView: View {
@@ -175,6 +176,7 @@ public struct ProfileEditorView: View {
     public var onSave: ((Profile) async throws -> Void)?
     public var onAuthenticate: ProfileAuthHandler?
     public var onLoadProviderAccounts: ProviderAccountsLoadHandler?
+    public var onLoadDaemonGitHubAuthStatus: DaemonGitHubAuthStatusLoadHandler?
     public var memoryEntries: [MemoryEntry] = []
     public var onApproveMemory: (String) -> Void = { _ in }
     public var onRejectMemory: (String) -> Void = { _ in }
@@ -222,6 +224,7 @@ public struct ProfileEditorView: View {
                 onSave: ((Profile) async throws -> Void)? = nil,
                 onAuthenticate: ProfileAuthHandler? = nil,
                 onLoadProviderAccounts: ProviderAccountsLoadHandler? = nil,
+                onLoadDaemonGitHubAuthStatus: DaemonGitHubAuthStatusLoadHandler? = nil,
                 memoryEntries: [MemoryEntry] = [],
                 onApproveMemory: @escaping (String) -> Void = { _ in },
                 onRejectMemory: @escaping (String) -> Void = { _ in },
@@ -242,6 +245,7 @@ public struct ProfileEditorView: View {
         self.onSave = onSave
         self.onAuthenticate = onAuthenticate
         self.onLoadProviderAccounts = onLoadProviderAccounts
+        self.onLoadDaemonGitHubAuthStatus = onLoadDaemonGitHubAuthStatus
         self.memoryEntries = memoryEntries
         self.onApproveMemory = onApproveMemory
         self.onRejectMemory = onRejectMemory
@@ -265,6 +269,8 @@ public struct ProfileEditorView: View {
     @State private var providerAccounts: [PublicProviderAccountResponse] = []
     @State private var isLoadingProviderAccounts = false
     @State private var providerAccountsError: String?
+    @State private var daemonGitHubAuthStatus: DaemonGitHubAuthStatusResponse?
+    @State private var daemonGitHubAuthStatusError: String?
     @State private var editorPayload: ProfileEditorResponse?
     /// Load state for the inheritance payload. Drives the overrides view's
     /// loading / error UI. We route derived profiles to the overrides view
@@ -342,6 +348,7 @@ public struct ProfileEditorView: View {
             await loadProviderAccounts()
         }
         .task { await loadEditorPayloadIfNeeded() }
+        .task { await loadDaemonGitHubAuthStatus() }
     }
 
     /// Show the overrides editor whenever the profile is a derived profile —
@@ -353,6 +360,20 @@ public struct ProfileEditorView: View {
     /// "the new UI is broken".
     private var showOverridesView: Bool {
         profile.extendsProfile != nil
+    }
+
+    private func loadDaemonGitHubAuthStatus() async {
+        guard let onLoadDaemonGitHubAuthStatus else {
+            daemonGitHubAuthStatusError = "Daemon GitHub authentication status is unavailable."
+            return
+        }
+        do {
+            daemonGitHubAuthStatus = try await onLoadDaemonGitHubAuthStatus()
+            daemonGitHubAuthStatusError = nil
+        } catch {
+            daemonGitHubAuthStatus = nil
+            daemonGitHubAuthStatusError = error.localizedDescription
+        }
     }
 
     // MARK: - Inheritance support
@@ -2141,9 +2162,27 @@ public struct ProfileEditorView: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(.blue.opacity(0.15), lineWidth: 0.5))
 
-        Text("GitHub uses the daemon service account's GitHub CLI login. Configure it on the daemon host with `sudo -u <daemon-user> gh auth login --hostname github.com --git-protocol https`.")
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: daemonGitHubAuthStatus?.available == true
+                ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(daemonGitHubAuthStatus?.available == true ? .green : .yellow)
+            VStack(alignment: .leading, spacing: 3) {
+                if let status = daemonGitHubAuthStatus, status.available {
+                    Text("Daemon GitHub CLI authenticated as **\(status.login ?? "unknown")**")
+                } else if let status = daemonGitHubAuthStatus {
+                    Text("Daemon GitHub CLI unavailable")
+                    if let reason = status.reason { Text(reason) }
+                    Text(status.setup)
+                } else if let daemonGitHubAuthStatusError {
+                    Text("Could not load daemon GitHub authentication status")
+                    Text(daemonGitHubAuthStatusError)
+                } else {
+                    ProgressView("Checking daemon GitHub authentication…")
+                }
+            }
             .font(.caption)
             .foregroundStyle(.secondary)
+        }
         patRow("ADO PAT", value: $profile.adoPat, expiresAt: $profile.adoPatExpiresAt,
                expiryStatus: profile.adoPatExpiryStatus, isSet: profile.hasAdoPat,
                isInherited: inheritedFields.contains("adoPat"),

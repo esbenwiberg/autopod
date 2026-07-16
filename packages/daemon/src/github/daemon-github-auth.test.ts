@@ -93,6 +93,21 @@ describe('GhCliDaemonGitHubAuth', () => {
     expect(JSON.stringify(status)).not.toContain('github_pat_secret');
   });
 
+  it('reports rejected credentials as unavailable instead of ready without a login', async () => {
+    const runGh = vi
+      .fn<GhRunner>()
+      .mockResolvedValueOnce({ stdout: 'github_pat_secret\n', stderr: '' })
+      .mockRejectedValueOnce(
+        Object.assign(new Error('HTTP 401: Bad credentials'), { stderr: 'Bad credentials' }),
+      );
+
+    const status = await authWith(runGh).getStatus();
+
+    expect(status).toMatchObject({ available: false });
+    expect(JSON.stringify(status)).toContain('rejected by GitHub');
+    expect(JSON.stringify(status)).not.toContain('github_pat_secret');
+  });
+
   it('uses typed auth errors', async () => {
     const err = new DaemonGitHubAuthError('missing auth', 'GH_UNAUTHENTICATED');
     expect(err.message).toContain(DAEMON_GITHUB_AUTH_SETUP);

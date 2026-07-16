@@ -61,7 +61,15 @@ export class GhCliDaemonGitHubAuth implements DaemonGitHubAuth {
   async getStatus(): Promise<DaemonGitHubAuthStatus> {
     try {
       await this.resolveToken();
-      const login = await this.resolveLogin().catch(() => null);
+      const login = await this.resolveLogin().catch((err) => {
+        throw mapGhFailure(err);
+      });
+      if (!login) {
+        throw new DaemonGitHubAuthError(
+          'GitHub CLI returned an empty authenticated login',
+          'GH_REJECTED',
+        );
+      }
       return { available: true, login, setup: DAEMON_GITHUB_AUTH_SETUP };
     } catch (err) {
       return {

@@ -31,6 +31,7 @@ const githubAuth = {
 
 describe('GhPrManager', () => {
   beforeEach(() => {
+    githubAuth.resolveCredential.mockClear();
     callCount = 0;
     execResponses.length = 0;
     execCalls.length = 0;
@@ -330,7 +331,11 @@ describe('GhPrManager', () => {
         '-f',
         'body=Autopod fix pod response: Fixed\n\nAdded the null check.',
       ],
-      { cwd: '/tmp/worktree', timeout: 15_000 },
+      expect.objectContaining({
+        cwd: '/tmp/worktree',
+        timeout: 15_000,
+        env: expect.objectContaining({ GH_TOKEN: 'daemon-gh-token' }),
+      }),
     ]);
     expect(execCalls[1]).toEqual([
       'gh',
@@ -342,7 +347,11 @@ describe('GhPrManager', () => {
         '-F',
         'threadId=PRRT_thread_123',
       ],
-      { cwd: '/tmp/worktree', timeout: 15_000 },
+      expect.objectContaining({
+        cwd: '/tmp/worktree',
+        timeout: 15_000,
+        env: expect.objectContaining({ GH_TOKEN: 'daemon-gh-token' }),
+      }),
     ]);
     expect(execCalls[2]).toEqual([
       'gh',
@@ -354,7 +363,11 @@ describe('GhPrManager', () => {
         '-f',
         'body=Autopod fix pod response: Not applicable\n\nThis is generated code.',
       ],
-      { cwd: '/tmp/worktree', timeout: 15_000 },
+      expect.objectContaining({
+        cwd: '/tmp/worktree',
+        timeout: 15_000,
+        env: expect.objectContaining({ GH_TOKEN: 'daemon-gh-token' }),
+      }),
     ]);
     expect(execCalls[3]).toEqual([
       'gh',
@@ -366,8 +379,18 @@ describe('GhPrManager', () => {
         '-f',
         expect.stringContaining('gh-review-10'),
       ],
-      { cwd: '/tmp/worktree', timeout: 15_000 },
+      expect.objectContaining({
+        cwd: '/tmp/worktree',
+        timeout: 15_000,
+        env: expect.objectContaining({ GH_TOKEN: 'daemon-gh-token' }),
+      }),
     ]);
+    expect(githubAuth.resolveCredential).toHaveBeenCalledTimes(4);
+    for (const call of execCalls) {
+      const options = call[2] as { env?: NodeJS.ProcessEnv };
+      expect(options.env?.GH_TOKEN).toBe('daemon-gh-token');
+      expect(options.env?.GITHUB_TOKEN).toBeUndefined();
+    }
   });
 });
 
