@@ -117,6 +117,11 @@ export class CodexRuntime implements Runtime {
   }
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
+    // A fresh spawn must not inherit the prior turn's durable rollout selector.
+    // The new thread.started event will repopulate this map before live rollout
+    // polling begins, keeping stale completed sessions from closing the new stream.
+    this.codexSessionIds.delete(config.podId);
+
     // Write Codex's config.toml so the CLI picks up escalation + profile MCP servers
     // from disk. Codex reads `~/.codex/config.toml` automatically — no flag required.
     await this.writeMcpConfig(config.containerId, config.mcpServers, config.executionTarget);
@@ -209,6 +214,34 @@ export class CodexRuntime implements Runtime {
     );
 
     const sessionId = this.codexSessionIds.get(podId) ?? pod.codexSessionId;
+    if (sessionId) {
+      // Seed the active selector before stdout starts. A previous rollout may be
+      // newer on disk, but only this resumed session is allowed to contribute events.
+      this.codexSessionIds.set(podId, sessionId);
+    }
+    if (sessionId && pod.executionTarget === 'sandbox') {
+      // Fresh sandbox containers can hold the durable resumed session before it
+      // appears in the daemon's host-side state directory. Snapshot it before
+      // launching the new turn so the byte baseline excludes all prior turns.
+      const snapshot = await settlePromiseWithin(
+        this.containerManager.extractDirectoryFromContainer(
+          containerId,
+          CONTAINER_CODEX_SESSIONS_PATH,
+          codexStateDirForPod(podId),
+        ),
+        summaryRecoveryTimeoutMs(),
+      );
+      if (snapshot.status !== 'fulfilled') {
+        this.logger.warn(
+          { component: 'codex-runtime', podId, status: snapshot.status },
+          'Could not snapshot Codex session before resume — first discovered rollout will establish the baseline',
+        );
+      }
+    }
+    // A resumed Codex session appends multiple turns to the same rollout file.
+    // Start at the current end before launching the new turn so live polling
+    // cannot replay the previous turn's task_complete and close this exec early.
+    const rolloutTail = await createResumeRolloutTail(podId, sessionId);
 
     const prompt = sessionId
       ? message
@@ -257,7 +290,14 @@ export class CodexRuntime implements Runtime {
     try {
       yield* withPostCompleteGrace(
         withIdleLivenessProbe(
-          this.parseWithRolloutFallback(handle, podId, outputState, pod.model, recovery),
+          this.parseWithRolloutFallback(
+            handle,
+            podId,
+            outputState,
+            pod.model,
+            recovery,
+            rolloutTail,
+          ),
           {
             streams: [handle.stdout, handle.stderr],
             runtimeName: 'codex-runtime',
@@ -340,11 +380,11 @@ export class CodexRuntime implements Runtime {
     outputState: OutputState,
     modelHint?: string,
     summaryRecovery?: SandboxRolloutRecovery,
+    rolloutTail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) },
   ): AsyncIterable<AgentEvent> {
     const seen = new Set<string>();
     const abortLiveRollout = new AbortController();
     const abortSummaryGrace = new AbortController();
-    const rolloutTail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) };
     let taskSummaryObserved = false;
     let resolveTaskSummary: (() => void) | null = null;
     const taskSummarySignal = new Promise<void>((resolve) => {
@@ -697,6 +737,20 @@ export class CodexRuntime implements Runtime {
     }
 
     if (exitResult.code !== 0) {
+      // Terminal completion is the authoritative proof that Codex finished the
+      // task. The CLI can still return a cleanup/transport exit code afterward;
+      // do not discard completed work or prevent validation in that case.
+      // Exit 127 remains fatal because it means the CLI was unavailable rather
+      // than a completed turn failing during teardown.
+      if (outputState.sawComplete && exitResult.code !== 127) {
+        return {
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          message: `Codex exited with code ${exitResult.code} after task completion — proceeding to validation`,
+          fatal: false,
+        };
+      }
+
       const message =
         exitResult.code === 127
           ? 'Codex CLI not found in container image (exit 127)'
@@ -781,7 +835,8 @@ export class CodexRuntime implements Runtime {
     modelHint?: string,
     rolloutTail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) },
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
-    const rollout = await findLatestCodexRollout(codexStateDirForPod(podId));
+    const activeSessionId = this.codexSessionIds.get(podId);
+    const rollout = await findLatestCodexRollout(codexStateDirForPod(podId), activeSessionId);
     if (!rollout) {
       this.logger.warn(
         {
@@ -829,7 +884,13 @@ export class CodexRuntime implements Runtime {
   ): AsyncGenerator<AgentEvent, void, void> {
     while (!signal.aborted) {
       try {
-        const rollout = await findLatestCodexRollout(codexStateDirForPod(podId));
+        // Do not replay anything until stdout identifies the active thread (spawn)
+        // or resume pre-seeds it. Otherwise an older completed rollout can arm the
+        // post-complete grace timer and terminate the live Codex exec.
+        const activeSessionId = this.codexSessionIds.get(podId);
+        const rollout = activeSessionId
+          ? await findLatestCodexRollout(codexStateDirForPod(podId), activeSessionId)
+          : null;
         if (rollout) {
           const complete = await readRolloutDelta(rollout, tail);
           if (complete.length > 0) {
@@ -1077,6 +1138,15 @@ async function readRolloutDelta(
   rollout: RolloutCandidate,
   tail: RolloutTailState,
 ): Promise<string> {
+  if (tail.path === null && tail.offset === -1) {
+    // A resumed session may not have been copied/mounted into the host state
+    // directory when the turn starts. The first discovered snapshot belongs to
+    // prior turns; establish the baseline at its end and consume only appends.
+    tail.path = rollout.path;
+    tail.offset = rollout.size;
+    tail.carry = Buffer.alloc(0);
+    return '';
+  }
   if (tail.path !== rollout.path || rollout.size < tail.offset) {
     tail.path = rollout.path;
     tail.offset = 0;
@@ -1149,6 +1219,17 @@ async function findLatestCodexRollout(
     : candidates;
   eligible.sort((a, b) => b.mtimeMs - a.mtimeMs);
   return eligible[0] ?? null;
+}
+
+async function createResumeRolloutTail(
+  podId: string,
+  sessionId?: string,
+): Promise<RolloutTailState> {
+  if (!sessionId) return { path: null, offset: 0, carry: Buffer.alloc(0) };
+  const rollout = await findLatestCodexRollout(codexStateDirForPod(podId), sessionId);
+  return rollout
+    ? { path: rollout.path, offset: rollout.size, carry: Buffer.alloc(0) }
+    : { path: null, offset: -1, carry: Buffer.alloc(0) };
 }
 
 async function collectRolloutFiles(dir: string, candidates: RolloutCandidate[]): Promise<void> {

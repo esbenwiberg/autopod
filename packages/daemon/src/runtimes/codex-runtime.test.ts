@@ -374,6 +374,63 @@ describe('CodexRuntime', () => {
       expect((errorEvent as any).fatal).toBe(true);
     });
 
+    it('proceeds to validation when Codex exits non-zero after terminal completion', async () => {
+      const handle = createMockHandle({ exitCode: 1 });
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      setTimeout(() => {
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({ type: 'thread.started', thread_id: 'completed-exit-one' })}\n`,
+        );
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({
+            type: 'item.completed',
+            item: { id: 'final-message', type: 'agent_message', text: 'Work is complete.' },
+          })}\n`,
+        );
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({
+            type: 'turn.completed',
+            usage: {
+              input_tokens: 10,
+              cached_input_tokens: 0,
+              output_tokens: 5,
+              reasoning_output_tokens: 1,
+            },
+          })}\n`,
+        );
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(1);
+      }, 10);
+
+      const events = [];
+      for await (const event of runtime.spawn({
+        podId: 'completed-exit-one',
+        task: 'Complete, then exit one',
+        model: 'o3-mini',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      })) {
+        events.push(event);
+      }
+
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'complete', result: 'Work is complete.' }),
+          expect.objectContaining({
+            type: 'error',
+            message: expect.stringContaining('proceeding to validation'),
+            fatal: false,
+          }),
+        ]),
+      );
+      expect(events).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ type: 'error', fatal: true })]),
+      );
+    });
+
     it('maps exit code 127 to a missing Codex CLI error', async () => {
       const handle = createMockHandle({ exitCode: 127 });
       const cm = createMockContainerManager(handle);
@@ -402,6 +459,92 @@ describe('CodexRuntime', () => {
       expect((errorEvent as any).message).toContain('Codex CLI not found');
       // biome-ignore lint/suspicious/noExplicitAny: accessing runtime event fields in test
       expect((errorEvent as any).fatal).toBe(true);
+    });
+
+    it('ignores a completed rollout from the previous session when spawning again', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousPollMs = process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
+      const previousGraceMs = process.env.AUTOPOD_POST_COMPLETE_GRACE_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-spawn-session-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = '5';
+      process.env.AUTOPOD_POST_COMPLETE_GRACE_MS = '20';
+
+      try {
+        const podId = 'spawn-active-session';
+        const rolloutDir = join(tmpRoot, podId, '2026', '07', '16');
+        await mkdir(rolloutDir, { recursive: true });
+        await writeFile(
+          join(rolloutDir, 'rollout-2026-07-16T08-00-00-old-session.jsonl'),
+          JSON.stringify({
+            timestamp: '2026-07-16T08:00:00.000Z',
+            type: 'event_msg',
+            payload: { type: 'task_complete', last_agent_message: 'Previous completion.' },
+          }),
+        );
+
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+        runtime.codexSessionIds.set(podId, 'old-session');
+
+        setTimeout(() => {
+          (handle.stdout as PassThrough).write(
+            `${JSON.stringify({ type: 'thread.started', thread_id: 'new-session' })}\n`,
+          );
+          (handle.stdout as PassThrough).write(`${JSON.stringify({ type: 'turn.started' })}\n`);
+        }, 5);
+        setTimeout(() => {
+          if (!(handle.stdout as PassThrough).writableEnded) {
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({
+                type: 'item.completed',
+                item: { id: 'new-message', type: 'agent_message', text: 'New completion.' },
+              })}\n`,
+            );
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({
+                type: 'turn.completed',
+                usage: {
+                  input_tokens: 10,
+                  cached_input_tokens: 0,
+                  output_tokens: 5,
+                  reasoning_output_tokens: 1,
+                },
+              })}\n`,
+            );
+          }
+          // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+          (handle as any).finish(0);
+        }, 50);
+
+        const events: AgentEvent[] = [];
+        for await (const event of runtime.spawn({
+          podId,
+          task: 'Start a fresh turn.',
+          model: 'gpt-5.6-sol',
+          workDir: '/workspace',
+          containerId: 'container-123',
+          env: {},
+        })) {
+          events.push(event);
+        }
+
+        expect(runtime.codexSessionIds.get(podId)).toBe('new-session');
+        expect(events.filter((event) => event.type === 'complete')).toEqual([
+          expect.objectContaining({ result: 'New completion.' }),
+        ]);
+        expect(events).not.toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: 'complete', result: 'Previous completion.' }),
+          ]),
+        );
+      } finally {
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previousStateDir);
+        restoreEnv('AUTOPOD_CODEX_ROLLOUT_POLL_MS', previousPollMs);
+        restoreEnv('AUTOPOD_POST_COMPLETE_GRACE_MS', previousGraceMs);
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
     });
 
     it('terminates the stalled exec but proceeds to validation when exit never resolves after task_complete', async () => {
@@ -1064,12 +1207,14 @@ describe('CodexRuntime', () => {
           })
           [Symbol.asyncIterator]();
 
-        const first = await withTimeout(iterator.next(), 1_000);
-        expect(first.value).toMatchObject({ type: 'complete', result: 'Finished from rollout.' });
-
         (handle.stdout as PassThrough).write(
           `${JSON.stringify({ type: 'thread.started', thread_id: 'thread-123' })}\n`,
         );
+        const sessionEvent = await withTimeout(iterator.next(), 1_000);
+        expect(sessionEvent.value).toMatchObject({ type: 'status', sessionId: 'thread-123' });
+        const first = await withTimeout(iterator.next(), 1_000);
+        expect(first.value).toMatchObject({ type: 'complete', result: 'Finished from rollout.' });
+
         (handle.stdout as PassThrough).write(
           `${JSON.stringify({
             type: 'item.completed',
@@ -1090,7 +1235,7 @@ describe('CodexRuntime', () => {
         // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
         (handle as any).finish(0);
 
-        const events: AgentEvent[] = [first.value as AgentEvent];
+        const events: AgentEvent[] = [sessionEvent.value as AgentEvent, first.value as AgentEvent];
         for (;;) {
           const next = await iterator.next();
           if (next.done) break;
@@ -1154,6 +1299,11 @@ describe('CodexRuntime', () => {
           })
           [Symbol.asyncIterator]();
 
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({ type: 'thread.started', thread_id: '019e64e9' })}\n`,
+        );
+        const sessionEvent = await withTimeout(iterator.next(), 1_000);
+        expect(sessionEvent.value).toMatchObject({ type: 'status', sessionId: '019e64e9' });
         const firstEvent = withTimeout(iterator.next(), 1_000);
         setTimeout(() => {
           void writeFile(
@@ -1274,6 +1424,11 @@ describe('CodexRuntime', () => {
           })
           [Symbol.asyncIterator]();
 
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({ type: 'thread.started', thread_id: 'thread-grow' })}\n`,
+        );
+        const sessionEvent = await withTimeout(iterator.next(), 1_000);
+        expect(sessionEvent.value).toMatchObject({ type: 'status', sessionId: 'thread-grow' });
         const first = await withTimeout(iterator.next(), 1_000);
         expect(first.value).toMatchObject({
           type: 'tool_use',
@@ -1368,6 +1523,7 @@ describe('CodexRuntime', () => {
           createMockContainerManager(createMockHandle()),
           createMockPodRepo(),
         );
+        runtime.codexSessionIds.set(podId, 'thread-partial');
         // biome-ignore lint/suspicious/noExplicitAny: focused coverage of the rollout tailer
         const iterator = (runtime as any)
           .pollLatestRollout(podId, abort.signal, 'gpt-5.5')
@@ -1403,6 +1559,269 @@ describe('CodexRuntime', () => {
   });
 
   describe('resume', () => {
+    it('ignores completed rollouts from a different session while a resume is active', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousPollMs = process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
+      const previousGraceMs = process.env.AUTOPOD_POST_COMPLETE_GRACE_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-resume-session-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = '5';
+      process.env.AUTOPOD_POST_COMPLETE_GRACE_MS = '20';
+
+      try {
+        const podId = 'resume-active-session';
+        const rolloutDir = join(tmpRoot, podId, '2026', '07', '16');
+        await mkdir(rolloutDir, { recursive: true });
+        await writeFile(
+          join(rolloutDir, 'rollout-2026-07-16T08-00-00-old-session.jsonl'),
+          JSON.stringify({
+            timestamp: '2026-07-16T08:00:00.000Z',
+            type: 'event_msg',
+            payload: { type: 'task_complete', last_agent_message: 'Stale completion.' },
+          }),
+        );
+
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const runtime = new CodexRuntime(
+          logger,
+          cm,
+          createMockPodRepo('current-session', { model: 'gpt-5.6-sol' }),
+        );
+
+        setTimeout(() => {
+          (handle.stdout as PassThrough).write(
+            `${JSON.stringify({ type: 'thread.started', thread_id: 'current-session' })}\n`,
+          );
+          (handle.stdout as PassThrough).write(`${JSON.stringify({ type: 'turn.started' })}\n`);
+        }, 5);
+        setTimeout(() => {
+          if (!(handle.stdout as PassThrough).writableEnded) {
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({
+                type: 'item.completed',
+                item: { id: 'current-message', type: 'agent_message', text: 'Current completion.' },
+              })}\n`,
+            );
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({
+                type: 'turn.completed',
+                usage: {
+                  input_tokens: 10,
+                  cached_input_tokens: 0,
+                  output_tokens: 5,
+                  reasoning_output_tokens: 1,
+                },
+              })}\n`,
+            );
+          }
+          // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+          (handle as any).finish(0);
+        }, 50);
+
+        const events: AgentEvent[] = [];
+        for await (const event of runtime.resume(
+          podId,
+          'Fix the validation finding.',
+          'container-123',
+        )) {
+          events.push(event);
+        }
+
+        expect(events.filter((event) => event.type === 'complete')).toEqual([
+          expect.objectContaining({ result: 'Current completion.' }),
+        ]);
+        expect(events).not.toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: 'complete', result: 'Stale completion.' }),
+          ]),
+        );
+      } finally {
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previousStateDir);
+        restoreEnv('AUTOPOD_CODEX_ROLLOUT_POLL_MS', previousPollMs);
+        restoreEnv('AUTOPOD_POST_COMPLETE_GRACE_MS', previousGraceMs);
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('starts a resumed rollout tail after the previous turn completion', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousPollMs = process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
+      const previousGraceMs = process.env.AUTOPOD_POST_COMPLETE_GRACE_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-resume-turn-tail-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = '5';
+      process.env.AUTOPOD_POST_COMPLETE_GRACE_MS = '20';
+
+      try {
+        const podId = 'resume-same-session';
+        const rolloutDir = join(tmpRoot, podId, '2026', '07', '16');
+        await mkdir(rolloutDir, { recursive: true });
+        await writeFile(
+          join(rolloutDir, 'rollout-2026-07-16T08-00-00-current-session.jsonl'),
+          JSON.stringify({
+            timestamp: '2026-07-16T08:00:00.000Z',
+            type: 'event_msg',
+            payload: { type: 'task_complete', last_agent_message: 'Previous turn completion.' },
+          }),
+        );
+
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const runtime = new CodexRuntime(
+          logger,
+          cm,
+          createMockPodRepo('current-session', { model: 'gpt-5.6-sol' }),
+        );
+
+        setTimeout(() => {
+          if (!(handle.stdout as PassThrough).writableEnded) {
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({ type: 'thread.started', thread_id: 'current-session' })}\n`,
+            );
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({
+                type: 'item.completed',
+                item: {
+                  id: 'current-turn-message',
+                  type: 'agent_message',
+                  text: 'Current turn completion.',
+                },
+              })}\n`,
+            );
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({
+                type: 'turn.completed',
+                usage: {
+                  input_tokens: 10,
+                  cached_input_tokens: 0,
+                  output_tokens: 5,
+                  reasoning_output_tokens: 1,
+                },
+              })}\n`,
+            );
+          }
+          // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+          (handle as any).finish(0);
+        }, 50);
+
+        const events: AgentEvent[] = [];
+        for await (const event of runtime.resume(
+          podId,
+          'Continue the same session.',
+          'container-123',
+        )) {
+          events.push(event);
+        }
+
+        expect(events.filter((event) => event.type === 'complete')).toEqual([
+          expect.objectContaining({ result: 'Current turn completion.' }),
+        ]);
+        expect(events).not.toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: 'complete', result: 'Previous turn completion.' }),
+          ]),
+        );
+      } finally {
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previousStateDir);
+        restoreEnv('AUTOPOD_CODEX_ROLLOUT_POLL_MS', previousPollMs);
+        restoreEnv('AUTOPOD_POST_COMPLETE_GRACE_MS', previousGraceMs);
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('skips prior records when the resumed rollout appears after launch', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousPollMs = process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
+      const previousGraceMs = process.env.AUTOPOD_POST_COMPLETE_GRACE_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-late-resume-rollout-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = '5';
+      process.env.AUTOPOD_POST_COMPLETE_GRACE_MS = '20';
+
+      try {
+        const podId = 'resume-late-rollout';
+        const rolloutDir = join(tmpRoot, podId, '2026', '07', '16');
+        const rolloutPath = join(rolloutDir, 'rollout-2026-07-16T08-00-00-current-session.jsonl');
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const runtime = new CodexRuntime(
+          logger,
+          cm,
+          createMockPodRepo('current-session', { model: 'gpt-5.6-sol' }),
+        );
+
+        setTimeout(() => {
+          void mkdir(rolloutDir, { recursive: true }).then(() =>
+            writeFile(
+              rolloutPath,
+              JSON.stringify({
+                timestamp: '2026-07-16T08:00:00.000Z',
+                type: 'event_msg',
+                payload: {
+                  type: 'task_complete',
+                  last_agent_message: 'Previous late completion.',
+                },
+              }),
+            ),
+          );
+        }, 5);
+        setTimeout(() => {
+          if (!(handle.stdout as PassThrough).writableEnded) {
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({ type: 'thread.started', thread_id: 'current-session' })}\n`,
+            );
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({
+                type: 'item.completed',
+                item: {
+                  id: 'current-late-message',
+                  type: 'agent_message',
+                  text: 'Current late completion.',
+                },
+              })}\n`,
+            );
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({
+                type: 'turn.completed',
+                usage: {
+                  input_tokens: 10,
+                  cached_input_tokens: 0,
+                  output_tokens: 5,
+                  reasoning_output_tokens: 1,
+                },
+              })}\n`,
+            );
+          }
+          // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+          (handle as any).finish(0);
+        }, 60);
+
+        const events: AgentEvent[] = [];
+        for await (const event of runtime.resume(
+          podId,
+          'Continue after the rollout mount appears.',
+          'container-123',
+        )) {
+          events.push(event);
+        }
+
+        expect(events.filter((event) => event.type === 'complete')).toEqual([
+          expect.objectContaining({ result: 'Current late completion.' }),
+        ]);
+        expect(events).not.toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: 'complete', result: 'Previous late completion.' }),
+          ]),
+        );
+      } finally {
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previousStateDir);
+        restoreEnv('AUTOPOD_CODEX_ROLLOUT_POLL_MS', previousPollMs);
+        restoreEnv('AUTOPOD_POST_COMPLETE_GRACE_MS', previousGraceMs);
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
+
     it('recovers live progress and proceeds to validation when the sandbox exec never exits', async () => {
       const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
       const previousIdleRecovery = process.env.AUTOPOD_CODEX_SANDBOX_IDLE_RECOVERY_MS;
@@ -1422,15 +1841,27 @@ describe('CodexRuntime', () => {
           await mkdir(rolloutDir, { recursive: true });
           const records = [
             JSON.stringify({
-              timestamp: '2026-07-13T21:53:14.000Z',
+              timestamp: '2026-07-13T21:00:00.000Z',
               type: 'event_msg',
               payload: {
-                type: 'patch_apply_end',
-                changes: { 'lib/control-plane.ts': { type: 'update' } },
+                type: 'task_complete',
+                last_agent_message: 'Previous turn completion.',
               },
             }),
           ];
           if (extractionCount >= 2) {
+            records.push(
+              JSON.stringify({
+                timestamp: '2026-07-13T21:53:14.000Z',
+                type: 'event_msg',
+                payload: {
+                  type: 'patch_apply_end',
+                  changes: { 'lib/control-plane.ts': { type: 'update' } },
+                },
+              }),
+            );
+          }
+          if (extractionCount >= 3) {
             records.push(
               JSON.stringify({
                 timestamp: '2026-07-13T22:18:36.000Z',
@@ -1490,7 +1921,7 @@ describe('CodexRuntime', () => {
         await rm(tmpRoot, { recursive: true, force: true });
       }
 
-      expect(cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
+      expect(cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(3);
       expect(handle.kill).toHaveBeenCalledOnce();
       expect(events).toEqual(
         expect.arrayContaining([

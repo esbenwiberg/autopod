@@ -9994,17 +9994,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (force && fromTerminal && (pod.worktreePath || isInteractive || !pod.containerId)) {
         emitActivityStatus(podId, 'Re-provisioning pod with fresh container…');
 
-        // Kill the old container (best-effort — it may already be dead)
+        // Kill the old container with the same hard ceiling used by terminal cleanup.
+        // Azure sandbox deletion can stall while polling the data plane; rework must
+        // still clear the stale container reference and return to the provisioning queue.
         await killSidecarsForPod(podId);
         await cleanupTestRunBranches(podId);
-        if (pod.containerId) {
-          try {
-            const cm = containerManagerFactory.get(pod.executionTarget);
-            await cm.kill(pod.containerId);
-          } catch {
-            // Container may already be removed — that's fine
-          }
-        }
+        await cleanupContainer(pod, 'Rework');
         // The new container will be attached to a freshly-created per-pod
         // bridge below; blow away any stale bridge from the prior attempt.
         await destroyPodNetwork(podId);
@@ -12084,17 +12079,33 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
-      const fact = pod.lastValidationResult?.factValidation?.results.find(
+      const latestFact = pod.lastValidationResult?.factValidation?.results.find(
         (result) => result.factId === factId,
       );
+      const historicalFact = validationRepo
+        ? [...validationRepo.getForSession(podId)]
+            .reverse()
+            .map((validation) =>
+              validation.result.factValidation?.results.find((result) => result.factId === factId),
+            )
+            .find((result) => result !== undefined)
+        : undefined;
+      // Operator interruption/kick can replace lastValidationResult with a
+      // partial snapshot whose fact phase is skipped. The completed attempt is
+      // still durable in validation history and remains the waiver authority.
+      const fact = latestFact ?? historicalFact;
       if (!fact) {
         throw new AutopodError(
-          `Required fact ${factId} was not found in the latest validation result for pod ${podId}`,
+          `Required fact ${factId} was not found in validation results for pod ${podId}`,
           'NOT_FOUND',
           404,
         );
       }
-      if (fact.status !== 'pending_human') {
+      // A later agent summary can overwrite the decision field even though a
+      // completed validation already persisted the human-approved waiver.
+      // Re-approving that durable waived result is idempotent: rebuild the
+      // decision in the current summary and revalidate the same worktree.
+      if (fact.status !== 'pending_human' && fact.status !== 'waived') {
         throw new AutopodError(
           `Required fact ${factId} is ${fact.status ?? (fact.passed ? 'pass' : 'fail')}, not pending_human`,
           'INVALID_STATE',

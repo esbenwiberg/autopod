@@ -5486,6 +5486,113 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).status).toBe('validated');
     });
 
+    it.each([
+      { historicalStatus: 'pending_human' as const, historicalPassed: false },
+      { historicalStatus: 'waived' as const, historicalPassed: true },
+    ])(
+      'restores a $historicalStatus fact waiver from history after an interrupted retry replaces the latest result',
+      async ({ historicalStatus, historicalPassed }) => {
+        const ctx = createTestContext({
+          overall: 'pass',
+          factValidation: {
+            status: 'pass',
+            results: [
+              {
+                factId: 'fact-swift-only',
+                proves: ['swift-helper-readable'],
+                kind: 'unit-test',
+                artifactPath: 'packages/desktop/Tests/AutopodUITests/ProfileEditorTests.swift',
+                command: 'swift test --filter ProfileEditorTests',
+                passed: true,
+                status: 'waived',
+                reasoning: 'Fact deviation approved by human as waive.',
+              },
+            ],
+          },
+        });
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Update profile UI' },
+          'user-1',
+        );
+        const pendingReasoning =
+          'Fact fact-swift-only needs human decision: swift is unavailable in the validation container.';
+        const pendingResult: ValidationResult = {
+          podId: pod.id,
+          attempt: 1,
+          timestamp: new Date().toISOString(),
+          smoke: {
+            status: 'pass',
+            build: { status: 'pass', output: '', duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 50,
+            },
+            pages: [],
+          },
+          test: { status: 'pass', duration: 100 },
+          taskReview: null,
+          overall: 'fail',
+          duration: 5000,
+          factValidation: {
+            status: historicalStatus === 'waived' ? 'pass' : 'pending_human',
+            results: [
+              {
+                factId: 'fact-swift-only',
+                proves: ['swift-helper-readable'],
+                kind: 'unit-test',
+                artifactPath: 'packages/desktop/Tests/AutopodUITests/ProfileEditorTests.swift',
+                command: 'swift test --filter ProfileEditorTests',
+                passed: historicalPassed,
+                status: historicalStatus,
+                reasoning: pendingReasoning,
+              },
+            ],
+          },
+        };
+        ctx.validationRepo.insert(pod.id, 1, pendingResult);
+        ctx.podRepo.update(pod.id, {
+          status: 'failed',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          taskSummary: { actualSummary: 'Updated the profile UI.', deviations: [] },
+          lastValidationResult: {
+            podId: pod.id,
+            attempt: 2,
+            timestamp: new Date().toISOString(),
+            smoke: {
+              status: 'fail',
+              build: { status: 'skip', output: '', duration: 0 },
+              health: { status: 'fail', url: '', responseCode: null, duration: 0 },
+              pages: [],
+            },
+            test: { status: 'skip', duration: 0 },
+            taskReview: null,
+            reviewSkipReason: 'Validation interrupted by user',
+            reviewSkipKind: 'upstream-failed',
+            overall: 'fail',
+            duration: 1000,
+            factValidation: { status: 'skip', results: [] },
+          },
+        });
+
+        await manager.approveFactWaiver(pod.id, 'fact-swift-only', 'Swift is unavailable here');
+
+        const validateConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[0]?.[0];
+        expect(validateConfig?.taskSummary?.factDeviations).toEqual([
+          expect.objectContaining({
+            factId: 'fact-swift-only',
+            action: 'waive',
+            decision: 'approved_waive',
+            whyImpossible: pendingReasoning,
+          }),
+        ]);
+        expect(manager.getSession(pod.id).status).toBe('validated');
+      },
+    );
+
     it('records a pending fact waiver during agent rework for the next validation', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
@@ -5753,6 +5860,44 @@ describe('PodManager', () => {
       expect(ctx.enqueuedSessions).toContain(pod.id);
       // Old container should be killed
       expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
+    });
+
+    it('re-queues force rework when sandbox container deletion never resolves', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext(undefined, {
+          executionTarget: 'sandbox',
+          warmImageTag: 'registry.azurecr.io/autopod/test-profile:latest',
+        });
+        const manager = createPodManager(ctx.deps);
+        vi.mocked(ctx.containerManager.kill).mockReturnValue(new Promise(() => {}));
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Add feature' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'failed',
+          containerId: 'sandbox-1',
+          worktreePath: '/tmp/worktrees/test-branch',
+          validationAttempts: 3,
+        });
+
+        let settled = false;
+        const rework = manager.triggerValidation(pod.id, { force: true }).then(() => {
+          settled = true;
+        });
+
+        await vi.advanceTimersByTimeAsync(15_001);
+        await Promise.resolve();
+
+        expect(settled).toBe(true);
+        await rework;
+        expect(manager.getSession(pod.id).status).toBe('queued');
+        expect(ctx.enqueuedSessions).toContain(pod.id);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('does not reuse stale worktree state when force retrying a setup-only failure', async () => {
