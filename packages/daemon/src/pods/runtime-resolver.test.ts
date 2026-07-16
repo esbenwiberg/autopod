@@ -38,6 +38,31 @@ describe('resolvePodRuntime', () => {
     expect(resolvePodRuntime(profile({ modelProvider: 'openai' }), 'pi')).toBe('pi');
   });
 
+  it('rejects Pi selection with Codex-specific ChatGPT credentials', () => {
+    expect(() =>
+      resolvePodRuntime(
+        profile({
+          modelProvider: 'openai',
+          providerCredentials: {
+            provider: 'openai',
+            authMode: 'chatgpt',
+            authJson: '{"tokens":{}}',
+          },
+        }),
+        'pi',
+      ),
+    ).toThrow('authenticate this profile with auth-pi');
+  });
+
+  it.each(['max', 'copilot', 'foundry'] as const)(
+    'rejects Pi selection with legacy %s provider credentials',
+    (modelProvider) => {
+      expect(() => resolvePodRuntime(profile({ modelProvider }), 'pi')).toThrow(
+        'does not support legacy',
+      );
+    },
+  );
+
   it('forces Codex for OpenAI profiles even when the stored default is Claude', () => {
     expect(resolvePodRuntime(profile({ modelProvider: 'openai' }), undefined)).toBe('codex');
   });
