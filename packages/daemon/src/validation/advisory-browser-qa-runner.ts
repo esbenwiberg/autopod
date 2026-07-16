@@ -1640,7 +1640,7 @@ function createProviderAwareAdvisoryReviewer(input: {
   return {
     async planActions(reviewInput) {
       if (!input.model) return [];
-      if (input.provider === 'copilot') return [];
+      if (input.provider === 'copilot' || input.provider === 'pi') return [];
       const prompt = buildActionPlannerPrompt(reviewInput);
       const plannerDeadlineMs = Math.min(
         rateLimitDeadlineMs,
@@ -1714,7 +1714,7 @@ function createProviderAwareAdvisoryReviewer(input: {
         };
       }
 
-      if (input.provider === 'copilot') {
+      if (input.provider === 'copilot' || input.provider === 'pi') {
         return {
           status: 'uncertain',
           reasoning: `Reviewer provider ${input.provider} does not yet support screenshot image input for advisory browser QA.`,
@@ -1916,7 +1916,7 @@ function resolveContainerReviewerRuntime(
   provider: ModelProvider | null | undefined,
   credentials: ProviderCredentials | null | undefined,
 ): 'claude' | 'codex' | null {
-  if (provider === 'copilot') return null;
+  if (provider === 'copilot' || provider === 'pi') return null;
   if (provider === 'openai') return 'codex';
   if (
     provider === 'foundry' &&
@@ -1932,7 +1932,7 @@ function shouldFallbackToDirectReviewer(
   provider: ModelProvider | null | undefined,
   credentials: ProviderCredentials | null | undefined,
 ): boolean {
-  if (provider === 'max' || provider === 'copilot') return false;
+  if (provider === 'max' || provider === 'copilot' || provider === 'pi') return false;
   if (
     provider === 'openai' &&
     credentials?.provider === 'openai' &&

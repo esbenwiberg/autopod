@@ -11,6 +11,34 @@ private final class PiAuthURLProtocol: URLProtocol, @unchecked Sendable {
 
   override func startLoading() {
     Self.requests.append(request)
+    let path = request.url?.path ?? ""
+    let responseBody: String
+    if path.hasPrefix("/provider-accounts/") {
+      responseBody = """
+      {
+        "id": "team-pi",
+        "name": "Team Pi",
+        "provider": "pi",
+        "credentials": null,
+        "hasCredentials": true,
+        "lastAuthenticatedAt": "2026-07-16T00:00:00Z",
+        "lastUsedAt": null,
+        "createdAt": "2026-07-16T00:00:00Z",
+        "updatedAt": "2026-07-16T00:00:00Z"
+      }
+      """
+    } else {
+      responseBody = """
+      {
+        "name": "pi-profile",
+        "defaultRuntime": "pi",
+        "modelProvider": "pi",
+        "version": 1,
+        "createdAt": "2026-07-16T00:00:00Z",
+        "updatedAt": "2026-07-16T00:00:00Z"
+      }
+      """
+    }
     let response = HTTPURLResponse(
       url: request.url!,
       statusCode: 200,
@@ -18,11 +46,35 @@ private final class PiAuthURLProtocol: URLProtocol, @unchecked Sendable {
       headerFields: ["Content-Type": "application/json"]
     )!
     client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-    client?.urlProtocol(self, didLoad: Data(#"{"name":"pi-profile"}"#.utf8))
+    client?.urlProtocol(self, didLoad: Data(responseBody.utf8))
     client?.urlProtocolDidFinishLoading(self)
   }
 
   override func stopLoading() {}
+}
+
+private func bodyData(from request: URLRequest) -> Data? {
+  if let body = request.httpBody {
+    return body
+  }
+  guard let stream = request.httpBodyStream else {
+    return nil
+  }
+
+  stream.open()
+  defer { stream.close() }
+
+  var data = Data()
+  let bufferSize = 4096
+  let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+  defer { buffer.deallocate() }
+
+  while stream.hasBytesAvailable {
+    let read = stream.read(buffer, maxLength: bufferSize)
+    if read <= 0 { break }
+    data.append(buffer, count: read)
+  }
+  return data
 }
 
 @Suite(.serialized)
@@ -50,7 +102,7 @@ struct ProfileAuthenticatorTests {
     )
 
     let request = try #require(PiAuthURLProtocol.requests.first)
-    let body = try #require(request.httpBody)
+    let body = try #require(bodyData(from: request))
     let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
     let credentials = try #require(json["providerCredentials"] as? [String: Any])
     let credential = try #require(credentials["credential"] as? [String: Any])
@@ -59,6 +111,28 @@ struct ProfileAuthenticatorTests {
     #expect(credentials["provider"] as? String == "pi")
     #expect(credentials["providerId"] as? String == "anthropic")
     #expect(credential["accessToken"] as? String == "selected-secret")
+    #expect(!String(data: body, encoding: .utf8)!.contains("other-secret"))
+  }
+
+  @Test func selectedPiProviderCanPatchProviderAccountCredentials() async throws {
+    let authenticator = makeAuthenticator()
+    let authData = Data(#"{"github-copilot":{"token":"selected-secret"},"anthropic":{"accessToken":"other-secret"}}"#.utf8)
+
+    _ = try await authenticator.authenticatePiProviderAccount(
+      accountId: "team-pi",
+      providerId: .githubCopilot,
+      authData: authData
+    )
+
+    let request = try #require(PiAuthURLProtocol.requests.first)
+    let body = try #require(bodyData(from: request))
+    let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let credentials = try #require(json["credentials"] as? [String: Any])
+    let credential = try #require(credentials["credential"] as? [String: Any])
+    #expect(request.url?.path == "/provider-accounts/team-pi")
+    #expect(credentials["provider"] as? String == "pi")
+    #expect(credentials["providerId"] as? String == "github-copilot")
+    #expect(credential["token"] as? String == "selected-secret")
     #expect(!String(data: body, encoding: .utf8)!.contains("other-secret"))
   }
 

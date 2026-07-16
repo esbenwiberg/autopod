@@ -224,16 +224,7 @@ struct ProviderAccountsSettingsView: View {
             .frame(width: 18, height: 18)
         }
 
-        if canAuthenticate(account.provider) {
-          Button {
-            Task { await authenticate(account) }
-          } label: {
-            Image(systemName: account.hasCredentials ? "arrow.triangle.2.circlepath" : "person.badge.key")
-          }
-          .buttonStyle(.borderless)
-          .disabled(isAccountBusy(account.id))
-          .help(account.hasCredentials ? "Re-authenticate" : "Authenticate")
-        }
+        authControl(account)
 
         Menu {
           if linkableProfiles.isEmpty {
@@ -407,6 +398,26 @@ struct ProviderAccountsSettingsView: View {
   }
 
   @MainActor
+  private func authenticatePi(
+    _ account: PublicProviderAccountResponse,
+    providerId: ProfileAuthenticator.PiOAuthProvider
+  ) async {
+    guard let api else { return }
+    inFlightAction = "auth:\(account.id)"
+    defer { inFlightAction = nil }
+    do {
+      let authenticator = ProfileAuthenticator(api: api)
+      _ = try await authenticator.authenticatePiProviderAccount(
+        accountId: account.id,
+        providerId: providerId
+      )
+      await loadAccounts()
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+
+  @MainActor
   private func link(_ account: PublicProviderAccountResponse, profileName: String) async {
     guard let api else { return }
     inFlightAction = "link:\(account.id)"
@@ -448,7 +459,7 @@ struct ProviderAccountsSettingsView: View {
   }
 
   private func canAuthenticate(_ provider: String) -> Bool {
-    provider == "max" || provider == "openai" || provider == "copilot"
+    provider == "max" || provider == "openai" || provider == "copilot" || provider == "pi"
   }
 
   private func providerLabel(_ provider: String) -> String {
@@ -459,6 +470,7 @@ struct ProviderAccountsSettingsView: View {
     case "foundry": "Foundry"
     case "copilot": "Copilot"
     case "openrouter": "OpenRouter"
+    case "pi": "Pi"
     default: provider
     }
   }
@@ -469,7 +481,43 @@ struct ProviderAccountsSettingsView: View {
     case "openai", "openrouter": "cpu"
     case "foundry": "building.2"
     case "copilot": "keyboard"
+    case "pi": "sparkle.magnifyingglass"
     default: "person.badge.key"
+    }
+  }
+
+  @ViewBuilder
+  private func authControl(_ account: PublicProviderAccountResponse) -> some View {
+    if account.provider == "pi" {
+      Menu {
+        ForEach(ProfileAuthenticator.PiOAuthProvider.allCases, id: \.rawValue) { providerId in
+          Button(piProviderLabel(providerId)) {
+            Task { await authenticatePi(account, providerId: providerId) }
+          }
+        }
+      } label: {
+        Image(systemName: account.hasCredentials ? "arrow.triangle.2.circlepath" : "person.badge.key")
+      }
+      .menuStyle(.borderlessButton)
+      .disabled(isAccountBusy(account.id))
+      .help(account.hasCredentials ? "Re-authenticate with Pi" : "Authenticate with Pi")
+    } else if canAuthenticate(account.provider) {
+      Button {
+        Task { await authenticate(account) }
+      } label: {
+        Image(systemName: account.hasCredentials ? "arrow.triangle.2.circlepath" : "person.badge.key")
+      }
+      .buttonStyle(.borderless)
+      .disabled(isAccountBusy(account.id))
+      .help(account.hasCredentials ? "Re-authenticate" : "Authenticate")
+    }
+  }
+
+  private func piProviderLabel(_ providerId: ProfileAuthenticator.PiOAuthProvider) -> String {
+    switch providerId {
+    case .anthropic: "Anthropic"
+    case .openAICodex: "OpenAI Codex"
+    case .githubCopilot: "GitHub Copilot"
     }
   }
 }
@@ -484,7 +532,7 @@ private struct ProviderAccountCreateSheet: View {
   @State private var isSaving = false
   @State private var errorMessage: String?
 
-  private let providers = ["anthropic", "max", "openai", "foundry", "copilot", "openrouter"]
+  private let providers = ["anthropic", "max", "openai", "foundry", "copilot", "openrouter", "pi"]
 
   private var trimmedName: String {
     name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -582,6 +630,7 @@ private struct ProviderAccountCreateSheet: View {
     case "foundry": "Foundry"
     case "copilot": "Copilot"
     case "openrouter": "OpenRouter"
+    case "pi": "Pi"
     default: provider
     }
   }

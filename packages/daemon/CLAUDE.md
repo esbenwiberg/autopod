@@ -17,7 +17,7 @@ src/
 ├── db/               # SQLite connection, migration runner, .sql files
 ├── images/           # Dockerfile generator, ACR client, image warming
 ├── worktrees/        # Git worktree ops, GitHub/ADO PR management
-├── providers/        # Multi-provider auth/env (Anthropic, MAX, OpenAI, Foundry, Copilot, OpenRouter)
+├── providers/        # Multi-provider auth/env (Anthropic, MAX, OpenAI, Foundry, Copilot, OpenRouter, Pi)
 ├── notifications/    # MS Teams webhook adapter + rate limiter
 ├── interfaces/       # Dependency-injection abstractions (ContainerManager, Runtime, etc.)
 ├── crypto/           # HMAC pod tokens, AES-256 credential encryption
@@ -69,7 +69,7 @@ calls `validateTransition` first.
 3. **System instructions** — `system-instructions-generator.ts` builds the container's `CLAUDE.md` with:
    task description, injected sections, MCP servers, actions, skills, memories, build/start commands,
    smoke pages, required facts, contract requirements, and custom instructions
-4. **Provider credentials** — inject model provider tokens (Anthropic/MAX/OpenAI/Foundry/Copilot/OpenRouter), write files into container
+4. **Provider credentials** — inject model provider tokens (Anthropic/MAX/OpenAI/Foundry/Copilot/OpenRouter/Pi), write files into container
 5. **Agent spawn / resume** — start the runtime stream; Claude supports mid-stream recovery via `claude_session_id`
 6. **Event consumption** — process `AgentEvent` stream: tool-use, escalations, progress reports, completion
 7. **Validation** — multi-phase: setup → lint → SAST → build → test → health → pages → facts → AI task review, with optional advisory browser QA

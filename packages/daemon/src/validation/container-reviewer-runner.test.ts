@@ -71,9 +71,12 @@ describe('resolveContainerReviewer', () => {
     expect(resolveContainerReviewer(profile({ modelProvider: null }))).toBe('claude');
   });
 
-  it('marks Copilot unavailable for the live container reviewer path', () => {
+  it('marks providers without a live container reviewer path as unavailable', () => {
     expect(resolveContainerReviewer(profile({ modelProvider: 'copilot' }))).toEqual({
       provider: 'copilot',
+    });
+    expect(resolveContainerReviewer(profile({ modelProvider: 'pi' }))).toEqual({
+      provider: 'pi',
     });
   });
 });

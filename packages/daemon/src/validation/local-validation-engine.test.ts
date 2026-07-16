@@ -2300,6 +2300,36 @@ describe('validate() — facts + review gate', () => {
     expect(result.reviewSkipKind).toBe('profile-skip');
   });
 
+  it('skips Pi task review instead of falling back to Claude', async () => {
+    const cm = stubContainerManager();
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(
+      baseConfig({
+        reviewerProvider: 'pi',
+        reviewerProviderCredentials: {
+          provider: 'pi',
+          providerId: 'anthropic',
+          credential: { accessToken: 'pi-token' },
+        },
+        reviewerModel: 'anthropic/claude-sonnet-4',
+        diff: `diff --git a/src/app.ts b/src/app.ts
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old
++new
+`,
+      }),
+    );
+
+    expect(result.taskReview).toBeNull();
+    expect(result.reviewSkipKind).toBe('review-failed');
+    expect(result.reviewSkipReason).toContain('provider pi is not supported');
+    expect(vi.mocked(runClaudeCli)).not.toHaveBeenCalled();
+    expect(vi.mocked(runCodexReview)).not.toHaveBeenCalled();
+  });
+
   it('blocks validation as pending_human when a fact deviation awaits a decision', async () => {
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);

@@ -167,7 +167,7 @@ function resolvePreSubmitRunner(opts: PreSubmitReviewOpts): 'claude' | 'codex' |
   ) {
     return 'codex';
   }
-  if (opts.reviewerProvider === 'copilot') return 'unsupported';
+  if (opts.reviewerProvider === 'copilot' || opts.reviewerProvider === 'pi') return 'unsupported';
   return 'claude';
 }
 

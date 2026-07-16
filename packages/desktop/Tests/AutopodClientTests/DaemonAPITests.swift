@@ -214,7 +214,9 @@ import AutopodUI
 
   let profile = try JSONDecoder().decode(
     ProfileResponse.self,
-    from: Data(#"{"name":"pi-profile","defaultRuntime":"pi","modelProvider":"pi","defaultModel":"anthropic/claude-sonnet-4"}"#.utf8)
+    from: Data(
+      #"{"name":"pi-profile","defaultRuntime":"pi","modelProvider":"pi","defaultModel":"anthropic/claude-sonnet-4","version":1,"createdAt":"2026-07-16T00:00:00Z","updatedAt":"2026-07-16T00:00:00Z"}"#.utf8
+    )
   )
   #expect(profile.defaultRuntime == "pi")
   #expect(profile.modelProvider == "pi")

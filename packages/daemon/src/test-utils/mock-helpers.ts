@@ -4,6 +4,7 @@ import type {
   AgentEscalationEvent,
   AgentEvent,
   EscalationRequest,
+  Profile,
   Runtime,
   RuntimeType,
   ScheduledJob,
@@ -310,7 +311,7 @@ export function createMockProfileStore(db: Database.Database): ProfileStore {
         networkPolicy: row.network_policy ? JSON.parse(row.network_policy as string) : null,
         actionPolicy: row.action_policy ? JSON.parse(row.action_policy as string) : null,
         outputMode: (row.output_mode as 'pr' | 'artifact' | 'workspace') ?? 'pr',
-        modelProvider: (row.model_provider as 'anthropic' | 'max' | 'foundry') ?? 'anthropic',
+        modelProvider: (row.model_provider as Profile['modelProvider']) ?? 'anthropic',
         providerCredentials: row.provider_credentials
           ? JSON.parse(row.provider_credentials as string)
           : null,

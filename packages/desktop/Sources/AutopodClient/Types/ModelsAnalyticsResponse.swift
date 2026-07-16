@@ -6,7 +6,7 @@ public struct ModelsAnalyticsResponse: Decodable, Equatable, Sendable {
     public let summary: ModelsSummary
     /// Sorted by podCount DESC, ties broken by model name ASC.
     public let byModel: [PerModelAggregate]
-    /// Always exactly 3 entries in claude / codex / copilot order.
+    /// Always exactly 4 entries in claude / codex / copilot / pi order.
     public let byRuntime: [PerRuntimeAggregate]
     /// One row per canonical model (same sort order as byModel).
     public let failureStageMatrix: [ModelsFailureStageRow]
