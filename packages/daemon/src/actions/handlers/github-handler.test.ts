@@ -57,7 +57,8 @@ describe('createGitHubHandler', () => {
   it('returns a handler with handlerType "github"', () => {
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
     expect(handler.handlerType).toBe('github');
   });
@@ -80,7 +81,8 @@ describe('createGitHubHandler', () => {
   it('throws on invalid repo format', async () => {
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     await expect(
@@ -100,7 +102,8 @@ describe('createGitHubHandler', () => {
 
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     const result = await handler.execute(makeAction('read_issue', ['number', 'title', 'state']), {
@@ -125,7 +128,8 @@ describe('createGitHubHandler', () => {
 
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     await handler.execute(makeAction('search_issues'), {
@@ -150,7 +154,8 @@ describe('createGitHubHandler', () => {
 
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     const result = await handler.execute(makeAction('read_file', ['content', 'path']), {
@@ -171,7 +176,8 @@ describe('createGitHubHandler', () => {
 
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     const result = await handler.execute(makeAction('read_pr_diff', ['filename', 'patch']), {
@@ -191,7 +197,8 @@ describe('createGitHubHandler', () => {
 
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     await expect(
@@ -205,7 +212,8 @@ describe('createGitHubHandler', () => {
   it('throws on unknown action', async () => {
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     await expect(
@@ -223,7 +231,8 @@ describe('createGitHubHandler', () => {
 
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     // Should succeed — remaining is above threshold and reset is in the past
@@ -248,7 +257,8 @@ describe('createGitHubHandler', () => {
 
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     // First call sets the rate limit state
