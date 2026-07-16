@@ -198,9 +198,7 @@ function hasNonEmptyPiAccessCredential(credential: Record<string, unknown>): boo
 }
 
 export async function runPiLogin(providerId: PiOAuthProviderId): Promise<ProviderCredentials> {
-  const token = Math.random().toString(36).slice(2, 10);
-  const piAgentDir = path.join(os.tmpdir(), `autopod-pi-auth-${token}`);
-  fs.mkdirSync(piAgentDir, { recursive: true, mode: 0o700 });
+  const piAgentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-pi-auth-'));
   fs.chmodSync(piAgentDir, 0o700);
 
   const spawnEnv = buildIsolatedEnv([
