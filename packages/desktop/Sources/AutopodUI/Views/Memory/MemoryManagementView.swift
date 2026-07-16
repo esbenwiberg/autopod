@@ -327,7 +327,7 @@ public struct MemoryManagementView: View {
     // MARK: - Origin grouping
 
     private func groupedByOrigin(_ entries: [MemoryEntry]) -> [(key: String, entries: [MemoryEntry])] {
-        let grouped = Dictionary(grouping: entries) { $0.createdBySessionId ?? "Manual" }
+        let grouped = Dictionary(grouping: entries) { Self.originKey(for: $0) }
         return grouped
             .map { (key: $0.key, entries: $0.value) }
             .sorted { a, b in
@@ -464,7 +464,12 @@ public struct MemoryManagementView: View {
         VStack(alignment: .leading, spacing: 16) {
             detailHeader(
                 title: candidate.path,
-                subtitle: "\(candidate.action.rawValue) candidate · \(candidate.kind.rawValue)",
+                subtitle: [
+                    Self.scopeLabel(scope: candidate.scope, scopeId: candidate.scopeId),
+                    candidate.createdByPodId.map { "source pod \(Self.shortId($0))" },
+                    "\(candidate.action.rawValue) candidate",
+                    candidate.kind.rawValue,
+                ].compactMap(\.self).joined(separator: " · "),
                 confidence: candidate.confidence,
                 tags: candidate.tags
             )
@@ -505,9 +510,15 @@ public struct MemoryManagementView: View {
 
     private func memoryDetail(_ memory: MemoryEntry) -> some View {
         VStack(alignment: .leading, spacing: 16) {
+            let sourcePodId = Self.sourcePodId(for: memory)
             detailHeader(
                 title: memory.path,
-                subtitle: "active memory · v\(memory.version)",
+                subtitle: [
+                    Self.scopeLabel(scope: memory.scope, scopeId: memory.scopeId),
+                    sourcePodId.map { "source pod \(Self.shortId($0))" },
+                    "active memory",
+                    "v\(memory.version)",
+                ].compactMap(\.self).joined(separator: " · "),
                 confidence: memory.confidence,
                 tags: memory.tags
             )
@@ -643,9 +654,15 @@ public struct MemoryManagementView: View {
                         .foregroundStyle(.tertiary)
                 }
                 if let podId = candidate.createdByPodId {
-                    Text("source: pod \(shortId(podId))")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    provenanceRow(
+                        primary: Self.scopeLabel(scope: candidate.scope, scopeId: candidate.scopeId),
+                        secondary: "source pod \(Self.shortId(podId))"
+                    )
+                } else {
+                    provenanceRow(
+                        primary: Self.scopeLabel(scope: candidate.scope, scopeId: candidate.scopeId),
+                        secondary: nil
+                    )
                 }
                 Text(candidate.impactSummary.isEmpty ? candidate.content : candidate.impactSummary)
                     .font(.caption2)
@@ -712,10 +729,8 @@ public struct MemoryManagementView: View {
                     .foregroundStyle(.secondary)
                 Text(entry.path)
                     .font(.system(.caption, design: .monospaced).weight(.medium))
-                if let scopeId = entry.scopeId,
-                   entry.scope != .global,
-                   let scopeName = scopeNameLookup?(entry.scope, scopeId) {
-                    Text("· \(scopeName)")
+                if let scopeLabel = resolvedScopeLabel(for: entry) {
+                    Text("· \(scopeLabel)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -734,12 +749,20 @@ public struct MemoryManagementView: View {
                 Text("v\(entry.version)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                if let sid = entry.createdBySessionId {
-                    Text("by \(sid)")
+                if let podId = Self.sourcePodId(for: entry) {
+                    Text("source pod \(Self.shortId(podId))")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
             }
+
+            provenanceRow(
+                primary: resolvedScopeLabel(for: entry) ?? Self.scopeLabel(
+                    scope: entry.scope,
+                    scopeId: entry.scopeId
+                ),
+                secondary: Self.sourcePodId(for: entry).map { "source pod \(Self.shortId($0))" }
+            )
 
             if let rationale = entry.rationale, !rationale.isEmpty {
                 HStack(alignment: .top, spacing: 4) {
@@ -823,6 +846,40 @@ public struct MemoryManagementView: View {
 
     private func cardBackground(isSelected: Bool) -> Color {
         isSelected ? Color.accentColor.opacity(0.08) : Color(nsColor: .controlBackgroundColor)
+    }
+
+    private func provenanceRow(primary: String, secondary: String?) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "person.text.rectangle")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+            Text(primary)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+            if let secondary {
+                Text("· \(secondary)")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .lineLimit(1)
+    }
+
+    private func resolvedScopeLabel(for entry: MemoryEntry) -> String? {
+        guard let scopeId = entry.scopeId, entry.scope != .global else {
+            return entry.scope == .global ? Self.scopeLabel(scope: entry.scope, scopeId: nil) : nil
+        }
+        let displayName = scopeNameLookup?(entry.scope, scopeId)
+        switch entry.scope {
+        case .profile:
+            return "profile \(displayName ?? scopeId)"
+        case .pod:
+            return "pod \(displayName ?? Self.shortId(scopeId))"
+        case .unknown(let value):
+            return "\(value) \(displayName ?? scopeId)"
+        case .global:
+            return "global"
+        }
     }
 
     // MARK: - Empty state
@@ -1226,6 +1283,31 @@ public struct MemoryManagementView: View {
             }
     }
 
+    static func originKey(for entry: MemoryEntry) -> String {
+        entry.createdByPodId ?? entry.createdBySessionId ?? "Manual"
+    }
+
+    static func sourcePodId(for entry: MemoryEntry) -> String? {
+        let value = originKey(for: entry)
+        return value == "Manual" ? nil : value
+    }
+
+    static func scopeLabel(scope: MemoryScope, scopeId: String?) -> String {
+        switch scope {
+        case .global:
+            return "global"
+        case .profile:
+            guard let scopeId, !scopeId.isEmpty else { return "profile unknown" }
+            return "profile \(scopeId)"
+        case .pod:
+            guard let scopeId, !scopeId.isEmpty else { return "pod unknown" }
+            return "pod \(shortId(scopeId))"
+        case .unknown(let value):
+            guard let scopeId, !scopeId.isEmpty else { return value }
+            return "\(value) \(scopeId)"
+        }
+    }
+
     static func usageImpactCounts(
         _ usage: [MemoryUsageEvent]
     ) -> (selected: Int, injected: Int, read: Int, applied: Int) {
@@ -1281,8 +1363,12 @@ public struct MemoryManagementView: View {
         return nil
     }
 
-    private func shortId(_ id: String) -> String {
+    static func shortId(_ id: String) -> String {
         id.count > 8 ? String(id.prefix(8)) : id
+    }
+
+    private func shortId(_ id: String) -> String {
+        Self.shortId(id)
     }
 
     private func copyId(_ id: String) {
