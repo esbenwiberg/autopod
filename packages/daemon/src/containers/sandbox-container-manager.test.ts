@@ -205,7 +205,18 @@ class StrictParentFakeClient extends FakeSandboxApiClient {
 
 /** A client variant exposing a native streaming exec. */
 class StreamingFakeClient extends FakeSandboxApiClient {
-  async *execStream(): AsyncIterable<SandboxExecChunk> {
+  execStreamOptions: SandboxExecOptions | undefined;
+  stdinChunks: string[] = [];
+
+  async *execStream(
+    _sandboxId: string,
+    _command: string[],
+    options?: SandboxExecOptions,
+  ): AsyncIterable<SandboxExecChunk> {
+    this.execStreamOptions = options;
+    options?.onStdinWriter?.((data) => {
+      this.stdinChunks.push(data.toString('utf-8'));
+    });
     yield { stdout: 'chunk-1 ' };
     yield { stdout: 'chunk-2' };
     yield { stderr: 'warn' };
@@ -508,6 +519,22 @@ describe('SandboxContainerManager', () => {
       expect(out).toBe('chunk-1 chunk-2');
       expect(err).toBe('warn');
       expect(code).toBe(7);
+    });
+
+    it('execStreaming exposes writable stdin for native streams', async () => {
+      const client = new StreamingFakeClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      const stream = await mgr.execStreaming(id, ['cat'], { stdin: true });
+
+      expect(stream.stdin).toBeDefined();
+      stream.stdin?.write('hello\n');
+
+      const [out, code] = await Promise.all([readStream(stream.stdout), stream.exitCode]);
+      expect(out).toBe('chunk-1 chunk-2');
+      expect(code).toBe(7);
+      expect(client.execStreamOptions?.stdin).toBe(true);
+      expect(client.stdinChunks).toEqual(['hello\n']);
     });
   });
 

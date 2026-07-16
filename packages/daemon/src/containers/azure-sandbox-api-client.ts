@@ -292,9 +292,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
    * `ExecStreamSession`): the client sends a `{"type":"start","start":{…}}`
    * frame on open, then the server streams `{"type":"stdout"|"stderr","data":
    * "<base64>"}` frames and finishes with `{"type":"exit_code","exitCode":N}`.
-   * `stdin`/`resize` frames exist for interactive TTY sessions but are not
-   * needed for the runtime-stream contract. The reference SDK sends no
-   * `api-version` query parameter on this endpoint.
+   * When requested, stdin is sent with the same base64 `stdin` frames as
+   * interactive TTY sessions. The reference SDK sends no `api-version` query
+   * parameter on this endpoint.
    */
   async *execStream(
     sandboxId: string,
@@ -363,12 +363,18 @@ export class AzureSandboxApiClient implements SandboxApiClient {
             command: scriptPath,
             environment: { TERM: 'xterm-256color', LANG: 'C.UTF-8', ...options?.env },
             tty: false,
-            stdin: false,
+            stdin: options?.stdin === true,
             height: 24,
             width: 80,
           },
         }),
       );
+      if (options?.stdin) {
+        options.onStdinWriter?.((data) => {
+          if (closed) return;
+          socket.send(JSON.stringify({ type: 'stdin', data: data.toString('base64') }));
+        });
+      }
     };
     socket.onmessage = (event) => {
       try {

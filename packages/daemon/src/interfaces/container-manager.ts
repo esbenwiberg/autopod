@@ -1,4 +1,4 @@
-import type { Readable } from 'node:stream';
+import type { Readable, Writable } from 'node:stream';
 
 export interface ContainerSpawnConfig {
   image: string;
@@ -51,11 +51,14 @@ export interface ExecOptions {
    * container's creation env (which would expose them via `docker inspect`).
    */
   env?: Record<string, string>;
+  /** Attach writable stdin for long-lived RPC subprocesses. Default false. */
+  stdin?: boolean;
 }
 
 export interface StreamingExecResult {
   stdout: Readable;
   stderr: Readable;
+  stdin?: Writable;
   exitCode: Promise<number>;
   kill(): Promise<void>;
 }

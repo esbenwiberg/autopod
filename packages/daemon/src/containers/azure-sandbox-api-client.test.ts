@@ -437,6 +437,41 @@ describe('AzureSandboxApiClient', () => {
     expect(sockets[0]?.closed).toBe(true);
   });
 
+  it('sends exec stdin frames over the native WebSocket when requested', async () => {
+    const { client, sockets } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+      socket.emit({ type: 'exit_code', exitCode: 0 });
+    });
+
+    const chunks: SandboxExecChunk[] = [];
+    for await (const chunk of client.execStream('sbx-1', ['cat'], {
+      stdin: true,
+      onStdinWriter: (write) => {
+        write(Buffer.from('hello\n'));
+      },
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(JSON.parse(sockets[0]?.sent[0] ?? '{}')).toEqual({
+      type: 'start',
+      start: {
+        command: expect.stringMatching(/^\/tmp\/\.autopod-execstream-\d+-\d+\.sh$/),
+        environment: { TERM: 'xterm-256color', LANG: 'C.UTF-8' },
+        tty: false,
+        stdin: true,
+        height: 24,
+        width: 80,
+      },
+    });
+
+    expect(JSON.parse(sockets[0]?.sent[1] ?? '{}')).toEqual({
+      type: 'stdin',
+      data: Buffer.from('hello\n').toString('base64'),
+    });
+    expect(chunks).toEqual([{ exitCode: 0 }]);
+  });
+
   it('fails the exec stream when the socket closes before an exit code', async () => {
     const { client } = makeStreamingClient((socket) => {
       socket.onopen?.({});

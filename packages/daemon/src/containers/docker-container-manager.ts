@@ -865,6 +865,7 @@ export class DockerContainerManager implements ContainerManager {
     const exec = await boundedDockerCall(
       container.exec({
         Cmd: command,
+        AttachStdin: options?.stdin === true,
         AttachStdout: true,
         AttachStderr: true,
         ...(options?.cwd ? { WorkingDir: options.cwd } : {}),
@@ -878,7 +879,8 @@ export class DockerContainerManager implements ContainerManager {
       },
     );
 
-    const muxStream = await boundedDockerCall(exec.start({ hijack: true, stdin: false }), {
+    const attachStdin = options?.stdin === true;
+    const muxStream = await boundedDockerCall(exec.start({ hijack: true, stdin: attachStdin }), {
       label: 'exec.start (execStreaming)',
       timeoutMs: DOCKER_CALL_TIMEOUTS.execStart,
       logger: this.logger,
@@ -962,7 +964,13 @@ export class DockerContainerManager implements ContainerManager {
 
     this.logger.info({ containerId, command: safeCommand }, 'Streaming exec started');
 
-    return { stdout: stdoutStream, stderr: stderrStream, exitCode, kill };
+    return {
+      stdout: stdoutStream,
+      stderr: stderrStream,
+      ...(attachStdin && { stdin: muxStream as unknown as NodeJS.WritableStream }),
+      exitCode,
+      kill,
+    };
   }
 
   async refreshFirewall(containerId: string, script: string): Promise<void> {

@@ -52,6 +52,10 @@ export interface SandboxExecOptions {
   user?: string;
   /** Extra env vars for this exec, in addition to the sandbox's main-process env. */
   env?: Record<string, string>;
+  /** Attach writable stdin for long-lived RPC subprocesses. Default false. */
+  stdin?: boolean;
+  /** Internal hook used by ContainerManager to bind the stdin WebSocket writer. */
+  onStdinWriter?: (write: (data: Buffer) => void) => void;
 }
 
 export interface SandboxExecResult {

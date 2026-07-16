@@ -65,6 +65,7 @@ import {
   ClaudeRuntime,
   CodexRuntime,
   CopilotRuntime,
+  PiRuntime,
   createRuntimeRegistry,
 } from './runtimes/index.js';
 import { createSafetyEventsRepository } from './safety/safety-events-repository.js';
@@ -616,6 +617,7 @@ const runtimeRegistry = createRuntimeRegistry([
   new ClaudeRuntime(logger, runtimeContainerManager),
   new CodexRuntime(logger, runtimeContainerManager, podRepo),
   new CopilotRuntime(logger, runtimeContainerManager),
+  new PiRuntime(logger, runtimeContainerManager),
 ]);
 
 const ghPrManager = new GhPrManager({ logger, llmDeps });
