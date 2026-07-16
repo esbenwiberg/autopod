@@ -196,7 +196,7 @@ test -n "$PI_CODING_AGENT_DIR" || exit 3
 echo "$PI_CODING_AGENT_DIR" > "${dirLog}"
 stat -c "%a" "$PI_CODING_AGENT_DIR" > "${modeLog}"
 cat > "$PI_CODING_AGENT_DIR/auth.json" <<'JSON'
-{"anthropic":{"accessToken":"selected"}}
+{"anthropic":{"accessToken":"selected"},"openai-codex":{"accessToken":"unrelated"}}
 JSON
 `);
     tempDirs.push(fakeBin);
@@ -233,26 +233,6 @@ JSON
 
     await expect(
       program.parseAsync(['node', 'ap', 'profile', 'auth-pi', 'my-app', 'openai-codex']),
-    ).rejects.toThrow('process.exit 1');
-
-    expect(mockClient.setProfileCredentials).not.toHaveBeenCalled();
-  });
-
-  it('leaves profile credentials unchanged when Pi auth has extra providers', async () => {
-    const fakeBin = installFakePi(`
-mkdir -p "$PI_CODING_AGENT_DIR"
-cat > "$PI_CODING_AGENT_DIR/auth.json" <<'JSON'
-{"anthropic":{"accessToken":"selected"},"openai-codex":{"accessToken":"extra"}}
-JSON
-`);
-    tempDirs.push(fakeBin);
-    process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
-    exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
-      throw new Error(`process.exit ${code}`);
-    });
-
-    await expect(
-      program.parseAsync(['node', 'ap', 'profile', 'auth-pi', 'my-app', 'anthropic']),
     ).rejects.toThrow('process.exit 1');
 
     expect(mockClient.setProfileCredentials).not.toHaveBeenCalled();

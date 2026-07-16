@@ -214,7 +214,7 @@ test -n "$PI_CODING_AGENT_DIR" || exit 3
 echo "$PI_CODING_AGENT_DIR" > "${dirLog}"
 stat -c "%a" "$PI_CODING_AGENT_DIR" > "${modeLog}"
 cat > "$PI_CODING_AGENT_DIR/auth.json" <<'JSON'
-{"github-copilot":{"accessToken":"selected"}}
+{"github-copilot":{"accessToken":"selected"},"anthropic":{"accessToken":"unrelated"}}
 JSON
 `);
     tempDirs.push(fakeBin);
