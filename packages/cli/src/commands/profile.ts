@@ -667,11 +667,10 @@ function prepareProfileEditUpdates(edited: Record<string, unknown>): Record<stri
     hasGithubPat: _hgp,
     hasAdoPat: _hap,
     hasRegistryPat: _hrp,
+    githubPat: _gp,
+    githubPatExpiresAt: _gpe,
     ...updates
   } = edited;
-
-  delete updates.githubPat;
-  delete updates.githubPatExpiresAt;
 
   for (const field of ['adoPat', 'registryPat'] as const) {
     if (typeof updates[field] !== 'string' || updates[field].length === 0) {

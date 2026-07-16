@@ -123,7 +123,10 @@ describe('WarmImageMaintenanceJob', () => {
     const deps = {
       ...createDeps([profile]),
       githubAuth: {
-        resolveCredential: vi.fn(async () => ({ token: 'daemon-gh-token', username: 'x-access-token' })),
+        resolveCredential: vi.fn(async () => ({
+          token: 'daemon-gh-token',
+          username: 'x-access-token',
+        })),
         getStatus: vi.fn(),
       },
     };

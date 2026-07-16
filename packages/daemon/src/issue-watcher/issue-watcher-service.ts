@@ -11,13 +11,13 @@ import {
   processContent,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodManager } from '../pods/pod-manager.js';
 import type { ProfileStore } from '../profiles/profile-store.js';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 import type { IssueClient, WatchedIssueCandidate } from './issue-client.js';
 import { createIssueClient } from './issue-client.js';
-import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import { isIssueProviderAuthError, isTransientIssueProviderError } from './issue-fetch.js';
 import type { IssueWatcherRepository } from './issue-watcher-repository.js';
 

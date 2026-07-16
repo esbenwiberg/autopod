@@ -85,6 +85,7 @@ import {
   sidecarPodEnv,
 } from '../containers/sidecar-resolver.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
+import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import { createHistoryExporter } from '../history/history-exporter.js';
 import {
   generateHistoryInstructions,
@@ -192,7 +193,6 @@ import {
 } from './state-machine.js';
 import { generateSystemInstructions } from './system-instructions-generator.js';
 import type { ValidationRepository } from './validation-repository.js';
-import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import {
   buildBashrcHintBlock,
   buildWorkspaceToolsDoc,
@@ -4383,9 +4383,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const profile = profileStore.get(pod.profileName);
 
     const pat =
-      service === 'github'
-        ? (await deps.githubAuth?.resolveCredential())?.token
-        : profile.adoPat;
+      service === 'github' ? (await deps.githubAuth?.resolveCredential())?.token : profile.adoPat;
     if (!pat) {
       throw new AutopodError(
         service === 'github'

@@ -731,7 +731,10 @@ function createTestContext(
     eventRepo,
     profileStore,
     githubAuth: {
-      resolveCredential: vi.fn(async () => ({ token: 'daemon-gh-token', username: 'x-access-token' })),
+      resolveCredential: vi.fn(async () => ({
+        token: 'daemon-gh-token',
+        username: 'x-access-token',
+      })),
       getStatus: vi.fn(async () => ({ available: true, login: 'autopod-dev', setup: 'setup' })),
     },
     eventBus,
@@ -7499,7 +7502,10 @@ describe('PodManager', () => {
       const result = await manager.resumePod(fix.id);
 
       expect(result).toEqual({ action: 'retry-fix-delivery' });
-      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith('/tmp/worktree/fix', 'daemon-gh-token');
+      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith(
+        '/tmp/worktree/fix',
+        'daemon-gh-token',
+      );
       expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalledWith(
         expect.objectContaining({
           worktreePath: '/tmp/worktree/fix',
@@ -7744,7 +7750,10 @@ describe('PodManager', () => {
 
       await manager.revalidateSession(pod.id, { force: true });
 
-      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith('/tmp/worktree/abc', 'daemon-gh-token');
+      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith(
+        '/tmp/worktree/abc',
+        'daemon-gh-token',
+      );
     });
 
     it('Path 2: forced revalidation without new commits uses validation-only status text', async () => {

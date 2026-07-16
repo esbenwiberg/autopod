@@ -1,8 +1,8 @@
 import { AutopodError } from '@autopod/shared';
 import type { ProfileEditorPayload, ProviderAuthSource } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
-import type { ImageBuilder } from '../../images/index.js';
 import type { DaemonGitHubAuth } from '../../github/daemon-github-auth.js';
+import type { ImageBuilder } from '../../images/index.js';
 import { type ProfileStore, buildSourceMap } from '../../profiles/index.js';
 import type { ProviderAccountStore } from '../../provider-accounts/index.js';
 import { redactProfileSecrets } from '../profile-redaction.js';
@@ -87,12 +87,14 @@ export function profileRoutes(
     return profileStore.list().map(redactProfileSecrets);
   });
 
-  app.get('/profiles/github-auth/status', async () =>
-    githubAuth?.getStatus() ?? {
-      available: false,
-      reason: 'Daemon GitHub authentication is not configured',
-      setup: 'Run gh auth login as the daemon service account',
-    },
+  app.get(
+    '/profiles/github-auth/status',
+    async () =>
+      githubAuth?.getStatus() ?? {
+        available: false,
+        reason: 'Daemon GitHub authentication is not configured',
+        setup: 'Run gh auth login as the daemon service account',
+      },
   );
 
   // GET /profiles/:name — get profile
