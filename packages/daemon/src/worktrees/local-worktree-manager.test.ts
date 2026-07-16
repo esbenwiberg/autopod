@@ -150,26 +150,6 @@ describe('LocalWorktreeManager', () => {
   });
 
   // -------------------------------------------------------------------------
-  // injectPat (private)
-  // -------------------------------------------------------------------------
-
-  describe('injectPat', () => {
-    it('injects PAT into https URL', () => {
-      const result = (
-        manager as unknown as { injectPat: (url: string, pat: string) => string }
-      ).injectPat('https://github.com/org/repo.git', 'mytoken');
-      expect(result).toBe('https://x-access-token:mytoken@github.com/org/repo.git');
-    });
-
-    it('replaces existing userinfo before injecting', () => {
-      const result = (
-        manager as unknown as { injectPat: (url: string, pat: string) => string }
-      ).injectPat('https://old-token@github.com/org/repo.git', 'new-token');
-      expect(result).toBe('https://x-access-token:new-token@github.com/org/repo.git');
-    });
-  });
-
-  // -------------------------------------------------------------------------
   // parseDiffStats (private)
   // -------------------------------------------------------------------------
 

@@ -34,6 +34,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const AUTOPOD_SYNC_STAGING_PREFIXES = ['.autopod-sync-', '.autopod-extract-'] as const;
+const gitCredentialsByUrl = new Map<string, { username: string; password: string }>();
 
 /**
  * Thrown when `commitPendingChanges` refuses to commit because the number of staged deletions
@@ -103,20 +104,16 @@ const GIT_NO_AMBIENT_CREDS_ENV: Record<string, string> = {
 function git(args: string[], options: { cwd?: string; timeout?: number; maxBuffer?: number } = {}) {
   let credentialEnv: Record<string, string> = {};
   const safeArgs = args.map((arg) => {
-    if (!/^https:\/\/[^/]+@/i.test(arg)) return arg;
+    const credential = gitCredentialsByUrl.get(arg);
+    if (!credential) return arg;
     const url = new URL(arg);
-    if (!url.username && !url.password) return arg;
-    const basic = Buffer.from(
-      `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`,
-    ).toString('base64');
-    url.username = '';
-    url.password = '';
+    const basic = Buffer.from(`${credential.username}:${credential.password}`).toString('base64');
     credentialEnv = {
       GIT_CONFIG_COUNT: '3',
       GIT_CONFIG_KEY_2: `http.${url.origin}/.extraheader`,
       GIT_CONFIG_VALUE_2: `Authorization: Basic ${basic}`,
     };
-    return url.toString();
+    return arg;
   });
   return execFileAsync('git', safeArgs, {
     ...options,
@@ -1721,7 +1718,11 @@ export class LocalWorktreeManager implements WorktreeManager {
       }
       const credential = await this.githubAuth.resolveCredential();
       this.patCache.set(bareRepoPath, credential.token);
-      return this.injectCredential(repoUrl, credential.username, credential.token);
+      gitCredentialsByUrl.set(repoUrl, {
+        username: credential.username,
+        password: credential.token,
+      });
+      return repoUrl;
     }
 
     const authPat = pat ?? this.patCache.get(bareRepoPath);
@@ -1732,21 +1733,16 @@ export class LocalWorktreeManager implements WorktreeManager {
           'Add an ADO PAT to the profile if this repo requires authentication.',
       );
     }
-    return authPat ? this.injectPat(repoUrl, authPat) : repoUrl;
+    if (authPat) {
+      gitCredentialsByUrl.set(repoUrl, { username: 'x-access-token', password: authPat });
+    }
+    return repoUrl;
   }
 
   /** Inject a PAT into an https remote URL: https://host/... → https://x-access-token:PAT@host/...
    * Uses `x-access-token` as the username — required by GitHub fine-grained PATs and
    * compatible with classic PATs too.
    * Strips any existing userinfo first so stale credentials in the stored URL don't double-inject. */
-  private injectPat(url: string, pat: string): string {
-    return this.injectCredential(url, 'x-access-token', pat);
-  }
-
-  private injectCredential(url: string, username: string, password: string): string {
-    return url.replace(/^https:\/\/([^@]*@)?/, `https://${username}:${password}@`);
-  }
-
   private isGitHubUrl(url: string): boolean {
     return /^https:\/\/([^@/]+@)?github\.com\//i.test(url);
   }
