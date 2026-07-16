@@ -51,7 +51,7 @@ describe('createGitHubHandler', () => {
         repo: 'octocat/hello-world',
         issue_number: 1,
       }),
-    ).rejects.toThrow(/token/i);
+    ).rejects.toThrow(/daemon GitHub authentication/i);
   });
 
   it('returns a handler with handlerType "github"', () => {
@@ -62,20 +62,19 @@ describe('createGitHubHandler', () => {
     expect(handler.handlerType).toBe('github');
   });
 
-  it('accepts token from github-pat fallback', async () => {
-    vi.mocked(global.fetch).mockResolvedValueOnce(mockResponse({ number: 1, title: 'Test' }));
-
+  it('does not accept the legacy github-pat fallback', async () => {
     const handler = createGitHubHandler({
       logger,
       getSecret: (ref) => (ref === 'github-pat' ? 'ghp_fallback' : undefined),
     });
 
-    // Should not throw — uses github-pat fallback
-    await handler.execute(makeAction('read_issue', ['number', 'title']), {
-      repo: 'octocat/hello-world',
-      issue_number: 1,
-    });
-    expect(global.fetch).toHaveBeenCalled();
+    await expect(
+      handler.execute(makeAction('read_issue', ['number', 'title']), {
+        repo: 'octocat/hello-world',
+        issue_number: 1,
+      }),
+    ).rejects.toThrow(/daemon GitHub authentication/i);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('throws on invalid repo format', async () => {
