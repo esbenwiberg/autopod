@@ -1577,7 +1577,7 @@ public struct ProfileEditorView: View {
             Image(systemName: "info.circle")
                 .foregroundStyle(.blue.opacity(0.6))
             Text(profile.prProvider == .github
-                 ? "GitHub — PRs created via GitHub API. Issue Watcher monitors GitHub Issues. Authenticate with a GitHub PAT in Credentials."
+                 ? "GitHub — PRs and Issue Watcher use the daemon service account's GitHub CLI authentication."
                  : "Azure DevOps — PRs created via ADO API. Issue Watcher monitors ADO Work Items. Authenticate with an ADO PAT in Credentials.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)

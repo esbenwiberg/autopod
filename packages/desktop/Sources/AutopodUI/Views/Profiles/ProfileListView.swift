@@ -517,7 +517,7 @@ struct ProfileCard: View {
                 if profile.networkEnabled {
                     statBadge(icon: "shield.checkered", label: profile.networkMode.label, color: .green)
                 }
-                if profile.hasGithubPat || profile.hasAdoPat || profile.hasRegistryPat {
+                if profile.hasAdoPat || profile.hasRegistryPat {
                     statBadge(icon: credentialBadgeIcon, label: credentialBadgeLabel, color: credentialBadgeColor)
                 }
                 if profile.mcpServerCount > 0 {
@@ -577,7 +577,7 @@ struct ProfileCard: View {
     }
 
     private var credentialBadgeIcon: String {
-        switch profile.worstConfiguredPatExpiryStatus {
+        switch nonGitHubPatExpiryStatus {
         case .some(.expired(_)):
             "key.slash.fill"
         case .some(.soon(_)):
@@ -588,7 +588,7 @@ struct ProfileCard: View {
     }
 
     private var credentialBadgeLabel: String {
-        switch profile.worstConfiguredPatExpiryStatus {
+        switch nonGitHubPatExpiryStatus {
         case .some(.expired(_)):
             "Expired"
         case .some(.soon(_)):
@@ -599,7 +599,7 @@ struct ProfileCard: View {
     }
 
     private var credentialBadgeColor: Color {
-        switch profile.worstConfiguredPatExpiryStatus {
+        switch nonGitHubPatExpiryStatus {
         case .some(.expired(_)):
             .red
         case .some(.soon(_)):
@@ -607,6 +607,17 @@ struct ProfileCard: View {
         default:
             .orange
         }
+    }
+
+    private var nonGitHubPatExpiryStatus: PatExpiryStatus? {
+        let statuses = [
+            profile.hasAdoPat ? profile.adoPatExpiryStatus : nil,
+            profile.hasRegistryPat ? profile.registryPatExpiryStatus : nil,
+        ].compactMap { $0 }
+        if let expired = statuses.first(where: { if case .expired = $0 { true } else { false } }) {
+            return expired
+        }
+        return statuses.first(where: { if case .soon = $0 { true } else { false } }) ?? statuses.first
     }
 
     private var templateIcon: some View {

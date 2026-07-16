@@ -52,6 +52,9 @@ export class GhCliDaemonGitHubAuth implements DaemonGitHubAuth {
 
   async resolveCredential(): Promise<DaemonGitHubCredential> {
     const token = await this.resolveToken();
+    await this.resolveLogin().catch((err) => {
+      throw mapGhFailure(err);
+    });
     return { token, username: 'x-access-token' };
   }
 
