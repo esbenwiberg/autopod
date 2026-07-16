@@ -121,10 +121,7 @@ export async function buildProviderEnv(
   }
 }
 
-function assertPiEnvironmentCompatible(
-  profile: Profile,
-  auth: ProviderAuthResolution,
-): void {
+function assertPiEnvironmentCompatible(profile: Profile, auth: ProviderAuthResolution): void {
   if (
     profile.modelProvider === 'max' ||
     profile.modelProvider === 'copilot' ||

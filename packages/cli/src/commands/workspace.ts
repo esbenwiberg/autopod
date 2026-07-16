@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
-import { stat, unlink } from 'node:fs/promises';
+import { readFile, stat, unlink } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { createInterface } from 'node:readline/promises';
+import { MAX_HANDOFF_INSTRUCTIONS_LENGTH } from '@autopod/shared';
 import type { Pod, PodStatus, PublicProfile } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
@@ -11,6 +12,7 @@ import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
 import { saveClipboardImage } from '../utils/clipboard.js';
 import { resolvePodId } from '../utils/id-resolver.js';
+import { runRemoteTerminalSession } from '../utils/remote-terminal.js';
 
 const IMAGE_EXTENSIONS = new Set([
   '.png',
@@ -29,12 +31,14 @@ const ATTACH_POLL_INTERVAL_MS = 1_500;
 const TERMINAL_STATUSES = new Set<PodStatus>(['complete', 'killed', 'failed']);
 
 type AttachSessionRunner = (containerName: string) => Promise<number>;
+type TerminalSessionRunner = (client: AutopodClient, podId: string) => Promise<number>;
 type ProfilePicker = (client: AutopodClient) => Promise<string>;
 type SleepFn = (ms: number) => Promise<void>;
 type NowFn = () => number;
 
 interface WorkspaceCommandDeps {
   runAttachSession?: AttachSessionRunner;
+  runTerminalSession?: TerminalSessionRunner;
   pickProfile?: ProfilePicker;
   sleep?: SleepFn;
   now?: NowFn;
@@ -42,6 +46,7 @@ interface WorkspaceCommandDeps {
 
 interface ResolvedWorkspaceCommandDeps {
   attachSession: AttachSessionRunner;
+  terminalSession: TerminalSessionRunner;
   pickProfile: ProfilePicker;
   sleep: SleepFn;
   now: NowFn;
@@ -50,6 +55,10 @@ interface ResolvedWorkspaceCommandDeps {
 interface WorkspaceCreateOptions {
   attach?: boolean;
   branch?: string;
+  baseBranch?: string;
+  startBranch?: string;
+  instructions?: string;
+  instructionsFile?: string;
   label?: string;
   pimGroup?: string[];
   timeout?: number;
@@ -67,6 +76,7 @@ export function registerWorkspaceCommands(
   deps: WorkspaceCommandDeps = {},
 ): void {
   const attachSession = deps.runAttachSession ?? runAttachSession;
+  const terminalSession = deps.runTerminalSession ?? runRemoteTerminalSession;
   const pickProfile = deps.pickProfile ?? pickProfileInteractively;
   const sleep =
     deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -83,6 +93,7 @@ export function registerWorkspaceCommands(
       const client = getClient();
       await createWorkspacePod(client, profile, label, opts, {
         attachSession,
+        terminalSession,
         pickProfile,
         sleep,
         now,
@@ -102,6 +113,7 @@ export function registerWorkspaceCommands(
       { ...opts, attach: true },
       {
         attachSession,
+        terminalSession,
         pickProfile,
         sleep,
         now,
@@ -112,13 +124,15 @@ export function registerWorkspaceCommands(
   // ap attach <id>
   program
     .command('attach <id>')
-    .description('Attach to a running workspace pod via docker exec')
+    .description(
+      'Attach to a running workspace pod (docker exec locally, daemon terminal for sandbox pods)',
+    )
     .action(async (id: string) => {
       const client = getClient();
       const resolvedId = await resolvePodId(client, id);
       const pod = await client.getSession(resolvedId);
 
-      await attachToRunningPod(client, pod, attachSession);
+      await attachToRunningPod(client, pod, { attachSession, terminalSession });
     });
 
   // ap complete <id>
@@ -134,7 +148,7 @@ export function registerWorkspaceCommands(
     .option('--none', 'Hand off to the agent ephemerally (no push)')
     .option(
       '-i, --instructions <text>',
-      'Handoff instructions for the agent (only used with --pr/--artifact/--none)',
+      'Handoff instructions for the agent (only used with --pr/--artifact/--none). REPLACES any instructions persisted at workspace creation; when omitted, the persisted handoff is reused as-is.',
     )
     .option(
       '--skip-agent',
@@ -348,9 +362,22 @@ export function registerWorkspaceCommands(
 
 function addWorkspaceOptions(command: Command): Command {
   return command
+    .option('-b, --branch <name>', 'Name for the new working branch (defaults to autopod/<id>).')
     .option(
-      '-b, --branch <name>',
-      'Name for the new working branch (defaults to autopod/<id>). Pass --base-branch on "ap run" for the handoff, not here.',
+      '--base-branch <ref>',
+      'Remote ref to start the workspace from AND target as the merge base (must exist on the remote; no fallback to the profile default).',
+    )
+    .option(
+      '--start-branch <ref>',
+      'Remote ref to start the workspace from while the eventual PR still targets the profile default (use instead of --base-branch to keep the merge base as main).',
+    )
+    .option(
+      '-i, --instructions <text>',
+      'Durable handoff instructions to persist on the pod and mirror to /workspace/.autopod/pi-handoff.md (mutually exclusive with --instructions-file).',
+    )
+    .option(
+      '--instructions-file <path>',
+      'Read durable handoff instructions from a local file (mutually exclusive with --instructions).',
     )
     .option(
       '--pim-group <spec>',
@@ -394,6 +421,52 @@ function parsePimGroups(specs: string[] | undefined):
       displayName: spec.slice(colonIdx + 1),
     };
   });
+}
+
+/**
+ * Resolve the handoff instructions from the mutually-exclusive `--instructions`
+ * / `--instructions-file` flags. Reads the file locally, rejects empty (after
+ * trim), and enforces {@link MAX_HANDOFF_INSTRUCTIONS_LENGTH}. Every error is
+ * actionable and mentions only sizes/paths — never the instruction body — so
+ * handoff content can't leak into logs or terminal scrollback on failure.
+ *
+ * Exported for unit testing.
+ */
+export async function resolveHandoffInstructions(opts: {
+  instructions?: string;
+  instructionsFile?: string;
+}): Promise<string | undefined> {
+  if (opts.instructions != null && opts.instructionsFile != null) {
+    throw new Error('Choose at most one of --instructions or --instructions-file.');
+  }
+
+  let raw: string | undefined;
+  if (opts.instructions != null) {
+    raw = opts.instructions;
+  } else if (opts.instructionsFile != null) {
+    try {
+      raw = await readFile(opts.instructionsFile, 'utf8');
+    } catch (err) {
+      throw new Error(
+        `Cannot read --instructions-file "${opts.instructionsFile}": ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  if (raw == null) return undefined;
+
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    throw new Error('Handoff instructions must not be empty.');
+  }
+  if (trimmed.length > MAX_HANDOFF_INSTRUCTIONS_LENGTH) {
+    throw new Error(
+      `Handoff instructions are too large (${trimmed.length} characters; limit ${MAX_HANDOFF_INSTRUCTIONS_LENGTH}). Trim the content or hand off a summary.`,
+    );
+  }
+  return trimmed;
 }
 
 async function pickProfileInteractively(client: AutopodClient): Promise<string> {
@@ -460,15 +533,24 @@ async function createWorkspacePod(
   opts: WorkspaceCreateOptions,
   deps: ResolvedWorkspaceCommandDeps,
 ): Promise<void> {
-  await assertInteractiveProfileSupported(client, profile);
-
   const label = opts.label ?? positionalLabel ?? 'Workspace pod';
+  // Resolve + validate the handoff before creating anything, so an empty,
+  // unreadable, or oversized file fails fast with an actionable message and
+  // never mints a pod. Never logs the body.
+  const handoffInstructions = await resolveHandoffInstructions(opts);
   const pod = await withSpinner('Creating workspace pod...', () =>
     client.createSession({
       profileName: profile,
       task: label,
       outputMode: 'workspace',
       branch: opts.branch,
+      // --base-branch → both start point and merge base; --start-branch → start
+      // point only (PR still targets the profile default). Passed straight
+      // through to the same fields worker pods use; the daemon resolves and the
+      // worktree layer fails closed if a requested ref can't be fetched.
+      baseBranch: opts.baseBranch,
+      startBranch: opts.startBranch,
+      handoffInstructions,
       pimGroups: parsePimGroups(opts.pimGroup),
     }),
   );
@@ -489,19 +571,7 @@ async function createWorkspacePod(
     () => waitForPodRunning(client, pod, opts.timeout ?? DEFAULT_ATTACH_TIMEOUT_MS, deps),
   );
 
-  await attachToRunningPod(client, runningPod, deps.attachSession);
-}
-
-async function assertInteractiveProfileSupported(
-  client: AutopodClient,
-  profileName: string,
-): Promise<void> {
-  const profile = await client.getProfile(profileName);
-  if (profile.executionTarget === 'sandbox') {
-    throw new Error(
-      `Sandbox interactive pods are not supported for profile "${profileName}" because Azure Sandboxes do not provide bidirectional TTY streaming yet. Use a local execution profile for ap shell/workspace, or run a non-interactive sandbox pod.`,
-    );
-  }
+  await attachToRunningPod(client, runningPod, deps);
 }
 
 function printWorkspaceSummary(pod: Pod): void {
@@ -550,7 +620,7 @@ function isInteractivePod(pod: Pod): boolean {
 async function attachToRunningPod(
   client: AutopodClient,
   pod: Pod,
-  attachSession: AttachSessionRunner,
+  deps: Pick<ResolvedWorkspaceCommandDeps, 'attachSession' | 'terminalSession'>,
 ): Promise<void> {
   if (!isInteractivePod(pod)) {
     console.error(chalk.red(`Pod ${pod.id} is not an interactive pod.`));
@@ -562,20 +632,19 @@ async function attachToRunningPod(
     process.exit(1);
   }
 
-  if (pod.executionTarget !== 'local') {
-    console.error(
-      chalk.red(
-        `Pod ${pod.id} uses executionTarget=${pod.executionTarget}; ap attach only supports local Docker pods because sandbox TTY streaming is unavailable.`,
-      ),
-    );
-    process.exit(1);
+  let exitCode: number;
+  if (pod.executionTarget === 'local') {
+    const containerName = `autopod-${pod.id}`;
+    console.log(chalk.dim(`Attaching to ${containerName}…`));
+    console.log(chalk.dim('Type "exit" to detach. Run "ap complete <id>" when done.\n'));
+    exitCode = await deps.attachSession(containerName);
+  } else {
+    // Remote container (Azure Sandbox) — no local docker exec; proxy the TTY
+    // through the daemon terminal WebSocket instead.
+    console.log(chalk.dim(`Attaching to ${pod.executionTarget} pod ${pod.id.slice(0, 8)}…`));
+    console.log(chalk.dim('Type "exit" to detach. Run "ap complete <id>" when done.\n'));
+    exitCode = await deps.terminalSession(client, pod.id);
   }
-
-  const containerName = `autopod-${pod.id}`;
-  console.log(chalk.dim(`Attaching to ${containerName}…`));
-  console.log(chalk.dim('Type "exit" to detach. Run "ap complete <id>" when done.\n'));
-
-  const exitCode = await attachSession(containerName);
 
   console.log();
 

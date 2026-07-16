@@ -14,7 +14,12 @@ import type {
   StackTemplate,
   ValidationResult,
 } from '@autopod/shared';
-import { AutopodError, InvalidStateTransitionError, PodNotFoundError } from '@autopod/shared';
+import {
+  AutopodError,
+  InvalidStateTransitionError,
+  PodNotFoundError,
+  WORKSPACE_PI_HANDOFF_PATH,
+} from '@autopod/shared';
 import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -76,17 +81,7 @@ function deferred<T>() {
 }
 
 async function waitForAssertion(assertion: () => void): Promise<void> {
-  let lastError: unknown;
-  for (let i = 0; i < 100; i++) {
-    try {
-      assertion();
-      return;
-    } catch (err) {
-      lastError = err;
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-  }
-  throw lastError;
+  await vi.waitFor(assertion, { timeout: 3_000, interval: 10 });
 }
 
 function mockExecFileSuccess(): void {
@@ -300,8 +295,21 @@ function createMockContainerManager(): ContainerManager {
     readFile: vi.fn(async () => ''),
     extractDirectoryFromContainer: vi.fn(async () => {}),
     getStatus: vi.fn(async () => 'running' as const),
-    execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+    execInContainer: vi.fn(async (_containerId, command) => {
+      if (command.join(' ') === 'codex --version') {
+        return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    }),
     execStreaming: vi.fn(),
+    attachTerminal: vi.fn(async () => ({
+      onData: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(),
+    })),
   };
 }
 
@@ -532,6 +540,7 @@ function insertApprovedMemory(
 
 function reviewInfrastructureFailureResult(
   reviewSkipKind: 'review-failed' | 'review-timeout' = 'review-timeout',
+  overrides: Partial<ValidationResult> = {},
 ): Partial<ValidationResult> {
   return {
     overall: 'fail',
@@ -556,6 +565,7 @@ function reviewInfrastructureFailureResult(
       reviewSkipKind === 'review-timeout'
         ? 'Review timed out: Command timed out after 300000ms'
         : 'Review failed: reviewer process exited with code 2',
+    ...overrides,
   };
 }
 
@@ -720,6 +730,13 @@ function createTestContext(
     fixFeedbackRepo,
     eventRepo,
     profileStore,
+    githubAuth: {
+      resolveCredential: vi.fn(async () => ({
+        token: 'daemon-gh-token',
+        username: 'x-access-token',
+      })),
+      getStatus: vi.fn(async () => ({ available: true, login: 'autopod-dev', setup: 'setup' })),
+    },
     eventBus,
     containerManagerFactory: { get: vi.fn(() => containerManager) },
     worktreeManager,
@@ -785,11 +802,27 @@ describe('PodManager', () => {
       expect(ctx.podRepo.list()).toHaveLength(0);
     });
 
-    it('rejects interactive workspace pods when the profile default target is sandbox', () => {
+    it('allows interactive workspace pods on sandbox when the backend supports terminals', () => {
       const ctx = createTestContext(undefined, {
         executionTarget: 'sandbox',
         warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
       });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Workspace', outputMode: 'workspace' },
+        'user-1',
+      );
+      expect(pod.executionTarget).toBe('sandbox');
+      expect(ctx.podRepo.list()).toHaveLength(1);
+    });
+
+    it('rejects interactive sandbox pods when the backend has no terminal support', () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      Object.assign(ctx.containerManager, { attachTerminal: undefined });
       const manager = createPodManager(ctx.deps);
 
       expect(() =>
@@ -797,7 +830,7 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Workspace', outputMode: 'workspace' },
           'user-1',
         ),
-      ).toThrow(/Interactive pods only support local execution target/);
+      ).toThrow(/interactive terminal support/);
       expect(ctx.podRepo.list()).toHaveLength(0);
     });
 
@@ -922,6 +955,127 @@ describe('PodManager', () => {
     });
   });
 
+  describe('sandbox runtime session state sync', () => {
+    it.each([
+      {
+        runtime: 'claude' as const,
+        containerPath: '/home/autopod/.claude/projects',
+        hostFolder: 'claude-state',
+      },
+      {
+        runtime: 'codex' as const,
+        containerPath: '/home/autopod/.codex/sessions',
+        hostFolder: 'codex-state',
+      },
+    ])('syncs $runtime sandbox session state after agent turns', async (testCase) => {
+      const ctx = createTestContext(undefined, {
+        defaultRuntime: testCase.runtime,
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Persist session state', skipValidation: true },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'sandbox-123' });
+
+      async function* events(): AsyncIterable<AgentEvent> {
+        yield {
+          type: 'complete',
+          timestamp: '2026-07-12T15:00:00.000Z',
+          result: 'done',
+        };
+      }
+
+      await manager.consumeAgentEvents(pod.id, events());
+
+      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledWith(
+        'sandbox-123',
+        testCase.containerPath,
+        path.join(os.homedir(), '.autopod', testCase.hostFolder, pod.id),
+      );
+    });
+
+    it.each([
+      { runtime: 'claude' as const, executionTarget: 'local' as const },
+      { runtime: 'copilot' as const, executionTarget: 'sandbox' as const },
+    ])(
+      'does not extract session state for $runtime on $executionTarget',
+      async ({ runtime, executionTarget }) => {
+        const ctx = createTestContext(undefined, {
+          defaultRuntime: runtime,
+          executionTarget,
+          warmImageTag:
+            executionTarget === 'sandbox' ? 'example.azurecr.io/autopod/test-profile:latest' : null,
+        });
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'No session sync', skipValidation: true },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, { status: 'running', containerId: 'container-123' });
+
+        async function* events(): AsyncIterable<AgentEvent> {
+          yield {
+            type: 'complete',
+            timestamp: '2026-07-12T15:00:00.000Z',
+            result: 'done',
+          };
+        }
+
+        await manager.consumeAgentEvents(pod.id, events());
+
+        expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+      },
+    );
+
+    it('sandbox session state sync failure does not fail completed work', async () => {
+      const ctx = createTestContext(undefined, {
+        defaultRuntime: 'codex',
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValueOnce(
+        new Error('sandbox file API unavailable'),
+      );
+      const warnSpy = vi.spyOn(logger, 'warn');
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Complete despite sync warning',
+          skipValidation: true,
+        },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'sandbox-123' });
+
+      async function* events(): AsyncIterable<AgentEvent> {
+        yield {
+          type: 'task_summary',
+          timestamp: '2026-07-12T15:00:00.000Z',
+          actualSummary: 'Work completed.',
+          deviations: [],
+        };
+        yield {
+          type: 'complete',
+          timestamp: '2026-07-12T15:00:01.000Z',
+          result: 'done',
+        };
+      }
+
+      await expect(manager.consumeAgentEvents(pod.id, events())).resolves.toBe('completed');
+
+      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledOnce();
+      expect(manager.getSession(pod.id).taskSummary?.actualSummary).toBe('Work completed.');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ podId: pod.id, runtime: 'codex' }),
+        'Failed to sync sandbox runtime session state — future recovery may restart fresh',
+      );
+    });
+  });
+
   describe('createSession', () => {
     it('creates a pod in queued status', () => {
       const ctx = createTestContext();
@@ -1013,6 +1167,38 @@ describe('PodManager', () => {
       expect(pod.baseBranch).toBe('main');
     });
 
+    it('creates a workspace pod from a non-default base branch with handoff instructions', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Workspace pod',
+          outputMode: 'workspace',
+          baseBranch: 'pi/feature-x',
+          handoffInstructions: '  Continue the Pi plan.  ',
+        },
+        'user-1',
+      );
+
+      // Persisted immediately, trimmed, and readable on the freshly created pod.
+      expect(manager.getSession(pod.id).handoffInstructions).toBe('Continue the Pi plan.');
+      expect(pod.baseBranch).toBe('pi/feature-x');
+    });
+
+    it('leaves handoffInstructions null for the unchanged legacy workspace path', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Workspace pod', outputMode: 'workspace' },
+        'user-1',
+      );
+
+      expect(manager.getSession(pod.id).handoffInstructions).toBeNull();
+    });
+
     it('persists local spec files for pre-agent branch materialization', () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
@@ -1059,7 +1245,7 @@ describe('PodManager', () => {
       expect(ctx.enqueuedSessions).toContain(pod.id);
     });
 
-    it('blocks creation when the selected GitHub PAT is expired', () => {
+    it('ignores an expired legacy GitHub PAT during creation', () => {
       const ctx = createTestContext(undefined, {
         prProvider: 'github',
         githubPat: 'ghp_secret',
@@ -1069,7 +1255,7 @@ describe('PodManager', () => {
 
       expect(() =>
         manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1'),
-      ).toThrow(/expired GitHub PAT|PAT_EXPIRED/);
+      ).not.toThrow();
     });
 
     it('allows creation when the selected PAT expires soon but has not expired', () => {
@@ -1855,12 +2041,7 @@ describe('PodManager', () => {
       expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
     });
 
-    // Regression: approval-time mergeBranch sites used to omit the PAT, so a daemon
-    // restart between worktree create and approval (or a recovery pod that mounts an
-    // existing worktree) left the in-memory PAT cache cold. ADO clone URLs of the
-    // form https://<org>@dev.azure.com/... then prompted for a password, and with
-    // GIT_TERMINAL_PROMPT=0 the push died with "could not read Password".
-    it('forwards profile PAT into mergeBranch on approval-time PR creation retry', async () => {
+    it('does not forward legacy GitHub PAT into mergeBranch on approval-time PR creation retry', async () => {
       const ctx = createTestContext(undefined, { githubPat: 'ghp_test_pat_12345' });
       const manager = createPodManager(ctx.deps);
 
@@ -1877,11 +2058,11 @@ describe('PodManager', () => {
       await manager.approveSession(pod.id);
 
       expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({ pat: 'ghp_test_pat_12345' }),
+        expect.objectContaining({ pat: 'daemon-gh-token' }),
       );
     });
 
-    it('forwards profile PAT into mergeBranch on approval-time fallback push (no prManager)', async () => {
+    it('does not forward legacy GitHub PAT into mergeBranch on approval-time fallback push', async () => {
       const ctx = createTestContext(undefined, { githubPat: 'ghp_test_pat_67890' });
       ctx.deps.prManagerFactory = undefined;
       const manager = createPodManager(ctx.deps);
@@ -1899,7 +2080,7 @@ describe('PodManager', () => {
       await manager.approveSession(pod.id);
 
       expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({ pat: 'ghp_test_pat_67890' }),
+        expect.objectContaining({ pat: 'daemon-gh-token' }),
       );
     });
 
@@ -2482,6 +2663,66 @@ describe('PodManager', () => {
       expect(processed.worktreePath).toBe('/tmp/worktree/abc');
     });
 
+    it('surfaces secret-safe finding details when the pre-push security scan blocks', async () => {
+      const ctx = createTestContext();
+      ctx.deps.repoScanner = {
+        scan: vi.fn(async (checkpoint) => ({
+          podId: 'scan-pod',
+          checkpoint,
+          startedAt: 1,
+          completedAt: 2,
+          filesScanned: 1,
+          filesSkipped: 0,
+          scanIncomplete: false,
+          findings:
+            checkpoint === 'push'
+              ? [
+                  {
+                    detector: 'secrets' as const,
+                    severity: 'critical' as const,
+                    file: 'src/config.ts',
+                    line: 42,
+                    ruleId: '@secretlint/rule-basicauth',
+                    snippet: 'http...[REDACTED]',
+                  },
+                  {
+                    detector: 'injection' as const,
+                    severity: 'high' as const,
+                    file: 'docs/prompt.md',
+                    snippet: 'RAW MATCH MUST NOT REACH LOGS',
+                  },
+                ]
+              : [],
+          decision: checkpoint === 'push' ? ('block' as const) : ('pass' as const),
+          warningSection: null,
+        })),
+      };
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      expect(manager.getSession(pod.id).status).toBe('failed');
+      const messages = ctx.eventRepo
+        .getForSession(pod.id, { type: 'pod.agent_activity' })
+        .map((event) => (event.payload as never as { event?: { message?: string } }).event?.message)
+        .filter((message): message is string => Boolean(message));
+      expect(messages).toContain('Pre-push security scan blocked: 2 findings.');
+      expect(messages).toContain(
+        'Security finding 1/2: severity=critical detector=secrets ' +
+          'rule=@secretlint/rule-basicauth location=src/config.ts:42',
+      );
+      expect(messages).toContain(
+        'Security finding 2/2: severity=high detector=injection ' +
+          'rule=unknown location=docs/prompt.md',
+      );
+      expect(messages.join('\n')).not.toContain('RAW MATCH MUST NOT REACH LOGS');
+      expect(messages.join('\n')).not.toContain('http...[REDACTED]');
+    });
+
     it('persists Codex auth.json back to a linked OpenAI provider account after agent run', async () => {
       const accountId = 'team-openai';
       const oldAuthJson = JSON.stringify({ token: 'old' });
@@ -2515,8 +2756,12 @@ describe('PodManager', () => {
       ctx.deps.providerAccountStore = providerAccountStore;
       vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
         async (_containerId, command) => {
-          if (command.join(' ').includes('command -v codex')) {
+          const rendered = command.join(' ');
+          if (rendered.includes('command -v codex')) {
             return { stdout: '/usr/local/bin/codex\n', stderr: '', exitCode: 0 };
+          }
+          if (rendered === 'codex --version') {
+            return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
           }
           return { stdout: '', stderr: '', exitCode: 0 };
         },
@@ -2844,6 +3089,78 @@ describe('PodManager', () => {
           baseBranch: 'main',
         }),
       );
+    });
+
+    it('mirrors handoff instructions into /workspace/.autopod/pi-handoff.md during provisioning (local)', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Workspace pod',
+          outputMode: 'workspace',
+          handoffInstructions: 'INITIAL PI HANDOFF',
+        },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      expect(ctx.containerManager.writeFile).toHaveBeenCalledWith(
+        'container-123',
+        WORKSPACE_PI_HANDOFF_PATH,
+        expect.stringContaining('INITIAL PI HANDOFF'),
+      );
+      // In-container info/exclude so an in-container `git add -A` can't sweep it in.
+      const excludeCall = vi
+        .mocked(ctx.containerManager.execInContainer)
+        .mock.calls.find((c) =>
+          (c[1] as string[]).some(
+            (a) => typeof a === 'string' && a.includes('.autopod/pi-handoff.md'),
+          ),
+        );
+      expect(excludeCall).toBeDefined();
+    });
+
+    it('mirrors handoff instructions into the workspace on the sandbox target (mocked Azure)', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Workspace pod',
+          outputMode: 'workspace',
+          handoffInstructions: 'SANDBOX PI HANDOFF',
+        },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      expect(ctx.containerManager.writeFile).toHaveBeenCalledWith(
+        'container-123',
+        WORKSPACE_PI_HANDOFF_PATH,
+        expect.stringContaining('SANDBOX PI HANDOFF'),
+      );
+    });
+
+    it('writes no pi-handoff.md when the workspace pod has no handoff instructions', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Workspace pod', outputMode: 'workspace' },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      const wrotePiHandoff = vi
+        .mocked(ctx.containerManager.writeFile)
+        .mock.calls.some((c) => c[1] === WORKSPACE_PI_HANDOFF_PATH);
+      expect(wrotePiHandoff).toBe(false);
     });
 
     it('materializes local spec files onto the pod branch before agent work starts', async () => {
@@ -4350,6 +4667,7 @@ describe('PodManager', () => {
       );
       ctx.podRepo.update(pod.id, {
         status: 'failed',
+        failureReason: 'Agent failed: stale reason',
         containerId: 'ctr-1',
         worktreePath: '/tmp/wt',
       });
@@ -4438,6 +4756,59 @@ describe('PodManager', () => {
         { cwd: '/tmp/wt' },
         expect.any(Function),
       );
+    });
+
+    it('re-provisions a fresh container (validation-only) when a force resume cannot sync the reused container', async () => {
+      const hostHead = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      const containerHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      // Host worktree HEAD is the recovered auto-commit; the reused (cold) container
+      // reports a divergent HEAD that is neither ancestor of the other.
+      mockedExecFile.mockImplementation((...args: unknown[]) => {
+        const gitArgs = Array.isArray(args[1]) ? (args[1] as string[]) : [];
+        const callback = args[args.length - 1] as (
+          err: Error | null,
+          result: { stdout: string; stderr: string },
+        ) => void;
+        const stdout = gitArgs[0] === 'rev-parse' && gitArgs[1] === 'HEAD' ? `${hostHead}\n` : '';
+        callback(null, { stdout, stderr: '' });
+        return undefined as never;
+      });
+
+      const ctx = createTestContext({ overall: 'pass' });
+      ctx.containerManager.execInContainer = vi.fn(async (_containerId, command) => {
+        if (command[0] === 'git' && command[3] === 'rev-parse') {
+          return { stdout: `${containerHead}\n`, stderr: '', exitCode: 0 };
+        }
+        if (command[0] === 'git' && command[3] === 'merge-base') {
+          // Neither direction is an ancestor → true divergence on the reused container.
+          return { stdout: '', stderr: '', exitCode: 1 };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'ctr-stale',
+        worktreePath: '/tmp/wt',
+      });
+
+      const result = await manager.revalidateSession(pod.id, { force: true });
+
+      expect(result).toEqual({ newCommits: false, result: 'fail' });
+      const refreshed = manager.getSession(pod.id);
+      // Fresh re-provision for validation-only — NOT parked as compromised.
+      expect(refreshed.worktreeCompromised).toBe(false);
+      expect(refreshed.status).toBe('queued');
+      expect(refreshed.containerId).toBeNull();
+      expect(refreshed.skipAgent).toBe(true);
+      expect(refreshed.recoveryWorktreePath).toBe('/tmp/wt');
+      // We did not fall back to validating against the stale container.
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
     });
 
     it('resets a stale validation container to host HEAD instead of mirroring it back', async () => {
@@ -4745,6 +5116,33 @@ describe('PodManager', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it('does not retry deterministic reviewer invalid-request failures', async () => {
+      const ctx = createTestContext(
+        reviewInfrastructureFailureResult('review-failed', {
+          reviewSkipReason:
+            'Review failed: {"type":"invalid_request_error","message":"The model requires a newer version of Codex."}',
+        }),
+      );
+      ctx.deps.reviewInfrastructureRetryBackoffMs = [0];
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).status).toBe('review_required');
     });
 
     it('moves pending fact deviations to review_required without retrying the agent', async () => {
@@ -5088,6 +5486,197 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).status).toBe('validated');
     });
 
+    it.each([
+      { historicalStatus: 'pending_human' as const, historicalPassed: false },
+      { historicalStatus: 'waived' as const, historicalPassed: true },
+    ])(
+      'restores a $historicalStatus fact waiver from history after an interrupted retry replaces the latest result',
+      async ({ historicalStatus, historicalPassed }) => {
+        const ctx = createTestContext({
+          overall: 'pass',
+          factValidation: {
+            status: 'pass',
+            results: [
+              {
+                factId: 'fact-swift-only',
+                proves: ['swift-helper-readable'],
+                kind: 'unit-test',
+                artifactPath: 'packages/desktop/Tests/AutopodUITests/ProfileEditorTests.swift',
+                command: 'swift test --filter ProfileEditorTests',
+                passed: true,
+                status: 'waived',
+                reasoning: 'Fact deviation approved by human as waive.',
+              },
+            ],
+          },
+        });
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Update profile UI' },
+          'user-1',
+        );
+        const pendingReasoning =
+          'Fact fact-swift-only needs human decision: swift is unavailable in the validation container.';
+        const pendingResult: ValidationResult = {
+          podId: pod.id,
+          attempt: 1,
+          timestamp: new Date().toISOString(),
+          smoke: {
+            status: 'pass',
+            build: { status: 'pass', output: '', duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 50,
+            },
+            pages: [],
+          },
+          test: { status: 'pass', duration: 100 },
+          taskReview: null,
+          overall: 'fail',
+          duration: 5000,
+          factValidation: {
+            status: historicalStatus === 'waived' ? 'pass' : 'pending_human',
+            results: [
+              {
+                factId: 'fact-swift-only',
+                proves: ['swift-helper-readable'],
+                kind: 'unit-test',
+                artifactPath: 'packages/desktop/Tests/AutopodUITests/ProfileEditorTests.swift',
+                command: 'swift test --filter ProfileEditorTests',
+                passed: historicalPassed,
+                status: historicalStatus,
+                reasoning: pendingReasoning,
+              },
+            ],
+          },
+        };
+        ctx.validationRepo.insert(pod.id, 1, pendingResult);
+        ctx.podRepo.update(pod.id, {
+          status: 'failed',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          taskSummary: { actualSummary: 'Updated the profile UI.', deviations: [] },
+          lastValidationResult: {
+            podId: pod.id,
+            attempt: 2,
+            timestamp: new Date().toISOString(),
+            smoke: {
+              status: 'fail',
+              build: { status: 'skip', output: '', duration: 0 },
+              health: { status: 'fail', url: '', responseCode: null, duration: 0 },
+              pages: [],
+            },
+            test: { status: 'skip', duration: 0 },
+            taskReview: null,
+            reviewSkipReason: 'Validation interrupted by user',
+            reviewSkipKind: 'upstream-failed',
+            overall: 'fail',
+            duration: 1000,
+            factValidation: { status: 'skip', results: [] },
+          },
+        });
+
+        await manager.approveFactWaiver(pod.id, 'fact-swift-only', 'Swift is unavailable here');
+
+        const validateConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[0]?.[0];
+        expect(validateConfig?.taskSummary?.factDeviations).toEqual([
+          expect.objectContaining({
+            factId: 'fact-swift-only',
+            action: 'waive',
+            decision: 'approved_waive',
+            whyImpossible: pendingReasoning,
+          }),
+        ]);
+        expect(manager.getSession(pod.id).status).toBe('validated');
+      },
+    );
+
+    it('records a pending fact waiver during agent rework for the next validation', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      const pendingReasoning =
+        'Fact fact-swift-only needs human decision: required fact command `swift` is unavailable in the validation container.';
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        taskSummary: {
+          actualSummary: 'Updated the Swift helper.',
+          deviations: [],
+          factDeviations: [
+            {
+              factId: 'fact-swift-only',
+              action: 'waive',
+              reason: 'Swift is unavailable in the validation image',
+              whyImpossible: pendingReasoning,
+            },
+          ],
+        },
+        lastValidationResult: {
+          podId: pod.id,
+          attempt: 1,
+          timestamp: new Date().toISOString(),
+          smoke: {
+            status: 'pass',
+            build: { status: 'pass', output: '', duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 50,
+            },
+            pages: [],
+          },
+          taskReview: null,
+          overall: 'fail',
+          duration: 5000,
+          factValidation: {
+            status: 'pending_human',
+            results: [
+              {
+                factId: 'fact-swift-only',
+                proves: ['swift-helper-readable'],
+                kind: 'unit-test',
+                artifactPath:
+                  'packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift',
+                command: 'swift test --filter ThroughputTimeInStatusDisplayTests',
+                passed: false,
+                status: 'pending_human',
+                exitCode: 127,
+                reasoning: pendingReasoning,
+              },
+            ],
+          },
+        },
+      });
+
+      const result = await manager.approveFactWaiver(
+        pod.id,
+        'fact-swift-only',
+        'Swift is unavailable here',
+      );
+
+      expect(result).toEqual({ newCommits: false, result: 'fail' });
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      const updated = manager.getSession(pod.id);
+      expect(updated.status).toBe('running');
+      expect(updated.taskSummary?.factDeviations).toEqual([
+        {
+          factId: 'fact-swift-only',
+          action: 'waive',
+          decision: 'approved_waive',
+          reason: 'Swift is unavailable here',
+          whyImpossible: pendingReasoning,
+        },
+      ]);
+    });
+
     it('retries with correction feedback until max attempts exhausted', async () => {
       // With always-failing validation, the retry loop exhausts all attempts
       const ctx = createTestContext({ overall: 'fail' });
@@ -5260,6 +5849,7 @@ describe('PodManager', () => {
       expect(result.status).toBe('queued');
       expect(result.containerId).toBeNull();
       expect(result.validationAttempts).toBe(0);
+      expect(result.failureReason).toBeNull();
       expect(result.recoveryWorktreePath).toBe('/tmp/worktrees/test-branch');
       // claudeSessionId should be cleared so we get a fresh spawn, not a stale resume
       expect(result.claudeSessionId).toBeNull();
@@ -5270,6 +5860,44 @@ describe('PodManager', () => {
       expect(ctx.enqueuedSessions).toContain(pod.id);
       // Old container should be killed
       expect(ctx.containerManager.kill).toHaveBeenCalledWith('ctr-1');
+    });
+
+    it('re-queues force rework when sandbox container deletion never resolves', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext(undefined, {
+          executionTarget: 'sandbox',
+          warmImageTag: 'registry.azurecr.io/autopod/test-profile:latest',
+        });
+        const manager = createPodManager(ctx.deps);
+        vi.mocked(ctx.containerManager.kill).mockReturnValue(new Promise(() => {}));
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Add feature' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'failed',
+          containerId: 'sandbox-1',
+          worktreePath: '/tmp/worktrees/test-branch',
+          validationAttempts: 3,
+        });
+
+        let settled = false;
+        const rework = manager.triggerValidation(pod.id, { force: true }).then(() => {
+          settled = true;
+        });
+
+        await vi.advanceTimersByTimeAsync(15_001);
+        await Promise.resolve();
+
+        expect(settled).toBe(true);
+        await rework;
+        expect(manager.getSession(pod.id).status).toBe('queued');
+        expect(ctx.enqueuedSessions).toContain(pod.id);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('does not reuse stale worktree state when force retrying a setup-only failure', async () => {
@@ -5387,12 +6015,7 @@ describe('PodManager', () => {
           ]),
         }),
       );
-      expect(piRuntime.resume).toHaveBeenCalledWith(
-        pod.id,
-        'continue please',
-        'ctr-1',
-        undefined,
-      );
+      expect(piRuntime.resume).toHaveBeenCalledWith(pod.id, 'continue please', 'ctr-1', undefined);
     });
   });
 
@@ -5685,6 +6308,62 @@ describe('PodManager', () => {
         expect(ctx.containerManager.stop).not.toHaveBeenCalled();
         expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
         expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      });
+
+      function createRunningWorkspaceWithHandoff(ctx: TestContext, handoff: string) {
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Workspace pod',
+            outputMode: 'workspace',
+            handoffInstructions: handoff,
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'ctr-workspace',
+          worktreePath: '/tmp/worktree/abc',
+          startedAt: new Date().toISOString(),
+        });
+        return { manager, pod };
+      }
+
+      it('reuses the creation-time handoff when promotion supplies no instructions', async () => {
+        const ctx = createTestContext({ overall: 'pass' });
+        const { manager, pod } = createRunningWorkspaceWithHandoff(ctx, 'INITIAL PI HANDOFF');
+
+        await manager.promoteToAuto(pod.id, 'pr');
+
+        expect(manager.getSession(pod.id).handoffInstructions).toBe('INITIAL PI HANDOFF');
+      });
+
+      it('replaces the creation-time handoff with an explicit promotion-time correction', async () => {
+        const ctx = createTestContext({ overall: 'pass' });
+        const { manager, pod } = createRunningWorkspaceWithHandoff(ctx, 'INITIAL PI HANDOFF');
+
+        await manager.promoteToAuto(pod.id, 'pr', { instructions: 'PROMOTION CORRECTION' });
+
+        // Deterministic replacement rule — no concatenation, no duplication.
+        expect(manager.getSession(pod.id).handoffInstructions).toBe('PROMOTION CORRECTION');
+      });
+
+      it('composes handoffContext from the persisted handoff with distinct, labeled sections and keeps the branch', async () => {
+        const ctx = createTestContext({ overall: 'pass' });
+        const { manager, pod } = createRunningWorkspaceWithHandoff(ctx, 'INITIAL PI HANDOFF');
+        const originalBranch = manager.getSession(pod.id).branch;
+        // A committed delta so the handoff isn't blocked as "no changes".
+        vi.mocked(ctx.worktreeManager.commitPendingChanges).mockResolvedValue(true);
+
+        await manager.promoteToAuto(pod.id, 'pr');
+        await manager.processPod(pod.id);
+
+        const result = manager.getSession(pod.id);
+        expect(result.branch).toBe(originalBranch);
+        expect(result.handoffContext).toContain('### Handoff instructions');
+        expect(result.handoffContext).toContain('INITIAL PI HANDOFF');
+        expect(result.handoffContext).toContain('### Session summary');
       });
 
       it('submit-as-is opens a PR after validation but does not auto-merge', async () => {
@@ -7094,7 +7773,10 @@ describe('PodManager', () => {
       const result = await manager.resumePod(fix.id);
 
       expect(result).toEqual({ action: 'retry-fix-delivery' });
-      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith('/tmp/worktree/fix', 'test-pat');
+      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith(
+        '/tmp/worktree/fix',
+        'daemon-gh-token',
+      );
       expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalledWith(
         expect.objectContaining({
           worktreePath: '/tmp/worktree/fix',
@@ -7330,7 +8012,7 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).status).toBe('validated');
     });
 
-    it('Path 2: passes the profile PAT when pulling during forced revalidation', async () => {
+    it('Path 2: ignores legacy GitHub PAT when pulling during forced revalidation', async () => {
       const ctx = createTestContext(undefined, { githubPat: 'test-github-pat' });
       const { manager, pod } = setupFailedPod(ctx, {
         validationOverall: 'fail',
@@ -7341,7 +8023,7 @@ describe('PodManager', () => {
 
       expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith(
         '/tmp/worktree/abc',
-        'test-github-pat',
+        'daemon-gh-token',
       );
     });
 
@@ -7939,6 +8621,42 @@ describe('PodManager', () => {
         expect(ctx.containerManager.stop).not.toHaveBeenCalled();
         const refreshed = manager.getSession(pod.id);
         expect(refreshed.status).toBe('running');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('leaves a pod with a fresh MCP heartbeat alone when agent events are stale', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'run full self-validation' },
+          'user-1',
+        );
+        const stale = new Date(Date.now() - 35 * 60 * 1000).toISOString();
+        const freshHeartbeat = new Date(Date.now() - 60 * 1000).toISOString();
+        ctx.podRepo.update(pod.id, {
+          status: 'provisioning',
+          worktreePath: '/tmp/worktree/active-validation',
+          containerId: 'container-validating',
+          startedAt: stale,
+        });
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          lastAgentEventAt: stale,
+          lastHeartbeatAt: freshHeartbeat,
+        });
+
+        manager.startStuckPodWatchdog({ intervalMs: 50, thresholdMs: 30 * 60 * 1000 });
+        await vi.advanceTimersByTimeAsync(60);
+        await vi.advanceTimersByTimeAsync(0);
+        manager.stopStuckPodWatchdog();
+
+        expect(ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id).status).toBe('running');
       } finally {
         vi.useRealTimers();
       }
@@ -8893,8 +9611,12 @@ describe('worker startup diagnostics', () => {
     ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
     vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
       async (_containerId, command) => {
-        if (command.join(' ').includes('command -v codex')) {
+        const rendered = command.join(' ');
+        if (rendered.includes('command -v codex')) {
           return { stdout: '/usr/local/bin/codex\n', stderr: '', exitCode: 0 };
+        }
+        if (rendered === 'codex --version') {
+          return { stdout: 'codex-cli 0.144.4\n', stderr: '', exitCode: 0 };
         }
         return { stdout: '', stderr: '', exitCode: 0 };
       },
@@ -8949,6 +9671,71 @@ describe('worker startup diagnostics', () => {
     expect(statusMessages(ctx, pod.id)).toContain(
       'Agent CLI missing: codex is not installed in this image. Rebuild the codex base/warm image. codex: not found',
     );
+  });
+
+  it('fails before spawn when the Codex CLI is below the supported compatibility floor', async () => {
+    const runtime = createMockRuntime();
+    runtime.type = 'codex';
+    const ctx = createTestContext(undefined, {
+      defaultModel: 'auto',
+      defaultRuntime: 'codex',
+      modelProvider: 'openai',
+    });
+    ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+    vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+      async (_containerId, command) => {
+        const rendered = command.join(' ');
+        if (rendered.includes('command -v codex')) {
+          return { stdout: '/usr/local/bin/codex\n', stderr: '', exitCode: 0 };
+        }
+        if (rendered === 'codex --version') {
+          return { stdout: 'codex-cli 0.144.3\n', stderr: '', exitCode: 0 };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    );
+
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget', runtime: 'codex', skipValidation: true },
+      'user-1',
+    );
+
+    await manager.processPod(pod.id);
+
+    const failed = manager.getSession(pod.id);
+    expect(failed.status).toBe('failed');
+    expect(runtime.spawn).not.toHaveBeenCalled();
+    expect(failed.failureReason).toContain(
+      'Codex CLI 0.144.3 is incompatible; Autopod requires 0.144.4 or newer',
+    );
+  });
+
+  it('persists a sanitized fatal runtime failure reason', async () => {
+    const runtime = createMockRuntime();
+    vi.mocked(runtime.spawn).mockImplementation(async function* () {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'Codex turn aborted with token ghp_1234567890abcdefghijklmnopqrstuvwxyz1234',
+        fatal: true,
+      };
+    });
+    const ctx = createTestContext();
+    ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget', skipValidation: true },
+      'user-1',
+    );
+
+    await manager.processPod(pod.id);
+
+    const failed = manager.getSession(pod.id);
+    expect(failed.status).toBe('failed');
+    expect(failed.failureReason).toContain('Agent failed: Codex turn aborted');
+    expect(failed.failureReason).toContain('[API_KEY_REDACTED]');
+    expect(failed.failureReason).not.toContain('ghp_1234567890');
   });
 
   it('pre-agent setup failure emits a visible fatal activity', async () => {
@@ -9216,6 +10003,7 @@ describe('updateFromBase', () => {
     await manager.triggerValidation(pod.id);
 
     // The retry path consumed the intent, ran the rebase, and scheduled follow-up
+    await new Promise((r) => setImmediate(r));
     expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalled();
     // Flush setImmediate so follow-up triggerValidation fires
     await new Promise((r) => setImmediate(r));

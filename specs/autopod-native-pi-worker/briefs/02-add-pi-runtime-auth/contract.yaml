@@ -1,0 +1,55 @@
+contract_version: 1
+title: "Add Pi RPC runtime and credential lifecycle"
+depends_on: [01-build-pi-worker-bridge]
+scenarios:
+  - id: pi-rpc-normalizes-events
+    given:
+      - "a Pi RPC stream contains correlated responses plus text, tool, error, and completion events"
+    when:
+      - "PiRuntime consumes the stream"
+    then:
+      - "the runtime emits distinguishable normalized Autopod events and completes only after terminal evidence"
+  - id: pi-rpc-rejects-false-completion
+    given:
+      - "Pi exits cleanly after emitting only acknowledgements or status events"
+    when:
+      - "PiRuntime evaluates the process outcome"
+    then:
+      - "the pod receives a fatal error instead of a successful completion"
+  - id: pi-session-lifecycle
+    given:
+      - "an active Pi pod has an established RPC session"
+    when:
+      - "the daemon follows up, suspends, resumes, or aborts it"
+    then:
+      - "follow-up and suspend preserve the session while abort terminates the process and clears resumable state"
+  - id: pi-auth-isolated-by-owner
+    given:
+      - "two credential owners hold different Pi OAuth provider entries"
+    when:
+      - "auth files are injected and one provider refreshes its token"
+    then:
+      - "each pod receives only its selected entry and refresh persistence updates only the matching owner and provider"
+required_facts:
+  - id: fact-pi-rpc-event-mapping
+    proves: [pi-rpc-normalizes-events, pi-rpc-rejects-false-completion]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/runtimes/pi-rpc-parser.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- pi-rpc-parser.test.ts
+  - id: fact-pi-runtime-lifecycle
+    proves: [pi-session-lifecycle, pi-rpc-rejects-false-completion]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/runtimes/pi-runtime.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- pi-runtime.test.ts
+  - id: fact-pi-auth-owner-isolation
+    proves: [pi-auth-isolated-by-owner]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/providers/pi-credential-persistence.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- pi-credential-persistence.test.ts
+human_review: []

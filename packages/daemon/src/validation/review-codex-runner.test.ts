@@ -1,5 +1,11 @@
+import { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
-import type { ContainerManager, ExecOptions, ExecResult } from '../interfaces/container-manager.js';
+import type {
+  ContainerManager,
+  ExecOptions,
+  ExecResult,
+  StreamingExecResult,
+} from '../interfaces/container-manager.js';
 import { runCodexReview } from './review-codex-runner.js';
 
 interface CapturedExec {
@@ -136,6 +142,39 @@ describe('runCodexReview', () => {
       env: { OPENAI_API_KEY_FILE: '/run/autopod/openai-api-key' },
       timeout: 1234,
     });
+  });
+
+  it('uses streaming exec for long-running container reviews when available', async () => {
+    const execStreaming = async (
+      _containerId: string,
+      _command: string[],
+      _options?: ExecOptions,
+    ): Promise<StreamingExecResult> => ({
+      stdout: Readable.from(['{"status":"pass"}']),
+      stderr: Readable.from([]),
+      exitCode: Promise.resolve(0),
+      kill: async () => {},
+    });
+    const manager = {
+      supportsStreamingExec: true,
+      writeFile: async () => {},
+      readFile: async () => '',
+      execInContainer: async () => {
+        throw new Error('buffered exec should not be used');
+      },
+      execStreaming,
+    } as unknown as ContainerManager;
+
+    const result = await runCodexReview({
+      podId: 'sandbox-pod',
+      containerId: 'sandbox-1',
+      containerManager: manager,
+      model: 'gpt-5',
+      prompt: 'review prompt',
+      timeout: 300_000,
+    });
+
+    expect(result.stdout).toBe('{"status":"pass"}');
   });
 
   it('throws a CodexReviewError when the in-container review command fails', async () => {

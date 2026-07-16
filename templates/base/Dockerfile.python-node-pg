@@ -45,7 +45,7 @@ RUN groupadd --gid 1000 autopod && \
 RUN npm install -g pnpm@9
 
 # Agent CLIs
-RUN npm install -g @anthropic-ai/claude-code @openai/codex @github/copilot @earendil-works/pi-coding-agent@0.80.6
+RUN npm install -g @anthropic-ai/claude-code @openai/codex@0.144.4 @github/copilot @earendil-works/pi-coding-agent@0.80.6
 
 # Trusted Autopod Pi worker extension
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml /opt/autopod/

@@ -55,6 +55,8 @@ export interface NewPod {
   /** Optional source branch used as worktree start point. */
   startBranch?: string | null;
   baseBranch?: string | null;
+  /** Durable handoff instructions persisted at creation (Pi → workspace flow). */
+  handoffInstructions?: string | null;
   /** Local spec files to materialize before the agent starts. */
   specFiles?: SpecFile[] | null;
   /** Local spec files to expose as runtime-only context under /autopod/spec. */
@@ -124,6 +126,7 @@ export interface PodUpdates {
   escalationCount?: number;
   startedAt?: string | null;
   completedAt?: string | null;
+  failureReason?: string | null;
   filesChanged?: number;
   linesAdded?: number;
   linesRemoved?: number;
@@ -313,6 +316,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     createdAt: row.created_at as string,
     startedAt: (row.started_at as string) ?? null,
     completedAt: (row.completed_at as string) ?? null,
+    failureReason: (row.failure_reason as string) ?? null,
     updatedAt: row.updated_at as string,
     userId: row.user_id as string,
     creatorEmail: (row.creator_email as string) ?? null,
@@ -445,7 +449,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           id, profile_name, task, status, model, runtime, execution_target, branch,
           user_id, creator_email, creator_name, max_validation_attempts, skip_validation, contract,
           output_mode, agent_mode, output_target, validate, validation_suite, advisory_browser_qa_enabled, promotable,
-          start_branch, base_branch, spec_files, spec_context_files, linked_pod_id, pim_groups, pr_url,
+          start_branch, base_branch, handoff_instructions, spec_files, spec_context_files, linked_pod_id, pim_groups, pr_url,
           token_budget, reference_repos, scheduled_job_id,
           depends_on_pod_id, depends_on_pod_ids, series_id, series_name, series_description,
           series_design, brief_title, touches, does_not_touch, pr_mode, wait_for_merge,
@@ -454,7 +458,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
           @userId, @creatorEmail, @creatorName, @maxValidationAttempts, @skipValidation, @contract,
           @outputMode, @agentMode, @outputTarget, @validate, @validationSuite, @advisoryBrowserQaEnabled, @promotable,
-          @startBranch, @baseBranch, @specFiles, @specContextFiles, @linkedPodId, @pimGroups, @prUrl,
+          @startBranch, @baseBranch, @handoffInstructions, @specFiles, @specContextFiles, @linkedPodId, @pimGroups, @prUrl,
           @tokenBudget, @referenceRepos, @scheduledJobId,
           @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName, @seriesDescription,
           @seriesDesign, @briefTitle, @touches, @doesNotTouch, @prMode, @waitForMerge,
@@ -484,6 +488,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         promotable: podOpts.promotable ? 1 : 0,
         startBranch: pod.startBranch ?? null,
         baseBranch: pod.baseBranch ?? null,
+        handoffInstructions: pod.handoffInstructions ?? null,
         specFiles: pod.specFiles ? JSON.stringify(pod.specFiles) : null,
         specContextFiles: pod.specContextFiles ? JSON.stringify(pod.specContextFiles) : null,
         linkedPodId: pod.linkedPodId ?? null,
@@ -584,6 +589,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.completedAt !== undefined) {
         setClauses.push('completed_at = @completedAt');
         params.completedAt = changes.completedAt;
+      }
+      if (changes.failureReason !== undefined) {
+        setClauses.push('failure_reason = @failureReason');
+        params.failureReason = changes.failureReason;
       }
       if (changes.filesChanged !== undefined) {
         setClauses.push('files_changed = @filesChanged');

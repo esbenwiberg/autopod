@@ -963,11 +963,9 @@ export class DockerContainerManager implements ContainerManager {
 
     const kill = async () => {
       try {
-        await this.execInContainer(
-          containerId,
-          ['sh', '-c', terminatePidFileScript(pidPath)],
-          { timeout: 5_000 },
-        );
+        await this.execInContainer(containerId, ['sh', '-c', terminatePidFileScript(pidPath)], {
+          timeout: 5_000,
+        });
       } finally {
         const destroyable = muxStream as NodeJS.ReadableStream & { destroy?: () => void };
         if (typeof destroyable.destroy === 'function') {

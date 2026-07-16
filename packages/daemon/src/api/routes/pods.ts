@@ -249,17 +249,6 @@ export function podRoutes(
   app.post('/pods', async (request, reply) => {
     const body = createPodRequestSchema.parse(request.body);
 
-    // Interactive pods are local-only — reject if execution target is not 'local'
-    const isInteractive =
-      body.options?.agentMode === 'interactive' || body.outputMode === 'workspace';
-    if (isInteractive) {
-      const resolvedTarget = body.executionTarget ?? 'local';
-      if (resolvedTarget !== 'local') {
-        reply.status(400);
-        return { error: 'Interactive pods only support local execution target' };
-      }
-    }
-
     // Sanitize human-authored free-text fields. Findings are quarantined into
     // the text (replaced with a marker) but never block pod creation — the
     // scan layer at provisioning is the gate.

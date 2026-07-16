@@ -1,5 +1,6 @@
 import type { Profile } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ImageBuildResult, ImageBuilder } from './image-builder.js';
 
@@ -31,6 +32,7 @@ export interface WarmImageMaintenanceDeps {
   intervalMs?: number;
   runOnStart?: boolean;
   scope?: WarmImageMaintenanceScope;
+  githubAuth?: DaemonGitHubAuth;
 }
 
 type WarmImageBuildOptions = Parameters<ImageBuilder['buildWarmImage']>[1];
@@ -63,12 +65,15 @@ function skipReason(
   return 'outside_scope';
 }
 
-function warmImageBuildOptions(profile: Profile): WarmImageBuildOptions {
+async function warmImageBuildOptions(
+  profile: Profile,
+  githubAuth?: DaemonGitHubAuth,
+): Promise<WarmImageBuildOptions> {
   const options: NonNullable<WarmImageBuildOptions> = {};
   const gitPat =
     profile.prProvider === 'ado'
       ? (profile.adoPat ?? undefined)
-      : (profile.githubPat ?? profile.adoPat ?? undefined);
+      : (await githubAuth?.resolveCredential())?.token;
 
   if (gitPat) options.gitPat = gitPat;
   if (profile.registryPat) options.registryPat = profile.registryPat;
@@ -116,7 +121,7 @@ export function createWarmImageMaintenanceJob(
         try {
           const build = await deps.imageBuilder.buildWarmImage(
             profile,
-            warmImageBuildOptions(profile),
+            await warmImageBuildOptions(profile, deps.githubAuth),
           );
           result.built++;
           logBuildSuccess(deps.logger, profile, build);

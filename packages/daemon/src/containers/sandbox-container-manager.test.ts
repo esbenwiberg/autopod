@@ -1,4 +1,6 @@
+import { randomBytes } from 'node:crypto';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -10,8 +12,10 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, posix } from 'node:path';
 import type { Readable } from 'node:stream';
+import { gunzipSync } from 'node:zlib';
 import pino from 'pino';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { extract as tarExtract } from 'tar-stream';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerSpawnConfig } from '../interfaces/container-manager.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
 import type {
@@ -26,6 +30,8 @@ import type {
   SandboxFileInfo,
   SandboxPortAuth,
   SandboxStatus,
+  SandboxTerminalOptions,
+  SandboxTerminalSession,
 } from './sandbox-api-client.js';
 import {
   SandboxContainerManager,
@@ -38,19 +44,21 @@ interface FakeSandbox {
   status: SandboxStatus;
   dirs: Set<string>;
   files: Map<string, Buffer>;
+  modes: Map<string, number>;
 }
 
 type ExecHandler = (
   id: string,
   command: string[],
   options?: SandboxExecOptions,
-) => SandboxExecResult;
+) => SandboxExecResult | Promise<SandboxExecResult>;
 
 class FakeSandboxApiClient implements SandboxApiClient {
   readonly created: CreateSandboxOptions[] = [];
   readonly execCalls: Array<{ id: string; command: string[]; options?: SandboxExecOptions }> = [];
   readonly egressUpdates: Array<{ id: string; policy: SandboxEgressPolicy }> = [];
   readonly mkdirCalls: Array<{ id: string; path: string }> = [];
+  readonly writeFileCalls: Array<{ id: string; path: string; size: number }> = [];
   readonly sandboxes = new Map<string, FakeSandbox>();
   private counter = 0;
 
@@ -59,7 +67,12 @@ class FakeSandboxApiClient implements SandboxApiClient {
   async createSandbox(options: CreateSandboxOptions): Promise<string> {
     this.created.push(options);
     const id = `sbx-${++this.counter}`;
-    this.sandboxes.set(id, { status: 'running', dirs: new Set(['/']), files: new Map() });
+    this.sandboxes.set(id, {
+      status: 'running',
+      dirs: new Set(['/', '/tmp']),
+      files: new Map(),
+      modes: new Map(),
+    });
     return id;
   }
 
@@ -73,7 +86,23 @@ class FakeSandboxApiClient implements SandboxApiClient {
     options?: SandboxExecOptions,
   ): Promise<SandboxExecResult> {
     this.execCalls.push({ id: sandboxId, command, options });
-    if (this.execHandler) return this.execHandler(sandboxId, command, options);
+    if (this.execHandler) return await this.execHandler(sandboxId, command, options);
+    if (command[0] === 'sh' && command[3] === 'autopod-volume-extract') {
+      const destination = command[4];
+      const archivePath = command[5];
+      if (!destination || !archivePath) throw new Error('malformed volume extraction command');
+      const archiveParts = command.slice(6);
+      if (!this.sandbox(sandboxId).files.has(archivePath)) {
+        const contents = archiveParts.map((partPath) => {
+          const content = this.sandbox(sandboxId).files.get(partPath);
+          if (!content) throw new Error(`no such archive part: ${partPath}`);
+          return content;
+        });
+        this.sandbox(sandboxId).files.set(archivePath, Buffer.concat(contents));
+      }
+      await this.extractArchive(sandboxId, destination, archivePath);
+      for (const partPath of archiveParts) this.sandbox(sandboxId).files.delete(partPath);
+    }
     return { stdout: '', stderr: '', exitCode: 0 };
   }
 
@@ -81,6 +110,7 @@ class FakeSandboxApiClient implements SandboxApiClient {
     const sandbox = this.sandbox(sandboxId);
     this.ensureDir(sandbox, dirname(path));
     sandbox.files.set(normalizeSandboxPath(path), content);
+    this.writeFileCalls.push({ id: sandboxId, path, size: content.byteLength });
   }
 
   async readFile(sandboxId: string, path: string): Promise<Buffer> {
@@ -180,6 +210,49 @@ class FakeSandboxApiClient implements SandboxApiClient {
       sandbox.dirs.add(current);
     }
   }
+
+  private async extractArchive(
+    sandboxId: string,
+    destination: string,
+    archivePath: string,
+  ): Promise<void> {
+    const sandbox = this.sandbox(sandboxId);
+    const archive = sandbox.files.get(normalizeSandboxPath(archivePath));
+    if (!archive) throw new Error(`no such archive: ${archivePath}`);
+    this.ensureDir(sandbox, destination);
+
+    const extract = tarExtract();
+    await new Promise<void>((resolve, reject) => {
+      extract.on('entry', (header, stream, next) => {
+        const target = normalizeSandboxPath(posix.join(destination, header.name));
+        if (header.type === 'directory') {
+          this.ensureDir(sandbox, target);
+          stream.resume();
+          stream.on('end', next);
+          return;
+        }
+
+        const chunks: Buffer[] = [];
+        stream.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+        stream.on('end', () => {
+          this.ensureDir(sandbox, dirname(target));
+          sandbox.files.set(
+            target,
+            header.type === 'symlink'
+              ? Buffer.from(header.linkname ?? '', 'utf-8')
+              : Buffer.concat(chunks),
+          );
+          sandbox.modes.set(target, header.mode ?? 0);
+          next();
+        });
+        stream.on('error', reject);
+      });
+      extract.on('finish', resolve);
+      extract.on('error', reject);
+      extract.end(gunzipSync(archive));
+    });
+    sandbox.files.delete(normalizeSandboxPath(archivePath));
+  }
 }
 
 class StrictParentFakeClient extends FakeSandboxApiClient {
@@ -243,6 +316,35 @@ class CancellableStreamingFakeClient extends FakeSandboxApiClient {
     yield { stdout: 'started' };
     await cancelled;
     yield { exitCode: 143 };
+  }
+}
+
+/** A client variant exposing an interactive TTY session. */
+class TerminalFakeClient extends FakeSandboxApiClient {
+  readonly attachCalls: Array<{ id: string; options: SandboxTerminalOptions }> = [];
+  readonly resumeCalls: string[] = [];
+
+  override async resume(sandboxId: string): Promise<void> {
+    this.resumeCalls.push(sandboxId);
+    await super.resume(sandboxId);
+  }
+
+  async attachTerminal(
+    sandboxId: string,
+    options: SandboxTerminalOptions,
+  ): Promise<SandboxTerminalSession> {
+    if ((await this.getStatus(sandboxId)) !== 'running') {
+      throw new Error(`sandbox ${sandboxId} is not running`);
+    }
+    this.attachCalls.push({ id: sandboxId, options });
+    return {
+      onData: () => {},
+      onExit: () => {},
+      onError: () => {},
+      write: () => {},
+      resize: () => {},
+      close: () => {},
+    };
   }
 }
 
@@ -327,6 +429,7 @@ describe('SandboxContainerManager', () => {
         mkdirSync(join(hostDir, 'node_modules'));
         writeFileSync(join(hostDir, 'README.md'), 'hello');
         writeFileSync(join(hostDir, 'src', 'index.ts'), 'console.log("hi");');
+        chmodSync(join(hostDir, 'src', 'index.ts'), 0o755);
         writeFileSync(join(hostDir, 'node_modules', 'left-pad.js'), 'skip');
         symlinkSync('README.md', join(hostDir, 'README-link'));
 
@@ -341,14 +444,54 @@ describe('SandboxContainerManager', () => {
         expect(files?.get('/mnt/worktree/src/index.ts')?.toString('utf-8')).toBe(
           'console.log("hi");',
         );
+        expect(client.sandboxes.get(id)?.modes.get('/mnt/worktree/src/index.ts')).toBe(0o755);
         expect(files?.get('/mnt/worktree/README-link')?.toString('utf-8')).toBe('README.md');
         expect(files?.has('/mnt/worktree/node_modules/left-pad.js')).toBe(false);
-        expect(client.mkdirCalls.map((call) => call.path)).toEqual([
-          '/mnt',
-          '/mnt/worktree',
-          '/mnt/worktree/src',
-        ]);
-        expect(client.execCalls).toEqual([]);
+        expect(client.mkdirCalls).toEqual([]);
+        expect(client.execCalls).toHaveLength(1);
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
+
+    it('uploads more than the Azure request limit with one bulk file request', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-bulk-upload-'));
+      try {
+        for (let index = 0; index < 700; index++) {
+          writeFileSync(join(hostDir, `file-${index}.txt`), `content-${index}`);
+        }
+
+        const client = new FakeSandboxApiClient();
+        const onProgress = vi.fn();
+        await new SandboxContainerManager(client, logger).spawn({
+          ...baseConfig,
+          volumes: [{ host: hostDir, container: '/mnt/worktree' }],
+          onProgress,
+        });
+
+        expect(client.writeFileCalls).toHaveLength(1);
+        expect(onProgress).toHaveBeenCalledWith('Uploading workspace to sandbox…');
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
+
+    it('chunks large volume archives and reassembles them before extraction', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-chunked-upload-'));
+      try {
+        const expected = randomBytes(1024);
+        writeFileSync(join(hostDir, 'payload.bin'), expected);
+
+        const client = new FakeSandboxApiClient();
+        const id = await new SandboxContainerManager(client, logger, {
+          volumeUploadChunkBytes: 64,
+        }).spawn({
+          ...baseConfig,
+          volumes: [{ host: hostDir, container: '/mnt/worktree' }],
+        });
+
+        expect(client.writeFileCalls.length).toBeGreaterThan(1);
+        expect(client.sandboxes.get(id)?.files.get('/mnt/worktree/payload.bin')).toEqual(expected);
       } finally {
         rmSync(hostDir, { recursive: true, force: true });
       }
@@ -368,13 +511,7 @@ describe('SandboxContainerManager', () => {
         expect(
           client.sandboxes.get(id)?.files.get('/home/ewi/.autopod/repos/worktree/README.md'),
         ).toEqual(Buffer.from('hello'));
-        expect(client.mkdirCalls.map((call) => call.path)).toEqual([
-          '/home',
-          '/home/ewi',
-          '/home/ewi/.autopod',
-          '/home/ewi/.autopod/repos',
-          '/home/ewi/.autopod/repos/worktree',
-        ]);
+        expect(client.mkdirCalls).toEqual([]);
       } finally {
         rmSync(hostDir, { recursive: true, force: true });
       }
@@ -427,6 +564,31 @@ describe('SandboxContainerManager', () => {
     it('getStatus returns unknown for a missing sandbox', async () => {
       const mgr = new SandboxContainerManager(new FakeSandboxApiClient(), logger);
       expect(await mgr.getStatus('nope')).toBe('unknown');
+    });
+
+    it('attachTerminal resumes an auto-suspended sandbox before attaching', async () => {
+      const client = new TerminalFakeClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      await mgr.stop(id);
+
+      const session = await mgr.attachTerminal?.(id, { cols: 120, rows: 40 });
+
+      expect(session).toBeDefined();
+      expect(client.resumeCalls).toEqual([id]);
+      expect(await mgr.getStatus(id)).toBe('running');
+      expect(client.attachCalls).toHaveLength(1);
+      expect(client.attachCalls[0]?.options.shellCommand).toContain('tmux new-session -A -s main');
+      expect(client.attachCalls[0]?.options.env).toEqual({ COLUMNS: '120', LINES: '40' });
+    });
+
+    it('attachTerminal rejects when the data-plane client has no TTY support', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      await expect(mgr.attachTerminal?.(id, { cols: 80, rows: 24 })).rejects.toThrow(
+        /no exec-stream TTY support/,
+      );
     });
 
     it('refreshFirewall reapplies the last known policy by default', async () => {
@@ -633,6 +795,31 @@ describe('SandboxContainerManager', () => {
         expect(existsSync(join(hostDir, 'node_modules', 'left-pad.js'))).toBe(false);
         expect(readFileSync(join(hostDir, 'node_modules', 'local-cache.txt'), 'utf-8')).toBe(
           'keep excluded',
+        );
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
+
+    it('round-trips runtime state through extract and next spawn', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-runtime-state-'));
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const firstId = await mgr.spawn(baseConfig);
+      const containerPath = '/home/autopod/.codex/sessions';
+      const rolloutPath = `${containerPath}/2026/07/12/rollout-thread-123.jsonl`;
+
+      try {
+        client.seedFile(firstId, rolloutPath, Buffer.from('{"type":"session_meta"}\n'));
+
+        await mgr.extractDirectoryFromContainer(firstId, containerPath, hostDir);
+        const secondId = await mgr.spawn({
+          ...baseConfig,
+          volumes: [{ host: hostDir, container: containerPath }],
+        });
+
+        expect(client.sandboxes.get(secondId)?.files.get(rolloutPath)?.toString('utf-8')).toBe(
+          '{"type":"session_meta"}\n',
         );
       } finally {
         rmSync(hostDir, { recursive: true, force: true });

@@ -15,6 +15,15 @@ function hasColumn(db: Database.Database, table: string, column: string): boolea
   return rows.some((r) => r.name === column);
 }
 
+function latestMigrationVersion(): number {
+  return Math.max(
+    ...fs
+      .readdirSync(MIGRATIONS_DIR)
+      .filter((file) => file.endsWith('.sql'))
+      .map((file) => Number.parseInt(file.split('_', 1)[0] ?? '', 10)),
+  );
+}
+
 describe('runMigrations — @allow-duplicate-columns', () => {
   let migrationsDir: string;
 
@@ -189,6 +198,35 @@ describe('runMigrations — migration 120 (provider accounts)', () => {
 
     const store = createProfileStore(db);
     expect(store.getRaw('legacy').providerAccountId).toBeNull();
+  });
+});
+
+describe('runMigrations — migration 122 (failure reason repair)', () => {
+  it('adds failure_reason when schema version 121 was recorded by a colliding migration', () => {
+    const pre121Dir = fs.mkdtempSync(path.join(os.tmpdir(), 'migrate-pre121-'));
+    try {
+      for (const file of fs.readdirSync(MIGRATIONS_DIR)) {
+        const version = Number.parseInt(file.split('_', 1)[0] ?? '', 10);
+        if (file.endsWith('.sql') && version <= 120) {
+          fs.copyFileSync(path.join(MIGRATIONS_DIR, file), path.join(pre121Dir, file));
+        }
+      }
+
+      const db = new Database(':memory:');
+      runMigrations(db, pre121Dir, logger);
+      db.prepare('INSERT INTO schema_version (version) VALUES (121)').run();
+
+      expect(hasColumn(db, 'pods', 'failure_reason')).toBe(false);
+      runMigrations(db, MIGRATIONS_DIR, logger);
+
+      expect(hasColumn(db, 'pods', 'failure_reason')).toBe(true);
+      const version = db.prepare('SELECT MAX(version) as v FROM schema_version').get() as {
+        v: number;
+      };
+      expect(version.v).toBe(latestMigrationVersion());
+    } finally {
+      fs.rmSync(pre121Dir, { recursive: true, force: true });
+    }
   });
 });
 

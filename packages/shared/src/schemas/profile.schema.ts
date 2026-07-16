@@ -86,8 +86,7 @@ const piOAuthCredentialsSchema = z.object({
     .refine(
       (credential) =>
         ['access', 'accessToken', 'token'].some(
-          (field) =>
-            typeof credential[field] === 'string' && credential[field].trim().length > 0,
+          (field) => typeof credential[field] === 'string' && credential[field].trim().length > 0,
         ),
       'Pi credential must contain a non-empty access token',
     ),

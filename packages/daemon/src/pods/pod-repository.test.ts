@@ -242,6 +242,18 @@ describe('PodRepository', () => {
       expect(pod.creatorName).toBe("O'Brien, Alice");
     });
 
+    it('persists handoffInstructions at creation and reads it back immediately', () => {
+      repo.insert({ ...validSession, id: 'sess-handoff', handoffInstructions: 'Pi handoff body' });
+      const pod = repo.getOrThrow('sess-handoff');
+      expect(pod.handoffInstructions).toBe('Pi handoff body');
+    });
+
+    it('defaults handoffInstructions to null when not provided (legacy path unchanged)', () => {
+      repo.insert(validSession);
+      const pod = repo.getOrThrow('sess-001');
+      expect(pod.handoffInstructions).toBeNull();
+    });
+
     it('should default creator email and name to null when not provided', () => {
       repo.insert(validSession);
       const pod = repo.getOrThrow('sess-001');
@@ -316,6 +328,16 @@ describe('PodRepository', () => {
       repo.update('sess-001', { lastValidationResult: { overall: 'pass' } });
       repo.update('sess-001', { lastValidationResult: null });
       expect(repo.getOrThrow('sess-001').lastValidationResult).toBeNull();
+    });
+
+    it('persists and clears a durable pod failure reason', () => {
+      repo.insert(validSession);
+      repo.update('sess-001', { failureReason: 'Agent failed: Codex turn aborted' });
+
+      expect(repo.getOrThrow('sess-001').failureReason).toBe('Agent failed: Codex turn aborted');
+
+      repo.update('sess-001', { failureReason: null });
+      expect(repo.getOrThrow('sess-001').failureReason).toBeNull();
     });
 
     it('should store and retrieve validationWaiver as JSON', () => {

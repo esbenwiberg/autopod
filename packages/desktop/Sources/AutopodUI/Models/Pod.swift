@@ -284,7 +284,7 @@ public struct ValidationChecks: Sendable {
     ) {
         self.setup = setup; self.smoke = smoke; self.build = build
         self.tests = tests; self.lint = lint; self.sast = sast
-        self.review = review
+        self.review = review ?? Self.failedReviewInfrastructureState(reviewSkipKind)
         self.setupOutput = setupOutput
         self.buildOutput = buildOutput; self.testOutput = testOutput
         self.lintOutput = lintOutput; self.sastOutput = sastOutput
@@ -301,6 +301,13 @@ public struct ValidationChecks: Sendable {
         self.advisoryQa = advisoryQa
         self.proofOfWorkScreenshots = proofOfWorkScreenshots
         self.correctionMessage = correctionMessage
+    }
+
+    private static func failedReviewInfrastructureState(_ skipKind: String?) -> Bool? {
+        switch skipKind {
+        case "review-failed", "review-timeout": false
+        default: nil
+        }
     }
 
     public var validationPhaseCount: Int { 9 }

@@ -1,0 +1,48 @@
+contract_version: 1
+title: "Package Pi and expose CLI profile support"
+depends_on: [02-add-pi-runtime-auth]
+scenarios:
+  - id: image-retains-all-runtimes
+    given:
+      - "Autopod generates a managed base or warm image"
+    when:
+      - "agent runtime dependencies are installed"
+    then:
+      - "a pinned Pi CLI and trusted worker package are present alongside Claude Code, Codex, and Copilot"
+  - id: profile-selects-pi-additively
+    given:
+      - "new and existing profiles use runtime selection and model resolution"
+    when:
+      - "a profile explicitly selects Pi or omits runtime selection"
+    then:
+      - "explicit Pi remains Pi while omitted and legacy values preserve their existing defaults and behavior"
+  - id: cli-captures-one-pi-provider
+    given:
+      - "isolated Pi login produces one or more auth entries"
+    when:
+      - "the user authenticates a profile or provider account for one selected subscription provider"
+    then:
+      - "only the requested valid provider entry is stored and cancellation or malformed credentials leave the owner unchanged"
+required_facts:
+  - id: fact-image-runtime-coexistence
+    proves: [image-retains-all-runtimes]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/images/dockerfile-generator.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- dockerfile-generator.test.ts
+  - id: fact-runtime-resolution-additive
+    proves: [profile-selects-pi-additively]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/runtime-resolver.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- runtime-resolver.test.ts
+  - id: fact-cli-pi-auth-isolation
+    proves: [cli-captures-one-pi-provider]
+    kind: integration-test
+    artifact:
+      path: packages/cli/src/commands/profile.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/cli test -- profile.test.ts
+human_review: []

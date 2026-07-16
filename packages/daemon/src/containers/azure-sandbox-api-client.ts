@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { AutopodError } from '@autopod/shared';
+import { AutopodError, CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/shared';
 import { DefaultAzureCredential } from '@azure/identity';
 import type { Logger } from 'pino';
 import type {
@@ -82,6 +82,13 @@ export interface AzureSandboxApiClientConfig {
   resolveImageDigest?: ImageDigestResolver;
   /** Test seam. Defaults to 3s to match the Python SDK poller. */
   pollIntervalMs?: number;
+  /**
+   * Retry/backoff for the Azure Sandboxes data-plane rate limiter (HTTP 429,
+   * 600 req/min). The platform returns `retryAfterSeconds`; we honor it (clamped
+   * to `maxDelayMs`) before retrying, up to `maxAttempts`. Test seam: set
+   * `maxDelayMs: 0` to retry instantly.
+   */
+  retry?: { maxAttempts?: number; maxDelayMs?: number; baseDelayMs?: number };
 }
 
 interface DiskImageResponse {
@@ -164,6 +171,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private readonly webSocketFactory: WebSocketFactory;
   private readonly resolveImageDigest?: ImageDigestResolver;
   private readonly pollIntervalMs: number;
+  private readonly retryMaxAttempts: number;
+  private readonly retryMaxDelayMs: number;
+  private readonly retryBaseDelayMs: number;
   private readonly dataEndpoint: string;
   private groupReady: Promise<void> | null = null;
   /** Monotonic counter for unique per-exec streaming wrapper-script paths. */
@@ -185,6 +195,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.webSocketFactory = config.webSocket ?? defaultWebSocketFactory;
     this.resolveImageDigest = config.resolveImageDigest;
     this.pollIntervalMs = config.pollIntervalMs ?? 3000;
+    this.retryMaxAttempts = config.retry?.maxAttempts ?? 6;
+    this.retryMaxDelayMs = config.retry?.maxDelayMs ?? 30_000;
+    this.retryBaseDelayMs = config.retry?.baseDelayMs ?? 1000;
     this.dataEndpoint = endpointForRegion(config.location);
     this.logger.info(
       {
@@ -464,11 +477,11 @@ export class AzureSandboxApiClient implements SandboxApiClient {
 
   /**
    * Stage `scriptBody` as an executable wrapper under `/tmp` and return its path.
-   * The files API writes as `root:0644`, so the non-root sandbox process can
-   * neither `execve` nor chmod it itself — we `chmod 0755` as root and verify,
-   * since a silent failure here resurfaces later as an opaque "permission
-   * denied" execve error. Shared by `execStream` and `attachTerminal`, both of
-   * which need `command` to be a single executable path.
+   * The files API writes as `root:0644`, so the sandbox runtime cannot exec it
+   * until we `chmod 0755` as root. Verify that step because a silent failure
+   * resurfaces later as an opaque "permission denied" execve error. Shared by
+   * `execStream` and `attachTerminal`, both of which need `command` to be a
+   * single executable path.
    */
   private async stageExecutableWrapper(sandboxId: string, scriptBody: string): Promise<string> {
     const scriptPath = `/tmp/.autopod-execstream-${Date.now()}-${this.execStreamSeq++}.sh`;
@@ -495,7 +508,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     options: SandboxTerminalOptions,
   ): Promise<SandboxTerminalSession> {
     const shellCommand = options.shellCommand ?? 'exec /bin/bash -l';
-    const scriptPath = await this.stageExecutableWrapper(sandboxId, `#!/bin/sh\n${shellCommand}\n`);
+    const scriptPath = await this.stageExecutableWrapper(
+      sandboxId,
+      sandboxRuntimeUserScript(shellCommand),
+    );
 
     const token = await this.getAzureToken(DATA_SCOPE, 'data access token', 'AZURE_AUTH');
     const wsUrl = `${this.dataEndpoint.replace(/^https:/, 'wss:')}${this.sandboxPath(
@@ -1102,37 +1118,59 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     );
 
     const url = withQuery(baseUrl, options.params);
-    const headers = new Headers(options.headers);
-    headers.set('Authorization', `Bearer ${token.token}`);
-    if (options.json !== undefined) {
-      headers.set('Content-Type', 'application/json');
-    }
+    const okStatuses = options.okStatuses ?? [200, 201, 202, 204];
 
-    const controller = options.timeoutMs ? new AbortController() : null;
-    const timeout = controller ? setTimeout(() => controller.abort(), options.timeoutMs) : null;
-    try {
-      const response = await this.fetchFn(url, {
-        method,
-        headers,
-        body: options.json !== undefined ? JSON.stringify(options.json) : options.body,
-        signal: controller?.signal,
-      });
-      const okStatuses = options.okStatuses ?? [200, 201, 202, 204];
+    // Retry loop for the data-plane rate limiter. A 429 means the request was NOT
+    // processed, so retrying any method is safe. We honor the platform's
+    // `retryAfterSeconds` (clamped) so we back off exactly as long as it asks,
+    // then give up after `retryMaxAttempts` rather than hanging forever.
+    for (let attempt = 1; ; attempt++) {
+      const headers = new Headers(options.headers);
+      headers.set('Authorization', `Bearer ${token.token}`);
+      if (options.json !== undefined) {
+        headers.set('Content-Type', 'application/json');
+      }
+
+      const controller = options.timeoutMs ? new AbortController() : null;
+      const timeout = controller ? setTimeout(() => controller.abort(), options.timeoutMs) : null;
+      let response: Response;
+      try {
+        response = await this.fetchFn(url, {
+          method,
+          headers,
+          body: options.json !== undefined ? JSON.stringify(options.json) : options.body,
+          signal: controller?.signal,
+        });
+      } catch (err) {
+        if (controller && isAbortError(err)) {
+          throw new AutopodError(
+            `Azure Sandboxes ${method} ${url} timed out after ${options.timeoutMs}ms`,
+            'AZURE_SANDBOX_TIMEOUT',
+            504,
+          );
+        }
+        throw err;
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+
+      if (response.status === 429 && attempt < this.retryMaxAttempts) {
+        const waitMs = Math.min(
+          await retryAfterMs(response, attempt, this.retryBaseDelayMs),
+          this.retryMaxDelayMs,
+        );
+        this.logger.warn(
+          { plane, method, url, attempt, maxAttempts: this.retryMaxAttempts, waitMs },
+          'Azure Sandboxes data plane rate-limited (429) — backing off and retrying',
+        );
+        await sleep(waitMs);
+        continue;
+      }
+
       if (!okStatuses.includes(response.status)) {
         await throwAzureHttpError(response, method, url);
       }
       return response;
-    } catch (err) {
-      if (controller && isAbortError(err)) {
-        throw new AutopodError(
-          `Azure Sandboxes ${method} ${url} timed out after ${options.timeoutMs}ms`,
-          'AZURE_SANDBOX_TIMEOUT',
-          504,
-        );
-      }
-      throw err;
-    } finally {
-      if (timeout) clearTimeout(timeout);
     }
   }
 
@@ -1296,16 +1334,36 @@ function defaultWebSocketFactory(url: string, headers: Record<string, string>): 
  * The exec-stream `start.command` is `execve`d literally as a single argv[0]
  * (not shell-interpreted, no arguments), so an arbitrary argv can only be run
  * by staging it as an executable wrapper script and exec-ing that path. This
- * builds that script: a `#!/bin/sh` shebang, an optional `cd` into `cwd`, then
+ * builds that script: a `#!/bin/sh` shebang, a privilege guard for Azure
+ * exec-stream sessions that start as root, an optional `cd` into `cwd`, then
  * `exec <argv>` so the command's exit code propagates as the script's own.
  */
 function streamExecScript(command: string[], cwd?: string): string {
   const argv = command.map(shellQuote).join(' ');
-  const lines = ['#!/bin/sh'];
-  lines.push('umask 077', 'echo $$ > "$0.pid"');
+  const lines: string[] = [];
   if (cwd) lines.push(`cd ${shellQuote(cwd)} || exit 1`);
   lines.push(`exec ${argv}`);
-  return `${lines.join('\n')}\n`;
+  return sandboxRuntimeUserScript(lines.join('\n'), ['umask 077', 'echo $$ > "$0.pid"']);
+}
+
+/**
+ * Azure's exec-stream frame has no user field and can start the wrapper as
+ * root even though buffered validation execs run as the image user. Drop
+ * root-started streams to the container's canonical user before they touch the
+ * workspace, otherwise agent/test caches become root-owned and later
+ * validation fails with EACCES. Non-root streams retain their existing user.
+ */
+function sandboxRuntimeUserScript(scriptBody: string, prelude: string[] = []): string {
+  const identity = `HOME=${shellQuote(CONTAINER_HOME_DIR)} USER=${shellQuote(CONTAINER_USER)} LOGNAME=${shellQuote(CONTAINER_USER)}`;
+  return [
+    '#!/bin/sh',
+    ...prelude,
+    'if [ "$(id -u)" = "0" ]; then',
+    `  exec env ${identity} su -m -s /bin/sh ${shellQuote(CONTAINER_USER)} -c ${shellQuote(scriptBody)}`,
+    'fi',
+    scriptBody,
+    '',
+  ].join('\n');
 }
 
 function terminatePidFileScript(pidPath: string): string {
@@ -1431,4 +1489,33 @@ function isAbortError(err: unknown): boolean {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * How long to wait before retrying a 429. Prefer the platform's own signal — the
+ * `Retry-After` header (seconds or HTTP-date) or the body's `retryAfterSeconds`
+ * — and fall back to exponential backoff. The caller clamps the result to a cap.
+ */
+async function retryAfterMs(response: Response, attempt: number, baseMs: number): Promise<number> {
+  const header = response.headers.get('retry-after');
+  if (header) {
+    const secs = Number(header);
+    if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+    const when = Date.parse(header);
+    if (!Number.isNaN(when)) return Math.max(0, when - Date.now());
+  }
+  // Body carries `{"retryAfterSeconds": N}`; reading it is safe here — a 429 response
+  // is always discarded (we retry, never return it).
+  try {
+    const text = await response.text();
+    if (text) {
+      const parsed = JSON.parse(text) as { retryAfterSeconds?: unknown };
+      if (typeof parsed.retryAfterSeconds === 'number') {
+        return Math.max(0, parsed.retryAfterSeconds * 1000);
+      }
+    }
+  } catch {
+    // Fall through to backoff.
+  }
+  return baseMs * 2 ** (attempt - 1);
 }

@@ -410,7 +410,17 @@ describe('AzureSandboxApiClient', () => {
     const scriptPath = new URL(writeReq.url).searchParams.get('path') ?? '';
     expect(scriptPath).toMatch(/^\/tmp\/\.autopod-execstream-\d+-\d+\.sh$/);
     expect(String(writeReq.init?.body)).toBe(
-      '#!/bin/sh\numask 077\necho $$ > "$0.pid"\ncd /workspace || exit 1\nexec echo hello\n',
+      [
+        '#!/bin/sh',
+        'umask 077',
+        'echo $$ > "$0.pid"',
+        'if [ "$(id -u)" = "0" ]; then',
+        "  exec env HOME=/home/autopod USER=autopod LOGNAME=autopod su -m -s /bin/sh autopod -c 'cd /workspace || exit 1\nexec echo hello'",
+        'fi',
+        'cd /workspace || exit 1',
+        'exec echo hello',
+        '',
+      ].join('\n'),
     );
     // The files API writes the wrapper as root:0644, so it is chmod-ed executable as root.
     expect(jsonBody(requests[1] ?? failRequest())).toEqual({
@@ -478,10 +488,7 @@ describe('AzureSandboxApiClient', () => {
       (socket) => {
         socket.onopen?.({});
       },
-      [
-        ...STREAM_SETUP_RESPONSES,
-        { status: 200, body: { stdout: '', stderr: '', exitCode: 0 } },
-      ],
+      [...STREAM_SETUP_RESPONSES, { status: 200, body: { stdout: '', stderr: '', exitCode: 0 } }],
     );
     const iterator = client
       .execStream('sbx-1', ['pi', 'rpc'], {
@@ -510,10 +517,7 @@ describe('AzureSandboxApiClient', () => {
       (socket) => {
         socket.onopen?.({});
       },
-      [
-        ...STREAM_SETUP_RESPONSES,
-        { status: 200, body: { stdout: '', stderr: '', exitCode: 0 } },
-      ],
+      [...STREAM_SETUP_RESPONSES, { status: 200, body: { stdout: '', stderr: '', exitCode: 0 } }],
     );
 
     await expect(
@@ -599,7 +603,16 @@ describe('AzureSandboxApiClient', () => {
     const writeReq = requests[0] ?? failRequest();
     const scriptPath = new URL(writeReq.url).searchParams.get('path') ?? '';
     expect(scriptPath).toMatch(/^\/tmp\/\.autopod-execstream-\d+-\d+\.sh$/);
-    expect(String(writeReq.init?.body)).toBe('#!/bin/sh\nexec /bin/bash -l\n');
+    expect(String(writeReq.init?.body)).toBe(
+      [
+        '#!/bin/sh',
+        'if [ "$(id -u)" = "0" ]; then',
+        "  exec env HOME=/home/autopod USER=autopod LOGNAME=autopod su -m -s /bin/sh autopod -c 'exec /bin/bash -l'",
+        'fi',
+        'exec /bin/bash -l',
+        '',
+      ].join('\n'),
+    );
     expect(jsonBody(requests[1] ?? failRequest())).toEqual({
       command: `chmod 0755 ${scriptPath}`,
       user: 'root',
@@ -711,6 +724,60 @@ describe('AzureSandboxApiClient', () => {
       defaultAction: 'Deny',
       hostRules: [{ pattern: 'api.github.com', action: 'Allow' }],
     });
+  });
+
+  it('honors a data-plane 429 (retryAfterSeconds) and retries the request', async () => {
+    const { client, requests } = makeClient(
+      [
+        {
+          status: 429,
+          body: {
+            title: 'Rate limit exceeded',
+            status: 429,
+            detail: 'API request rate limit exceeded (limit 600 requests/min).',
+            retryAfterSeconds: 30,
+          },
+        },
+        { status: 200, rawText: 'hello-after-retry' },
+      ],
+      { retry: { maxDelayMs: 0 } },
+    );
+
+    const read = await client.readFile('sbx-1', '/tmp/hello.txt');
+
+    expect(read.toString('utf-8')).toBe('hello-after-retry');
+    // First attempt 429, retried once → 2 requests to the same files endpoint.
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.url).toContain('/sandboxes/sbx-1/files');
+    expect(requests[1]?.url).toContain('/sandboxes/sbx-1/files');
+  });
+
+  it('honors the Retry-After header when the body has no retryAfterSeconds', async () => {
+    const { client, requests } = makeClient(
+      [
+        { status: 429, rawText: 'slow down', headers: { 'retry-after': '1' } },
+        { status: 200, body: { path: '/tmp', entries: [] } },
+      ],
+      { retry: { maxDelayMs: 0 } },
+    );
+
+    const list = await client.listFiles('sbx-1', '/tmp');
+    expect(list.entries).toEqual([]);
+    expect(requests).toHaveLength(2);
+  });
+
+  it('gives up after the retry budget is exhausted on persistent 429s', async () => {
+    const rateLimited = () => ({
+      status: 429,
+      body: { status: 429, retryAfterSeconds: 30 },
+    });
+    const { client, requests } = makeClient([rateLimited(), rateLimited(), rateLimited()], {
+      retry: { maxAttempts: 3, maxDelayMs: 0 },
+    });
+
+    await expect(client.readFile('sbx-1', '/tmp/hello.txt')).rejects.toThrow(/429/);
+    // maxAttempts=3 → 3 tries then throw (no infinite loop).
+    expect(requests).toHaveLength(3);
   });
 
   it('exposes an Entra-gated port and maps the returned public URL', async () => {

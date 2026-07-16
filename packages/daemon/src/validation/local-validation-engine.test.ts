@@ -25,7 +25,7 @@ import {
   startAppStabilityMonitor,
   stripMarkdownFences,
 } from './local-validation-engine.js';
-import { hashDiff } from './pre-submit-review.js';
+import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
 import { runToolUseReview } from './review-tool-runner.js';
 
 vi.mock('../runtimes/run-claude-cli.js', async (importOriginal) => {
@@ -52,12 +52,21 @@ vi.mock('./review-tool-runner.js', async (importOriginal) => {
   };
 });
 
+vi.mock('./review-codex-runner.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./review-codex-runner.js')>();
+  return {
+    ...actual,
+    runCodexReview: vi.fn(),
+  };
+});
+
 beforeEach(() => {
   vi.mocked(runClaudeCli).mockReset();
   vi.mocked(createProviderAnthropicClient)
     .mockReset()
     .mockResolvedValue({ ok: false, reason: 'no_anthropic_api_key' });
   vi.mocked(runToolUseReview).mockReset();
+  vi.mocked(runCodexReview).mockReset();
 });
 
 afterEach(() => {
@@ -2127,8 +2136,7 @@ describe('validate() — facts + review gate', () => {
     );
   });
 
-  it('runs Review through the daemon OpenAI API for OpenAI reviewer profiles', async () => {
-    vi.stubEnv('OPENAI_API_KEY', undefined);
+  it('runs OpenAI Review through Codex in the pod container', async () => {
     const diff = `diff --git a/src/app.ts b/src/app.ts
 --- a/src/app.ts
 +++ b/src/app.ts
@@ -2136,34 +2144,26 @@ describe('validate() — facts + review gate', () => {
 -old
 +new
 `;
-    const fetchMock = vi.fn(async () => {
-      return new Response(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  status: 'pass',
-                  reasoning: 'OpenAI reviewer passed',
-                  issues: [],
-                }),
-              },
-            },
-          ],
-          usage: {
-            prompt_tokens: 12_345,
-            completion_tokens: 678,
-            prompt_tokens_details: {
-              cached_tokens: 10_000,
-            },
-          },
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      );
+    vi.mocked(runCodexReview).mockResolvedValue({
+      stdout: JSON.stringify({
+        status: 'pass',
+        reasoning: 'OpenAI reviewer passed',
+        issues: [],
+      }),
+      tokenUsage: {
+        inputTokens: 12_345,
+        cachedInputTokens: 10_000,
+        outputTokens: 678,
+      },
     });
+    const fetchMock = vi.fn(async () => new Response('quota exceeded', { status: 429 }));
     vi.stubGlobal('fetch', fetchMock);
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
+    const reviewerExecEnv = {
+      CODEX_HOME: '/run/autopod/codex-home',
+      OPENAI_API_KEY_FILE: '/run/autopod/openai-api-key',
+    };
 
     const result = await engine.validate(
       baseConfig({
@@ -2174,30 +2174,10 @@ describe('validate() — facts + review gate', () => {
           authJson: JSON.stringify({ tokens: { access_token: 'chatgpt-profile-token' } }),
         },
         reviewerModel: 'gpt-5',
+        reviewerExecEnv,
         diff,
-        preSubmitReview: {
-          status: 'pass',
-          diffHash: hashDiff(diff),
-          reasoning: 'Cached pre-submit pass should not suppress daemon-side OpenAI Review.',
-          issues: [],
-          model: 'gpt-5',
-          checkedAt: new Date().toISOString(),
-        },
       }),
     );
-
-    const fetchCall = fetchMock.mock.calls[0];
-    const fetchInit = fetchCall?.[1] as
-      | {
-          method?: string;
-          headers?: Record<string, string>;
-          body?: string;
-        }
-      | undefined;
-    const requestBody = JSON.parse(fetchInit?.body ?? '{}') as {
-      model?: string;
-      messages?: Array<{ content?: string }>;
-    };
 
     expect(result.overall).toBe('pass');
     expect(result.taskReview).toMatchObject({
@@ -2205,17 +2185,17 @@ describe('validate() — facts + review gate', () => {
       model: 'gpt-5',
       reasoning: 'OpenAI reviewer passed',
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchCall?.[0]).toBe('https://api.openai.com/v1/chat/completions');
-    expect(fetchInit).toMatchObject({
-      method: 'POST',
-      headers: expect.objectContaining({
-        authorization: 'Bearer chatgpt-profile-token',
-        'content-type': 'application/json',
-      }),
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(runCodexReview).toHaveBeenCalledWith({
+      podId: 'pod-test',
+      attempt: 1,
+      containerId: 'container-test',
+      containerManager: cm,
+      model: 'gpt-5',
+      prompt: expect.stringContaining('## DIFF'),
+      timeout: 300_000,
+      env: reviewerExecEnv,
     });
-    expect(requestBody.model).toBe('gpt-5');
-    expect(requestBody.messages?.[0]?.content).toContain('## DIFF');
     expect(vi.mocked(cm.execInContainer)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(cm.execInContainer).mock.calls[0]?.[1].join(' ')).toContain(
       'git reset --hard HEAD',
@@ -2228,13 +2208,12 @@ describe('validate() — facts + review gate', () => {
   });
 
   it('blocks validation when OpenAI review times out', async () => {
-    vi.stubEnv('OPENAI_API_KEY', 'sk-test');
-    const fetchMock = vi.fn(async () => {
-      const err = new Error('The operation was aborted');
-      err.name = 'AbortError';
-      throw err;
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(runCodexReview).mockRejectedValue(
+      new CodexReviewError({
+        kind: 'timeout',
+        message: 'codex review timed out after 300000ms',
+      }),
+    );
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
     const completed: Array<{ phase: string; status: string }> = [];
@@ -2258,17 +2237,20 @@ describe('validate() — facts + review gate', () => {
 
     expect(result.taskReview).toBeNull();
     expect(result.reviewSkipKind).toBe('review-timeout');
-    expect(result.reviewSkipReason).toMatch(/Review timed out: openai review timed out/);
+    expect(result.reviewSkipReason).toMatch(/Review timed out: codex review timed out/);
     expect(result.overall).toBe('fail');
     expect(completed).toContainEqual({ phase: 'review', status: 'fail' });
   });
 
   it('blocks validation when OpenAI review fails after deterministic gates pass', async () => {
-    vi.stubEnv('OPENAI_API_KEY', 'sk-test');
-    const fetchMock = vi.fn(async () => {
-      return new Response('quota exceeded', { status: 429 });
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(runCodexReview).mockRejectedValue(
+      new CodexReviewError({
+        kind: 'non-zero-exit',
+        message: 'codex review failed (exit=2): reviewer process failed',
+        exitCode: 2,
+        stderr: 'reviewer process failed',
+      }),
+    );
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
     const completed: Array<{ phase: string; status: string }> = [];
@@ -2292,7 +2274,7 @@ describe('validate() — facts + review gate', () => {
 
     expect(result.taskReview).toBeNull();
     expect(result.reviewSkipKind).toBe('review-failed');
-    expect(result.reviewSkipReason).toContain('openai review failed (http 429): quota exceeded');
+    expect(result.reviewSkipReason).toContain('codex review failed (exit=2)');
     expect(result.overall).toBe('fail');
     expect(result.smoke.status).toBe('pass');
     expect(result.factValidation?.status).toBe('skip');
@@ -2795,6 +2777,51 @@ describe('runBuild — warning policy', () => {
     expect(result.smoke.build.warningCount).toBe(3);
     expect(result.smoke.build.output).not.toContain('Build exited 0 but emitted');
     expect(result.smoke.build.output).not.toContain('--- build output ---');
+  });
+
+  it('repairs root-owned package binaries as root before building as autopod', async () => {
+    let binaryRepaired = false;
+    const execInContainer = vi.fn(
+      async (
+        _containerId: string,
+        command: string[],
+        options?: { user?: string },
+      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+        const shell = command.join(' ');
+        if (shell.includes('-empty -print')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('node_modules/.bin') && shell.includes('chmod')) {
+          binaryRepaired = options?.user === 'root' && shell.includes('chmod a+rx');
+          return {
+            stdout: '',
+            stderr: binaryRepaired ? '' : 'Operation not permitted',
+            exitCode: binaryRepaired ? 0 : 1,
+          };
+        }
+        if (shell.includes('pnpm build')) {
+          return binaryRepaired
+            ? { stdout: 'Build succeeded.', stderr: '', exitCode: 0 }
+            : {
+                stdout: '',
+                stderr:
+                  "EACCES: permission denied, open '/workspace/packages/pi-worker/node_modules/.bin/tsup'",
+                exitCode: 1,
+              };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    );
+    const cm = {
+      ...containerManagerWithBuildOutput('', 0),
+      execInContainer,
+    } as unknown as ContainerManager;
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(baseConfigForBuild('npx pnpm build'));
+
+    expect(result.smoke.build.status).toBe('pass');
+    expect(binaryRepaired).toBe(true);
   });
 
   it("keeps status 'pass' when exit 0 and no warnings", async () => {

@@ -35,6 +35,7 @@ import type {
   ReviewFeedbackResponseItem,
   Runtime,
   SastResult,
+  ScanFinding,
   SetupResult,
   SpawnFixResponse,
   SpecFile,
@@ -55,6 +56,7 @@ import {
   CONTAINER_HOME_DIR,
   DEFAULT_CONTAINER_MEMORY_GB,
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
+  WORKSPACE_PI_HANDOFF_PATH,
   generateId,
   generatePodId,
   mergeValidationPhaseSkips,
@@ -84,6 +86,7 @@ import {
   sidecarPodEnv,
 } from '../containers/sidecar-resolver.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
+import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import { createHistoryExporter } from '../history/history-exporter.js';
 import {
   generateHistoryInstructions,
@@ -98,7 +101,6 @@ import type {
   ValidationEngine,
   WorktreeManager,
 } from '../interfaces/index.js';
-import { selectGitPat } from '../profiles/index.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { assertNoExpiredPat } from '../profiles/pat-expiry.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
@@ -117,8 +119,16 @@ import type {
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { RUNTIME_TELEMETRY_OPT_OUT_ENV } from '../runtime-env.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
-import { cleanupClaudeState, ensureClaudeStateDir } from '../runtimes/claude-state-store.js';
-import { cleanupCodexState, ensureCodexStateDir } from '../runtimes/codex-state-store.js';
+import {
+  claudeStateDirForPod,
+  cleanupClaudeState,
+  ensureClaudeStateDir,
+} from '../runtimes/claude-state-store.js';
+import {
+  cleanupCodexState,
+  codexStateDirForPod,
+  ensureCodexStateDir,
+} from '../runtimes/codex-state-store.js';
 import type { PiRuntime } from '../runtimes/pi-runtime.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
@@ -130,8 +140,10 @@ import {
 } from '../validation/screenshot-collector.js';
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import { pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
+import { graftHostTreeOntoBase } from '../worktrees/graft-reconcile.js';
 import { DeletionGuardError, GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
+import { transferCommitToContainer } from '../worktrees/sandbox-reconcile.js';
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import type { EscalationRepository } from './escalation-repository.js';
@@ -456,6 +468,22 @@ function shellQuote(s: string): string {
 const WORKSPACE_RUNTIME_CACHE_EXCLUDES = ['node_modules', '.serena', '.roslyn-codelens'];
 const WORKSPACE_SYNC_EXCLUDES = ['.git', ...WORKSPACE_RUNTIME_CACHE_EXCLUDES];
 
+/** Render the in-workspace pi-handoff.md file body. A short managed-file banner
+ * makes clear to the human/agent that it is Autopod-managed and git-excluded,
+ * followed by the raw persisted instructions verbatim. */
+function renderPiHandoffFile(instructions: string): string {
+  return [
+    "<!-- Autopod-managed: a copy of this pod's handoff instructions.",
+    '     Git-excluded — edits here are not tracked and will not be committed',
+    '     unless you `git add -f` this path. -->',
+    '',
+    '# Pi handoff',
+    '',
+    instructions.trim(),
+    '',
+  ].join('\n');
+}
+
 function workspaceMirrorPruneExpression(excludes: string[]): string {
   const predicates = excludes.map((name) => `-name ${shellQuote(name)}`).join(' -o ');
   return `\\( ${predicates} \\) -prune -o`;
@@ -764,6 +792,7 @@ export function buildActionableFailureSummary(status: PrMergeStatus, profile: Pr
 
 const REVIEW_FEEDBACK_REPLY_MAX_CHARS = 2000;
 const REVIEW_INFRA_RETRY_BACKOFF_MS = [10_000, 30_000, 90_000] as const;
+const SECURITY_SCAN_FINDING_LOG_LIMIT = 20;
 
 function formatReviewFeedbackReply(response: ReviewFeedbackResponseItem): string {
   const outcomeLabel: Record<ReviewFeedbackResponseItem['outcome'], string> = {
@@ -794,6 +823,16 @@ function isReviewInfrastructureOnlyFailure(result: ValidationResult): boolean {
     return false;
   }
   return result.overall === 'fail';
+}
+
+function isRetryableReviewInfrastructureFailure(result: ValidationResult): boolean {
+  if (!isReviewInfrastructureOnlyFailure(result)) return false;
+  if (result.reviewSkipKind === 'review-timeout') return true;
+
+  // Provider-declared invalid requests are deterministic. Re-running the same
+  // build/test/facts/review pipeline cannot repair an unsupported model or old
+  // client, so park for operator action after the first validation pass.
+  return !/invalid_request_error/i.test(result.reviewSkipReason ?? '');
 }
 
 function reviewInfrastructureFailureLabel(result: ValidationResult): string {
@@ -1103,6 +1142,26 @@ const AGENT_CLI_BY_RUNTIME: Record<Pod['runtime'], string> = {
   copilot: 'copilot',
 };
 
+const MIN_CODEX_CLI_VERSION = '0.144.4';
+
+function parseCliVersion(output: string): [number, number, number] | null {
+  const match = output.match(/\b(\d+)\.(\d+)\.(\d+)\b/);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function isVersionBelow(
+  version: [number, number, number],
+  minimum: [number, number, number],
+): boolean {
+  for (let index = 0; index < version.length; index += 1) {
+    const current = version[index] ?? 0;
+    const required = minimum[index] ?? 0;
+    if (current !== required) return current < required;
+  }
+  return false;
+}
+
 async function verifyAgentCli(
   containerManager: ContainerManager,
   containerId: string,
@@ -1120,6 +1179,27 @@ async function verifyAgentCli(
     throw new Error(
       `Agent CLI missing: ${cli} is not installed in this image. Rebuild the ${runtime} base/warm image.${detail ? ` ${detail}` : ''}`,
     );
+  }
+
+  if (runtime === 'codex') {
+    const versionResult = await containerManager.execInContainer(
+      containerId,
+      ['codex', '--version'],
+      { timeout: 10_000 },
+    );
+    const output = (versionResult.stdout || versionResult.stderr).trim();
+    const version = parseCliVersion(output);
+    const minimum = parseCliVersion(MIN_CODEX_CLI_VERSION);
+    if (versionResult.exitCode !== 0 || !version || !minimum) {
+      throw new Error(
+        `Unable to verify the Codex CLI version${output ? ` (${output})` : ''}. Rebuild the codex base/warm image with Codex CLI ${MIN_CODEX_CLI_VERSION} or newer.`,
+      );
+    }
+    if (isVersionBelow(version, minimum)) {
+      throw new Error(
+        `Codex CLI ${version.join('.')} is incompatible; Autopod requires ${MIN_CODEX_CLI_VERSION} or newer. Rebuild the codex base/warm image.`,
+      );
+    }
   }
 
   return result.stdout.trim();
@@ -1154,6 +1234,8 @@ export interface PodManagerDependencies {
   validationRepo?: ValidationRepository;
   progressEventRepo?: ProgressEventRepository;
   profileStore: ProfileStore;
+  /** Canonical credential source for every GitHub operation. Legacy profile PATs are ignored. */
+  githubAuth?: DaemonGitHubAuth;
   providerAccountStore?: ProviderAccountStore;
   eventBus: EventBus;
   containerManagerFactory: ContainerManagerFactory;
@@ -1649,6 +1731,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const reviewInfrastructureRetryBackoffMs =
     deps.reviewInfrastructureRetryBackoffMs ?? REVIEW_INFRA_RETRY_BACKOFF_MS;
 
+  async function resolveGitCredential(profile: Profile): Promise<string | undefined> {
+    if (profile.prProvider === 'ado') return profile.adoPat ?? undefined;
+    if (!profile.repoUrl) {
+      throw new Error(`GitHub profile "${profile.name}" does not have a repository URL`);
+    }
+    let hostname: string;
+    try {
+      hostname = new URL(profile.repoUrl).hostname.toLowerCase();
+    } catch {
+      throw new Error(`GitHub profile "${profile.name}" has an invalid repository URL`);
+    }
+    if (hostname !== 'github.com') {
+      throw new Error(
+        `GitHub profile "${profile.name}" must use an exact github.com repository host`,
+      );
+    }
+    return (await deps.githubAuth?.resolveCredential())?.token;
+  }
+
   function assertSandboxAgentStreamingExecSupported(
     profile: Pick<Profile, 'name'>,
     executionTarget: ExecutionTarget,
@@ -1722,6 +1823,44 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       env: env ?? {},
       mcpServers,
     });
+  }
+
+  async function syncSandboxRuntimeSessionState(podId: string): Promise<void> {
+    let pod: Pod;
+    try {
+      pod = podRepo.getOrThrow(podId);
+    } catch {
+      return;
+    }
+    if (pod.executionTarget !== 'sandbox' || !pod.containerId) return;
+
+    const statePaths =
+      pod.runtime === 'claude'
+        ? {
+            container: `${CONTAINER_HOME_DIR}/.claude/projects`,
+            host: claudeStateDirForPod(podId),
+          }
+        : pod.runtime === 'codex'
+          ? {
+              container: `${CONTAINER_HOME_DIR}/.codex/sessions`,
+              host: codexStateDirForPod(podId),
+            }
+          : null;
+    if (!statePaths) return;
+
+    try {
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      await cm.extractDirectoryFromContainer(
+        pod.containerId,
+        statePaths.container,
+        statePaths.host,
+      );
+    } catch (err) {
+      logger.warn(
+        { err, podId, runtime: pod.runtime },
+        'Failed to sync sandbox runtime session state — future recovery may restart fresh',
+      );
+    }
   }
 
   /**
@@ -2054,6 +2193,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'Pre-push security scan completed',
       );
       if (scan.decision === 'block') {
+        emitBlockingSecurityScanFindings(pod.id, scan.findings);
         throw new AutopodError(
           `Pre-push security scan blocked (${scan.findings.length} finding(s))`,
           'SECURITY_SCAN_BLOCKED',
@@ -2835,7 +2975,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const rebaseResult = await worktreeManager.rebaseOntoBase({
             worktreePath,
             baseBranch,
-            pat: selectGitPat(profile),
+            pat: await resolveGitCredential(profile),
           });
 
           if (!rebaseResult.rebased) {
@@ -2856,13 +2996,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           if (!rebaseResult.alreadyUpToDate) {
             await worktreeManager.pushBranch(worktreePath, branch, {
               force: true,
-              pat: selectGitPat(profile),
+              pat: await resolveGitCredential(profile),
             });
             branchPushed = true;
             emitActivityStatus(podId, 'Rebased fix branch pushed');
           } else {
             await worktreeManager.pushBranch(worktreePath, branch, {
-              pat: selectGitPat(profile),
+              pat: await resolveGitCredential(profile),
             });
             branchPushed = true;
             emitActivityStatus(podId, 'Fix branch pushed');
@@ -2933,7 +3073,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const rebaseResult = await worktreeManager.rebaseOntoBase({
       worktreePath: pod.worktreePath,
       baseBranch,
-      pat: selectGitPat(profile),
+      pat: await resolveGitCredential(profile),
     });
 
     const freshPod = podRepo.getOrThrow(podId);
@@ -3097,7 +3237,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               const result = await worktreeManager.rebaseOntoBase({
                 worktreePath,
                 baseBranch,
-                pat: selectGitPat(profile),
+                pat: await resolveGitCredential(profile),
               });
               if (!result.rebased) {
                 const blockReason = formatRebaseConflictReason(baseBranch, result.conflicts);
@@ -3114,7 +3254,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               if (!result.alreadyUpToDate) {
                 await worktreeManager.pushBranch(worktreePath, branch, {
                   force: true,
-                  pat: selectGitPat(profile),
+                  pat: await resolveGitCredential(profile),
                 });
                 logger.info(
                   { podId, baseBranch },
@@ -3294,7 +3434,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   async function getResumeEnv(pod: Pod): Promise<Record<string, string> | undefined> {
     const profile = profileStore.get(pod.profileName);
     const provider = profile.modelProvider;
-    if (provider !== 'max' && provider !== 'foundry' && provider !== 'openai' && provider !== 'pi') {
+    if (
+      provider !== 'max' &&
+      provider !== 'foundry' &&
+      provider !== 'openai' &&
+      provider !== 'pi'
+    ) {
       return undefined;
     }
 
@@ -3709,6 +3854,240 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
   }
 
+  /**
+   * Recover from a host/container HEAD divergence on **sandbox** pods without
+   * quarantining the worktree.
+   *
+   * On sandbox the container is the source of truth: the host worktree is a
+   * staging area whose files are extracted from `/workspace` and then
+   * auto-committed host-side. When the daemon's own auto-commit lands on a base
+   * that isn't a descendant of the container HEAD, the two HEADs diverge in
+   * *ancestry* even though the host commit's *tree* is exactly the agent state
+   * we want to validate.
+   *
+   * We reconcile by grafting the host worktree's tree onto the container HEAD:
+   *   reset --soft <containerHead>  → keep the host tree, re-parent onto container
+   *   commit (if the trees differ)  → linear child of container HEAD
+   * then reset the container to the grafted HEAD. This preserves 100% of the
+   * agent's file content and yields a linear branch, so validation and PR
+   * delivery proceed normally instead of the work being stranded.
+   *
+   * Returns true when the worktree was reconciled, false when we could not make
+   * the container HEAD available on the host (caller should fall back to the
+   * divergence throw / quarantine).
+   */
+  async function reconcileDivergedSandboxWorkspace(
+    containerId: string,
+    worktreePath: string,
+    cm: ContainerManager,
+    podId: string,
+    hostHead: string,
+    containerHead: string,
+  ): Promise<boolean> {
+    const hostGit = async (args: string[]) => {
+      try {
+        const r = await execFileAsync('git', args, { cwd: worktreePath });
+        return { stdout: r.stdout, stderr: r.stderr, exitCode: 0 };
+      } catch (err) {
+        const e = err as { stdout?: string; stderr?: string; code?: number };
+        return {
+          stdout: e.stdout ?? '',
+          stderr: e.stderr ?? (err as Error).message,
+          exitCode: typeof e.code === 'number' ? e.code : 1,
+        };
+      }
+    };
+
+    const containerGit = async (args: string[]) => {
+      const r = await cm.execInContainer(
+        containerId,
+        ['git', '-c', 'safe.directory=/workspace', '-C', '/workspace', ...args],
+        { timeout: 30_000 },
+      );
+      return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode };
+    };
+
+    // Capture the full lineage before touching anything — this is the repro data
+    // that pins down *why* the auto-commit diverged (see sandbox-rework-reconcile-bug.md).
+    const [mergeBase, hostTree, containerTree] = await Promise.all([
+      hostGit(['merge-base', hostHead, containerHead]).then((r) =>
+        r.exitCode === 0 ? r.stdout.trim() : null,
+      ),
+      hostGit(['rev-parse', `${hostHead}^{tree}`]).then((r) =>
+        r.exitCode === 0 ? r.stdout.trim() : null,
+      ),
+      hostGit(['rev-parse', `${containerHead}^{tree}`]).then((r) =>
+        r.exitCode === 0 ? r.stdout.trim() : null,
+      ),
+    ]);
+    logger.warn(
+      { podId, hostHead, containerHead, mergeBase, hostTree, containerTree },
+      'Sandbox workspace HEADs diverged — attempting recoverable reconcile',
+    );
+
+    // Derive the bare repo path up front — needed both to push the container HEAD
+    // to a throwaway ref (if it isn't already on the host) and to clean that ref up.
+    let bareRepoPath: string | null = null;
+    try {
+      bareRepoPath = await deriveBareRepoPath(worktreePath);
+    } catch {
+      // Best-effort; the cat-file check below is the real gate.
+    }
+    const reconcileRef = `refs/autopod-reconcile/${podId}`;
+    const cleanupReconcileRef = async () => {
+      if (!bareRepoPath) return;
+      await execFileAsync('git', [
+        '--git-dir',
+        bareRepoPath,
+        'update-ref',
+        '-d',
+        reconcileRef,
+      ]).catch(() => {});
+    };
+
+    // The graft needs the container HEAD reachable as an object on the host. It
+    // usually is (sync-back pushed it to the bare); if not, push it now to a
+    // throwaway ref so the object exists without moving any branch.
+    const ensureContainerHeadReachable = async (): Promise<boolean> => {
+      if ((await hostGit(['cat-file', '-e', `${containerHead}^{commit}`])).exitCode === 0) {
+        return true;
+      }
+      if (!bareRepoPath) {
+        logger.warn(
+          { podId, containerHead },
+          'Cannot reconcile diverged workspace — container HEAD missing on host and bare path unknown',
+        );
+        return false;
+      }
+      // Validate the daemon-derived bare path against the container's alternates,
+      // mirroring the sync-back push guard, before letting the container push to it.
+      const alternatesResult = await cm.execInContainer(
+        containerId,
+        [
+          'sh',
+          '-c',
+          "sed 's|/objects$||' /workspace/.git/objects/info/alternates 2>/dev/null | head -1 || true",
+        ],
+        { timeout: 5_000 },
+      );
+      const containerBarePath =
+        alternatesResult.exitCode === 0 && alternatesResult.stdout.trim()
+          ? alternatesResult.stdout.trim()
+          : null;
+      if (!containerBarePath || containerBarePath !== bareRepoPath) {
+        logger.warn(
+          { podId, bareRepoPath, containerBarePath },
+          'Cannot reconcile diverged workspace — container bare path mismatch, refusing push',
+        );
+        return false;
+      }
+      const push = await cm.execInContainer(
+        containerId,
+        [
+          'git',
+          '-c',
+          'safe.directory=/workspace',
+          '-c',
+          `safe.directory=${bareRepoPath}`,
+          '-C',
+          '/workspace',
+          'push',
+          bareRepoPath,
+          `HEAD:${reconcileRef}`,
+        ],
+        { timeout: 30_000 },
+      );
+      if (push.exitCode !== 0) {
+        logger.warn(
+          { podId, containerHead, stderr: push.stderr.slice(0, 500) },
+          'Cannot reconcile diverged workspace — failed to make container HEAD available on host',
+        );
+        return false;
+      }
+      return true;
+    };
+
+    const hostBundlePath = path.join(
+      os.tmpdir(),
+      `autopod-reconcile-${podId}-${Date.now()}.bundle`,
+    );
+    const containerBundlePath = `/tmp/autopod-reconcile-${podId}.bundle`;
+    try {
+      // Both HEADs must be visible host-side to compute the target. containerHead is
+      // normally already on the host bare (sync-back pushed it); ensure it if not.
+      if (!(await ensureContainerHeadReachable())) return false;
+
+      // Decide the reconciled target commit HOST-SIDE, where both HEADs resolve.
+      // The common case is "host ahead" — the daemon's auto-commit sits linearly on
+      // top of the container HEAD, so the host commit is already the target. Only on
+      // true divergence (neither an ancestor of the other) do we graft the host tree
+      // onto the container HEAD to synthesise a linear target.
+      const containerAncestorOfHost =
+        (await hostGit(['merge-base', '--is-ancestor', containerHead, hostHead])).exitCode === 0;
+      let target = hostHead;
+      if (!containerAncestorOfHost) {
+        const graft = await graftHostTreeOntoBase(hostGit, containerHead);
+        if (!graft.ok) {
+          logger.warn(
+            { podId, hostHead, containerHead, reason: graft.reason },
+            'Reconcile graft failed',
+          );
+          return false;
+        }
+        target = graft.head;
+      }
+
+      if (target === containerHead) {
+        // Trees were identical — the HEADs already agree in content. Nothing to move.
+        logger.info(
+          { podId, hostHead, containerHead },
+          'Reconciled diverged sandbox workspace — host and container already share the target tree',
+        );
+        return true;
+      }
+
+      // The sandbox container has an ISOLATED object store and cannot resolve the
+      // host-created `target`. Bundle it across (incremental on containerHead, which
+      // the container already has) so `target` becomes a real object in the container
+      // BEFORE we reset the workspace to it. Resetting to a host-only commit is exactly
+      // what broke the first cut of this fix ("Could not parse object").
+      const transfer = await transferCommitToContainer({
+        hostGit,
+        containerGit,
+        transferBundle: async (fromHostPath, toContainerPath) => {
+          const bytes = await readFile(fromHostPath);
+          await cm.writeFile(containerId, toContainerPath, bytes);
+        },
+        hostBundlePath,
+        containerBundlePath,
+        transferRef: `refs/autopod-xfer/${podId}`,
+        target,
+        base: containerHead,
+      });
+      if (!transfer.ok) {
+        logger.warn(
+          { podId, hostHead, containerHead, target, reason: transfer.reason },
+          'Reconcile failed to transfer target commit into the sandbox container',
+        );
+        return false;
+      }
+
+      // `target` now resolves in the container's own store, so this succeeds on sandbox.
+      await resetContainerWorkspaceToHead(containerId, cm, target);
+      logger.info(
+        { podId, hostHead, containerHead, target },
+        'Reconciled diverged sandbox workspace by transferring target commit into the container',
+      );
+      return true;
+    } finally {
+      await cleanupReconcileRef();
+      await rm(hostBundlePath, { force: true }).catch(() => {});
+      await cm
+        .execInContainer(containerId, ['rm', '-f', containerBundlePath], { timeout: 5_000 })
+        .catch(() => {});
+    }
+  }
+
   async function prepareWorkspaceForValidation(
     containerId: string,
     worktreePath: string,
@@ -3766,6 +4145,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (hostAncestorOfContainer === true) {
       await syncWorkspaceBack(containerId, worktreePath, cm, podId, executionTarget);
       return;
+    }
+
+    // True divergence: neither HEAD is an ancestor of the other. On sandbox the
+    // container is authoritative and the host worktree's tree is the agent state
+    // we want to validate, so recover by grafting rather than quarantining the
+    // worktree. Docker pods keep the strict throw — their host worktree is
+    // bind-mounted and should stay linear, so a divergence there is a real anomaly.
+    if (executionTarget === 'sandbox') {
+      const reconciled = await reconcileDivergedSandboxWorkspace(
+        containerId,
+        worktreePath,
+        cm,
+        podId,
+        hostHead,
+        containerHead,
+      );
+      if (reconciled) return;
     }
 
     throw new ValidationWorkspaceReconcileError(
@@ -4103,10 +4499,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const pod = podRepo.getOrThrow(podId);
     const profile = profileStore.get(pod.profileName);
 
-    const pat = service === 'github' ? profile.githubPat : profile.adoPat;
+    const pat =
+      service === 'github' ? (await deps.githubAuth?.resolveCredential())?.token : profile.adoPat;
     if (!pat) {
       throw new AutopodError(
-        `No ${service} PAT configured in profile '${pod.profileName}'. Add one via ap profile update.`,
+        service === 'github'
+          ? `Daemon GitHub CLI authentication is unavailable for profile '${pod.profileName}'.`
+          : `No ADO PAT configured in profile '${pod.profileName}'. Add one via ap profile update.`,
         'MISSING_CREDENTIAL',
         400,
       );
@@ -4298,20 +4697,63 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     bumpActivityTimestamp(podId);
   }
 
-  type OperatorFailurePhase = 'setup' | 'agent' | 'completion';
+  function emitBlockingSecurityScanFindings(podId: string, findings: ScanFinding[]): void {
+    const findingLabel = findings.length === 1 ? 'finding' : 'findings';
+    emitActivityError(
+      podId,
+      `Pre-push security scan blocked: ${findings.length} ${findingLabel}.`,
+      false,
+    );
+    const visibleFindings = findings.slice(0, SECURITY_SCAN_FINDING_LOG_LIMIT);
+    for (const [index, finding] of visibleFindings.entries()) {
+      const rule = sanitizeSecurityScanLogValue(finding.ruleId, 'unknown');
+      const file = sanitizeSecurityScanLogValue(finding.file, 'unknown');
+      const location = finding.line ? `${file}:${finding.line}` : file;
+      emitActivityError(
+        podId,
+        `Security finding ${index + 1}/${findings.length}: severity=${finding.severity} ` +
+          `detector=${finding.detector} rule=${rule} location=${location}`,
+        false,
+      );
+    }
 
-  function operatorErrorMessage(err: unknown, phase: OperatorFailurePhase): string {
-    const raw = err instanceof Error && err.message.trim().length > 0 ? err.message : String(err);
-    const sanitized = processContent(raw.slice(0, 1200), {
+    const omitted = findings.length - visibleFindings.length;
+    if (omitted > 0) {
+      const omittedSummary = `${omitted} additional security ${
+        omitted === 1 ? 'finding was' : 'findings were'
+      } omitted from logs; inspect the security evidence for the complete result.`;
+      emitActivityError(podId, omittedSummary, false);
+    }
+  }
+
+  function sanitizeSecurityScanLogValue(value: string | undefined, fallback: string): string {
+    const normalized = value?.replace(/\s+/g, ' ').trim().slice(0, 400);
+    if (!normalized) return fallback;
+    const sanitized = processContent(normalized, {
       sanitization: { preset: 'standard' },
     }).text.trim();
+    return sanitized || fallback;
+  }
+
+  type OperatorFailurePhase = 'setup' | 'agent' | 'completion';
+
+  function sanitizeFailureReason(raw: unknown, prefix: string): string {
+    const message =
+      raw instanceof Error && raw.message.trim().length > 0 ? raw.message : String(raw);
+    const sanitized = processContent(message.slice(0, 1200), {
+      sanitization: { preset: 'standard' },
+    }).text.trim();
+    return `${prefix}: ${sanitized || 'unknown error'}`;
+  }
+
+  function operatorErrorMessage(err: unknown, phase: OperatorFailurePhase): string {
     const prefix =
       phase === 'setup'
         ? 'Pod setup failed before the agent could finish'
         : phase === 'completion'
           ? 'Pod failed while finalizing after the agent run'
           : 'Pod failed while the agent was running';
-    return `${prefix}: ${sanitized || 'unknown error'}`;
+    return sanitizeFailureReason(err, prefix);
   }
 
   function describeSyncFailure(err: unknown): string {
@@ -4661,7 +5103,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       timestamp: new Date().toISOString(),
       payload: {
         service: err.service,
-        reason: `git ${err.op} was rejected by ${err.service}. Update the profile's ${err.service === 'github' ? 'githubPat' : 'adoPat'} with a token that has write access to the target repo, then resume the pod.`,
+        reason:
+          err.service === 'github'
+            ? `git ${err.op} was rejected by GitHub. Authenticate the daemon service account with gh auth login and ensure it has write access to the target repo, then resume the pod.`
+            : `git ${err.op} was rejected by ADO. Update the profile's adoPat with a token that has write access to the target repo, then resume the pod.`,
         source: 'host_push',
       },
       response: null,
@@ -4744,7 +5189,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         worktreePath: pod.worktreePath,
         branch: baseBranch,
         sourceRef: `refs/heads/${baseBranch}`,
-        pat: selectGitPat(profile),
+        pat: await resolveGitCredential(profile),
       });
       if (result.created) {
         emitActivityStatus(pod.id, `Base branch published: ${baseBranch}`);
@@ -4786,7 +5231,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
 
     const baseBranch = resolvePrBaseBranch(pod, profile);
-    const pat = selectGitPat(profile);
+    const pat = await resolveGitCredential(profile);
     try {
       await worktreeManager.mergeBranch({
         worktreePath: pod.worktreePath,
@@ -5002,11 +5447,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     };
 
     let result = await runValidation();
+    let retryCount = 0;
     for (let retryIndex = 0; retryIndex < reviewInfrastructureRetryBackoffMs.length; retryIndex++) {
-      if (!isReviewInfrastructureOnlyFailure(result)) break;
+      if (!isRetryableReviewInfrastructureFailure(result)) break;
 
       const delayMs = reviewInfrastructureRetryBackoffMs[retryIndex] ?? 0;
       const retryNumber = retryIndex + 1;
+      retryCount = retryNumber;
       emitActivityStatus(
         podId,
         `Review infrastructure failure — retrying in ${formatRetryDelay(delayMs)} (${retryNumber}/${reviewInfrastructureRetryBackoffMs.length})`,
@@ -5036,7 +5483,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (isReviewInfrastructureOnlyFailure(result)) {
       emitActivityStatus(
         podId,
-        `Review infrastructure failed after ${reviewInfrastructureRetryBackoffMs.length} retries — needs human review`,
+        retryCount === 0
+          ? `${reviewInfrastructureFailureLabel(result)} — needs human review`
+          : `Review infrastructure failed after ${retryCount} retries — needs human review`,
       );
     }
 
@@ -5238,11 +5687,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         resolvedPod.validationSuite = 'off';
       }
       if (resolvedPod.agentMode === 'interactive' && executionTarget !== 'local') {
-        throw new AutopodError(
-          'Interactive pods only support local execution target',
-          'INVALID_CONFIGURATION',
-          400,
-        );
+        const interactiveCm = containerManagerFactory.get(executionTarget);
+        if (!interactiveCm.attachTerminal) {
+          throw new AutopodError(
+            `Interactive pods on execution target '${executionTarget}' require a container backend with interactive terminal support (attachTerminal)`,
+            'INVALID_CONFIGURATION',
+            400,
+          );
+        }
       }
       if (executionTarget === 'sandbox') {
         if (!profile.warmImageTag) {
@@ -5410,6 +5862,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             outputMode: effectiveOutputMode,
             startBranch: effectiveStartBranch !== effectiveBaseBranch ? effectiveStartBranch : null,
             baseBranch: effectiveBaseBranch,
+            // Persist durable handoff instructions immediately so they survive
+            // independently of the originating Pi session and are visible on the
+            // pod the moment it is created. Trimmed (schema already rejects empty).
+            handoffInstructions: request.handoffInstructions?.trim() || null,
             specFiles: request.specFiles && request.specFiles.length > 0 ? request.specFiles : null,
             specContextFiles:
               request.specContextFiles && request.specContextFiles.length > 0
@@ -5592,6 +6048,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let pod = podRepo.getOrThrow(podId);
       const startingAttempt = deriveAgentAttempt(pod.phaseTokenUsage);
       let visibleFailurePhase: OperatorFailurePhase = 'setup';
+      const stagedReferenceArchivePaths = new Set<string>();
 
       // Defense-in-depth: processPod must only run for pods in queued/handoff state.
       // The queue's activeIds dedup prevents most races, but this guard ensures
@@ -5733,7 +6190,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                     'Treat the human as a collaborator, not noise — their commits encode intent, ' +
                     'and their instructions (if any) take precedence over inferences from the diff alone.',
                   '',
-                  '### Human instructions',
+                  // Three clearly-separated parts so the agent can tell the human's
+                  // authoritative handoff apart from the machine-generated activity
+                  // summary. Per the documented replacement rule, "Handoff
+                  // instructions" is the initial handoff captured at creation (the
+                  // Pi → workspace flow) UNLESS a promotion-time `--instructions`
+                  // correction replaced it in `promoteToAuto` — either way it is the
+                  // single authoritative instruction, never a blend of both.
+                  '### Handoff instructions',
                   hasInstructions
                     ? (pod.handoffInstructions as string)
                     : '(none provided — infer the remaining work from the session summary and original brief)',
@@ -5779,6 +6243,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // intact; recoverWorktree() owns clearing it on that path.)
         const provisioningUpdates: Partial<PodUpdates> = {
           startedAt: new Date().toISOString(),
+          failureReason: null,
         };
         if (!isRecovery && pod.worktreeCompromised) {
           provisioningUpdates.worktreeCompromised = false;
@@ -5854,7 +6319,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               branch: pod.branch,
               baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
               startBranch: pod.startBranch ?? undefined,
-              pat: selectGitPat(profile),
+              pat: await resolveGitCredential(profile),
               sessionId: pod.id,
             });
             worktreePath = result.worktreePath;
@@ -6107,6 +6572,54 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
+        // Clone authenticated profile references before provisioning so auth/clone failures
+        // cannot leave a partial pod and daemon credentials never cross into the container.
+        const stagedReferenceRepos = new Map<
+          string,
+          { archivePath: string; containerArchive: string }
+        >();
+        try {
+          for (const repo of pod.referenceRepos ?? []) {
+            if (!repo.sourceProfile) continue;
+            const credential = await resolveRefRepoPat(repo, profileStore, deps.githubAuth, logger);
+            if (!credential) continue;
+            const sourceProfile = profileStore.get(repo.sourceProfile);
+            if (!sourceProfile) {
+              throw new Error(`Reference repo profile ${repo.sourceProfile} was not found`);
+            }
+            const refId = generateId(8);
+            const refWorktree = await worktreeManager.create({
+              repoUrl: repo.url,
+              branch: `autopod/ref-${podId}-${refId}`,
+              baseBranch: sourceProfile.defaultBranch ?? 'main',
+              sessionId: `ref-${podId}-${refId}`,
+              pat: credential,
+            });
+            const archivePath = path.join(os.tmpdir(), `autopod-ref-${podId}-${refId}.tgz`);
+            stagedReferenceArchivePaths.add(archivePath);
+            try {
+              await execFileAsync(
+                'tar',
+                ['--exclude=.git', '-czf', archivePath, '-C', refWorktree.worktreePath, '.'],
+                { timeout: 60_000 },
+              );
+            } finally {
+              await worktreeManager.cleanup(refWorktree.worktreePath).catch(() => {});
+            }
+            stagedReferenceRepos.set(repo.mountPath, {
+              archivePath,
+              containerArchive: `/tmp/.autopod-ref-${refId}.tgz`,
+            });
+          }
+        } catch (err) {
+          await Promise.all(
+            [...stagedReferenceRepos.values()].map(({ archivePath }) =>
+              rm(archivePath, { force: true }),
+            ),
+          );
+          throw err;
+        }
+
         // Spawn container with port mapping so daemon + user can reach the app
         // Prefer the per-profile warm image when one has been built — that's
         // where customisations like Serena / roslyn-codelens-mcp live. Fall
@@ -6115,7 +6628,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (pod.executionTarget === 'sandbox') {
           await verifySandboxWarmImageAccess(profile, spawnImage, deps.warmImageExists);
         }
-        emitStatus(`Spawning container (${profile.template})…`);
+        emitStatus(
+          pod.executionTarget === 'sandbox'
+            ? `Creating sandbox (${profile.template})…`
+            : `Spawning container (${profile.template})…`,
+        );
         logger.info(
           { podId, image: spawnImage, warm: Boolean(profile.warmImageTag) },
           'Spawning pod container',
@@ -6219,6 +6736,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             memoryBytes:
               (profile.containerMemoryGb ?? DEFAULT_CONTAINER_MEMORY_GB) * 1024 * 1024 * 1024,
             nanoCpus: resolveContainerNanoCpus(process.env.CONTAINER_CPUS),
+            onProgress: emitStatus,
           });
         } catch (err) {
           // Pod container failed to spawn — tear down sidecars we already
@@ -6443,6 +6961,48 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               );
             }
           }
+
+          // Mirror the pod's durable handoff instructions into the workspace at
+          // /workspace/.autopod/pi-handoff.md so the interactive session (and,
+          // after promotion, the agent) can read the Pi handoff without leaving
+          // the container. Written *after* the populate/restore/clean sequence
+          // so nothing clobbers it. Kept out of commits by two layers: the
+          // shared worktree info/exclude (host-side auto-commit) set at worktree
+          // creation, plus this in-container info/exclude entry — the container's
+          // reconstructed /workspace/.git does NOT inherit the shared exclude, so
+          // without this an in-container `git add -A` would still sweep it in.
+          // Fail closed: a workspace that cannot surface or protect its handoff
+          // is an inconsistent handoff, so both the write and the exclude throw.
+          if (pod.handoffInstructions) {
+            emitStatus('Writing handoff…');
+            await containerManager.writeFile(
+              containerId,
+              WORKSPACE_PI_HANDOFF_PATH,
+              renderPiHandoffFile(pod.handoffInstructions),
+            );
+            const marker = '# autopod: pi handoff';
+            const guard = await containerManager.execInContainer(
+              containerId,
+              [
+                'sh',
+                '-c',
+                [
+                  'set -e',
+                  'mkdir -p /workspace/.git/info',
+                  'touch /workspace/.git/info/exclude',
+                  `if ! grep -qF ${shellQuote(marker)} /workspace/.git/info/exclude; then`,
+                  `  printf '\\n%s\\n%s\\n' ${shellQuote(marker)} ${shellQuote('.autopod/pi-handoff.md')} >> /workspace/.git/info/exclude`,
+                  'fi',
+                ].join('\n'),
+              ],
+              { timeout: 10_000 },
+            );
+            if (guard.exitCode !== 0) {
+              throw new Error(
+                `Failed to exclude pi-handoff.md from workspace commits (exit ${guard.exitCode}): ${guard.stderr}`,
+              );
+            }
+          }
         }
 
         // Pre-fill global git author identity so the user (or agent) doesn't hit
@@ -6479,36 +7039,30 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
           for (const repo of referenceRepos) {
             const destPath = `/repos/${repo.mountPath}`;
-            const refPat = resolveRefRepoPat(repo, profileStore, logger);
+            const staged = stagedReferenceRepos.get(repo.mountPath);
             try {
-              if (refPat) {
-                // Use a git credential helper script to avoid embedding the PAT in the
-                // clone URL (which would expose it in /proc/<pid>/cmdline). The script
-                // is written to a tmpfs path, used for the single clone, then deleted.
-                const credHelper = `/tmp/.autopod-refcred-${generateId(8)}`;
-                // Write a store-format credentials line for git credential-store
-                const { hostname } = new URL(repo.url);
-                const credLine = `https://x-access-token:${refPat}@${hostname}`;
-                await containerManager.writeFile(containerId, credHelper, `${credLine}\n`);
+              if (staged) {
                 try {
+                  await containerManager.writeFile(
+                    containerId,
+                    staged.containerArchive,
+                    await readFile(staged.archivePath),
+                  );
+                  await containerManager.execInContainer(containerId, ['mkdir', '-p', destPath], {
+                    timeout: 5_000,
+                  });
                   await containerManager.execInContainer(
                     containerId,
-                    [
-                      'git',
-                      '-c',
-                      `credential.helper=store --file ${credHelper}`,
-                      'clone',
-                      '--depth',
-                      '1',
-                      repo.url,
-                      destPath,
-                    ],
+                    ['tar', '-xzf', staged.containerArchive, '-C', destPath],
                     { timeout: 60_000 },
                   );
                 } finally {
-                  await containerManager.execInContainer(containerId, ['rm', '-f', credHelper], {
-                    timeout: 5_000,
-                  });
+                  await rm(staged.archivePath, { force: true });
+                  await containerManager
+                    .execInContainer(containerId, ['rm', '-f', staged.containerArchive], {
+                      timeout: 5_000,
+                    })
+                    .catch(() => {});
                 }
               } else {
                 await containerManager.execInContainer(
@@ -6518,6 +7072,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 );
               }
             } catch (err) {
+              if (repo.sourceProfile) throw err;
               logger.warn(
                 { err, podId, url: repo.url },
                 'Failed to clone reference repo — skipping',
@@ -7353,6 +7908,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             customInstructions: runtimeInstructions,
             env: secretEnv,
             mcpServers,
+            executionTarget: pod.executionTarget,
           });
 
           // Clear rework reason now that it's been consumed (one-shot)
@@ -7411,6 +7967,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 customInstructions: customInstructionsRef,
                 env: secretEnvRef,
                 mcpServers: mcpServersRef,
+                executionTarget: podRef.executionTarget,
               });
             }
           })();
@@ -7447,6 +8004,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             customInstructions: runtimeInstructions,
             env: secretEnv,
             mcpServers,
+            executionTarget: pod.executionTarget,
           });
         } else {
           // Normal path
@@ -7459,6 +8017,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             customInstructions: runtimeInstructions,
             env: secretEnv,
             mcpServers,
+            executionTarget: pod.executionTarget,
           });
         }
 
@@ -7479,7 +8038,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       } catch (err) {
         logger.error({ err, podId }, 'Pod processing error');
-        emitActivityError(podId, operatorErrorMessage(err, visibleFailurePhase), true);
+        const failureReason = operatorErrorMessage(err, visibleFailurePhase);
+        emitActivityError(podId, failureReason, true);
         // Best-effort: recover runtime credentials before the failure path
         // tears the container down. The happy-path persist at the end of the
         // try block was bypassed, so without this latest auth state can die
@@ -7501,7 +8061,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           pod = podRepo.getOrThrow(podId);
           if (!isTerminalState(pod.status)) {
             if (canFail(pod.status)) {
-              transition(pod, 'failed', { completedAt: new Date().toISOString() });
+              transition(pod, 'failed', {
+                completedAt: new Date().toISOString(),
+                failureReason,
+              });
             } else if (canKill(pod.status)) {
               // Fallback for states not yet reachable via 'failed' (validated, review_required, etc.)
               transition(pod, 'killing');
@@ -7512,6 +8075,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         } catch {
           /* swallow — best effort */
         }
+      } finally {
+        await Promise.all(
+          [...stagedReferenceArchivePaths].map((archivePath) => rm(archivePath, { force: true })),
+        );
       }
     },
 
@@ -7721,8 +8288,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           } else if (event.type === 'error' && event.fatal) {
             const pod = podRepo.getOrThrow(podId);
             if (pod.status === 'running') {
-              emitActivityStatus(podId, `Agent failed: ${event.message}`);
-              transition(pod, 'failed', { completedAt: new Date().toISOString() });
+              const failureReason = sanitizeFailureReason(event.message, 'Agent failed');
+              emitActivityStatus(podId, failureReason);
+              transition(pod, 'failed', {
+                completedAt: new Date().toISOString(),
+                failureReason,
+              });
             }
             outcome = 'failed';
             break;
@@ -7731,6 +8302,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
       } finally {
+        await syncSandboxRuntimeSessionState(podId);
         stopCommitPolling(podId);
         lastEventWriteAt.delete(podId);
       }
@@ -7784,7 +8356,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             emitActivityStatus(podId, 'Pushing artifact branch…');
             const tempWorktreeParent = path.join(dataDir, 'artifact-worktrees');
             await mkdir(tempWorktreeParent, { recursive: true });
-            const pat = selectGitPat(profile);
+            const pat = await resolveGitCredential(profile);
             const worktreeResult = await worktreeManager.create({
               repoUrl: profile.repoUrl,
               branch: repoBranch,
@@ -8059,10 +8631,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // updated profile PAT.
         if (payload.source === 'host_push') {
           const profile = profileStore.get(pod.profileName);
-          const pat = selectGitPat(profile);
+          const pat = await resolveGitCredential(profile);
           if (!pat) {
             throw new AutopodError(
-              `Profile '${pod.profileName}' still has no PAT for ${payload.service}. Add the ${payload.service === 'github' ? 'githubPat' : 'adoPat'} to the profile (must have write access to the target repo) and try again.`,
+              payload.service === 'github'
+                ? 'Daemon GitHub authentication is still unavailable. Run gh auth login as the daemon service account and try again.'
+                : `Profile '${pod.profileName}' still has no ADO PAT. Add adoPat to the profile (must have write access to the target repo) and try again.`,
               'MISSING_CREDENTIAL',
               400,
             );
@@ -8511,7 +9085,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const useForce = forceWithLeaseAllowances.has(podId);
           try {
             await worktreeManager.pushBranch(worktreePath, branch, {
-              pat: selectGitPat(approveProfile),
+              pat: await resolveGitCredential(approveProfile),
               ...(useForce ? { force: true } : {}),
             });
             forceWithLeaseAllowances.delete(podId);
@@ -8536,7 +9110,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const rebaseResult = await worktreeManager.rebaseOntoBase({
             worktreePath,
             baseBranch: mergeBaseBranch,
-            pat: selectGitPat(approveProfile),
+            pat: await resolveGitCredential(approveProfile),
           });
 
           if (!rebaseResult.rebased) {
@@ -8560,7 +9134,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             try {
               await worktreeManager.pushBranch(worktreePath, branch, {
                 force: true,
-                pat: selectGitPat(approveProfile),
+                pat: await resolveGitCredential(approveProfile),
               });
               emitActivityStatus(podId, 'Rebased branch pushed');
             } catch (pushErr) {
@@ -8667,7 +9241,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             targetBranch: pod.branch,
             // Pass the PAT explicitly — approval retry runs post-container, so the
             // in-memory PAT cache may be cold after a daemon restart.
-            pat: selectGitPat(retryProfile),
+            pat: await resolveGitCredential(retryProfile),
             // Post-container retry: sync-back already happened (or failed silently) upstream;
             // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
             maxDeletions: 0,
@@ -8774,7 +9348,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             targetBranch: pod.branch,
             // Pass the PAT explicitly — fallback push runs post-container, so the
             // in-memory PAT cache may be cold after a daemon restart.
-            pat: selectGitPat(profile),
+            pat: await resolveGitCredential(profile),
             // Post-container fallback push: don't let a stale worktree commit a phantom mass-delete.
             maxDeletions: 0,
             podTask: pod.task,
@@ -9099,6 +9673,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       // them after `syncWorkspaceBack()` completes and composes `handoffContext`.
       // (When skipAgent is set the agent never sees these — the field stays on
       // the pod for audit/UI purposes only.)
+      //
+      // DETERMINISTIC PROMOTION RULE — REPLACEMENT (not append/merge):
+      // A non-empty promotion-time correction *replaces* whatever
+      // `handoffInstructions` the pod already carried (e.g. the initial Pi
+      // handoff persisted at creation). When no correction is supplied, the
+      // existing value is reused verbatim. We never concatenate the two, so a
+      // large initial handoff can't be silently duplicated. The composed
+      // `## Handoff` section always shows the single authoritative instruction
+      // (initial OR correction) distinct from the machine-generated summary.
       const trimmedInstructions = options?.instructions?.trim();
       if (trimmedInstructions && trimmedInstructions.length > 0) {
         podRepo.update(podId, { handoffInstructions: trimmedInstructions });
@@ -9274,7 +9857,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               // Pass the PAT explicitly — workspace pods auto-push on container exit,
               // possibly hours/days after the worktree was created. The in-memory PAT
               // cache may be cold after a daemon restart in between.
-              pat: selectGitPat(pushScanProfile),
+              pat: await resolveGitCredential(pushScanProfile),
               maxDeletions: workspaceSyncOk ? 100 : 0,
               commitMessage,
             });
@@ -9458,7 +10041,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
 
         await worktreeManager.pushBranch(pod.worktreePath, pod.branch, {
-          pat: selectGitPat(profile),
+          pat: await resolveGitCredential(profile),
         });
 
         const headAfter = await worktreeManager
@@ -9525,17 +10108,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (force && fromTerminal && (pod.worktreePath || isInteractive || !pod.containerId)) {
         emitActivityStatus(podId, 'Re-provisioning pod with fresh container…');
 
-        // Kill the old container (best-effort — it may already be dead)
+        // Kill the old container with the same hard ceiling used by terminal cleanup.
+        // Azure sandbox deletion can stall while polling the data plane; rework must
+        // still clear the stale container reference and return to the provisioning queue.
         await killSidecarsForPod(podId);
         await cleanupTestRunBranches(podId);
-        if (pod.containerId) {
-          try {
-            const cm = containerManagerFactory.get(pod.executionTarget);
-            await cm.kill(pod.containerId);
-          } catch {
-            // Container may already be removed — that's fine
-          }
-        }
+        await cleanupContainer(pod, 'Rework');
         // The new container will be attached to a freshly-created per-pod
         // bridge below; blow away any stale bridge from the prior attempt.
         await destroyPodNetwork(podId);
@@ -9579,6 +10157,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           recoveryCount: 0,
           preSubmitReview: null,
           completedAt: null,
+          failureReason: null,
           ...(failedBeforeAgentWork
             ? {
                 filesChanged: 0,
@@ -10171,7 +10750,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 // restart or for recovery pods that mount an existing worktree without
                 // re-warming via create(). Without this, ADO URLs of the form
                 // https://<org>@dev.azure.com/... cause git to prompt for a password.
-                pat: selectGitPat(profile),
+                pat: await resolveGitCredential(profile),
                 maxDeletions: validationSyncOk ? 100 : 0,
                 podTask: pod.task,
                 profile,
@@ -10514,7 +11093,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       try {
         const pullResult = await worktreeManager.pullBranch(
           pod.worktreePath,
-          selectGitPat(profile),
+          await resolveGitCredential(profile),
         );
         newCommits = pullResult.newCommits;
       } catch (err) {
@@ -10619,6 +11198,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             );
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to sync workspace before revalidation');
+            // Under an explicit operator resume (force), a workspace-sync failure
+            // against the *reused* container is almost always a cold/expired sandbox
+            // that can no longer serve /workspace (or an in-place reconcile that can't
+            // engage). The committed work lives in the recovery worktree, so the robust
+            // move is to re-provision a fresh container from it and validate the existing
+            // commits — a fresh container starts at the worktree HEAD, so there is no
+            // divergence to reconcile — rather than parking the pod as compromised.
+            if (force) {
+              // Drop back to `failed` first — requeueValidationOnly re-queues from a
+              // terminal state, and `validating → queued` is not a legal transition.
+              transition(podRepo.getOrThrow(podId), 'failed');
+              return requeueValidationOnly(
+                'Resume: reused container could not serve workspace — re-provisioning fresh for validation only',
+              );
+            }
             validationSyncOk =
               err instanceof ValidationWorkspaceReconcileError
                 ? false
@@ -10786,7 +11380,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 targetBranch: s2.branch,
                 // Pass the PAT explicitly — revalidation often runs after a daemon restart,
                 // when the in-memory PAT cache for this bare repo is cold.
-                pat: selectGitPat(profile),
+                pat: await resolveGitCredential(profile),
                 maxDeletions: 0,
                 podTask: pod.task,
                 profile,
@@ -11592,25 +12186,43 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       reason?: string,
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
       const pod = podRepo.getOrThrow(podId);
-      if (pod.status !== 'failed' && pod.status !== 'review_required') {
+      const canRevalidateImmediately = pod.status === 'failed' || pod.status === 'review_required';
+      const canRecordForActiveRun = pod.status === 'running' || pod.status === 'validating';
+      if (!canRevalidateImmediately && !canRecordForActiveRun) {
         throw new AutopodError(
-          `Cannot approve fact waiver for pod ${podId} in status ${pod.status} — only failed or review_required pods`,
+          `Cannot approve fact waiver for pod ${podId} in status ${pod.status} — only running, validating, failed, or review_required pods`,
           'INVALID_STATE',
           409,
         );
       }
 
-      const fact = pod.lastValidationResult?.factValidation?.results.find(
+      const latestFact = pod.lastValidationResult?.factValidation?.results.find(
         (result) => result.factId === factId,
       );
+      const historicalFact = validationRepo
+        ? [...validationRepo.getForSession(podId)]
+            .reverse()
+            .map((validation) =>
+              validation.result.factValidation?.results.find((result) => result.factId === factId),
+            )
+            .find((result) => result !== undefined)
+        : undefined;
+      // Operator interruption/kick can replace lastValidationResult with a
+      // partial snapshot whose fact phase is skipped. The completed attempt is
+      // still durable in validation history and remains the waiver authority.
+      const fact = latestFact ?? historicalFact;
       if (!fact) {
         throw new AutopodError(
-          `Required fact ${factId} was not found in the latest validation result for pod ${podId}`,
+          `Required fact ${factId} was not found in validation results for pod ${podId}`,
           'NOT_FOUND',
           404,
         );
       }
-      if (fact.status !== 'pending_human') {
+      // A later agent summary can overwrite the decision field even though a
+      // completed validation already persisted the human-approved waiver.
+      // Re-approving that durable waived result is idempotent: rebuild the
+      // decision in the current summary and revalidate the same worktree.
+      if (fact.status !== 'pending_human' && fact.status !== 'waived') {
         throw new AutopodError(
           `Required fact ${factId} is ${fact.status ?? (fact.passed ? 'pass' : 'fail')}, not pending_human`,
           'INVALID_STATE',
@@ -11622,8 +12234,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podRepo.update(podId, { taskSummary: nextTaskSummary });
       emitActivityStatus(
         podId,
-        `Approved waiver for required fact ${factId} — revalidating existing worktree`,
+        canRevalidateImmediately
+          ? `Approved waiver for required fact ${factId} — revalidating existing worktree`
+          : `Approved waiver for required fact ${factId} — next validation will use the decision`,
       );
+
+      if (!canRevalidateImmediately) {
+        return { newCommits: false, result: 'fail' };
+      }
 
       return this.revalidateSession(podId, { force: true });
     },
@@ -11775,7 +12393,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const rebaseResult = await worktreeManager.rebaseOntoBase({
         worktreePath: pod.worktreePath,
         baseBranch,
-        pat: selectGitPat(profile),
+        pat: await resolveGitCredential(profile),
       });
 
       if (rebaseResult.alreadyUpToDate) {
@@ -12147,7 +12765,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, 'Resume: checking remote fix branch before retry…');
         const validated = transition(pod, 'validated', { mergeBlockReason: null });
         try {
-          await worktreeManager.pullBranch(pod.worktreePath, selectGitPat(profile));
+          await worktreeManager.pullBranch(pod.worktreePath, await resolveGitCredential(profile));
         } catch (err) {
           parkFixPodDeliveryFailure(podRepo.getOrThrow(podId), err);
           return { action: 'retry-fix-delivery' };
@@ -12344,15 +12962,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // drives the container directly. They will never emit agent events,
             // so silence-based timeout cannot apply.
             if (pod.options?.agentMode === 'interactive') continue;
-            // Reference is the most recent of (lastAgentEventAt, startedAt) —
-            // both are real liveness signals scoped to the current run.
+            // Reference is the most recent of (lastAgentEventAt, lastHeartbeatAt,
+            // startedAt) — all are real liveness signals scoped to the current run.
+            // MCP tools can legitimately stay open while validation runs without
+            // producing an agent-stream event, so their heartbeat must defer the
+            // watchdog just like an agent event does.
             // `startedAt` is reset on every transition into provisioning, so it
             // acts as a freshness floor that prevents a stale `lastAgentEventAt`
-            // (from a prior life of the same pod, e.g. across recovery) from
-            // dragging the reference back across the threshold.
-            // Fall back to updatedAt/createdAt only when both primary signals
+            // or `lastHeartbeatAt` (from a prior life of the same pod, e.g. across
+            // recovery) from dragging the reference back across the threshold.
+            // Fall back to updatedAt/createdAt only when all primary signals
             // are missing (pods predating the migration that added these fields).
-            const primary = [pod.lastAgentEventAt, pod.startedAt]
+            const primary = [pod.lastAgentEventAt, pod.lastHeartbeatAt, pod.startedAt]
               .filter((t): t is string => typeof t === 'string')
               .map((t) => new Date(t).getTime())
               .filter((ms) => !Number.isNaN(ms));

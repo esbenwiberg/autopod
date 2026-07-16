@@ -212,7 +212,9 @@ describe('provider-account commands', () => {
 test "$1" = "/login" || exit 2
 test -n "$PI_CODING_AGENT_DIR" || exit 3
 echo "$PI_CODING_AGENT_DIR" > "${dirLog}"
-stat -c "%a" "$PI_CODING_AGENT_DIR" > "${modeLog}"
+if ! stat -f "%Lp" "$PI_CODING_AGENT_DIR" > "${modeLog}" 2>/dev/null; then
+  stat -c "%a" "$PI_CODING_AGENT_DIR" > "${modeLog}"
+fi
 cat > "$PI_CODING_AGENT_DIR/auth.json" <<'JSON'
 {"github-copilot":{"accessToken":"selected"},"anthropic":{"accessToken":"unrelated"}}
 JSON
@@ -220,7 +222,14 @@ JSON
     tempDirs.push(fakeBin);
     process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
 
-    await program.parseAsync(['node', 'ap', 'provider-account', 'auth-pi', 'team-pi', 'github-copilot']);
+    await program.parseAsync([
+      'node',
+      'ap',
+      'provider-account',
+      'auth-pi',
+      'team-pi',
+      'github-copilot',
+    ]);
 
     expect(mockClient.updateProviderAccount).toHaveBeenCalledWith('team-pi', {
       credentials: {

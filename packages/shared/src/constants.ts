@@ -9,6 +9,20 @@ export const DEFAULT_MAX_AI_ESCALATIONS = 5;
 export const DEFAULT_AUTO_PAUSE_AFTER = 3;
 export const MAX_BUILD_LOG_LENGTH = 10_000;
 export const MAX_DIFF_LENGTH = 50_000;
+/**
+ * Upper bound on handoff instructions (Pi → workspace at creation, and
+ * promotion-time corrections). Mirrors the `task` field cap so a handoff can
+ * be as detailed as a task brief but cannot be used to smuggle an unbounded
+ * blob into pod state. Enforced both CLI-side (actionable error before the
+ * request is sent) and in `createPodRequestSchema` (server-side defense).
+ */
+export const MAX_HANDOFF_INSTRUCTIONS_LENGTH = 50_000;
+/**
+ * In-workspace path where the persisted handoff instructions are mirrored for
+ * the interactive session (and the promoted agent). Kept out of auto-commit
+ * via the worktree + container `info/exclude` (see pod-manager provisioning).
+ */
+export const WORKSPACE_PI_HANDOFF_PATH = '/workspace/.autopod/pi-handoff.md';
 export const SCREENSHOT_QUALITY = 80;
 export const EVENT_LOG_RETENTION_DAYS = 30;
 export const DEFAULT_CONTAINER_MEMORY_GB = 10;

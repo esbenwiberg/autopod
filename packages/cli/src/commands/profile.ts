@@ -6,6 +6,7 @@ import type {
   ActionOverride,
   PodOptions,
   Profile,
+  ProviderCredentials,
   PublicProfile,
   ValidationSuite,
 } from '@autopod/shared';
@@ -78,6 +79,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
     .action(async (name: string, opts: { json?: boolean }) => {
       const client = getClient();
       const p = await withSpinner('Fetching profile...', () => client.getProfile(name));
+      const githubAuth = await client.getGitHubAuthStatus().catch(() => null);
 
       withJsonOutput(opts, p, (data) => {
         console.log(chalk.bold.cyan(`Profile: ${data.name}`));
@@ -94,6 +96,15 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         console.log(`${chalk.bold('Model:')}      ${data.defaultModel}`);
         console.log(`${chalk.bold('Runtime:')}    ${data.defaultRuntime}`);
         console.log(`${chalk.bold('Provider:')}   ${data.modelProvider ?? 'none'}`);
+        if (data.prProvider !== 'ado' && githubAuth) {
+          console.log(
+            `${chalk.bold('GitHub:')}     ${
+              githubAuth.available
+                ? `daemon gh authenticated${githubAuth.login ? ` as ${githubAuth.login}` : ''}`
+                : `unavailable — ${githubAuth.reason}. ${githubAuth.setup}`
+            }`,
+          );
+        }
         if (data.providerAccountId) {
           console.log(`${chalk.bold('Account:')}    ${data.providerAccountId}`);
         }
@@ -110,7 +121,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
           console.log(`${chalk.bold('Extends:')}    ${data.extends}`);
         }
         const patExpiries = [
-          hasGithubPat(data) ? `GitHub ${data.githubPatExpiresAt ?? '(no expiry)'}` : null,
           hasAdoPat(data) ? `ADO ${data.adoPatExpiresAt ?? '(no expiry)'}` : null,
           hasRegistryPat(data) ? `Registry ${data.registryPatExpiresAt ?? '(no expiry)'}` : null,
         ].filter(Boolean);
@@ -209,7 +219,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         mcpServers: [],
         claudeMdSections: [],
         extends: null,
-        githubPatExpiresAt: null,
         adoPatExpiresAt: null,
         registryPatExpiresAt: null,
         providerAccountId: null,
@@ -258,6 +267,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         hasAdoPat: _hap,
         hasRegistryPat: _hrp,
         githubPat: _gp,
+        githubPatExpiresAt: _gpe,
         adoPat: _ap,
         registryPat: _rp,
         ...editable
@@ -524,7 +534,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       console.log(chalk.cyan(`\nStarting Pi login for profile "${name}" (${provider})...`));
       console.log(chalk.dim('Follow the Pi subscription login flow.\n'));
 
-      let providerCredentials;
+      let providerCredentials: ProviderCredentials;
       try {
         providerCredentials = await runPiLogin(provider);
       } catch (error) {
@@ -704,10 +714,6 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
 type ProfileWithOptionalPresence = Profile &
   Partial<Pick<PublicProfile, 'hasGithubPat' | 'hasAdoPat' | 'hasRegistryPat'>>;
 
-function hasGithubPat(profile: ProfileWithOptionalPresence): boolean {
-  return profile.hasGithubPat ?? profile.githubPat !== null;
-}
-
 function hasAdoPat(profile: ProfileWithOptionalPresence): boolean {
   return profile.hasAdoPat ?? profile.adoPat !== null;
 }
@@ -722,10 +728,12 @@ function prepareProfileEditUpdates(edited: Record<string, unknown>): Record<stri
     hasGithubPat: _hgp,
     hasAdoPat: _hap,
     hasRegistryPat: _hrp,
+    githubPat: _gp,
+    githubPatExpiresAt: _gpe,
     ...updates
   } = edited;
 
-  for (const field of ['githubPat', 'adoPat', 'registryPat'] as const) {
+  for (const field of ['adoPat', 'registryPat'] as const) {
     if (typeof updates[field] !== 'string' || updates[field].length === 0) {
       delete updates[field];
     }

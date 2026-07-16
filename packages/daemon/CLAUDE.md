@@ -206,6 +206,11 @@ Current preview caveats:
   stage the command as an executable wrapper script because the exec-stream `start.command` is
   `execve`d literally (not shell-interpreted); the files API writes it as `root:0644`, so it is
   `chmod 0755`'d as root before exec.
+- Interactive workspace pods (`ap shell` / `ap workspace`) are supported on sandbox: pod creation
+  requires the target's `ContainerManager.attachTerminal` capability (the old local-only gate is
+  gone), the CLI attaches through the daemon terminal WebSocket instead of `docker exec`, and
+  `attachTerminal` resumes an auto-suspended sandbox first (the platform memory-snapshots idle
+  sandboxes after ~15 min; tmux carries the session across reconnects).
 - Sandboxes do not support Docker bind mounts. The supported workspace model is snapshot upload at
   spawn, pod provisioning copies `/mnt/worktree` staging into writable `/workspace`, and sync-back
   extracts `/workspace` through `extractDirectoryFromContainer`. Host edits after spawn are not

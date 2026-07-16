@@ -138,6 +138,8 @@ export interface Pod {
   startedAt: string | null;
   runningAt: string | null;
   completedAt: string | null;
+  /** Sanitized durable explanation for the latest terminal failure. */
+  failureReason: string | null;
   updatedAt: string;
   userId: string;
   /**
@@ -248,10 +250,14 @@ export interface Pod {
   /** Host path where /workspace was extracted on pod completion (artifact mode). */
   artifactsPath: string | null;
   /**
-   * Raw human-typed instructions captured when a workspace pod was promoted
-   * (interactive → auto). Persisted at promote time and read once when the
-   * recovery restart composes `handoffContext`. Null for pods that were
-   * never promoted, or promoted without instructions.
+   * Raw human-typed handoff instructions. Set in one of two places:
+   *  - at creation, via `CreatePodRequest.handoffInstructions` (the Pi →
+   *    interactive-workspace flow); or
+   *  - at promote time, when `ap complete` supplies a promotion-time
+   *    correction (which replaces any creation-time value — see
+   *    `promoteToAuto`).
+   * Read once when the recovery restart composes `handoffContext`. Null for
+   * pods created without instructions and never promoted with any.
    */
   handoffInstructions: string | null;
   /**
@@ -444,6 +450,16 @@ export interface CreatePodRequest {
   /** Optional checkout/source branch. Defaults to baseBranch/profile default. */
   startBranch?: string;
   baseBranch?: string;
+  /**
+   * Durable handoff instructions to persist on the pod at creation time —
+   * used by the Pi → interactive-workspace flow so the reasoning handoff
+   * survives independently of the originating Pi session. Persisted through
+   * the same `handoffInstructions` mechanism used at promotion, mirrored into
+   * the workspace at `/workspace/.autopod/pi-handoff.md`, and reused as the
+   * promoted agent's handoff unless a promotion-time correction replaces it.
+   * Rejected when empty; capped at `MAX_HANDOFF_INSTRUCTIONS_LENGTH`.
+   */
+  handoffInstructions?: string;
   /** Local spec files to materialize onto the pod branch before the agent starts. */
   specFiles?: SpecFile[];
   /** Local spec files to expose as runtime-only context under /autopod/spec. */

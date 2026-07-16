@@ -1,6 +1,6 @@
 import type { ReferenceRepo } from '@autopod/shared';
 import type { Logger } from 'pino';
-import { selectGitPat } from '../profiles/profile-pat.js';
+import { type DaemonGitHubAuth, DaemonGitHubAuthError } from '../github/daemon-github-auth.js';
 import type { ProfileStore } from '../profiles/profile-store.js';
 
 function deriveMountName(url: string): string {
@@ -35,16 +35,16 @@ export function deriveReferenceRepos(
 }
 
 /**
- * Resolve the PAT to use when cloning a reference repo. When the repo was
- * picked from a profile, we authenticate as that profile (its `githubPat` /
- * `adoPat` per `prProvider`). Ad-hoc URLs and missing/empty profile PATs
- * fall through to undefined, which the clone path treats as "public/SSH".
+ * Resolve the explicit credential for cloning a profile-selected reference
+ * repo. GitHub uses the daemon identity; ADO continues to use the profile PAT.
+ * Ad-hoc URLs remain unauthenticated and may use public/SSH access.
  */
-export function resolveRefRepoPat(
+export async function resolveRefRepoPat(
   repo: ReferenceRepo,
   profileStore: Pick<ProfileStore, 'get'>,
+  githubAuth?: DaemonGitHubAuth,
   logger?: Pick<Logger, 'warn'>,
-): string | undefined {
+): Promise<string | undefined> {
   if (!repo.sourceProfile) return undefined;
   const profile = profileStore.get(repo.sourceProfile);
   if (!profile) {
@@ -54,5 +54,12 @@ export function resolveRefRepoPat(
     );
     return undefined;
   }
-  return selectGitPat(profile);
+  if (profile.prProvider === 'ado') return profile.adoPat ?? undefined;
+  if (!githubAuth) {
+    throw new DaemonGitHubAuthError(
+      'Daemon GitHub authentication is not configured',
+      'GH_UNAUTHENTICATED',
+    );
+  }
+  return (await githubAuth.resolveCredential()).token;
 }

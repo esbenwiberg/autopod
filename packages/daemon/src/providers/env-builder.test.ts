@@ -133,9 +133,9 @@ describe('buildProviderEnv', () => {
         },
       });
 
-      await expect(
-        buildProviderEnv(profile, 'pod-1', logger, { runtime: 'pi' }),
-      ).rejects.toThrow('incompatible with the Pi runtime');
+      await expect(buildProviderEnv(profile, 'pod-1', logger, { runtime: 'pi' })).rejects.toThrow(
+        'incompatible with the Pi runtime',
+      );
     });
 
     it('writes ChatGPT auth.json when profile has Codex login credentials', async () => {

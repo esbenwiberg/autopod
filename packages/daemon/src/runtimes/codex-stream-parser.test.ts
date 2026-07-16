@@ -390,6 +390,52 @@ describe('CodexStreamParser', () => {
   });
 
   describe('parse — stream-level integration', () => {
+    it('parses documented exec JSON completion', async () => {
+      const stream = createMockStream([
+        JSON.stringify({ type: 'thread.started', thread_id: 'thread-123' }),
+        JSON.stringify({ type: 'turn.started' }),
+        JSON.stringify({
+          type: 'item.completed',
+          item: { id: 'item-1', type: 'agent_message', text: 'Finished from stdout.' },
+        }),
+        JSON.stringify({
+          type: 'turn.completed',
+          usage: {
+            input_tokens: 120,
+            cached_input_tokens: 20,
+            output_tokens: 30,
+            reasoning_output_tokens: 5,
+          },
+        }),
+      ]);
+
+      const events: AgentEvent[] = [];
+      for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
+        events.push(event);
+      }
+
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'status',
+            message: 'Codex session ready',
+            sessionId: 'thread-123',
+          }),
+          expect.objectContaining({
+            type: 'reasoning',
+            text: 'Finished from stdout.',
+            isRaw: false,
+          }),
+          expect.objectContaining({
+            type: 'complete',
+            result: 'Finished from stdout.',
+            totalInputTokens: 120,
+            totalOutputTokens: 30,
+          }),
+        ]),
+      );
+    });
+
     it('emits AgentCompleteEvent on task_complete with accumulated token usage', async () => {
       const stream = createMockStream([
         envelope('session_configured'),

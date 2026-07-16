@@ -180,7 +180,6 @@ public struct Profile: Identifiable, Sendable {
 
     public var worstConfiguredPatExpiryStatus: PatExpiryStatus? {
         var statuses: [PatExpiryStatus] = []
-        if hasGithubPat { statuses.append(githubPatExpiryStatus) }
         if hasAdoPat { statuses.append(adoPatExpiryStatus) }
         if hasRegistryPat { statuses.append(registryPatExpiryStatus) }
         if let expired = statuses.first(where: \.isExpired) { return expired }

@@ -336,6 +336,13 @@ export class AutopodClient {
     return this.request<PublicProfile>('GET', `/profiles/${name}`);
   }
 
+  async getGitHubAuthStatus(): Promise<
+    | { available: true; login: string | null; setup: string }
+    | { available: false; reason: string; setup: string }
+  > {
+    return this.request('GET', '/profiles/github-auth/status');
+  }
+
   async createProfile(profile: Partial<Profile>): Promise<PublicProfile> {
     return this.request<PublicProfile>('POST', '/profiles', profile);
   }

@@ -274,6 +274,14 @@ public struct ProfileResponse: Codable, Sendable {
 
 // MARK: - Editor payload (GET /profiles/:name/editor)
 
+/// Read-only readiness of the daemon service account's canonical GitHub CLI identity.
+public struct DaemonGitHubAuthStatusResponse: Codable, Equatable, Sendable {
+  public let available: Bool
+  public let login: String?
+  public let reason: String?
+  public let setup: String
+}
+
 public enum FieldSource: String, Codable, Sendable {
   case own
   case inherited

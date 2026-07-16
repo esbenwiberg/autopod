@@ -1,6 +1,7 @@
 import type { ChildProcess } from 'node:child_process';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import {
   DeletionGuardError,
   GitCredentialError,
@@ -10,6 +11,17 @@ import {
 } from './local-worktree-manager.js';
 
 const logger = pino({ level: 'silent' });
+
+function fakeGitHubAuth(token = 'daemon-gh-token'): DaemonGitHubAuth {
+  return {
+    async resolveCredential() {
+      return { token, username: 'x-access-token' };
+    },
+    async getStatus() {
+      return { available: true, login: 'autopod-dev', setup: 'setup gh auth' };
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Hoist mock fns so they're available inside vi.mock factories
@@ -103,7 +115,12 @@ describe('LocalWorktreeManager', () => {
     fsRmMock.mockResolvedValue(undefined);
     fsReadFileMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
     fsWriteFileMock.mockResolvedValue(undefined);
-    manager = new LocalWorktreeManager({ cacheDir, worktreeDir, logger });
+    manager = new LocalWorktreeManager({
+      cacheDir,
+      worktreeDir,
+      logger,
+      githubAuth: fakeGitHubAuth(),
+    });
   });
 
   afterEach(() => {
@@ -134,26 +151,6 @@ describe('LocalWorktreeManager', () => {
         manager as unknown as { sanitizeRepoUrl: (url: string) => string }
       ).sanitizeRepoUrl('https://dev.azure.com/myorg/myproject/_git/myrepo');
       expect(result).toBe('dev.azure.com_myorg_myproject__git_myrepo');
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // injectPat (private)
-  // -------------------------------------------------------------------------
-
-  describe('injectPat', () => {
-    it('injects PAT into https URL', () => {
-      const result = (
-        manager as unknown as { injectPat: (url: string, pat: string) => string }
-      ).injectPat('https://github.com/org/repo.git', 'mytoken');
-      expect(result).toBe('https://x-access-token:mytoken@github.com/org/repo.git');
-    });
-
-    it('replaces existing userinfo before injecting', () => {
-      const result = (
-        manager as unknown as { injectPat: (url: string, pat: string) => string }
-      ).injectPat('https://old-token@github.com/org/repo.git', 'new-token');
-      expect(result).toBe('https://x-access-token:new-token@github.com/org/repo.git');
     });
   });
 
@@ -1238,14 +1235,20 @@ describe('LocalWorktreeManager', () => {
       expect(pushCall).toEqual([
         'push',
         '--no-verify',
-        'https://x-access-token:ado-pat@dev.azure.com/org/project/_git/repo',
+        'https://dev.azure.com/org/project/_git/repo',
         'refs/heads/feature/base:refs/heads/feature/base',
       ]);
     });
   });
 
   describe('pullBranch', () => {
-    it('uses an explicit profile PAT instead of relying only on the in-memory cache', async () => {
+    it('uses daemon GitHub auth instead of an explicit legacy profile PAT', async () => {
+      manager = new LocalWorktreeManager({
+        cacheDir,
+        worktreeDir,
+        logger,
+        githubAuth: fakeGitHubAuth(),
+      });
       const calls: string[][] = [];
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
@@ -1270,11 +1273,7 @@ describe('LocalWorktreeManager', () => {
       await manager.pullBranch('/tmp/worktree/sess', 'profile-pat');
 
       const fetchCall = calls.find((args) => args[0] === 'fetch');
-      expect(fetchCall).toEqual([
-        'fetch',
-        'https://x-access-token:profile-pat@github.com/org/repo.git',
-        'feat/security',
-      ]);
+      expect(fetchCall).toEqual(['fetch', 'https://github.com/org/repo.git', 'feat/security']);
     });
   });
 
@@ -1283,6 +1282,36 @@ describe('LocalWorktreeManager', () => {
   // -------------------------------------------------------------------------
 
   describe('mergeBranch explicit refspec', () => {
+    it('rejects missing daemon GitHub auth before committing pending changes', async () => {
+      manager = new LocalWorktreeManager({ cacheDir, worktreeDir, logger });
+      const calls: string[][] = [];
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          calls.push(args);
+          const cb = resolveCallback(arg3, arg4);
+          if (args.join(' ') === 'rev-parse --git-common-dir') {
+            cb(null, { stdout: '/tmp/test-cache/org_repo.git\n', stderr: '' });
+          } else if (args.join(' ') === 'remote get-url origin') {
+            cb(null, { stdout: 'https://github.com/org/repo.git\n', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await expect(
+        manager.mergeBranch({
+          worktreePath: '/tmp/worktree/sess',
+          targetBranch: 'feat/security',
+          commitMessage: 'chore: should not be committed',
+          pat: 'ignored-legacy-profile-pat',
+        }),
+      ).rejects.toThrow('sudo -u <daemon-user> gh auth login');
+
+      expect(calls.map((args) => args[0])).toEqual(['rev-parse', 'remote']);
+    });
+
     it('rejects when HEAD is on a different branch than targetBranch', async () => {
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
@@ -1469,6 +1498,121 @@ describe('LocalWorktreeManager', () => {
   // -------------------------------------------------------------------------
 
   describe('create', () => {
+    const credentialUrls = [
+      (() => {
+        const url = new URL('https://github.com/org/repo.git');
+        url.username = 'embedded-secret';
+        return url.toString();
+      })(),
+      (() => {
+        const url = new URL('https://github.com/org/repo.git');
+        url.username = 'user';
+        url.password = 'embedded-secret';
+        return url.toString();
+      })(),
+    ];
+
+    it.each(credentialUrls)(
+      'rejects credential-bearing remote %s before any side effect',
+      async (repoUrl) => {
+        const githubAuth = fakeGitHubAuth();
+        const resolveCredential = vi.spyOn(githubAuth, 'resolveCredential');
+        manager = new LocalWorktreeManager({ cacheDir, worktreeDir, logger, githubAuth });
+
+        await expect(
+          manager.create({
+            repoUrl,
+            branch: 'feat/no-url-credentials',
+            baseBranch: 'main',
+          }),
+        ).rejects.toThrow(
+          'Refusing Git remote URL containing credentials; configure authentication through the daemon credential provider',
+        );
+
+        expect(resolveCredential).not.toHaveBeenCalled();
+        expect(execFileMock).not.toHaveBeenCalled();
+        expect(fsMkdirMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects a GitHub lookalike host before resolving or attaching credentials', async () => {
+      const githubAuth = fakeGitHubAuth();
+      const resolveCredential = vi.spyOn(githubAuth, 'resolveCredential');
+      manager = new LocalWorktreeManager({ cacheDir, worktreeDir, logger, githubAuth });
+
+      await expect(
+        manager.create({
+          repoUrl: 'https://github.com.attacker.example/org/repo.git',
+          branch: 'feat/host-boundary',
+          baseBranch: 'main',
+          pat: 'must-not-be-forwarded',
+        }),
+      ).rejects.toThrow('Refusing unsupported Git remote host');
+
+      expect(resolveCredential).not.toHaveBeenCalled();
+      expect(execFileMock).not.toHaveBeenCalled();
+      expect(fsMkdirMock).not.toHaveBeenCalled();
+    });
+
+    it('fails before any git or filesystem work when daemon GitHub auth is not configured', async () => {
+      manager = new LocalWorktreeManager({ cacheDir, worktreeDir, logger });
+
+      await expect(
+        manager.create({
+          repoUrl: 'https://github.com/org/repo.git',
+          branch: 'feat/no-auth',
+          baseBranch: 'main',
+          pat: 'ignored-legacy-profile-pat',
+        }),
+      ).rejects.toThrow('sudo -u <daemon-user> gh auth login');
+
+      expect(execFileMock).not.toHaveBeenCalled();
+      expect(fsMkdirMock).not.toHaveBeenCalled();
+      expect(fsRmMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps concurrent ADO credentials scoped to their own git invocations', async () => {
+      const authorizationHeaders: string[] = [];
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const options = arg3 as { env?: Record<string, string> };
+          if (args[0] === 'clone' && options.env?.GIT_CONFIG_VALUE_2) {
+            authorizationHeaders.push(options.env.GIT_CONFIG_VALUE_2);
+          }
+          const cb = resolveCallback(arg3, arg4);
+          if (args.join(' ').includes('rev-parse --git-dir')) {
+            cb(new Error('no repo'), { stdout: '', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await Promise.all([
+        manager.create({
+          repoUrl: 'https://dev.azure.com/org/project/_git/repo',
+          branch: 'feat/one',
+          baseBranch: 'main',
+          pat: 'ado-token-one',
+        }),
+        manager.create({
+          repoUrl: 'https://dev.azure.com/org/project/_git/repo',
+          branch: 'feat/two',
+          baseBranch: 'main',
+          pat: 'ado-token-two',
+        }),
+      ]);
+
+      const decodedCredentials = authorizationHeaders.map((header) =>
+        Buffer.from(header.replace('Authorization: Basic ', ''), 'base64').toString('utf8'),
+      );
+      expect(decodedCredentials).toEqual([
+        'x-access-token:ado-token-one',
+        'x-access-token:ado-token-two',
+      ]);
+    });
+
     it('clones bare repo and creates worktree when repo does not exist', async () => {
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
@@ -1521,7 +1665,13 @@ describe('LocalWorktreeManager', () => {
       expect(cmds.some((c: string) => c.includes('clone --bare'))).toBe(false);
     });
 
-    it('injects PAT into clone URL but resets origin to clean URL', async () => {
+    it('injects daemon GitHub credential into clone URL but resets origin to clean URL', async () => {
+      manager = new LocalWorktreeManager({
+        cacheDir,
+        worktreeDir,
+        logger,
+        githubAuth: fakeGitHubAuth(),
+      });
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
           const cb = resolveCallback(arg3, arg4);
@@ -1546,11 +1696,22 @@ describe('LocalWorktreeManager', () => {
 
       const cloneCmd = cmds.find((c: string) => c.includes('clone --bare'));
       expect(cloneCmd).toBeDefined();
-      expect(cloneCmd).toContain('super-secret-token');
+      expect(cloneCmd).not.toContain('daemon-gh-token');
+      expect(cloneCmd).not.toContain('super-secret-token');
+      const cloneCall = execFileMock.mock.calls.find((c: string[][]) => c[1]?.includes('clone'));
+      expect(cloneCall?.[2]).toEqual(
+        expect.objectContaining({
+          env: expect.objectContaining({
+            GIT_CONFIG_KEY_2: 'http.https://github.com/.extraheader',
+            GIT_CONFIG_VALUE_2: expect.stringMatching(/^Authorization: Basic /),
+          }),
+        }),
+      );
 
       const setUrlCmd = cmds.find((c: string) => c.includes('remote set-url'));
       expect(setUrlCmd).toBeDefined();
       expect(setUrlCmd).not.toContain('super-secret-token');
+      expect(setUrlCmd).not.toContain('daemon-gh-token');
     });
 
     it('falls back to local baseBranch ref when remote fetch fails (fork scenario)', async () => {
@@ -1615,9 +1776,11 @@ describe('LocalWorktreeManager', () => {
       );
       expect(excludeWrite).toBeDefined();
       expect(String(excludeWrite?.[1])).toContain('.mcp.json');
+      // The Pi handoff mirror is excluded from the host-side auto-commit here.
+      expect(String(excludeWrite?.[1])).toContain('.autopod/pi-handoff.md');
     });
 
-    it('does not duplicate .mcp.json when info/exclude already lists it', async () => {
+    it('does not duplicate excludes when info/exclude already lists them', async () => {
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
           const cb = resolveCallback(arg3, arg4);
@@ -1632,7 +1795,7 @@ describe('LocalWorktreeManager', () => {
           return {} as ChildProcess;
         },
       );
-      fsReadFileMock.mockResolvedValueOnce('# pre-existing\n.mcp.json\n');
+      fsReadFileMock.mockResolvedValueOnce('# pre-existing\n.mcp.json\n.autopod/pi-handoff.md\n');
 
       await manager.create({
         repoUrl: 'https://github.com/org/repo.git',
@@ -1640,7 +1803,7 @@ describe('LocalWorktreeManager', () => {
         baseBranch: 'main',
       });
 
-      // Already listed → no write needed
+      // Both already listed → no write needed
       expect(fsWriteFileMock).not.toHaveBeenCalled();
     });
 
@@ -1671,7 +1834,37 @@ describe('LocalWorktreeManager', () => {
       ).rejects.toThrow('baseBranch "gone-branch" not found on remote or locally');
     });
 
-    it('stores PAT in cache for later push operations', async () => {
+    it('throws when a distinct startBranch is unresolvable — no fallback to base/default', async () => {
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('rev-parse --git-dir')) {
+            cb(null, { stdout: '.', stderr: '' });
+          } else if (cmd.includes('fetch') && cmd.includes('pi/gone')) {
+            cb(new Error("fatal: couldn't find remote ref"));
+          } else if (cmd.includes('rev-parse --verify refs/heads/pi/gone')) {
+            cb(new Error('fatal: Needed a single revision'));
+          } else {
+            // baseBranch (main) resolves fine — proving there is no silent
+            // fallback to it (or the profile default) when startBranch is missing.
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await expect(
+        manager.create({
+          repoUrl: 'https://github.com/org/repo.git',
+          branch: 'autopod/new-pod',
+          baseBranch: 'main',
+          startBranch: 'pi/gone',
+        }),
+      ).rejects.toThrow('startBranch "pi/gone" not found on remote or locally');
+    });
+
+    it('does not retain a legacy GitHub profile PAT in the ADO credential cache', async () => {
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
           const cb = resolveCallback(arg3, arg4);
@@ -1696,7 +1889,7 @@ describe('LocalWorktreeManager', () => {
         string,
         string
       >;
-      expect([...patCache.values()]).toContain('cached-pat');
+      expect([...patCache.values()]).not.toContain('cached-pat');
     });
 
     it('returns the resolved HEAD SHA so callers can persist startCommitSha before container start', async () => {
@@ -1765,6 +1958,7 @@ describe('LocalWorktreeManager.rebaseOntoBase', () => {
       cacheDir: '/tmp/test-cache',
       worktreeDir: '/tmp/test-worktrees',
       logger,
+      githubAuth: fakeGitHubAuth(),
     });
   });
 

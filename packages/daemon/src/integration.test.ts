@@ -84,7 +84,8 @@ function expectRedactedPatFields(
   expect(profile.githubPat).toBeNull();
   expect(profile.adoPat).toBeNull();
   expect(profile.registryPat).toBeNull();
-  expect(profile.hasGithubPat).toBe(expected.github ?? false);
+  // Legacy GitHub PAT presence is never exposed as current profile status.
+  expect(profile.hasGithubPat).toBe(false);
   expect(profile.hasAdoPat).toBe(expected.ado ?? false);
   expect(profile.hasRegistryPat).toBe(expected.registry ?? false);
 }
@@ -900,7 +901,7 @@ describe('Integration', () => {
       expect(pod.status).toBe('queued');
     });
 
-    it('POST /pods rejects workspace + sandbox execution target', async () => {
+    it('POST /pods rejects workspace + sandbox when the backend has no terminal support', async () => {
       await app.inject({
         method: 'POST',
         url: '/profiles',
@@ -921,7 +922,7 @@ describe('Integration', () => {
       });
 
       expect(res.statusCode).toBe(400);
-      expect(res.json().error).toContain('local');
+      expect(res.json().error).toContain('interactive terminal support');
     });
 
     it('POST /pods rejects deny-all network policy with cloud-backed runtime', async () => {

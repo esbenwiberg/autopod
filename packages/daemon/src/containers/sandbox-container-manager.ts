@@ -11,7 +11,9 @@ import {
 import { readFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import { Readable, Writable } from 'node:stream';
+import { createGzip } from 'node:zlib';
 import type { Logger } from 'pino';
+import { type Headers as TarHeaders, type Pack as TarPack, pack as tarPack } from 'tar-stream';
 import type {
   ContainerManager,
   ContainerSpawnConfig,
@@ -37,7 +39,14 @@ import {
 export interface SandboxContainerManagerOptions {
   /** Tier used when a spawn carries no `memoryBytes` hint (default: 'L'). */
   defaultTier?: SandboxResourceTier;
+  /** Test seam for exercising multi-part archive uploads. */
+  volumeUploadChunkBytes?: number;
 }
+
+const SANDBOX_VOLUME_EXTRACT_TIMEOUT_MS = 5 * 60 * 1000;
+const SANDBOX_VOLUME_UPLOAD_CHUNK_BYTES = 64 * 1024 * 1024;
+const SANDBOX_ARCHIVE_UID = 1000;
+const SANDBOX_ARCHIVE_GID = 1000;
 
 export interface SandboxContainerManagerConfig {
   /** Azure subscription ID. */
@@ -86,6 +95,7 @@ export class SandboxContainerManager implements ContainerManager {
   private readonly client: SandboxApiClient;
   private readonly logger: Logger;
   private readonly defaultTier: SandboxResourceTier;
+  private readonly volumeUploadChunkBytes: number;
   private readonly egressPolicies = new Map<string, ReturnType<typeof egressPolicyForMode>>();
 
   constructor(
@@ -96,6 +106,10 @@ export class SandboxContainerManager implements ContainerManager {
     this.client = client;
     this.logger = logger;
     this.defaultTier = options.defaultTier ?? 'L';
+    this.volumeUploadChunkBytes = Math.max(
+      1,
+      options.volumeUploadChunkBytes ?? SANDBOX_VOLUME_UPLOAD_CHUNK_BYTES,
+    );
   }
 
   get supportsStreamingExec(): boolean {
@@ -143,6 +157,7 @@ export class SandboxContainerManager implements ContainerManager {
 
     try {
       if (config.volumes?.length) {
+        config.onProgress?.('Uploading workspace to sandbox…');
         await this.uploadVolumes(sandboxId, config.volumes);
       }
     } catch (err) {
@@ -276,6 +291,10 @@ export class SandboxContainerManager implements ContainerManager {
         'Sandbox interactive terminal is not supported by this data-plane client (no exec-stream TTY support).',
       );
     }
+    // The platform auto-suspends idle sandboxes (memory snapshot after ~15 min),
+    // which a human workspace session will routinely hit. resume() is idempotent —
+    // it early-returns when the sandbox is already Running.
+    await this.client.resume(containerId);
     // Mirror the Docker terminal: cd into the workspace, then prefer a persistent
     // tmux session ("new-session -A -s main" creates or reattaches, so WebSocket
     // reconnects resume where the user left off) and fall back to a login bash.
@@ -410,8 +429,7 @@ export class SandboxContainerManager implements ContainerManager {
     sandboxId: string,
     volumes: NonNullable<ContainerSpawnConfig['volumes']>,
   ): Promise<void> {
-    const createdDirs = new Set<string>();
-    for (const volume of volumes) {
+    for (const [index, volume] of volumes.entries()) {
       if (!existsSync(volume.host)) {
         this.logger.debug(
           { sandboxId, hostPath: volume.host, containerPath: volume.container },
@@ -419,7 +437,7 @@ export class SandboxContainerManager implements ContainerManager {
         );
         continue;
       }
-      await this.uploadPath(sandboxId, volume.host, volume.container, createdDirs);
+      await this.uploadPath(sandboxId, volume.host, volume.container, index);
     }
   }
 
@@ -427,47 +445,80 @@ export class SandboxContainerManager implements ContainerManager {
     sandboxId: string,
     hostPath: string,
     containerPath: string,
-    createdDirs: Set<string>,
+    volumeIndex: number,
   ): Promise<void> {
     const stat = lstatSync(hostPath);
     if (stat.isDirectory()) {
-      await this.ensureSandboxDirectory(sandboxId, containerPath, createdDirs);
-      for (const entry of readdirSync(hostPath)) {
-        if (shouldSkipUploadedVolumeEntry(entry)) continue;
-        await this.uploadPath(
-          sandboxId,
-          join(hostPath, entry),
-          `${containerPath}/${entry}`,
-          createdDirs,
+      const startedAt = Date.now();
+      const archive = await createSandboxVolumeArchive(hostPath);
+      const safeSandboxId = sandboxId.replace(/[^A-Za-z0-9_-]/g, '-');
+      const archivePath = `/tmp/.autopod-volume-${safeSandboxId}-${volumeIndex}.tar.gz`;
+      const archiveParts: string[] = [];
+
+      for (
+        let offset = 0, part = 0;
+        offset < archive.content.byteLength;
+        offset += this.volumeUploadChunkBytes, part++
+      ) {
+        const end = Math.min(offset + this.volumeUploadChunkBytes, archive.content.byteLength);
+        const partPath =
+          archive.content.byteLength <= this.volumeUploadChunkBytes
+            ? archivePath
+            : `${archivePath}.part-${part.toString().padStart(4, '0')}`;
+        await this.client.writeFile(sandboxId, partPath, archive.content.subarray(offset, end));
+        archiveParts.push(partPath);
+      }
+
+      const extraction = await this.client.exec(
+        sandboxId,
+        [
+          'sh',
+          '-c',
+          [
+            'destination=$1; archive=$2; shift 2',
+            'mkdir -p -- "$destination" || exit $?',
+            'if [ "$#" -eq 1 ] && [ "$1" = "$archive" ]; then source=$archive; else cat -- "$@" > "$archive" || exit $?; source=$archive; fi',
+            'tar -xzf "$source" -C "$destination"; status=$?',
+            'rm -f -- "$archive" "$@"',
+            'exit $status',
+          ].join('; '),
+          'autopod-volume-extract',
+          normalizeSandboxPath(containerPath),
+          archivePath,
+          ...archiveParts,
+        ],
+        { user: 'root', timeoutMs: SANDBOX_VOLUME_EXTRACT_TIMEOUT_MS },
+      );
+      if (extraction.exitCode !== 0) {
+        throw new Error(
+          `Sandbox volume extraction failed for ${containerPath} (exit ${extraction.exitCode}): ${(
+            extraction.stderr || extraction.stdout
+          ).slice(0, 500)}`,
         );
       }
+
+      this.logger.info(
+        {
+          sandboxId,
+          hostPath,
+          containerPath,
+          entries: archive.entries,
+          archiveBytes: archive.content.byteLength,
+          uploadRequests: archiveParts.length,
+          durationMs: Date.now() - startedAt,
+        },
+        'Uploaded sandbox volume as bulk archive',
+      );
       return;
     }
     if (stat.isSymbolicLink()) {
       const target = readlinkSync(hostPath);
-      await this.ensureSandboxDirectory(sandboxId, posix.dirname(containerPath), createdDirs);
       await this.client.writeFile(sandboxId, containerPath, Buffer.from(target, 'utf-8'));
       return;
     }
     if (stat.isFile()) {
-      await this.ensureSandboxDirectory(sandboxId, posix.dirname(containerPath), createdDirs);
       await this.client.writeFile(sandboxId, containerPath, await readFile(hostPath));
     }
-  }
-
-  private async ensureSandboxDirectory(
-    sandboxId: string,
-    path: string,
-    createdDirs: Set<string>,
-  ): Promise<void> {
-    if (!this.client.mkdir) return;
-
-    const normalized = normalizeSandboxPath(path);
-    if (normalized === '/' || createdDirs.has(normalized)) return;
-
-    await this.ensureSandboxDirectory(sandboxId, posix.dirname(normalized), createdDirs);
-    await this.client.mkdir(sandboxId, normalized);
-    createdDirs.add(normalized);
   }
 
   private async extractSandboxPath(
@@ -495,6 +546,85 @@ export class SandboxContainerManager implements ContainerManager {
       writeFileSync(target, await this.client.readFile(sandboxId, entryPath));
     }
   }
+}
+
+interface SandboxVolumeArchive {
+  content: Buffer;
+  entries: number;
+}
+
+async function createSandboxVolumeArchive(rootPath: string): Promise<SandboxVolumeArchive> {
+  const pack = tarPack();
+  const gzip = createGzip({ level: 1 });
+  const chunks: Buffer[] = [];
+  let entries = 0;
+
+  const compressed = new Promise<Buffer>((resolve, reject) => {
+    pack.on('error', reject);
+    gzip.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+    gzip.on('end', () => resolve(Buffer.concat(chunks)));
+    gzip.on('error', reject);
+  });
+  pack.pipe(gzip);
+
+  async function addPath(hostPath: string, archivePath: string): Promise<void> {
+    const stat = lstatSync(hostPath);
+    const common: TarHeaders = {
+      name: archivePath,
+      mode: stat.mode & 0o777,
+      uid: SANDBOX_ARCHIVE_UID,
+      gid: SANDBOX_ARCHIVE_GID,
+      mtime: stat.mtime,
+    };
+
+    if (stat.isDirectory()) {
+      await addTarEntry(pack, { ...common, type: 'directory' });
+      entries++;
+      for (const entry of readdirSync(hostPath).sort()) {
+        if (shouldSkipUploadedVolumeEntry(entry)) continue;
+        await addPath(join(hostPath, entry), posix.join(archivePath, entry));
+      }
+      return;
+    }
+
+    if (stat.isSymbolicLink()) {
+      await addTarEntry(pack, {
+        ...common,
+        type: 'symlink',
+        linkname: readlinkSync(hostPath),
+      });
+      entries++;
+      return;
+    }
+
+    if (stat.isFile()) {
+      await addTarEntry(
+        pack,
+        { ...common, type: 'file', size: stat.size },
+        await readFile(hostPath),
+      );
+      entries++;
+    }
+  }
+
+  for (const entry of readdirSync(rootPath).sort()) {
+    if (shouldSkipUploadedVolumeEntry(entry)) continue;
+    await addPath(join(rootPath, entry), entry);
+  }
+  pack.finalize();
+
+  return { content: await compressed, entries };
+}
+
+function addTarEntry(pack: TarPack, headers: TarHeaders, content?: Buffer): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const callback = (err?: Error | null) => {
+      if (err) reject(err);
+      else resolve();
+    };
+    if (content === undefined) pack.entry(headers, callback);
+    else pack.entry(headers, content, callback);
+  });
 }
 
 function assertRegistryQualifiedImage(image: string): void {

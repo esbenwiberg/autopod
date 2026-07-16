@@ -61,20 +61,24 @@ describe('runPreSubmitReview', () => {
 
   it('runs the reviewer through Codex for OpenAI providers', async () => {
     const commands: string[] = [];
+    const timeouts: number[] = [];
     const containerManager = {
       writeFile: vi.fn(),
-      execInContainer: vi.fn(async (_containerId: string, command: string[]) => {
-        commands.push(command[2] ?? '');
-        return {
-          stdout: JSON.stringify({
-            status: 'pass',
-            reasoning: 'Codex says clean.',
-            issues: [],
-          }),
-          stderr: '',
-          exitCode: 0,
-        };
-      }),
+      execInContainer: vi.fn(
+        async (_containerId: string, command: string[], options?: { timeout?: number }) => {
+          commands.push(command[2] ?? '');
+          timeouts.push(options?.timeout ?? 0);
+          return {
+            stdout: JSON.stringify({
+              status: 'pass',
+              reasoning: 'Codex says clean.',
+              issues: [],
+            }),
+            stderr: '',
+            exitCode: 0,
+          };
+        },
+      ),
     } as unknown as ContainerManager;
 
     const result = await runPreSubmitReview({
@@ -91,6 +95,7 @@ describe('runPreSubmitReview', () => {
     expect(result.model).toBe('gpt-5');
     expect(commands.some((cmd) => cmd.includes('codex exec'))).toBe(true);
     expect(commands.some((cmd) => cmd.includes("--model 'gpt-5'"))).toBe(true);
+    expect(timeouts).toEqual([300_000]);
     expect(mockRunClaudeCli).not.toHaveBeenCalled();
   });
 

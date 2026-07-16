@@ -53,21 +53,6 @@ interface ChatCompletionResponse {
   }>;
 }
 
-function parseOpenAiAuthJson(authJson: string | undefined): string | null {
-  if (!authJson) return null;
-  try {
-    const parsed = JSON.parse(authJson) as {
-      OPENAI_API_KEY?: string | null;
-      tokens?: {
-        access_token?: string | null;
-      };
-    };
-    return parsed.OPENAI_API_KEY ?? parsed.tokens?.access_token ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function trimTrailingSlash(url: string): string {
   return url.endsWith('/') ? url.slice(0, -1) : url;
 }
@@ -159,6 +144,18 @@ function isOpenAiSurface(creds: ProviderCredentials | null | undefined): boolean
   return creds?.provider === 'foundry' && (creds.apiSurface ?? 'anthropic') === 'openai';
 }
 
+/**
+ * Codex on a ChatGPT (OAuth) account rejects most explicit `--model` values —
+ * e.g. `gpt-5-mini` / `gpt-5-codex` fail with "model is not supported when using
+ * Codex with a ChatGPT account". For that auth mode we must leave the reviewer
+ * model as 'auto' so the container Codex runner omits `--model` and lets the CLI
+ * pick the account's supported default instead of forcing an unsupported one.
+ */
+function usesChatGptReviewerAuth(profile: Profile): boolean {
+  const creds = profile.providerCredentials;
+  return creds?.provider === 'openai' && creds.authMode === 'chatgpt';
+}
+
 export async function createProfileMemoryReviewer(
   profile: Profile,
   reviewerModel: string,
@@ -167,6 +164,12 @@ export async function createProfileMemoryReviewer(
 ): Promise<MemoryReviewerResult> {
   if (options.container) {
     return createContainerFirstMemoryReviewer(profile, reviewerModel, logger, options.container);
+  }
+  if (usesChatGptReviewerAuth(profile)) {
+    return {
+      ok: false,
+      reason: 'container_reviewer_unavailable: ChatGPT-auth review requires a live pod container',
+    };
   }
   return createDaemonMemoryReviewer(profile, reviewerModel, logger);
 }
@@ -192,6 +195,12 @@ async function createContainerFirstMemoryReviewer(
   }
 
   if (!container.containerId) {
+    if (usesChatGptReviewerAuth(profile)) {
+      return {
+        ok: false,
+        reason: 'container_reviewer_unavailable: pod has no live container',
+      };
+    }
     const daemonResult = await safeCreateDaemonMemoryReviewer(profile, reviewerModel, logger);
     if (daemonResult.ok) return daemonResult;
     return {
@@ -203,8 +212,13 @@ async function createContainerFirstMemoryReviewer(
     };
   }
 
+  // Only substitute the concrete OpenAI reviewer model for 'auto' when the
+  // account can actually run it. ChatGPT-auth Codex rejects `gpt-5-mini`, so we
+  // keep 'auto' and let the container Codex runner fall back to the CLI default.
   const model =
-    reviewerModel === 'auto' && profile.modelProvider === 'openai'
+    reviewerModel === 'auto' &&
+    profile.modelProvider === 'openai' &&
+    !usesChatGptReviewerAuth(profile)
       ? DEFAULT_OPENAI_REVIEWER_MODEL
       : reviewerModel;
 
@@ -233,6 +247,9 @@ async function createContainerFirstMemoryReviewer(
             { podId: container.podId, reason: containerReason },
             'Container memory reviewer unavailable',
           );
+          if (usesChatGptReviewerAuth(profile)) {
+            throw new ContainerReviewerUnavailableError(containerReason, { cause: err });
+          }
           const daemonResult = await safeCreateDaemonMemoryReviewer(profile, reviewerModel, logger);
           if (daemonResult.ok) {
             return daemonResult.reviewer.generateText(input);
@@ -271,10 +288,7 @@ async function createDaemonMemoryReviewer(
   logger: Logger,
 ): Promise<MemoryReviewerResult> {
   if (profile.modelProvider === 'openai') {
-    const creds = profile.providerCredentials;
-    const token =
-      process.env.OPENAI_API_KEY ??
-      (creds?.provider === 'openai' ? parseOpenAiAuthJson(creds.authJson) : null);
+    const token = process.env.OPENAI_API_KEY;
     if (!token) return { ok: false, reason: 'openai_auth_unavailable' };
     return {
       ok: true,

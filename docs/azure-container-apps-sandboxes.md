@@ -18,6 +18,12 @@ Supported:
 - Interactive terminal (`ap shell` / `ap attach`, `WS /pods/:podId/terminal`) over the exec-stream
   WebSocket TTY variant (`tty`/`stdin`/`resize` frames), with tmux-reattach parity where the warm
   image ships tmux. Validated live 2026-07-08.
+- Interactive workspace pods (`ap shell` / `ap workspace` on a sandbox profile). The CLI attaches
+  through the daemon terminal WebSocket instead of `docker exec`; `attachTerminal` resumes an
+  auto-suspended sandbox before attaching (the platform memory-snapshots idle sandboxes after
+  ~15 min, and tmux carries the session across reconnects). Caveats vs local workspace pods:
+  no host bind mount (host edits after spawn are not live inside the sandbox) and no
+  image-paste-to-container support in `ap attach`.
 - Host preview URLs, two modes (see "Native Port Exposure" below):
   - **Default**: daemon-side exec proxy (`sandbox-preview-proxy.ts`) → a daemon-local
     `http://127.0.0.1:<hostPort>` URL.
@@ -55,14 +61,18 @@ with no shell interpretation and no arguments: a joined `sh -lc '…'` string fa
 (`/bin/bash`) here and drives real work through stdin. To run an arbitrary argv with
 streaming output, `AzureSandboxApiClient.execStream()` stages the command as an executable
 `#!/bin/sh` wrapper script (writeFile → the files API writes it as `root:0644`, so a
-`chmod 0755` as `root` follows → so the non-root sandbox process can `execve` it) and sends
-that script path as `command`. `cwd` is folded into the wrapper (`cd … || exit 1`); `env`
-rides the start frame's `environment`.
+`chmod 0755` as `root` follows) and sends that script path as `command`. Azure may start
+the exec-stream wrapper as root even when buffered `executeShellCommand` calls run as the
+image user. The wrapper therefore drops a root-started stream to `autopod` before running
+the requested command; this keeps agent, terminal, and validation artifacts under one
+filesystem identity. `cwd` is folded into the wrapper (`cd … || exit 1`); `env` rides the
+start frame's `environment`.
 
 Autopod's `AzureSandboxApiClient.execStream()` implements the non-TTY variant, which flips
 `SandboxContainerManager.supportsStreamingExec` to `true` and unblocks agent runtimes on
-this target. The TTY variant is available for a future interactive-terminal integration
-(daemon terminal route — see the interactive-pods caveat above).
+this target. The TTY variant is `AzureSandboxApiClient.attachTerminal()`, surfaced as
+`SandboxContainerManager.attachTerminal()` and consumed by the daemon terminal route
+(`WS /pods/:podId/terminal`) — the transport behind `ap shell` / `ap attach` for sandbox pods.
 
 The data-plane token scope is `https://dynamicsessions.io/.default` for both the HTTPS
 data plane and the WebSocket upgrade — the live run confirmed no per-endpoint scope split is
@@ -277,7 +287,7 @@ The sandbox data plane then proves the image can be pulled by creating the disk 
 
 Sandboxes do not support Docker bind mounts. Autopod uses a snapshot model:
 
-- Sync-in: configured host volumes are uploaded into the sandbox at spawn as source snapshots. For pod worktrees, `/mnt/worktree` is staging only; provisioning copies it into writable `/workspace`, matching Docker's existing overlayfs workspace flow.
+- Sync-in: each configured host volume is packed as one gzip-compressed tar archive, uploaded in bounded chunks (one file API request for archives up to 64 MiB), and extracted inside the sandbox. This avoids the Sandboxes data-plane 600 requests/minute limit that a file-by-file worktree upload can exhaust. For pod worktrees, `/mnt/worktree` is staging only; provisioning copies it into writable `/workspace`, matching Docker's existing overlayfs workspace flow.
 - Runtime: the sandbox mutates `/workspace`, not the uploaded staging tree.
 - Sync-back: `extractDirectoryFromContainer` lists runtime sandbox files recursively through the file API, reads file contents, writes into a staging directory, then mirrors staging back to the host while honoring excludes such as `node_modules` and `.autopod-*` staging directories.
 

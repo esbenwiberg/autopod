@@ -319,6 +319,9 @@ public enum PodMapper {
     // Error summary for failed pods
     let errorSummary: String? = {
       guard status == .failed || status == .killed || status == .reviewRequired else { return nil }
+      if let failureReason = response.failureReason, !failureReason.isEmpty {
+        return failureReason
+      }
       // Try to extract from last validation
       if let issues = response.lastValidationResult?.taskReview?.issues, !issues.isEmpty {
         return issues.first
@@ -337,7 +340,9 @@ public enum PodMapper {
     let prUrl: URL? = response.prUrl.flatMap { URL(string: $0) }
     let containerUrl: URL? = response.previewUrl.flatMap { URL(string: $0) }
     let hasWebUi: Bool = response.hasWebUi ?? false
-    let latestActivity: String? = response.mergeBlockReason ?? response.plan?.summary
+    let latestActivity: String? = response.failureReason
+      ?? response.mergeBlockReason
+      ?? response.plan?.summary
     let profileSnapshotMapped: Profile? = response.profileSnapshot.map { ProfileMapper.map($0) }
     let dependsOnPodIds: [String] = response.dependsOnPodIds
       ?? (response.dependsOnPodId.map { [$0] } ?? [])

@@ -73,6 +73,11 @@ function createMockClient() {
     ),
     updateProfile: vi.fn().mockResolvedValue(createProfile()),
     setProfileCredentials: vi.fn().mockResolvedValue(createProfile()),
+    getGitHubAuthStatus: vi.fn().mockResolvedValue({
+      available: true,
+      login: 'autopod-dev',
+      setup: 'setup',
+    }),
   } as unknown as AutopodClient;
 }
 
@@ -139,6 +144,19 @@ describe('profile commands', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('team-openai'));
   });
 
+  it('does not present legacy GitHub PAT status or expiry', async () => {
+    vi.mocked(mockClient.getProfile).mockResolvedValueOnce(
+      createProfile({ hasGithubPat: true, githubPatExpiresAt: '2026-08-01' }),
+    );
+
+    await program.parseAsync(['node', 'ap', 'profile', 'show', 'my-app']);
+
+    const output = logSpy.mock.calls.flat().join('\n');
+    expect(output).not.toContain('GitHub 2026-08-01');
+    expect(output).not.toContain('GitHub PAT');
+    expect(output).toContain('daemon gh authenticated as autopod-dev');
+  });
+
   it('includes validationSetupCommand in the create template', async () => {
     process.env.EDITOR = 'true';
 
@@ -194,7 +212,9 @@ describe('profile commands', () => {
 test "$1" = "/login" || exit 2
 test -n "$PI_CODING_AGENT_DIR" || exit 3
 echo "$PI_CODING_AGENT_DIR" > "${dirLog}"
-stat -c "%a" "$PI_CODING_AGENT_DIR" > "${modeLog}"
+if ! stat -f "%Lp" "$PI_CODING_AGENT_DIR" > "${modeLog}" 2>/dev/null; then
+  stat -c "%a" "$PI_CODING_AGENT_DIR" > "${modeLog}"
+fi
 cat > "$PI_CODING_AGENT_DIR/auth.json" <<'JSON'
 {"anthropic":{"accessToken":"selected"},"openai-codex":{"accessToken":"unrelated"}}
 JSON
@@ -302,5 +322,22 @@ printf '{"anthropic":{"accessToken":""}}' > "$PI_CODING_AGENT_DIR/auth.json"
     ).rejects.toThrow('process.exit 1');
 
     expect(mockClient.setProfileCredentials).not.toHaveBeenCalled();
+  });
+
+  it('does not submit legacy GitHub PAT fields from profile edit', async () => {
+    process.env.EDITOR = 'true';
+    vi.mocked(mockClient.getProfile).mockResolvedValueOnce(
+      createProfile({ githubPat: 'legacy-value', githubPatExpiresAt: '2026-08-01' }),
+    );
+
+    await program.parseAsync(['node', 'ap', 'profile', 'edit', 'my-app']);
+
+    const updates = vi.mocked(mockClient.updateProfile).mock.calls[0]?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(updates).not.toHaveProperty('githubPat');
+    expect(updates).not.toHaveProperty('githubPatExpiresAt');
+    expect(updates).toHaveProperty('adoPatExpiresAt');
   });
 });

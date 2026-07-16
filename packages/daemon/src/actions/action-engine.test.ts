@@ -9,21 +9,26 @@ import type { ActionAuditRepository } from './audit-repository.js';
 // ─── Hoisted mocks (shared with vi.mock factories) ──────────────────────────
 // vi.hoisted runs before module loading so these refs are stable when vi.mock
 // factories execute. The http handler mock becomes configurable per-test.
-const { mockHttpExecute, mockProcessContentDeep, mockCollectPiiPatternNames } = vi.hoisted(() => ({
-  mockHttpExecute: vi
-    .fn()
-    .mockRejectedValue(new Error('HTTP handler unavailable in test environment')),
-  mockProcessContentDeep: vi
-    .fn()
-    .mockReturnValue({ result: {}, sanitized: false, quarantined: false, threats: [] }),
-  mockCollectPiiPatternNames: vi.fn().mockReturnValue([]),
-}));
+const { mockHttpExecute, mockProcessContentDeep, mockCollectPiiPatternNames, githubConfigs } =
+  vi.hoisted(() => ({
+    mockHttpExecute: vi
+      .fn()
+      .mockRejectedValue(new Error('HTTP handler unavailable in test environment')),
+    mockProcessContentDeep: vi
+      .fn()
+      .mockReturnValue({ result: {}, sanitized: false, quarantined: false, threats: [] }),
+    mockCollectPiiPatternNames: vi.fn().mockReturnValue([]),
+    githubConfigs: [] as Array<{ getGitHubToken?: () => Promise<string> }>,
+  }));
 
 // Prevent real network calls — handlers throw immediately so tests stay fast
 vi.mock('./handlers/github-handler.js', () => ({
-  createGitHubHandler: () => ({
-    execute: vi.fn().mockRejectedValue(new Error('GitHub API unavailable in test environment')),
-  }),
+  createGitHubHandler: (config: { getGitHubToken?: () => Promise<string> }) => {
+    githubConfigs.push(config);
+    return {
+      execute: vi.fn().mockRejectedValue(new Error('GitHub API unavailable in test environment')),
+    };
+  },
 }));
 vi.mock('./handlers/ado-handler.js', () => ({
   createAdoHandler: () => ({
@@ -110,6 +115,7 @@ describe('ActionEngine', () => {
   let auditRepo: ReturnType<typeof createMockAuditRepo>;
 
   beforeEach(() => {
+    githubConfigs.length = 0;
     registry = createMockRegistry();
     auditRepo = createMockAuditRepo();
     engine = createActionEngine({
@@ -123,6 +129,28 @@ describe('ActionEngine', () => {
         return undefined;
       },
     });
+  });
+
+  it('forwards daemon GitHub auth without changing policy or audit boundaries', async () => {
+    const getGitHubToken = vi.fn(async () => 'daemon-github-token');
+    const deniedRegistry = createMockRegistry([]);
+    const deniedAudit = createMockAuditRepo();
+    const deniedEngine = createActionEngine({
+      registry: deniedRegistry,
+      auditRepo: deniedAudit,
+      logger: pino({ level: 'silent' }),
+      getSecret: () => undefined,
+      getGitHubToken,
+    });
+
+    expect(await githubConfigs.at(-1)?.getGitHubToken?.()).toBe('daemon-github-token');
+    const result = await deniedEngine.execute(
+      { podId: 'sess-1', actionName: 'read_issue', params: { repo: 'org/repo', issue_number: 1 } },
+      testPolicy,
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not found or not enabled');
+    expect(deniedAudit.insert).not.toHaveBeenCalled();
   });
 
   it('returns error when action not found', async () => {

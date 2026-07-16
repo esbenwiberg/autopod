@@ -85,7 +85,7 @@ describe('getBaseImage', () => {
 });
 
 describe('base image templates', () => {
-  it('installs every supported agent CLI', () => {
+  it('installs every supported agent CLI with the current Codex version pinned', () => {
     const templatesDir = path.resolve(import.meta.dirname, '../../../../templates/base');
     const dockerfiles = fs
       .readdirSync(templatesDir)
@@ -95,7 +95,7 @@ describe('base image templates', () => {
     for (const dockerfile of dockerfiles) {
       const content = fs.readFileSync(path.join(templatesDir, dockerfile), 'utf-8');
       expect(content, dockerfile).toContain('@anthropic-ai/claude-code');
-      expect(content, dockerfile).toContain('@openai/codex');
+      expect(content, dockerfile).toContain('@openai/codex@0.144.4');
       expect(content, dockerfile).toContain('@github/copilot');
       expect(content, dockerfile).toContain('@earendil-works/pi-coding-agent@0.80.6');
       expect(content, dockerfile).toContain(

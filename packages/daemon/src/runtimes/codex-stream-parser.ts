@@ -7,18 +7,17 @@ import type { Logger } from 'pino';
 /**
  * Codex CLI JSONL parser.
  *
- * Mapped against the real `EventMsg` enum in
- * `openai/codex/codex-rs/protocol/src/protocol.rs` (snake_case via
- * `#[serde(tag = "type", rename_all = "snake_case")]`). Each line emitted by
- * `codex exec --json` is an `Event { id, msg }` with `msg.type` discriminating
- * the variant.
+ * Supports both Codex event channels:
+ * - `codex exec --json` emits flat dotted `ThreadEvent` records such as
+ *   `thread.started`, `item.completed`, and terminal `turn.completed`.
+ * - rollout JSONL stores the internal protocol as envelopes such as
+ *   `event_msg` / `response_item` with snake_case payload types.
  *
- * Token usage arrives in `token_count` events ahead of completion events; the
- * parser carries the most recent snapshot and flushes it as part of the final
- * `task_complete` AgentEvent so pod-manager's accumulator (`pod-manager.ts:~2898`)
- * picks up `totalInputTokens` / `totalOutputTokens` the same way it does for
- * the Claude runtime. Codex also emits `turn_complete` for intermediate turns
- * around tool calls; those are explicitly non-terminal.
+ * Token usage arrives either in rollout `token_count` events or directly on the
+ * public `turn.completed` event. Both terminal shapes are normalized to one
+ * AgentCompleteEvent by the runtime.
+ * Internal undotted `turn_complete` remains non-terminal because older rollout
+ * streams can emit it around intermediate tool turns.
  */
 
 interface CodexEnvelope {
@@ -198,6 +197,107 @@ function completeEventFromState(
   };
 }
 
+function publicItemEvents(
+  eventType: 'item.started' | 'item.updated' | 'item.completed',
+  item: Record<string, unknown>,
+  timestamp: string,
+): AgentEvent[] {
+  const itemType = typeof item.type === 'string' ? item.type : '';
+  const callId = typeof item.id === 'string' ? item.id : undefined;
+  const completed = eventType === 'item.completed';
+  if (eventType === 'item.updated') return [];
+
+  if (itemType === 'agent_message') {
+    if (!completed || typeof item.text !== 'string' || !item.text) return [];
+    return [{ type: 'reasoning', timestamp, text: item.text, isRaw: false }];
+  }
+
+  if (itemType === 'reasoning') {
+    if (!completed) return [];
+    const text = truncate(item.text, MAX_REASONING_LEN);
+    return text ? [{ type: 'reasoning', timestamp, text, isRaw: false }] : [];
+  }
+
+  if (itemType === 'command_execution') {
+    if (!completed) {
+      const command = commandToString(item.command);
+      return command
+        ? [{ type: 'tool_use', timestamp, tool: 'Bash', input: { call_id: callId, command } }]
+        : [];
+    }
+    const output = typeof item.aggregated_output === 'string' ? item.aggregated_output : '';
+    const exit = typeof item.exit_code === 'number' ? ` (exit ${item.exit_code})` : '';
+    return [
+      {
+        type: 'tool_use',
+        timestamp,
+        tool: 'Bash',
+        input: { call_id: callId },
+        output: truncate(`${output}${exit}`, MAX_OUTPUT_LEN) ?? '',
+      },
+    ];
+  }
+
+  if (itemType === 'mcp_tool_call') {
+    const server = typeof item.server === 'string' ? item.server : '';
+    const tool = typeof item.tool === 'string' ? item.tool : 'mcp_tool';
+    const input = parseJsonObject(item.arguments) ?? {};
+    const qualifiedTool = server ? `mcp__${server}__${tool}` : tool;
+    if (!completed) {
+      return [
+        {
+          type: 'tool_use',
+          timestamp,
+          tool: qualifiedTool,
+          input: { call_id: callId, ...(server ? { server } : {}), ...input },
+        },
+      ];
+    }
+    const result = item.error ?? item.result ?? null;
+    return [
+      {
+        type: 'tool_use',
+        timestamp,
+        tool: qualifiedTool,
+        input: { call_id: callId, ...(server ? { server } : {}), ...input },
+        output: truncate(
+          typeof result === 'string' ? result : JSON.stringify(result),
+          MAX_OUTPUT_LEN,
+        ),
+      },
+    ];
+  }
+
+  if (itemType === 'file_change' && completed && Array.isArray(item.changes)) {
+    return item.changes.flatMap((rawChange) => {
+      if (!rawChange || typeof rawChange !== 'object') return [];
+      const change = rawChange as Record<string, unknown>;
+      if (typeof change.path !== 'string') return [];
+      const action: 'create' | 'modify' | 'delete' =
+        change.kind === 'add' ? 'create' : change.kind === 'delete' ? 'delete' : 'modify';
+      return [{ type: 'file_change', timestamp, path: change.path, action }];
+    });
+  }
+
+  if (itemType === 'web_search') {
+    return [
+      {
+        type: 'tool_use',
+        timestamp,
+        tool: 'WebSearch',
+        input: { call_id: callId, query: item.query, action: item.action },
+      },
+    ];
+  }
+
+  if (itemType === 'error' && completed) {
+    const message = typeof item.message === 'string' ? item.message : 'Codex item error';
+    return [{ type: 'error', timestamp, message, fatal: false }];
+  }
+
+  return [];
+}
+
 function mapFunctionCall(msg: { [key: string]: unknown }, ts: string): AgentEvent | null {
   const callId = typeof msg.call_id === 'string' ? msg.call_id : undefined;
   const rawName = typeof msg.name === 'string' ? msg.name : 'tool';
@@ -258,8 +358,14 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
       return typeof msg.session_id === 'string' ? { ...base, sessionId: msg.session_id } : base;
     }
 
+    case 'thread.started': {
+      const base = { type: 'status' as const, timestamp: ts, message: 'Codex session ready' };
+      return typeof msg.thread_id === 'string' ? { ...base, sessionId: msg.thread_id } : base;
+    }
+
     case 'task_started':
     case 'turn_started':
+    case 'turn.started':
       return { type: 'status', timestamp: ts, message: 'Codex turn started' };
 
     case 'agent_message': {
@@ -449,16 +555,23 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
 /**
  * Parse `codex exec --json` JSONL into `AgentEvent` stream.
  *
- * Carries `token_count` snapshots forward and folds them into the
- * `task_complete` → `AgentCompleteEvent` so token telemetry persists via the
- * same pod-manager accumulator that handles Claude usage.
+ * Carries token snapshots forward and folds them into the terminal event so
+ * telemetry persists via the same pod-manager accumulator that handles Claude
+ * usage. `modelHint` supplies pricing context for the public stream, which does
+ * not include the selected model on `turn.completed`.
  *
  * Malformed lines are warned-and-skipped — never fatal.
  */
-async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIterable<AgentEvent> {
+async function* parse(
+  stream: Readable,
+  podId: string,
+  logger: Logger,
+  modelHint?: string,
+): AsyncIterable<AgentEvent> {
   const rl = createInterface({ input: stream });
   let latestUsage: CodexTokenUsage | undefined;
-  let latestModel: string | null = null;
+  let latestModel: string | null = modelHint && modelHint !== 'auto' ? modelHint : null;
+  let latestAgentMessage: string | undefined;
 
   for await (const line of rl) {
     const trimmed = line.trim();
@@ -491,6 +604,55 @@ async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIte
       const info = msg.info as CodexTokenUsageInfo | undefined;
       const usage = info?.total_token_usage ?? info?.last_token_usage;
       if (usage) latestUsage = usage;
+      continue;
+    }
+
+    if (
+      msg.type === 'item.started' ||
+      msg.type === 'item.updated' ||
+      msg.type === 'item.completed'
+    ) {
+      const item = msg.item as Record<string, unknown> | undefined;
+      if (!item) continue;
+      if (
+        msg.type === 'item.completed' &&
+        item.type === 'agent_message' &&
+        typeof item.text === 'string' &&
+        item.text.length > 0
+      ) {
+        latestAgentMessage = item.text;
+      }
+      for (const event of publicItemEvents(msg.type, item, tsOf(env))) {
+        yield event;
+      }
+      continue;
+    }
+
+    if (msg.type === 'turn.completed') {
+      const usage = msg.usage as CodexTokenUsage | undefined;
+      yield completeEventFromState(
+        {
+          type: 'turn.completed',
+          ...(latestAgentMessage ? { last_agent_message: latestAgentMessage } : {}),
+        },
+        env,
+        usage,
+        latestModel,
+        podId,
+        logger,
+      );
+      latestAgentMessage = undefined;
+      continue;
+    }
+
+    if (msg.type === 'turn.failed') {
+      const error = msg.error as Record<string, unknown> | undefined;
+      yield {
+        type: 'error',
+        timestamp: tsOf(env),
+        message: typeof error?.message === 'string' ? error.message : 'Codex turn failed',
+        fatal: true,
+      };
       continue;
     }
 

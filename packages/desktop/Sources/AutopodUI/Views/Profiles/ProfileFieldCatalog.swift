@@ -167,7 +167,7 @@ public enum ProfileOverrideCatalog {
             key: "defaultModel",
             label: "Default Model",
             section: .agent,
-            help: "AI model for the selected runtime (e.g. `claude-opus-4-8`, `auto`, `gpt-5.3-codex`)."
+            help: "AI model for the selected runtime (e.g. `claude-opus-4-8`, `auto`, `gpt-5.6-sol`)."
         ),
         .init(
             key: "reviewerModel",
@@ -349,18 +349,6 @@ public enum ProfileOverrideCatalog {
         ),
 
         // MARK: Credentials
-        .init(
-            key: "githubPat",
-            label: "GitHub PAT",
-            section: .credentials,
-            help: "Personal access token for GitHub PR and action operations."
-        ),
-        .init(
-            key: "githubPatExpiresAt",
-            label: "GitHub PAT Expiry",
-            section: .credentials,
-            help: "Date the GitHub PAT expires, formatted as YYYY-MM-DD."
-        ),
         .init(
             key: "adoPat",
             label: "ADO PAT",

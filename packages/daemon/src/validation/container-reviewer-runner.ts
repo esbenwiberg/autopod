@@ -34,9 +34,9 @@ export async function runContainerReviewer(
   }
 
   const containerStatus = await config.containerManager.getStatus(config.containerId);
-  if (containerStatus !== 'running') {
+  if (containerStatus === 'stopped') {
     throw new ContainerReviewerUnavailableError(
-      `Container reviewer unavailable: container is ${containerStatus} (not running)`,
+      'Container reviewer unavailable: container is stopped (not running)',
     );
   }
 

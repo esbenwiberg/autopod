@@ -1,6 +1,7 @@
 import { AutopodError } from '@autopod/shared';
 import type { ProfileEditorPayload, ProviderAuthSource } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
+import type { DaemonGitHubAuth } from '../../github/daemon-github-auth.js';
 import type { ImageBuilder } from '../../images/index.js';
 import { type ProfileStore, buildSourceMap } from '../../profiles/index.js';
 import type { ProviderAccountStore } from '../../provider-accounts/index.js';
@@ -20,6 +21,7 @@ export function profileRoutes(
   refreshNetworkPolicy: (profileName: string) => Promise<void>,
   imageBuilder?: ImageBuilder,
   providerAccountStore?: ProviderAccountStore,
+  githubAuth?: DaemonGitHubAuth,
 ): void {
   function validateProviderAccountMismatch(name: string, changes: Record<string, unknown>): void {
     if (!providerAccountStore) return;
@@ -84,6 +86,16 @@ export function profileRoutes(
   app.get('/profiles', async () => {
     return profileStore.list().map(redactProfileSecrets);
   });
+
+  app.get(
+    '/profiles/github-auth/status',
+    async () =>
+      githubAuth?.getStatus() ?? {
+        available: false,
+        reason: 'Daemon GitHub authentication is not configured',
+        setup: 'Run gh auth login as the daemon service account',
+      },
+  );
 
   // GET /profiles/:name — get profile
   app.get('/profiles/:name', async (request) => {
@@ -162,9 +174,9 @@ export function profileRoutes(
     // are already stored on the profile — fall back to those when the caller
     // doesn't pass them in the body, so the CLI never has to handle secrets.
     const gitPat =
-      body.gitPat ??
-      (profile.prProvider === 'github' ? profile.githubPat : profile.adoPat) ??
-      undefined;
+      profile.prProvider === 'github'
+        ? (await githubAuth?.resolveCredential())?.token
+        : (body.gitPat ?? profile.adoPat ?? undefined);
     const registryPat = body.registryPat ?? profile.registryPat ?? undefined;
 
     try {

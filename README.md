@@ -900,6 +900,36 @@ For **OpenAI Codex**, use `ap profile auth-openai <name>` for interactive ChatGP
 
 For **Copilot**, use `ap profile auth-copilot <name>` for interactive OAuth setup. Supported token types: OAuth (`gho_`), fine-grained PAT (`github_pat_`), and GitHub App (`ghu_`). Classic PATs (`ghp_`) are not supported.
 
+### Daemon GitHub identity
+
+All GitHub-backed profiles use the single GitHub identity authenticated through `gh` as the
+account that runs the daemon. For a host-installed daemon service, run:
+
+```bash
+sudo -u <daemon-user> gh auth login --hostname github.com --git-protocol https
+```
+
+For the supported Docker Compose deployment, `gh` is installed in the daemon image and its
+configuration is retained in the restricted `daemon-gh-config` volume. Authenticate that exact
+container identity instead:
+
+```bash
+docker compose exec daemon gh auth login --hostname github.com --git-protocol https
+```
+
+For another container orchestrator, mount a persistent, daemon-user-only directory at the
+runtime user's GitHub CLI config path (`/home/autopod/.config/gh` in the production image), then
+run the login command inside the running container. Authenticating only the host account does not
+make its GitHub CLI state available inside a container.
+
+Use a dedicated, lower-privilege development account and restrict its repository permissions.
+Autopod resolves its credential explicitly for host Git, PRs, brokered GitHub actions, issue
+watchers, private reference repositories, warm images, and requested workspace injection; it does
+not enable ambient Git credential helpers or automatically inject the credential into pods.
+Legacy profile `githubPat` fields remain accepted and encrypted for rolling-client compatibility
+and rollback, but are redacted, ignored operationally, and never mask missing daemon `gh` auth.
+`COPILOT_GITHUB_TOKEN` remains a separate model-provider credential.
+
 ### Pod Injection (MCP Servers & CLAUDE.md)
 
 Profiles can inject additional MCP servers and CLAUDE.md content sections into agent pods. This is how you plug in external tools (like [Prism](https://github.com/esbenwiberg/prism) for codebase context) without modifying autopod itself.
