@@ -1250,7 +1250,7 @@ describe('LocalWorktreeManager', () => {
       expect(pushCall).toEqual([
         'push',
         '--no-verify',
-        'https://x-access-token:ado-pat@dev.azure.com/org/project/_git/repo',
+        'https://dev.azure.com/org/project/_git/repo',
         'refs/heads/feature/base:refs/heads/feature/base',
       ]);
     });
@@ -1288,11 +1288,7 @@ describe('LocalWorktreeManager', () => {
       await manager.pullBranch('/tmp/worktree/sess', 'profile-pat');
 
       const fetchCall = calls.find((args) => args[0] === 'fetch');
-      expect(fetchCall).toEqual([
-        'fetch',
-        'https://x-access-token:daemon-gh-token@github.com/org/repo.git',
-        'feat/security',
-      ]);
+      expect(fetchCall).toEqual(['fetch', 'https://github.com/org/repo.git', 'feat/security']);
     });
   });
 
@@ -1570,8 +1566,17 @@ describe('LocalWorktreeManager', () => {
 
       const cloneCmd = cmds.find((c: string) => c.includes('clone --bare'));
       expect(cloneCmd).toBeDefined();
-      expect(cloneCmd).toContain('daemon-gh-token');
+      expect(cloneCmd).not.toContain('daemon-gh-token');
       expect(cloneCmd).not.toContain('super-secret-token');
+      const cloneCall = execFileMock.mock.calls.find((c: string[][]) => c[1]?.includes('clone'));
+      expect(cloneCall?.[2]).toEqual(
+        expect.objectContaining({
+          env: expect.objectContaining({
+            GIT_CONFIG_KEY_2: 'http.https://github.com/.extraheader',
+            GIT_CONFIG_VALUE_2: expect.stringMatching(/^Authorization: Basic /),
+          }),
+        }),
+      );
 
       const setUrlCmd = cmds.find((c: string) => c.includes('remote set-url'));
       expect(setUrlCmd).toBeDefined();

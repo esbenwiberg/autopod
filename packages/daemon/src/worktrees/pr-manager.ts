@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Logger } from 'pino';
+import { type DaemonGitHubAuth, GhCliDaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import type {
   CiFailureDetail,
   CreatePrConfig,
@@ -264,6 +265,7 @@ export interface GhPrManagerConfig {
   logger: Logger;
   /** Stores so PR-body LLM helpers resolve live provider-account credentials. */
   llmDeps?: ProfileLlmClientDeps;
+  githubAuth?: DaemonGitHubAuth;
 }
 
 /**
@@ -276,10 +278,19 @@ export interface GhPrManagerConfig {
 export class GhPrManager implements PrManager {
   private logger: Logger;
   private llmDeps?: ProfileLlmClientDeps;
+  private githubAuth: DaemonGitHubAuth;
 
   constructor(config: GhPrManagerConfig) {
     this.logger = config.logger;
     this.llmDeps = config.llmDeps;
+    this.githubAuth = config.githubAuth ?? new GhCliDaemonGitHubAuth();
+  }
+
+  private async execGh(args: string[], options: { cwd: string; timeout: number }) {
+    const credential = await this.githubAuth.resolveCredential();
+    const { GH_TOKEN: _ambientGh, GITHUB_TOKEN: _ambientGitHub, ...hostEnv } = process.env;
+    const env = { ...hostEnv, GH_TOKEN: credential.token };
+    return execFileAsync('gh', args, { ...options, env });
   }
 
   async createPr(config: CreatePrConfig): Promise<CreatePrResult> {
@@ -345,7 +356,7 @@ export class GhPrManager implements PrManager {
     ];
 
     try {
-      const { stdout } = await execFileAsync('gh', args, {
+      const { stdout } = await this.execGh(args, {
         cwd: config.worktreePath,
         timeout: 30_000,
       });
@@ -375,7 +386,7 @@ export class GhPrManager implements PrManager {
     );
 
     try {
-      await execFileAsync('gh', args, {
+      await this.execGh(args, {
         cwd: config.worktreePath,
         timeout: 30_000,
       });
@@ -410,7 +421,7 @@ export class GhPrManager implements PrManager {
       'state,mergedAt,statusCheckRollup,reviewDecision,autoMergeRequest',
     ];
 
-    const { stdout } = await execFileAsync('gh', args, {
+    const { stdout } = await this.execGh(args, {
       cwd: config.worktreePath,
       timeout: 15_000,
     });

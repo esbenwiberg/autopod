@@ -101,9 +101,26 @@ const GIT_NO_AMBIENT_CREDS_ENV: Record<string, string> = {
 
 /** Wrapper so every git call in this file gets GIT_ENV — no env-less calls allowed. */
 function git(args: string[], options: { cwd?: string; timeout?: number; maxBuffer?: number } = {}) {
-  return execFileAsync('git', args, {
+  let credentialEnv: Record<string, string> = {};
+  const safeArgs = args.map((arg) => {
+    if (!/^https:\/\/[^/]+@/i.test(arg)) return arg;
+    const url = new URL(arg);
+    if (!url.username && !url.password) return arg;
+    const basic = Buffer.from(
+      `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`,
+    ).toString('base64');
+    url.username = '';
+    url.password = '';
+    credentialEnv = {
+      GIT_CONFIG_COUNT: '3',
+      GIT_CONFIG_KEY_2: `http.${url.origin}/.extraheader`,
+      GIT_CONFIG_VALUE_2: `Authorization: Basic ${basic}`,
+    };
+    return url.toString();
+  });
+  return execFileAsync('git', safeArgs, {
     ...options,
-    env: { ...GIT_ENV, ...GIT_NO_AMBIENT_CREDS_ENV },
+    env: { ...GIT_ENV, ...GIT_NO_AMBIENT_CREDS_ENV, ...credentialEnv },
   });
 }
 

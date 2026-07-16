@@ -621,7 +621,7 @@ const runtimeRegistry = createRuntimeRegistry([
   new CopilotRuntime(logger, runtimeContainerManager),
 ]);
 
-const ghPrManager = new GhPrManager({ logger, llmDeps });
+const ghPrManager = new GhPrManager({ logger, llmDeps, githubAuth });
 
 function prManagerFactory(
   profile: import('@autopod/shared').Profile,

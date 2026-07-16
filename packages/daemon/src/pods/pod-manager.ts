@@ -4986,7 +4986,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       timestamp: new Date().toISOString(),
       payload: {
         service: err.service,
-        reason: `git ${err.op} was rejected by ${err.service}. Update the profile's ${err.service === 'github' ? 'githubPat' : 'adoPat'} with a token that has write access to the target repo, then resume the pod.`,
+        reason:
+          err.service === 'github'
+            ? `git ${err.op} was rejected by GitHub. Authenticate the daemon service account with gh auth login and ensure it has write access to the target repo, then resume the pod.`
+            : `git ${err.op} was rejected by ADO. Update the profile's adoPat with a token that has write access to the target repo, then resume the pod.`,
         source: 'host_push',
       },
       response: null,
@@ -8458,7 +8461,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const pat = await resolveGitCredential(profile);
           if (!pat) {
             throw new AutopodError(
-              `Profile '${pod.profileName}' still has no PAT for ${payload.service}. Add the ${payload.service === 'github' ? 'githubPat' : 'adoPat'} to the profile (must have write access to the target repo) and try again.`,
+              payload.service === 'github'
+                ? 'Daemon GitHub authentication is still unavailable. Run gh auth login as the daemon service account and try again.'
+                : `Profile '${pod.profileName}' still has no ADO PAT. Add adoPat to the profile (must have write access to the target repo) and try again.`,
               'MISSING_CREDENTIAL',
               400,
             );
