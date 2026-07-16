@@ -13,6 +13,26 @@ import Testing
     #expect(groups.first?.candidates.map(\.id) == ["cand-old", "cand-sibling"])
 }
 
+@MainActor @Test func memoryWorkbenchUsesPodOriginForApprovedMemoryGroups() {
+    let podMemory = makeMemory(id: "mem-pod", createdByPodId: "pod-source-1234")
+    let manual = makeMemory(id: "mem-manual")
+
+    #expect(MemoryManagementView.originKey(for: podMemory) == "pod-source-1234")
+    #expect(MemoryManagementView.sourcePodId(for: podMemory) == "pod-source-1234")
+    #expect(MemoryManagementView.originKey(for: manual) == "Manual")
+    #expect(MemoryManagementView.sourcePodId(for: manual) == nil)
+}
+
+@MainActor @Test func memoryWorkbenchFormatsScopeProvenanceLabels() {
+    #expect(
+        MemoryManagementView.scopeLabel(scope: .profile, scopeId: "resource-planner")
+            == "profile resource-planner"
+    )
+    #expect(MemoryManagementView.scopeLabel(scope: .profile, scopeId: nil) == "profile unknown")
+    #expect(MemoryManagementView.scopeLabel(scope: .global, scopeId: nil) == "global")
+    #expect(MemoryManagementView.scopeLabel(scope: .pod, scopeId: "pod-source-1234") == "pod pod-sour")
+}
+
 @MainActor @Test func memoryWorkbenchFiltersActiveMemoriesByScopeAndQuery() {
     let global = makeMemory(id: "global", scope: .global, path: "/conventions/commits.md", content: "Use direct commits")
     let profile = makeMemory(id: "profile", scope: .profile, path: "/gotchas/migrations.md", content: "Migration prefixes must be unique")
@@ -164,7 +184,8 @@ private func makeMemory(
     id: String,
     scope: MemoryScope = .profile,
     path: String = "/gotchas/test.md",
-    content: String = "Remember this"
+    content: String = "Remember this",
+    createdByPodId: String? = nil
 ) -> MemoryEntry {
     MemoryEntry(
         id: id,
@@ -173,6 +194,7 @@ private func makeMemory(
         path: path,
         content: content,
         approved: true,
+        createdByPodId: createdByPodId,
         updatedAt: "2026-05-22T00:00:00Z"
     )
 }
