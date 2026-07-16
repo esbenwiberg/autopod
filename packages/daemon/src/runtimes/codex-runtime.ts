@@ -707,6 +707,20 @@ export class CodexRuntime implements Runtime {
     }
 
     if (exitResult.code !== 0) {
+      // Terminal completion is the authoritative proof that Codex finished the
+      // task. The CLI can still return a cleanup/transport exit code afterward;
+      // do not discard completed work or prevent validation in that case.
+      // Exit 127 remains fatal because it means the CLI was unavailable rather
+      // than a completed turn failing during teardown.
+      if (outputState.sawComplete && exitResult.code !== 127) {
+        return {
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          message: `Codex exited with code ${exitResult.code} after task completion — proceeding to validation`,
+          fatal: false,
+        };
+      }
+
       const message =
         exitResult.code === 127
           ? 'Codex CLI not found in container image (exit 127)'

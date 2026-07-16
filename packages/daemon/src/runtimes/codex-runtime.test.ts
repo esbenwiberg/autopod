@@ -374,6 +374,63 @@ describe('CodexRuntime', () => {
       expect((errorEvent as any).fatal).toBe(true);
     });
 
+    it('proceeds to validation when Codex exits non-zero after terminal completion', async () => {
+      const handle = createMockHandle({ exitCode: 1 });
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      setTimeout(() => {
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({ type: 'thread.started', thread_id: 'completed-exit-one' })}\n`,
+        );
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({
+            type: 'item.completed',
+            item: { id: 'final-message', type: 'agent_message', text: 'Work is complete.' },
+          })}\n`,
+        );
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({
+            type: 'turn.completed',
+            usage: {
+              input_tokens: 10,
+              cached_input_tokens: 0,
+              output_tokens: 5,
+              reasoning_output_tokens: 1,
+            },
+          })}\n`,
+        );
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(1);
+      }, 10);
+
+      const events = [];
+      for await (const event of runtime.spawn({
+        podId: 'completed-exit-one',
+        task: 'Complete, then exit one',
+        model: 'o3-mini',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      })) {
+        events.push(event);
+      }
+
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'complete', result: 'Work is complete.' }),
+          expect.objectContaining({
+            type: 'error',
+            message: expect.stringContaining('proceeding to validation'),
+            fatal: false,
+          }),
+        ]),
+      );
+      expect(events).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ type: 'error', fatal: true })]),
+      );
+    });
+
     it('maps exit code 127 to a missing Codex CLI error', async () => {
       const handle = createMockHandle({ exitCode: 127 });
       const cm = createMockContainerManager(handle);
