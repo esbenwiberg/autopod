@@ -505,6 +505,33 @@ describe('AzureSandboxApiClient', () => {
     expect(killBody).toContain('kill -KILL');
   });
 
+  it('terminates the recorded process when a streaming exec times out', async () => {
+    const { client, sockets, requests } = makeStreamingClient(
+      (socket) => {
+        socket.onopen?.({});
+      },
+      [
+        ...STREAM_SETUP_RESPONSES,
+        { status: 200, body: { stdout: '', stderr: '', exitCode: 0 } },
+      ],
+    );
+
+    await expect(
+      (async () => {
+        for await (const _chunk of client.execStream('sbx-1', ['pi', 'rpc'], {
+          timeoutMs: 1,
+        })) {
+          // No output is expected before timeout.
+        }
+      })(),
+    ).rejects.toThrow(/timed out/);
+
+    expect(sockets[0]?.closed).toBe(true);
+    const killBody = JSON.stringify(jsonBody(requests[2] ?? failRequest()));
+    expect(killBody).toContain('kill -TERM');
+    expect(killBody).toContain('kill -KILL');
+  });
+
   it('fails the exec stream when the socket closes before an exit code', async () => {
     const { client } = makeStreamingClient((socket) => {
       socket.onopen?.({});

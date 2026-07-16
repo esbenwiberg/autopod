@@ -327,13 +327,18 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       sandboxId,
     )}/exec/stream`;
     const socket = this.webSocketFactory(wsUrl, { Authorization: `Bearer ${token.token}` });
-    options?.onCancelReady?.(async () => {
-      try {
-        await this.exec(sandboxId, ['sh', '-c', terminatePidFileScript(pidPath)]);
-      } finally {
-        socket.close();
-      }
-    });
+    let cancellation: Promise<void> | null = null;
+    const cancelRemote = () => {
+      cancellation ??= (async () => {
+        try {
+          await this.exec(sandboxId, ['sh', '-c', terminatePidFileScript(pidPath)]);
+        } finally {
+          socket.close();
+        }
+      })();
+      return cancellation;
+    };
+    options?.onCancelReady?.(cancelRemote);
 
     const queue: SandboxExecChunk[] = [];
     let failure: Error | null = null;
@@ -359,7 +364,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
               504,
             ),
           );
-          socket.close();
+          void cancelRemote().catch((err) => {
+            this.logger.warn({ err, sandboxId }, 'Failed to terminate timed-out sandbox exec');
+          });
         }, options.timeoutMs)
       : null;
 

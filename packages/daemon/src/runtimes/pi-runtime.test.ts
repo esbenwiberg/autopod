@@ -206,6 +206,19 @@ describe('PiRuntime', () => {
     expect(handle.kill).toHaveBeenCalledOnce();
   });
 
+  it('terminates the RPC process when stream parsing fails', async () => {
+    const handle = createHandle();
+    const cm = createContainerManager([handle]);
+    const runtime = new PiRuntime(logger, cm);
+    const events = collect(runtime.spawn(config()));
+    await waitFor(() => vi.mocked(cm.execStreaming).mock.calls.length === 1);
+
+    handle.stdout.destroy(new Error('broken RPC stream'));
+
+    await expect(events).rejects.toThrow('broken RPC stream');
+    expect(handle.kill).toHaveBeenCalledOnce();
+  });
+
   it('resumes from primed durable session state after runtime restart', async () => {
     const handle = createHandle();
     const cm = createContainerManager([handle]);

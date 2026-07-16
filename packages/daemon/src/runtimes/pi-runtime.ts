@@ -144,6 +144,12 @@ export class PiRuntime implements Runtime {
       { cwd, env, stdin: true },
     );
     this.handles.set(podId, handle);
+    let terminated = false;
+    const terminate = async () => {
+      if (terminated) return;
+      terminated = true;
+      await handle.kill();
+    };
     const commandId = this.nextCommandId(podId);
     if (!handle.stdin) {
       yield {
@@ -152,7 +158,7 @@ export class PiRuntime implements Runtime {
         message: 'Pi RPC subprocess did not expose stdin',
         fatal: true,
       };
-      await handle.kill();
+      await terminate();
       this.handles.delete(podId);
       return;
     }
@@ -188,10 +194,11 @@ export class PiRuntime implements Runtime {
       for await (const event of events) {
         yield event;
         if (event.type === 'complete' || (event.type === 'error' && event.fatal)) {
-          await handle.kill();
+          await terminate();
         }
       }
     } finally {
+      await terminate();
       this.handles.delete(podId);
     }
 
