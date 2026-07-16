@@ -219,6 +219,10 @@ export class CodexRuntime implements Runtime {
       // newer on disk, but only this resumed session is allowed to contribute events.
       this.codexSessionIds.set(podId, sessionId);
     }
+    // A resumed Codex session appends multiple turns to the same rollout file.
+    // Start at the current end before launching the new turn so live polling
+    // cannot replay the previous turn's task_complete and close this exec early.
+    const rolloutTail = await createResumeRolloutTail(podId, sessionId);
 
     const prompt = sessionId
       ? message
@@ -267,7 +271,14 @@ export class CodexRuntime implements Runtime {
     try {
       yield* withPostCompleteGrace(
         withIdleLivenessProbe(
-          this.parseWithRolloutFallback(handle, podId, outputState, pod.model, recovery),
+          this.parseWithRolloutFallback(
+            handle,
+            podId,
+            outputState,
+            pod.model,
+            recovery,
+            rolloutTail,
+          ),
           {
             streams: [handle.stdout, handle.stderr],
             runtimeName: 'codex-runtime',
@@ -350,11 +361,11 @@ export class CodexRuntime implements Runtime {
     outputState: OutputState,
     modelHint?: string,
     summaryRecovery?: SandboxRolloutRecovery,
+    rolloutTail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) },
   ): AsyncIterable<AgentEvent> {
     const seen = new Set<string>();
     const abortLiveRollout = new AbortController();
     const abortSummaryGrace = new AbortController();
-    const rolloutTail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) };
     let taskSummaryObserved = false;
     let resolveTaskSummary: (() => void) | null = null;
     const taskSummarySignal = new Promise<void>((resolve) => {
@@ -1180,6 +1191,17 @@ async function findLatestCodexRollout(
     : candidates;
   eligible.sort((a, b) => b.mtimeMs - a.mtimeMs);
   return eligible[0] ?? null;
+}
+
+async function createResumeRolloutTail(
+  podId: string,
+  sessionId?: string,
+): Promise<RolloutTailState> {
+  if (!sessionId) return { path: null, offset: 0, carry: Buffer.alloc(0) };
+  const rollout = await findLatestCodexRollout(codexStateDirForPod(podId), sessionId);
+  return rollout
+    ? { path: rollout.path, offset: rollout.size, carry: Buffer.alloc(0) }
+    : { path: null, offset: 0, carry: Buffer.alloc(0) };
 }
 
 async function collectRolloutFiles(dir: string, candidates: RolloutCandidate[]): Promise<void> {

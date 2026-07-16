@@ -1644,6 +1644,92 @@ describe('CodexRuntime', () => {
       }
     });
 
+    it('starts a resumed rollout tail after the previous turn completion', async () => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousPollMs = process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
+      const previousGraceMs = process.env.AUTOPOD_POST_COMPLETE_GRACE_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-resume-turn-tail-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS = '5';
+      process.env.AUTOPOD_POST_COMPLETE_GRACE_MS = '20';
+
+      try {
+        const podId = 'resume-same-session';
+        const rolloutDir = join(tmpRoot, podId, '2026', '07', '16');
+        await mkdir(rolloutDir, { recursive: true });
+        await writeFile(
+          join(rolloutDir, 'rollout-2026-07-16T08-00-00-current-session.jsonl'),
+          JSON.stringify({
+            timestamp: '2026-07-16T08:00:00.000Z',
+            type: 'event_msg',
+            payload: { type: 'task_complete', last_agent_message: 'Previous turn completion.' },
+          }),
+        );
+
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const runtime = new CodexRuntime(
+          logger,
+          cm,
+          createMockPodRepo('current-session', { model: 'gpt-5.6-sol' }),
+        );
+
+        setTimeout(() => {
+          if (!(handle.stdout as PassThrough).writableEnded) {
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({ type: 'thread.started', thread_id: 'current-session' })}\n`,
+            );
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({
+                type: 'item.completed',
+                item: {
+                  id: 'current-turn-message',
+                  type: 'agent_message',
+                  text: 'Current turn completion.',
+                },
+              })}\n`,
+            );
+            (handle.stdout as PassThrough).write(
+              `${JSON.stringify({
+                type: 'turn.completed',
+                usage: {
+                  input_tokens: 10,
+                  cached_input_tokens: 0,
+                  output_tokens: 5,
+                  reasoning_output_tokens: 1,
+                },
+              })}\n`,
+            );
+          }
+          // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+          (handle as any).finish(0);
+        }, 50);
+
+        const events: AgentEvent[] = [];
+        for await (const event of runtime.resume(
+          podId,
+          'Continue the same session.',
+          'container-123',
+        )) {
+          events.push(event);
+        }
+
+        expect(events.filter((event) => event.type === 'complete')).toEqual([
+          expect.objectContaining({ result: 'Current turn completion.' }),
+        ]);
+        expect(events).not.toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: 'complete', result: 'Previous turn completion.' }),
+          ]),
+        );
+      } finally {
+        restoreEnv('AUTOPOD_CODEX_STATE_DIR', previousStateDir);
+        restoreEnv('AUTOPOD_CODEX_ROLLOUT_POLL_MS', previousPollMs);
+        restoreEnv('AUTOPOD_POST_COMPLETE_GRACE_MS', previousGraceMs);
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
+
     it('recovers live progress and proceeds to validation when the sandbox exec never exits', async () => {
       const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
       const previousIdleRecovery = process.env.AUTOPOD_CODEX_SANDBOX_IDLE_RECOVERY_MS;
