@@ -317,7 +317,12 @@ public struct DetailPanelView: View {
                     onLoadAll: onLoadAllLogs
                 )
                 case .diff:       DiffTab(pod: pod, diffResponse: diffResponse, onRefresh: onRefreshDiff)
-                case .work:       WorkTab(pod: pod, loadQuality: loadQuality, loadCost: loadCost)
+                case .work:       WorkTab(
+                    pod: pod,
+                    actions: actions,
+                    loadQuality: loadQuality,
+                    loadCost: loadCost
+                )
                 case .validation: ValidationTab(
                     pod: pod,
                     actions: actions,

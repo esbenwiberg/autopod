@@ -730,6 +730,13 @@ function createTestContext(
     fixFeedbackRepo,
     eventRepo,
     profileStore,
+    githubAuth: {
+      resolveCredential: vi.fn(async () => ({
+        token: 'daemon-gh-token',
+        username: 'x-access-token',
+      })),
+      getStatus: vi.fn(async () => ({ available: true, login: 'autopod-dev', setup: 'setup' })),
+    },
     eventBus,
     containerManagerFactory: { get: vi.fn(() => containerManager) },
     worktreeManager,
@@ -1238,7 +1245,7 @@ describe('PodManager', () => {
       expect(ctx.enqueuedSessions).toContain(pod.id);
     });
 
-    it('blocks creation when the selected GitHub PAT is expired', () => {
+    it('ignores an expired legacy GitHub PAT during creation', () => {
       const ctx = createTestContext(undefined, {
         prProvider: 'github',
         githubPat: 'ghp_secret',
@@ -1248,7 +1255,7 @@ describe('PodManager', () => {
 
       expect(() =>
         manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1'),
-      ).toThrow(/expired GitHub PAT|PAT_EXPIRED/);
+      ).not.toThrow();
     });
 
     it('allows creation when the selected PAT expires soon but has not expired', () => {
@@ -2034,12 +2041,7 @@ describe('PodManager', () => {
       expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
     });
 
-    // Regression: approval-time mergeBranch sites used to omit the PAT, so a daemon
-    // restart between worktree create and approval (or a recovery pod that mounts an
-    // existing worktree) left the in-memory PAT cache cold. ADO clone URLs of the
-    // form https://<org>@dev.azure.com/... then prompted for a password, and with
-    // GIT_TERMINAL_PROMPT=0 the push died with "could not read Password".
-    it('forwards profile PAT into mergeBranch on approval-time PR creation retry', async () => {
+    it('does not forward legacy GitHub PAT into mergeBranch on approval-time PR creation retry', async () => {
       const ctx = createTestContext(undefined, { githubPat: 'ghp_test_pat_12345' });
       const manager = createPodManager(ctx.deps);
 
@@ -2056,11 +2058,11 @@ describe('PodManager', () => {
       await manager.approveSession(pod.id);
 
       expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({ pat: 'ghp_test_pat_12345' }),
+        expect.objectContaining({ pat: 'daemon-gh-token' }),
       );
     });
 
-    it('forwards profile PAT into mergeBranch on approval-time fallback push (no prManager)', async () => {
+    it('does not forward legacy GitHub PAT into mergeBranch on approval-time fallback push', async () => {
       const ctx = createTestContext(undefined, { githubPat: 'ghp_test_pat_67890' });
       ctx.deps.prManagerFactory = undefined;
       const manager = createPodManager(ctx.deps);
@@ -2078,7 +2080,7 @@ describe('PodManager', () => {
       await manager.approveSession(pod.id);
 
       expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
-        expect.objectContaining({ pat: 'ghp_test_pat_67890' }),
+        expect.objectContaining({ pat: 'daemon-gh-token' }),
       );
     });
 
@@ -5591,6 +5593,90 @@ describe('PodManager', () => {
       },
     );
 
+    it('records a pending fact waiver during agent rework for the next validation', async () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      const pendingReasoning =
+        'Fact fact-swift-only needs human decision: required fact command `swift` is unavailable in the validation container.';
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        taskSummary: {
+          actualSummary: 'Updated the Swift helper.',
+          deviations: [],
+          factDeviations: [
+            {
+              factId: 'fact-swift-only',
+              action: 'waive',
+              reason: 'Swift is unavailable in the validation image',
+              whyImpossible: pendingReasoning,
+            },
+          ],
+        },
+        lastValidationResult: {
+          podId: pod.id,
+          attempt: 1,
+          timestamp: new Date().toISOString(),
+          smoke: {
+            status: 'pass',
+            build: { status: 'pass', output: '', duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 50,
+            },
+            pages: [],
+          },
+          taskReview: null,
+          overall: 'fail',
+          duration: 5000,
+          factValidation: {
+            status: 'pending_human',
+            results: [
+              {
+                factId: 'fact-swift-only',
+                proves: ['swift-helper-readable'],
+                kind: 'unit-test',
+                artifactPath:
+                  'packages/desktop/Tests/AutopodUITests/ThroughputTimeInStatusDisplayTests.swift',
+                command: 'swift test --filter ThroughputTimeInStatusDisplayTests',
+                passed: false,
+                status: 'pending_human',
+                exitCode: 127,
+                reasoning: pendingReasoning,
+              },
+            ],
+          },
+        },
+      });
+
+      const result = await manager.approveFactWaiver(
+        pod.id,
+        'fact-swift-only',
+        'Swift is unavailable here',
+      );
+
+      expect(result).toEqual({ newCommits: false, result: 'fail' });
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      const updated = manager.getSession(pod.id);
+      expect(updated.status).toBe('running');
+      expect(updated.taskSummary?.factDeviations).toEqual([
+        {
+          factId: 'fact-swift-only',
+          action: 'waive',
+          decision: 'approved_waive',
+          reason: 'Swift is unavailable here',
+          whyImpossible: pendingReasoning,
+        },
+      ]);
+    });
+
     it('retries with correction feedback until max attempts exhausted', async () => {
       // With always-failing validation, the retry loop exhausts all attempts
       const ctx = createTestContext({ overall: 'fail' });
@@ -7645,7 +7731,10 @@ describe('PodManager', () => {
       const result = await manager.resumePod(fix.id);
 
       expect(result).toEqual({ action: 'retry-fix-delivery' });
-      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith('/tmp/worktree/fix', 'test-pat');
+      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith(
+        '/tmp/worktree/fix',
+        'daemon-gh-token',
+      );
       expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalledWith(
         expect.objectContaining({
           worktreePath: '/tmp/worktree/fix',
@@ -7881,7 +7970,7 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).status).toBe('validated');
     });
 
-    it('Path 2: passes the profile PAT when pulling during forced revalidation', async () => {
+    it('Path 2: ignores legacy GitHub PAT when pulling during forced revalidation', async () => {
       const ctx = createTestContext(undefined, { githubPat: 'test-github-pat' });
       const { manager, pod } = setupFailedPod(ctx, {
         validationOverall: 'fail',
@@ -7892,7 +7981,7 @@ describe('PodManager', () => {
 
       expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith(
         '/tmp/worktree/abc',
-        'test-github-pat',
+        'daemon-gh-token',
       );
     });
 
@@ -9872,6 +9961,7 @@ describe('updateFromBase', () => {
     await manager.triggerValidation(pod.id);
 
     // The retry path consumed the intent, ran the rebase, and scheduled follow-up
+    await new Promise((r) => setImmediate(r));
     expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalled();
     // Flush setImmediate so follow-up triggerValidation fires
     await new Promise((r) => setImmediate(r));

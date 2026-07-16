@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Logger } from 'pino';
+import { type DaemonGitHubAuth, DaemonGitHubAuthError } from '../github/daemon-github-auth.js';
 import type {
   BranchDiffConfig,
   BranchFolderContents,
@@ -33,6 +34,16 @@ import {
 
 const execFileAsync = promisify(execFile);
 const AUTOPOD_SYNC_STAGING_PREFIXES = ['.autopod-sync-', '.autopod-extract-'] as const;
+
+interface GitCredential {
+  username: string;
+  password: string;
+}
+
+interface AuthenticatedRemote {
+  url: string;
+  credential?: GitCredential;
+}
 
 /**
  * Thrown when `commitPendingChanges` refuses to commit because the number of staged deletions
@@ -99,16 +110,39 @@ const GIT_NO_AMBIENT_CREDS_ENV: Record<string, string> = {
 };
 
 /** Wrapper so every git call in this file gets GIT_ENV — no env-less calls allowed. */
-function git(args: string[], options: { cwd?: string; timeout?: number; maxBuffer?: number } = {}) {
+function git(
+  args: string[],
+  options: {
+    cwd?: string;
+    timeout?: number;
+    maxBuffer?: number;
+    credential?: GitCredential;
+    credentialUrl?: string;
+  } = {},
+) {
+  const { credential, credentialUrl, ...execOptions } = options;
+  let credentialEnv: Record<string, string> = {};
+  if (credential) {
+    if (!credentialUrl) {
+      throw new Error('A credential URL is required for an explicit git credential');
+    }
+    const url = new URL(credentialUrl);
+    const basic = Buffer.from(`${credential.username}:${credential.password}`).toString('base64');
+    credentialEnv = {
+      GIT_CONFIG_COUNT: '3',
+      GIT_CONFIG_KEY_2: `http.${url.origin}/.extraheader`,
+      GIT_CONFIG_VALUE_2: `Authorization: Basic ${basic}`,
+    };
+  }
   return execFileAsync('git', args, {
-    ...options,
-    env: { ...GIT_ENV, ...GIT_NO_AMBIENT_CREDS_ENV },
+    ...execOptions,
+    env: { ...GIT_ENV, ...GIT_NO_AMBIENT_CREDS_ENV, ...credentialEnv },
   });
 }
 
 /**
  * Thrown when a git remote operation fails because the daemon either has no
- * PAT for this repo or the PAT it has is rejected by the remote. Distinct
+ * explicit credential for this repo or the credential is rejected by the remote. Distinct
  * from generic git errors so the pod manager can park the pod in
  * `awaiting_input` (operator updates the profile, daemon retries) instead of
  * failing terminally.
@@ -181,7 +215,9 @@ export function classifyGitError(err: unknown, op: string): unknown {
   if (!isCredential) return err;
   const service = inferGitService(stderr, cmd);
   const wrapped = new GitCredentialError(
-    `git ${op} rejected: credentials missing or unauthorized for ${service}. Update the profile PAT (it must have write access to the target repo) and resume the pod.`,
+    service === 'github'
+      ? `git ${op} rejected: daemon GitHub CLI authentication is missing or unauthorized. Log in as the daemon service account with gh auth login and resume the pod.`
+      : `git ${op} rejected: credentials missing or unauthorized for ${service}. Update the profile PAT (it must have write access to the target repo) and resume the pod.`,
     service,
     op,
     stderr.slice(0, 500),
@@ -301,6 +337,7 @@ export interface LocalWorktreeManagerConfig {
   logger: Logger;
   /** Stores so the auto-commit LLM helper resolves live provider-account credentials. */
   llmDeps?: ProfileLlmClientDeps;
+  githubAuth?: DaemonGitHubAuth;
 }
 
 /**
@@ -319,12 +356,14 @@ export class LocalWorktreeManager implements WorktreeManager {
   private repoLocks = new KeyedPromiseQueue();
 
   /**
-   * In-memory PAT cache keyed by bare repo path.
-   * PATs are never written to the git remote URL — remote stays clean so containers
-   * that mount the bare repo cannot read the credential. Host-side git operations
-   * (fetch, push) use the auth URL constructed from this cache at call time only.
+   * In-memory credential cache keyed by bare repo path.
+   * Credentials are never written to the git remote URL — remote stays clean so
+   * containers that mount the bare repo cannot read them. Host-side git
+   * operations (fetch, push) use the auth URL constructed from this cache at
+   * call time only.
    */
   private patCache = new Map<string, string>();
+  private githubAuth?: DaemonGitHubAuth;
 
   constructor(config: LocalWorktreeManagerConfig) {
     this.cacheDir =
@@ -337,6 +376,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       path.join(os.homedir(), '.autopod', 'worktrees');
     this.logger = config.logger;
     this.llmDeps = config.llmDeps;
+    this.githubAuth = config.githubAuth;
   }
 
   async create(config: WorktreeCreateConfig): Promise<WorktreeResult> {
@@ -344,15 +384,10 @@ export class LocalWorktreeManager implements WorktreeManager {
     const startBranch = config.startBranch ?? baseBranch;
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
-    const authUrl = pat ? this.injectPat(repoUrl, pat) : repoUrl;
+    const remote = await this.getAuthenticatedRemoteForRepo(repoUrl, bareRepoPath, pat);
 
     await fs.mkdir(this.cacheDir, { recursive: true });
     await fs.mkdir(this.worktreeDir, { recursive: true });
-
-    // Update in-memory PAT cache (PAT is never written to the remote URL).
-    if (pat) {
-      this.patCache.set(bareRepoPath, pat);
-    }
 
     // Create worktree — use sessionId-derived path if provided, else branch-derived
     const sessionDir = config.sessionId ? config.sessionId : branch.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -370,7 +405,10 @@ export class LocalWorktreeManager implements WorktreeManager {
         // reset origin to the clean URL — containers mount the bare repo and must
         // not be able to read the PAT from git config.
         try {
-          await git(['clone', '--bare', authUrl, bareRepoPath]);
+          await git(['clone', '--bare', remote.url, bareRepoPath], {
+            credential: remote.credential,
+            credentialUrl: remote.url,
+          });
         } catch (err) {
           throw sanitizeGitError(err);
         }
@@ -387,7 +425,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       // Fetch baseBranch from remote. If the branch hasn't been pushed yet (e.g. forking
       // a pod that failed before pushing), fall back to the local ref in the bare repo.
       const baseBranchRef = await this.fetchBranchRef({
-        authUrl,
+        remote,
         bareRepoPath,
         branch: baseBranch,
         purpose: 'create baseBranch',
@@ -402,7 +440,7 @@ export class LocalWorktreeManager implements WorktreeManager {
         startBranch === baseBranch
           ? baseBranchRef
           : await this.fetchBranchRef({
-              authUrl,
+              remote,
               bareRepoPath,
               branch: startBranch,
               purpose: 'create startBranch',
@@ -419,8 +457,10 @@ export class LocalWorktreeManager implements WorktreeManager {
       let startPoint = startBranchRef;
       if (branch !== startBranch) {
         try {
-          await git(['fetch', authUrl, `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
+          await git(['fetch', remote.url, `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
             cwd: bareRepoPath,
+            credential: remote.credential,
+            credentialUrl: remote.url,
           });
           // Fetch succeeded — branch exists on remote, use it as start point
           startPoint = `refs/remotes/origin/${branch}`;
@@ -699,9 +739,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     const { repoUrl, branch, baseBranch, pat, maxLength = 200_000 } = config;
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
-    const authUrl = pat ? this.injectPat(repoUrl, pat) : repoUrl;
-    if (pat) this.patCache.set(bareRepoPath, pat);
-
+    const remote = await this.getAuthenticatedRemoteForRepo(repoUrl, bareRepoPath, pat);
     await fs.mkdir(this.cacheDir, { recursive: true });
 
     try {
@@ -710,7 +748,10 @@ export class LocalWorktreeManager implements WorktreeManager {
           await fs.rm(bareRepoPath, { recursive: true, force: true });
           this.logger.info({ repoUrl, bareRepoPath }, 'getBranchDiff: cloning bare repo');
           try {
-            await git(['clone', '--bare', authUrl, bareRepoPath]);
+            await git(['clone', '--bare', remote.url, bareRepoPath], {
+              credential: remote.credential,
+              credentialUrl: remote.url,
+            });
           } catch (err) {
             throw sanitizeGitError(err);
           }
@@ -718,7 +759,7 @@ export class LocalWorktreeManager implements WorktreeManager {
         }
 
         const branchRef = await this.fetchBranchRef({
-          authUrl,
+          remote,
           bareRepoPath,
           branch,
           purpose: 'getBranchDiff',
@@ -739,7 +780,7 @@ export class LocalWorktreeManager implements WorktreeManager {
 
         if (!base) {
           const baseRef = await this.fetchBranchRef({
-            authUrl,
+            remote,
             bareRepoPath,
             branch: baseBranch,
             purpose: 'getBranchDiff',
@@ -772,15 +813,8 @@ export class LocalWorktreeManager implements WorktreeManager {
 
   async mergeBranch(config: MergeBranchConfig): Promise<void> {
     const { worktreePath, targetBranch, pat } = config;
-
-    // If a PAT is explicitly provided, warm the cache so getAuthUrl picks it up.
-    if (pat) {
-      const { stdout: commonDir } = await git(['rev-parse', '--git-common-dir'], {
-        cwd: worktreePath,
-      });
-      const bareRepoPath = path.resolve(worktreePath, commonDir.trim());
-      this.patCache.set(bareRepoPath, pat);
-    }
+    // Resolve remote authentication before committing or otherwise mutating the worktree.
+    const remote = await this.getAuthenticatedRemote(worktreePath, pat);
 
     // Commit any uncommitted work (with deletion guard). Callers that know the worktree may be
     // out of sync with the container should pass `maxDeletions: 0` so a ghost mass-deletion
@@ -821,7 +855,6 @@ export class LocalWorktreeManager implements WorktreeManager {
     // Push using auth URL so the PAT is never stored in git config. Daemon validation already
     // ran, so bypass repo-local hooks that may not be runnable from the host worktree.
     this.logger.info({ worktreePath, targetBranch }, 'Pushing branch to origin');
-    const authUrl = await this.getAuthUrl(worktreePath);
     const { stdout: actualBranch } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: worktreePath,
     });
@@ -831,8 +864,10 @@ export class LocalWorktreeManager implements WorktreeManager {
       );
     }
     try {
-      await git(['push', '--no-verify', authUrl, `HEAD:refs/heads/${targetBranch}`], {
+      await git(['push', '--no-verify', remote.url, `HEAD:refs/heads/${targetBranch}`], {
         cwd: worktreePath,
+        credential: remote.credential,
+        credentialUrl: remote.url,
       });
     } catch (err) {
       throw classifyGitError(sanitizeGitError(err), 'push');
@@ -1154,6 +1189,7 @@ export class LocalWorktreeManager implements WorktreeManager {
   ): Promise<void> {
     const force = options?.force === true;
     this.logger.info({ worktreePath, expectedBranch, force }, 'Pushing branch to origin');
+    const remote = await this.getAuthenticatedRemote(worktreePath, options?.pat);
     const { stdout: actualBranch } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: worktreePath,
     });
@@ -1162,23 +1198,19 @@ export class LocalWorktreeManager implements WorktreeManager {
         `Expected HEAD to be on branch '${expectedBranch}' but it is on '${actualBranch.trim()}'`,
       );
     }
-    if (options?.pat) {
-      const { stdout: commonDir } = await git(['rev-parse', '--git-common-dir'], {
-        cwd: worktreePath,
-      });
-      const bareRepoPath = path.resolve(worktreePath, commonDir.trim());
-      this.patCache.set(bareRepoPath, options.pat);
-    }
-    const authUrl = await this.getAuthUrl(worktreePath);
     // --force-with-lease (not --force) — refuses the push if origin/<branch> moved
     // since our last fetch. Protects against clobbering a teammate's commits when
     // pushing a rebased branch.
     const refspec = `HEAD:refs/heads/${expectedBranch}`;
     const pushArgs = force
-      ? ['push', '--no-verify', '--force-with-lease', authUrl, refspec]
-      : ['push', '--no-verify', authUrl, refspec];
+      ? ['push', '--no-verify', '--force-with-lease', remote.url, refspec]
+      : ['push', '--no-verify', remote.url, refspec];
     try {
-      await git(pushArgs, { cwd: worktreePath });
+      await git(pushArgs, {
+        cwd: worktreePath,
+        credential: remote.credential,
+        credentialUrl: remote.url,
+      });
     } catch (err) {
       throw classifyGitError(sanitizeGitError(err), 'push');
     }
@@ -1191,12 +1223,14 @@ export class LocalWorktreeManager implements WorktreeManager {
       throw new Error(`Refusing to publish non-branch ref '${sourceRef}'`);
     }
 
-    const authUrl = await this.getAuthUrl(worktreePath, pat);
+    const remote = await this.getAuthenticatedRemote(worktreePath, pat);
     this.logger.info({ worktreePath, branch, sourceRef }, 'Ensuring branch exists on origin');
 
     try {
-      await git(['ls-remote', '--exit-code', '--heads', authUrl, branch], {
+      await git(['ls-remote', '--exit-code', '--heads', remote.url, branch], {
         cwd: worktreePath,
+        credential: remote.credential,
+        credentialUrl: remote.url,
       });
       return { branch, created: false };
     } catch (err) {
@@ -1208,8 +1242,10 @@ export class LocalWorktreeManager implements WorktreeManager {
 
     try {
       await git(['rev-parse', '--verify', sourceRef], { cwd: worktreePath });
-      await git(['push', '--no-verify', authUrl, `${sourceRef}:refs/heads/${branch}`], {
+      await git(['push', '--no-verify', remote.url, `${sourceRef}:refs/heads/${branch}`], {
         cwd: worktreePath,
+        credential: remote.credential,
+        credentialUrl: remote.url,
       });
       this.logger.info({ worktreePath, branch, sourceRef }, 'Published local branch ref to origin');
       return { branch, created: true };
@@ -1221,23 +1257,19 @@ export class LocalWorktreeManager implements WorktreeManager {
   async rebaseOntoBase(config: RebaseOntoBaseConfig): Promise<RebaseOntoBaseResult> {
     const { worktreePath, baseBranch, pat } = config;
 
-    // Warm the PAT cache when caller supplies one — mirrors mergeBranch().
-    if (pat) {
-      const { stdout: commonDir } = await git(['rev-parse', '--git-common-dir'], {
-        cwd: worktreePath,
-      });
-      const bareRepoPath = path.resolve(worktreePath, commonDir.trim());
-      this.patCache.set(bareRepoPath, pat);
-    }
-
-    const authUrl = await this.getAuthUrl(worktreePath);
+    const remote = await this.getAuthenticatedRemote(worktreePath, pat);
 
     // Fetch the latest base into refs/remotes/origin/<baseBranch>. Explicit refspec
     // per CLAUDE.md — wildcard fetches fail on Azure File Share.
     try {
-      await git(['fetch', authUrl, `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`], {
-        cwd: worktreePath,
-      });
+      await git(
+        ['fetch', remote.url, `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`],
+        {
+          cwd: worktreePath,
+          credential: remote.credential,
+          credentialUrl: remote.url,
+        },
+      );
     } catch (err) {
       throw sanitizeGitError(err);
     }
@@ -1311,16 +1343,18 @@ export class LocalWorktreeManager implements WorktreeManager {
 
   async pullBranch(worktreePath: string, pat?: string): Promise<{ newCommits: boolean }> {
     this.logger.info({ worktreePath }, 'Pulling latest from origin');
+    const remote = await this.getAuthenticatedRemote(worktreePath, pat);
     const { stdout: headBefore } = await git(['rev-parse', 'HEAD'], {
       cwd: worktreePath,
     });
-    const authUrl = await this.getAuthUrl(worktreePath, pat);
     const { stdout: branch } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: worktreePath,
     });
     try {
-      await git(['fetch', authUrl, branch.trim()], {
+      await git(['fetch', remote.url, branch.trim()], {
         cwd: worktreePath,
+        credential: remote.credential,
+        credentialUrl: remote.url,
       });
     } catch (err) {
       throw sanitizeGitError(err);
@@ -1385,9 +1419,7 @@ export class LocalWorktreeManager implements WorktreeManager {
 
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
-    const authUrl = pat ? this.injectPat(repoUrl, pat) : repoUrl;
-    if (pat) this.patCache.set(bareRepoPath, pat);
-
+    const remote = await this.getAuthenticatedRemoteForRepo(repoUrl, bareRepoPath, pat);
     await fs.mkdir(this.cacheDir, { recursive: true });
 
     // Serialize per-repo to avoid fetch races with other callers.
@@ -1397,7 +1429,10 @@ export class LocalWorktreeManager implements WorktreeManager {
         await fs.rm(bareRepoPath, { recursive: true, force: true });
         this.logger.info({ repoUrl, bareRepoPath }, 'readBranchFolder: cloning bare repo');
         try {
-          await git(['clone', '--bare', authUrl, bareRepoPath]);
+          await git(['clone', '--bare', remote.url, bareRepoPath], {
+            credential: remote.credential,
+            credentialUrl: remote.url,
+          });
         } catch (err) {
           throw sanitizeGitError(err);
         }
@@ -1413,11 +1448,15 @@ export class LocalWorktreeManager implements WorktreeManager {
         await git(
           [
             'fetch',
-            authUrl,
+            remote.url,
             `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
             `+refs/heads/${branch}:refs/heads/${branch}`,
           ],
-          { cwd: bareRepoPath },
+          {
+            cwd: bareRepoPath,
+            credential: remote.credential,
+            credentialUrl: remote.url,
+          },
         );
       } catch (fetchErr) {
         this.logger.debug(
@@ -1634,21 +1673,25 @@ export class LocalWorktreeManager implements WorktreeManager {
   }
 
   private async fetchBranchRef(params: {
-    authUrl: string;
+    remote: AuthenticatedRemote;
     bareRepoPath: string;
     branch: string;
     purpose: string;
   }): Promise<string> {
-    const { authUrl, bareRepoPath, branch, purpose } = params;
+    const { remote, bareRepoPath, branch, purpose } = params;
     try {
       await git(
         [
           'fetch',
-          authUrl,
+          remote.url,
           `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
           `+refs/heads/${branch}:refs/heads/${branch}`,
         ],
-        { cwd: bareRepoPath },
+        {
+          cwd: bareRepoPath,
+          credential: remote.credential,
+          credentialUrl: remote.url,
+        },
       );
       return `refs/remotes/origin/${branch}`;
     } catch (fetchErr) {
@@ -1667,35 +1710,87 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
   }
 
-  private async getAuthUrl(worktreePath: string, pat?: string): Promise<string> {
+  private async getAuthenticatedRemote(
+    worktreePath: string,
+    pat?: string,
+  ): Promise<AuthenticatedRemote> {
     const { stdout: commonDir } = await git(['rev-parse', '--git-common-dir'], {
       cwd: worktreePath,
     });
     const bareRepoPath = path.resolve(worktreePath, commonDir.trim());
-    if (pat) {
-      this.patCache.set(bareRepoPath, pat);
-    }
     const { stdout: remoteUrl } = await git(['remote', 'get-url', 'origin'], {
       cwd: bareRepoPath,
     });
     const cleanUrl = remoteUrl.trim();
+    return this.getAuthenticatedRemoteForRepo(cleanUrl, bareRepoPath, pat);
+  }
+
+  private async getAuthenticatedRemoteForRepo(
+    repoUrl: string,
+    bareRepoPath: string,
+    pat?: string,
+  ): Promise<AuthenticatedRemote> {
+    this.assertSupportedRemoteHost(repoUrl);
+    if (this.isGitHubUrl(repoUrl)) {
+      if (!this.githubAuth) {
+        throw new DaemonGitHubAuthError(
+          'Daemon GitHub authentication is not configured',
+          'GH_UNAUTHENTICATED',
+        );
+      }
+      const credential = await this.githubAuth.resolveCredential();
+      return {
+        url: repoUrl,
+        credential: { username: credential.username, password: credential.token },
+      };
+    }
+
     const authPat = pat ?? this.patCache.get(bareRepoPath);
     if (!authPat) {
       this.logger.warn(
         { bareRepoPath },
         'No PAT cached for this repo — git push/fetch will fail without credentials. ' +
-          'Add a GitHub PAT to the profile.',
+          'Add an ADO PAT to the profile if this repo requires authentication.',
       );
     }
-    return authPat ? this.injectPat(cleanUrl, authPat) : cleanUrl;
+    if (authPat) {
+      this.patCache.set(bareRepoPath, authPat);
+      return {
+        url: repoUrl,
+        credential: { username: 'x-access-token', password: authPat },
+      };
+    }
+    return { url: repoUrl };
   }
 
-  /** Inject a PAT into an https remote URL: https://host/... → https://x-access-token:PAT@host/...
-   * Uses `x-access-token` as the username — required by GitHub fine-grained PATs and
-   * compatible with classic PATs too.
-   * Strips any existing userinfo first so stale credentials in the stored URL don't double-inject. */
-  private injectPat(url: string, pat: string): string {
-    return url.replace(/^https:\/\/([^@]*@)?/, `https://x-access-token:${pat}@`);
+  private isGitHubUrl(url: string): boolean {
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'https:' && parsed.hostname.toLowerCase() === 'github.com';
+    } catch {
+      return false;
+    }
+  }
+
+  private assertSupportedRemoteHost(url: string): void {
+    try {
+      const parsed = new URL(url);
+      if (parsed.username !== '' || parsed.password !== '') {
+        throw new Error(
+          'Refusing Git remote URL containing credentials; configure authentication through the daemon credential provider',
+        );
+      }
+      const hostname = parsed.hostname.toLowerCase();
+      if (hostname !== 'github.com' && hostname !== 'dev.azure.com') {
+        throw new Error(`Refusing unsupported Git remote host: ${hostname}`);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Refusing ')) {
+        throw err;
+      }
+      // Other validation layers reject malformed profile URLs. Preserve existing error ordering
+      // for corrupt cached remotes; importantly, no daemon GitHub credential is selected for them.
+    }
   }
 
   /** A bare repo is valid if it has been cloned (packed-refs or non-empty refs/). */

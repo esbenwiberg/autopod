@@ -89,13 +89,9 @@ describe('PAT expiry checks', () => {
     expect(findExpiredPat(profile, now)).toBeNull();
   });
 
-  it('finds an expired selected GitHub PAT', () => {
+  it('ignores an expired legacy GitHub PAT', () => {
     const profile = makeProfile({ githubPat: 'ghp_secret', githubPatExpiresAt: '2026-05-19' });
-    expect(findExpiredPat(profile, now)).toEqual({
-      field: 'githubPatExpiresAt',
-      label: 'GitHub PAT',
-      expiresAt: '2026-05-19',
-    });
+    expect(findExpiredPat(profile, now)).toBeNull();
   });
 
   it('finds an expired selected ADO PAT', () => {

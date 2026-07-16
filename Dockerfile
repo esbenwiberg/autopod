@@ -52,7 +52,7 @@ RUN pnpm run build
 # ─── Production stage ──────────────────────────────────────
 FROM node:22-alpine
 
-RUN apk add --no-cache tini git docker-cli
+RUN apk add --no-cache tini git docker-cli github-cli
 
 WORKDIR /app
 

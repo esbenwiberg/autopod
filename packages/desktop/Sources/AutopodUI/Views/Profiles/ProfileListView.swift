@@ -29,6 +29,7 @@ public struct ProfileListView: View {
     public var onCreate: ((Profile) async throws -> Void)?
     public var onAuthenticate: ProfileAuthHandler?
     public var onLoadProviderAccounts: ProviderAccountsLoadHandler?
+    public var onLoadDaemonGitHubAuthStatus: DaemonGitHubAuthStatusLoadHandler?
     public var onLoadEditor: ((String) async throws -> ProfileEditorResponse)?
     public var onSaveWithInheritance: (
         (Profile, Set<String>, Set<String>, [String: MergeMode]) async throws -> Void
@@ -43,6 +44,7 @@ public struct ProfileListView: View {
                 onSave: ((Profile) async throws -> Void)? = nil, onCreate: ((Profile) async throws -> Void)? = nil,
                 onAuthenticate: ProfileAuthHandler? = nil,
                 onLoadProviderAccounts: ProviderAccountsLoadHandler? = nil,
+                onLoadDaemonGitHubAuthStatus: DaemonGitHubAuthStatusLoadHandler? = nil,
                 onLoadEditor: ((String) async throws -> ProfileEditorResponse)? = nil,
                 onSaveWithInheritance: (
                     (Profile, Set<String>, Set<String>, [String: MergeMode]) async throws -> Void
@@ -57,6 +59,7 @@ public struct ProfileListView: View {
         self.onSave = onSave; self.onCreate = onCreate
         self.onAuthenticate = onAuthenticate
         self.onLoadProviderAccounts = onLoadProviderAccounts
+        self.onLoadDaemonGitHubAuthStatus = onLoadDaemonGitHubAuthStatus
         self.onLoadEditor = onLoadEditor
         self.onSaveWithInheritance = onSaveWithInheritance
         self.onCreateWithInheritance = onCreateWithInheritance
@@ -94,6 +97,7 @@ public struct ProfileListView: View {
                 onSave: onSave,
                 onAuthenticate: onAuthenticate,
                 onLoadProviderAccounts: onLoadProviderAccounts,
+                onLoadDaemonGitHubAuthStatus: onLoadDaemonGitHubAuthStatus,
                 onLoadEditor: onLoadEditor,
                 onSaveWithInheritance: onSaveWithInheritance,
                 onDelete: onDelete
@@ -117,7 +121,8 @@ public struct ProfileListView: View {
                 actionCatalog: actionCatalog,
                 builtinSkills: builtinSkills,
                 onSave: onCreate,
-                onLoadProviderAccounts: onLoadProviderAccounts
+                onLoadProviderAccounts: onLoadProviderAccounts,
+                onLoadDaemonGitHubAuthStatus: onLoadDaemonGitHubAuthStatus
             )
         }
         .sheet(item: $creatingDerivedFrom) { parent in
@@ -132,6 +137,7 @@ public struct ProfileListView: View {
                 builtinSkills: builtinSkills,
                 onSave: onCreate,
                 onLoadProviderAccounts: onLoadProviderAccounts,
+                onLoadDaemonGitHubAuthStatus: onLoadDaemonGitHubAuthStatus,
                 onLoadEditor: onLoadEditor,
                 onSaveWithInheritance: onSaveWithInheritance,
                 onCreateWithInheritance: onCreateWithInheritance
@@ -517,7 +523,7 @@ struct ProfileCard: View {
                 if profile.networkEnabled {
                     statBadge(icon: "shield.checkered", label: profile.networkMode.label, color: .green)
                 }
-                if profile.hasGithubPat || profile.hasAdoPat || profile.hasRegistryPat {
+                if profile.hasAdoPat || profile.hasRegistryPat {
                     statBadge(icon: credentialBadgeIcon, label: credentialBadgeLabel, color: credentialBadgeColor)
                 }
                 if profile.mcpServerCount > 0 {
@@ -577,7 +583,7 @@ struct ProfileCard: View {
     }
 
     private var credentialBadgeIcon: String {
-        switch profile.worstConfiguredPatExpiryStatus {
+        switch nonGitHubPatExpiryStatus {
         case .some(.expired(_)):
             "key.slash.fill"
         case .some(.soon(_)):
@@ -588,7 +594,7 @@ struct ProfileCard: View {
     }
 
     private var credentialBadgeLabel: String {
-        switch profile.worstConfiguredPatExpiryStatus {
+        switch nonGitHubPatExpiryStatus {
         case .some(.expired(_)):
             "Expired"
         case .some(.soon(_)):
@@ -599,7 +605,7 @@ struct ProfileCard: View {
     }
 
     private var credentialBadgeColor: Color {
-        switch profile.worstConfiguredPatExpiryStatus {
+        switch nonGitHubPatExpiryStatus {
         case .some(.expired(_)):
             .red
         case .some(.soon(_)):
@@ -607,6 +613,17 @@ struct ProfileCard: View {
         default:
             .orange
         }
+    }
+
+    private var nonGitHubPatExpiryStatus: PatExpiryStatus? {
+        let statuses = [
+            profile.hasAdoPat ? profile.adoPatExpiryStatus : nil,
+            profile.hasRegistryPat ? profile.registryPatExpiryStatus : nil,
+        ].compactMap { $0 }
+        if let expired = statuses.first(where: { if case .expired = $0 { true } else { false } }) {
+            return expired
+        }
+        return statuses.first(where: { if case .soon = $0 { true } else { false } }) ?? statuses.first
     }
 
     private var templateIcon: some View {

@@ -382,7 +382,7 @@ public struct ReferenceRepoRequest: Codable, Sendable, Hashable {
   public let url: String
   /// When the user picked this URL from a profile, this carries that
   /// profile's name so the daemon can authenticate the clone with the
-  /// profile's `githubPat` / `adoPat`. Nil for ad-hoc URLs.
+  /// daemon GitHub identity or the profile's ADO PAT. Nil for ad-hoc URLs.
   public let sourceProfile: String?
   public init(url: String, sourceProfile: String? = nil) {
     self.url = url

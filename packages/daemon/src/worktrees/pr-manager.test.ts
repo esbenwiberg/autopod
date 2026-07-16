@@ -24,22 +24,27 @@ vi.mock('node:util', async () => {
 });
 
 const logger = pino({ level: 'silent' });
+const githubAuth = {
+  resolveCredential: vi.fn(async () => ({ token: 'daemon-gh-token', username: 'x-access-token' })),
+  getStatus: vi.fn(),
+};
 
 describe('GhPrManager', () => {
   beforeEach(() => {
+    githubAuth.resolveCredential.mockClear();
     callCount = 0;
     execResponses.length = 0;
     execCalls.length = 0;
   });
 
   it('can be instantiated', () => {
-    const manager = new GhPrManager({ logger });
+    const manager = new GhPrManager({ logger, githubAuth });
     expect(manager).toBeDefined();
   });
 
   it('createPr returns trimmed PR URL with fallback metadata', async () => {
     execResponses.push({ stdout: 'https://github.com/org/repo/pull/42\n', stderr: '' });
-    const manager = new GhPrManager({ logger });
+    const manager = new GhPrManager({ logger, githubAuth });
 
     const result = await manager.createPr({
       worktreePath: '/tmp/worktree',
@@ -78,7 +83,7 @@ describe('GhPrManager', () => {
       stderr: '',
     });
 
-    const manager = new GhPrManager({ logger });
+    const manager = new GhPrManager({ logger, githubAuth });
     const result = await manager.mergePr({
       worktreePath: '/tmp/worktree',
       prUrl: 'https://github.com/org/repo/pull/42',
@@ -102,7 +107,7 @@ describe('GhPrManager', () => {
       stderr: '',
     });
 
-    const manager = new GhPrManager({ logger });
+    const manager = new GhPrManager({ logger, githubAuth });
     const result = await manager.mergePr({
       worktreePath: '/tmp/worktree',
       prUrl: 'https://github.com/org/repo/pull/42',
@@ -123,7 +128,7 @@ describe('GhPrManager', () => {
       stderr: '',
     });
 
-    const manager = new GhPrManager({ logger });
+    const manager = new GhPrManager({ logger, githubAuth });
     const status = await manager.getPrStatus({
       prUrl: 'https://github.com/org/repo/pull/42',
     });
@@ -154,7 +159,7 @@ describe('GhPrManager', () => {
       stderr: '',
     });
 
-    const manager = new GhPrManager({ logger });
+    const manager = new GhPrManager({ logger, githubAuth });
     const status = await manager.getPrStatus({
       prUrl: 'https://github.com/org/repo/pull/42',
     });
@@ -178,7 +183,7 @@ describe('GhPrManager', () => {
       stderr: '',
     });
 
-    const manager = new GhPrManager({ logger });
+    const manager = new GhPrManager({ logger, githubAuth });
     const status = await manager.getPrStatus({
       prUrl: 'https://github.com/org/repo/pull/42',
     });
@@ -263,7 +268,7 @@ describe('GhPrManager', () => {
       stderr: '',
     });
 
-    const manager = new GhPrManager({ logger });
+    const manager = new GhPrManager({ logger, githubAuth });
     const status = await manager.getPrStatus({
       prUrl: 'https://github.com/org/repo/pull/42',
     });
@@ -285,7 +290,7 @@ describe('GhPrManager', () => {
   });
 
   it('posts GitHub replies, resolves fixed threads, and preserves legacy fallbacks', async () => {
-    const manager = new GhPrManager({ logger });
+    const manager = new GhPrManager({ logger, githubAuth });
 
     const result = await manager.replyToReviewFeedback({
       prUrl: 'https://github.com/org/repo/pull/42',
@@ -326,7 +331,11 @@ describe('GhPrManager', () => {
         '-f',
         'body=Autopod fix pod response: Fixed\n\nAdded the null check.',
       ],
-      { cwd: '/tmp/worktree', timeout: 15_000 },
+      expect.objectContaining({
+        cwd: '/tmp/worktree',
+        timeout: 15_000,
+        env: expect.objectContaining({ GH_TOKEN: 'daemon-gh-token' }),
+      }),
     ]);
     expect(execCalls[1]).toEqual([
       'gh',
@@ -338,7 +347,11 @@ describe('GhPrManager', () => {
         '-F',
         'threadId=PRRT_thread_123',
       ],
-      { cwd: '/tmp/worktree', timeout: 15_000 },
+      expect.objectContaining({
+        cwd: '/tmp/worktree',
+        timeout: 15_000,
+        env: expect.objectContaining({ GH_TOKEN: 'daemon-gh-token' }),
+      }),
     ]);
     expect(execCalls[2]).toEqual([
       'gh',
@@ -350,7 +363,11 @@ describe('GhPrManager', () => {
         '-f',
         'body=Autopod fix pod response: Not applicable\n\nThis is generated code.',
       ],
-      { cwd: '/tmp/worktree', timeout: 15_000 },
+      expect.objectContaining({
+        cwd: '/tmp/worktree',
+        timeout: 15_000,
+        env: expect.objectContaining({ GH_TOKEN: 'daemon-gh-token' }),
+      }),
     ]);
     expect(execCalls[3]).toEqual([
       'gh',
@@ -362,8 +379,18 @@ describe('GhPrManager', () => {
         '-f',
         expect.stringContaining('gh-review-10'),
       ],
-      { cwd: '/tmp/worktree', timeout: 15_000 },
+      expect.objectContaining({
+        cwd: '/tmp/worktree',
+        timeout: 15_000,
+        env: expect.objectContaining({ GH_TOKEN: 'daemon-gh-token' }),
+      }),
     ]);
+    expect(githubAuth.resolveCredential).toHaveBeenCalledTimes(4);
+    for (const call of execCalls) {
+      const options = call[2] as { env?: NodeJS.ProcessEnv };
+      expect(options.env?.GH_TOKEN).toBe('daemon-gh-token');
+      expect(options.env?.GITHUB_TOKEN).toBeUndefined();
+    }
   });
 });
 

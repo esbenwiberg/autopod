@@ -470,7 +470,7 @@ describe('GET /pods/analytics/reliability', () => {
     expect(profile.adoPat).toBeNull();
     expect(profile.registryPat).toBeNull();
     expect(profile.openrouterApiKey).toBeNull();
-    expect(profile.hasGithubPat).toBe(true);
+    expect(profile.hasGithubPat).toBe(false);
     expect(profile.hasAdoPat).toBe(true);
     expect(profile.hasRegistryPat).toBe(true);
   });
@@ -518,7 +518,7 @@ describe('GET /pods/analytics/reliability', () => {
     expect(profileSnapshot.adoPat).toBeNull();
     expect(profileSnapshot.registryPat).toBeNull();
     expect(profileSnapshot.openrouterApiKey).toBeNull();
-    expect(profileSnapshot.hasGithubPat).toBe(true);
+    expect(profileSnapshot.hasGithubPat).toBe(false);
     expect(profileSnapshot.hasAdoPat).toBe(true);
     expect(profileSnapshot.hasRegistryPat).toBe(true);
   });
