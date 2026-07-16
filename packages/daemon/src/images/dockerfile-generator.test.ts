@@ -101,8 +101,15 @@ describe('base image templates', () => {
       expect(content, dockerfile).toContain(
         'COPY packages/pi-worker/src /opt/autopod/packages/pi-worker/src',
       );
-      expect(content, dockerfile).toContain('npm run build');
+      expect(content, dockerfile).toContain(
+        'COPY package.json pnpm-lock.yaml pnpm-workspace.yaml /opt/autopod/',
+      );
+      expect(content, dockerfile).toContain(
+        'pnpm --filter @autopod/pi-worker install --frozen-lockfile',
+      );
+      expect(content, dockerfile).toContain('pnpm --filter @autopod/pi-worker build');
       expect(content, dockerfile).toContain('npm install -g .');
+      expect(content, dockerfile).not.toContain('&& npm install \\');
       expect(content, dockerfile).not.toContain('COPY packages/pi-worker/dist');
       expect(content, dockerfile).not.toContain('@earendil-works/pi-coding-agent@latest');
     }
