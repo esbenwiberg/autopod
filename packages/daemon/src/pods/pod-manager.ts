@@ -6454,13 +6454,51 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
-        // Resolve profile-selected reference credentials before provisioning so missing or
-        // rejected daemon auth cannot leave a partially provisioned pod.
-        const referenceRepoCredentials = new Map<string, string>();
-        for (const repo of pod.referenceRepos ?? []) {
-          if (!repo.sourceProfile) continue;
-          const credential = await resolveRefRepoPat(repo, profileStore, deps.githubAuth, logger);
-          if (credential) referenceRepoCredentials.set(repo.mountPath, credential);
+        // Clone authenticated profile references before provisioning so auth/clone failures
+        // cannot leave a partial pod and daemon credentials never cross into the container.
+        const stagedReferenceRepos = new Map<
+          string,
+          { archivePath: string; containerArchive: string }
+        >();
+        try {
+          for (const repo of pod.referenceRepos ?? []) {
+            if (!repo.sourceProfile) continue;
+            const credential = await resolveRefRepoPat(repo, profileStore, deps.githubAuth, logger);
+            if (!credential) continue;
+            const sourceProfile = profileStore.get(repo.sourceProfile);
+            if (!sourceProfile) {
+              throw new Error(`Reference repo profile ${repo.sourceProfile} was not found`);
+            }
+            const refId = generateId(8);
+            const refWorktree = await worktreeManager.create({
+              repoUrl: repo.url,
+              branch: `autopod/ref-${podId}-${refId}`,
+              baseBranch: sourceProfile.defaultBranch ?? 'main',
+              sessionId: `ref-${podId}-${refId}`,
+              pat: credential,
+            });
+            const archivePath = path.join(os.tmpdir(), `autopod-ref-${podId}-${refId}.tgz`);
+            try {
+              await execFileAsync(
+                'tar',
+                ['--exclude=.git', '-czf', archivePath, '-C', refWorktree.worktreePath, '.'],
+                { timeout: 60_000 },
+              );
+            } finally {
+              await worktreeManager.cleanup(refWorktree.worktreePath).catch(() => {});
+            }
+            stagedReferenceRepos.set(repo.mountPath, {
+              archivePath,
+              containerArchive: `/tmp/.autopod-ref-${refId}.tgz`,
+            });
+          }
+        } catch (err) {
+          await Promise.all(
+            [...stagedReferenceRepos.values()].map(({ archivePath }) =>
+              rm(archivePath, { force: true }),
+            ),
+          );
+          throw err;
         }
 
         // Spawn container with port mapping so daemon + user can reach the app
@@ -6882,53 +6920,27 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
           for (const repo of referenceRepos) {
             const destPath = `/repos/${repo.mountPath}`;
-            const refPat = referenceRepoCredentials.get(repo.mountPath);
+            const staged = stagedReferenceRepos.get(repo.mountPath);
             try {
-              if (refPat) {
-                // Clone authenticated profile references on the daemon host, where the
-                // explicit git credential boundary is enforced, then transfer only the
-                // checked-out files. The daemon-wide GitHub credential must never enter
-                // an ordinary pod merely because it requested a reference repository.
-                const sourceProfile = repo.sourceProfile
-                  ? profileStore.get(repo.sourceProfile)
-                  : undefined;
-                if (!sourceProfile) {
-                  throw new Error(`Reference repo profile ${repo.sourceProfile} was not found`);
-                }
-                const refId = generateId(8);
-                const refWorktree = await worktreeManager.create({
-                  repoUrl: repo.url,
-                  branch: `autopod/ref-${podId}-${refId}`,
-                  baseBranch: sourceProfile.defaultBranch ?? 'main',
-                  sessionId: `ref-${podId}-${refId}`,
-                  pat: refPat,
-                });
-                const hostArchive = path.join(os.tmpdir(), `autopod-ref-${podId}-${refId}.tgz`);
-                const containerArchive = `/tmp/.autopod-ref-${refId}.tgz`;
+              if (staged) {
                 try {
-                  await execFileAsync(
-                    'tar',
-                    ['--exclude=.git', '-czf', hostArchive, '-C', refWorktree.worktreePath, '.'],
-                    { timeout: 60_000 },
-                  );
                   await containerManager.writeFile(
                     containerId,
-                    containerArchive,
-                    await readFile(hostArchive),
+                    staged.containerArchive,
+                    await readFile(staged.archivePath),
                   );
                   await containerManager.execInContainer(containerId, ['mkdir', '-p', destPath], {
                     timeout: 5_000,
                   });
                   await containerManager.execInContainer(
                     containerId,
-                    ['tar', '-xzf', containerArchive, '-C', destPath],
+                    ['tar', '-xzf', staged.containerArchive, '-C', destPath],
                     { timeout: 60_000 },
                   );
                 } finally {
-                  await rm(hostArchive, { force: true });
-                  await worktreeManager.cleanup(refWorktree.worktreePath).catch(() => {});
+                  await rm(staged.archivePath, { force: true });
                   await containerManager
-                    .execInContainer(containerId, ['rm', '-f', containerArchive], {
+                    .execInContainer(containerId, ['rm', '-f', staged.containerArchive], {
                       timeout: 5_000,
                     })
                     .catch(() => {});
