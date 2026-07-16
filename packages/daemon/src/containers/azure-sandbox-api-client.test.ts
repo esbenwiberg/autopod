@@ -410,7 +410,7 @@ describe('AzureSandboxApiClient', () => {
     const scriptPath = new URL(writeReq.url).searchParams.get('path') ?? '';
     expect(scriptPath).toMatch(/^\/tmp\/\.autopod-execstream-\d+-\d+\.sh$/);
     expect(String(writeReq.init?.body)).toBe(
-      '#!/bin/sh\ncd /workspace || exit 1\nexec echo hello\n',
+      '#!/bin/sh\numask 077\necho $$ > "$0.pid"\ncd /workspace || exit 1\nexec echo hello\n',
     );
     // The files API writes the wrapper as root:0644, so it is chmod-ed executable as root.
     expect(jsonBody(requests[1] ?? failRequest())).toEqual({
@@ -470,6 +470,39 @@ describe('AzureSandboxApiClient', () => {
       data: Buffer.from('hello\n').toString('base64'),
     });
     expect(chunks).toEqual([{ exitCode: 0 }]);
+  });
+
+  it('cancels a streaming exec by killing its recorded process and closing the socket', async () => {
+    let cancel: (() => Promise<void>) | undefined;
+    const { client, sockets, requests } = makeStreamingClient(
+      (socket) => {
+        socket.onopen?.({});
+      },
+      [
+        ...STREAM_SETUP_RESPONSES,
+        { status: 200, body: { stdout: '', stderr: '', exitCode: 0 } },
+      ],
+    );
+    const iterator = client
+      .execStream('sbx-1', ['pi', 'rpc'], {
+        stdin: true,
+        onCancelReady: (callback) => {
+          cancel = callback;
+        },
+      })
+      [Symbol.asyncIterator]();
+    const pending = iterator.next();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await cancel?.();
+
+    await expect(pending).rejects.toThrow(/closed before reporting an exit code/);
+    expect(sockets[0]?.closed).toBe(true);
+    const killRequest = requests[2] ?? failRequest();
+    const killBody = JSON.stringify(jsonBody(killRequest));
+    expect(killBody).toMatch(/\.autopod-execstream-\d+-\d+\.sh\.pid/);
+    expect(killBody).toContain('kill -TERM');
+    expect(killBody).toContain('kill -KILL');
   });
 
   it('fails the exec stream when the socket closes before an exit code', async () => {

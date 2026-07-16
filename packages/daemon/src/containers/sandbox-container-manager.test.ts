@@ -224,6 +224,28 @@ class StreamingFakeClient extends FakeSandboxApiClient {
   }
 }
 
+class CancellableStreamingFakeClient extends FakeSandboxApiClient {
+  cancelCalls = 0;
+
+  async *execStream(
+    _sandboxId: string,
+    _command: string[],
+    options?: SandboxExecOptions,
+  ): AsyncIterable<SandboxExecChunk> {
+    let release: (() => void) | undefined;
+    const cancelled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    options?.onCancelReady?.(async () => {
+      this.cancelCalls += 1;
+      release?.();
+    });
+    yield { stdout: 'started' };
+    await cancelled;
+    yield { exitCode: 143 };
+  }
+}
+
 function readStream(stream: Readable): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -535,6 +557,20 @@ describe('SandboxContainerManager', () => {
       expect(code).toBe(7);
       expect(client.execStreamOptions?.stdin).toBe(true);
       expect(client.stdinChunks).toEqual(['hello\n']);
+    });
+
+    it('kill terminates the remote native exec and unblocks its streams', async () => {
+      const client = new CancellableStreamingFakeClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      const stream = await mgr.execStreaming(id, ['pi', 'rpc'], { stdin: true });
+      const output = readStream(stream.stdout);
+
+      await stream.kill();
+
+      await expect(output).resolves.toBe('');
+      await expect(stream.exitCode).resolves.toBe(0);
+      expect(client.cancelCalls).toBe(1);
     });
   });
 

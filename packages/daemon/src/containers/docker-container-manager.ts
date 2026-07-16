@@ -962,17 +962,20 @@ export class DockerContainerManager implements ContainerManager {
     });
 
     const kill = async () => {
-      await this.execInContainer(
-        containerId,
-        ['sh', '-c', terminatePidFileScript(pidPath)],
-        { timeout: 5_000 },
-      );
-      const destroyable = muxStream as NodeJS.ReadableStream & { destroy?: () => void };
-      if (typeof destroyable.destroy === 'function') {
-        destroyable.destroy();
+      try {
+        await this.execInContainer(
+          containerId,
+          ['sh', '-c', terminatePidFileScript(pidPath)],
+          { timeout: 5_000 },
+        );
+      } finally {
+        const destroyable = muxStream as NodeJS.ReadableStream & { destroy?: () => void };
+        if (typeof destroyable.destroy === 'function') {
+          destroyable.destroy();
+        }
+        stdoutStream.destroy();
+        stderrStream.destroy();
       }
-      stdoutStream.destroy();
-      stderrStream.destroy();
     };
 
     this.logger.info({ containerId, command: safeCommand }, 'Streaming exec started');
@@ -1109,6 +1112,19 @@ interface DemuxWriterContext {
   containerId: string;
   command: string[];
   logger: Logger;
+}
+
+function terminatePidFileScript(pidPath: string): string {
+  return [
+    `pid_file=${pidPath}`,
+    '[ -s "$pid_file" ] || exit 0',
+    'pid=$(cat "$pid_file")',
+    'kill -TERM "$pid" 2>/dev/null || exit 0',
+    'i=0',
+    'while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
+    'kill -KILL "$pid" 2>/dev/null || true',
+    'rm -f "$pid_file"',
+  ].join('; ');
 }
 
 function createGuardedDemuxWriter(
