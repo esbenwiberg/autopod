@@ -103,4 +103,22 @@ struct ProfileAuthenticatorTests {
     #expect(!FileManager.default.fileExists(atPath: agentDir.path))
     #expect(!FileManager.default.fileExists(atPath: cancellationPath.path))
   }
+
+  @Test func cancellationMarkerSurvivesDelayedTerminalLaunch() throws {
+    let tag = UUID().uuidString
+    let agentDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pi-auth-delayed-test-\(tag)")
+    let cancellationPath = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pi-auth-delayed-test-cancel-\(tag)")
+    try FileManager.default.createDirectory(at: agentDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: cancellationPath) }
+
+    ProfileAuthenticator.cancelPiLogin(
+      agentDir: agentDir,
+      cancellationPath: cancellationPath
+    )
+
+    #expect(!FileManager.default.fileExists(atPath: agentDir.path))
+    #expect(FileManager.default.fileExists(atPath: cancellationPath.path))
+  }
 }

@@ -391,6 +391,11 @@ public final class ProfileAuthenticator: Sendable {
     kill "$watcher_pid" 2>/dev/null || true
     wait "$watcher_pid" 2>/dev/null || true
     echo "$status" > "\(statusPath.path)"
+    if [ -e "\(cancellationPath.path)" ]; then
+      rm -rf "\(agentDir.path)"
+      rm -f "\(cancellationPath.path)"
+      exit "$status"
+    fi
     echo ""
     if [ "$status" -eq 0 ]; then
       echo "Authentication complete. You can close this window."
@@ -454,12 +459,20 @@ public final class ProfileAuthenticator: Sendable {
     // wait for the shell's status record before deleting secrets so Pi cannot recreate them.
     FileManager.default.createFile(atPath: cancellationPath.path, contents: Data())
     let statusPath = agentDir.appendingPathComponent(".auth-status")
+    var terminationConfirmed = false
     for _ in 0..<40 {
-      if FileManager.default.fileExists(atPath: statusPath.path) { break }
+      if FileManager.default.fileExists(atPath: statusPath.path) {
+        terminationConfirmed = true
+        break
+      }
       Thread.sleep(forTimeInterval: 0.05)
     }
     try? FileManager.default.removeItem(at: agentDir)
-    try? FileManager.default.removeItem(at: cancellationPath)
+    // If Terminal has not launched yet, leave the non-secret marker behind. The delayed
+    // script will observe it, kill Pi before it can persist credentials, and remove it.
+    if terminationConfirmed {
+      try? FileManager.default.removeItem(at: cancellationPath)
+    }
   }
 
   private static func piProviderLabel(_ providerId: PiOAuthProvider) -> String {
