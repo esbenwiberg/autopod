@@ -1245,7 +1245,7 @@ describe('PodManager', () => {
       expect(ctx.enqueuedSessions).toContain(pod.id);
     });
 
-    it('blocks creation when the selected GitHub PAT is expired', () => {
+    it('ignores an expired legacy GitHub PAT during creation', () => {
       const ctx = createTestContext(undefined, {
         prProvider: 'github',
         githubPat: 'ghp_secret',
@@ -1255,7 +1255,7 @@ describe('PodManager', () => {
 
       expect(() =>
         manager.createSession({ profileName: 'test-profile', task: 'Do stuff' }, 'user-1'),
-      ).toThrow(/expired GitHub PAT|PAT_EXPIRED/);
+      ).not.toThrow();
     });
 
     it('allows creation when the selected PAT expires soon but has not expired', () => {
