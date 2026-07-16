@@ -143,7 +143,7 @@ describe('PiRuntime', () => {
     const cm = createContainerManager([first, second]);
     const runtime = new PiRuntime(logger, cm);
 
-    const spawnEvents = collect(runtime.spawn(config()));
+    const spawnEvents = collect(runtime.spawn(config({ workDir: '/workspace/packages/service' })));
     first.stdout.write(
       `${JSON.stringify({ type: 'response', id: 'pod-1:1', result: { sessionId: 'pi-s1' } })}\n`,
     );
@@ -162,7 +162,11 @@ describe('PiRuntime', () => {
     expect(cm.execStreaming).toHaveBeenLastCalledWith(
       'ctr-1',
       expect.arrayContaining(['rpc', '--jsonl']),
-      expect.objectContaining({ env: { FRESH: '1' }, stdin: true }),
+      expect.objectContaining({
+        cwd: '/workspace/packages/service',
+        env: { FRESH: '1' },
+        stdin: true,
+      }),
     );
     expect(second.stdin.read()?.toString('utf-8')).toBe(
       `${JSON.stringify({

@@ -83,7 +83,7 @@ export class PiRuntime implements Runtime {
       { component: 'pi-runtime', podId, containerId, hasSessionId: Boolean(sessionId) },
       'Resuming Pi managed worker in container',
     );
-    yield* this.run(podId, containerId, '/workspace', args, env ?? lastConfig.env, {
+    yield* this.run(podId, containerId, lastConfig.workDir, args, env ?? lastConfig.env, {
       method: sessionId ? 'follow-up' : 'prompt',
       message,
       model: lastConfig.model,
