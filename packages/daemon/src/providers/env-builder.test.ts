@@ -74,6 +74,15 @@ describe('buildProviderEnv', () => {
   });
 
   describe('anthropic provider (default)', () => {
+    it('builds the standard Anthropic API-key environment for Pi', async () => {
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-pi';
+
+      const result = await buildProviderEnv(makeProfile(), 'pod-1', logger, { runtime: 'pi' });
+
+      expect(result.env.ANTHROPIC_API_KEY_FILE).toBe('/run/autopod/anthropic-api-key');
+      expect(result.secretFiles[0]?.content).toBe('sk-ant-pi');
+    });
+
     it('writes API key to a secret file (not in env) when ANTHROPIC_API_KEY is set', async () => {
       process.env.ANTHROPIC_API_KEY = 'sk-ant-test123';
       const profile = makeProfile();
@@ -114,6 +123,21 @@ describe('buildProviderEnv', () => {
   });
 
   describe('openai provider (Codex)', () => {
+    it('rejects Codex ChatGPT credentials when building a Pi environment', async () => {
+      const profile = makeProfile({
+        modelProvider: 'openai',
+        providerCredentials: {
+          provider: 'openai',
+          authMode: 'chatgpt',
+          authJson: '{"tokens":{}}',
+        },
+      });
+
+      await expect(
+        buildProviderEnv(profile, 'pod-1', logger, { runtime: 'pi' }),
+      ).rejects.toThrow('incompatible with the Pi runtime');
+    });
+
     it('writes ChatGPT auth.json when profile has Codex login credentials', async () => {
       process.env.OPENAI_API_KEY = 'sk-openai-daemon-fallback';
       const authJson = JSON.stringify({ OPENAI_API_KEY: null, tokens: { id_token: 'redacted' } });

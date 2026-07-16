@@ -3310,6 +3310,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const result = await buildProviderEnv(profile, pod.id, logger, {
       profileStore,
       providerAccountStore,
+      runtime: pod.runtime,
     });
     rememberMaxCredentialLineage(pod.id, result);
     // Re-write credential files to container in case tokens were rotated.
@@ -6969,6 +6970,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const providerResult = await buildProviderEnv(profile, podId, logger, {
           profileStore,
           providerAccountStore,
+          runtime: pod.runtime,
         });
         rememberMaxCredentialLineage(podId, providerResult);
         const secretEnv: Record<string, string> = {

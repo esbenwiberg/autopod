@@ -6,6 +6,7 @@ import type {
   MaxSetupTokenCredentials,
   PiOAuthCredentials,
   Profile,
+  RuntimeType,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ProfileStore } from '../profiles/index.js';
@@ -24,6 +25,7 @@ const CONTAINER_WORK_DIR = '/workspace';
 export interface BuildProviderEnvOptions {
   profileStore?: ProfileStore;
   providerAccountStore?: ProviderAccountStore;
+  runtime?: RuntimeType;
 }
 
 /**
@@ -84,6 +86,9 @@ export async function buildProviderEnv(
 ): Promise<ProviderEnvResult> {
   const provider = profile.modelProvider;
   const auth = resolveProviderAuth(profile, options);
+  if (options.runtime === 'pi') {
+    assertPiEnvironmentCompatible(profile, auth);
+  }
   if (auth.owner?.type === 'provider-account') {
     options.providerAccountStore?.touchLastUsed(auth.owner.id);
   }
@@ -113,6 +118,24 @@ export async function buildProviderEnv(
     default:
       // Exhaustiveness check
       throw new Error(`Unknown model provider: ${provider as string}`);
+  }
+}
+
+function assertPiEnvironmentCompatible(
+  profile: Profile,
+  auth: ProviderAuthResolution,
+): void {
+  if (
+    profile.modelProvider === 'max' ||
+    profile.modelProvider === 'copilot' ||
+    profile.modelProvider === 'foundry' ||
+    (profile.modelProvider === 'openai' &&
+      auth.credentials?.provider === 'openai' &&
+      auth.credentials.authMode === 'chatgpt')
+  ) {
+    throw new Error(
+      `Profile "${profile.name}" uses credentials that are incompatible with the Pi runtime`,
+    );
   }
 }
 
