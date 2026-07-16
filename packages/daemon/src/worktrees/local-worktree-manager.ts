@@ -1730,6 +1730,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     bareRepoPath: string,
     pat?: string,
   ): Promise<AuthenticatedRemote> {
+    this.assertSupportedRemoteHost(repoUrl);
     if (this.isGitHubUrl(repoUrl)) {
       if (!this.githubAuth) {
         throw new DaemonGitHubAuthError(
@@ -1767,7 +1768,27 @@ export class LocalWorktreeManager implements WorktreeManager {
    * compatible with classic PATs too.
    * Strips any existing userinfo first so stale credentials in the stored URL don't double-inject. */
   private isGitHubUrl(url: string): boolean {
-    return /^https:\/\/([^@/]+@)?github\.com\//i.test(url);
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'https:' && parsed.hostname.toLowerCase() === 'github.com';
+    } catch {
+      return false;
+    }
+  }
+
+  private assertSupportedRemoteHost(url: string): void {
+    try {
+      const hostname = new URL(url).hostname.toLowerCase();
+      if (hostname !== 'github.com' && hostname !== 'dev.azure.com') {
+        throw new Error(`Refusing unsupported Git remote host: ${hostname}`);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Refusing unsupported Git remote')) {
+        throw err;
+      }
+      // Other validation layers reject malformed profile URLs. Preserve existing error ordering
+      // for corrupt cached remotes; importantly, no daemon GitHub credential is selected for them.
+    }
   }
 
   /** A bare repo is valid if it has been cloned (packed-refs or non-empty refs/). */

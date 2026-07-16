@@ -1498,6 +1498,25 @@ describe('LocalWorktreeManager', () => {
   // -------------------------------------------------------------------------
 
   describe('create', () => {
+    it('rejects a GitHub lookalike host before resolving or attaching credentials', async () => {
+      const githubAuth = fakeGitHubAuth();
+      const resolveCredential = vi.spyOn(githubAuth, 'resolveCredential');
+      manager = new LocalWorktreeManager({ cacheDir, worktreeDir, logger, githubAuth });
+
+      await expect(
+        manager.create({
+          repoUrl: 'https://github.com.attacker.example/org/repo.git',
+          branch: 'feat/host-boundary',
+          baseBranch: 'main',
+          pat: 'must-not-be-forwarded',
+        }),
+      ).rejects.toThrow('Refusing unsupported Git remote host');
+
+      expect(resolveCredential).not.toHaveBeenCalled();
+      expect(execFileMock).not.toHaveBeenCalled();
+      expect(fsMkdirMock).not.toHaveBeenCalled();
+    });
+
     it('fails before any git or filesystem work when daemon GitHub auth is not configured', async () => {
       manager = new LocalWorktreeManager({ cacheDir, worktreeDir, logger });
 

@@ -59,6 +59,15 @@ describe('ProfileValidator', () => {
     expect(result.errors[0]).toContain('github.com');
   });
 
+  it('should reject repository hosts that only contain github.com', () => {
+    const result = validateProfile({
+      ...validInput,
+      repoUrl: 'https://github.com.attacker.example/org/repo',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('github.com');
+  });
+
   it('should reject invalid URL format', () => {
     const result = validateProfile({ ...validInput, repoUrl: 'not-a-url' });
     expect(result.valid).toBe(false);

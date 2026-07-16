@@ -1730,6 +1730,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   async function resolveGitCredential(profile: Profile): Promise<string | undefined> {
     if (profile.prProvider === 'ado') return profile.adoPat ?? undefined;
+    if (!profile.repoUrl) {
+      throw new Error(`GitHub profile "${profile.name}" does not have a repository URL`);
+    }
+    let hostname: string;
+    try {
+      hostname = new URL(profile.repoUrl).hostname.toLowerCase();
+    } catch {
+      throw new Error(`GitHub profile "${profile.name}" has an invalid repository URL`);
+    }
+    if (hostname !== 'github.com') {
+      throw new Error(
+        `GitHub profile "${profile.name}" must use an exact github.com repository host`,
+      );
+    }
     return (await deps.githubAuth?.resolveCredential())?.token;
   }
 
@@ -5931,6 +5945,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let pod = podRepo.getOrThrow(podId);
       const startingAttempt = deriveAgentAttempt(pod.phaseTokenUsage);
       let visibleFailurePhase: OperatorFailurePhase = 'setup';
+      const stagedReferenceArchivePaths = new Set<string>();
 
       // Defense-in-depth: processPod must only run for pods in queued/handoff state.
       // The queue's activeIds dedup prevents most races, but this guard ensures
@@ -6478,6 +6493,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               pat: credential,
             });
             const archivePath = path.join(os.tmpdir(), `autopod-ref-${podId}-${refId}.tgz`);
+            stagedReferenceArchivePaths.add(archivePath);
             try {
               await execFileAsync(
                 'tar',
@@ -7949,6 +7965,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         } catch {
           /* swallow — best effort */
         }
+      } finally {
+        await Promise.all(
+          [...stagedReferenceArchivePaths].map((archivePath) => rm(archivePath, { force: true })),
+        );
       }
     },
 
