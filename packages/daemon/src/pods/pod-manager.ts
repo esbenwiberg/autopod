@@ -11997,9 +11997,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       reason?: string,
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
       const pod = podRepo.getOrThrow(podId);
-      if (pod.status !== 'failed' && pod.status !== 'review_required') {
+      const canRevalidateImmediately = pod.status === 'failed' || pod.status === 'review_required';
+      const canRecordForActiveRun = pod.status === 'running' || pod.status === 'validating';
+      if (!canRevalidateImmediately && !canRecordForActiveRun) {
         throw new AutopodError(
-          `Cannot approve fact waiver for pod ${podId} in status ${pod.status} — only failed or review_required pods`,
+          `Cannot approve fact waiver for pod ${podId} in status ${pod.status} — only running, validating, failed, or review_required pods`,
           'INVALID_STATE',
           409,
         );
@@ -12027,8 +12029,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podRepo.update(podId, { taskSummary: nextTaskSummary });
       emitActivityStatus(
         podId,
-        `Approved waiver for required fact ${factId} — revalidating existing worktree`,
+        canRevalidateImmediately
+          ? `Approved waiver for required fact ${factId} — revalidating existing worktree`
+          : `Approved waiver for required fact ${factId} — next validation will use the decision`,
       );
+
+      if (!canRevalidateImmediately) {
+        return { newCommits: false, result: 'fail' };
+      }
 
       return this.revalidateSession(podId, { force: true });
     },
