@@ -99,11 +99,13 @@ describe('resolveRefRepoPat', () => {
     expect(store.get).not.toHaveBeenCalled();
   });
 
-  it('does not return the legacy github PAT for a github URL when prProvider=github', async () => {
+  it('fails closed instead of using a legacy GitHub PAT when daemon auth is absent', async () => {
     const profile = makeProfile({ githubPat: 'gh_token', prProvider: 'github' });
     const store = { get: vi.fn().mockReturnValue(profile) };
     const repo = { ...repoBase, sourceProfile: 'duck' };
-    expect(await resolveRefRepoPat(repo, store)).toBeUndefined();
+    await expect(resolveRefRepoPat(repo, store)).rejects.toThrow(
+      'sudo -u <daemon-user> gh auth login',
+    );
   });
 
   it('returns the ADO PAT when prProvider=ado', async () => {

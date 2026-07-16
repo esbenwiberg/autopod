@@ -1,6 +1,6 @@
 import type { ReferenceRepo } from '@autopod/shared';
 import type { Logger } from 'pino';
-import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
+import { type DaemonGitHubAuth, DaemonGitHubAuthError } from '../github/daemon-github-auth.js';
 import type { ProfileStore } from '../profiles/profile-store.js';
 
 function deriveMountName(url: string): string {
@@ -55,5 +55,11 @@ export async function resolveRefRepoPat(
     return undefined;
   }
   if (profile.prProvider === 'ado') return profile.adoPat ?? undefined;
-  return (await githubAuth?.resolveCredential())?.token;
+  if (!githubAuth) {
+    throw new DaemonGitHubAuthError(
+      'Daemon GitHub authentication is not configured',
+      'GH_UNAUTHENTICATED',
+    );
+  }
+  return (await githubAuth.resolveCredential()).token;
 }

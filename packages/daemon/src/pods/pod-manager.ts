@@ -6876,33 +6876,53 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const refPat = await resolveRefRepoPat(repo, profileStore, deps.githubAuth, logger);
             try {
               if (refPat) {
-                // Use a git credential helper script to avoid embedding the PAT in the
-                // clone URL (which would expose it in /proc/<pid>/cmdline). The script
-                // is written to a tmpfs path, used for the single clone, then deleted.
-                const credHelper = `/tmp/.autopod-refcred-${generateId(8)}`;
-                // Write a store-format credentials line for git credential-store
-                const { hostname } = new URL(repo.url);
-                const credLine = `https://x-access-token:${refPat}@${hostname}`;
-                await containerManager.writeFile(containerId, credHelper, `${credLine}\n`);
+                // Clone authenticated profile references on the daemon host, where the
+                // explicit git credential boundary is enforced, then transfer only the
+                // checked-out files. The daemon-wide GitHub credential must never enter
+                // an ordinary pod merely because it requested a reference repository.
+                const sourceProfile = repo.sourceProfile
+                  ? profileStore.get(repo.sourceProfile)
+                  : undefined;
+                if (!sourceProfile) {
+                  throw new Error(`Reference repo profile ${repo.sourceProfile} was not found`);
+                }
+                const refId = generateId(8);
+                const refWorktree = await worktreeManager.create({
+                  repoUrl: repo.url,
+                  branch: `autopod/ref-${podId}-${refId}`,
+                  baseBranch: sourceProfile.defaultBranch ?? 'main',
+                  sessionId: `ref-${podId}-${refId}`,
+                  pat: refPat,
+                });
+                const hostArchive = path.join(os.tmpdir(), `autopod-ref-${podId}-${refId}.tgz`);
+                const containerArchive = `/tmp/.autopod-ref-${refId}.tgz`;
                 try {
+                  await execFileAsync(
+                    'tar',
+                    ['--exclude=.git', '-czf', hostArchive, '-C', refWorktree.worktreePath, '.'],
+                    { timeout: 60_000 },
+                  );
+                  await containerManager.writeFile(
+                    containerId,
+                    containerArchive,
+                    await readFile(hostArchive),
+                  );
+                  await containerManager.execInContainer(containerId, ['mkdir', '-p', destPath], {
+                    timeout: 5_000,
+                  });
                   await containerManager.execInContainer(
                     containerId,
-                    [
-                      'git',
-                      '-c',
-                      `credential.helper=store --file ${credHelper}`,
-                      'clone',
-                      '--depth',
-                      '1',
-                      repo.url,
-                      destPath,
-                    ],
+                    ['tar', '-xzf', containerArchive, '-C', destPath],
                     { timeout: 60_000 },
                   );
                 } finally {
-                  await containerManager.execInContainer(containerId, ['rm', '-f', credHelper], {
-                    timeout: 5_000,
-                  });
+                  await rm(hostArchive, { force: true });
+                  await worktreeManager.cleanup(refWorktree.worktreePath).catch(() => {});
+                  await containerManager
+                    .execInContainer(containerId, ['rm', '-f', containerArchive], {
+                      timeout: 5_000,
+                    })
+                    .catch(() => {});
                 }
               } else {
                 await containerManager.execInContainer(
