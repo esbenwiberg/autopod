@@ -457,7 +457,10 @@ function parsePiCredential(
     !credential ||
     typeof credential !== 'object' ||
     Array.isArray(credential) ||
-    Object.keys(credential as Record<string, unknown>).length === 0
+    !['access', 'accessToken', 'token'].some((field) => {
+      const value = (credential as Record<string, unknown>)[field];
+      return typeof value === 'string' && value.trim().length > 0;
+    })
   ) {
     logger.warn({ profileName, providerId }, 'Pi auth.json provider entry was malformed');
     return null;

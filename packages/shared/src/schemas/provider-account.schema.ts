@@ -79,7 +79,14 @@ const piOAuthCredentialsSchema = z.object({
   providerId: z.enum(['anthropic', 'openai-codex', 'github-copilot']),
   credential: z
     .record(z.unknown())
-    .refine((credential) => Object.keys(credential).length > 0, 'Pi credential cannot be empty'),
+    .refine(
+      (credential) =>
+        ['access', 'accessToken', 'token'].some(
+          (field) =>
+            typeof credential[field] === 'string' && credential[field].trim().length > 0,
+        ),
+      'Pi credential must contain a non-empty access token',
+    ),
 });
 
 const providerAccountCredentialsSchema = z.union([

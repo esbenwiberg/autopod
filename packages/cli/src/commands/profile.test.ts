@@ -259,7 +259,7 @@ printf 'not-json' > "$PI_CODING_AGENT_DIR/auth.json"
   it('leaves profile credentials unchanged when the selected Pi credential is empty', async () => {
     const fakeBin = installFakePi(`
 mkdir -p "$PI_CODING_AGENT_DIR"
-printf '{"anthropic":{}}' > "$PI_CODING_AGENT_DIR/auth.json"
+printf '{"anthropic":{"accessToken":""}}' > "$PI_CODING_AGENT_DIR/auth.json"
 `);
     tempDirs.push(fakeBin);
     process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;

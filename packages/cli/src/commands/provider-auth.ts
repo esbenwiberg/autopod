@@ -179,7 +179,7 @@ export function extractPiCredential(
   if (
     typeof selected !== 'object' ||
     Array.isArray(selected) ||
-    Object.keys(selected as Record<string, unknown>).length === 0
+    !hasNonEmptyPiAccessCredential(selected as Record<string, unknown>)
   ) {
     throw new Error(`Pi credential for provider "${providerId}" was malformed.`);
   }
@@ -189,6 +189,12 @@ export function extractPiCredential(
     providerId,
     credential: selected as Record<string, unknown>,
   };
+}
+
+function hasNonEmptyPiAccessCredential(credential: Record<string, unknown>): boolean {
+  return ['access', 'accessToken', 'token'].some(
+    (field) => typeof credential[field] === 'string' && credential[field].trim().length > 0,
+  );
 }
 
 export async function runPiLogin(providerId: PiOAuthProviderId): Promise<ProviderCredentials> {
