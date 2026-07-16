@@ -17,17 +17,18 @@ function tokenKey(token: string): string {
 }
 
 export function createGitHubHandler(config: HandlerConfig): ActionHandler {
-  const { logger, getSecret } = config;
+  const { logger } = config;
   const log = logger.child({ handler: 'github' });
 
-  function getToken(): string {
-    const token = getSecret('GITHUB_TOKEN') ?? getSecret('github-pat');
-    if (!token) throw new Error('GitHub token not configured (GITHUB_TOKEN or github-pat)');
-    return token;
+  async function getToken(): Promise<string> {
+    if (!config.getGitHubToken) {
+      throw new Error('Daemon GitHub authentication is not configured');
+    }
+    return config.getGitHubToken();
   }
 
   async function githubFetch(path: string, accept?: string): Promise<unknown> {
-    const token = getToken();
+    const token = await getToken();
     const key = tokenKey(token);
     const rateState = rateLimitByToken.get(key) ?? { remaining: 5000, reset: 0 };
 

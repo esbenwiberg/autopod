@@ -84,7 +84,8 @@ function expectRedactedPatFields(
   expect(profile.githubPat).toBeNull();
   expect(profile.adoPat).toBeNull();
   expect(profile.registryPat).toBeNull();
-  expect(profile.hasGithubPat).toBe(expected.github ?? false);
+  // Legacy GitHub PAT presence is never exposed as current profile status.
+  expect(profile.hasGithubPat).toBe(false);
   expect(profile.hasAdoPat).toBe(expected.ado ?? false);
   expect(profile.hasRegistryPat).toBe(expected.registry ?? false);
 }

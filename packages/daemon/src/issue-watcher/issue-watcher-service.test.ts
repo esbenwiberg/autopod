@@ -541,9 +541,7 @@ human_review: []
     expect(client.addComment).toHaveBeenCalledWith('42', expect.stringContaining('queue full'));
   });
 
-  it('skips and warns when issue watcher enabled but no PAT in inheritance chain', async () => {
-    // Override the derived profile to have null githubPat (simulates base profile
-    // with no github_pat — inheritance returns null, hasPat = false).
+  it('does not require a legacy GitHub PAT in the inheritance chain', async () => {
     mockProfileStore.setProfile('test-profile', {
       prProvider: 'github',
       githubPat: null,
@@ -556,7 +554,7 @@ human_review: []
     const { service } = createService([
       {
         id: '99',
-        title: 'Should be skipped',
+        title: 'Uses daemon authentication',
         body: '',
         url: 'https://github.com/org/repo/issues/99',
         labels: ['autopod'],
@@ -568,7 +566,7 @@ human_review: []
     await new Promise((r) => setTimeout(r, 50));
     service.stop();
 
-    expect(mockSessionManager.createSession).not.toHaveBeenCalled();
+    expect(mockSessionManager.createSession).toHaveBeenCalledTimes(1);
   });
 
   describe('safety_events instrumentation', () => {

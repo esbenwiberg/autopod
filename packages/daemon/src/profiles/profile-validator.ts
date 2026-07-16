@@ -72,7 +72,7 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
       const url = new URL(repoUrl as string);
       if (url.protocol !== 'https:') {
         errors.push('repoUrl must use https://');
-      } else if (!url.hostname.includes('github.com') && !url.hostname.includes('dev.azure.com')) {
+      } else if (url.hostname !== 'github.com' && url.hostname !== 'dev.azure.com') {
         errors.push('repoUrl must be a github.com or dev.azure.com URL');
       }
     } catch {

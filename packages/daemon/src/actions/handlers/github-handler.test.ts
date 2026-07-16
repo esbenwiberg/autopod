@@ -51,37 +51,38 @@ describe('createGitHubHandler', () => {
         repo: 'octocat/hello-world',
         issue_number: 1,
       }),
-    ).rejects.toThrow(/token/i);
+    ).rejects.toThrow(/daemon GitHub authentication/i);
   });
 
   it('returns a handler with handlerType "github"', () => {
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
     expect(handler.handlerType).toBe('github');
   });
 
-  it('accepts token from github-pat fallback', async () => {
-    vi.mocked(global.fetch).mockResolvedValueOnce(mockResponse({ number: 1, title: 'Test' }));
-
+  it('does not accept the legacy github-pat fallback', async () => {
     const handler = createGitHubHandler({
       logger,
       getSecret: (ref) => (ref === 'github-pat' ? 'ghp_fallback' : undefined),
     });
 
-    // Should not throw — uses github-pat fallback
-    await handler.execute(makeAction('read_issue', ['number', 'title']), {
-      repo: 'octocat/hello-world',
-      issue_number: 1,
-    });
-    expect(global.fetch).toHaveBeenCalled();
+    await expect(
+      handler.execute(makeAction('read_issue', ['number', 'title']), {
+        repo: 'octocat/hello-world',
+        issue_number: 1,
+      }),
+    ).rejects.toThrow(/daemon GitHub authentication/i);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('throws on invalid repo format', async () => {
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     await expect(
@@ -101,7 +102,8 @@ describe('createGitHubHandler', () => {
 
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     const result = await handler.execute(makeAction('read_issue', ['number', 'title', 'state']), {
@@ -126,7 +128,8 @@ describe('createGitHubHandler', () => {
 
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     await handler.execute(makeAction('search_issues'), {
@@ -151,7 +154,8 @@ describe('createGitHubHandler', () => {
 
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     const result = await handler.execute(makeAction('read_file', ['content', 'path']), {
@@ -172,7 +176,8 @@ describe('createGitHubHandler', () => {
 
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     const result = await handler.execute(makeAction('read_pr_diff', ['filename', 'patch']), {
@@ -192,7 +197,8 @@ describe('createGitHubHandler', () => {
 
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     await expect(
@@ -206,7 +212,8 @@ describe('createGitHubHandler', () => {
   it('throws on unknown action', async () => {
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     await expect(
@@ -224,7 +231,8 @@ describe('createGitHubHandler', () => {
 
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     // Should succeed — remaining is above threshold and reset is in the past
@@ -249,7 +257,8 @@ describe('createGitHubHandler', () => {
 
     const handler = createGitHubHandler({
       logger,
-      getSecret: (ref) => (ref === 'GITHUB_TOKEN' ? 'ghp_test' : undefined),
+      getSecret: () => undefined,
+      getGitHubToken: async () => 'ghp_test',
     });
 
     // First call sets the rate limit state

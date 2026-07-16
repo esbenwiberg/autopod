@@ -11,6 +11,8 @@ services:
       - ./packages/daemon/src:/app/packages/daemon/src:ro
       - ./packages/shared/src:/app/packages/shared/src:ro
       - daemon-data:/app/data
+      # Authenticate this container identity with `docker compose exec daemon gh auth login`.
+      - daemon-gh-config:/var/lib/autopod/gh
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - PORT=3100
@@ -18,6 +20,7 @@ services:
       - DB_PATH=/app/data/autopod.db
       - LOG_LEVEL=debug
       - NODE_ENV=development
+      - GH_CONFIG_DIR=/var/lib/autopod/gh
       # These are required but not used in Phase 1
       - ENTRA_CLIENT_ID=placeholder
       - ENTRA_TENANT_ID=placeholder
@@ -25,3 +28,4 @@ services:
 
 volumes:
   daemon-data:
+  daemon-gh-config:

@@ -404,6 +404,12 @@ public struct SettingsView: View {
                                guard let api = connectionManager.api else { return [] }
                                return try await api.listProviderAccounts(provider: provider)
                            },
+                           onLoadDaemonGitHubAuthStatus: {
+                               guard let api = connectionManager.api else {
+                                   throw DaemonError.networkError("Not connected to daemon")
+                               }
+                               return try await api.getDaemonGitHubAuthStatus()
+                           },
                            onLoadEditor: onLoadProfileEditor,
                            onSaveWithInheritance: onSaveProfileWithInheritance,
                            onCreateWithInheritance: onCreateProfileWithInheritance,

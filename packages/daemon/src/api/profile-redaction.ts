@@ -11,7 +11,8 @@ export function redactProfileSecrets(profile: Profile): PublicProfile {
       ? { provider: profile.providerCredentials.provider }
       : null,
     hasAdoPat: profile.adoPat !== null,
-    hasGithubPat: profile.githubPat !== null,
+    // Legacy GitHub PAT presence is deliberately not part of ordinary profile presentation.
+    hasGithubPat: false,
     hasRegistryPat: profile.registryPat !== null,
   };
 }
