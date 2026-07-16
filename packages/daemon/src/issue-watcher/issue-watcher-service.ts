@@ -11,6 +11,7 @@ import {
   processContent,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodManager } from '../pods/pod-manager.js';
 import type { ProfileStore } from '../profiles/profile-store.js';
@@ -38,7 +39,11 @@ export interface IssueWatcherServiceDependencies {
   logger: Logger;
   pollIntervalMs?: number;
   /** Override for testing — inject a mock client factory */
-  issueClientFactory?: (profile: Profile) => IssueClient;
+  issueClientFactory?: (
+    profile: Profile,
+    githubAuth?: DaemonGitHubAuth,
+  ) => IssueClient | Promise<IssueClient>;
+  githubAuth?: DaemonGitHubAuth;
 }
 
 export function createIssueWatcherService(
@@ -563,9 +568,7 @@ ${input.body}${requirementsSection}
   }
 
   async function pollProfile(profile: Profile): Promise<void> {
-    // Validate PAT is available
-    const hasPat = profile.prProvider === 'ado' ? !!profile.adoPat : !!profile.githubPat;
-    if (!hasPat) {
+    if (profile.prProvider === 'ado' && !profile.adoPat) {
       logger.warn(
         {
           profile: profile.name,
@@ -581,7 +584,7 @@ ${input.body}${requirementsSection}
 
     let client: IssueClient;
     try {
-      client = issueClientFactory(profile);
+      client = await issueClientFactory(profile, deps.githubAuth);
     } catch (err) {
       logger.error({ err, profile: profile.name }, 'Failed to create issue client');
       return;

@@ -36,7 +36,7 @@ The critical security property is **containment**: an agent that has been compro
 | Asset | Location | Protection |
 |---|---|---|
 | Provider API keys (Anthropic, MAX, Foundry) | `profiles.provider_credentials` (DB) | AES-256-GCM encrypted; key at `~/.autopod/secrets.key` (0600) |
-| ADO / GitHub PATs | `profiles.ado_pat`, `profiles.github_pat` | AES-256-GCM encrypted |
+| ADO PAT / legacy GitHub PAT | `profiles.ado_pat`, `profiles.github_pat` | AES-256-GCM encrypted; legacy GitHub value is retained only for compatibility and is not an authority |
 | Registry PATs | `profiles.registry_pat` | AES-256-GCM encrypted |
 | Secrets key | `~/.autopod/secrets.key` | Filesystem 0600; must be backed up offline |
 | Pod HMAC tokens | Issued per-pod | Short-lived, HMAC-SHA256; Bearer-only (no query-string) |

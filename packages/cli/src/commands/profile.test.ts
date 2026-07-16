@@ -69,6 +69,11 @@ function createMockClient() {
       }),
     ),
     updateProfile: vi.fn().mockResolvedValue(createProfile()),
+    getGitHubAuthStatus: vi.fn().mockResolvedValue({
+      available: true,
+      login: 'autopod-dev',
+      setup: 'setup',
+    }),
   } as unknown as AutopodClient;
 }
 
@@ -117,6 +122,19 @@ describe('profile commands', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('team-openai'));
   });
 
+  it('does not present legacy GitHub PAT status or expiry', async () => {
+    vi.mocked(mockClient.getProfile).mockResolvedValueOnce(
+      createProfile({ hasGithubPat: true, githubPatExpiresAt: '2026-08-01' }),
+    );
+
+    await program.parseAsync(['node', 'ap', 'profile', 'show', 'my-app']);
+
+    const output = logSpy.mock.calls.flat().join('\n');
+    expect(output).not.toContain('GitHub 2026-08-01');
+    expect(output).not.toContain('GitHub PAT');
+    expect(output).toContain('daemon gh authenticated as autopod-dev');
+  });
+
   it('includes validationSetupCommand in the create template', async () => {
     process.env.EDITOR = 'true';
 
@@ -161,5 +179,22 @@ describe('profile commands', () => {
       'my-app',
       expect.objectContaining({ validationSetupCommand: 'pip install -e ".[dev]" semgrep' }),
     );
+  });
+
+  it('does not submit legacy GitHub PAT fields from profile edit', async () => {
+    process.env.EDITOR = 'true';
+    vi.mocked(mockClient.getProfile).mockResolvedValueOnce(
+      createProfile({ githubPat: 'legacy-value', githubPatExpiresAt: '2026-08-01' }),
+    );
+
+    await program.parseAsync(['node', 'ap', 'profile', 'edit', 'my-app']);
+
+    const updates = vi.mocked(mockClient.updateProfile).mock.calls[0]?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(updates).not.toHaveProperty('githubPat');
+    expect(updates).not.toHaveProperty('githubPatExpiresAt');
+    expect(updates).toHaveProperty('adoPatExpiresAt');
   });
 });

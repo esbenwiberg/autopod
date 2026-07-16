@@ -232,7 +232,7 @@ describe('diff route', () => {
       repoUrl: 'https://github.com/acme/project.git',
       branch: 'autopod/safe-marten',
       baseBranch: 'main',
-      pat: 'ghp_test',
+      pat: undefined,
       startCommitSha: 'start-sha',
     });
   });

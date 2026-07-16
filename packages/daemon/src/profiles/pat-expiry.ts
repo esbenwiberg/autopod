@@ -22,18 +22,6 @@ function isExpired(expiresAt: string | null | undefined, today: string): expires
 export function findExpiredPat(profile: Profile, now = new Date()): ExpiredPat | null {
   const today = todayDateString(now);
 
-  if (
-    profile.prProvider === 'github' &&
-    profile.githubPat &&
-    isExpired(profile.githubPatExpiresAt, today)
-  ) {
-    return {
-      field: 'githubPatExpiresAt',
-      label: 'GitHub PAT',
-      expiresAt: profile.githubPatExpiresAt,
-    };
-  }
-
   if (profile.prProvider === 'ado' && profile.adoPat && isExpired(profile.adoPatExpiresAt, today)) {
     return {
       field: 'adoPatExpiresAt',

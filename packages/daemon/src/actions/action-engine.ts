@@ -33,6 +33,7 @@ export interface ActionEngineDependencies {
   safetyEventsRepo?: SafetyEventsRepository;
   logger: Logger;
   getSecret: (ref: string) => string | undefined;
+  getGitHubToken?: () => Promise<string>;
   /**
    * Override for the SSRF guard used by the generic HTTP handler. Defaults to
    * `assertPublicUrl` (rejects private/loopback/metadata addresses). Tests
@@ -52,6 +53,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
     safetyEventsRepo,
     logger,
     getSecret,
+    getGitHubToken,
     ssrfGuard,
     podRepo,
     profileStore,
@@ -59,7 +61,7 @@ export function createActionEngine(deps: ActionEngineDependencies): ActionEngine
   const log = logger.child({ component: 'action-engine' });
 
   // Create handler instances
-  const handlerConfig: HandlerConfig = { logger: log, getSecret, ssrfGuard };
+  const handlerConfig: HandlerConfig = { logger: log, getSecret, getGitHubToken, ssrfGuard };
   const handlers: Record<string, ActionHandler> = {
     github: createGitHubHandler(handlerConfig),
     ado: createAdoHandler(handlerConfig),

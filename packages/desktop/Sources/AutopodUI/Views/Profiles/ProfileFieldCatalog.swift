@@ -350,18 +350,6 @@ public enum ProfileOverrideCatalog {
 
         // MARK: Credentials
         .init(
-            key: "githubPat",
-            label: "GitHub PAT",
-            section: .credentials,
-            help: "Personal access token for GitHub PR and action operations."
-        ),
-        .init(
-            key: "githubPatExpiresAt",
-            label: "GitHub PAT Expiry",
-            section: .credentials,
-            help: "Date the GitHub PAT expires, formatted as YYYY-MM-DD."
-        ),
-        .init(
             key: "adoPat",
             label: "ADO PAT",
             section: .credentials,

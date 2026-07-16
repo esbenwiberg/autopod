@@ -464,6 +464,10 @@ public actor DaemonAPI {
     try await request("GET", "/profiles/\(name)")
   }
 
+  public func getDaemonGitHubAuthStatus() async throws -> DaemonGitHubAuthStatusResponse {
+    try await request("GET", "/profiles/github-auth/status")
+  }
+
   /// Editor-oriented fetch: returns raw + resolved + parent + per-field source map.
   /// Used by the profile editor to render Inherited/Overridden chips.
   public func getProfileEditor(_ name: String) async throws -> ProfileEditorResponse {

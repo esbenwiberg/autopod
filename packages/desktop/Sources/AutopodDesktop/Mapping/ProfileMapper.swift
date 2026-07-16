@@ -70,11 +70,11 @@ public enum ProfileMapper {
       maxBudgetExtensions: response.maxBudgetExtensions,
       issueWatcherEnabled: response.issueWatcherEnabled ?? false,
       issueWatcherLabelPrefix: response.issueWatcherLabelPrefix ?? "autopod",
-      hasGithubPat: response.hasGithubPat ?? (response.githubPat != nil),
+      hasGithubPat: false,
       hasAdoPat: response.hasAdoPat ?? (response.adoPat != nil),
       hasRegistryPat: response.hasRegistryPat ?? (response.registryPat != nil),
       openrouterApiKey: response.openrouterApiKey,
-      githubPatExpiresAt: response.githubPatExpiresAt,
+      githubPatExpiresAt: nil,
       adoPatExpiresAt: response.adoPatExpiresAt,
       registryPatExpiresAt: response.registryPatExpiresAt,
       networkEnabled: response.networkPolicy?.enabled ?? false,
@@ -297,11 +297,9 @@ public enum ProfileMapper {
     if let v = profile.mergePollIntervalSec { d["mergePollIntervalSec"] = v }
     else { d["mergePollIntervalSec"] = NSNull() }
     if let v = profile.containerMemoryGb { d["containerMemoryGb"] = v }
-    if let v = profile.githubPat { d["githubPat"] = v }
     if let v = profile.adoPat { d["adoPat"] = v }
     if let v = profile.openrouterApiKey { d["openrouterApiKey"] = v }
     if let v = profile.registryPat { d["registryPat"] = v }
-    d["githubPatExpiresAt"] = profile.githubPatExpiresAt ?? NSNull()
     d["adoPatExpiresAt"] = profile.adoPatExpiresAt ?? NSNull()
     d["registryPatExpiresAt"] = profile.registryPatExpiresAt ?? NSNull()
     if let v = profile.extendsProfile { d["extends"] = v }
