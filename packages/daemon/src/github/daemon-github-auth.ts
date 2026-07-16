@@ -118,9 +118,13 @@ async function defaultGhRunner(
   args: string[],
   options: { timeout: number },
 ): Promise<{ stdout: string; stderr: string }> {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => key !== 'GH_TOKEN' && key !== 'GITHUB_TOKEN'),
+  );
   const { stdout, stderr } = await execFileAsync('gh', args, {
     timeout: options.timeout,
     windowsHide: true,
+    env,
   });
   return { stdout, stderr };
 }

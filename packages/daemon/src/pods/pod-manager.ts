@@ -6454,6 +6454,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
+        // Resolve profile-selected reference credentials before provisioning so missing or
+        // rejected daemon auth cannot leave a partially provisioned pod.
+        const referenceRepoCredentials = new Map<string, string>();
+        for (const repo of pod.referenceRepos ?? []) {
+          if (!repo.sourceProfile) continue;
+          const credential = await resolveRefRepoPat(repo, profileStore, deps.githubAuth, logger);
+          if (credential) referenceRepoCredentials.set(repo.mountPath, credential);
+        }
+
         // Spawn container with port mapping so daemon + user can reach the app
         // Prefer the per-profile warm image when one has been built — that's
         // where customisations like Serena / roslyn-codelens-mcp live. Fall
@@ -6873,7 +6882,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
           for (const repo of referenceRepos) {
             const destPath = `/repos/${repo.mountPath}`;
-            const refPat = await resolveRefRepoPat(repo, profileStore, deps.githubAuth, logger);
+            const refPat = referenceRepoCredentials.get(repo.mountPath);
             try {
               if (refPat) {
                 // Clone authenticated profile references on the daemon host, where the
@@ -6932,6 +6941,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 );
               }
             } catch (err) {
+              if (repo.sourceProfile) throw err;
               logger.warn(
                 { err, podId, url: repo.url },
                 'Failed to clone reference repo — skipping',
