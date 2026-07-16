@@ -176,7 +176,11 @@ export function extractPiCredential(
   if (!selected) {
     throw new Error(`Pi auth.json did not contain credentials for provider "${providerId}".`);
   }
-  if (typeof selected !== 'object' || Array.isArray(selected)) {
+  if (
+    typeof selected !== 'object' ||
+    Array.isArray(selected) ||
+    Object.keys(selected as Record<string, unknown>).length === 0
+  ) {
     throw new Error(`Pi credential for provider "${providerId}" was malformed.`);
   }
 

@@ -81,7 +81,9 @@ const openRouterCredentialsSchema = z.object({
 const piOAuthCredentialsSchema = z.object({
   provider: z.literal('pi'),
   providerId: z.enum(['anthropic', 'openai-codex', 'github-copilot']),
-  credential: z.record(z.unknown()),
+  credential: z
+    .record(z.unknown())
+    .refine((credential) => Object.keys(credential).length > 0, 'Pi credential cannot be empty'),
 });
 
 export const providerCredentialsSchema = z.union([
