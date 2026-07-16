@@ -139,6 +139,7 @@ export interface PodUpdates {
   } | null;
   claudeSessionId?: string | null;
   codexSessionId?: string | null;
+  piSessionId?: string | null;
   contract?: SpecContract | null;
   recoveryWorktreePath?: string | null;
   reworkReason?: string | null;
@@ -328,6 +329,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     contract: row.contract ? (JSON.parse(row.contract as string) as SpecContract) : null,
     claudeSessionId: (row.claude_session_id as string) ?? null,
     codexSessionId: (row.codex_session_id as string) ?? null,
+    piSessionId: (row.pi_session_id as string) ?? null,
     options: readPodFromRow(row),
     outputMode: (row.output_mode as OutputMode) ?? 'pr',
     startBranch: (row.start_branch as string) ?? null,
@@ -622,6 +624,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.codexSessionId !== undefined) {
         setClauses.push('codex_session_id = @codexSessionId');
         params.codexSessionId = changes.codexSessionId;
+      }
+      if (changes.piSessionId !== undefined) {
+        setClauses.push('pi_session_id = @piSessionId');
+        params.piSessionId = changes.piSessionId;
       }
       if (changes.contract !== undefined) {
         setClauses.push('contract = @contract');

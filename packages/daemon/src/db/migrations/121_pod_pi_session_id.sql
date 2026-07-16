@@ -1,0 +1,1 @@
+ALTER TABLE pods ADD COLUMN pi_session_id TEXT DEFAULT NULL;

@@ -5347,6 +5347,53 @@ describe('PodManager', () => {
 
       await expect(manager.sendMessage(pod.id, 'hello')).rejects.toThrow(AutopodError);
     });
+
+    it('primes durable Pi session and config before reply resume after restart', async () => {
+      const ctx = createTestContext(undefined, { defaultRuntime: 'pi' });
+      const piRuntime = {
+        ...createMockRuntime(),
+        type: 'pi' as const,
+        setPiSessionId: vi.fn(),
+        setPiResumeConfig: vi.fn(),
+      };
+      ctx.deps.runtimeRegistry = createMockRuntimeRegistry(piRuntime);
+      ctx.deps.sessionTokenIssuer = { generate: vi.fn(() => 'pod-token') };
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do stuff', runtime: 'pi' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'awaiting_input',
+        containerId: 'ctr-1',
+        piSessionId: 'pi-session-1',
+        pendingEscalation: null,
+      });
+
+      await manager.sendMessage(pod.id, 'continue please');
+
+      expect(piRuntime.setPiSessionId).toHaveBeenCalledWith(pod.id, 'pi-session-1');
+      expect(piRuntime.setPiResumeConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          podId: pod.id,
+          containerId: 'ctr-1',
+          customInstructions: 'resume',
+          mcpServers: expect.arrayContaining([
+            expect.objectContaining({
+              type: 'http',
+              name: 'escalation',
+              headers: { Authorization: 'Bearer pod-token' },
+            }),
+          ]),
+        }),
+      );
+      expect(piRuntime.resume).toHaveBeenCalledWith(
+        pod.id,
+        'continue please',
+        'ctr-1',
+        undefined,
+      );
+    });
   });
 
   describe('workspace pods', () => {
