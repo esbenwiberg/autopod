@@ -12000,12 +12000,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
-      const fact = pod.lastValidationResult?.factValidation?.results.find(
+      const latestFact = pod.lastValidationResult?.factValidation?.results.find(
         (result) => result.factId === factId,
       );
+      const historicalFact = validationRepo
+        ? [...validationRepo.getForSession(podId)]
+            .reverse()
+            .map((validation) =>
+              validation.result.factValidation?.results.find((result) => result.factId === factId),
+            )
+            .find((result) => result !== undefined)
+        : undefined;
+      // Operator interruption/kick can replace lastValidationResult with a
+      // partial snapshot whose fact phase is skipped. The completed attempt is
+      // still durable in validation history and remains the waiver authority.
+      const fact = latestFact ?? historicalFact;
       if (!fact) {
         throw new AutopodError(
-          `Required fact ${factId} was not found in the latest validation result for pod ${podId}`,
+          `Required fact ${factId} was not found in validation results for pod ${podId}`,
           'NOT_FOUND',
           404,
         );
