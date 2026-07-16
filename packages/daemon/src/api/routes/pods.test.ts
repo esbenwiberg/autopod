@@ -1787,7 +1787,12 @@ describe('GET /pods/analytics/models', () => {
     expect(body.summary.mostUsedDailySparkline).toHaveLength(30);
     expect(Array.isArray(body.byModel)).toBe(true);
     expect(Array.isArray(body.byRuntime)).toBe(true);
-    expect(body.byRuntime).toHaveLength(3);
+    expect(body.byRuntime.map(({ runtime }: { runtime: string }) => runtime)).toEqual([
+      'claude',
+      'codex',
+      'copilot',
+      'pi',
+    ]);
     expect(Array.isArray(body.failureStageMatrix)).toBe(true);
     expect(Array.isArray(body.unknownModels)).toBe(true);
     expect(body.unknownModels.length).toBeLessThanOrEqual(10);
@@ -1833,7 +1838,7 @@ describe('GET /pods/analytics/models', () => {
     expect(res.json().code).toBe('invalid_days');
   });
 
-  it('days=90 → 200 with sparkline length 90 and byRuntime length 3', async () => {
+  it('days=90 → 200 with sparkline length 90 and every runtime', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/pods/analytics/models?days=90',
@@ -1842,7 +1847,12 @@ describe('GET /pods/analytics/models', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.summary.mostUsedDailySparkline).toHaveLength(90);
-    expect(body.byRuntime).toHaveLength(3);
+    expect(body.byRuntime.map(({ runtime }: { runtime: string }) => runtime)).toEqual([
+      'claude',
+      'codex',
+      'copilot',
+      'pi',
+    ]);
   });
 });
 
