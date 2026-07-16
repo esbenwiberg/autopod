@@ -56,6 +56,8 @@ export interface SandboxExecOptions {
   stdin?: boolean;
   /** Internal hook used by ContainerManager to bind the stdin WebSocket writer. */
   onStdinWriter?: (write: (data: Buffer) => void) => void;
+  /** Internal hook used by ContainerManager to terminate the remote exec process. */
+  onCancelReady?: (cancel: () => Promise<void>) => void;
 }
 
 export interface SandboxExecResult {

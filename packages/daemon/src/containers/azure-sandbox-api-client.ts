@@ -320,12 +320,20 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       sandboxId,
       streamExecScript(command, options?.cwd),
     );
+    const pidPath = `${scriptPath}.pid`;
 
     const token = await this.getAzureToken(DATA_SCOPE, 'data access token', 'AZURE_AUTH');
     const wsUrl = `${this.dataEndpoint.replace(/^https:/, 'wss:')}${this.sandboxPath(
       sandboxId,
     )}/exec/stream`;
     const socket = this.webSocketFactory(wsUrl, { Authorization: `Bearer ${token.token}` });
+    options?.onCancelReady?.(async () => {
+      try {
+        await this.exec(sandboxId, ['sh', '-c', terminatePidFileScript(pidPath)]);
+      } finally {
+        socket.close();
+      }
+    });
 
     const queue: SandboxExecChunk[] = [];
     let failure: Error | null = null;
@@ -1287,9 +1295,22 @@ function defaultWebSocketFactory(url: string, headers: Record<string, string>): 
 function streamExecScript(command: string[], cwd?: string): string {
   const argv = command.map(shellQuote).join(' ');
   const lines = ['#!/bin/sh'];
+  lines.push('umask 077', 'echo $$ > "$0.pid"');
   if (cwd) lines.push(`cd ${shellQuote(cwd)} || exit 1`);
   lines.push(`exec ${argv}`);
   return `${lines.join('\n')}\n`;
+}
+
+function terminatePidFileScript(pidPath: string): string {
+  return [
+    `pid_file=${shellQuote(pidPath)}`,
+    '[ -s "$pid_file" ] || exit 0',
+    'pid=$(cat "$pid_file")',
+    'kill -TERM "$pid" 2>/dev/null || exit 0',
+    'i=0',
+    'while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
+    'kill -KILL "$pid" 2>/dev/null || true',
+  ].join('; ');
 }
 
 function commandToShell(command: string[], env?: Record<string, string>): string {

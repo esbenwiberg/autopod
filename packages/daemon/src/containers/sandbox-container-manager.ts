@@ -327,6 +327,7 @@ export class SandboxContainerManager implements ContainerManager {
     const stdout = new Readable({ read() {} });
     const stderr = new Readable({ read() {} });
     let cancelled = false;
+    let cancelRemote: (() => Promise<void>) | null = null;
     let writeRemoteStdin: ((data: Buffer) => void) | null = null;
     const pendingStdin: Buffer[] = [];
     const stdin =
@@ -345,6 +346,9 @@ export class SandboxContainerManager implements ContainerManager {
         : undefined;
     const streamOptions: SandboxExecOptions = {
       ...options,
+      onCancelReady: (cancel) => {
+        cancelRemote = cancel;
+      },
       onStdinWriter: stdin
         ? (write) => {
             writeRemoteStdin = write;
@@ -384,6 +388,9 @@ export class SandboxContainerManager implements ContainerManager {
       kill: async () => {
         cancelled = true;
         stdin?.destroy();
+        if (cancelRemote) await cancelRemote();
+        stdout.push(null);
+        stderr.push(null);
       },
     };
   }

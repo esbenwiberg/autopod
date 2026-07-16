@@ -193,6 +193,7 @@ export class DockerContainerManager implements ContainerManager {
   private docker: Dockerode;
   private logger: Logger;
   private imagePuller: ImagePuller | null;
+  private streamingExecSeq = 0;
 
   constructor({ docker, logger, imagePuller }: DockerContainerManagerOptions) {
     this.docker = docker ?? new Dockerode();
@@ -862,9 +863,17 @@ export class DockerContainerManager implements ContainerManager {
       ? Object.entries(options.env).map(([k, v]) => `${k}=${v}`)
       : undefined;
 
+    const pidPath = `/tmp/.autopod-stream-exec-${process.pid}-${this.streamingExecSeq++}.pid`;
+    const wrappedCommand = [
+      'sh',
+      '-c',
+      `umask 077; echo $$ > ${pidPath}; exec "$@"`,
+      'autopod-stream-exec',
+      ...command,
+    ];
     const exec = await boundedDockerCall(
       container.exec({
-        Cmd: command,
+        Cmd: wrappedCommand,
         AttachStdin: options?.stdin === true,
         AttachStdout: true,
         AttachStderr: true,
@@ -953,7 +962,11 @@ export class DockerContainerManager implements ContainerManager {
     });
 
     const kill = async () => {
-      // Destroy the mux stream to abort the exec
+      await this.execInContainer(
+        containerId,
+        ['sh', '-c', terminatePidFileScript(pidPath)],
+        { timeout: 5_000 },
+      );
       const destroyable = muxStream as NodeJS.ReadableStream & { destroy?: () => void };
       if (typeof destroyable.destroy === 'function') {
         destroyable.destroy();
