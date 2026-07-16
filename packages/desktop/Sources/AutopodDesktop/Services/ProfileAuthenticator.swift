@@ -345,14 +345,19 @@ public final class ProfileAuthenticator: Sendable {
   }
 
   private func collectPiAuthData(providerId: PiOAuthProvider) async throws -> Data {
+    let tag = UUID().uuidString.prefix(8)
     let agentDir = FileManager.default.temporaryDirectory
-      .appendingPathComponent("autopod-pi-auth-\(UUID().uuidString.prefix(8))")
+      .appendingPathComponent("autopod-pi-auth-\(tag)")
+    let cancellationPath = FileManager.default.temporaryDirectory
+      .appendingPathComponent("autopod-pi-auth-cancel-\(tag)")
     try FileManager.default.createDirectory(
       at: agentDir,
       withIntermediateDirectories: true,
       attributes: [.posixPermissions: 0o700]
     )
-    defer { try? FileManager.default.removeItem(at: agentDir) }
+    defer {
+      Self.cancelPiLogin(agentDir: agentDir, cancellationPath: cancellationPath)
+    }
 
     guard let piPath = Self.findExecutable("pi") else {
       throw AuthError.cliNotFound("pi")
@@ -369,8 +374,22 @@ public final class ProfileAuthenticator: Sendable {
     echo "Choose \(providerId.rawValue) in Pi's login flow. Only that provider will be saved."
     \(providerId == .anthropic ? "echo \"Note: Pi Anthropic OAuth uses billed extra usage, not Claude Code plan usage.\"" : "")
     echo ""
-    "\(piPath.path)" /login
+    "\(piPath.path)" /login &
+    pi_pid=$!
+    (
+      while [ ! -e "\(cancellationPath.path)" ]; do sleep 0.1; done
+      kill -TERM "$pi_pid" 2>/dev/null || true
+      for _ in {1..10}; do
+        kill -0 "$pi_pid" 2>/dev/null || exit 0
+        sleep 0.1
+      done
+      kill -KILL "$pi_pid" 2>/dev/null || true
+    ) &
+    watcher_pid=$!
+    wait "$pi_pid"
     status=$?
+    kill "$watcher_pid" 2>/dev/null || true
+    wait "$watcher_pid" 2>/dev/null || true
     echo "$status" > "\(statusPath.path)"
     echo ""
     if [ "$status" -eq 0 ]; then
@@ -428,6 +447,19 @@ public final class ProfileAuthenticator: Sendable {
       "providerId": providerId.rawValue,
       "credential": credential,
     ]
+  }
+
+  static func cancelPiLogin(agentDir: URL, cancellationPath: URL) {
+    // The Terminal process is independent of the Swift task. Its watcher terminates Pi;
+    // wait for the shell's status record before deleting secrets so Pi cannot recreate them.
+    FileManager.default.createFile(atPath: cancellationPath.path, contents: Data())
+    let statusPath = agentDir.appendingPathComponent(".auth-status")
+    for _ in 0..<40 {
+      if FileManager.default.fileExists(atPath: statusPath.path) { break }
+      Thread.sleep(forTimeInterval: 0.05)
+    }
+    try? FileManager.default.removeItem(at: agentDir)
+    try? FileManager.default.removeItem(at: cancellationPath)
   }
 
   private static func piProviderLabel(_ providerId: PiOAuthProvider) -> String {

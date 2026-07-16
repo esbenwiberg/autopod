@@ -75,4 +75,32 @@ struct ProfileAuthenticatorTests {
     }
     #expect(PiAuthURLProtocol.requests.isEmpty)
   }
+
+  @Test func cancellationWaitsForTerminalBeforeDeletingIsolatedCredentials() throws {
+    let tag = UUID().uuidString
+    let agentDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pi-auth-test-\(tag)")
+    let cancellationPath = FileManager.default.temporaryDirectory
+      .appendingPathComponent("pi-auth-test-cancel-\(tag)")
+    try FileManager.default.createDirectory(at: agentDir, withIntermediateDirectories: true)
+    try Data("secret".utf8).write(to: agentDir.appendingPathComponent("auth.json"))
+
+    DispatchQueue.global().async {
+      while !FileManager.default.fileExists(atPath: cancellationPath.path) {
+        Thread.sleep(forTimeInterval: 0.01)
+      }
+      FileManager.default.createFile(
+        atPath: agentDir.appendingPathComponent(".auth-status").path,
+        contents: Data("130".utf8)
+      )
+    }
+
+    ProfileAuthenticator.cancelPiLogin(
+      agentDir: agentDir,
+      cancellationPath: cancellationPath
+    )
+
+    #expect(!FileManager.default.fileExists(atPath: agentDir.path))
+    #expect(!FileManager.default.fileExists(atPath: cancellationPath.path))
+  }
 }
