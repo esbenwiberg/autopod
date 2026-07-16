@@ -76,6 +76,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
     .action(async (name: string, opts: { json?: boolean }) => {
       const client = getClient();
       const p = await withSpinner('Fetching profile...', () => client.getProfile(name));
+      const githubAuth = await client.getGitHubAuthStatus().catch(() => null);
 
       withJsonOutput(opts, p, (data) => {
         console.log(chalk.bold.cyan(`Profile: ${data.name}`));
@@ -92,6 +93,15 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         console.log(`${chalk.bold('Model:')}      ${data.defaultModel}`);
         console.log(`${chalk.bold('Runtime:')}    ${data.defaultRuntime}`);
         console.log(`${chalk.bold('Provider:')}   ${data.modelProvider ?? 'none'}`);
+        if (data.prProvider !== 'ado' && githubAuth) {
+          console.log(
+            `${chalk.bold('GitHub:')}     ${
+              githubAuth.available
+                ? `daemon gh authenticated${githubAuth.login ? ` as ${githubAuth.login}` : ''}`
+                : `unavailable — ${githubAuth.reason}. ${githubAuth.setup}`
+            }`,
+          );
+        }
         if (data.providerAccountId) {
           console.log(`${chalk.bold('Account:')}    ${data.providerAccountId}`);
         }

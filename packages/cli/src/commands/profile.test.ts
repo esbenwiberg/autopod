@@ -69,6 +69,11 @@ function createMockClient() {
       }),
     ),
     updateProfile: vi.fn().mockResolvedValue(createProfile()),
+    getGitHubAuthStatus: vi.fn().mockResolvedValue({
+      available: true,
+      login: 'autopod-dev',
+      setup: 'setup',
+    }),
   } as unknown as AutopodClient;
 }
 
@@ -127,6 +132,7 @@ describe('profile commands', () => {
     const output = logSpy.mock.calls.flat().join('\n');
     expect(output).not.toContain('GitHub 2026-08-01');
     expect(output).not.toContain('GitHub PAT');
+    expect(output).toContain('daemon gh authenticated as autopod-dev');
   });
 
   it('includes validationSetupCommand in the create template', async () => {
