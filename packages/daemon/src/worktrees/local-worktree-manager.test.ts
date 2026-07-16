@@ -1512,25 +1512,28 @@ describe('LocalWorktreeManager', () => {
       })(),
     ];
 
-    it.each(credentialUrls)('rejects credential-bearing remote %s before any side effect', async (repoUrl) => {
-      const githubAuth = fakeGitHubAuth();
-      const resolveCredential = vi.spyOn(githubAuth, 'resolveCredential');
-      manager = new LocalWorktreeManager({ cacheDir, worktreeDir, logger, githubAuth });
+    it.each(credentialUrls)(
+      'rejects credential-bearing remote %s before any side effect',
+      async (repoUrl) => {
+        const githubAuth = fakeGitHubAuth();
+        const resolveCredential = vi.spyOn(githubAuth, 'resolveCredential');
+        manager = new LocalWorktreeManager({ cacheDir, worktreeDir, logger, githubAuth });
 
-      await expect(
-        manager.create({
-          repoUrl,
-          branch: 'feat/no-url-credentials',
-          baseBranch: 'main',
-        }),
-      ).rejects.toThrow(
-        'Refusing Git remote URL containing credentials; configure authentication through the daemon credential provider',
-      );
+        await expect(
+          manager.create({
+            repoUrl,
+            branch: 'feat/no-url-credentials',
+            baseBranch: 'main',
+          }),
+        ).rejects.toThrow(
+          'Refusing Git remote URL containing credentials; configure authentication through the daemon credential provider',
+        );
 
-      expect(resolveCredential).not.toHaveBeenCalled();
-      expect(execFileMock).not.toHaveBeenCalled();
-      expect(fsMkdirMock).not.toHaveBeenCalled();
-    });
+        expect(resolveCredential).not.toHaveBeenCalled();
+        expect(execFileMock).not.toHaveBeenCalled();
+        expect(fsMkdirMock).not.toHaveBeenCalled();
+      },
+    );
 
     it('rejects a GitHub lookalike host before resolving or attaching credentials', async () => {
       const githubAuth = fakeGitHubAuth();
