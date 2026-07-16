@@ -1763,10 +1763,6 @@ export class LocalWorktreeManager implements WorktreeManager {
     return { url: repoUrl };
   }
 
-  /** Inject a PAT into an https remote URL: https://host/... → https://x-access-token:PAT@host/...
-   * Uses `x-access-token` as the username — required by GitHub fine-grained PATs and
-   * compatible with classic PATs too.
-   * Strips any existing userinfo first so stale credentials in the stored URL don't double-inject. */
   private isGitHubUrl(url: string): boolean {
     try {
       const parsed = new URL(url);
@@ -1778,12 +1774,18 @@ export class LocalWorktreeManager implements WorktreeManager {
 
   private assertSupportedRemoteHost(url: string): void {
     try {
-      const hostname = new URL(url).hostname.toLowerCase();
+      const parsed = new URL(url);
+      if (parsed.username !== '' || parsed.password !== '') {
+        throw new Error(
+          'Refusing Git remote URL containing credentials; configure authentication through the daemon credential provider',
+        );
+      }
+      const hostname = parsed.hostname.toLowerCase();
       if (hostname !== 'github.com' && hostname !== 'dev.azure.com') {
         throw new Error(`Refusing unsupported Git remote host: ${hostname}`);
       }
     } catch (err) {
-      if (err instanceof Error && err.message.startsWith('Refusing unsupported Git remote')) {
+      if (err instanceof Error && err.message.startsWith('Refusing ')) {
         throw err;
       }
       // Other validation layers reject malformed profile URLs. Preserve existing error ordering
