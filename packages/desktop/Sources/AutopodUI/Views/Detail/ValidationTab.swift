@@ -1492,7 +1492,7 @@ public struct ValidationTab: View {
 
   private func factCanApproveWaiver(_ evidence: FactCheckDetail?) -> Bool {
     guard evidence?.status == "pending_human" else { return false }
-    return true
+    return pod.status == .failed || pod.status == .reviewRequired
   }
 
   private func factWaiverButton(factId: String, evidence: FactCheckDetail?) -> some View {

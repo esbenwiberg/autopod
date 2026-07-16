@@ -5,7 +5,6 @@ import SwiftUI
 /// Work tab — task, plan, task summary, deviations, quality signals, and cost.
 struct WorkTab: View {
     let pod: Pod
-    var actions: PodActions = .preview
     /// Optional closures for fetching server-derived cards. When nil
     /// (previews, tests without daemon), the cards are simply hidden.
     var loadQuality: ((String) async throws -> PodQualitySignals)? = nil
@@ -14,9 +13,6 @@ struct WorkTab: View {
     @State private var quality: PodQualitySignals? = nil
     @State private var cost: PodCostBreakdownResponse? = nil
     @State private var selectedSection: WorkSection = .task
-    @State private var factWaiverPopoverFactId: String? = nil
-    @State private var factWaiverReason: String = ""
-    @State private var approvingFactWaiverIds: Set<String> = []
 
     private enum WorkSection: String, CaseIterable {
         case task, plan, summary, deviations, quality, cost
@@ -492,76 +488,6 @@ struct WorkTab: View {
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.orange.opacity(0.15), lineWidth: 1))
     }
 
-    private func factDeviationCanApprove(_ deviation: FactDeviationItem) -> Bool {
-        guard deviation.action == "waive", deviation.decision == nil else { return false }
-        return true
-    }
-
-    private func factDeviationWaiverButton(_ deviation: FactDeviationItem) -> some View {
-        let factId = deviation.factId
-        let isApproving = approvingFactWaiverIds.contains(factId)
-        return Button {
-            factWaiverReason = deviation.reason
-            factWaiverPopoverFactId = factId
-        } label: {
-            if isApproving {
-                HStack(spacing: 4) {
-                    ProgressView().controlSize(.mini)
-                    Text("Approving...").lineLimit(1)
-                }
-            } else {
-                Label("Approve Waiver", systemImage: "checkmark.seal.fill").lineLimit(1)
-            }
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.mini)
-        .tint(.green)
-        .disabled(isApproving)
-        .popover(isPresented: Binding(
-            get: { factWaiverPopoverFactId == factId },
-            set: { if !$0 { factWaiverPopoverFactId = nil } }
-        )) {
-            factDeviationWaiverPopover(deviation)
-        }
-    }
-
-    @ViewBuilder
-    private func factDeviationWaiverPopover(_ deviation: FactDeviationItem) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Approve Fact Waiver").font(.headline)
-            Text("Mark this required fact as waived and re-run validation so later gates can continue.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(deviation.whyImpossible)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            TextField("Reason", text: $factWaiverReason).textFieldStyle(.roundedBorder)
-            HStack {
-                Button("Cancel") { factWaiverPopoverFactId = nil }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
-                Spacer()
-                Button("Approve Waiver") {
-                    let fid = deviation.factId
-                    let reason = factWaiverReason.isEmpty ? nil : factWaiverReason
-                    factWaiverPopoverFactId = nil
-                    factWaiverReason = ""
-                    approvingFactWaiverIds.insert(fid)
-                    Task {
-                        await actions.approveFactWaiver(pod.id, fid, reason)
-                        approvingFactWaiverIds.remove(fid)
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(.green)
-            }
-        }
-        .padding(16)
-        .frame(width: 320)
-    }
-
     private func factDeviationCard(_ deviation: FactDeviationItem) -> some View {
         HStack(alignment: .top, spacing: 0) {
             Rectangle()
@@ -587,9 +513,6 @@ struct WorkTab: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)
-                    if factDeviationCanApprove(deviation) {
-                        factDeviationWaiverButton(deviation)
-                    }
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
