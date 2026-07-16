@@ -432,8 +432,9 @@ export async function persistOpenAiAuthJson(
   });
 }
 
-function parseSinglePiCredential(
+function parsePiCredential(
   rawContent: string,
+  providerId: PiOAuthProviderId,
   profileName: string,
   logger: Logger,
 ): PiOAuthCredentials | null {
@@ -451,24 +452,13 @@ function parseSinglePiCredential(
   }
 
   const entries = parsed as Record<string, unknown>;
-  const providerIds = Object.keys(entries);
-  if (providerIds.length !== 1) {
-    logger.warn({ profileName, providerCount: providerIds.length }, 'Pi auth.json must hold one provider entry');
-    return null;
-  }
-
-  const providerId = providerIds[0] as PiOAuthProviderId;
-  if (
-    providerId !== 'anthropic' &&
-    providerId !== 'openai-codex' &&
-    providerId !== 'github-copilot'
-  ) {
-    logger.warn({ profileName, providerId }, 'Pi auth.json contained unsupported provider id');
-    return null;
-  }
-
   const credential = entries[providerId];
-  if (!credential || typeof credential !== 'object' || Array.isArray(credential)) {
+  if (
+    !credential ||
+    typeof credential !== 'object' ||
+    Array.isArray(credential) ||
+    Object.keys(credential as Record<string, unknown>).length === 0
+  ) {
     logger.warn({ profileName, providerId }, 'Pi auth.json provider entry was malformed');
     return null;
   }
@@ -502,9 +492,6 @@ export async function persistPiAuthJson(
     return;
   }
 
-  const updated = parseSinglePiCredential(rawContent, profileName, logger);
-  if (!updated) return;
-
   const ownerKey = credentialOwnerKey(owner);
   await withOwnerLock(ownerKey, async () => {
     const currentCreds = getOwnerCredentials(profileStore, options.providerAccountStore, owner);
@@ -520,18 +507,8 @@ export async function persistPiAuthJson(
       return;
     }
 
-    if (currentCreds.providerId !== updated.providerId) {
-      logger.warn(
-        {
-          profileName,
-          ...ownerLogFields(owner),
-          ownerPiProviderId: currentCreds.providerId,
-          containerPiProviderId: updated.providerId,
-        },
-        'Skipping Pi auth.json persist because provider id changed',
-      );
-      return;
-    }
+    const updated = parsePiCredential(rawContent, currentCreds.providerId, profileName, logger);
+    if (!updated) return;
 
     if (JSON.stringify(currentCreds.credential) === JSON.stringify(updated.credential)) {
       logger.debug(
