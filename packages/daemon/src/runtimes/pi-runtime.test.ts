@@ -189,6 +189,23 @@ describe('PiRuntime', () => {
     expect(runtime2.getPiSessionId('pod-1')).toBe('pi-s2');
   });
 
+  it('terminates a long-lived RPC process after terminal agent evidence', async () => {
+    const handle = createHandle();
+    const cm = createContainerManager([handle]);
+    const runtime = new PiRuntime(logger, cm);
+
+    const eventsPromise = collect(runtime.spawn(config()));
+    handle.stdout.write(
+      `${JSON.stringify({ type: 'response', id: 'pod-1:1', result: { sessionId: 'pi-s1' } })}\n`,
+    );
+    handle.stdout.write(`${JSON.stringify({ type: 'complete', result: 'done' })}\n`);
+
+    const events = await eventsPromise;
+
+    expect(events.some((event) => event.type === 'complete')).toBe(true);
+    expect(handle.kill).toHaveBeenCalledOnce();
+  });
+
   it('resumes from primed durable session state after runtime restart', async () => {
     const handle = createHandle();
     const cm = createContainerManager([handle]);

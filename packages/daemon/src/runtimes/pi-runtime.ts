@@ -161,7 +161,7 @@ export class PiRuntime implements Runtime {
     const stats: PiRpcStats = { events: 0, nonStatusEvents: 0, sawTerminal: false };
     const expectedResponseIds = new Set<string | number>([commandId]);
     try {
-      yield* withPostCompleteGrace(
+      const events = withPostCompleteGrace(
         withIdleLivenessProbe(
           PiRpcParser.parse(handle.stdout, {
             podId,
@@ -185,6 +185,12 @@ export class PiRuntime implements Runtime {
           logger: this.logger,
         },
       );
+      for await (const event of events) {
+        yield event;
+        if (event.type === 'complete' || (event.type === 'error' && event.fatal)) {
+          await handle.kill();
+        }
+      }
     } finally {
       this.handles.delete(podId);
     }
@@ -210,6 +216,10 @@ export class PiRuntime implements Runtime {
         message: 'Pi RPC subprocess exited before acknowledging the command',
         fatal: true,
       };
+      return;
+    }
+
+    if (stats.sawTerminal && stats.nonStatusEvents > 0) {
       return;
     }
 
