@@ -12022,7 +12022,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           404,
         );
       }
-      if (fact.status !== 'pending_human') {
+      // A later agent summary can overwrite the decision field even though a
+      // completed validation already persisted the human-approved waiver.
+      // Re-approving that durable waived result is idempotent: rebuild the
+      // decision in the current summary and revalidate the same worktree.
+      if (fact.status !== 'pending_human' && fact.status !== 'waived') {
         throw new AutopodError(
           `Required fact ${factId} is ${fact.status ?? (fact.passed ? 'pass' : 'fail')}, not pending_human`,
           'INVALID_STATE',

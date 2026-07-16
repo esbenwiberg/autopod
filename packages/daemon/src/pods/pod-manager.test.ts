@@ -5484,106 +5484,112 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).status).toBe('validated');
     });
 
-    it('approves a pending fact waiver from history after an interrupted retry replaces the latest result', async () => {
-      const ctx = createTestContext({
-        overall: 'pass',
-        factValidation: {
-          status: 'pass',
-          results: [
-            {
-              factId: 'fact-swift-only',
-              proves: ['swift-helper-readable'],
-              kind: 'unit-test',
-              artifactPath: 'packages/desktop/Tests/AutopodUITests/ProfileEditorTests.swift',
-              command: 'swift test --filter ProfileEditorTests',
-              passed: true,
-              status: 'waived',
-              reasoning: 'Fact deviation approved by human as waive.',
-            },
-          ],
-        },
-      });
-      const manager = createPodManager(ctx.deps);
-      const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Update profile UI' },
-        'user-1',
-      );
-      const pendingReasoning =
-        'Fact fact-swift-only needs human decision: swift is unavailable in the validation container.';
-      const pendingResult: ValidationResult = {
-        podId: pod.id,
-        attempt: 1,
-        timestamp: new Date().toISOString(),
-        smoke: {
-          status: 'pass',
-          build: { status: 'pass', output: '', duration: 100 },
-          health: {
+    it.each([
+      { historicalStatus: 'pending_human' as const, historicalPassed: false },
+      { historicalStatus: 'waived' as const, historicalPassed: true },
+    ])(
+      'restores a $historicalStatus fact waiver from history after an interrupted retry replaces the latest result',
+      async ({ historicalStatus, historicalPassed }) => {
+        const ctx = createTestContext({
+          overall: 'pass',
+          factValidation: {
             status: 'pass',
-            url: 'http://localhost:3000',
-            responseCode: 200,
-            duration: 50,
+            results: [
+              {
+                factId: 'fact-swift-only',
+                proves: ['swift-helper-readable'],
+                kind: 'unit-test',
+                artifactPath: 'packages/desktop/Tests/AutopodUITests/ProfileEditorTests.swift',
+                command: 'swift test --filter ProfileEditorTests',
+                passed: true,
+                status: 'waived',
+                reasoning: 'Fact deviation approved by human as waive.',
+              },
+            ],
           },
-          pages: [],
-        },
-        test: { status: 'pass', duration: 100 },
-        taskReview: null,
-        overall: 'fail',
-        duration: 5000,
-        factValidation: {
-          status: 'pending_human',
-          results: [
-            {
-              factId: 'fact-swift-only',
-              proves: ['swift-helper-readable'],
-              kind: 'unit-test',
-              artifactPath: 'packages/desktop/Tests/AutopodUITests/ProfileEditorTests.swift',
-              command: 'swift test --filter ProfileEditorTests',
-              passed: false,
-              status: 'pending_human',
-              reasoning: pendingReasoning,
-            },
-          ],
-        },
-      };
-      ctx.validationRepo.insert(pod.id, 1, pendingResult);
-      ctx.podRepo.update(pod.id, {
-        status: 'failed',
-        containerId: 'ctr-1',
-        worktreePath: '/tmp/worktree/abc',
-        taskSummary: { actualSummary: 'Updated the profile UI.', deviations: [] },
-        lastValidationResult: {
+        });
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Update profile UI' },
+          'user-1',
+        );
+        const pendingReasoning =
+          'Fact fact-swift-only needs human decision: swift is unavailable in the validation container.';
+        const pendingResult: ValidationResult = {
           podId: pod.id,
-          attempt: 2,
+          attempt: 1,
           timestamp: new Date().toISOString(),
           smoke: {
-            status: 'fail',
-            build: { status: 'skip', output: '', duration: 0 },
-            health: { status: 'fail', url: '', responseCode: null, duration: 0 },
+            status: 'pass',
+            build: { status: 'pass', output: '', duration: 100 },
+            health: {
+              status: 'pass',
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 50,
+            },
             pages: [],
           },
-          test: { status: 'skip', duration: 0 },
+          test: { status: 'pass', duration: 100 },
           taskReview: null,
-          reviewSkipReason: 'Validation interrupted by user',
-          reviewSkipKind: 'upstream-failed',
           overall: 'fail',
-          duration: 1000,
-          factValidation: { status: 'skip', results: [] },
-        },
-      });
+          duration: 5000,
+          factValidation: {
+            status: historicalStatus === 'waived' ? 'pass' : 'pending_human',
+            results: [
+              {
+                factId: 'fact-swift-only',
+                proves: ['swift-helper-readable'],
+                kind: 'unit-test',
+                artifactPath: 'packages/desktop/Tests/AutopodUITests/ProfileEditorTests.swift',
+                command: 'swift test --filter ProfileEditorTests',
+                passed: historicalPassed,
+                status: historicalStatus,
+                reasoning: pendingReasoning,
+              },
+            ],
+          },
+        };
+        ctx.validationRepo.insert(pod.id, 1, pendingResult);
+        ctx.podRepo.update(pod.id, {
+          status: 'failed',
+          containerId: 'ctr-1',
+          worktreePath: '/tmp/worktree/abc',
+          taskSummary: { actualSummary: 'Updated the profile UI.', deviations: [] },
+          lastValidationResult: {
+            podId: pod.id,
+            attempt: 2,
+            timestamp: new Date().toISOString(),
+            smoke: {
+              status: 'fail',
+              build: { status: 'skip', output: '', duration: 0 },
+              health: { status: 'fail', url: '', responseCode: null, duration: 0 },
+              pages: [],
+            },
+            test: { status: 'skip', duration: 0 },
+            taskReview: null,
+            reviewSkipReason: 'Validation interrupted by user',
+            reviewSkipKind: 'upstream-failed',
+            overall: 'fail',
+            duration: 1000,
+            factValidation: { status: 'skip', results: [] },
+          },
+        });
 
-      await manager.approveFactWaiver(pod.id, 'fact-swift-only', 'Swift is unavailable here');
+        await manager.approveFactWaiver(pod.id, 'fact-swift-only', 'Swift is unavailable here');
 
-      const validateConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[0]?.[0];
-      expect(validateConfig?.taskSummary?.factDeviations).toEqual([
-        expect.objectContaining({
-          factId: 'fact-swift-only',
-          action: 'waive',
-          decision: 'approved_waive',
-          whyImpossible: pendingReasoning,
-        }),
-      ]);
-      expect(manager.getSession(pod.id).status).toBe('validated');
-    });
+        const validateConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[0]?.[0];
+        expect(validateConfig?.taskSummary?.factDeviations).toEqual([
+          expect.objectContaining({
+            factId: 'fact-swift-only',
+            action: 'waive',
+            decision: 'approved_waive',
+            whyImpossible: pendingReasoning,
+          }),
+        ]);
+        expect(manager.getSession(pod.id).status).toBe('validated');
+      },
+    );
 
     it('retries with correction feedback until max attempts exhausted', async () => {
       // With always-failing validation, the retry loop exhausts all attempts
