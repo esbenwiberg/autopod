@@ -326,6 +326,35 @@ public final class ProfileAuthenticator: Sendable {
     )
   }
 
+  /// Authenticate a shared provider account with one Pi subscription provider.
+  public func authenticatePiProviderAccount(
+    accountId: String,
+    providerId: PiOAuthProvider
+  ) async throws -> String {
+    let authData = try await collectPiAuthData(providerId: providerId)
+    return try await authenticatePiProviderAccount(
+      accountId: accountId,
+      providerId: providerId,
+      authData: authData
+    )
+  }
+
+  /// Separated from Terminal collection so tests can prove malformed credentials never patch.
+  func authenticatePiProviderAccount(
+    accountId: String,
+    providerId: PiOAuthProvider,
+    authData: Data
+  ) async throws -> String {
+    let providerCredentials = try Self.extractPiCredentials(
+      providerId: providerId,
+      authData: authData
+    )
+    _ = try await api.updateProviderAccount(accountId, fields: [
+      "credentials": providerCredentials,
+    ])
+    return "Authenticated Pi provider account with \(Self.piProviderLabel(providerId))"
+  }
+
   /// Separated from Terminal collection so tests can prove malformed credentials never patch.
   func authenticatePi(
     profileName: String,

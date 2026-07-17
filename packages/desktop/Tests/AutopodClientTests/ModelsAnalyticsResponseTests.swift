@@ -34,14 +34,17 @@ import Testing
     #expect(unknown.totalCostUsd == nil)
     #expect(unknown.completeCostUsd == nil)
 
-    // byRuntime — always exactly 3 entries
-    #expect(response.byRuntime.count == 3)
+    // byRuntime — always exactly 4 entries
+    #expect(response.byRuntime.count == 4)
     #expect(response.byRuntime[0].runtime == .claude)
     #expect(response.byRuntime[1].runtime == .codex)
     #expect(response.byRuntime[2].runtime == .copilot)
-    // copilot has zero pods
+    #expect(response.byRuntime[3].runtime == .pi)
+    // copilot and pi have zero pods
     #expect(response.byRuntime[2].podCount == 0)
     #expect(response.byRuntime[2].dollarPerPr == nil)
+    #expect(response.byRuntime[3].podCount == 0)
+    #expect(response.byRuntime[3].dollarPerPr == nil)
 
     // failureStageMatrix — one row with all 8 stages
     #expect(response.failureStageMatrix.count == 1)
@@ -77,7 +80,7 @@ import Testing
     #expect(response.summary.cheapestDollarPerPrDelta.direction == .flat)
     #expect(response.summary.cheapestDollarPerPrDelta.value == 0)
     #expect(response.byModel.isEmpty)
-    #expect(response.byRuntime.count == 3)
+    #expect(response.byRuntime.count == 4)
     #expect(response.byRuntime.allSatisfy { $0.podCount == 0 })
     #expect(response.failureStageMatrix.isEmpty)
     #expect(response.unknownModels.isEmpty)
@@ -214,16 +217,17 @@ import Testing
     }
 }
 
-// MARK: - Runtime enum: claude / codex / copilot; length == 3
+// MARK: - Runtime enum: claude / codex / copilot / pi; length == 4
 
 @Test func modelsRuntimeKindDecodesAllCases() throws {
     let json = makeFullModelsFixtureJSON().data(using: .utf8)!
     let response = try JSONDecoder().decode(ModelsAnalyticsResponse.self, from: json)
 
-    #expect(response.byRuntime.count == 3)
+    #expect(response.byRuntime.count == 4)
     #expect(response.byRuntime[0].runtime == .claude)
     #expect(response.byRuntime[1].runtime == .codex)
     #expect(response.byRuntime[2].runtime == .copilot)
+    #expect(response.byRuntime[3].runtime == .pi)
 }
 
 // MARK: - Helpers
@@ -345,6 +349,21 @@ private func makeFullModelsFixtureJSON() -> String {
           "meanTtmSeconds": null,
           "escalatedCount": 0,
           "escalationRate": 0.0
+        },
+        {
+          "runtime": "pi",
+          "podCount": 0,
+          "completeCount": 0,
+          "killedCount": 0,
+          "failedCount": 0,
+          "successRate": 0.0,
+          "totalCostUsd": 0.0,
+          "dollarPerPr": null,
+          "scoredCount": 0,
+          "avgQuality": null,
+          "meanTtmSeconds": null,
+          "escalatedCount": 0,
+          "escalationRate": 0.0
         }
       ],
       "failureStageMatrix": [
@@ -387,7 +406,8 @@ private func makeMinimalModelsFixtureJSON(days: Int) -> String {
       "byRuntime": [
         {"runtime":"claude","podCount":0,"completeCount":0,"killedCount":0,"failedCount":0,"successRate":0.0,"totalCostUsd":0.0,"dollarPerPr":null,"scoredCount":0,"avgQuality":null,"meanTtmSeconds":null,"escalatedCount":0,"escalationRate":0.0},
         {"runtime":"codex","podCount":0,"completeCount":0,"killedCount":0,"failedCount":0,"successRate":0.0,"totalCostUsd":0.0,"dollarPerPr":null,"scoredCount":0,"avgQuality":null,"meanTtmSeconds":null,"escalatedCount":0,"escalationRate":0.0},
-        {"runtime":"copilot","podCount":0,"completeCount":0,"killedCount":0,"failedCount":0,"successRate":0.0,"totalCostUsd":0.0,"dollarPerPr":null,"scoredCount":0,"avgQuality":null,"meanTtmSeconds":null,"escalatedCount":0,"escalationRate":0.0}
+        {"runtime":"copilot","podCount":0,"completeCount":0,"killedCount":0,"failedCount":0,"successRate":0.0,"totalCostUsd":0.0,"dollarPerPr":null,"scoredCount":0,"avgQuality":null,"meanTtmSeconds":null,"escalatedCount":0,"escalationRate":0.0},
+        {"runtime":"pi","podCount":0,"completeCount":0,"killedCount":0,"failedCount":0,"successRate":0.0,"totalCostUsd":0.0,"dollarPerPr":null,"scoredCount":0,"avgQuality":null,"meanTtmSeconds":null,"escalatedCount":0,"escalationRate":0.0}
       ],
       "failureStageMatrix": [],
       "unknownModels": []

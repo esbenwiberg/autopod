@@ -2896,7 +2896,9 @@ function resolveReviewRunner(
     return 'codex';
   }
   if (config.reviewerProvider === 'max') return 'container-claude';
-  if (config.reviewerProvider === 'copilot') return 'unsupported';
+  if (config.reviewerProvider === 'copilot' || config.reviewerProvider === 'pi') {
+    return 'unsupported';
+  }
   return 'claude';
 }
 

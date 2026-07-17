@@ -1140,6 +1140,7 @@ const AGENT_CLI_BY_RUNTIME: Record<Pod['runtime'], string> = {
   claude: 'claude',
   codex: 'codex',
   copilot: 'copilot',
+  pi: 'pi',
 };
 
 const MIN_CODEX_CLI_VERSION = '0.144.4';

@@ -38,6 +38,25 @@ describe('runPreSubmitReview', () => {
     expect(result.skipReason).toBe('no-task');
   });
 
+  it('skips Pi reviewers instead of falling back to Claude', async () => {
+    const result = await runPreSubmitReview({
+      task: 'Add dark mode toggle',
+      diff: 'diff --git a/app.tsx b/app.tsx\n+const [theme, setTheme] = useState("light")',
+      reviewerModel: 'anthropic/claude-sonnet-4',
+      reviewerProvider: 'pi',
+      reviewerProviderCredentials: {
+        provider: 'pi',
+        providerId: 'anthropic',
+        credential: { accessToken: 'pi-token' },
+      },
+    });
+
+    expect(result.status).toBe('skipped');
+    expect(result.skipReason).toBe('cli-error');
+    expect(result.reasoning).toContain('provider pi is not supported');
+    expect(mockRunClaudeCli).not.toHaveBeenCalled();
+  });
+
   it('returns the reviewer verdict on a clean pass', async () => {
     mockRunClaudeCli.mockResolvedValueOnce({
       stdout: JSON.stringify({

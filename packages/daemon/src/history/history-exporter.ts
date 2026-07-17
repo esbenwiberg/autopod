@@ -415,7 +415,7 @@ Core pod data — one row per pod run.
 | task | TEXT | Task description |
 | status | TEXT | Final status (complete, failed, killed, etc.) |
 | model | TEXT | AI model used |
-| runtime | TEXT | Runtime (claude, codex, copilot) |
+| runtime | TEXT | Runtime (claude, codex, copilot, pi) |
 | validation_attempts | INT | Number of validation attempts |
 | max_validation_attempts | INT | Max allowed |
 | rework_reason | TEXT | Why agent was asked to rework (null if N/A) |
