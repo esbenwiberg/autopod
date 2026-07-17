@@ -406,21 +406,39 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .description('List pods')
     .option('-s, --status <status>', 'Filter by status')
     .option('-p, --profile <profile>', 'Filter by profile')
+    .option('-l, --limit <number>', 'Limit the number of newest pods', (value) => {
+      if (!/^[1-9]\d*$/.test(value)) throw new Error('limit must be a positive integer');
+      return Number.parseInt(value, 10);
+    })
+    .option('--compact', 'Return compact pod records (best used with --json)')
     .option('--json', 'Output as JSON')
-    .action(async (opts: { status?: string; profile?: string; json?: boolean }) => {
-      const client = getClient();
-      const pods = await withSpinner('Fetching pods...', () =>
-        client.listSessions({ status: opts.status, profile: opts.profile }),
-      );
+    .action(
+      async (opts: {
+        status?: string;
+        profile?: string;
+        limit?: number;
+        compact?: boolean;
+        json?: boolean;
+      }) => {
+        const client = getClient();
+        const pods = await withSpinner('Fetching pods...', () =>
+          client.listSessions({
+            status: opts.status,
+            profile: opts.profile,
+            limit: opts.limit,
+            compact: opts.compact === true,
+          }),
+        );
 
-      withJsonOutput(opts, pods, (data) => {
-        if (data.length === 0) {
-          console.log(chalk.dim('No pods found.'));
-          return;
-        }
-        console.log(renderTable(data, podColumns));
-      });
-    });
+        withJsonOutput(opts, pods, (data) => {
+          if (data.length === 0) {
+            console.log(chalk.dim('No pods found.'));
+            return;
+          }
+          console.log(renderTable(data, podColumns));
+        });
+      },
+    );
 
   // ap status
   async function statusAction(id: string, opts: { json?: boolean }): Promise<void> {

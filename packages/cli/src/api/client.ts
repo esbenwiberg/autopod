@@ -8,6 +8,7 @@ import {
 } from '@autopod/shared';
 import type {
   AgentEvent,
+  CompactPod,
   CreatePodRequest,
   CreateScheduledJobRequest,
   CreateScheduledJobTemplateRequest,
@@ -118,12 +119,31 @@ export class AutopodClient {
     return this.request<SeriesResponse>('GET', `/pods/series/${seriesId}`);
   }
 
-  async listSessions(filters?: { status?: string; profile?: string }): Promise<Pod[]> {
+  async listSessions(filters?: {
+    status?: string;
+    profile?: string;
+    limit?: number;
+    compact?: false;
+  }): Promise<Pod[]>;
+  async listSessions(filters: {
+    status?: string;
+    profile?: string;
+    limit?: number;
+    compact: true;
+  }): Promise<CompactPod[]>;
+  async listSessions(filters?: {
+    status?: string;
+    profile?: string;
+    limit?: number;
+    compact?: boolean;
+  }): Promise<Pod[] | CompactPod[]> {
     const params = new URLSearchParams();
     if (filters?.status) params.set('status', filters.status);
     if (filters?.profile) params.set('profile', filters.profile);
+    if (filters?.limit !== undefined) params.set('limit', String(filters.limit));
+    if (filters?.compact) params.set('compact', 'true');
     const qs = params.toString();
-    return this.request<Pod[]>('GET', `/pods${qs ? `?${qs}` : ''}`);
+    return this.request<Pod[] | CompactPod[]>('GET', `/pods${qs ? `?${qs}` : ''}`);
   }
 
   async getSessionStats(filters?: {

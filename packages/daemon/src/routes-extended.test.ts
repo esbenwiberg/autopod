@@ -309,7 +309,6 @@ describe('Extended Route Tests', () => {
         url: '/pods/stats',
         headers: authHeaders,
       });
-
       expect(res.statusCode).toBe(200);
       const stats = res.json();
       expect(typeof stats).toBe('object');
@@ -354,6 +353,60 @@ describe('Extended Route Tests', () => {
         headers: authHeaders,
       });
       expect(res.statusCode).toBe(200);
+    });
+
+    it('supports bounded multi-status compact discovery', async () => {
+      const hugeTask = `Compact title\n${'x'.repeat(50_000)}`;
+      const createdPods: Array<{ id: string; task: string; status: string; createdAt: string }> =
+        [];
+      for (const [task, status, createdAt] of [
+        ['older running', 'running', '2024-01-01T00:00:00Z'],
+        [hugeTask, 'failed', '2024-01-02T00:00:00Z'],
+        ['newest queued', 'queued', '2024-01-03T00:00:00Z'],
+      ] as const) {
+        const created = await app.inject({
+          method: 'POST',
+          url: '/pods',
+          headers: authHeaders,
+          payload: { profileName: 'test-app', task: task === hugeTask ? 'Compact title' : task },
+        });
+        expect(created.statusCode).toBe(201);
+        const { id } = created.json<{ id: string }>();
+        createdPods.push({ id, task, status, createdAt });
+      }
+      for (const pod of createdPods) {
+        expect(
+          db
+            .prepare('UPDATE pods SET status = ?, created_at = ?, task = ? WHERE id = ?')
+            .run(pod.status, pod.createdAt, pod.task, pod.id).changes,
+        ).toBe(1);
+      }
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/pods?status=running,failed&limit=1&compact=true',
+        headers: authHeaders,
+      });
+      expect(
+        db.prepare("SELECT id FROM pods WHERE status IN ('running', 'failed')").all(),
+      ).toHaveLength(2);
+      expect(res.statusCode).toBe(200);
+      const pods = res.json<Record<string, unknown>[]>();
+      expect(pods).toHaveLength(1);
+      expect(pods[0]?.status).toBe('failed');
+      expect(pods[0]?.title).toBe('Compact title');
+      expect(pods[0]).not.toHaveProperty('task');
+      expect(pods[0]).not.toHaveProperty('contract');
+    });
+
+    it.each(['0', '-1', 'abc', '501'])('rejects invalid limit %s', async (limit) => {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/pods?limit=${limit}`,
+        headers: authHeaders,
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toContain('limit');
     });
   });
 
