@@ -56,13 +56,22 @@ function parsePositiveIntegerQueryParam(raw: unknown): number | null | undefined
 
 const LOG_REPLAY_EVENT_TYPES = ['pod.agent_activity', 'pod.firewall_denied'];
 const MAX_POD_LIST_LIMIT = 500;
+const COMPACT_TITLE_MAX_CHARS = 160;
+const COMPACT_SUMMARY_MAX_CHARS = 500;
+
+function compactText(value: string | null | undefined, maxChars = COMPACT_SUMMARY_MAX_CHARS) {
+  return value === null || value === undefined ? null : value.slice(0, maxChars);
+}
 
 function compactPod(pod: ReturnType<PodManager['getSession']>): CompactPod {
-  const title = pod.briefTitle ?? pod.task.split('\n', 1)[0]?.slice(0, 160) ?? pod.id;
+  const title = compactText(
+    pod.briefTitle ?? pod.task.split('\n', 1)[0] ?? pod.id,
+    COMPACT_TITLE_MAX_CHARS,
+  ) as string;
   return {
     id: pod.id,
     title,
-    taskSummary: pod.taskSummary?.actualSummary ?? null,
+    taskSummary: compactText(pod.taskSummary?.actualSummary),
     profileName: pod.profileName,
     status: pod.status,
     model: pod.model,
@@ -81,10 +90,10 @@ function compactPod(pod: ReturnType<PodManager['getSession']>): CompactPod {
     updatedAt: pod.updatedAt,
     completedAt: pod.completedAt,
     lastHeartbeatAt: pod.lastHeartbeatAt,
-    failureReason: pod.failureReason,
-    mergeBlockReason: pod.mergeBlockReason,
-    lastCorrectionMessage: pod.lastCorrectionMessage,
-    pendingEscalationSummary: pod.pendingEscalation?.question ?? null,
+    failureReason: compactText(pod.failureReason),
+    mergeBlockReason: compactText(pod.mergeBlockReason),
+    lastCorrectionMessage: compactText(pod.lastCorrectionMessage),
+    pendingEscalationSummary: compactText(pod.pendingEscalation?.question),
     progressSummary: pod.progress
       ? `${pod.progress.phase}: ${pod.progress.description}`.slice(0, 240)
       : null,

@@ -377,8 +377,10 @@ describe('Extended Route Tests', () => {
       for (const pod of createdPods) {
         expect(
           db
-            .prepare('UPDATE pods SET status = ?, created_at = ?, task = ? WHERE id = ?')
-            .run(pod.status, pod.createdAt, pod.task, pod.id).changes,
+            .prepare(
+              'UPDATE pods SET status = ?, created_at = ?, task = ?, failure_reason = ? WHERE id = ?',
+            )
+            .run(pod.status, pod.createdAt, pod.task, 'diagnostic'.repeat(10_000), pod.id).changes,
         ).toBe(1);
       }
 
@@ -395,6 +397,7 @@ describe('Extended Route Tests', () => {
       expect(pods).toHaveLength(1);
       expect(pods[0]?.status).toBe('failed');
       expect(pods[0]?.title).toBe('Compact title');
+      expect(String(pods[0]?.failureReason)).toHaveLength(500);
       expect(pods[0]).not.toHaveProperty('task');
       expect(pods[0]).not.toHaveProperty('contract');
     });
