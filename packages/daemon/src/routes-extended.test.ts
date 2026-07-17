@@ -378,16 +378,26 @@ describe('Extended Route Tests', () => {
         expect(
           db
             .prepare(
-              'UPDATE pods SET status = ?, created_at = ?, task = ?, failure_reason = ? WHERE id = ?',
+              `UPDATE pods
+               SET status = ?, created_at = ?, task = ?, failure_reason = ?,
+                   preview_url = ?
+               WHERE id = ?`,
             )
-            .run(pod.status, pod.createdAt, pod.task, 'diagnostic'.repeat(10_000), pod.id).changes,
+            .run(
+              pod.status,
+              pod.createdAt,
+              pod.task,
+              'diagnostic'.repeat(10_000),
+              'http://127.0.0.1:3000',
+              pod.id,
+            ).changes,
         ).toBe(1);
       }
 
       const res = await app.inject({
         method: 'GET',
         url: '/pods?status=running,failed&limit=1&compact=true',
-        headers: authHeaders,
+        headers: { ...authHeaders, host: 'api.example.com' },
       });
       expect(
         db.prepare("SELECT id FROM pods WHERE status IN ('running', 'failed')").all(),
@@ -398,6 +408,10 @@ describe('Extended Route Tests', () => {
       expect(pods[0]?.status).toBe('failed');
       expect(pods[0]?.title).toBe('Compact title');
       expect(String(pods[0]?.failureReason)).toHaveLength(500);
+      expect(pods[0]?.hasWebUi).toBe(true);
+      expect(pods[0]?.previewUrl).toBe(
+        `http://api.example.com/pods/${String(pods[0]?.id)}/preview/proxy/`,
+      );
       expect(pods[0]).not.toHaveProperty('task');
       expect(pods[0]).not.toHaveProperty('contract');
     });

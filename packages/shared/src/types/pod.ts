@@ -553,6 +553,8 @@ export interface CompactPod {
   seriesId: string | null;
   seriesName: string | null;
   options: PodOptions;
+  hasWebUi: boolean;
+  previewUrl: string | null;
   containerId: string | null;
   worktreePath: string | null;
   createdAt: string;

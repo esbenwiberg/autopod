@@ -63,7 +63,10 @@ function compactText(value: string | null | undefined, maxChars = COMPACT_SUMMAR
   return value === null || value === undefined ? null : value.slice(0, maxChars);
 }
 
-function compactPod(pod: ReturnType<PodManager['getSession']>): CompactPod {
+function compactPod(
+  pod: ReturnType<PodManager['getSession']>,
+  request: FastifyRequest,
+): CompactPod {
   const title = compactText(
     pod.briefTitle ?? pod.task.split('\n', 1)[0] ?? pod.id,
     COMPACT_TITLE_MAX_CHARS,
@@ -82,6 +85,8 @@ function compactPod(pod: ReturnType<PodManager['getSession']>): CompactPod {
     seriesId: pod.seriesId,
     seriesName: pod.seriesName,
     options: pod.options,
+    hasWebUi: pod.hasWebUi,
+    previewUrl: rewritePreviewUrlForRequest(pod.id, pod.previewUrl, request),
     containerId: pod.containerId,
     worktreePath: pod.worktreePath,
     createdAt: pod.createdAt,
@@ -401,7 +406,7 @@ export function podRoutes(
       userId: query.userId,
       limit,
     });
-    if (query.compact === 'true') return pods.map(compactPod);
+    if (query.compact === 'true') return pods.map((pod) => compactPod(pod, request));
     return pods.map((pod) => serializePodForRequest(pod, request));
   });
 
