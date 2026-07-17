@@ -2,6 +2,7 @@ import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSyn
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import type {
   AgentActivityEvent,
+  CompactPod,
   ExecutionTarget,
   FirewallDeniedEvent,
   Pod,
@@ -33,6 +34,18 @@ const podColumns: ColumnDef<Pod>[] = [
     width: 10,
   },
   { header: 'Files', formatter: (s) => String(s.filesChanged), width: 7 },
+];
+
+const compactPodColumns: ColumnDef<CompactPod>[] = [
+  { header: 'ID', formatter: (pod) => pod.id.slice(0, 8), width: 10 },
+  { header: 'Profile', key: 'profileName', width: 16 },
+  { header: 'Status', formatter: (pod) => formatStatus(pod.status), width: 18 },
+  { header: 'Title', formatter: (pod) => truncate(pod.title, 40), width: 42 },
+  {
+    header: 'Duration',
+    formatter: (pod) => formatDurationFromDates(pod.startedAt, pod.completedAt),
+    width: 10,
+  },
 ];
 
 const validationSuiteHelp = `Autopod validation suite: ${VALIDATION_SUITES.join('|')}`;
@@ -421,14 +434,22 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         json?: boolean;
       }) => {
         const client = getClient();
-        const pods = await withSpinner('Fetching pods...', () =>
-          client.listSessions({
-            status: opts.status,
-            profile: opts.profile,
-            limit: opts.limit,
-            compact: opts.compact === true,
-          }),
-        );
+        const filters = { status: opts.status, profile: opts.profile, limit: opts.limit };
+        if (opts.compact) {
+          const pods = await withSpinner('Fetching pods...', () =>
+            client.listSessions({ ...filters, compact: true }),
+          );
+          withJsonOutput(opts, pods, (data) => {
+            if (data.length === 0) {
+              console.log(chalk.dim('No pods found.'));
+              return;
+            }
+            console.log(renderTable(data, compactPodColumns));
+          });
+          return;
+        }
+
+        const pods = await withSpinner('Fetching pods...', () => client.listSessions(filters));
 
         withJsonOutput(opts, pods, (data) => {
           if (data.length === 0) {

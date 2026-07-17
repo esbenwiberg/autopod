@@ -346,6 +346,24 @@ describe('pod commands', () => {
     );
   });
 
+  it('renders compact records without requiring JSON', async () => {
+    (mockClient.listSessions as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        id: 'compact1',
+        profileName: 'test',
+        status: 'running',
+        title: 'Compact title',
+        startedAt: null,
+        completedAt: null,
+      },
+    ]);
+
+    await program.parseAsync(['node', 'ap', 'ls', '--compact']);
+    expect(mockClient.listSessions).toHaveBeenCalledWith(
+      expect.objectContaining({ compact: true }),
+    );
+  });
+
   it('rejects a non-positive ls limit with an actionable error', async () => {
     await expect(program.parseAsync(['node', 'ap', 'ls', '--limit', '0'])).rejects.toThrow(
       'limit must be a positive integer',
