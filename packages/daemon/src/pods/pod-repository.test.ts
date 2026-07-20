@@ -560,6 +560,24 @@ describe('PodRepository', () => {
     });
   });
 
+  describe('bounded list discovery', () => {
+    it('filters statuses before limiting and returns the newest matching pods', () => {
+      repo.insert({ ...validSession, id: 'old-run', status: 'running' });
+      repo.insert({ ...validSession, id: 'new-fail', status: 'failed' });
+      repo.insert({ ...validSession, id: 'newest-queued', status: 'queued' });
+      db.prepare("UPDATE pods SET created_at = '2024-01-01T00:00:00Z' WHERE id = 'old-run'").run();
+      db.prepare("UPDATE pods SET created_at = '2024-01-02T00:00:00Z' WHERE id = 'new-fail'").run();
+      db.prepare(
+        "UPDATE pods SET created_at = '2024-01-03T00:00:00Z' WHERE id = 'newest-queued'",
+      ).run();
+
+      expect(repo.list({ status: ['running', 'failed'], limit: 1 }).map((pod) => pod.id)).toEqual([
+        'new-fail',
+      ]);
+      expect(repo.list({ status: 'running' }).map((pod) => pod.id)).toEqual(['old-run']);
+    });
+  });
+
   describe('countByStatusAndProfile', () => {
     it('should count matching pods', () => {
       repo.insert(validSession);

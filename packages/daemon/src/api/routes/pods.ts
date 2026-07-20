@@ -1,9 +1,11 @@
 import {
   AutopodError,
+  type CompactPod,
   type FirewallDeniedEvent,
   type PodStatus,
   collectPiiPatternNames,
   createPodRequestSchema,
+  podStatusSchema,
   processContent,
   renderEvidenceYaml,
   sendMessageSchema,
@@ -53,6 +55,55 @@ function parsePositiveIntegerQueryParam(raw: unknown): number | null | undefined
 }
 
 const LOG_REPLAY_EVENT_TYPES = ['pod.agent_activity', 'pod.firewall_denied'];
+const MAX_POD_LIST_LIMIT = 500;
+const COMPACT_TITLE_MAX_CHARS = 160;
+const COMPACT_SUMMARY_MAX_CHARS = 500;
+
+function compactText(value: string | null | undefined, maxChars = COMPACT_SUMMARY_MAX_CHARS) {
+  return value === null || value === undefined ? null : value.slice(0, maxChars);
+}
+
+function compactPod(
+  pod: ReturnType<PodManager['getSession']>,
+  request: FastifyRequest,
+): CompactPod {
+  const title = compactText(
+    pod.briefTitle ?? pod.task.split('\n', 1)[0] ?? pod.id,
+    COMPACT_TITLE_MAX_CHARS,
+  ) as string;
+  return {
+    id: pod.id,
+    title,
+    taskSummary: compactText(pod.taskSummary?.actualSummary),
+    profileName: pod.profileName,
+    status: pod.status,
+    model: pod.model,
+    runtime: pod.runtime,
+    executionTarget: pod.executionTarget,
+    branch: pod.branch,
+    baseBranch: pod.baseBranch,
+    seriesId: pod.seriesId,
+    seriesName: pod.seriesName,
+    options: pod.options,
+    hasWebUi: pod.hasWebUi,
+    previewUrl: rewritePreviewUrlForRequest(pod.id, pod.previewUrl, request),
+    containerId: pod.containerId,
+    worktreePath: pod.worktreePath,
+    createdAt: pod.createdAt,
+    startedAt: pod.startedAt,
+    runningAt: pod.runningAt,
+    updatedAt: pod.updatedAt,
+    completedAt: pod.completedAt,
+    lastHeartbeatAt: pod.lastHeartbeatAt,
+    failureReason: compactText(pod.failureReason),
+    mergeBlockReason: compactText(pod.mergeBlockReason),
+    lastCorrectionMessage: compactText(pod.lastCorrectionMessage),
+    pendingEscalationSummary: compactText(pod.pendingEscalation?.question),
+    progressSummary: pod.progress
+      ? `${pod.progress.phase}: ${pod.progress.description}`.slice(0, 240)
+      : null,
+  };
+}
 
 function previewRewriteContext(request: FastifyRequest) {
   return {
@@ -321,13 +372,41 @@ export function podRoutes(
   });
 
   // GET /pods — list pods
-  app.get('/pods', async (request) => {
-    const query = request.query as { profileName?: string; status?: string; userId?: string };
+  app.get('/pods', async (request, reply) => {
+    const query = request.query as {
+      profileName?: string;
+      profile?: string;
+      status?: string;
+      userId?: string;
+      limit?: string;
+      compact?: string;
+    };
+    const limit = parsePositiveIntegerQueryParam(query.limit);
+    if (limit === null) {
+      reply.status(400);
+      return { error: 'limit must be a positive integer', code: 'invalid_limit' };
+    }
+    if (limit !== undefined && limit > MAX_POD_LIST_LIMIT) {
+      reply.status(400);
+      return {
+        error: `limit must be at most ${MAX_POD_LIST_LIMIT}`,
+        code: 'limit_too_large',
+      };
+    }
+    const rawStatuses = query.status?.split(',').filter(Boolean);
+    const invalidStatus = rawStatuses?.find((status) => !podStatusSchema.safeParse(status).success);
+    if (invalidStatus !== undefined) {
+      reply.status(400);
+      return { error: `Unknown pod status: ${invalidStatus}`, code: 'invalid_status' };
+    }
+    const statuses = rawStatuses as PodStatus[] | undefined;
     const pods = podManager.listSessions({
-      profileName: query.profileName,
-      status: query.status as PodStatus | undefined,
+      profileName: query.profileName ?? query.profile,
+      status: statuses,
       userId: query.userId,
+      limit,
     });
+    if (query.compact === 'true') return pods.map((pod) => compactPod(pod, request));
     return pods.map((pod) => serializePodForRequest(pod, request));
   });
 

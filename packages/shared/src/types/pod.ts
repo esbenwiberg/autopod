@@ -538,6 +538,38 @@ export interface PodSummary {
   createdAt: string;
 }
 
+/** Lightweight pod representation for monitoring and discovery consumers. */
+export interface CompactPod {
+  id: string;
+  title: string;
+  taskSummary: string | null;
+  profileName: string;
+  status: PodStatus;
+  model: string;
+  runtime: RuntimeType;
+  executionTarget: ExecutionTarget;
+  branch: string;
+  baseBranch: string | null;
+  seriesId: string | null;
+  seriesName: string | null;
+  options: PodOptions;
+  hasWebUi: boolean;
+  previewUrl: string | null;
+  containerId: string | null;
+  worktreePath: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  runningAt: string | null;
+  updatedAt: string;
+  completedAt: string | null;
+  lastHeartbeatAt: string | null;
+  failureReason: string | null;
+  mergeBlockReason: string | null;
+  lastCorrectionMessage: string | null;
+  pendingEscalationSummary: string | null;
+  progressSummary: string | null;
+}
+
 /**
  * Per-pod behavioural telemetry derived from the agent event stream plus
  * escalation/pod state. Surfaces how the agent actually worked — reading

@@ -90,6 +90,17 @@ describe('AutopodClient', () => {
         expect.objectContaining({ method: 'GET' }),
       );
     });
+
+    it('sends comma-separated statuses, limit, and compact query params', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse([]));
+
+      await client.listSessions({ status: 'running,failed', limit: 25, compact: true });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/pods?status=running%2Cfailed&limit=25&compact=true',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
   });
 
   describe('getSession', () => {

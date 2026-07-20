@@ -325,6 +325,51 @@ describe('pod commands', () => {
     );
   });
 
+  it('passes bounded compact multi-status options to the client', async () => {
+    await program.parseAsync([
+      'node',
+      'ap',
+      'ls',
+      '--status',
+      'running,failed',
+      '--limit',
+      '10',
+      '--compact',
+      '--json',
+    ]);
+    expect(mockClient.listSessions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'running,failed',
+        limit: 10,
+        compact: true,
+      }),
+    );
+  });
+
+  it('renders compact records without requiring JSON', async () => {
+    (mockClient.listSessions as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        id: 'compact1',
+        profileName: 'test',
+        status: 'running',
+        title: 'Compact title',
+        startedAt: null,
+        completedAt: null,
+      },
+    ]);
+
+    await program.parseAsync(['node', 'ap', 'ls', '--compact']);
+    expect(mockClient.listSessions).toHaveBeenCalledWith(
+      expect.objectContaining({ compact: true }),
+    );
+  });
+
+  it('rejects a non-positive ls limit with an actionable error', async () => {
+    await expect(program.parseAsync(['node', 'ap', 'ls', '--limit', '0'])).rejects.toThrow(
+      'limit must be a positive integer',
+    );
+  });
+
   it('registers status command that calls getSession', async () => {
     await program.parseAsync(['node', 'ap', 'status', 'abcd1234']);
     expect(mockClient.getSession).toHaveBeenCalledWith('abcd1234');

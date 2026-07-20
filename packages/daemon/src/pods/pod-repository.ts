@@ -103,8 +103,9 @@ export interface NewPod {
 
 export interface PodFilters {
   profileName?: string;
-  status?: PodStatus;
+  status?: PodStatus | PodStatus[];
   userId?: string;
+  limit?: number;
 }
 
 export interface PodUpdates {
@@ -899,8 +900,13 @@ export function createPodRepository(db: Database.Database): PodRepository {
         params.profileName = filters.profileName;
       }
       if (filters?.status !== undefined) {
-        whereClauses.push('status = @status');
-        params.status = filters.status;
+        const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];
+        const placeholders = statuses.map((status, index) => {
+          const key = `status${index}`;
+          params[key] = status;
+          return `@${key}`;
+        });
+        whereClauses.push(`status IN (${placeholders.join(', ')})`);
       }
       if (filters?.userId !== undefined) {
         whereClauses.push('user_id = @userId');
@@ -908,8 +914,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       }
 
       const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+      const limit = filters?.limit === undefined ? '' : ' LIMIT @limit';
+      if (filters?.limit !== undefined) params.limit = filters.limit;
       const rows = db
-        .prepare(`SELECT * FROM pods ${where} ORDER BY created_at DESC`)
+        .prepare(`SELECT * FROM pods ${where} ORDER BY created_at DESC${limit}`)
         .all(params) as Record<string, unknown>[];
 
       return rows.map(rowToSession);
