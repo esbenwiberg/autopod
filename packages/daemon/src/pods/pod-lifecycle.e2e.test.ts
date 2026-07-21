@@ -304,14 +304,14 @@ describe('Pod Lifecycle E2E', () => {
       );
     });
 
-    it('queues a check_messages fallback when an MCP response stream detached', async () => {
+    it('queues and resumes with a fallback when an MCP response stream detached', async () => {
       const pendingRequests = new PendingRequests();
       const responsePromise = pendingRequests.waitForResponse('esc-1', 5000);
       pendingRequests.markDetached('esc-1', 'mcp_response_stream_closed');
 
       const runtime = createMockRuntime({
         resume: vi.fn(async function* () {
-          yield completeEvent('Should not resume via runtime');
+          yield completeEvent('Resumed after detached MCP reply');
         } as () => AsyncIterable<AgentEvent>),
       });
 
@@ -335,13 +335,45 @@ describe('Pod Lifecycle E2E', () => {
       await manager.sendMessage(pod.id, 'Use PostgreSQL');
 
       await expect(responsePromise).resolves.toBe('Use PostgreSQL');
-      expect(runtime.resume).not.toHaveBeenCalled();
+      expect(runtime.resume).toHaveBeenCalledTimes(1);
+      const resumeMessage = vi.mocked(runtime.resume).mock.calls[0]?.[1] as string;
+      expect(resumeMessage).toContain('Fallback response for the previous ask_human MCP call');
+      expect(resumeMessage).toContain('Use PostgreSQL');
 
       const queued = ctx.nudgeRepo.listPending(pod.id);
       expect(queued).toHaveLength(1);
       expect(queued[0]?.message).toContain('Fallback response for the previous ask_human MCP call');
       expect(queued[0]?.message).toContain('Use PostgreSQL');
       expect(queued[0]?.message).toContain('original MCP response stream closed');
+      expect(manager.getSession(pod.id).status).toBe('validated');
+    });
+
+    it('fails the pod when the worker crashes while awaiting human input', async () => {
+      const runtime = createMockRuntime({
+        spawn: vi.fn(async function* () {
+          yield escalationEvent('esc-1', 'Which DB?');
+          yield {
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            message: 'Codex process exited with code 1',
+            fatal: true,
+          };
+        } as () => AsyncIterable<AgentEvent>),
+      });
+
+      const ctx = createTestContext({ runtime });
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add database support', skipValidation: true },
+        'user-1',
+      );
+
+      await manager.processPod(pod.id);
+
+      const result = manager.getSession(pod.id);
+      expect(result.status).toBe('failed');
+      expect(result.failureReason).toBe('Agent failed: Codex process exited with code 1');
     });
   });
 
