@@ -8289,7 +8289,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           } else if (event.type === 'error' && event.fatal) {
             const pod = podRepo.getOrThrow(podId);
-            if (pod.status === 'running') {
+            if (canFail(pod.status)) {
               const failureReason = sanitizeFailureReason(event.message, 'Agent failed');
               emitActivityStatus(podId, failureReason);
               transition(pod, 'failed', {
@@ -8885,24 +8885,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       transition(pod, 'running', { pendingEscalation: null });
 
       // If the pod was blocked on an ask_human MCP call, resolve the pending request.
-      // The container's agent event stream is still active — no need to call runtime.resume().
+      // A still-attached MCP stream can deliver the response directly. If the
+      // stream detached, resume the agent with the same fallback text queued for
+      // check_messages so a dead or errored Codex turn is not stranded forever.
+      let resumeMessage = message;
       const pendingForSession = deps.pendingRequestsByPod?.get(podId);
       if (pendingForSession && pod.pendingEscalation?.id) {
         const resolveResult = pendingForSession.resolveWithState(pod.pendingEscalation.id, message);
         if (resolveResult.resolved) {
           if (resolveResult.detached) {
-            nudgeRepo.queue(
-              podId,
-              buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, message),
-            );
+            resumeMessage = buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, message);
+            nudgeRepo.queue(podId, resumeMessage);
             emitActivityStatus(
               podId,
               'MCP response stream was closed — queued human reply for check_messages',
             );
+          } else {
+            // The MCP ask_human call has been unblocked — processPod's consumeAgentEvents
+            // loop will continue picking up events from the still-running container.
+            return;
           }
-          // The MCP ask_human call has been unblocked — processPod's consumeAgentEvents
-          // loop will continue picking up events from the still-running container.
-          return;
         }
       }
 
@@ -8912,7 +8914,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const runtime = runtimeRegistry.get(pod.runtime);
         if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
         primePiRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
-        const events = runtime.resume(podId, message, pod.containerId, resumeEnv);
+        const events = runtime.resume(podId, resumeMessage, pod.containerId, resumeEnv);
         const outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
         await persistRuntimeCredentialsForPod(
           podId,
