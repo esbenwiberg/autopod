@@ -23,7 +23,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.111.0",
+    "@anthropic-ai/sdk": "^0.112.4",
     "@autopod/escalation-mcp": "workspace:^",
     "@autopod/shared": "workspace:*",
     "@autopod/validator": "workspace:*",
