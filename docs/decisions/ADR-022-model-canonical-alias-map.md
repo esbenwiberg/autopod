@@ -110,8 +110,8 @@ adding to the pricing catalog.
   see a row + a sample list of unrecognised strings and know to
   update the catalog. Today's behaviour (silent zero-cost) was
   worse.
-- Pricing JSON stays intact — no risk of accidentally repricing
-  a model by editing the wrong row.
+- Pricing JSON contains canonical keys only; `MODEL_CANONICAL` is the sole
+  historical-alias map, avoiding duplicate price rows that can drift.
 
 **Harder**
 
