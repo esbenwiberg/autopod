@@ -36,8 +36,9 @@ by the `@autopod/shared` package. Shape:
 }
 ```
 
-Keys are exact model IDs as stored in `pod.model` (the same string the
-runtime reports). Values are USD per 1 000 000 tokens.
+Keys are canonical model IDs. Raw historical aliases stored in `pod.model`
+are resolved through `canonicalModelKey()` before lookup. Values are USD per
+1 000 000 tokens.
 
 The daemon imports the JSON, exposes `effectiveCostUsd(pod)` and
 `computeCost(model, inputTokens, outputTokens)` helpers, and uses them
@@ -46,6 +47,10 @@ at aggregation time:
 ```ts
 effectiveCost = pod.costUsd > 0 ? pod.costUsd : computeCost(pod.model, ...)
 ```
+
+`computeCost()` and `computeCostWithCache()` own canonicalization so every
+cost caller uses the same historical identity rule. Direct price-table lookup
+is reserved for already-canonical keys.
 
 Refresh policy: **manual only**. When prices change, edit the JSON,
 rebuild, redeploy. No auto-fetch, no scheduled job, no admin endpoint.

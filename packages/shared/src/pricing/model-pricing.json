@@ -1,5 +1,5 @@
 {
-  "$comment": "USD per 1M tokens. Short aliases (opus/sonnet/haiku) are legacy-internal pricing shims for historical rows only; new profile and pod writes must use canonical model IDs. cachedInputPer1M is optional because not every provider reports cached input. Do not add new short aliases here unless a migration/analytics compatibility path explicitly requires it.",
+  "$comment": "USD per 1M tokens keyed by canonical model ID. Historical short aliases are resolved through MODEL_CANONICAL before lookup; new profile and pod writes must use canonical model IDs. cachedInputPer1M is optional because not every provider reports cached input.",
   "claude-opus-4-8": { "inputPer1M": 5.0, "cachedInputPer1M": 0.5, "outputPer1M": 25.0 },
   "claude-opus-4-7": { "inputPer1M": 5.0, "cachedInputPer1M": 0.5, "outputPer1M": 25.0 },
   "claude-opus-4-6": { "inputPer1M": 5.0, "cachedInputPer1M": 0.5, "outputPer1M": 25.0 },
@@ -19,9 +19,6 @@
   "gpt-5.1-codex-mini": { "inputPer1M": 0.25, "cachedInputPer1M": 0.025, "outputPer1M": 2.0 },
   "gpt-5-codex": { "inputPer1M": 1.25, "cachedInputPer1M": 0.125, "outputPer1M": 10.0 },
   "codex-mini-latest": { "inputPer1M": 1.5, "cachedInputPer1M": 0.375, "outputPer1M": 6.0 },
-  "opus": { "inputPer1M": 5.0, "cachedInputPer1M": 0.5, "outputPer1M": 25.0 },
-  "sonnet": { "inputPer1M": 3.0, "cachedInputPer1M": 0.3, "outputPer1M": 15.0 },
-  "haiku": { "inputPer1M": 1.0, "cachedInputPer1M": 0.1, "outputPer1M": 5.0 },
   "deepseek/deepseek-r1": { "inputPer1M": 0.55, "outputPer1M": 2.19 },
   "deepseek/deepseek-chat-v3-0324": { "inputPer1M": 0.27, "outputPer1M": 1.1 },
   "minimax/minimax-01": { "inputPer1M": 0.2, "outputPer1M": 1.1 },

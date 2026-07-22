@@ -1,7 +1,7 @@
 import {
   type CostAnalyticsResponse,
-  MODEL_PRICING,
   type Pod,
+  canonicalModelKey,
   computeCostWithCache,
   effectiveCostUsd,
 } from '@autopod/shared';
@@ -142,7 +142,7 @@ export function aggregateCost(
   for (const pod of currentPods) {
     const agentCost = effectiveCostUsd(pod);
 
-    if (pod.costUsd === 0 && pod.model && !MODEL_PRICING[pod.model]) {
+    if (pod.costUsd === 0 && pod.model && !canonicalModelKey(pod.model)) {
       unknownModels.add(pod.model);
     }
 
