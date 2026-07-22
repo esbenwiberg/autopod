@@ -79,10 +79,10 @@ export function canonicalModelKey(
 }
 ```
 
-The map is additive — adding new aliases never breaks existing
-analytics paths. The current alias set mirrors the three short
-aliases already present in `model-pricing.json` and stays in
-sync with that file (today: `opus`, `sonnet`, `haiku`).
+The map is additive — adding new aliases never breaks existing analytics paths.
+It is the source of truth for the three historical short aliases
+(`opus`, `sonnet`, `haiku`). Pricing helpers canonicalize through the map,
+so the pricing JSON contains canonical IDs only.
 
 Unrecognised models — neither a `MODEL_PRICING` key nor a
 known alias — coalesce to `null` from `canonicalModelKey()`
@@ -102,27 +102,23 @@ adding to the pricing catalog.
 - One-line cure for the alias-bisection footgun: every analytics
   rollup calls `canonicalModelKey()` on the way out of the
   query and the rest of the code is unchanged.
-- Backwards-compatible — existing `computeCost` /
-  `effectiveCostUsd` paths don't change. Adding a new alias is
-  one line in `MODEL_CANONICAL` and one line in
-  `model-pricing.json` (the price-catalog duplicate stays so
-  short aliases still cost-look-up correctly).
+- Backwards-compatible — `computeCost`, `computeCostWithCache`, and
+  `effectiveCostUsd` canonicalize raw model strings before price lookup.
+  Adding a historical alias is one mapping to an existing canonical price key;
+  no duplicate price row is required.
 - The `<unknown>` bucket is observable, not silent. Operators
   see a row + a sample list of unrecognised strings and know to
   update the catalog. Today's behaviour (silent zero-cost) was
   worse.
-- Pricing JSON stays intact — no risk of accidentally repricing
-  a model by editing the wrong row.
+- Pricing JSON contains canonical keys only; `MODEL_CANONICAL` is the sole
+  historical-alias map, avoiding duplicate price rows that can drift.
 
 **Harder**
 
-- `MODEL_CANONICAL` is hand-maintained. Adding a new short
-  alias to `model-pricing.json` without adding it to
-  `MODEL_CANONICAL` would silently bisect that model's stats
-  again. Mitigation: a comment in `pricing/index.ts` reminds
-  editors to update both; a future change could derive the map
-  from the JSON automatically (defer until we have a 4th alias
-  to justify the indirection).
+- `MODEL_CANONICAL` is hand-maintained. A missing mapping leaves the raw
+  string unknown to both analytics and pricing. Shared pricing tests lock the
+  historical mappings and verify that aliases never re-enter the canonical
+  price table.
 - Analytics has a second consumer of model strings besides
   pricing. Future code adding new model-keyed rollups must
   remember to coalesce. The convention is "key analytics by

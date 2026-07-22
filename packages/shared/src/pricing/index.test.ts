@@ -30,10 +30,10 @@ describe('MODEL_PRICING', () => {
     expect(MODEL_PRICING['gpt-5-codex']).toBeDefined();
   });
 
-  it('contains legacy short alias pricing shims', () => {
-    expect(MODEL_PRICING.opus).toBeDefined();
-    expect(MODEL_PRICING.sonnet).toBeDefined();
-    expect(MODEL_PRICING.haiku).toBeDefined();
+  it('keeps legacy short aliases out of the canonical price table', () => {
+    expect(MODEL_PRICING.opus).toBeUndefined();
+    expect(MODEL_PRICING.sonnet).toBeUndefined();
+    expect(MODEL_PRICING.haiku).toBeUndefined();
   });
 
   it('contains claude-opus-4-8 with the same price as claude-opus-4-7', () => {
@@ -56,6 +56,14 @@ describe('computeCost', () => {
 
   it('computes blended cost for claude-opus-4-8', () => {
     expect(computeCost('claude-opus-4-8', 500_000, 500_000)).toBe(15.0);
+  });
+
+  it('prices historical short aliases through their original canonical IDs', () => {
+    expect(computeCost('opus', 1_000_000, 0)).toBe(computeCost('claude-opus-4-7', 1_000_000, 0));
+    expect(computeCost('sonnet', 1_000_000, 0)).toBe(
+      computeCost('claude-sonnet-4-6', 1_000_000, 0),
+    );
+    expect(computeCost('haiku', 1_000_000, 0)).toBe(computeCost('claude-haiku-4-5', 1_000_000, 0));
   });
 
   it('returns 0 for null model', () => {
@@ -91,6 +99,12 @@ describe('computeCostWithCache', () => {
       0.1 * 1.0 + 0.9 * 0.1,
     );
   });
+
+  it('applies canonical cached-input pricing to historical aliases', () => {
+    expect(computeCostWithCache('opus', 1_000_000, 0, 900_000)).toBe(
+      computeCostWithCache('claude-opus-4-7', 1_000_000, 0, 900_000),
+    );
+  });
 });
 
 describe('effectiveCostUsd', () => {
@@ -120,6 +134,17 @@ describe('effectiveCostUsd', () => {
         outputTokens: 1_000_000,
       }),
     ).toBe(0);
+  });
+
+  it('prices a historical alias when no recorded vendor cost exists', () => {
+    expect(
+      effectiveCostUsd({
+        costUsd: 0,
+        model: 'opus',
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+      }),
+    ).toBe(5);
   });
 });
 

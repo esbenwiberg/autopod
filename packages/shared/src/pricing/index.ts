@@ -33,8 +33,7 @@ export const MODEL_CANONICAL: Readonly<Record<string, string>> = {
  * Resolve a raw model string to its canonical MODEL_PRICING key.
  * Returns null if the model is neither a direct MODEL_PRICING key nor a known alias.
  * MODEL_CANONICAL is checked first so legacy short aliases (opus/sonnet/haiku)
- * coalesce to their historical full IDs even though MODEL_PRICING also carries
- * those short names as legacy pricing shims.
+ * coalesce to their historical full IDs before pricing or analytics lookup.
  */
 export function canonicalModelKey(model: string | null | undefined): string | null {
   if (!model) return null;
@@ -58,8 +57,9 @@ export function computeCostWithCache(
   outputTokens: number,
   cachedInputTokens: number,
 ): number {
-  if (!model) return 0;
-  const price = MODEL_PRICING[model];
+  const canonical = canonicalModelKey(model);
+  if (!canonical) return 0;
+  const price = MODEL_PRICING[canonical];
   if (!price) return 0;
   const cachedInput = price.cachedInputPer1M
     ? Math.min(Math.max(cachedInputTokens, 0), inputTokens)

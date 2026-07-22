@@ -168,6 +168,23 @@ describe('aggregateCost', () => {
     expect(result.total).toBe(1.25);
   });
 
+  it('prices a historical model alias without reporting it as unknown', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    insertPod(db, {
+      model: 'opus',
+      costUsd: 0,
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+      completedAt: msToIso(WINDOW_START_MS + 1),
+    });
+
+    const result = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
+
+    expect(result.total).toBe(5);
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('opus'));
+    warnSpy.mockRestore();
+  });
+
   it('returns 0 cost for unknown model and warns', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     insertPod(db, {
