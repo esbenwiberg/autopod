@@ -105,7 +105,7 @@ struct AutopodApp: App {
       memoryStore: memoryStore,
       scheduledJobStore: scheduledJobStore
     )
-    stream.connect(baseURL: conn.url, token: connToken, tokenProvider: tokenProvider)
+    stream.connect(baseURL: conn.url, token: connToken, api: api, tokenProvider: tokenProvider)
     eventStream = stream
 
     // Reload historical events for the currently selected pod — the EventStream was just

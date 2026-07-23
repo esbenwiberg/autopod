@@ -71,6 +71,7 @@ public final class EventStream {
   public func connect(
     baseURL: URL,
     token: String,
+    api: DaemonAPI,
     tokenProvider: DaemonAccessTokenProvider? = nil
   ) {
     disconnect()
@@ -87,6 +88,11 @@ public final class EventStream {
       onStateChange: { [weak self] state in
         Task { @MainActor [weak self] in
           self?.handleStateChange(state)
+        }
+      },
+      onResyncRequired: { [weak self] in
+        Task { @MainActor [weak self] in
+          await self?.handleResyncRequired(api: api)
         }
       }
     )
@@ -137,36 +143,60 @@ public final class EventStream {
     historicalRequestedScope[podId] = requestedScope
     historicalLoadState[podId] = .loading
     Task {
-      do {
-        let events = try await api.getSessionEvents(podId, limit: requestedScope.limit)
-        let mapped = events.enumerated().map { (i, e) in
-          // Legacy daemon responses did not include eventId, so keep a deterministic fallback.
-          mapAgentEvent(e, id: e.eventId ?? -(events.count - i))
-        }
-        let liveEvents = sessionEvents[podId] ?? []
-        sessionEvents[podId] = Self.mergeHistoricalAndLiveEvents(
-          historical: mapped,
-          live: liveEvents
-        )
-        let loadedScope: HistoricalEventScope = {
-          switch requestedScope {
-          case .full:
-            return .full
-          case .latest(let limit):
-            return events.count < limit ? .full : .latest(limit)
-          }
-        }()
-        historicalEventScope[podId] = loadedScope
-        historicalRequestedScope[podId] = loadedScope
-        historicalLoadState[podId] = .loaded
-      } catch {
-        historicalLoadState[podId] = .failed(error.localizedDescription)
-      }
+      await fetchHistoricalEvents(podId: podId, api: api, scope: requestedScope)
     }
   }
 
   public func reloadHistoricalEvents(podId: String, api: DaemonAPI) {
     loadHistoricalEvents(podId: podId, api: api, scope: historicalRequestedScope[podId])
+  }
+
+  func handleResyncRequired(api: DaemonAPI) async {
+    flushPendingEvents()
+    await podStore.loadSessions()
+
+    var podIds = Set(historicalRequestedScope.keys)
+    if let selectedPodId = podStore.selectedSessionId {
+      podIds.insert(selectedPodId)
+    }
+    for podId in podIds.sorted() {
+      let scope = historicalRequestedScope[podId] ?? .latest(Self.defaultHistoricalEventLimit)
+      historicalRequestedScope[podId] = scope
+      historicalLoadState[podId] = .loading
+      await fetchHistoricalEvents(podId: podId, api: api, scope: scope)
+    }
+  }
+
+  private func fetchHistoricalEvents(
+    podId: String,
+    api: DaemonAPI,
+    scope: HistoricalEventScope
+  ) async {
+    do {
+      let events = try await api.getSessionEvents(podId, limit: scope.limit)
+      let mapped = events.enumerated().map { (i, e) in
+        // Legacy daemon responses did not include eventId, so keep a deterministic fallback.
+        mapAgentEvent(e, id: e.eventId ?? -(events.count - i))
+      }
+      let liveEvents = sessionEvents[podId] ?? []
+      sessionEvents[podId] = Self.mergeHistoricalAndLiveEvents(
+        historical: mapped,
+        live: liveEvents
+      )
+      let loadedScope: HistoricalEventScope = {
+        switch scope {
+        case .full:
+          return .full
+        case .latest(let limit):
+          return events.count < limit ? .full : .latest(limit)
+        }
+      }()
+      historicalEventScope[podId] = loadedScope
+      historicalRequestedScope[podId] = loadedScope
+      historicalLoadState[podId] = .loaded
+    } catch {
+      historicalLoadState[podId] = .failed(error.localizedDescription)
+    }
   }
 
   // MARK: - Event dispatch
