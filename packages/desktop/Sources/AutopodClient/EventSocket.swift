@@ -13,6 +13,15 @@ public actor EventSocket {
     case reconnecting(attempt: Int)
   }
 
+  enum IncomingMessage: Sendable {
+    case event(RawSystemEvent)
+    case resyncRequired
+  }
+
+  private struct ControlMessage: Decodable {
+    let type: String
+  }
+
   private var state: State = .disconnected
   private var webSocketTask: URLSessionWebSocketTask?
   private var lastEventId: Int = 0
@@ -27,6 +36,7 @@ public actor EventSocket {
   private let pod: URLSession
   private let onEvent: @Sendable (RawSystemEvent) -> Void
   private let onStateChange: @Sendable (State) -> Void
+  private let onResyncRequired: @Sendable () -> Void
 
   private static let maxBackoff: TimeInterval = 16
   private static let heartbeatTimeout: TimeInterval = 45  // 30s ping + 15s grace
@@ -38,7 +48,8 @@ public actor EventSocket {
     token: String,
     tokenProvider: DaemonAccessTokenProvider? = nil,
     onEvent: @escaping @Sendable (RawSystemEvent) -> Void,
-    onStateChange: @escaping @Sendable (State) -> Void
+    onStateChange: @escaping @Sendable (State) -> Void,
+    onResyncRequired: @escaping @Sendable () -> Void = {}
   ) {
     self.baseURL = baseURL
     self.token = DaemonAuth.normalizeBearerToken(token)
@@ -46,6 +57,7 @@ public actor EventSocket {
     self.pod = URLSession.shared
     self.onEvent = onEvent
     self.onStateChange = onStateChange
+    self.onResyncRequired = onResyncRequired
   }
 
   // MARK: - Public API
@@ -127,16 +139,18 @@ public actor EventSocket {
 
         switch message {
         case .string(let text):
-          guard let data = text.data(using: .utf8) else { continue }
-          do {
-            let event = try JSONDecoder().decode(RawSystemEvent.self, from: data)
+          switch Self.decodeIncomingMessage(text) {
+          case .event(let event):
             // Track event ID for replay
             if let eventId = event._eventId, eventId > lastEventId {
               lastEventId = eventId
             }
             onEvent(event)
-          } catch {
-            // Skip unparseable events (e.g. ack messages like "subscribed_all")
+          case .resyncRequired:
+            onResyncRequired()
+          case nil:
+            // Skip unparseable events and acknowledgements.
+            break
           }
 
         case .data:
@@ -196,6 +210,16 @@ public actor EventSocket {
       return DaemonAuth.normalizeBearerToken(freshToken)
     }
     return token
+  }
+
+  nonisolated static func decodeIncomingMessage(_ text: String) -> IncomingMessage? {
+    guard let data = text.data(using: .utf8) else { return nil }
+    if let event = try? JSONDecoder().decode(RawSystemEvent.self, from: data) {
+      return .event(event)
+    }
+    guard let control = try? JSONDecoder().decode(ControlMessage.self, from: data),
+          control.type == "replay_truncated" else { return nil }
+    return .resyncRequired
   }
 
   private func send(_ dict: [String: any Sendable]) {
