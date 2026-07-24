@@ -53,7 +53,10 @@ enum ProviderModelSaveEligibility {
             return "\(provider.displayName) is not authorized for unattended pods."
         }
         let reviewedModel = catalog?.models.contains {
-            $0.id == model && $0.providerId == provider.id && $0.lifecycle == "active"
+            $0.id == model
+                && $0.providerId == provider.id
+                && provider.modelIds.contains($0.id)
+                && $0.lifecycle == "active"
         } == true
         guard reviewedModel else {
             return "Choose a reviewed \(provider.displayName) model before saving."

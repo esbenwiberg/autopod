@@ -94,6 +94,12 @@ final class ProviderCatalogTests: XCTestCase {
           "providerId": "fixture-cloud",
           "displayName": "Fixture Model A",
           "lifecycle": "active"
+        },
+        {
+          "id": "fixture/unreviewed-model",
+          "providerId": "fixture-cloud",
+          "displayName": "Fixture Unreviewed Model",
+          "lifecycle": "active"
         }
       ]
     }
@@ -139,6 +145,20 @@ final class ProviderCatalogTests: XCTestCase {
     XCTAssertTrue(options.contains {
       $0.value == "fixture/model-a" && $0.label == "Fixture Model A"
     })
+    XCTAssertFalse(options.contains { $0.value == "fixture/unreviewed-model" })
+  }
+
+  func testProviderModelAllowlistBlocksUnreviewedCatalogModel() throws {
+    let catalog = try catalog()
+
+    XCTAssertNotNil(ProviderModelSaveEligibility.profileErrorMessage(
+      profileProviderId: "pi",
+      hasLinkedAccount: true,
+      accountProviderId: "fixture-cloud",
+      defaultModel: "fixture/unreviewed-model",
+      reviewerModel: "fixture/model-a",
+      catalog: catalog
+    ))
   }
 
   func testLegacyCatalogProviderUsesOnlySchemaSupportedAdapter() throws {
