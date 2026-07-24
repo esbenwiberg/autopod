@@ -17,9 +17,18 @@ describe('ProviderAccountStore', () => {
   it('round-trips ordered failover defaults and preserves null for legacy rows', () => {
     const db = createTestDb();
     const store = createProviderAccountStore(db);
-    store.create({ id: 'claude-max', name: 'Claude Max', provider: 'max' });
-    store.create({ id: 'copilot', name: 'Copilot', provider: 'copilot' });
-
+    store.create({
+      id: 'claude-max',
+      name: 'Claude Max',
+      provider: 'max',
+      credentials: { provider: 'max', oauthToken: 'max-token' },
+    });
+    store.create({
+      id: 'copilot',
+      name: 'Copilot',
+      provider: 'copilot',
+      credentials: { provider: 'copilot', token: 'copilot-token' },
+    });
     const source = store.create({
       id: 'openai-primary',
       name: 'OpenAI Primary',
@@ -65,8 +74,19 @@ describe('ProviderAccountStore', () => {
   it('rejects invalid failover defaults without changing the existing policy', () => {
     const db = createTestDb();
     const store = createProviderAccountStore(db);
-    store.create({ id: 'claude-max', name: 'Claude Max', provider: 'max' });
-    store.create({ id: 'copilot', name: 'Copilot', provider: 'copilot' });
+    store.create({
+      id: 'claude-max',
+      name: 'Claude Max',
+      provider: 'max',
+      credentials: { provider: 'max', oauthToken: 'max-token' },
+    });
+    store.create({
+      id: 'copilot',
+      name: 'Copilot',
+      provider: 'copilot',
+      credentials: { provider: 'copilot', token: 'copilot-token' },
+    });
+    store.create({ id: 'unauthenticated', name: 'Unauthenticated', provider: 'copilot' });
     const source = store.create({ id: 'primary', name: 'Primary', provider: 'openai' });
     const validPolicy = {
       targets: [{ providerAccountId: 'claude-max', runtime: 'claude', model: 'opus' as const }],
@@ -83,8 +103,12 @@ describe('ProviderAccountStore', () => {
         ],
       },
       { targets: [{ providerAccountId: 'missing', runtime: 'claude', model: 'opus' }] },
+      {
+        targets: [{ providerAccountId: 'unauthenticated', runtime: 'copilot', model: 'auto' }],
+      },
       { targets: [{ providerAccountId: 'claude-max', runtime: 'codex', model: 'gpt-5' }] },
       { targets: [{ providerAccountId: 'copilot', runtime: 'copilot' }] },
+      { targets: [] },
       {
         targets: [{ providerAccountId: 'copilot', runtime: 'copilot', model: 'auto' }],
         maxHops: 2,
@@ -101,7 +125,12 @@ describe('ProviderAccountStore', () => {
     const db = createTestDb();
     const store = createProviderAccountStore(db);
     store.create({ id: 'one', name: 'One', provider: 'openai' });
-    store.create({ id: 'two', name: 'Two', provider: 'max' });
+    store.create({
+      id: 'two',
+      name: 'Two',
+      provider: 'max',
+      credentials: { provider: 'max', oauthToken: 'max-token' },
+    });
     store.update('one', {
       failoverPolicy: {
         targets: [{ providerAccountId: 'two', runtime: 'claude', model: 'opus' }],

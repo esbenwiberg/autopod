@@ -192,13 +192,7 @@ describe('provider-account commands', () => {
   });
 
   it('clears an account failover policy', async () => {
-    await program.parseAsync([
-      'node',
-      'ap',
-      'provider-account',
-      'clear-failover',
-      'team-openai',
-    ]);
+    await program.parseAsync(['node', 'ap', 'provider-account', 'clear-failover', 'team-openai']);
     expect(mockClient.updateProviderAccount).toHaveBeenCalledWith('team-openai', {
       failoverPolicy: null,
     });

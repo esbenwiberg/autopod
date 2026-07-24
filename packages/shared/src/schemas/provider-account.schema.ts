@@ -152,6 +152,13 @@ export const createProviderAccountSchema = z
         message: 'Provider account credentials must match the account provider',
       });
     }
+    if (data.failoverPolicy && data.failoverPolicy.targets.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['failoverPolicy', 'targets'],
+        message: 'Provider account failover policies must contain at least one target',
+      });
+    }
   });
 
 export const updateProviderAccountSchema = z
@@ -160,7 +167,16 @@ export const updateProviderAccountSchema = z
     credentials: providerAccountCredentialsSchema.nullable().optional(),
     failoverPolicy: providerFailoverPolicySchema.nullable().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((data, ctx) => {
+    if (data.failoverPolicy && data.failoverPolicy.targets.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['failoverPolicy', 'targets'],
+        message: 'Provider account failover policies must contain at least one target',
+      });
+    }
+  });
 
 export const linkProviderAccountSchema = z.object({
   profileName: z.string().min(1),

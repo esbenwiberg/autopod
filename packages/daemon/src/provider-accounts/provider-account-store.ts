@@ -69,10 +69,7 @@ function parseFailoverPolicy(raw: unknown): ProviderFailoverPolicy | null {
   }
 }
 
-function isRuntimeCompatible(
-  target: ProviderFailoverTarget,
-  account: ProviderAccount,
-): boolean {
+function isRuntimeCompatible(target: ProviderFailoverTarget, account: ProviderAccount): boolean {
   switch (account.provider) {
     case 'anthropic':
     case 'max':
@@ -167,6 +164,16 @@ export function createProviderAccountStore(
         );
       }
       const targetAccount = fetchRaw(target.providerAccountId);
+      if (
+        targetAccount.credentials === null &&
+        !['anthropic', 'openai'].includes(targetAccount.provider)
+      ) {
+        throw new AutopodError(
+          `Provider account "${target.providerAccountId}" is not authenticated`,
+          'PROVIDER_ACCOUNT_FAILOVER_UNAUTHENTICATED',
+          400,
+        );
+      }
       if (!isRuntimeCompatible(target, targetAccount)) {
         throw new AutopodError(
           `Runtime "${target.runtime}" is incompatible with provider "${targetAccount.provider}"`,
@@ -185,7 +192,9 @@ export function createProviderAccountStore(
         .prepare('SELECT failover_policy FROM provider_accounts WHERE id = ?')
         .get(accountId) as { failover_policy?: string | null } | undefined;
       const targetPolicy = parseFailoverPolicy(row?.failover_policy);
-      return targetPolicy?.targets.some((target) => reachesSource(target.providerAccountId)) ?? false;
+      return (
+        targetPolicy?.targets.some((target) => reachesSource(target.providerAccountId)) ?? false
+      );
     };
     if (policy.targets.some((target) => reachesSource(target.providerAccountId))) {
       throw new AutopodError(

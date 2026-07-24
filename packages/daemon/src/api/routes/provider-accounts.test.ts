@@ -82,7 +82,12 @@ describe('provider account routes', () => {
   });
 
   it('rejects invalid failover policies without changing the account', async () => {
-    providerAccountStore.create({ id: 'claude-max', name: 'Claude Max', provider: 'max' });
+    providerAccountStore.create({
+      id: 'claude-max',
+      name: 'Claude Max',
+      provider: 'max',
+      credentials: { provider: 'max', oauthToken: 'max-token' },
+    });
     providerAccountStore.create({ id: 'primary', name: 'Primary', provider: 'openai' });
 
     const invalidPolicies = [
@@ -96,6 +101,7 @@ describe('provider account routes', () => {
       { targets: [{ providerAccountId: 'missing', runtime: 'claude', model: 'opus' }] },
       { targets: [{ providerAccountId: 'claude-max', runtime: 'codex', model: 'gpt-5' }] },
       { targets: [{ providerAccountId: 'claude-max', runtime: 'claude' }] },
+      { targets: [] },
     ];
 
     for (const failoverPolicy of invalidPolicies) {

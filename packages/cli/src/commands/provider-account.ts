@@ -50,9 +50,7 @@ function parseFailoverTarget(value: string): ProviderFailoverTarget {
     !['claude', 'codex', 'copilot', 'pi'].includes(runtime) ||
     !model
   ) {
-    throw new Error(
-      `Invalid failover target "${value}"; expected <account-id>:<runtime>:<model>`,
-    );
+    throw new Error(`Invalid failover target "${value}"; expected <account-id>:<runtime>:<model>`);
   }
   return {
     providerAccountId,
@@ -211,10 +209,7 @@ export function registerProviderAccountCommands(
       ) => {
         const client = getClient();
         const provider = parseProvider(opts.provider);
-        const failoverPolicy = buildFailoverPolicy(
-          opts.failoverTarget,
-          opts.maxFailoverHops,
-        );
+        const failoverPolicy = buildFailoverPolicy(opts.failoverTarget, opts.maxFailoverHops);
         const account = await withSpinner('Creating provider account...', () =>
           client.createProviderAccount({
             name,
