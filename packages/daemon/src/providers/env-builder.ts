@@ -368,6 +368,11 @@ function buildPiEnv(profile: Profile, auth: ProviderAuthResolution): ProviderEnv
   const creds = auth.credentials;
 
   if (isGenericApiKeyCredentials(creds)) {
+    if (!auth.account || auth.account.provider !== creds.providerId) {
+      throw new Error(
+        `Profile "${profile.name}" uses generic API-key credentials without a matching provider account`,
+      );
+    }
     const provider = PROVIDER_CATALOG.providers.find(
       (candidate) => candidate.id === creds.providerId,
     );
@@ -376,12 +381,6 @@ function buildPiEnv(profile: Profile, auth: ProviderAuthResolution): ProviderEnv
         `Profile "${profile.name}" uses API-key credentials for a provider that is not a generic Pi provider`,
       );
     }
-    if (auth.account && auth.account.provider !== creds.providerId) {
-      throw new Error(
-        `Profile "${profile.name}" uses API-key credentials that do not match provider account "${auth.account.name}"`,
-      );
-    }
-
     const authJson = JSON.stringify(
       {
         [provider.implementation.piProviderId]: {

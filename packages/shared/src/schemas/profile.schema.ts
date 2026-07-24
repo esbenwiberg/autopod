@@ -11,10 +11,7 @@ import {
   injectedSkillSchema,
 } from './injection.schema.js';
 import { withCanonicalModelIdPolicy } from './model.schema.js';
-import {
-  genericApiKeyCredentialsSchema,
-  providerAccountIdSchema,
-} from './provider-account.schema.js';
+import { providerAccountIdSchema } from './provider-account.schema.js';
 
 // ---------------------------------------------------------------------------
 // Model provider credentials schemas
@@ -103,7 +100,6 @@ export const providerCredentialsSchema = z.union([
   copilotCredentialsSchema,
   openRouterCredentialsSchema,
   piOAuthCredentialsSchema,
-  genericApiKeyCredentialsSchema,
 ]);
 
 const pageAssertionSchema = z.object({

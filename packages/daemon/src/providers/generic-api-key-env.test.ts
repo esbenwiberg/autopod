@@ -82,4 +82,16 @@ describe('generic API-key Pi environment', () => {
     });
     expect(JSON.stringify(publicAccount)).not.toContain(rawKey);
   });
+
+  it('rejects profile-owned generic API-key credentials without an account identity', async () => {
+    const profile = {
+      ...makeProfile(),
+      providerAccountId: null,
+      providerCredentials: makeAccount().credentials,
+    };
+
+    await expect(buildProviderEnv(profile, 'pod-1', logger, { runtime: 'pi' })).rejects.toThrow(
+      /without a matching provider account/,
+    );
+  });
 });
