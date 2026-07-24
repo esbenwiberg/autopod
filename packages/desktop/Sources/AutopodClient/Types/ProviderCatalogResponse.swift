@@ -39,6 +39,10 @@ public struct ProviderCatalogProvider: Codable, Sendable, Equatable, Identifiabl
       && credentialOptions.contains { $0.kind == "api-key" }
   }
 
+  public var isSelectableAsProfileProvider: Bool {
+    implementation.kind == "legacy" && policy.runnable
+  }
+
   public var systemImage: String {
     guard let icon, Self.knownSystemImages.contains(icon) else {
       return "person.badge.key"

@@ -171,14 +171,12 @@ enum RuntimeModelOptions {
         providerId: String? = nil
     ) -> [RuntimeModelOption] {
         var options = baseOptions(for: runtime, role: role)
-        if runtime == .pi, let catalog {
-            let catalogModels = catalog.models
-                .filter { providerId == nil || $0.providerId == providerId }
+        if runtime == .pi, let catalog, let providerId,
+           catalog.provider(id: providerId)?.implementation.kind == "generic-pi-api" {
+            options = catalog.models
+                .filter { $0.providerId == providerId }
                 .filter { $0.lifecycle == "active" }
                 .map { RuntimeModelOption(value: $0.id, label: $0.displayName) }
-            for option in catalogModels where !options.contains(where: { $0.value == option.value }) {
-                options.append(option)
-            }
         }
         guard let currentValue, !currentValue.isEmpty else { return options }
 

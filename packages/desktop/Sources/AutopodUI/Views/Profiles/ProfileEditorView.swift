@@ -1143,7 +1143,7 @@ public struct ProfileEditorView: View {
                     role: role,
                     currentValue: selection.wrappedValue,
                     catalog: providerCatalog,
-                    providerId: profile.modelProvider.rawValue
+                    providerId: selectedCatalogProviderId
                 ),
                 id: \.value
             ) { option in
@@ -1188,9 +1188,6 @@ public struct ProfileEditorView: View {
     private func handleModelProviderChanged(_ newValue: ModelProvider) {
         profile.providerAccountId = nil
         providerAccountsError = nil
-        if providerCatalog?.provider(id: newValue.rawValue)?.implementation.kind == "generic-pi-api" {
-            profile.defaultRuntime = .pi
-        }
         if newValue == .openai || newValue == .openrouter {
             profile.defaultRuntime = .codex
             normalizeRuntimeModelSelections(resetCodexRestrictedModel: true)
@@ -1220,13 +1217,24 @@ public struct ProfileEditorView: View {
     }
 
     private var modelProviderOptions: [(ModelProvider, String)] {
-        var options = providerCatalog?.providers.map {
+        var options = providerCatalog?.providers
+          .filter(\.isSelectableAsProfileProvider)
+          .map {
             (ModelProvider(rawValue: $0.id), $0.displayName)
         } ?? ModelProvider.legacyValues.map { ($0, $0.label) }
         if !options.contains(where: { $0.0 == profile.modelProvider }) {
             options.append((profile.modelProvider, "\(profile.modelProvider.label) (unavailable)"))
         }
         return options
+    }
+
+    private var selectedCatalogProviderId: String? {
+        if let accountId = profile.providerAccountId,
+           let account = providerAccounts.first(where: { $0.id == accountId }) {
+            return account.provider
+        }
+        return providerCatalog?.models.first(where: { $0.id == profile.defaultModel })?.providerId
+            ?? profile.modelProvider.rawValue
     }
 
     private func loadProviderAccounts() async {
@@ -1238,7 +1246,7 @@ public struct ProfileEditorView: View {
             }
             return
         }
-        let provider = profile.modelProvider.rawValue
+        let provider = profile.modelProvider == .pi ? nil : profile.modelProvider.rawValue
         await MainActor.run {
             isLoadingProviderAccounts = true
             providerAccountsError = nil
@@ -1421,7 +1429,12 @@ public struct ProfileEditorView: View {
 
     private var sortedProviderAccounts: [PublicProviderAccountResponse] {
         providerAccounts
-            .filter { $0.provider == profile.modelProvider.rawValue }
+            .filter { account in
+                if account.provider == profile.modelProvider.rawValue { return true }
+                return profile.modelProvider == .pi
+                    && providerCatalog?.provider(id: account.provider)?.implementation.kind
+                        == "generic-pi-api"
+            }
             .sorted {
                 if $0.name == $1.name { return $0.id < $1.id }
                 return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending

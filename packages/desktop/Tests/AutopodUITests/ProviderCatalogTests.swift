@@ -81,6 +81,7 @@ final class ProviderCatalogTests: XCTestCase {
 
     let blocked = try XCTUnwrap(catalog.provider(id: "blocked-fixture"))
     XCTAssertFalse(blocked.canAcceptGenericAPIKey)
+    XCTAssertFalse(blocked.isSelectableAsProfileProvider)
     XCTAssertEqual(blocked.policy.authorization, "blocked")
   }
 

@@ -80,7 +80,7 @@ describe('daemon-driven provider catalog', () => {
     ]);
     expect(catalog.providers[0]?.modelIds).toContain('fixture/model-a');
     expect(resolveCatalogProfileSelection(catalog, 'fixture-cloud', 'fixture/model-a')).toEqual({
-      modelProvider: 'fixture-cloud',
+      modelProvider: 'pi',
       defaultRuntime: 'pi',
       defaultModel: 'fixture/model-a',
     });

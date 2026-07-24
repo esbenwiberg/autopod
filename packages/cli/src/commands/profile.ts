@@ -51,7 +51,7 @@ export function resolveCatalogProfileSelection(
   const provider = catalog.providers.find((candidate) => candidate.id === providerId);
   if (!provider?.policy.runnable || !provider.modelIds.includes(modelId)) return undefined;
   return {
-    modelProvider: provider.id,
+    modelProvider: provider.implementation.kind === 'generic-pi-api' ? 'pi' : provider.id,
     defaultRuntime: provider.implementation.kind === 'generic-pi-api' ? 'pi' : undefined,
     defaultModel: modelId,
   };
@@ -198,7 +198,8 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
     .command('set-provider <name> <provider>')
     .description('Select a daemon-catalog provider and compatible model')
     .requiredOption('--model <model>', 'Provider-qualified model from the daemon catalog')
-    .action(async (name: string, providerId: string, opts: { model: string }) => {
+    .option('--account <id>', 'Matching provider account (required for generic providers)')
+    .action(async (name: string, providerId: string, opts: { model: string; account?: string }) => {
       const client = getClient();
       const catalog = await client.getModelProviderCatalog();
       const provider = catalog.providers.find((candidate) => candidate.id === providerId);
@@ -223,9 +224,21 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         );
         process.exit(1);
       }
+      if (provider.implementation.kind === 'generic-pi-api') {
+        if (!opts.account) {
+          console.error(chalk.red('Generic providers require --account to bind the spend source.'));
+          process.exit(1);
+        }
+        const account = await client.getProviderAccount(opts.account);
+        if (account.provider !== provider.id) {
+          console.error(chalk.red(`Provider account "${opts.account}" is not for ${provider.id}.`));
+          process.exit(1);
+        }
+      }
       const updated = await withSpinner('Updating profile provider...', () =>
         client.updateProfile(name, {
           ...selection,
+          providerAccountId: opts.account,
         }),
       );
       console.log(
