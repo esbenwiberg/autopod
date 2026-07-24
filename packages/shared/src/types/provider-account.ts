@@ -26,7 +26,7 @@ export type PublicProviderAccount = Omit<ProviderAccount, 'credentials'> & {
 export type ProviderAuthSource =
   | {
       type: 'provider-account';
-      provider: ModelProvider;
+      provider: ProviderAccountProvider;
       account: PublicProviderAccount;
       inherited: boolean;
     }

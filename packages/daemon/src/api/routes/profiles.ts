@@ -1,4 +1,4 @@
-import { AutopodError } from '@autopod/shared';
+import { AutopodError, PROVIDER_CATALOG } from '@autopod/shared';
 import type { ProfileEditorPayload, ProviderAuthSource } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { DaemonGitHubAuth } from '../../github/daemon-github-auth.js';
@@ -35,7 +35,13 @@ export function profileRoutes(
     const account = providerAccountStore.get(nextAccountId);
     const nextProvider =
       typeof changes.modelProvider === 'string' ? changes.modelProvider : existing.modelProvider;
-    if (nextProvider !== account.provider) {
+    const catalogProvider = PROVIDER_CATALOG.providers.find(
+      (provider) => provider.id === account.provider,
+    );
+    const matchesLegacyProvider = nextProvider === account.provider;
+    const matchesGenericPiProvider =
+      nextProvider === 'pi' && catalogProvider?.implementation.kind === 'generic-pi-api';
+    if (!matchesLegacyProvider && !matchesGenericPiProvider) {
       throw new AutopodError(
         `Profile "${name}" uses modelProvider=${nextProvider ?? 'none'} but provider account "${account.name}" is for ${account.provider}`,
         'PROVIDER_ACCOUNT_PROVIDER_MISMATCH',

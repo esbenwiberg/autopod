@@ -3,7 +3,7 @@ import type {
   ProviderCredentials,
   PublicProviderAccount,
 } from '@autopod/shared';
-import { providerAccountProviderSchema } from '@autopod/shared';
+import { PROVIDER_CATALOG, providerAccountProviderSchema } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
@@ -43,7 +43,9 @@ function parseProvider(value: string): ProviderAccountProvider {
   const parsed = providerAccountProviderSchema.safeParse(value);
   if (!parsed.success) {
     console.error(
-      chalk.red(`provider must be one of: ${providerAccountProviderSchema.options.join(', ')}`),
+      chalk.red(
+        `provider must be one of: ${PROVIDER_CATALOG.providers.map((provider) => provider.id).join(', ')}`,
+      ),
     );
     process.exit(1);
   }

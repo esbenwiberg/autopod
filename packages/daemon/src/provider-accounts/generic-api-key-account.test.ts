@@ -110,6 +110,14 @@ describe('generic API-key provider accounts', () => {
     expect(linked.statusCode).toBe(200);
     expect(profileStore.get('generic-pi').providerAccountId).toBe('opencode-zen-fixture');
     expect(linked.body).not.toContain(updatedKey);
+
+    const profileUpdate = await app.inject({
+      method: 'PATCH',
+      url: '/profiles/generic-pi',
+      payload: { customInstructions: 'Keep the linked generic provider account.' },
+    });
+    expect(profileUpdate.statusCode).toBe(200);
+    expect(profileUpdate.body).not.toContain(updatedKey);
   });
 
   it('rejects credential identity mismatches and unknown account providers', () => {
