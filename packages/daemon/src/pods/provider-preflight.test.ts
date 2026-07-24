@@ -261,6 +261,29 @@ describe('resolveProviderPreflight', () => {
     });
   });
 
+  it('preserves profile-owned legacy Pi OAuth credentials', () => {
+    const result = resolveProviderPreflight(
+      profile({
+        providerAccountId: null,
+        defaultModel: 'anthropic/claude-sonnet-4-6',
+        providerCredentials: {
+          provider: 'pi',
+          providerId: 'anthropic',
+          credential: { access: 'opaque-test-value' },
+        },
+      }),
+      undefined,
+      undefined,
+    );
+
+    expect(result).toMatchObject({
+      runtime: 'pi',
+      model: 'anthropic/claude-sonnet-4-6',
+      account: null,
+      manifestProvider: null,
+    });
+  });
+
   it('rejects a reviewed generic model linked to a legacy Pi OAuth account', () => {
     const piAccount = account({
       provider: 'pi',

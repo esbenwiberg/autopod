@@ -90,10 +90,13 @@ export function resolveProviderPreflight(
     : undefined;
   const provider =
     modelProvider?.implementation.kind === 'generic-pi-api' ? modelProvider : accountProvider;
+  const usesLegacyPiCredentials =
+    accountProvider?.implementation.kind === 'legacy' ||
+    profile.providerCredentials?.provider === 'pi';
   const selectsGenericProvider =
     provider?.implementation.kind === 'generic-pi-api' ||
     (account !== null && accountProvider === undefined) ||
-    (model.includes('/') && selectedModel === undefined);
+    (model.includes('/') && selectedModel === undefined && !usesLegacyPiCredentials);
   if (!selectsGenericProvider) {
     if (account) resolveProviderAuth(profile, options);
     const providerId = account?.provider ?? profile.modelProvider;
