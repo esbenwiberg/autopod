@@ -138,8 +138,12 @@ struct ProviderAccountsSettingsView: View {
       }
       .buttonStyle(.borderedProminent)
       .controlSize(.small)
-      .disabled(api == nil)
-      .help("Create provider account")
+      .disabled(api == nil || providerCatalog == nil)
+      .help(
+        providerCatalog == nil
+          ? "Refresh the provider catalog before creating an account"
+          : "Create provider account"
+      )
     }
   }
 
@@ -374,7 +378,13 @@ struct ProviderAccountsSettingsView: View {
       providerCatalog = try await loadedCatalog
       errorMessage = nil
     } catch {
-      errorMessage = error.localizedDescription
+      let failure = ProviderAccountsCatalogFailure(
+        preserving: accounts,
+        error: error
+      )
+      accounts = failure.accounts
+      providerCatalog = failure.catalog
+      errorMessage = failure.errorMessage
     }
   }
 
