@@ -52,6 +52,7 @@ import { historyRoutes } from './routes/history.js';
 import { issueWatcherRoutes } from './routes/issue-watcher.js';
 import { memoryWorkspaceRoutes } from './routes/memory-workspace.js';
 import { memoryRoutes } from './routes/memory.js';
+import { modelProviderRoutes } from './routes/model-providers.js';
 import { podRoutes } from './routes/pods.js';
 import { profileRoutes } from './routes/profiles.js';
 import { providerAccountRoutes } from './routes/provider-accounts.js';
@@ -175,6 +176,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   }
   historyRoutes(app, deps.podManager);
   memoryWorkspaceRoutes(app, deps.podManager);
+  modelProviderRoutes(app);
   profileRoutes(
     app,
     deps.profileStore,
