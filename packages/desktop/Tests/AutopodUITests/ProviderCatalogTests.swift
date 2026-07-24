@@ -124,19 +124,21 @@ final class ProviderCatalogTests: XCTestCase {
     )
     XCTAssertEqual(switchedOptions.last?.value, previousModel)
     XCTAssertTrue(switchedOptions.last?.label.contains("unavailable") == true)
-    XCTAssertNotNil(ProviderModelSaveEligibility.errorMessage(
+    XCTAssertNotNil(ProviderModelSaveEligibility.profileErrorMessage(
       profileProviderId: "pi",
       hasLinkedAccount: true,
       accountProviderId: "fixture-cloud",
-      model: previousModel,
+      defaultModel: previousModel,
+      reviewerModel: "fixture/model-a",
       catalog: catalog
     ))
 
-    XCTAssertNil(ProviderModelSaveEligibility.errorMessage(
+    XCTAssertNil(ProviderModelSaveEligibility.profileErrorMessage(
       profileProviderId: "pi",
       hasLinkedAccount: true,
       accountProviderId: "fixture-cloud",
-      model: "fixture/model-a",
+      defaultModel: "fixture/model-a",
+      reviewerModel: "fixture/model-a",
       catalog: catalog
     ))
     XCTAssertNotNil(ProviderModelSaveEligibility.profileErrorMessage(
@@ -147,26 +149,12 @@ final class ProviderCatalogTests: XCTestCase {
       reviewerModel: "another-provider/model",
       catalog: catalog
     ))
-    XCTAssertNil(ProviderModelSaveEligibility.profileErrorMessage(
-      profileProviderId: "pi",
-      hasLinkedAccount: true,
-      accountProviderId: "fixture-cloud",
-      defaultModel: "fixture/model-a",
-      reviewerModel: "fixture/model-a",
-      catalog: catalog
-    ))
-    XCTAssertNotNil(ProviderModelSaveEligibility.errorMessage(
-      profileProviderId: "pi",
-      hasLinkedAccount: true,
-      accountProviderId: "fixture-cloud",
-      model: "another-provider/model",
-      catalog: catalog
-    ))
-    XCTAssertNotNil(ProviderModelSaveEligibility.errorMessage(
+    XCTAssertNotNil(ProviderModelSaveEligibility.profileErrorMessage(
       profileProviderId: "pi",
       hasLinkedAccount: true,
       accountProviderId: nil,
-      model: "fixture/model-a",
+      defaultModel: "fixture/model-a",
+      reviewerModel: "fixture/model-a",
       catalog: catalog
     ))
   }
