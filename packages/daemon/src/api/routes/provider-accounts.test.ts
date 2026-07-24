@@ -548,5 +548,24 @@ describe('provider account routes', () => {
     });
     expect(invalidReparent.statusCode).toBe(400);
     expect(profileStore.getRaw('reparent-child').extends).toBeNull();
+
+    profileStore.create({ ...validProfile, name: 'family-root' });
+    profileStore.create({
+      ...validProfile,
+      name: 'family-child',
+      extends: 'family-root',
+      providerAccountId: 'backup',
+    });
+    const invalidParentUpdate = await app.inject({
+      method: 'PATCH',
+      url: '/profiles/family-root',
+      payload: {
+        providerFailover: {
+          targets: [{ providerAccountId: 'backup', runtime: 'codex', model: 'gpt-5' }],
+        },
+      },
+    });
+    expect(invalidParentUpdate.statusCode).toBe(400);
+    expect(profileStore.getRaw('family-root').providerFailover).toBeNull();
   });
 });

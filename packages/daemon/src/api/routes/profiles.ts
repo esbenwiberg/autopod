@@ -1,4 +1,9 @@
-import { AutopodError, createProfileSchema, updateProfileSchema } from '@autopod/shared';
+import {
+  AutopodError,
+  ProfileNotFoundError,
+  createProfileSchema,
+  updateProfileSchema,
+} from '@autopod/shared';
 import type {
   ProfileEditorPayload,
   ProviderAuthSource,
@@ -90,6 +95,65 @@ export function profileRoutes(
       accountId: raw.providerAccountId ?? parent?.providerAccountId ?? null,
       policy: raw.providerFailover ?? parent?.providerFailover ?? null,
     };
+  }
+
+  function validateProspectiveProfileFamily(
+    targetName: string,
+    targetRaw: {
+      extends: string | null;
+      providerAccountId: string | null;
+      providerFailover: ProviderFailoverPolicy | null;
+    },
+  ): void {
+    const profiles = profileStore.list();
+    const rawByName = new Map(
+      profiles.map((profile) => [
+        profile.name,
+        profile.name === targetName ? targetRaw : profileStore.getRaw(profile.name),
+      ]),
+    );
+    const memo = new Map<
+      string,
+      { accountId: string | null; policy: ProviderFailoverPolicy | null }
+    >();
+    const visiting = new Set<string>();
+
+    const resolveConfig = (
+      name: string,
+    ): { accountId: string | null; policy: ProviderFailoverPolicy | null } => {
+      const cached = memo.get(name);
+      if (cached) return cached;
+      if (visiting.has(name)) {
+        throw new AutopodError('Circular profile inheritance', 'CIRCULAR_INHERITANCE', 400);
+      }
+      visiting.add(name);
+      const raw = rawByName.get(name);
+      if (!raw) throw new ProfileNotFoundError(name);
+      const parent = raw.extends ? resolveConfig(raw.extends) : { accountId: null, policy: null };
+      const resolved = {
+        accountId: raw.providerAccountId ?? parent.accountId,
+        policy: raw.providerFailover ?? parent.policy,
+      };
+      visiting.delete(name);
+      memo.set(name, resolved);
+      return resolved;
+    };
+
+    const belongsToTargetFamily = (name: string): boolean => {
+      const seen = new Set<string>();
+      let current: string | null = name;
+      while (current !== null && !seen.has(current)) {
+        if (current === targetName) return true;
+        seen.add(current);
+        current = rawByName.get(current)?.extends ?? null;
+      }
+      return false;
+    };
+
+    for (const profile of profiles.filter((candidate) => belongsToTargetFamily(candidate.name))) {
+      const config = resolveConfig(profile.name);
+      validateProviderFailover(config.accountId, config.policy);
+    }
   }
 
   function resolveAuthSource(
@@ -188,7 +252,7 @@ export function profileRoutes(
     const changes = parseProfileUpdate(request.body);
     validateProviderAccountMismatch(name, changes);
     const existing = profileStore.getRaw(name);
-    const prospective = resolveProspectiveProviderConfig({
+    const prospectiveRaw = {
       extends: changes.extends === undefined ? existing.extends : changes.extends,
       providerAccountId:
         changes.providerAccountId === undefined
@@ -198,8 +262,8 @@ export function profileRoutes(
         changes.providerFailover === undefined
           ? existing.providerFailover
           : changes.providerFailover,
-    });
-    validateProviderFailover(prospective.accountId, prospective.policy);
+    };
+    validateProspectiveProfileFamily(name, prospectiveRaw);
     const updated = profileStore.update(name, changes);
     // Fire-and-forget: re-apply network policy to running containers using this profile
     refreshNetworkPolicy(name).catch(() => {
