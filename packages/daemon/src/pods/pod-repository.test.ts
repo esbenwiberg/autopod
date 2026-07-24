@@ -138,10 +138,25 @@ describe('PodRepository', () => {
       expect(pod.status).toBe('queued');
       expect(pod.model).toBe('opus');
       expect(pod.runtime).toBe('claude');
+      expect(pod.providerAccountIdSnapshot).toBeNull();
+      expect(pod.providerIdSnapshot).toBeNull();
       expect(pod.branch).toBe('feature/dark-mode');
       expect(pod.userId).toBe('user-1');
       expect(pod.maxValidationAttempts).toBe(3);
       expect(pod.skipValidation).toBe(false);
+    });
+
+    it('round-trips the creation-time provider binding', () => {
+      repo.insert({
+        ...validSession,
+        providerAccountIdSnapshot: 'fixture-account',
+        providerIdSnapshot: 'fixture-cloud',
+      });
+
+      expect(repo.getOrThrow(validSession.id)).toMatchObject({
+        providerAccountIdSnapshot: 'fixture-account',
+        providerIdSnapshot: 'fixture-cloud',
+      });
     });
 
     it('round-trips runtime-only spec context files', () => {

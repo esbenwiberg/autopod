@@ -22,6 +22,10 @@ export interface ProviderPreflightOptions {
   profileStore?: ProfileStore;
   providerAccountStore?: ProviderAccountStore;
   manifest?: CompiledProviderManifest;
+  expectedBinding?: {
+    accountId: string | null;
+    providerId: string;
+  };
 }
 
 function reject(message: string, code: string): never {
@@ -63,9 +67,16 @@ export function resolveProviderPreflight(
       throw error;
     }
   }
+  if (options.expectedBinding && providerAccountId !== options.expectedBinding.accountId) {
+    reject('Selected provider account changed after pod creation', 'PROVIDER_BINDING_MISMATCH');
+  }
 
   if (profile.modelProvider !== 'pi') {
     const auth = resolveProviderAuth(profile, options);
+    const providerId = auth.account?.provider ?? auth.provider;
+    if (options.expectedBinding && providerId !== options.expectedBinding.providerId) {
+      reject('Selected provider changed after pod creation', 'PROVIDER_BINDING_MISMATCH');
+    }
     return { runtime, model, account: auth.account, manifestProvider: null };
   }
 
@@ -85,6 +96,10 @@ export function resolveProviderPreflight(
     (model.includes('/') && selectedModel === undefined);
   if (!selectsGenericProvider) {
     if (account) resolveProviderAuth(profile, options);
+    const providerId = account?.provider ?? profile.modelProvider;
+    if (options.expectedBinding && providerId !== options.expectedBinding.providerId) {
+      reject('Selected provider changed after pod creation', 'PROVIDER_BINDING_MISMATCH');
+    }
     return { runtime, model, account, manifestProvider: null };
   }
   if (!provider) {
@@ -92,6 +107,10 @@ export function resolveProviderPreflight(
   }
   if (provider.implementation.kind !== 'generic-pi-api') {
     const auth = resolveProviderAuth(profile, options);
+    const providerId = auth.account?.provider ?? auth.provider;
+    if (options.expectedBinding && providerId !== options.expectedBinding.providerId) {
+      reject('Selected provider changed after pod creation', 'PROVIDER_BINDING_MISMATCH');
+    }
     return { runtime, model, account: auth.account, manifestProvider: null };
   }
 
@@ -122,6 +141,9 @@ export function resolveProviderPreflight(
       'Selected provider account does not match the selected model',
       'PROVIDER_ACCOUNT_PROVIDER_MISMATCH',
     );
+  }
+  if (options.expectedBinding && provider.id !== options.expectedBinding.providerId) {
+    reject('Selected provider changed after pod creation', 'PROVIDER_BINDING_MISMATCH');
   }
   if (runtime !== 'pi') {
     reject('Selected provider requires the managed Pi runtime', 'PROVIDER_RUNTIME_MISMATCH');

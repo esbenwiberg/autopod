@@ -2783,6 +2783,8 @@ describe('PodManager', () => {
         },
         'user-1',
       );
+      expect(pod.providerAccountIdSnapshot).toBe(accountId);
+      expect(pod.providerIdSnapshot).toBe('openai');
 
       await manager.processPod(pod.id);
 
@@ -2797,6 +2799,52 @@ describe('PodManager', () => {
         '/home/autopod/.codex/auth.json',
         oldAuthJson,
       );
+    });
+
+    it('fails before provisioning when a queued profile changes provider account', async () => {
+      const firstId = 'team-openai-first';
+      const secondId = 'team-openai-second';
+      const credentials = {
+        provider: 'openai',
+        authMode: 'api-key',
+        apiKey: 'test-openai-key',
+      } satisfies ProviderCredentials;
+      const ctx = createTestContext(undefined, {
+        defaultModel: 'gpt-5',
+        defaultRuntime: 'codex',
+        modelProvider: 'openai',
+      });
+      insertProviderAccount(ctx.db, firstId, 'openai', credentials);
+      insertProviderAccount(ctx.db, secondId, 'openai', credentials);
+      linkProfileToProviderAccount(ctx.db, 'test-profile', firstId);
+      const accounts = new Map([
+        [firstId, createMutableProviderAccountStore(firstId, 'openai', credentials).get(firstId)],
+        [
+          secondId,
+          createMutableProviderAccountStore(secondId, 'openai', credentials).get(secondId),
+        ],
+      ]);
+      ctx.deps.providerAccountStore = {
+        get: vi.fn((id: string) => {
+          const value = accounts.get(id);
+          if (!value) throw new Error('missing test account');
+          return value;
+        }),
+      } as ProviderAccountStore;
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Build widget' },
+        'user-1',
+      );
+
+      linkProfileToProviderAccount(ctx.db, 'test-profile', secondId);
+      await manager.processPod(pod.id);
+
+      expect(manager.getSession(pod.id).status).toBe('failed');
+      expect(manager.getSession(pod.id).failureReason).toContain(
+        'Selected provider account changed after pod creation',
+      );
+      expect(ctx.containerManager.spawn).not.toHaveBeenCalled();
     });
 
     it('recovers and rewrites fresh Codex auth.json for resume env from provider account', async () => {

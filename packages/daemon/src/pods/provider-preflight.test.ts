@@ -280,4 +280,19 @@ describe('resolveProviderPreflight', () => {
       'PROVIDER_ACCOUNT_PROVIDER_MISMATCH',
     );
   });
+
+  it('rejects a provider account changed while the pod was queued', () => {
+    expectCode(
+      () =>
+        resolveProviderPreflight(profile(), undefined, undefined, {
+          providerAccountStore: accountStore(account()),
+          manifest: manifest(),
+          expectedBinding: {
+            accountId: 'original-account',
+            providerId: 'fixture-cloud',
+          },
+        }),
+      'PROVIDER_BINDING_MISMATCH',
+    );
+  });
 });

@@ -124,4 +124,32 @@ describe('generic API-key Pi environment', () => {
       }),
     ).rejects.toThrow(/not authorized to run/);
   });
+
+  it('uses the creation-time account binding instead of a changed profile link', async () => {
+    const providerAccountStore = {
+      get: vi.fn((id: string) => {
+        if (id !== 'zen-account') throw new Error(`unexpected account ${id}`);
+        return makeAccount();
+      }),
+      touchLastUsed: vi.fn(),
+    } as unknown as ProviderAccountStore;
+
+    const result = await buildProviderEnv(
+      { ...makeProfile(), providerAccountId: 'changed-account' },
+      'pod-1',
+      logger,
+      {
+        runtime: 'pi',
+        providerAccountStore,
+        providerCatalog: runnableFixtureCatalog(),
+        providerBinding: { accountId: 'zen-account', providerId: 'opencode-zen' },
+      },
+    );
+
+    expect(result.secretFiles).toEqual([
+      { path: '/run/autopod/model-provider-key', content: rawKey },
+    ]);
+    expect(providerAccountStore.get).toHaveBeenCalledWith('zen-account');
+    expect(providerAccountStore.get).not.toHaveBeenCalledWith('changed-account');
+  });
 });

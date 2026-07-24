@@ -122,6 +122,10 @@ export interface Pod {
   status: PodStatus;
   model: string;
   runtime: RuntimeType;
+  /** Provider account selected at creation; null for legacy rows or accountless providers. */
+  providerAccountIdSnapshot: string | null;
+  /** Provider/product identity selected at creation; null only for legacy rows. */
+  providerIdSnapshot: string | null;
   executionTarget: ExecutionTarget;
   branch: string;
   containerId: string | null;

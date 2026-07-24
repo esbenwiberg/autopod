@@ -3518,6 +3518,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       profileStore,
       providerAccountStore,
       runtime: pod.runtime,
+      ...(pod.providerIdSnapshot
+        ? {
+            providerBinding: {
+              accountId: pod.providerAccountIdSnapshot,
+              providerId: pod.providerIdSnapshot,
+            },
+          }
+        : {}),
     });
     rememberMaxCredentialLineage(pod.id, result);
     // Re-write credential files to container in case tokens were rotated.
@@ -5856,6 +5864,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             status: 'queued',
             model,
             runtime,
+            providerAccountIdSnapshot: providerPreflight.account?.id ?? null,
+            providerIdSnapshot:
+              providerPreflight.manifestProvider?.id ??
+              providerPreflight.account?.provider ??
+              profile.modelProvider ??
+              null,
             executionTarget,
             branch,
             userId,
@@ -6077,10 +6091,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // the queue's finally block frees activeIds, and without a status update nothing
         // ever re-enqueues the pod.
         const profile = profileStore.get(pod.profileName);
-        const providerPreflight = resolveProviderPreflight(profile, pod.runtime, pod.model, {
-          profileStore,
-          providerAccountStore,
-        });
 
         // For handoff pods the interactive container is still running. Persist
         // the human's work before stopping that container; if we cannot prove the
@@ -6261,6 +6271,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Transition to provisioning
         pod = transition(pod, 'provisioning', provisioningUpdates);
+        const providerPreflight = resolveProviderPreflight(profile, pod.runtime, pod.model, {
+          profileStore,
+          providerAccountStore,
+          ...(pod.providerIdSnapshot
+            ? {
+                expectedBinding: {
+                  accountId: pod.providerAccountIdSnapshot,
+                  providerId: pod.providerIdSnapshot,
+                },
+              }
+            : {}),
+        });
         assertSandboxAgentStreamingExecSupported(profile, pod.executionTarget, pod.options);
 
         // Snapshot the resolved profile at pod start time for auditability
@@ -7596,6 +7618,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           profileStore,
           providerAccountStore,
           runtime: pod.runtime,
+          ...(pod.providerIdSnapshot
+            ? {
+                providerBinding: {
+                  accountId: pod.providerAccountIdSnapshot,
+                  providerId: pod.providerIdSnapshot,
+                },
+              }
+            : {}),
         });
         rememberMaxCredentialLineage(podId, providerResult);
         const secretEnv: Record<string, string> = {

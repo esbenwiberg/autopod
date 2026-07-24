@@ -1,4 +1,4 @@
-import { CONTAINER_HOME_DIR, PROVIDER_CATALOG } from '@autopod/shared';
+import { AutopodError, CONTAINER_HOME_DIR, PROVIDER_CATALOG } from '@autopod/shared';
 import type {
   FoundryCredentials,
   GenericApiKeyCredentials,
@@ -30,6 +30,11 @@ export interface BuildProviderEnvOptions {
   runtime?: RuntimeType;
   /** Validated catalog override for deterministic conformance fixtures. */
   providerCatalog?: PublicProviderCatalog;
+  /** Creation-time binding that prevents queued profile edits from changing spend source. */
+  providerBinding?: {
+    accountId: string | null;
+    providerId: string;
+  };
 }
 
 /**
@@ -88,10 +93,23 @@ export async function buildProviderEnv(
   logger: Logger,
   options: BuildProviderEnvOptions = {},
 ): Promise<ProviderEnvResult> {
-  const provider = profile.modelProvider;
-  const auth = resolveProviderAuth(profile, options);
+  const boundProfile = options.providerBinding
+    ? { ...profile, providerAccountId: options.providerBinding.accountId }
+    : profile;
+  const provider = boundProfile.modelProvider;
+  const auth = resolveProviderAuth(boundProfile, options);
+  if (options.providerBinding) {
+    const resolvedProviderId = auth.account?.provider ?? auth.provider;
+    if (resolvedProviderId !== options.providerBinding.providerId) {
+      throw new AutopodError(
+        'Selected provider binding changed after pod creation',
+        'PROVIDER_BINDING_MISMATCH',
+        400,
+      );
+    }
+  }
   if (options.runtime === 'pi') {
-    assertPiEnvironmentCompatible(profile, auth);
+    assertPiEnvironmentCompatible(boundProfile, auth);
   }
   if (auth.owner?.type === 'provider-account') {
     options.providerAccountStore?.touchLastUsed(auth.owner.id);
@@ -102,22 +120,22 @@ export async function buildProviderEnv(
       return buildAnthropicEnv();
 
     case 'max':
-      return buildMaxEnv(profile, auth, logger, options);
+      return buildMaxEnv(boundProfile, auth, logger, options);
 
     case 'openai':
       return buildOpenAiEnv(auth);
 
     case 'foundry':
-      return buildFoundryEnv(profile, auth, logger);
+      return buildFoundryEnv(boundProfile, auth, logger);
 
     case 'copilot':
-      return buildCopilotEnv(profile, auth);
+      return buildCopilotEnv(boundProfile, auth);
 
     case 'openrouter':
-      return buildOpenRouterEnv(profile, auth);
+      return buildOpenRouterEnv(boundProfile, auth);
 
     case 'pi':
-      return buildPiEnv(profile, auth, options.providerCatalog ?? PROVIDER_CATALOG);
+      return buildPiEnv(boundProfile, auth, options.providerCatalog ?? PROVIDER_CATALOG);
 
     default:
       // Exhaustiveness check
