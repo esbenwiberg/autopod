@@ -156,6 +156,35 @@ export type {
   OpenRouterCredentials,
 } from './types/model-provider.js';
 
+export {
+  PROVIDER_MANIFEST_VERSION,
+  type CompiledProvider,
+  type CompiledProviderManifest,
+  type CompiledProviderModel,
+  type GenericPiProviderImplementation,
+  type LegacyProviderImplementation,
+  type PiCatalogCompatibility,
+  type ProviderAuthorizationState,
+  type ProviderCaveat,
+  type ProviderCaveatKind,
+  type ProviderCaveatSeverity,
+  type ProviderCredentialKind,
+  type ProviderCredentialOption,
+  type ProviderImplementation,
+  type ProviderImplementationKind,
+  type ProviderLifecycleState,
+  type ProviderManifestVersion,
+  type ProviderModelLifecycleState,
+  type ProviderPolicy,
+  type PublicProviderCatalog,
+} from './types/provider-catalog.js';
+export {
+  COMPILED_PROVIDER_MANIFEST,
+  PROVIDER_CATALOG,
+  createProviderCatalog,
+  validateProviderManifest,
+} from './provider-catalog/index.js';
+
 export type {
   ProviderAccount,
   PublicProviderAccount,
