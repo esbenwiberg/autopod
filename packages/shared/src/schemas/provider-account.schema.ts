@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PROVIDER_CATALOG } from '../provider-catalog/compiled-manifest.js';
 
 export const providerAccountIdSchema = z
   .string()
@@ -16,15 +17,12 @@ export const providerAccountNameSchema = z
     'Provider account name must be human-readable and cannot start or end with punctuation',
   );
 
-export const providerAccountProviderSchema = z.enum([
-  'anthropic',
-  'max',
-  'openai',
-  'foundry',
-  'copilot',
-  'openrouter',
-  'pi',
-]);
+const catalogProviderIds = new Set(PROVIDER_CATALOG.providers.map((provider) => provider.id));
+
+export const providerAccountProviderSchema = providerAccountIdSchema.refine(
+  (providerId) => catalogProviderIds.has(providerId),
+  'Provider account provider must exist in the compiled provider catalog',
+);
 
 const anthropicCredentialsSchema = z.object({
   provider: z.literal('anthropic'),
@@ -88,6 +86,12 @@ const piOAuthCredentialsSchema = z.object({
     ),
 });
 
+const genericApiKeyCredentialsSchema = z.object({
+  provider: z.literal('api-key'),
+  providerId: providerAccountIdSchema,
+  apiKey: z.string().min(1),
+});
+
 const providerAccountCredentialsSchema = z.union([
   anthropicCredentialsSchema,
   openAiCredentialsSchema,
@@ -97,6 +101,7 @@ const providerAccountCredentialsSchema = z.union([
   copilotCredentialsSchema,
   openRouterCredentialsSchema,
   piOAuthCredentialsSchema,
+  genericApiKeyCredentialsSchema,
 ]);
 
 export const createProviderAccountSchema = z
@@ -107,7 +112,11 @@ export const createProviderAccountSchema = z
     credentials: providerAccountCredentialsSchema.nullable().optional().default(null),
   })
   .superRefine((data, ctx) => {
-    if (data.credentials && data.credentials.provider !== data.provider) {
+    const credentialProviderId =
+      data.credentials?.provider === 'api-key'
+        ? data.credentials.providerId
+        : data.credentials?.provider;
+    if (credentialProviderId && credentialProviderId !== data.provider) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['credentials'],

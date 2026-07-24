@@ -145,6 +145,7 @@ export type {
 export type {
   ModelProvider,
   ProviderCredentials,
+  GenericApiKeyCredentials,
   AnthropicCredentials,
   OpenAiCredentials,
   MaxCredentials,
@@ -188,6 +189,7 @@ export {
 export type {
   ProviderAccount,
   PublicProviderAccount,
+  PublicProviderCredentials,
   ProviderAccountProvider,
   ProviderAuthSource,
 } from './types/provider-account.js';

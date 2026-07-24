@@ -92,6 +92,12 @@ const piOAuthCredentialsSchema = z.object({
     ),
 });
 
+const genericApiKeyCredentialsSchema = z.object({
+  provider: z.literal('api-key'),
+  providerId: providerAccountIdSchema,
+  apiKey: z.string().min(1),
+});
+
 export const providerCredentialsSchema = z.union([
   anthropicCredentialsSchema,
   openAiCredentialsSchema,
@@ -100,6 +106,7 @@ export const providerCredentialsSchema = z.union([
   copilotCredentialsSchema,
   openRouterCredentialsSchema,
   piOAuthCredentialsSchema,
+  genericApiKeyCredentialsSchema,
 ]);
 
 const pageAssertionSchema = z.object({

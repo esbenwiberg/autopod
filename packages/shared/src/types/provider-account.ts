@@ -1,6 +1,7 @@
 import type { ModelProvider, ProviderCredentials } from './model-provider.js';
 
-export type ProviderAccountProvider = ProviderCredentials['provider'];
+/** Stable provider identity from the compiled catalog (legacy or generic). */
+export type ProviderAccountProvider = string;
 
 export interface ProviderAccount {
   id: string;
@@ -13,8 +14,12 @@ export interface ProviderAccount {
   lastUsedAt: string | null;
 }
 
+export type PublicProviderCredentials =
+  | Pick<Exclude<ProviderCredentials, { provider: 'api-key' }>, 'provider'>
+  | Pick<Extract<ProviderCredentials, { provider: 'api-key' }>, 'provider' | 'providerId'>;
+
 export type PublicProviderAccount = Omit<ProviderAccount, 'credentials'> & {
-  credentials: Pick<ProviderCredentials, 'provider'> | null;
+  credentials: PublicProviderCredentials | null;
   hasCredentials: boolean;
 };
 
