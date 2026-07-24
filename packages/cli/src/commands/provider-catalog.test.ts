@@ -198,6 +198,8 @@ describe('daemon-driven provider catalog', () => {
       'fixture-cloud',
       '--model',
       'fixture/model-a',
+      '--reviewer-model',
+      'fixture/model-a',
       '--account',
       'fixture-account',
     ]);
@@ -205,6 +207,7 @@ describe('daemon-driven provider catalog', () => {
       modelProvider: 'pi',
       defaultRuntime: 'pi',
       defaultModel: 'fixture/model-a',
+      reviewerModel: 'fixture/model-a',
       providerAccountId: 'fixture-account',
     });
   });
@@ -249,6 +252,45 @@ describe('daemon-driven provider catalog', () => {
 
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining('deprecated and cannot be selected for pod launch'),
+    );
+    expect(client.getProviderAccount).not.toHaveBeenCalled();
+    expect(client.updateProfile).not.toHaveBeenCalled();
+  });
+
+  it('preserves an incompatible reviewer model by rejecting the profile update', async () => {
+    const client = {
+      getModelProviderCatalog: vi.fn().mockResolvedValue(catalog),
+      getProfile: vi.fn().mockResolvedValue({ reviewerModel: 'other-provider/reviewer' }),
+      getProviderAccount: vi.fn(),
+      updateProfile: vi.fn(),
+    } as unknown as AutopodClient;
+    const program = new Command();
+    program.exitOverride();
+    registerProfileCommands(program, () => client);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+      throw new Error(`process.exit ${code}`);
+    });
+
+    await expect(
+      program.parseAsync([
+        'node',
+        'ap',
+        'profile',
+        'set-provider',
+        'fixture-profile',
+        'fixture-cloud',
+        '--model',
+        'fixture/model-a',
+        '--account',
+        'fixture-account',
+      ]),
+    ).rejects.toThrow('process.exit 1');
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Reviewer model "other-provider/reviewer" is not an active reviewed model',
+      ),
     );
     expect(client.getProviderAccount).not.toHaveBeenCalled();
     expect(client.updateProfile).not.toHaveBeenCalled();
