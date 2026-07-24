@@ -56,6 +56,12 @@ function firstModel(manifest: CompiledProviderManifest) {
   return model;
 }
 
+function firstCaveat(manifest: CompiledProviderManifest) {
+  const caveat = firstProvider(manifest).policy.caveats[0];
+  if (!caveat) throw new Error('Synthetic manifest has no caveat');
+  return caveat;
+}
+
 describe('provider catalog validation', () => {
   it('constructs a generic Pi provider solely from validated manifest data', () => {
     const catalog = createProviderCatalog(syntheticManifest());
@@ -131,10 +137,77 @@ describe('provider catalog validation', () => {
     );
   });
 
+  it.each([
+    {
+      field: 'implementation kind',
+      mutate: (manifest: CompiledProviderManifest) => {
+        firstProvider(manifest).implementation = { kind: 'plugin' } as never;
+      },
+      expected: "unsupported implementation kind 'plugin'",
+    },
+    {
+      field: 'provider lifecycle',
+      mutate: (manifest: CompiledProviderManifest) => {
+        firstProvider(manifest).policy.lifecycle = 'retired' as 'active';
+      },
+      expected: "unsupported lifecycle 'retired'",
+    },
+    {
+      field: 'authorization state',
+      mutate: (manifest: CompiledProviderManifest) => {
+        firstProvider(manifest).policy.authorization = 'approved' as 'supported';
+      },
+      expected: "unsupported authorization 'approved'",
+    },
+    {
+      field: 'caveat kind',
+      mutate: (manifest: CompiledProviderManifest) => {
+        firstCaveat(manifest).kind = 'legal' as 'spend';
+      },
+      expected: "unsupported caveat kind 'legal'",
+    },
+    {
+      field: 'caveat severity',
+      mutate: (manifest: CompiledProviderManifest) => {
+        firstCaveat(manifest).severity = 'critical' as 'warning';
+      },
+      expected: "unsupported caveat severity 'critical'",
+    },
+    {
+      field: 'model lifecycle',
+      mutate: (manifest: CompiledProviderManifest) => {
+        firstModel(manifest).lifecycle = 'experimental' as 'active';
+      },
+      expected: "unsupported lifecycle 'experimental'",
+    },
+  ])('rejects unsupported $field values', ({ mutate, expected }) => {
+    const manifest = syntheticManifest();
+    mutate(manifest);
+    expect(() => createProviderCatalog(manifest)).toThrow(expected);
+  });
+
+  it('returns an isolated deeply frozen catalog', () => {
+    const manifest = syntheticManifest();
+    const catalog = createProviderCatalog(manifest);
+    const catalogProvider = firstProvider(catalog);
+
+    firstProvider(manifest).displayName = 'Mutated source';
+    expect(catalogProvider.displayName).toBe('Fixture Cloud');
+    expect(Object.isFrozen(catalog)).toBe(true);
+    expect(Object.isFrozen(catalogProvider.policy.caveats)).toBe(true);
+    expect(() => {
+      catalogProvider.displayName = 'Mutated catalog';
+    }).toThrow(TypeError);
+  });
+
   it('compiles legacy compatibility and non-runnable launch posture', () => {
     expect(PROVIDER_CATALOG.providers.find(({ id }) => id === 'max')?.implementation).toEqual({
       kind: 'legacy',
       adapterId: 'max',
+    });
+    expect(PROVIDER_CATALOG.providers.find(({ id }) => id === 'pi')?.implementation).toEqual({
+      kind: 'legacy',
+      adapterId: 'pi',
     });
     expect(
       PROVIDER_CATALOG.providers

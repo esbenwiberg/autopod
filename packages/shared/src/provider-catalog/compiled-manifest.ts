@@ -85,7 +85,7 @@ export const COMPILED_PROVIDER_MANIFEST = {
         acquisition: 'Continue using the existing OpenRouter provider account flow.',
       },
     ]),
-    legacy('pi', 'Pi OAuth', 'pi-oauth', [
+    legacy('pi', 'Pi OAuth', 'pi', [
       {
         kind: 'opaque',
         label: 'Pi OAuth provider entry',
