@@ -10,9 +10,9 @@ public enum ProviderFailoverTargetEligibility {
         case "openai", "openrouter": return ["codex"]
         case "copilot": return ["copilot"]
         case "pi": return ["pi"]
-        // The public response redacts Foundry's API surface, so the operator chooses and
-        // the daemon remains authoritative about the account's configured surface.
-        case "foundry": return ["claude", "codex"]
+        // The public response redacts Foundry's API surface, so neither runtime can be
+        // established safely from desktop-visible evidence.
+        case "foundry": return []
         default: return []
         }
     }

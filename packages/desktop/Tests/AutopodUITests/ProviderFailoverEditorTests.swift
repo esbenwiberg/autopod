@@ -72,14 +72,11 @@ private func failoverAccount(
     #expect(!ProviderFailoverTargetEligibility.isEligible(openai))
 }
 
-@Test func failoverEligibilityOffersBothRedactedFoundrySurfaces() throws {
+@Test func failoverEligibilityRejectsFoundryWithoutRuntimeEvidence() throws {
     let foundry = try failoverAccount(id: "foundry", provider: "foundry")
 
-    #expect(ProviderFailoverTargetEligibility.isEligible(foundry))
-    #expect(
-        ProviderFailoverTargetEligibility.compatibleRuntimes(for: foundry)
-            == ["claude", "codex"]
-    )
+    #expect(!ProviderFailoverTargetEligibility.isEligible(foundry))
+    #expect(ProviderFailoverTargetEligibility.compatibleRuntimes(for: foundry).isEmpty)
 }
 
 @Test func failoverValidationAcceptsCompleteOrderedTargets() throws {
