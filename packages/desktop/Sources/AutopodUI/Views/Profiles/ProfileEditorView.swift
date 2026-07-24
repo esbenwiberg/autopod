@@ -1205,6 +1205,9 @@ public struct ProfileEditorView: View {
         if newValue == .openai || newValue == .openrouter {
             profile.defaultRuntime = .codex
             normalizeRuntimeModelSelections(resetCodexRestrictedModel: true)
+        } else if newValue == .pi {
+            profile.defaultRuntime = .pi
+            normalizeRuntimeModelSelections()
         }
     }
 
