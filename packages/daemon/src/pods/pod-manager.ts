@@ -161,6 +161,7 @@ import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
 import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
+import { resolveProviderPreflight } from './provider-preflight.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import { createReadinessService } from './readiness-review.js';
 import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
@@ -5636,8 +5637,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod {
       const profile = profileStore.get(request.profileName);
       assertNoExpiredPat(profile);
-      const runtime = resolvePodRuntime(profile, request.runtime, logger);
-      const model = resolvePodModel(profile, request.model, runtime, logger);
+      const providerPreflight = resolveProviderPreflight(profile, request.runtime, request.model, {
+        profileStore,
+        providerAccountStore,
+      });
+      const { runtime, model } = providerPreflight;
       const executionTarget = request.executionTarget ?? profile.executionTarget ?? 'local';
       const skipValidation = request.skipValidation ?? false;
       const normalizedDependsOnPodIds =
@@ -6073,6 +6077,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // the queue's finally block frees activeIds, and without a status update nothing
         // ever re-enqueues the pod.
         const profile = profileStore.get(pod.profileName);
+        const providerPreflight = resolveProviderPreflight(profile, pod.runtime, pod.model, {
+          profileStore,
+          providerAccountStore,
+        });
 
         // For handoff pods the interactive container is still running. Persist
         // the human's work before stopping that container; if we cannot prove the
@@ -6427,6 +6435,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           profile.networkPolicy,
           profile,
           pod.runtime,
+          providerPreflight.manifestProvider,
         );
         const runtimeNetworkPolicyMode = runtimeNetworkPolicy?.enabled
           ? (runtimeNetworkPolicy.mode ?? 'restricted')
@@ -12510,10 +12519,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       await Promise.all(
         runningSessions.map(async (pod) => {
           try {
+            const providerPreflight = resolveProviderPreflight(profile, pod.runtime, pod.model, {
+              profileStore,
+              providerAccountStore,
+            });
             const runtimeNetworkPolicy = addRuntimeNetworkDefaults(
               profile.networkPolicy,
               profile,
               pod.runtime,
+              providerPreflight.manifestProvider,
             );
             // biome-ignore lint/style/noNonNullAssertion: runningSessions always have a containerId
             const containerId = pod.containerId!;

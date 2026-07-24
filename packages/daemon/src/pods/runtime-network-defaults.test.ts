@@ -1,4 +1,4 @@
-import type { NetworkPolicy, Profile } from '@autopod/shared';
+import { type NetworkPolicy, PROVIDER_CATALOG, type Profile } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
 
@@ -54,5 +54,29 @@ describe('addRuntimeNetworkDefaults', () => {
     const input = policy();
 
     expect(addRuntimeNetworkDefaults(input, profile(), 'claude')).toBe(input);
+  });
+
+  it('adds only reviewed hosts for a manifest provider under restricted policy', () => {
+    const manifestProvider = PROVIDER_CATALOG.providers.find(({ id }) => id === 'kimi-code');
+    const result = addRuntimeNetworkDefaults(
+      policy(),
+      profile({ modelProvider: 'pi' }),
+      'pi',
+      manifestProvider,
+    );
+
+    expect(result?.allowedHosts).toContain('api.kimi.com');
+    expect(result?.allowedHosts).not.toContain('chatgpt.com');
+    expect(result?.allowedHosts).not.toContain('*.chatgpt.com');
+    expect(result?.allowedHosts).not.toContain('opencode.ai');
+  });
+
+  it('does not add manifest provider hosts outside restricted mode', () => {
+    const manifestProvider = PROVIDER_CATALOG.providers.find(({ id }) => id === 'kimi-code');
+    const input = policy({ mode: 'allow-all' });
+
+    expect(
+      addRuntimeNetworkDefaults(input, profile({ modelProvider: 'pi' }), 'pi', manifestProvider),
+    ).toBe(input);
   });
 });
