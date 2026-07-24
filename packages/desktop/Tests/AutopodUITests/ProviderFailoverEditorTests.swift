@@ -56,7 +56,7 @@ private func failoverAccount(
     #expect(ProviderFailoverTargetEligibility.compatibleRuntimes(for: unknown).isEmpty)
 }
 
-@Test func failoverEligibilityAcceptsEnvironmentAuthenticatedApiProviders() throws {
+@Test func failoverEligibilityRejectsApiProvidersWithoutAuthenticationEvidence() throws {
     let anthropic = try failoverAccount(
         id: "anthropic-env",
         provider: "anthropic",
@@ -68,8 +68,8 @@ private func failoverAccount(
         authenticated: false
     )
 
-    #expect(ProviderFailoverTargetEligibility.isEligible(anthropic))
-    #expect(ProviderFailoverTargetEligibility.isEligible(openai))
+    #expect(!ProviderFailoverTargetEligibility.isEligible(anthropic))
+    #expect(!ProviderFailoverTargetEligibility.isEligible(openai))
 }
 
 @Test func failoverEligibilityOffersBothRedactedFoundrySurfaces() throws {

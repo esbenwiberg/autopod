@@ -19,8 +19,9 @@ public enum ProviderFailoverTargetEligibility {
 
     public static func isEligible(_ account: PublicProviderAccountResponse) -> Bool {
         guard !compatibleRuntimes(for: account).isEmpty else { return false }
-        // These API-backed providers may authenticate through the daemon environment.
-        return account.hasCredentials || account.provider == "anthropic" || account.provider == "openai"
+        // The public account response is the desktop's only authoritative authentication signal.
+        // Do not infer daemon environment credentials from the provider type.
+        return account.hasCredentials
     }
 }
 
