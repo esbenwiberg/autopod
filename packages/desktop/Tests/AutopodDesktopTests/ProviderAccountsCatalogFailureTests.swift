@@ -4,7 +4,7 @@ import XCTest
 @testable import AutopodDesktop
 
 final class ProviderAccountsCatalogFailureTests: XCTestCase {
-  func testCatalogRefreshFailureClearsPolicyButPreservesAccounts() throws {
+  func testCatalogRefreshFailurePreservesPolicyAndAccounts() throws {
     let account = try JSONDecoder().decode(
       PublicProviderAccountResponse.self,
       from: Data(
@@ -20,8 +20,26 @@ final class ProviderAccountsCatalogFailureTests: XCTestCase {
         """.utf8
       )
     )
+    let catalog = try JSONDecoder().decode(
+      ProviderCatalogResponse.self,
+      from: Data(
+        """
+        {
+          "manifestVersion": 1,
+          "piCompatibility": {
+            "packageName": "fixture",
+            "packageVersion": "1.0.0",
+            "source": "pinned-distribution"
+          },
+          "providers": [],
+          "models": []
+        }
+        """.utf8
+      )
+    )
     let failure = ProviderAccountsCatalogFailure(
       preserving: [account],
+      catalog: catalog,
       error: NSError(
         domain: "ProviderAccountsCatalogFailureTests",
         code: 1,
@@ -30,7 +48,7 @@ final class ProviderAccountsCatalogFailureTests: XCTestCase {
     )
 
     XCTAssertEqual(failure.accounts.map(\.id), ["fixture-account"])
-    XCTAssertNil(failure.catalog)
+    XCTAssertEqual(failure.catalog?.manifestVersion, 1)
     XCTAssertTrue(failure.errorMessage.contains("Provider catalog unavailable"))
     XCTAssertTrue(failure.errorMessage.contains("refresh to manage credentials"))
   }

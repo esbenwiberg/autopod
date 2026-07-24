@@ -432,6 +432,7 @@ struct ProviderAccountsSettingsView: View {
     } else if let catalogError = catalogResult.error {
       let failure = ProviderAccountsCatalogFailure(
         preserving: accounts,
+        catalog: providerCatalog,
         error: DaemonError.networkError(catalogError)
       )
       accounts = failure.accounts
