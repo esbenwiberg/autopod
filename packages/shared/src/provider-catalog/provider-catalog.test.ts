@@ -85,14 +85,17 @@ describe('provider catalog validation', () => {
     );
   });
 
-  it('rejects unsafe required hosts', () => {
-    const manifest = syntheticManifest();
-    firstProvider(manifest).requiredHosts = ['127.0.0.1'];
+  it.each(['127.0.0.1', 'metadata.googleapis.com', 'service.internal'])(
+    'rejects unsafe required host %s',
+    (host) => {
+      const manifest = syntheticManifest();
+      firstProvider(manifest).requiredHosts = [host];
 
-    expect(() => createProviderCatalog(manifest)).toThrow(
-      "Invalid provider manifest: provider 'fixture-cloud' has unsafe required host '127.0.0.1'",
-    );
-  });
+      expect(() => createProviderCatalog(manifest)).toThrow(
+        `Invalid provider manifest: provider 'fixture-cloud' has unsafe required host '${host}'`,
+      );
+    },
+  );
 
   it('rejects unknown model references', () => {
     const manifest = syntheticManifest();

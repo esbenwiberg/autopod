@@ -15,6 +15,13 @@ const SUPPORTED_CREDENTIAL_KINDS = new Set<ProviderCredentialKind>([
   'managed-identity',
   'opaque',
 ]);
+const METADATA_HOSTNAMES = new Set([
+  'metadata',
+  'metadata.google.internal',
+  'metadata.googleapis.com',
+  'metadata.azure.com',
+  'instance-data',
+]);
 
 function fail(message: string): never {
   throw new Error(`Invalid provider manifest: ${message}`);
@@ -34,6 +41,7 @@ function assertSafePublicHostname(host: string, providerId: string): void {
     !SAFE_HOSTNAME.test(host) ||
     /^\d+(?:\.\d+){3}$/.test(normalized) ||
     normalized === 'localhost' ||
+    METADATA_HOSTNAMES.has(normalized) ||
     normalized.endsWith('.localhost') ||
     normalized.endsWith('.local') ||
     normalized.endsWith('.internal')
