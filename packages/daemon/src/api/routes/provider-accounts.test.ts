@@ -33,6 +33,82 @@ describe('provider account routes', () => {
     app = buildApp(profileStore, providerAccountStore);
   });
 
+  it('round-trips ordered failover policy through redacted responses', async () => {
+    providerAccountStore.create({
+      id: 'claude-max',
+      name: 'Claude Max',
+      provider: 'max',
+      credentials: { provider: 'max', oauthToken: 'target-secret' },
+    });
+    providerAccountStore.create({
+      id: 'copilot',
+      name: 'Copilot',
+      provider: 'copilot',
+      credentials: { provider: 'copilot', token: 'copilot-secret' },
+    });
+    const targets = [
+      { providerAccountId: 'claude-max', runtime: 'claude', model: 'opus' },
+      { providerAccountId: 'copilot', runtime: 'copilot', model: 'auto' },
+    ];
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/provider-accounts',
+      payload: {
+        id: 'primary',
+        name: 'Primary',
+        provider: 'openai',
+        credentials: { provider: 'openai', authJson: 'source-secret' },
+        failoverPolicy: { targets, maxHops: 2 },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().failoverPolicy).toEqual({ targets, maxHops: 2 });
+    expect(created.body).not.toContain('source-secret');
+    expect(created.body).not.toContain('target-secret');
+    expect(created.body).not.toContain('copilot-secret');
+
+    const reversed = [...targets].reverse();
+    const updated = await app.inject({
+      method: 'PATCH',
+      url: '/provider-accounts/primary',
+      payload: { failoverPolicy: { targets: reversed, maxHops: 1 } },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().failoverPolicy.targets).toEqual(reversed);
+
+    const read = await app.inject({ method: 'GET', url: '/provider-accounts/primary' });
+    expect(read.json().failoverPolicy.targets).toEqual(reversed);
+  });
+
+  it('rejects invalid failover policies without changing the account', async () => {
+    providerAccountStore.create({ id: 'claude-max', name: 'Claude Max', provider: 'max' });
+    providerAccountStore.create({ id: 'primary', name: 'Primary', provider: 'openai' });
+
+    const invalidPolicies = [
+      { targets: [{ providerAccountId: 'primary', runtime: 'codex', model: 'gpt-5' }] },
+      {
+        targets: [
+          { providerAccountId: 'claude-max', runtime: 'claude', model: 'opus' },
+          { providerAccountId: 'claude-max', runtime: 'claude', model: 'sonnet' },
+        ],
+      },
+      { targets: [{ providerAccountId: 'missing', runtime: 'claude', model: 'opus' }] },
+      { targets: [{ providerAccountId: 'claude-max', runtime: 'codex', model: 'gpt-5' }] },
+      { targets: [{ providerAccountId: 'claude-max', runtime: 'claude' }] },
+    ];
+
+    for (const failoverPolicy of invalidPolicies) {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/provider-accounts/primary',
+        payload: { failoverPolicy },
+      });
+      expect(response.statusCode).toBeGreaterThanOrEqual(400);
+      expect(providerAccountStore.get('primary').failoverPolicy).toBeNull();
+    }
+  });
+
   it('creates, lists, gets, updates, and redacts provider account credentials', async () => {
     const createResponse = await app.inject({
       method: 'POST',

@@ -1,4 +1,10 @@
-import type { ModelProvider, ProviderAccount, ProviderCredentials } from '@autopod/shared';
+import type {
+  ModelProvider,
+  ProviderAccount,
+  ProviderCredentials,
+  ProviderFailoverPolicy,
+  ProviderFailoverTarget,
+} from '@autopod/shared';
 import {
   AutopodError,
   createProviderAccountSchema,
@@ -46,11 +52,44 @@ function rowToProviderAccount(
     name: row.name as string,
     provider: row.provider as ProviderAccount['provider'],
     credentials: decryptCredentials(row.credentials),
+    failoverPolicy: parseFailoverPolicy(row.failover_policy),
     lastAuthenticatedAt: (row.last_authenticated_at as string | null | undefined) ?? null,
     lastUsedAt: (row.last_used_at as string | null | undefined) ?? null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
+}
+
+function parseFailoverPolicy(raw: unknown): ProviderFailoverPolicy | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  try {
+    return JSON.parse(raw) as ProviderFailoverPolicy;
+  } catch {
+    return null;
+  }
+}
+
+function isRuntimeCompatible(
+  target: ProviderFailoverTarget,
+  account: ProviderAccount,
+): boolean {
+  switch (account.provider) {
+    case 'anthropic':
+    case 'max':
+      return target.runtime === 'claude';
+    case 'openai':
+    case 'openrouter':
+      return target.runtime === 'codex';
+    case 'copilot':
+      return target.runtime === 'copilot';
+    case 'pi':
+      return target.runtime === 'pi';
+    case 'foundry':
+      return account.credentials?.provider === 'foundry' &&
+        account.credentials.apiSurface === 'openai'
+        ? target.runtime === 'codex'
+        : target.runtime === 'claude';
+  }
 }
 
 export function createProviderAccountStore(
@@ -113,24 +152,73 @@ export function createProviderAccountStore(
     }
   }
 
+  function assertValidFailoverPolicy(
+    sourceId: string,
+    policy: ProviderFailoverPolicy | null,
+  ): void {
+    if (!policy) return;
+
+    for (const target of policy.targets) {
+      if (target.providerAccountId === sourceId) {
+        throw new AutopodError(
+          `Provider account "${sourceId}" cannot fail over to itself`,
+          'PROVIDER_ACCOUNT_FAILOVER_SELF_REFERENCE',
+          400,
+        );
+      }
+      const targetAccount = fetchRaw(target.providerAccountId);
+      if (!isRuntimeCompatible(target, targetAccount)) {
+        throw new AutopodError(
+          `Runtime "${target.runtime}" is incompatible with provider "${targetAccount.provider}"`,
+          'PROVIDER_ACCOUNT_FAILOVER_INCOMPATIBLE_RUNTIME',
+          400,
+        );
+      }
+    }
+
+    const visited = new Set<string>();
+    const reachesSource = (accountId: string): boolean => {
+      if (accountId === sourceId) return true;
+      if (visited.has(accountId)) return false;
+      visited.add(accountId);
+      const row = db
+        .prepare('SELECT failover_policy FROM provider_accounts WHERE id = ?')
+        .get(accountId) as { failover_policy?: string | null } | undefined;
+      const targetPolicy = parseFailoverPolicy(row?.failover_policy);
+      return targetPolicy?.targets.some((target) => reachesSource(target.providerAccountId)) ?? false;
+    };
+    if (policy.targets.some((target) => reachesSource(target.providerAccountId))) {
+      throw new AutopodError(
+        `Failover policy for provider account "${sourceId}" would create a cycle`,
+        'PROVIDER_ACCOUNT_FAILOVER_CYCLE',
+        400,
+      );
+    }
+  }
+
   return {
     create(input: Record<string, unknown>): ProviderAccount {
       const parsed = createProviderAccountSchema.parse(input);
       const id = parsed.id ?? slugifyProviderAccountId(parsed.name);
       const now = new Date().toISOString();
+      assertValidFailoverPolicy(id, parsed.failoverPolicy);
 
       try {
         db.prepare(
           `INSERT INTO provider_accounts (
-            id, name, provider, credentials, last_authenticated_at, last_used_at, created_at, updated_at
+            id, name, provider, credentials, failover_policy,
+            last_authenticated_at, last_used_at, created_at, updated_at
           ) VALUES (
-            @id, @name, @provider, @credentials, @lastAuthenticatedAt, NULL, @createdAt, @updatedAt
+            @id, @name, @provider, @credentials, @failoverPolicy,
+            @lastAuthenticatedAt, NULL, @createdAt, @updatedAt
           )`,
         ).run({
           id,
           name: parsed.name,
           provider: parsed.provider,
           credentials: encryptCredentials(parsed.credentials),
+          failoverPolicy:
+            parsed.failoverPolicy === null ? null : JSON.stringify(parsed.failoverPolicy),
           lastAuthenticatedAt: parsed.credentials ? now : null,
           createdAt: now,
           updatedAt: now,
@@ -170,6 +258,9 @@ export function createProviderAccountStore(
       if (parsed.credentials !== undefined) {
         assertCredentialsMatchProvider(existing.provider, parsed.credentials);
       }
+      if (parsed.failoverPolicy !== undefined) {
+        assertValidFailoverPolicy(id, parsed.failoverPolicy);
+      }
 
       const setClauses: string[] = [];
       const fieldMap: Record<string, unknown> = { id };
@@ -182,6 +273,11 @@ export function createProviderAccountStore(
         fieldMap.credentials = encryptCredentials(parsed.credentials);
         setClauses.push('last_authenticated_at = @lastAuthenticatedAt');
         fieldMap.lastAuthenticatedAt = parsed.credentials ? new Date().toISOString() : null;
+      }
+      if (parsed.failoverPolicy !== undefined) {
+        setClauses.push('failover_policy = @failoverPolicy');
+        fieldMap.failoverPolicy =
+          parsed.failoverPolicy === null ? null : JSON.stringify(parsed.failoverPolicy);
       }
       if (setClauses.length === 0) return existing;
 

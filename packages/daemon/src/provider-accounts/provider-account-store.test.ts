@@ -14,6 +14,108 @@ const reversibleCipher: CredentialsCipher = {
 };
 
 describe('ProviderAccountStore', () => {
+  it('round-trips ordered failover defaults and preserves null for legacy rows', () => {
+    const db = createTestDb();
+    const store = createProviderAccountStore(db);
+    store.create({ id: 'claude-max', name: 'Claude Max', provider: 'max' });
+    store.create({ id: 'copilot', name: 'Copilot', provider: 'copilot' });
+
+    const source = store.create({
+      id: 'openai-primary',
+      name: 'OpenAI Primary',
+      provider: 'openai',
+      failoverPolicy: {
+        targets: [
+          { providerAccountId: 'claude-max', runtime: 'claude', model: 'opus' },
+          { providerAccountId: 'copilot', runtime: 'copilot', model: 'auto' },
+        ],
+        maxHops: 2,
+      },
+    });
+    expect(source.failoverPolicy?.targets.map((target) => target.providerAccountId)).toEqual([
+      'claude-max',
+      'copilot',
+    ]);
+
+    const updated = store.update(source.id, {
+      failoverPolicy: {
+        targets: [
+          { providerAccountId: 'copilot', runtime: 'copilot', model: 'auto' },
+          { providerAccountId: 'claude-max', runtime: 'claude', model: 'sonnet' },
+        ],
+        maxHops: 1,
+      },
+    });
+    expect(updated.failoverPolicy).toEqual({
+      targets: [
+        { providerAccountId: 'copilot', runtime: 'copilot', model: 'auto' },
+        { providerAccountId: 'claude-max', runtime: 'claude', model: 'sonnet' },
+      ],
+      maxHops: 1,
+    });
+
+    db.prepare(
+      `INSERT INTO provider_accounts (id, name, provider, created_at, updated_at)
+       VALUES ('legacy', 'Legacy', 'anthropic', datetime('now'), datetime('now'))`,
+    ).run();
+    expect(store.get('legacy').failoverPolicy).toBeNull();
+    expect(store.update(source.id, { failoverPolicy: null }).failoverPolicy).toBeNull();
+  });
+
+  it('rejects invalid failover defaults without changing the existing policy', () => {
+    const db = createTestDb();
+    const store = createProviderAccountStore(db);
+    store.create({ id: 'claude-max', name: 'Claude Max', provider: 'max' });
+    store.create({ id: 'copilot', name: 'Copilot', provider: 'copilot' });
+    const source = store.create({ id: 'primary', name: 'Primary', provider: 'openai' });
+    const validPolicy = {
+      targets: [{ providerAccountId: 'claude-max', runtime: 'claude', model: 'opus' as const }],
+      maxHops: 1,
+    };
+    store.update(source.id, { failoverPolicy: validPolicy });
+
+    const invalidPolicies = [
+      { targets: [{ providerAccountId: 'primary', runtime: 'codex', model: 'gpt-5' }] },
+      {
+        targets: [
+          { providerAccountId: 'copilot', runtime: 'copilot', model: 'auto' },
+          { providerAccountId: 'copilot', runtime: 'copilot', model: 'gpt-5' },
+        ],
+      },
+      { targets: [{ providerAccountId: 'missing', runtime: 'claude', model: 'opus' }] },
+      { targets: [{ providerAccountId: 'claude-max', runtime: 'codex', model: 'gpt-5' }] },
+      { targets: [{ providerAccountId: 'copilot', runtime: 'copilot' }] },
+      {
+        targets: [{ providerAccountId: 'copilot', runtime: 'copilot', model: 'auto' }],
+        maxHops: 2,
+      },
+    ];
+
+    for (const failoverPolicy of invalidPolicies) {
+      expect(() => store.update(source.id, { failoverPolicy })).toThrow();
+      expect(store.get(source.id).failoverPolicy).toEqual(validPolicy);
+    }
+  });
+
+  it('rejects failover cycles across provider accounts', () => {
+    const db = createTestDb();
+    const store = createProviderAccountStore(db);
+    store.create({ id: 'one', name: 'One', provider: 'openai' });
+    store.create({ id: 'two', name: 'Two', provider: 'max' });
+    store.update('one', {
+      failoverPolicy: {
+        targets: [{ providerAccountId: 'two', runtime: 'claude', model: 'opus' }],
+      },
+    });
+    expect(() =>
+      store.update('two', {
+        failoverPolicy: {
+          targets: [{ providerAccountId: 'one', runtime: 'codex', model: 'gpt-5' }],
+        },
+      }),
+    ).toThrow(/cycle/);
+  });
+
   it('creates, reads, lists, updates, and deletes provider accounts', () => {
     const db = createTestDb();
     const store = createProviderAccountStore(db, reversibleCipher);

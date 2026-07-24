@@ -160,6 +160,8 @@ export type {
   ProviderAccount,
   PublicProviderAccount,
   ProviderAccountProvider,
+  ProviderFailoverPolicy,
+  ProviderFailoverTarget,
   ProviderAuthSource,
 } from './types/provider-account.js';
 
@@ -372,6 +374,8 @@ export {
   providerAccountIdSchema,
   providerAccountNameSchema,
   providerAccountProviderSchema,
+  providerFailoverPolicySchema,
+  providerFailoverTargetSchema,
   updateProviderAccountSchema,
 } from './schemas/provider-account.schema.js';
 

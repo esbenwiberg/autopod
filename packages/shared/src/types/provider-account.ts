@@ -1,12 +1,25 @@
 import type { ModelProvider, ProviderCredentials } from './model-provider.js';
+import type { RuntimeType } from './runtime.js';
 
 export type ProviderAccountProvider = ProviderCredentials['provider'];
+
+export interface ProviderFailoverTarget {
+  providerAccountId: string;
+  runtime: RuntimeType;
+  model: string;
+}
+
+export interface ProviderFailoverPolicy {
+  targets: ProviderFailoverTarget[];
+  maxHops?: number;
+}
 
 export interface ProviderAccount {
   id: string;
   name: string;
   provider: ProviderAccountProvider;
   credentials: ProviderCredentials | null;
+  failoverPolicy: ProviderFailoverPolicy | null;
   createdAt: string;
   updatedAt: string;
   lastAuthenticatedAt: string | null;

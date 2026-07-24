@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_PROVIDER_FAILOVER_TARGETS } from '../constants.js';
 
 export const providerAccountIdSchema = z
   .string()
@@ -99,12 +100,49 @@ const providerAccountCredentialsSchema = z.union([
   piOAuthCredentialsSchema,
 ]);
 
+export const providerFailoverTargetSchema = z
+  .object({
+    providerAccountId: providerAccountIdSchema,
+    runtime: z.enum(['claude', 'codex', 'copilot', 'pi']),
+    model: z.string().trim().min(1).max(256),
+  })
+  .strict();
+
+export const providerFailoverPolicySchema = z
+  .object({
+    targets: z.array(providerFailoverTargetSchema).max(MAX_PROVIDER_FAILOVER_TARGETS),
+    maxHops: z.number().int().min(1).max(MAX_PROVIDER_FAILOVER_TARGETS).optional(),
+  })
+  .strict()
+  .superRefine((policy, ctx) => {
+    const seen = new Set<string>();
+    for (const [index, target] of policy.targets.entries()) {
+      const identity = target.providerAccountId;
+      if (seen.has(identity)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['targets', index],
+          message: 'Failover targets must not contain duplicate provider accounts',
+        });
+      }
+      seen.add(identity);
+    }
+    if (policy.maxHops !== undefined && policy.maxHops > policy.targets.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['maxHops'],
+        message: 'maxHops cannot exceed the number of failover targets',
+      });
+    }
+  });
+
 export const createProviderAccountSchema = z
   .object({
     id: providerAccountIdSchema.optional(),
     name: providerAccountNameSchema,
     provider: providerAccountProviderSchema,
     credentials: providerAccountCredentialsSchema.nullable().optional().default(null),
+    failoverPolicy: providerFailoverPolicySchema.nullable().optional().default(null),
   })
   .superRefine((data, ctx) => {
     if (data.credentials && data.credentials.provider !== data.provider) {
@@ -120,6 +158,7 @@ export const updateProviderAccountSchema = z
   .object({
     name: providerAccountNameSchema.optional(),
     credentials: providerAccountCredentialsSchema.nullable().optional(),
+    failoverPolicy: providerFailoverPolicySchema.nullable().optional(),
   })
   .strict();
 
