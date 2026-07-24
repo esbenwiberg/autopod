@@ -112,6 +112,16 @@ describe('provider catalog validation', () => {
     );
   });
 
+  it('rejects unqualified model IDs even when references are internally consistent', () => {
+    const manifest = syntheticManifest();
+    firstModel(manifest).id = 'unqualified-model';
+    firstProvider(manifest).modelIds = ['unqualified-model'];
+
+    expect(() => createProviderCatalog(manifest)).toThrow(
+      "Invalid provider manifest: model ID 'unqualified-model' is not provider-qualified",
+    );
+  });
+
   it('rejects models referenced by a provider other than their owner', () => {
     const manifest = syntheticManifest();
     manifest.providers.push({
@@ -198,6 +208,28 @@ describe('provider catalog validation', () => {
     expect(() => {
       catalogProvider.displayName = 'Mutated catalog';
     }).toThrow(TypeError);
+  });
+
+  it('allowlists public fields and drops injected credential material', () => {
+    const manifest = syntheticManifest();
+    const provider = firstProvider(manifest) as (typeof manifest.providers)[number] & {
+      apiKey?: string;
+    };
+    const credential = provider.credentialOptions[0] as
+      | ((typeof provider.credentialOptions)[number] & { secret?: string })
+      | undefined;
+    provider.apiKey = 'provider-secret';
+    if (!credential) throw new Error('Synthetic manifest has no credential');
+    credential.secret = 'credential-secret';
+    (manifest as CompiledProviderManifest & { credentials?: unknown }).credentials = {
+      token: 'top-level-secret',
+    };
+
+    const serialized = JSON.stringify(createProviderCatalog(manifest));
+    expect(serialized).not.toContain('provider-secret');
+    expect(serialized).not.toContain('credential-secret');
+    expect(serialized).not.toContain('top-level-secret');
+    expect(serialized).not.toMatch(/"apiKey"|"secret"|"credentials"|"token"/);
   });
 
   it('compiles legacy compatibility and non-runnable launch posture', () => {

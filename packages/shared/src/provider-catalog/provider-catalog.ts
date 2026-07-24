@@ -6,12 +6,14 @@ import {
   type ProviderCaveatKind,
   type ProviderCaveatSeverity,
   type ProviderCredentialKind,
+  type ProviderImplementation,
   type ProviderLifecycleState,
   type ProviderModelLifecycleState,
   type PublicProviderCatalog,
 } from '../types/provider-catalog.js';
 
 const STABLE_ID = /^[a-z0-9][a-z0-9._-]*$/;
+const PROVIDER_QUALIFIED_MODEL_ID = /^[a-z0-9][a-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 const SAFE_HOSTNAME =
   /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
 const SUPPORTED_CREDENTIAL_KINDS = new Set<ProviderCredentialKind>([
@@ -177,6 +179,9 @@ function assertValidProviderManifest(manifest: CompiledProviderManifest): void {
 
   const providers = new Set(manifest.providers.map(({ id }) => id));
   for (const model of manifest.models) {
+    if (!PROVIDER_QUALIFIED_MODEL_ID.test(model.id)) {
+      fail(`model ID '${model.id}' is not provider-qualified`);
+    }
     if (model.displayName.trim().length === 0) fail(`model '${model.id}' has no display name`);
     if (!MODEL_LIFECYCLE_STATES.has(model.lifecycle)) {
       fail(`model '${model.id}' has unsupported lifecycle '${model.lifecycle}'`);
@@ -199,7 +204,7 @@ function assertValidProviderManifest(manifest: CompiledProviderManifest): void {
 export function validateProviderManifest(
   manifest: CompiledProviderManifest,
 ): CompiledProviderManifest {
-  const isolated = JSON.parse(JSON.stringify(manifest)) as CompiledProviderManifest;
+  const isolated = copyManifest(manifest);
   assertValidProviderManifest(isolated);
   return deepFreeze(isolated);
 }
@@ -214,4 +219,59 @@ function deepFreeze<T>(value: T): T {
     Object.freeze(value);
   }
   return value;
+}
+
+function copyImplementation(implementation: ProviderImplementation): ProviderImplementation {
+  if (implementation.kind === 'legacy') {
+    return { kind: implementation.kind, adapterId: implementation.adapterId };
+  }
+  if (implementation.kind === 'generic-pi-api') {
+    return { kind: implementation.kind, piProviderId: implementation.piProviderId };
+  }
+  return { kind: (implementation as { kind: 'legacy' }).kind, adapterId: '' };
+}
+
+/**
+ * Builds the public/validated DTO field by field. Unknown properties are intentionally
+ * discarded so a cast or deserialized object cannot smuggle credential material into the API.
+ */
+function copyManifest(manifest: CompiledProviderManifest): CompiledProviderManifest {
+  return {
+    manifestVersion: manifest.manifestVersion,
+    piCompatibility: {
+      packageName: manifest.piCompatibility.packageName,
+      packageVersion: manifest.piCompatibility.packageVersion,
+      source: manifest.piCompatibility.source,
+    },
+    providers: manifest.providers.map((provider) => ({
+      id: provider.id,
+      displayName: provider.displayName,
+      description: provider.description,
+      ...(provider.icon === undefined ? {} : { icon: provider.icon }),
+      implementation: copyImplementation(provider.implementation),
+      credentialOptions: provider.credentialOptions.map((credential) => ({
+        kind: credential.kind,
+        label: credential.label,
+        acquisition: credential.acquisition,
+      })),
+      modelIds: [...provider.modelIds],
+      requiredHosts: [...provider.requiredHosts],
+      policy: {
+        lifecycle: provider.policy.lifecycle,
+        authorization: provider.policy.authorization,
+        runnable: provider.policy.runnable,
+        caveats: provider.policy.caveats.map((caveat) => ({
+          kind: caveat.kind,
+          severity: caveat.severity,
+          message: caveat.message,
+        })),
+      },
+    })),
+    models: manifest.models.map((model) => ({
+      id: model.id,
+      providerId: model.providerId,
+      displayName: model.displayName,
+      lifecycle: model.lifecycle,
+    })),
+  };
 }
