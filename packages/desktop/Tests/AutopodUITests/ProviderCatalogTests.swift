@@ -83,6 +83,12 @@ final class ProviderCatalogTests: XCTestCase {
     XCTAssertFalse(blocked.canAcceptGenericAPIKey)
     XCTAssertFalse(blocked.isSelectableAsProfileProvider)
     XCTAssertEqual(blocked.policy.authorization, "blocked")
+    XCTAssertTrue(RuntimeModelOptions.options(
+      for: .pi,
+      role: .defaultModel,
+      catalog: catalog,
+      providerId: blocked.id
+    ).isEmpty)
   }
 
   func testSyntheticProviderModelAppearsWithoutSourceEnumeration() throws {

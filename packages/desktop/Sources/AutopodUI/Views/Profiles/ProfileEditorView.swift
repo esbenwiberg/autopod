@@ -1432,8 +1432,7 @@ public struct ProfileEditorView: View {
             .filter { account in
                 if account.provider == profile.modelProvider.rawValue { return true }
                 return profile.modelProvider == .pi
-                    && providerCatalog?.provider(id: account.provider)?.implementation.kind
-                        == "generic-pi-api"
+                    && providerCatalog?.provider(id: account.provider)?.canAcceptGenericAPIKey
             }
             .sorted {
                 if $0.name == $1.name { return $0.id < $1.id }
@@ -1504,7 +1503,8 @@ public struct ProfileEditorView: View {
             .frame(width: 160)
         }
 
-        if let provider = providerCatalog?.provider(id: profile.modelProvider.rawValue) {
+        if let providerId = selectedCatalogProviderId,
+           let provider = providerCatalog?.provider(id: providerId) {
             providerPolicySummary(provider)
         } else if let providerCatalogError {
             Label(providerCatalogError, systemImage: "exclamationmark.triangle.fill")

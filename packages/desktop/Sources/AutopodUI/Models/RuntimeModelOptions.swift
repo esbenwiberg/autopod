@@ -172,9 +172,10 @@ enum RuntimeModelOptions {
     ) -> [RuntimeModelOption] {
         var options = baseOptions(for: runtime, role: role)
         if runtime == .pi, let catalog, let providerId,
-           catalog.provider(id: providerId)?.implementation.kind == "generic-pi-api" {
+           let provider = catalog.provider(id: providerId),
+           provider.implementation.kind == "generic-pi-api" {
             options = catalog.models
-                .filter { $0.providerId == providerId }
+                .filter { $0.providerId == providerId && provider.policy.runnable }
                 .filter { $0.lifecycle == "active" }
                 .map { RuntimeModelOption(value: $0.id, label: $0.displayName) }
         }
