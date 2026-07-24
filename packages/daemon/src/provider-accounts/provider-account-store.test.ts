@@ -145,6 +145,72 @@ describe('ProviderAccountStore', () => {
     ).toThrow(/cycle/);
   });
 
+  it('rejects deleting an account referenced by a failover policy', () => {
+    const db = createTestDb();
+    const store = createProviderAccountStore(db);
+    store.create({
+      id: 'target',
+      name: 'Target',
+      provider: 'copilot',
+      credentials: { provider: 'copilot', token: 'copilot-token' },
+    });
+    store.create({
+      id: 'source',
+      name: 'Source',
+      provider: 'openai',
+      failoverPolicy: {
+        targets: [{ providerAccountId: 'target', runtime: 'copilot', model: 'auto' }],
+      },
+    });
+
+    expect(() => store.delete('target')).toThrow(/referenced by failover policies: source/);
+    expect(store.exists('target')).toBe(true);
+    expect(store.get('source').failoverPolicy?.targets[0]?.providerAccountId).toBe('target');
+  });
+
+  it('rejects credential changes that invalidate inbound failover policies atomically', () => {
+    const db = createTestDb();
+    const store = createProviderAccountStore(db);
+    const originalCredentials = {
+      provider: 'foundry' as const,
+      endpoint: 'https://example.services.ai.azure.com',
+      projectId: 'project',
+      apiSurface: 'openai' as const,
+    };
+    store.create({
+      id: 'foundry-target',
+      name: 'Foundry Target',
+      provider: 'foundry',
+      credentials: originalCredentials,
+    });
+    store.create({
+      id: 'source',
+      name: 'Source',
+      provider: 'openai',
+      failoverPolicy: {
+        targets: [{ providerAccountId: 'foundry-target', runtime: 'codex', model: 'gpt-5' }],
+      },
+    });
+
+    expect(() => store.updateCredentials('foundry-target', null)).toThrow(/not authenticated/);
+    expect(store.get('foundry-target').credentials).toEqual(originalCredentials);
+
+    expect(() =>
+      store.updateCredentials('foundry-target', {
+        ...originalCredentials,
+        apiSurface: 'anthropic',
+      }),
+    ).toThrow(/incompatible/);
+    expect(store.get('foundry-target').credentials).toEqual(originalCredentials);
+
+    expect(() =>
+      store.update('foundry-target', {
+        credentials: { ...originalCredentials, apiSurface: 'anthropic' },
+      }),
+    ).toThrow(/incompatible/);
+    expect(store.get('foundry-target').credentials).toEqual(originalCredentials);
+  });
+
   it('creates, reads, lists, updates, and deletes provider accounts', () => {
     const db = createTestDb();
     const store = createProviderAccountStore(db, reversibleCipher);

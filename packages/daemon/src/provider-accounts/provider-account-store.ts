@@ -152,6 +152,7 @@ export function createProviderAccountStore(
   function assertValidFailoverPolicy(
     sourceId: string,
     policy: ProviderFailoverPolicy | null,
+    accountOverrides: ReadonlyMap<string, ProviderAccount> = new Map(),
   ): void {
     if (!policy) return;
 
@@ -163,7 +164,8 @@ export function createProviderAccountStore(
           400,
         );
       }
-      const targetAccount = fetchRaw(target.providerAccountId);
+      const targetAccount =
+        accountOverrides.get(target.providerAccountId) ?? fetchRaw(target.providerAccountId);
       if (
         targetAccount.credentials === null &&
         !['anthropic', 'openai'].includes(targetAccount.provider)
@@ -202,6 +204,34 @@ export function createProviderAccountStore(
         'PROVIDER_ACCOUNT_FAILOVER_CYCLE',
         400,
       );
+    }
+  }
+
+  function listFailoverReferrerIds(targetId: string): string[] {
+    const rows = db
+      .prepare(
+        `SELECT id, failover_policy
+         FROM provider_accounts
+         WHERE failover_policy IS NOT NULL
+         ORDER BY id`,
+      )
+      .all() as Array<{ id: string; failover_policy: string }>;
+    return rows
+      .filter((row) =>
+        parseFailoverPolicy(row.failover_policy)?.targets.some(
+          (target) => target.providerAccountId === targetId,
+        ),
+      )
+      .map((row) => row.id);
+  }
+
+  function assertInboundPoliciesRemainValid(proposedAccount: ProviderAccount): void {
+    const referrerIds = listFailoverReferrerIds(proposedAccount.id);
+    if (referrerIds.length === 0) return;
+    const overrides = new Map([[proposedAccount.id, proposedAccount]]);
+    for (const referrerId of referrerIds) {
+      const referrer = fetchRaw(referrerId);
+      assertValidFailoverPolicy(referrer.id, referrer.failoverPolicy, overrides);
     }
   }
 
@@ -266,6 +296,7 @@ export function createProviderAccountStore(
       const parsed = updateProviderAccountSchema.parse(changes);
       if (parsed.credentials !== undefined) {
         assertCredentialsMatchProvider(existing.provider, parsed.credentials);
+        assertInboundPoliciesRemainValid({ ...existing, credentials: parsed.credentials });
       }
       if (parsed.failoverPolicy !== undefined) {
         assertValidFailoverPolicy(id, parsed.failoverPolicy);
@@ -318,6 +349,7 @@ export function createProviderAccountStore(
     ): ProviderAccount {
       const existing = fetchRaw(id);
       assertCredentialsMatchProvider(existing.provider, credentials);
+      assertInboundPoliciesRemainValid({ ...existing, credentials });
       const now = new Date().toISOString();
       const authenticatedAt =
         options.authenticatedAt === undefined
@@ -354,6 +386,14 @@ export function createProviderAccountStore(
 
     delete(id: string): void {
       fetchRaw(id);
+      const failoverReferrers = listFailoverReferrerIds(id);
+      if (failoverReferrers.length > 0) {
+        throw new AutopodError(
+          `Cannot delete provider account "${id}" while referenced by failover policies: ${failoverReferrers.join(', ')}`,
+          'PROVIDER_ACCOUNT_FAILOVER_TARGET_IN_USE',
+          409,
+        );
+      }
       const linkedProfiles = listLinkedProfileNames(id);
       if (linkedProfiles.length > 0) {
         throw new AutopodError(
