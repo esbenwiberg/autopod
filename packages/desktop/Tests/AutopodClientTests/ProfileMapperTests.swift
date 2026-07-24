@@ -185,6 +185,51 @@ import AutopodUI
   #expect(fields["providerAccountId"] as? String == "team-openai")
 }
 
+@Test func profileMapperRoundTripsProviderFailoverOverride() throws {
+  let json = """
+  {
+    "name": "app",
+    "providerFailover": {
+      "targets": [
+        { "providerAccountId": "openai-pro", "runtime": "codex", "model": "gpt-5.6-terra" },
+        { "providerAccountId": "copilot", "runtime": "copilot", "model": "auto" }
+      ],
+      "maxHops": 2
+    },
+    "version": 1,
+    "createdAt": "2026-07-24T00:00:00Z",
+    "updatedAt": "2026-07-24T00:00:00Z"
+  }
+  """.data(using: .utf8)!
+  let response = try JSONDecoder().decode(ProfileResponse.self, from: json)
+  let mapped = ProfileMapper.map(response)
+  let fields = ProfileMapper.mapToFields(mapped)
+  let policy = fields["providerFailover"] as? [String: Any]
+  let targets = policy?["targets"] as? [[String: String]]
+
+  #expect(mapped.providerFailover?.targets.map(\.providerAccountId) == ["openai-pro", "copilot"])
+  #expect(policy?["maxHops"] as? Int == 2)
+  #expect(targets?.first?["runtime"] == "codex")
+  #expect(targets?.first?["model"] == "gpt-5.6-terra")
+}
+
+@Test func profileMapperEncodesExplicitEmptyFailoverOverrideAndLegacyNil() throws {
+  let response = try JSONDecoder().decode(
+    ProfileResponse.self,
+    from: Data(
+      #"{"name":"legacy","version":1,"createdAt":"","updatedAt":""}"#.utf8
+    )
+  )
+  let inherited = ProfileMapper.map(response)
+  #expect(inherited.providerFailover == nil)
+  #expect(ProfileMapper.mapToFields(inherited)["providerFailover"] is NSNull)
+
+  var disabled = inherited
+  disabled.providerFailover = ProviderFailoverPolicyResponse(targets: [])
+  let policy = ProfileMapper.mapToFields(disabled)["providerFailover"] as? [String: Any]
+  #expect((policy?["targets"] as? [[String: String]])?.isEmpty == true)
+}
+
 private func decodeMapperProfile(advisoryBrowserQaFragment: String) throws -> ProfileResponse {
   let json = """
   {

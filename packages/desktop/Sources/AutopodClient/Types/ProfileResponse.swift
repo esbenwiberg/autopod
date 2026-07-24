@@ -36,6 +36,10 @@ public struct ProfileResponse: Codable, Sendable {
   public var pod: PodConfigResponse?
   public var modelProvider: String?
   public var providerAccountId: String?
+  /// Nil inherits the linked provider-account default. A non-nil policy replaces it.
+  public var providerFailover: ProviderFailoverPolicyResponse?
+  /// Optional on editor/resolved responses from newer daemons.
+  public var providerFailoverResolution: ResolvedProviderFailoverPolicyResponse?
   public var providerCredentials: ProviderCredentialsResponse?
   public var testCommand: String?
   public var validationSetupCommand: String?
@@ -127,6 +131,8 @@ public struct ProfileResponse: Codable, Sendable {
     case pod
     case modelProvider
     case providerAccountId
+    case providerFailover
+    case providerFailoverResolution
     case providerCredentials
     case testCommand
     case validationSetupCommand
@@ -208,6 +214,11 @@ public struct ProfileResponse: Codable, Sendable {
     pod = try c.decodeIfPresent(PodConfigResponse.self, forKey: .pod)
     modelProvider = try c.decodeIfPresent(String.self, forKey: .modelProvider)
     providerAccountId = try c.decodeIfPresent(String.self, forKey: .providerAccountId)
+    providerFailover = try c.decodeIfPresent(ProviderFailoverPolicyResponse.self, forKey: .providerFailover)
+    providerFailoverResolution = try c.decodeIfPresent(
+      ResolvedProviderFailoverPolicyResponse.self,
+      forKey: .providerFailoverResolution
+    )
     providerCredentials = try c.decodeIfPresent(ProviderCredentialsResponse.self, forKey: .providerCredentials)
     testCommand = try c.decodeIfPresent(String.self, forKey: .testCommand)
     validationSetupCommand = try c.decodeIfPresent(String.self, forKey: .validationSetupCommand)
@@ -264,6 +275,8 @@ public struct ProfileResponse: Codable, Sendable {
     escalation = .init(); mcpServers = []; claudeMdSections = []; skills = []
     outputMode = "pr"; modelProvider = "anthropic"; buildTimeout = 300
     providerAccountId = nil
+    providerFailover = nil
+    providerFailoverResolution = nil
     testTimeout = 600; prProvider = "github"; privateRegistries = []
     validationSetupCommand = nil
     hasAdoPat = false; hasGithubPat = false; hasRegistryPat = false
@@ -342,10 +355,55 @@ public struct PublicProviderAccountResponse: Codable, Sendable {
   public var provider: String
   public var credentials: ProviderCredentialsResponse?
   public var hasCredentials: Bool
+  /// Optional so the desktop remains compatible with daemons predating failover policies.
+  public var failoverPolicy: ProviderFailoverPolicyResponse?
   public var lastAuthenticatedAt: String?
   public var lastUsedAt: String?
   public var createdAt: String
   public var updatedAt: String
+}
+
+public struct ProviderFailoverTargetResponse: Codable, Hashable, Identifiable, Sendable {
+  public var providerAccountId: String
+  public var runtime: String
+  public var model: String
+
+  public var id: String { providerAccountId }
+
+  public init(providerAccountId: String, runtime: String, model: String) {
+    self.providerAccountId = providerAccountId
+    self.runtime = runtime
+    self.model = model
+  }
+}
+
+public struct ProviderFailoverPolicyResponse: Codable, Equatable, Sendable {
+  public var targets: [ProviderFailoverTargetResponse]
+  public var maxHops: Int?
+
+  public init(targets: [ProviderFailoverTargetResponse], maxHops: Int? = nil) {
+    self.targets = targets
+    self.maxHops = maxHops
+  }
+
+  public var dictionary: [String: Any] {
+    var value: [String: Any] = [
+      "targets": targets.map {
+        [
+          "providerAccountId": $0.providerAccountId,
+          "runtime": $0.runtime,
+          "model": $0.model,
+        ]
+      },
+    ]
+    if let maxHops { value["maxHops"] = maxHops }
+    return value
+  }
+}
+
+public struct ResolvedProviderFailoverPolicyResponse: Codable, Sendable {
+  public var policy: ProviderFailoverPolicyResponse?
+  public var source: String
 }
 
 public struct ProviderAuthSourceResponse: Codable, Sendable {

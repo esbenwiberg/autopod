@@ -1,4 +1,5 @@
 import Foundation
+import AutopodClient
 
 // MARK: - Profile (mirrors packages/shared/src/types/profile.ts)
 
@@ -52,6 +53,8 @@ public struct Profile: Identifiable, Sendable {
     public var executionTarget: ExecutionTarget
     public var modelProvider: ModelProvider
     public var providerAccountId: String?
+    /// Nil inherits provider-account defaults; non-nil replaces them, including an empty target list.
+    public var providerFailover: ProviderFailoverPolicyResponse?
     public var prProvider: PRProvider
     public var customInstructions: String?
     public var agentDonePrompt: String?
@@ -210,6 +213,7 @@ public struct Profile: Identifiable, Sendable {
         executionTarget: ExecutionTarget = .local,
         modelProvider: ModelProvider = .anthropic,
         providerAccountId: String? = nil,
+        providerFailover: ProviderFailoverPolicyResponse? = nil,
         prProvider: PRProvider = .github,
         customInstructions: String? = nil, agentDonePrompt: String? = nil,
         containerMemoryGb: Double? = nil,
@@ -276,6 +280,7 @@ public struct Profile: Identifiable, Sendable {
         self.defaultRuntime = defaultRuntime
         self.executionTarget = executionTarget; self.modelProvider = modelProvider
         self.providerAccountId = providerAccountId
+        self.providerFailover = providerFailover
         self.prProvider = prProvider; self.customInstructions = customInstructions
         self.agentDonePrompt = agentDonePrompt
         self.containerMemoryGb = containerMemoryGb

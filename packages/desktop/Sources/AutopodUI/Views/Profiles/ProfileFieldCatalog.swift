@@ -208,6 +208,12 @@ public enum ProfileOverrideCatalog {
             help: "Shared provider account id. Leave empty to inherit profile credentials or daemon environment auth."
         ),
         .init(
+            key: "providerFailover",
+            label: "Failover Policy",
+            section: .providers,
+            help: "Ordered complete provider targets. Profile targets replace account defaults rather than merging."
+        ),
+        .init(
             key: "prProvider",
             label: "PR Provider",
             section: .providers,

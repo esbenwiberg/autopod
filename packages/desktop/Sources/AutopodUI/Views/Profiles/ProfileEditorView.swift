@@ -1194,13 +1194,13 @@ public struct ProfileEditorView: View {
             }
             return
         }
-        let provider = profile.modelProvider.rawValue
         await MainActor.run {
             isLoadingProviderAccounts = true
             providerAccountsError = nil
         }
         do {
-            let accounts = try await onLoadProviderAccounts(provider)
+            // Failover targets may use a different provider than the profile's primary account.
+            let accounts = try await onLoadProviderAccounts(nil)
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 providerAccounts = accounts
@@ -1391,6 +1391,24 @@ public struct ProfileEditorView: View {
         )
     }
 
+    private var providerFailoverOverrideBinding: Binding<Bool> {
+        Binding(
+            get: { profile.providerFailover != nil },
+            set: { enabled in
+                profile.providerFailover = enabled
+                    ? (profile.providerFailover ?? ProviderFailoverPolicyResponse(targets: []))
+                    : nil
+            }
+        )
+    }
+
+    private var providerFailoverPolicyBinding: Binding<ProviderFailoverPolicyResponse> {
+        Binding(
+            get: { profile.providerFailover ?? ProviderFailoverPolicyResponse(targets: []) },
+            set: { profile.providerFailover = $0 }
+        )
+    }
+
     @ViewBuilder
     private var providerAccountPicker: some View {
         HStack(spacing: 8) {
@@ -1450,6 +1468,30 @@ public struct ProfileEditorView: View {
         fieldRow("Provider Account", help: "Shared provider account id for model-provider auth. Leave empty to use profile credentials or daemon environment auth.") {
             providerAccountPicker
         }
+
+        Divider()
+
+        Toggle("Override account defaults", isOn: providerFailoverOverrideBinding)
+            .toggleStyle(.switch)
+
+        if profile.providerFailover != nil {
+            ProviderFailoverEditor(
+                policy: providerFailoverPolicyBinding,
+                accounts: providerAccounts,
+                excludedAccountId: profile.providerAccountId,
+                isLoading: isLoadingProviderAccounts,
+                loadError: providerAccountsError
+            )
+        } else {
+            Text("This profile inherits the linked provider account's default failover chain.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Text("Profile targets replace account defaults; they are never merged. An empty override disables automatic failover.")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
 
         // Provider credentials indicator
         if let credType = profile.providerCredentialsType {
@@ -2872,6 +2914,9 @@ public struct ProfileEditorView: View {
                             ForEach(items) { field in
                                 Button(field.label) {
                                     inheritedFields.remove(field.key)
+                                    if field.key == "providerFailover" {
+                                        profile.providerFailover = ProviderFailoverPolicyResponse(targets: [])
+                                    }
                                 }
                             }
                         }
@@ -3045,6 +3090,8 @@ public struct ProfileEditorView: View {
                      parent: editorPayload?.parent?.modelProvider ?? "")
         case "providerAccountId":
             providerAccountCard(field, parent: editorPayload?.parent?.providerAccountId ?? "")
+        case "providerFailover":
+            providerFailoverCard(field)
         case "prProvider":
             enumCard(field, selection: $profile.prProvider,
                      options: PRProvider.allCases.map { ($0, $0.label) },
@@ -3224,6 +3271,21 @@ public struct ProfileEditorView: View {
         overrideCardShell(field: field) {
             providerAccountPicker
             parentLine(parent.isEmpty ? "(none)" : parent)
+        }
+    }
+
+    private func providerFailoverCard(_ field: ProfileOverrideField) -> some View {
+        overrideCardShell(field: field) {
+            ProviderFailoverEditor(
+                policy: providerFailoverPolicyBinding,
+                accounts: providerAccounts,
+                excludedAccountId: profile.providerAccountId,
+                isLoading: isLoadingProviderAccounts,
+                loadError: providerAccountsError
+            )
+            Text("This profile chain replaces the provider-account default. It is never merged.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
     }
 
