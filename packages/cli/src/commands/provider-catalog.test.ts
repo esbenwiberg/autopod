@@ -71,6 +71,21 @@ const catalog: PublicProviderCatalog = {
         ],
       },
     },
+    {
+      id: 'legacy-fixture',
+      displayName: 'Legacy Fixture',
+      description: 'Synthetic legacy adapter',
+      implementation: { kind: 'legacy', adapterId: 'legacy-fixture' },
+      credentialOptions: [],
+      modelIds: ['legacy/model'],
+      requiredHosts: [],
+      policy: {
+        lifecycle: 'active',
+        authorization: 'supported',
+        runnable: true,
+        caveats: [],
+      },
+    },
   ],
   models: [
     {
@@ -183,6 +198,21 @@ describe('daemon-driven provider catalog', () => {
       defaultRuntime: 'pi',
       defaultModel: 'fixture/model-a',
       providerAccountId: 'fixture-account',
+    });
+
+    await run([
+      'profile',
+      'set-provider',
+      'fixture-profile',
+      'legacy-fixture',
+      '--model',
+      'legacy/model',
+    ]);
+    expect(client.updateProfile).toHaveBeenCalledWith('fixture-profile', {
+      modelProvider: 'legacy-fixture',
+      defaultRuntime: undefined,
+      defaultModel: 'legacy/model',
+      providerAccountId: null,
     });
   });
 });

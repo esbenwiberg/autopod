@@ -238,7 +238,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
       const updated = await withSpinner('Updating profile provider...', () =>
         client.updateProfile(name, {
           ...selection,
-          providerAccountId: opts.account,
+          providerAccountId: opts.account ?? null,
         }),
       );
       console.log(
