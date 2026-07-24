@@ -15,6 +15,7 @@ struct ProviderAccountsSettingsView: View {
   @State private var showImportSheet = false
   @State private var inFlightAction: String?
   @State private var deleteTarget: PublicProviderAccountResponse?
+  @State private var apiKeyTarget: PublicProviderAccountResponse?
 
   private var sortedAccounts: [PublicProviderAccountResponse] {
     accounts.sorted {
@@ -80,6 +81,26 @@ struct ProviderAccountsSettingsView: View {
           accountName: accountName,
           clearLegacyCredentials: clearLegacyCredentials
         )
+      }
+    }
+    .sheet(
+      isPresented: Binding(
+        get: { apiKeyTarget != nil },
+        set: { if !$0 { apiKeyTarget = nil } }
+      )
+    ) {
+      if let account = apiKeyTarget,
+         let provider = providerCatalog?.provider(id: account.provider) {
+        ProviderAPIKeySheet(
+          isPresented: Binding(
+            get: { apiKeyTarget != nil },
+            set: { if !$0 { apiKeyTarget = nil } }
+          ),
+          accountName: account.name,
+          provider: provider
+        ) { apiKey in
+          try await replaceAPIKey(account, apiKey: apiKey)
+        }
       }
     }
     .alert(
@@ -481,6 +502,30 @@ struct ProviderAccountsSettingsView: View {
   }
 
   @MainActor
+  private func replaceAPIKey(
+    _ account: PublicProviderAccountResponse,
+    apiKey: String
+  ) async throws {
+    guard let api else { throw DaemonError.networkError("Not connected to daemon") }
+    guard let provider = providerCatalog?.provider(id: account.provider),
+          provider.canAcceptGenericAPIKey else {
+      throw DaemonError.badRequest(
+        "Provider catalog unavailable or \(providerLabel(account.provider)) cannot accept API keys."
+      )
+    }
+    inFlightAction = "auth:\(account.id)"
+    defer { inFlightAction = nil }
+    _ = try await api.updateProviderAccount(account.id, fields: [
+      "credentials": [
+        "provider": "api-key",
+        "providerId": account.provider,
+        "apiKey": apiKey,
+      ],
+    ])
+    await loadAccounts()
+  }
+
+  @MainActor
   private func link(_ account: PublicProviderAccountResponse, profileName: String) async {
     guard let api else { return }
     inFlightAction = "link:\(account.id)"
@@ -557,7 +602,16 @@ struct ProviderAccountsSettingsView: View {
 
   @ViewBuilder
   private func authControl(_ account: PublicProviderAccountResponse) -> some View {
-    if account.provider == "pi" {
+    if providerCatalog?.provider(id: account.provider)?.canAcceptGenericAPIKey == true {
+      Button {
+        apiKeyTarget = account
+      } label: {
+        Image(systemName: account.hasCredentials ? "arrow.triangle.2.circlepath" : "person.badge.key")
+      }
+      .buttonStyle(.borderless)
+      .disabled(isAccountBusy(account.id))
+      .help(account.hasCredentials ? "Replace API key" : "Add API key")
+    } else if account.provider == "pi" {
       Menu {
         ForEach(ProfileAuthenticator.PiOAuthProvider.allCases, id: \.rawValue) { providerId in
           Button(piProviderLabel(providerId)) {
@@ -587,6 +641,70 @@ struct ProviderAccountsSettingsView: View {
     case .anthropic: "Anthropic"
     case .openAICodex: "OpenAI Codex"
     case .githubCopilot: "GitHub Copilot"
+    }
+  }
+}
+
+private struct ProviderAPIKeySheet: View {
+  @Binding var isPresented: Bool
+  let accountName: String
+  let provider: ProviderCatalogProvider
+  let onSave: (String) async throws -> Void
+
+  @State private var apiKey = ""
+  @State private var isSaving = false
+  @State private var errorMessage: String?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      Text("Replace \(provider.displayName) API Key")
+        .font(.headline)
+      Text("Enter a new key for \(accountName). The stored secret is never displayed.")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+
+      if let guidance = provider.credentialOptions.first?.acquisition {
+        Text(guidance)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      if let errorMessage {
+        Text(errorMessage)
+          .font(.caption)
+          .foregroundStyle(.red)
+      }
+
+      SecureField(provider.credentialOptions.first?.label ?? "API key", text: $apiKey)
+        .textFieldStyle(.roundedBorder)
+
+      HStack {
+        Spacer()
+        Button("Cancel") { isPresented = false }
+          .keyboardShortcut(.cancelAction)
+        Button("Save") {
+          Task { await save() }
+        }
+        .keyboardShortcut(.defaultAction)
+        .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+      }
+    }
+    .padding(20)
+    .frame(width: 420)
+  }
+
+  @MainActor
+  private func save() async {
+    let secret = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !secret.isEmpty else { return }
+    isSaving = true
+    errorMessage = nil
+    defer { isSaving = false }
+    do {
+      try await onSave(secret)
+      apiKey = ""
+      isPresented = false
+    } catch {
+      errorMessage = error.localizedDescription
     }
   }
 }
