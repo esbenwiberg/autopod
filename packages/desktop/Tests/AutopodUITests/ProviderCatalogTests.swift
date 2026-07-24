@@ -56,6 +56,36 @@ final class ProviderCatalogTests: XCTestCase {
               }
             ]
           }
+        },
+        {
+          "id": "synthetic-legacy-product",
+          "displayName": "Synthetic Anthropic Adapter",
+          "description": "Synthetic supported legacy adapter",
+          "implementation": { "kind": "legacy", "adapterId": "anthropic" },
+          "credentialOptions": [],
+          "modelIds": [],
+          "requiredHosts": [],
+          "policy": {
+            "lifecycle": "active",
+            "authorization": "supported",
+            "runnable": true,
+            "caveats": []
+          }
+        },
+        {
+          "id": "unsupported-legacy-product",
+          "displayName": "Unsupported Legacy Adapter",
+          "description": "Synthetic unsupported legacy adapter",
+          "implementation": { "kind": "legacy", "adapterId": "future-adapter" },
+          "credentialOptions": [],
+          "modelIds": [],
+          "requiredHosts": [],
+          "policy": {
+            "lifecycle": "active",
+            "authorization": "supported",
+            "runnable": true,
+            "caveats": []
+          }
         }
       ],
       "models": [
@@ -87,7 +117,7 @@ final class ProviderCatalogTests: XCTestCase {
 
     let blocked = try XCTUnwrap(catalog.provider(id: "blocked-fixture"))
     XCTAssertFalse(blocked.canAcceptGenericAPIKey)
-    XCTAssertFalse(blocked.isSelectableAsProfileProvider)
+    XCTAssertNil(ProviderCatalogProfileOptions.modelProvider(for: blocked))
     XCTAssertFalse(blocked.isCompatible(profileProviderId: "pi"))
     XCTAssertEqual(blocked.policy.authorization, "blocked")
     XCTAssertTrue(RuntimeModelOptions.options(
@@ -109,6 +139,22 @@ final class ProviderCatalogTests: XCTestCase {
     XCTAssertTrue(options.contains {
       $0.value == "fixture/model-a" && $0.label == "Fixture Model A"
     })
+  }
+
+  func testLegacyCatalogProviderUsesOnlySchemaSupportedAdapter() throws {
+    let catalog = try catalog()
+    let options = ProviderCatalogProfileOptions.options(from: catalog)
+
+    XCTAssertTrue(options.contains {
+      $0.0 == .anthropic && $0.1 == "Synthetic Anthropic Adapter"
+    })
+    XCTAssertFalse(options.contains { $0.0.rawValue == "synthetic-legacy-product" })
+    XCTAssertFalse(options.contains { $0.0.rawValue == "future-adapter" })
+
+    let supported = try XCTUnwrap(catalog.provider(id: "synthetic-legacy-product"))
+    XCTAssertEqual(ProviderCatalogProfileOptions.modelProvider(for: supported), .anthropic)
+    let unsupported = try XCTUnwrap(catalog.provider(id: "unsupported-legacy-product"))
+    XCTAssertNil(ProviderCatalogProfileOptions.modelProvider(for: unsupported))
   }
 
   func testSwitchingGenericAccountPreservesModelButBlocksSaveUntilCompatible() throws {

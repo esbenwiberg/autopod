@@ -39,10 +39,6 @@ public struct ProviderCatalogProvider: Codable, Sendable, Equatable, Identifiabl
       && credentialOptions.contains { $0.kind == "api-key" }
   }
 
-  public var isSelectableAsProfileProvider: Bool {
-    implementation.kind == "legacy" && policy.runnable
-  }
-
   public func isCompatible(profileProviderId: String) -> Bool {
     guard policy.authorization == "supported", policy.runnable else { return false }
     if id == profileProviderId { return true }

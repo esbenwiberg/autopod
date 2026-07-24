@@ -1223,11 +1223,8 @@ public struct ProfileEditorView: View {
     }
 
     private var modelProviderOptions: [(ModelProvider, String)] {
-        var options = providerCatalog?.providers
-          .filter(\.isSelectableAsProfileProvider)
-          .map {
-            (ModelProvider(rawValue: $0.id), $0.displayName)
-        } ?? ModelProvider.legacyValues.map { ($0, $0.label) }
+        var options = providerCatalog.map { ProviderCatalogProfileOptions.options(from: $0) }
+            ?? ModelProvider.legacyValues.map { ($0, $0.label) }
         if !options.contains(where: { $0.0 == profile.modelProvider }) {
             options.append((profile.modelProvider, "\(profile.modelProvider.label) (unavailable)"))
         }
