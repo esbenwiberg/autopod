@@ -2,8 +2,8 @@ import type {
   CompiledProvider,
   ProviderAccountProvider,
   ProviderCredentials,
-  PublicProviderCatalog,
   PublicProviderAccount,
+  PublicProviderCatalog,
 } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
@@ -371,7 +371,8 @@ export function registerProviderAccountCommands(
         }
         process.exit(1);
       }
-      const apiKey = process.env.AUTOPOD_PROVIDER_API_KEY?.trim() || (await readSecret('API key: '));
+      const apiKey =
+        process.env.AUTOPOD_PROVIDER_API_KEY?.trim() || (await readSecret('API key: '));
       if (!apiKey) {
         console.error(chalk.red('API key cannot be empty.'));
         process.exit(1);

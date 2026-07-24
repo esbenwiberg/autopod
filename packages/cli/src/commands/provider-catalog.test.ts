@@ -33,9 +33,7 @@ const catalog: PublicProviderCatalog = {
         lifecycle: 'experimental',
         authorization: 'supported',
         runnable: true,
-        caveats: [
-          { kind: 'privacy', severity: 'warning', message: 'Review fixture privacy.' },
-        ],
+        caveats: [{ kind: 'privacy', severity: 'warning', message: 'Review fixture privacy.' }],
       },
     },
     {
@@ -86,7 +84,11 @@ describe('daemon-driven provider catalog', () => {
     expect(provider?.policy).toMatchObject({ authorization: 'blocked', runnable: false });
     expect(provider?.policy.caveats[0]?.message).toContain('authorization');
     expect(JSON.stringify(catalog)).not.toMatch(/apiKey|secret/i);
-    expect(canSubmitGenericApiKey(provider!)).toBe(false);
-    expect(canSubmitGenericApiKey(catalog.providers[0]!)).toBe(true);
+    expect(provider).toBeDefined();
+    const runnableProvider = catalog.providers[0];
+    expect(runnableProvider).toBeDefined();
+    if (!provider || !runnableProvider) return;
+    expect(canSubmitGenericApiKey(provider)).toBe(false);
+    expect(canSubmitGenericApiKey(runnableProvider)).toBe(true);
   });
 });

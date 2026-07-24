@@ -11,7 +11,7 @@ public enum ProfileMapper {
     let template = StackTemplate(rawValue: response.template ?? "") ?? .custom
     let runtime = RuntimeType(rawValue: response.defaultRuntime ?? "") ?? .claude
     let target = ExecutionTarget(rawValue: response.executionTarget ?? "") ?? .local
-    let provider = ModelProvider(rawValue: response.modelProvider ?? "") ?? .anthropic
+    let provider = response.modelProvider.map(ModelProvider.init(rawValue:)) ?? .anthropic
     let prProvider = PRProvider(rawValue: response.prProvider ?? "") ?? .github
     let networkMode = response.networkPolicy.flatMap { NetworkPolicyMode(rawValue: $0.mode ?? "restricted") } ?? .restricted
     let escalation = response.escalation ?? EscalationConfigResponse()
