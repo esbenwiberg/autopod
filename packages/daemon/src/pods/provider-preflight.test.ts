@@ -260,4 +260,24 @@ describe('resolveProviderPreflight', () => {
       manifestProvider: null,
     });
   });
+
+  it('rejects a reviewed generic model linked to a legacy Pi OAuth account', () => {
+    const piAccount = account({
+      provider: 'pi',
+      credentials: {
+        provider: 'pi',
+        providerId: 'anthropic',
+        credential: { access: 'opaque-test-value' },
+      },
+    });
+
+    expectCode(
+      () =>
+        resolveProviderPreflight(profile(), undefined, undefined, {
+          providerAccountStore: accountStore(piAccount),
+          manifest: manifest(),
+        }),
+      'PROVIDER_ACCOUNT_PROVIDER_MISMATCH',
+    );
+  });
 });

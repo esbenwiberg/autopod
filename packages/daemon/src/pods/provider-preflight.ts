@@ -77,7 +77,8 @@ export function resolveProviderPreflight(
   const accountProvider = account
     ? manifest.providers.find(({ id }) => id === account?.provider)
     : undefined;
-  const provider = accountProvider ?? modelProvider;
+  const provider =
+    modelProvider?.implementation.kind === 'generic-pi-api' ? modelProvider : accountProvider;
   const selectsGenericProvider =
     provider?.implementation.kind === 'generic-pi-api' ||
     (account !== null && accountProvider === undefined) ||
@@ -96,8 +97,8 @@ export function resolveProviderPreflight(
 
   if (
     modelProvider?.implementation.kind === 'generic-pi-api' &&
-    accountProvider?.implementation.kind === 'generic-pi-api' &&
-    modelProvider.id !== accountProvider.id
+    account !== null &&
+    account?.provider !== modelProvider.id
   ) {
     reject(
       'Selected provider account does not match the selected model',
