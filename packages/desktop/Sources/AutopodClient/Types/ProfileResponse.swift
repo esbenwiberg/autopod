@@ -327,6 +327,8 @@ public struct ProfileEditorResponse: Codable, Sendable {
   public let providerAccountId: String?
   /// Server-computed model-provider auth source for the resolved profile.
   public let authSource: ProviderAuthSourceResponse?
+  /// Server-computed effective failover policy and its profile/account/none source.
+  public let providerFailoverResolution: ResolvedProviderFailoverPolicyResponse?
 
   public init(
     raw: ProfileResponse,
@@ -335,7 +337,8 @@ public struct ProfileEditorResponse: Codable, Sendable {
     sourceMap: [String: FieldSource],
     credentialOwner: String?,
     providerAccountId: String? = nil,
-    authSource: ProviderAuthSourceResponse? = nil
+    authSource: ProviderAuthSourceResponse? = nil,
+    providerFailoverResolution: ResolvedProviderFailoverPolicyResponse? = nil
   ) {
     self.raw = raw
     self.resolved = resolved
@@ -344,6 +347,7 @@ public struct ProfileEditorResponse: Codable, Sendable {
     self.credentialOwner = credentialOwner
     self.providerAccountId = providerAccountId
     self.authSource = authSource
+    self.providerFailoverResolution = providerFailoverResolution
   }
 }
 

@@ -419,7 +419,8 @@ public struct ProfileEditorView: View {
                     resolved: parentPayload.resolved,
                     parent: parentPayload.resolved,
                     sourceMap: sourceMap,
-                    credentialOwner: parentPayload.credentialOwner
+                    credentialOwner: parentPayload.credentialOwner,
+                    providerFailoverResolution: parentPayload.providerFailoverResolution
                 )
                 await MainActor.run {
                     self.editorPayload = synthesized
@@ -1682,7 +1683,8 @@ public struct ProfileEditorView: View {
     }
 
     private var inheritedFailoverDescription: String {
-        let resolution = profile.providerFailoverResolution
+        let resolution = editorPayload?.providerFailoverResolution
+            ?? profile.providerFailoverResolution
             ?? editorPayload?.resolved.providerFailoverResolution
         switch resolution?.source {
         case "profile":
