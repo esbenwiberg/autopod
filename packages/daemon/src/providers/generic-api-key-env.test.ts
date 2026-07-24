@@ -1,4 +1,5 @@
-import type { Profile, ProviderAccount } from '@autopod/shared';
+import { PROVIDER_CATALOG, createProviderCatalog } from '@autopod/shared';
+import type { Profile, ProviderAccount, PublicProviderCatalog } from '@autopod/shared';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 import { redactProviderAccountSecrets } from '../api/provider-account-redaction.js';
@@ -35,6 +36,20 @@ function makeAccount(): ProviderAccount {
   };
 }
 
+function runnableFixtureCatalog(): PublicProviderCatalog {
+  return createProviderCatalog({
+    ...PROVIDER_CATALOG,
+    providers: PROVIDER_CATALOG.providers.map((provider) =>
+      provider.id === 'opencode-zen'
+        ? {
+            ...provider,
+            policy: { ...provider.policy, authorization: 'supported', runnable: true },
+          }
+        : provider,
+    ),
+  });
+}
+
 describe('generic API-key Pi environment', () => {
   it('places the literal key only in secretFiles and uses a trusted auth command reference', async () => {
     const account = makeAccount();
@@ -46,6 +61,7 @@ describe('generic API-key Pi environment', () => {
     const result = await buildProviderEnv(makeProfile(), 'pod-1', logger, {
       runtime: 'pi',
       providerAccountStore,
+      providerCatalog: runnableFixtureCatalog(),
     });
 
     expect(result.secretFiles).toEqual([
@@ -93,5 +109,19 @@ describe('generic API-key Pi environment', () => {
     await expect(buildProviderEnv(profile, 'pod-1', logger, { runtime: 'pi' })).rejects.toThrow(
       /without a matching provider account/,
     );
+  });
+
+  it('rejects authorization-pending providers before emitting auth or secret files', async () => {
+    const providerAccountStore = {
+      get: vi.fn(() => makeAccount()),
+      touchLastUsed: vi.fn(),
+    } as unknown as ProviderAccountStore;
+
+    await expect(
+      buildProviderEnv(makeProfile(), 'pod-1', logger, {
+        runtime: 'pi',
+        providerAccountStore,
+      }),
+    ).rejects.toThrow(/not authorized to run/);
   });
 });

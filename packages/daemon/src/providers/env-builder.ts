@@ -7,6 +7,7 @@ import type {
   MaxSetupTokenCredentials,
   PiOAuthCredentials,
   Profile,
+  PublicProviderCatalog,
   RuntimeType,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
@@ -27,6 +28,8 @@ export interface BuildProviderEnvOptions {
   profileStore?: ProfileStore;
   providerAccountStore?: ProviderAccountStore;
   runtime?: RuntimeType;
+  /** Validated catalog override for deterministic conformance fixtures. */
+  providerCatalog?: PublicProviderCatalog;
 }
 
 /**
@@ -114,7 +117,7 @@ export async function buildProviderEnv(
       return buildOpenRouterEnv(profile, auth);
 
     case 'pi':
-      return buildPiEnv(profile, auth);
+      return buildPiEnv(profile, auth, options.providerCatalog ?? PROVIDER_CATALOG);
 
     default:
       // Exhaustiveness check
@@ -364,7 +367,11 @@ function isGenericApiKeyCredentials(creds: unknown): creds is GenericApiKeyCrede
   );
 }
 
-function buildPiEnv(profile: Profile, auth: ProviderAuthResolution): ProviderEnvResult {
+function buildPiEnv(
+  profile: Profile,
+  auth: ProviderAuthResolution,
+  providerCatalog: PublicProviderCatalog,
+): ProviderEnvResult {
   const creds = auth.credentials;
 
   if (isGenericApiKeyCredentials(creds)) {
@@ -373,12 +380,17 @@ function buildPiEnv(profile: Profile, auth: ProviderAuthResolution): ProviderEnv
         `Profile "${profile.name}" uses generic API-key credentials without a matching provider account`,
       );
     }
-    const provider = PROVIDER_CATALOG.providers.find(
+    const provider = providerCatalog.providers.find(
       (candidate) => candidate.id === creds.providerId,
     );
     if (!provider || provider.implementation.kind !== 'generic-pi-api') {
       throw new Error(
         `Profile "${profile.name}" uses API-key credentials for a provider that is not a generic Pi provider`,
+      );
+    }
+    if (!provider.policy.runnable) {
+      throw new Error(
+        `Profile "${profile.name}" uses provider "${provider.id}", which is not authorized to run`,
       );
     }
     const authJson = JSON.stringify(
