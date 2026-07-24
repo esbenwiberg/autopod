@@ -129,8 +129,8 @@ function assertProvider(provider: CompiledProvider, modelOwners: Map<string, str
       fail(`provider '${provider.id}' has an empty caveat message`);
     }
   }
-  if (provider.policy.runnable !== (provider.policy.authorization === 'supported')) {
-    fail(`provider '${provider.id}' runnable state must match supported unattended authorization`);
+  if (provider.policy.runnable && provider.policy.authorization !== 'supported') {
+    fail(`provider '${provider.id}' cannot be runnable without supported authorization`);
   }
   if (provider.implementation.kind === 'legacy') {
     if (!STABLE_ID.test(provider.implementation.adapterId)) {

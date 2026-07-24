@@ -77,6 +77,16 @@ describe('provider catalog validation', () => {
     });
   });
 
+  it('allows a supported provider to remain administratively non-runnable', () => {
+    const manifest = syntheticManifest();
+    firstProvider(manifest).policy.runnable = false;
+
+    expect(createProviderCatalog(manifest).providers[0]?.policy).toMatchObject({
+      authorization: 'supported',
+      runnable: false,
+    });
+  });
+
   it('rejects duplicate provider and model IDs deterministically', () => {
     const duplicateProvider = syntheticManifest();
     duplicateProvider.providers.push(structuredClone(firstProvider(duplicateProvider)));
