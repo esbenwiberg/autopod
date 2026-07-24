@@ -102,11 +102,11 @@ export const genericApiKeyCredentialsSchema = z
         path: ['providerId'],
         message: 'Generic API-key credentials require a generic Pi provider from the catalog',
       });
-    } else if (provider.policy.authorization === 'blocked') {
+    } else if (provider.policy.authorization !== 'supported' || provider.policy.runnable !== true) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['providerId'],
-        message: 'Generic API-key credentials cannot be stored for a blocked provider',
+        message: 'Generic API-key credentials require a supported, runnable provider',
       });
     }
   });

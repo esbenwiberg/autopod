@@ -77,11 +77,18 @@ final class ProviderCatalogTests: XCTestCase {
     XCTAssertEqual(provider.displayName, "Fixture Cloud")
     XCTAssertEqual(provider.systemImage, "person.badge.key")
     XCTAssertTrue(provider.canAcceptGenericAPIKey)
+    XCTAssertTrue(provider.isCompatible(profileProviderId: "pi"))
+    XCTAssertFalse(provider.isCompatible(profileProviderId: "openai"))
+    let linkableProfileProviders = ["anthropic", "pi", "openai"].filter {
+      provider.isCompatible(profileProviderId: $0)
+    }
+    XCTAssertEqual(linkableProfileProviders, ["pi"])
     XCTAssertEqual(provider.policy.caveats.first?.kind, "privacy")
 
     let blocked = try XCTUnwrap(catalog.provider(id: "blocked-fixture"))
     XCTAssertFalse(blocked.canAcceptGenericAPIKey)
     XCTAssertFalse(blocked.isSelectableAsProfileProvider)
+    XCTAssertFalse(blocked.isCompatible(profileProviderId: "pi"))
     XCTAssertEqual(blocked.policy.authorization, "blocked")
     XCTAssertTrue(RuntimeModelOptions.options(
       for: .pi,

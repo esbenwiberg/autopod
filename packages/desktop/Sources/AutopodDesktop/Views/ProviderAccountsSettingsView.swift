@@ -196,7 +196,12 @@ struct ProviderAccountsSettingsView: View {
       .filter { $0.providerAccountId == account.id }
       .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     let linkableProfiles = profiles
-      .filter { $0.modelProvider.rawValue == account.provider && $0.providerAccountId != account.id }
+      .filter { profile in
+        guard profile.providerAccountId != account.id else { return false }
+        return providerCatalog?.provider(id: account.provider)?
+          .isCompatible(profileProviderId: profile.modelProvider.rawValue)
+          ?? (profile.modelProvider.rawValue == account.provider)
+      }
       .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
     return VStack(alignment: .leading, spacing: 10) {

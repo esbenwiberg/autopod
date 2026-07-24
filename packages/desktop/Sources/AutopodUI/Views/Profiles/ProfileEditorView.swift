@@ -1430,9 +1430,9 @@ public struct ProfileEditorView: View {
     private var sortedProviderAccounts: [PublicProviderAccountResponse] {
         providerAccounts
             .filter { account in
-                if account.provider == profile.modelProvider.rawValue { return true }
-                return profile.modelProvider == .pi
-                    && providerCatalog?.provider(id: account.provider)?.canAcceptGenericAPIKey
+                return providerCatalog?.provider(id: account.provider)?
+                    .isCompatible(profileProviderId: profile.modelProvider.rawValue)
+                    ?? (account.provider == profile.modelProvider.rawValue)
             }
             .sorted {
                 if $0.name == $1.name { return $0.id < $1.id }

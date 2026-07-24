@@ -43,6 +43,12 @@ public struct ProviderCatalogProvider: Codable, Sendable, Equatable, Identifiabl
     implementation.kind == "legacy" && policy.runnable
   }
 
+  public func isCompatible(profileProviderId: String) -> Bool {
+    guard policy.authorization == "supported", policy.runnable else { return false }
+    if id == profileProviderId { return true }
+    return profileProviderId == "pi" && implementation.kind == "generic-pi-api"
+  }
+
   public var systemImage: String {
     guard let icon, Self.knownSystemImages.contains(icon) else {
       return "person.badge.key"

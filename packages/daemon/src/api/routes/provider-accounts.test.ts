@@ -72,18 +72,21 @@ describe('provider account routes', () => {
     expect(patchResponse.json().name).toBe('Shared OpenAI');
   });
 
-  it('rejects blocked provider credentials on create and update', async () => {
+  it.each([
+    ['blocked', 'kimi-code'],
+    ['authorization-pending', 'opencode-zen'],
+  ])('rejects %s provider credentials on create and update', async (_, providerId) => {
     const blockedCredentials = {
       provider: 'api-key',
-      providerId: 'kimi-code',
+      providerId,
       apiKey: 'must-not-be-stored',
     };
     const createResponse = await app.inject({
       method: 'POST',
       url: '/provider-accounts',
       payload: {
-        name: 'Blocked Kimi',
-        provider: 'kimi-code',
+        name: `Rejected ${providerId}`,
+        provider: providerId,
         credentials: blockedCredentials,
       },
     });
@@ -93,7 +96,7 @@ describe('provider account routes', () => {
     const accountResponse = await app.inject({
       method: 'POST',
       url: '/provider-accounts',
-      payload: { name: 'Blocked Kimi', provider: 'kimi-code' },
+      payload: { name: `Rejected ${providerId}`, provider: providerId },
     });
     expect(accountResponse.statusCode).toBe(201);
     const patchResponse = await app.inject({

@@ -40,16 +40,7 @@ describe('generic API-key provider accounts', () => {
     app = buildApp(profileStore, providerAccountStore);
   });
 
-  it('creates, encrypts, updates, filters, links, and redacts a manifest provider account', async () => {
-    profileStore.create({
-      name: 'generic-pi',
-      repoUrl: 'https://github.com/org/repo',
-      buildCommand: 'npm run build',
-      startCommand: 'npm start',
-      modelProvider: 'pi',
-      defaultRuntime: 'pi',
-    });
-
+  it('rejects credential custody until a generic provider is supported and runnable', async () => {
     const created = await app.inject({
       method: 'POST',
       url: '/provider-accounts',
@@ -60,64 +51,11 @@ describe('generic API-key provider accounts', () => {
       },
     });
 
-    expect(created.statusCode).toBe(201);
-    expect(created.json()).toMatchObject({
-      provider: 'opencode-zen',
-      credentials: { provider: 'api-key', providerId: 'opencode-zen' },
-      hasCredentials: true,
-    });
+    expect(created.statusCode).toBe(400);
     expect(created.body).not.toContain(rawKey);
-
-    const rawRow = db
-      .prepare('SELECT credentials FROM provider_accounts WHERE id = ?')
-      .get('opencode-zen-fixture') as { credentials: string };
-    expect(rawRow.credentials).toMatch(/^encrypted:/);
-    expect(rawRow.credentials).not.toContain(rawKey);
-
-    const filtered = await app.inject({
-      method: 'GET',
-      url: '/provider-accounts?provider=opencode-zen',
+    expect(db.prepare('SELECT COUNT(*) AS count FROM provider_accounts').get()).toMatchObject({
+      count: 0,
     });
-    expect(filtered.statusCode).toBe(200);
-    expect(filtered.json()).toHaveLength(1);
-    expect(filtered.body).not.toContain(rawKey);
-
-    const updatedKey = `${rawKey}-updated`;
-    const updated = await app.inject({
-      method: 'PATCH',
-      url: '/provider-accounts/opencode-zen-fixture',
-      payload: {
-        credentials: {
-          provider: 'api-key',
-          providerId: 'opencode-zen',
-          apiKey: updatedKey,
-        },
-      },
-    });
-    expect(updated.statusCode).toBe(200);
-    expect(updated.body).not.toContain(updatedKey);
-    expect(providerAccountStore.get('opencode-zen-fixture').credentials).toMatchObject({
-      provider: 'api-key',
-      providerId: 'opencode-zen',
-      apiKey: updatedKey,
-    });
-
-    const linked = await app.inject({
-      method: 'POST',
-      url: '/provider-accounts/opencode-zen-fixture/link-profile',
-      payload: { profileName: 'generic-pi' },
-    });
-    expect(linked.statusCode).toBe(200);
-    expect(profileStore.get('generic-pi').providerAccountId).toBe('opencode-zen-fixture');
-    expect(linked.body).not.toContain(updatedKey);
-
-    const profileUpdate = await app.inject({
-      method: 'PATCH',
-      url: '/profiles/generic-pi',
-      payload: { customInstructions: 'Keep the linked generic provider account.' },
-    });
-    expect(profileUpdate.statusCode).toBe(200);
-    expect(profileUpdate.body).not.toContain(updatedKey);
   });
 
   it('rejects credential identity mismatches and unknown account providers', () => {
