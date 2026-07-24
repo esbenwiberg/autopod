@@ -2840,7 +2840,7 @@ describe('PodManager', () => {
       linkProfileToProviderAccount(ctx.db, 'test-profile', secondId);
       await manager.processPod(pod.id);
 
-      expect(manager.getSession(pod.id).status).toBe('failed');
+      expect(manager.getSession(pod.id).status).toBe('killed');
       expect(manager.getSession(pod.id).failureReason).toContain(
         'Selected provider account changed after pod creation',
       );

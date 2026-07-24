@@ -6269,8 +6269,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           provisioningUpdates.worktreeCompromised = false;
         }
 
-        // Transition to provisioning
-        pod = transition(pod, 'provisioning', provisioningUpdates);
         const providerPreflight = resolveProviderPreflight(profile, pod.runtime, pod.model, {
           profileStore,
           providerAccountStore,
@@ -6283,6 +6281,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               }
             : {}),
         });
+
+        // Transition only after the complete provider tuple has passed preflight.
+        pod = transition(pod, 'provisioning', provisioningUpdates);
         assertSandboxAgentStreamingExecSupported(profile, pod.executionTarget, pod.options);
 
         // Snapshot the resolved profile at pod start time for auditability
@@ -8108,7 +8109,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               });
             } else if (canKill(pod.status)) {
               // Fallback for states not yet reachable via 'failed' (validated, review_required, etc.)
-              transition(pod, 'killing');
+              transition(pod, 'killing', { failureReason });
               pod = podRepo.getOrThrow(podId);
               transition(pod, 'killed', { completedAt: new Date().toISOString() });
             }
@@ -12552,6 +12553,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const providerPreflight = resolveProviderPreflight(profile, pod.runtime, pod.model, {
               profileStore,
               providerAccountStore,
+              ...(pod.providerIdSnapshot
+                ? {
+                    expectedBinding: {
+                      accountId: pod.providerAccountIdSnapshot,
+                      providerId: pod.providerIdSnapshot,
+                    },
+                  }
+                : {}),
             });
             const runtimeNetworkPolicy = addRuntimeNetworkDefaults(
               profile.networkPolicy,
