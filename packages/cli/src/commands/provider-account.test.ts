@@ -41,6 +41,32 @@ function createProfile(overrides: Record<string, unknown> = {}) {
 
 function createMockClient() {
   return {
+    getModelProviderCatalog: vi.fn().mockResolvedValue({
+      manifestVersion: 1,
+      piCompatibility: {
+        packageName: '@earendil-works/pi-coding-agent',
+        packageVersion: '0.80.6',
+        source: 'pinned-distribution',
+      },
+      providers: [
+        {
+          id: 'openai',
+          displayName: 'OpenAI',
+          description: 'OpenAI compatibility provider',
+          implementation: { kind: 'legacy', adapterId: 'openai' },
+          credentialOptions: [],
+          modelIds: [],
+          requiredHosts: [],
+          policy: {
+            lifecycle: 'active',
+            authorization: 'supported',
+            runnable: true,
+            caveats: [],
+          },
+        },
+      ],
+      models: [],
+    }),
     listProviderAccounts: vi.fn().mockResolvedValue([createAccount()]),
     getProviderAccount: vi.fn().mockResolvedValue(createAccount()),
     createProviderAccount: vi.fn().mockResolvedValue(createAccount()),
