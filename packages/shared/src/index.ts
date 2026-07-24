@@ -50,6 +50,8 @@ export type {
   Profile,
   PublicProfile,
   ProfileEditorPayload,
+  ProviderFailoverPolicySource,
+  ResolvedProviderFailoverPolicy,
   StackTemplate,
   ExecutionTarget,
   SmokePage,

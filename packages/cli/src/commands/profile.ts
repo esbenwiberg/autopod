@@ -108,6 +108,19 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         if (data.providerAccountId) {
           console.log(`${chalk.bold('Account:')}    ${data.providerAccountId}`);
         }
+        console.log(
+          `${chalk.bold('Failover:')}   ${
+            data.providerFailover === null
+              ? 'inherit account default'
+              : data.providerFailover.targets.length === 0
+                ? 'disabled'
+                : data.providerFailover.targets
+                    .map(
+                      (target) => `${target.providerAccountId}:${target.runtime}:${target.model}`,
+                    )
+                    .join(', ')
+          }`,
+        );
         console.log(`${chalk.bold('Max retries:')} ${data.maxValidationAttempts}`);
         const podOptions = defaultPodOptions(data);
         console.log(`${chalk.bold('Pod:')}        ${podOptions.agentMode} -> ${podOptions.output}`);
@@ -222,6 +235,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         adoPatExpiresAt: null,
         registryPatExpiresAt: null,
         providerAccountId: null,
+        providerFailover: null,
         actionPolicy: {
           enabledGroups: ['github-issues', 'github-prs'],
           // actionOverrides:

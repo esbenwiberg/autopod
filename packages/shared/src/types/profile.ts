@@ -3,7 +3,7 @@ import type { ValidationPhase } from './events.js';
 import type { InjectedClaudeMdSection, InjectedMcpServer, InjectedSkill } from './injection.js';
 import type { ModelProvider, ProviderCredentials } from './model-provider.js';
 import type { PodOptions } from './pod-options.js';
-import type { ProviderAuthSource } from './provider-account.js';
+import type { ProviderAuthSource, ProviderFailoverPolicy } from './provider-account.js';
 import type { RuntimeType } from './runtime.js';
 import type { SecurityScanPolicy } from './security-scan.js';
 import type { SidecarsConfig } from './sidecar.js';
@@ -106,6 +106,11 @@ export interface Profile {
   modelProvider: ModelProvider | null;
   /** Shared provider account used for model-provider auth. Null on derived profiles means inherit. */
   providerAccountId: string | null;
+  /**
+   * Profile failover override. Null inherits the linked account default; a non-null policy
+   * replaces it entirely, including an empty target list which disables automatic failover.
+   */
+  providerFailover: ProviderFailoverPolicy | null;
   /** Provider-specific credentials (OAuth tokens for MAX, endpoint config for Foundry, etc.) */
   providerCredentials: ProviderCredentials | null;
   /** Optional test command to run after build (e.g. 'pnpm test') */
@@ -259,7 +264,15 @@ export interface ProfileEditorPayload {
   sourceMap: Record<string, 'own' | 'inherited' | 'merged'>;
   authSource?: ProviderAuthSource;
   providerAccountId?: string | null;
+  providerFailoverResolution?: ResolvedProviderFailoverPolicy;
   credentialOwner: string | null;
+}
+
+export type ProviderFailoverPolicySource = 'profile' | 'account-default' | 'none';
+
+export interface ResolvedProviderFailoverPolicy {
+  policy: ProviderFailoverPolicy | null;
+  source: ProviderFailoverPolicySource;
 }
 
 export interface TestPipelineConfig {

@@ -27,6 +27,7 @@ export interface ProviderAccountStore {
   delete(id: string): void;
   exists(id: string): boolean;
   listLinkedProfileNames(id: string): string[];
+  validateFailoverPolicy(sourceId: string | null, policy: ProviderFailoverPolicy | null): void;
 }
 
 function slugifyProviderAccountId(name: string): string {
@@ -150,14 +151,14 @@ export function createProviderAccountStore(
   }
 
   function assertValidFailoverPolicy(
-    sourceId: string,
+    sourceId: string | null,
     policy: ProviderFailoverPolicy | null,
     accountOverrides: ReadonlyMap<string, ProviderAccount> = new Map(),
   ): void {
     if (!policy) return;
 
     for (const target of policy.targets) {
-      if (target.providerAccountId === sourceId) {
+      if (sourceId !== null && target.providerAccountId === sourceId) {
         throw new AutopodError(
           `Provider account "${sourceId}" cannot fail over to itself`,
           'PROVIDER_ACCOUNT_FAILOVER_SELF_REFERENCE',
@@ -198,7 +199,10 @@ export function createProviderAccountStore(
         targetPolicy?.targets.some((target) => reachesSource(target.providerAccountId)) ?? false
       );
     };
-    if (policy.targets.some((target) => reachesSource(target.providerAccountId))) {
+    if (
+      sourceId !== null &&
+      policy.targets.some((target) => reachesSource(target.providerAccountId))
+    ) {
       throw new AutopodError(
         `Failover policy for provider account "${sourceId}" would create a cycle`,
         'PROVIDER_ACCOUNT_FAILOVER_CYCLE',
@@ -236,6 +240,9 @@ export function createProviderAccountStore(
   }
 
   return {
+    validateFailoverPolicy(sourceId, policy): void {
+      assertValidFailoverPolicy(sourceId, policy);
+    },
     create(input: Record<string, unknown>): ProviderAccount {
       const parsed = createProviderAccountSchema.parse(input);
       const id = parsed.id ?? slugifyProviderAccountId(parsed.name);

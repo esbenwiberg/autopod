@@ -39,17 +39,23 @@ const validInput = {
   startCommand: 'node server.js --port $PORT',
 };
 
-function insertProviderAccount(db: Database.Database, id: string, provider = 'openai'): void {
+function insertProviderAccount(
+  db: Database.Database,
+  id: string,
+  provider = 'openai',
+  failoverPolicy: Record<string, unknown> | null = null,
+): void {
   db.prepare(
     `INSERT INTO provider_accounts (
-      id, name, provider, credentials, created_at, updated_at
+      id, name, provider, credentials, failover_policy, created_at, updated_at
     ) VALUES (
-      @id, @name, @provider, NULL, @now, @now
+      @id, @name, @provider, NULL, @failoverPolicy, @now, @now
     )`,
   ).run({
     id,
     name: id,
     provider,
+    failoverPolicy: failoverPolicy === null ? null : JSON.stringify(failoverPolicy),
     now: new Date().toISOString(),
   });
 }
@@ -1005,6 +1011,92 @@ describe('ProfileStore', () => {
 
       expect(store.get('leaf').providerAccountId).toBe('middle-openai');
       expect(store.resolveProviderAccountId('leaf')).toBe('middle-openai');
+    });
+  });
+
+  describe('provider failover', () => {
+    const accountPolicy = {
+      targets: [{ providerAccountId: 'backup-openai', runtime: 'codex', model: 'gpt-5' }],
+    };
+    const profilePolicy = {
+      targets: [{ providerAccountId: 'backup-copilot', runtime: 'copilot', model: 'auto' }],
+    };
+
+    it('inherits the linked account failover policy with account-default source', () => {
+      insertProviderAccount(db, 'primary-openai', 'openai', accountPolicy);
+      const profile = store.create({
+        ...validInput,
+        modelProvider: 'openai',
+        providerAccountId: 'primary-openai',
+        providerFailover: null,
+      });
+
+      expect(profile.providerFailover).toBeNull();
+      expect(store.resolveProviderFailover(profile.name)).toEqual({
+        policy: accountPolicy,
+        source: 'account-default',
+      });
+    });
+
+    it('replaces the account failover policy without merging targets', () => {
+      insertProviderAccount(db, 'primary-openai', 'openai', accountPolicy);
+      const profile = store.create({
+        ...validInput,
+        modelProvider: 'openai',
+        providerAccountId: 'primary-openai',
+        providerFailover: profilePolicy,
+      });
+
+      expect(store.resolveProviderFailover(profile.name)).toEqual({
+        policy: profilePolicy,
+        source: 'profile',
+      });
+    });
+
+    it('uses an explicit empty profile failover policy to disable the account default', () => {
+      insertProviderAccount(db, 'primary-openai', 'openai', accountPolicy);
+      const profile = store.create({
+        ...validInput,
+        modelProvider: 'openai',
+        providerAccountId: 'primary-openai',
+        providerFailover: { targets: [] },
+      });
+
+      expect(store.resolveProviderFailover(profile.name)).toEqual({
+        policy: { targets: [] },
+        source: 'profile',
+      });
+    });
+
+    it('inherits and overrides failover policy through a profile family', () => {
+      store.create({ ...validInput, name: 'base', providerFailover: profilePolicy });
+      store.create({ ...validInput, name: 'middle', extends: 'base' });
+      store.create({
+        ...validInput,
+        name: 'leaf',
+        extends: 'middle',
+        providerFailover: { targets: [] },
+      });
+
+      expect(store.getRaw('middle').providerFailover).toBeNull();
+      expect(store.resolveProviderFailover('middle')).toEqual({
+        policy: profilePolicy,
+        source: 'profile',
+      });
+      expect(store.resolveProviderFailover('leaf')).toEqual({
+        policy: { targets: [] },
+        source: 'profile',
+      });
+    });
+
+    it('round-trips updates and decodes a missing legacy failover column as null', () => {
+      const profile = store.create(validInput);
+      expect(profile.providerFailover).toBeNull();
+
+      expect(
+        store.update(profile.name, { providerFailover: profilePolicy }).providerFailover,
+      ).toEqual(profilePolicy);
+      expect(store.update(profile.name, { providerFailover: null }).providerFailover).toBeNull();
     });
   });
 });

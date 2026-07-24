@@ -398,4 +398,91 @@ describe('provider account routes', () => {
     });
     expect(response.body).not.toContain('tokens');
   });
+
+  it('exposes profile failover replacement semantics and resolved source', async () => {
+    providerAccountStore.create({
+      id: 'backup-openai',
+      name: 'Backup OpenAI',
+      provider: 'openai',
+    });
+    providerAccountStore.create({
+      id: 'backup-copilot',
+      name: 'Backup Copilot',
+      provider: 'copilot',
+      credentials: { provider: 'copilot', token: 'secret' },
+    });
+    providerAccountStore.create({
+      id: 'primary',
+      name: 'Primary',
+      provider: 'openai',
+      failoverPolicy: {
+        targets: [{ providerAccountId: 'backup-openai', runtime: 'codex', model: 'gpt-5' }],
+      },
+    });
+    profileStore.create({
+      ...validProfile,
+      name: 'base',
+      modelProvider: 'openai',
+      providerAccountId: 'primary',
+    });
+    profileStore.create({ ...validProfile, name: 'child', extends: 'base' });
+
+    const inherited = await app.inject({ method: 'GET', url: '/profiles/child/editor' });
+    expect(inherited.json().providerFailoverResolution).toEqual({
+      policy: {
+        targets: [{ providerAccountId: 'backup-openai', runtime: 'codex', model: 'gpt-5' }],
+      },
+      source: 'account-default',
+    });
+
+    const replacement = {
+      targets: [{ providerAccountId: 'backup-copilot', runtime: 'copilot', model: 'auto' }],
+    };
+    const updated = await app.inject({
+      method: 'PATCH',
+      url: '/profiles/child',
+      payload: { providerFailover: replacement },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().providerFailover).toEqual(replacement);
+
+    const replaced = await app.inject({ method: 'GET', url: '/profiles/child/editor' });
+    expect(replaced.json().providerFailoverResolution).toEqual({
+      policy: replacement,
+      source: 'profile',
+    });
+
+    const disabled = await app.inject({
+      method: 'PATCH',
+      url: '/profiles/child',
+      payload: { providerFailover: { targets: [] } },
+    });
+    expect(disabled.statusCode).toBe(200);
+    expect(
+      (await app.inject({ method: 'GET', url: '/profiles/child/editor' })).json()
+        .providerFailoverResolution,
+    ).toEqual({ policy: { targets: [] }, source: 'profile' });
+  });
+
+  it('rejects invalid profile failover targets without changing the profile', async () => {
+    providerAccountStore.create({ id: 'primary', name: 'Primary', provider: 'openai' });
+    profileStore.create({
+      ...validProfile,
+      modelProvider: 'openai',
+      providerAccountId: 'primary',
+    });
+
+    for (const providerFailover of [
+      { targets: [{ providerAccountId: 'missing', runtime: 'codex', model: 'gpt-5' }] },
+      { targets: [{ providerAccountId: 'missing', runtime: 'codex' }] },
+    ]) {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/profiles/app',
+        payload: { providerFailover },
+      });
+      expect(response.statusCode).toBeGreaterThanOrEqual(400);
+      expect(profileStore.getRaw('app').providerFailover).toBeNull();
+    }
+  });
 });

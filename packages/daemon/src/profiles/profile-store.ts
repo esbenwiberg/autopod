@@ -15,6 +15,8 @@ import type {
   PrivateRegistry,
   Profile,
   ProviderCredentials,
+  ProviderFailoverPolicy,
+  ResolvedProviderFailoverPolicy,
   SecurityScanPolicy,
   SidecarsConfig,
   SmokePage,
@@ -75,6 +77,8 @@ export interface ProfileStore {
    * account-linked profiles can inherit auth without copying secrets.
    */
   resolveProviderAccountId(name: string): string | null;
+  /** Resolve the effective replace-or-inherit failover policy and its source. */
+  resolveProviderFailover(name: string): ResolvedProviderFailoverPolicy;
 }
 
 function canonicalizeLegacyProfileModel(model: string | null): string | null {
@@ -103,6 +107,15 @@ function canonicalizeLegacyEscalationConfig(config: unknown): unknown {
       model: canonical,
     },
   };
+}
+
+function parseProviderFailover(raw: unknown): ProviderFailoverPolicy | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  try {
+    return JSON.parse(raw) as ProviderFailoverPolicy;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -193,6 +206,7 @@ export function rowToProfile(
     outputMode: nullableStr(row.output_mode) as Profile['outputMode'],
     modelProvider: nullableStr(row.model_provider) as Profile['modelProvider'],
     providerAccountId: nullableStr(row.provider_account_id),
+    providerFailover: parseProviderFailover(row.provider_failover),
     providerCredentials: decryptCreds(row.provider_credentials),
     testCommand: nullableStr(row.test_command),
     validationSetupCommand: nullableStr(row.validation_setup_command),
@@ -358,7 +372,7 @@ export function createProfileStore(
           default_model, reviewer_model, default_runtime, execution_target, custom_instructions, agent_done_prompt, escalation_config,
           extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
           agent_mode, output_target, validate, validation_suite, advisory_browser_qa_enabled, promotable,
-          model_provider, provider_account_id, provider_credentials, test_command, validation_setup_command, pr_provider,
+          model_provider, provider_account_id, provider_failover, provider_credentials, test_command, validation_setup_command, pr_provider,
           ado_pat, ado_pat_expires_at, github_pat, github_pat_expires_at, openrouter_api_key,
           private_registries, registry_pat, registry_pat_expires_at, branch_prefix, container_memory_gb,
           build_timeout, test_timeout, build_env,
@@ -380,7 +394,7 @@ export function createProfileStore(
           @defaultModel, @reviewerModel, @defaultRuntime, @executionTarget, @customInstructions, @agentDonePrompt, @escalationConfig,
           @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
           @agentMode, @outputTarget, @validate, @validationSuite, @advisoryBrowserQaEnabled, @promotable,
-          @modelProvider, @providerAccountId, @providerCredentials, @testCommand, @validationSetupCommand, @prProvider,
+          @modelProvider, @providerAccountId, @providerFailover, @providerCredentials, @testCommand, @validationSetupCommand, @prProvider,
           @adoPat, @adoPatExpiresAt, @githubPat, @githubPatExpiresAt, @openrouterApiKey,
           @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix, @containerMemoryGb,
           @buildTimeout, @testTimeout, @buildEnv,
@@ -437,6 +451,8 @@ export function createProfileStore(
         promotable: parsed.pod?.promotable === undefined ? null : parsed.pod.promotable ? 1 : 0,
         modelProvider: parsed.modelProvider,
         providerAccountId: parsed.providerAccountId,
+        providerFailover:
+          parsed.providerFailover === null ? null : JSON.stringify(parsed.providerFailover),
         providerCredentials: encryptCreds(parsed.providerCredentials),
         testCommand: parsed.testCommand ?? null,
         validationSetupCommand: parsed.validationSetupCommand ?? null,
@@ -706,6 +722,11 @@ export function createProfileStore(
       if (parsed.providerAccountId !== undefined) {
         setClauses.push('provider_account_id = @providerAccountId');
         fieldMap.providerAccountId = parsed.providerAccountId;
+      }
+      if (parsed.providerFailover !== undefined) {
+        setClauses.push('provider_failover = @providerFailover');
+        fieldMap.providerFailover =
+          parsed.providerFailover === null ? null : JSON.stringify(parsed.providerFailover);
       }
       if (parsed.providerCredentials !== undefined) {
         setClauses.push('provider_credentials = @providerCredentials');
@@ -990,6 +1011,23 @@ export function createProfileStore(
         current = row.extends;
       }
       return null;
+    },
+
+    resolveProviderFailover(name: string): ResolvedProviderFailoverPolicy {
+      const profile = resolve(fetchRaw(name));
+      if (profile.providerFailover !== null) {
+        return { policy: profile.providerFailover, source: 'profile' };
+      }
+      if (profile.providerAccountId) {
+        const row = db
+          .prepare('SELECT failover_policy FROM provider_accounts WHERE id = ?')
+          .get(profile.providerAccountId) as { failover_policy?: string | null } | undefined;
+        const policy = parseProviderFailover(row?.failover_policy);
+        if (policy !== null) {
+          return { policy, source: 'account-default' };
+        }
+      }
+      return { policy: null, source: 'none' };
     },
   };
 }

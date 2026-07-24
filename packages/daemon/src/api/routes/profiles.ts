@@ -1,5 +1,9 @@
 import { AutopodError } from '@autopod/shared';
-import type { ProfileEditorPayload, ProviderAuthSource } from '@autopod/shared';
+import type {
+  ProfileEditorPayload,
+  ProviderAuthSource,
+  ProviderFailoverPolicy,
+} from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { DaemonGitHubAuth } from '../../github/daemon-github-auth.js';
 import type { ImageBuilder } from '../../images/index.js';
@@ -44,6 +48,14 @@ export function profileRoutes(
     }
   }
 
+  function validateProviderFailover(
+    accountId: string | null,
+    policy: ProviderFailoverPolicy | null | undefined,
+  ): void {
+    if (!providerAccountStore || policy === undefined) return;
+    providerAccountStore.validateFailoverPolicy(accountId, policy);
+  }
+
   function resolveAuthSource(
     name: string,
     sourceMap: Record<string, 'own' | 'inherited' | 'merged'>,
@@ -77,7 +89,13 @@ export function profileRoutes(
 
   // POST /profiles — create profile
   app.post('/profiles', async (request, reply) => {
-    const profile = profileStore.create(request.body as Record<string, unknown>);
+    const input = request.body as Record<string, unknown>;
+    const accountId = typeof input.providerAccountId === 'string' ? input.providerAccountId : null;
+    validateProviderFailover(
+      accountId,
+      input.providerFailover as ProviderFailoverPolicy | null | undefined,
+    );
+    const profile = profileStore.create(input);
     reply.status(201);
     return redactProfileSecrets(profile);
   });
@@ -118,6 +136,7 @@ export function profileRoutes(
     const sourceMap = buildSourceMap(raw, parent);
     const credentialOwner = profileStore.resolveCredentialOwner(name);
     const authSource = resolveAuthSource(name, sourceMap);
+    const providerFailoverResolution = profileStore.resolveProviderFailover(name);
     return {
       raw: redactProfileSecrets(raw),
       resolved: redactProfileSecrets(resolved),
@@ -125,6 +144,7 @@ export function profileRoutes(
       sourceMap,
       authSource,
       providerAccountId: resolved.providerAccountId,
+      providerFailoverResolution,
       credentialOwner,
     } satisfies ProfileEditorPayload;
   });
@@ -134,6 +154,15 @@ export function profileRoutes(
     const { name } = request.params as { name: string };
     const changes = request.body as Record<string, unknown>;
     validateProviderAccountMismatch(name, changes);
+    const existing = profileStore.get(name);
+    const nextAccountId =
+      changes.providerAccountId === undefined
+        ? existing.providerAccountId
+        : (changes.providerAccountId as string | null);
+    validateProviderFailover(
+      nextAccountId,
+      changes.providerFailover as ProviderFailoverPolicy | null | undefined,
+    );
     const updated = profileStore.update(name, changes);
     // Fire-and-forget: re-apply network policy to running containers using this profile
     refreshNetworkPolicy(name).catch(() => {

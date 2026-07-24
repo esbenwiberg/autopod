@@ -47,6 +47,7 @@ function createProfile(overrides: Record<string, unknown> = {}) {
     outputMode: 'pr',
     modelProvider: 'anthropic',
     providerAccountId: null,
+    providerFailover: null,
     pod: {
       agentMode: 'auto',
       output: 'pr',
@@ -142,6 +143,24 @@ describe('profile commands', () => {
     await program.parseAsync(['node', 'ap', 'profile', 'show', 'my-app']);
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('team-openai'));
+  });
+
+  it('shows profile failover overrides and explicit disablement', async () => {
+    vi.mocked(mockClient.getProfile).mockResolvedValueOnce(
+      createProfile({
+        providerFailover: {
+          targets: [{ providerAccountId: 'backup', runtime: 'codex', model: 'gpt-5' }],
+        },
+      }),
+    );
+    await program.parseAsync(['node', 'ap', 'profile', 'show', 'my-app']);
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('backup:codex:gpt-5'));
+
+    vi.mocked(mockClient.getProfile).mockResolvedValueOnce(
+      createProfile({ providerFailover: { targets: [] } }),
+    );
+    await program.parseAsync(['node', 'ap', 'profile', 'show', 'my-app']);
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('disabled'));
   });
 
   it('does not present legacy GitHub PAT status or expiry', async () => {
@@ -339,5 +358,21 @@ printf '{"anthropic":{"accessToken":""}}' > "$PI_CODING_AGENT_DIR/auth.json"
     expect(updates).not.toHaveProperty('githubPat');
     expect(updates).not.toHaveProperty('githubPatExpiresAt');
     expect(updates).toHaveProperty('adoPatExpiresAt');
+  });
+
+  it('round-trips profile failover policy through editor updates', async () => {
+    process.env.EDITOR = 'true';
+    const providerFailover = {
+      targets: [{ providerAccountId: 'backup', runtime: 'codex', model: 'gpt-5' }],
+    };
+    vi.mocked(mockClient.getProfile).mockResolvedValueOnce(createProfile({ providerFailover }));
+
+    await program.parseAsync(['node', 'ap', 'profile', 'edit', 'my-app']);
+
+    const updates = vi.mocked(mockClient.updateProfile).mock.calls[0]?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(updates.providerFailover).toEqual(providerFailover);
   });
 });
