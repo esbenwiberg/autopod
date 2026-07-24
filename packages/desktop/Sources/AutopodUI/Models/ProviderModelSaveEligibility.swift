@@ -34,8 +34,12 @@ enum ProviderModelSaveEligibility {
         model: String,
         catalog: ProviderCatalogResponse?
     ) -> String? {
-        guard profileProviderId == "pi", hasLinkedAccount else {
-            return nil
+        guard profileProviderId == "pi" else { return nil }
+        guard hasLinkedAccount else {
+            let modelProviderId = catalog?.models.first(where: { $0.id == model })?.providerId
+            let modelProvider = modelProviderId.flatMap { catalog?.provider(id: $0) }
+            guard modelProvider?.implementation.kind == "generic-pi-api" else { return nil }
+            return "Link a \(modelProvider?.displayName ?? "provider") account before saving."
         }
         guard let accountProviderId else {
             return "Provider account unavailable. Keep the current selection, but reconnect before saving."

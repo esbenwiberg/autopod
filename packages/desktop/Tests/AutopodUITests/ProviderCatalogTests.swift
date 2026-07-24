@@ -157,6 +157,22 @@ final class ProviderCatalogTests: XCTestCase {
       reviewerModel: "fixture/model-a",
       catalog: catalog
     ))
+    XCTAssertNotNil(ProviderModelSaveEligibility.profileErrorMessage(
+      profileProviderId: "pi",
+      hasLinkedAccount: false,
+      accountProviderId: nil,
+      defaultModel: "fixture/model-a",
+      reviewerModel: "fixture/model-a",
+      catalog: catalog
+    ))
+    XCTAssertNil(ProviderModelSaveEligibility.profileErrorMessage(
+      profileProviderId: "pi",
+      hasLinkedAccount: false,
+      accountProviderId: nil,
+      defaultModel: "auto",
+      reviewerModel: "",
+      catalog: catalog
+    ))
   }
 
   @MainActor
