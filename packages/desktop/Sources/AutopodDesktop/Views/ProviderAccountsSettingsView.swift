@@ -8,6 +8,7 @@ struct ProviderAccountsSettingsView: View {
   let onProfilesChanged: (() async -> Void)?
 
   @State private var accounts: [PublicProviderAccountResponse] = []
+  @State private var providerCatalog: ProviderCatalogResponse?
   @State private var isLoading = false
   @State private var errorMessage: String?
   @State private var showCreateSheet = false
@@ -61,8 +62,11 @@ struct ProviderAccountsSettingsView: View {
       await loadAccounts()
     }
     .sheet(isPresented: $showCreateSheet) {
-      ProviderAccountCreateSheet(isPresented: $showCreateSheet) { name, provider, id in
-        try await createAccount(name: name, provider: provider, id: id)
+      ProviderAccountCreateSheet(
+        isPresented: $showCreateSheet,
+        providers: providerCatalog?.providers ?? []
+      ) { name, provider, id, apiKey in
+        try await createAccount(name: name, provider: provider, id: id, apiKey: apiKey)
       }
     }
     .sheet(isPresented: $showImportSheet) {
@@ -258,6 +262,23 @@ struct ProviderAccountsSettingsView: View {
         linkedProfilesRow(linkedProfiles)
       }
 
+      if let provider = providerCatalog?.provider(id: account.provider) {
+        HStack(alignment: .top, spacing: 6) {
+          Image(systemName: provider.policy.runnable ? "checkmark.shield" : "hand.raised.fill")
+          VStack(alignment: .leading, spacing: 2) {
+            Text(provider.policy.runnable
+              ? "Supported for unattended pods"
+              : "Not runnable — \(provider.policy.authorization)")
+            ForEach(provider.policy.caveats, id: \.message) { caveat in
+              Text("\(caveat.kind.capitalized): \(caveat.message)")
+            }
+          }
+          Spacer()
+        }
+        .font(.caption2)
+        .foregroundStyle(provider.policy.runnable ? .secondary : .orange)
+      }
+
       metadataRow(account)
     }
     .padding(12)
@@ -342,7 +363,10 @@ struct ProviderAccountsSettingsView: View {
     isLoading = true
     defer { isLoading = false }
     do {
-      accounts = try await api.listProviderAccounts()
+      async let loadedAccounts = api.listProviderAccounts()
+      async let loadedCatalog = api.fetchModelProviderCatalog()
+      accounts = try await loadedAccounts
+      providerCatalog = try await loadedCatalog
       errorMessage = nil
     } catch {
       errorMessage = error.localizedDescription
@@ -350,9 +374,27 @@ struct ProviderAccountsSettingsView: View {
   }
 
   @MainActor
-  private func createAccount(name: String, provider: String, id: String?) async throws {
+  private func createAccount(
+    name: String,
+    provider: String,
+    id: String?,
+    apiKey: String?
+  ) async throws {
     guard let api else { throw DaemonError.networkError("Not connected to daemon") }
-    _ = try await api.createProviderAccount(name: name, provider: provider, id: id)
+    guard let catalogProvider = providerCatalog?.provider(id: provider) else {
+      throw DaemonError.badRequest("Provider catalog unavailable. Refresh before creating an account.")
+    }
+    guard catalogProvider.policy.runnable else {
+      throw DaemonError.badRequest(
+        "\(catalogProvider.displayName) is \(catalogProvider.policy.authorization) and cannot accept credentials."
+      )
+    }
+    _ = try await api.createProviderAccount(
+      name: name,
+      provider: provider,
+      id: id,
+      apiKey: catalogProvider.implementation.kind == "generic-pi-api" ? apiKey : nil
+    )
     await loadAccounts()
   }
 
@@ -463,6 +505,9 @@ struct ProviderAccountsSettingsView: View {
   }
 
   private func providerLabel(_ provider: String) -> String {
+    if let label = providerCatalog?.provider(id: provider)?.displayName {
+      return label
+    }
     switch provider {
     case "anthropic": "Anthropic"
     case "max": "Claude Max"
@@ -476,6 +521,9 @@ struct ProviderAccountsSettingsView: View {
   }
 
   private func providerIcon(_ provider: String) -> String {
+    if let icon = providerCatalog?.provider(id: provider)?.systemImage {
+      return icon
+    }
     switch provider {
     case "anthropic", "max": "sparkles"
     case "openai", "openrouter": "cpu"
@@ -524,15 +572,19 @@ struct ProviderAccountsSettingsView: View {
 
 private struct ProviderAccountCreateSheet: View {
   @Binding var isPresented: Bool
-  let onCreate: (String, String, String?) async throws -> Void
+  let providers: [ProviderCatalogProvider]
+  let onCreate: (String, String, String?, String?) async throws -> Void
 
   @State private var name = ""
   @State private var accountId = ""
   @State private var provider = "openai"
+  @State private var apiKey = ""
   @State private var isSaving = false
   @State private var errorMessage: String?
 
-  private let providers = ["anthropic", "max", "openai", "foundry", "copilot", "openrouter", "pi"]
+  private var selectedProvider: ProviderCatalogProvider? {
+    providers.first { $0.id == provider }
+  }
 
   private var trimmedName: String {
     name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -575,12 +627,36 @@ private struct ProviderAccountCreateSheet: View {
           Text("Provider")
             .foregroundStyle(.secondary)
           Picker("", selection: $provider) {
-            ForEach(providers, id: \.self) { value in
-              Text(providerLabel(value)).tag(value)
+            ForEach(providers) { value in
+              Text(value.displayName).tag(value.id)
+                .disabled(!value.policy.runnable)
             }
           }
           .labelsHidden()
           .frame(width: 180)
+        }
+        if let selectedProvider {
+          GridRow {
+            Text("Policy").foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+              Text(selectedProvider.policy.runnable
+                ? "Supported"
+                : "Not runnable — \(selectedProvider.policy.authorization)")
+              ForEach(selectedProvider.policy.caveats, id: \.message) { caveat in
+                Text("\(caveat.kind.capitalized): \(caveat.message)")
+              }
+            }
+            .font(.caption)
+            .foregroundStyle(selectedProvider.policy.runnable ? .secondary : .orange)
+          }
+          if selectedProvider.implementation.kind == "generic-pi-api" {
+            GridRow {
+              Text("API Key").foregroundStyle(.secondary)
+              SecureField(selectedProvider.credentialOptions.first?.label ?? "API key", text: $apiKey)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 260)
+            }
+          }
         }
       }
 
@@ -602,11 +678,21 @@ private struct ProviderAccountCreateSheet: View {
           }
         }
         .keyboardShortcut(.defaultAction)
-        .disabled(trimmedName.isEmpty || isSaving)
+        .disabled(
+          trimmedName.isEmpty || isSaving || selectedProvider?.policy.runnable != true
+            || (selectedProvider?.implementation.kind == "generic-pi-api"
+              && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        )
       }
     }
     .padding(20)
     .frame(width: 420)
+    .onAppear {
+      if !providers.contains(where: { $0.id == provider && $0.policy.runnable }),
+         let first = providers.first(where: \.policy.runnable) {
+        provider = first.id
+      }
+    }
   }
 
   @MainActor
@@ -615,25 +701,15 @@ private struct ProviderAccountCreateSheet: View {
     errorMessage = nil
     defer { isSaving = false }
     do {
-      try await onCreate(trimmedName, provider, trimmedId)
+      let secret = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+      try await onCreate(trimmedName, provider, trimmedId, secret.isEmpty ? nil : secret)
+      apiKey = ""
       isPresented = false
     } catch {
       errorMessage = error.localizedDescription
     }
   }
 
-  private func providerLabel(_ provider: String) -> String {
-    switch provider {
-    case "anthropic": "Anthropic"
-    case "max": "Claude Max"
-    case "openai": "OpenAI"
-    case "foundry": "Foundry"
-    case "copilot": "Copilot"
-    case "openrouter": "OpenRouter"
-    case "pi": "Pi"
-    default: provider
-    }
-  }
 }
 
 private struct ProviderAccountImportSheet: View {

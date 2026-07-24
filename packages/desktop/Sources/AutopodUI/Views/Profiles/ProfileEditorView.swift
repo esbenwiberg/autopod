@@ -165,6 +165,7 @@ struct HelpBadge: View {
 /// Parameters: profile name, provider ("max", "openai", or "copilot"), completion callback (error message or nil).
 public typealias ProfileAuthHandler = (String, String, @escaping (String?) -> Void) -> Void
 public typealias ProviderAccountsLoadHandler = (String?) async throws -> [PublicProviderAccountResponse]
+public typealias ProviderCatalogLoadHandler = () async throws -> ProviderCatalogResponse
 public typealias DaemonGitHubAuthStatusLoadHandler = () async throws -> DaemonGitHubAuthStatusResponse
 
 /// Profile editor — settings-style layout with sidebar section navigation and inline help.
@@ -176,6 +177,7 @@ public struct ProfileEditorView: View {
     public var onSave: ((Profile) async throws -> Void)?
     public var onAuthenticate: ProfileAuthHandler?
     public var onLoadProviderAccounts: ProviderAccountsLoadHandler?
+    public var onLoadProviderCatalog: ProviderCatalogLoadHandler?
     public var onLoadDaemonGitHubAuthStatus: DaemonGitHubAuthStatusLoadHandler?
     public var memoryEntries: [MemoryEntry] = []
     public var onApproveMemory: (String) -> Void = { _ in }
@@ -224,6 +226,7 @@ public struct ProfileEditorView: View {
                 onSave: ((Profile) async throws -> Void)? = nil,
                 onAuthenticate: ProfileAuthHandler? = nil,
                 onLoadProviderAccounts: ProviderAccountsLoadHandler? = nil,
+                onLoadProviderCatalog: ProviderCatalogLoadHandler? = nil,
                 onLoadDaemonGitHubAuthStatus: DaemonGitHubAuthStatusLoadHandler? = nil,
                 memoryEntries: [MemoryEntry] = [],
                 onApproveMemory: @escaping (String) -> Void = { _ in },
@@ -245,6 +248,7 @@ public struct ProfileEditorView: View {
         self.onSave = onSave
         self.onAuthenticate = onAuthenticate
         self.onLoadProviderAccounts = onLoadProviderAccounts
+        self.onLoadProviderCatalog = onLoadProviderCatalog
         self.onLoadDaemonGitHubAuthStatus = onLoadDaemonGitHubAuthStatus
         self.memoryEntries = memoryEntries
         self.onApproveMemory = onApproveMemory
@@ -267,6 +271,8 @@ public struct ProfileEditorView: View {
     @State private var isDeleting: Bool = false
     @State private var showDeleteConfirmation: Bool = false
     @State private var providerAccounts: [PublicProviderAccountResponse] = []
+    @State private var providerCatalog: ProviderCatalogResponse?
+    @State private var providerCatalogError: String?
     @State private var isLoadingProviderAccounts = false
     @State private var providerAccountsError: String?
     @State private var daemonGitHubAuthStatus: DaemonGitHubAuthStatusResponse?
@@ -347,6 +353,7 @@ public struct ProfileEditorView: View {
         .task(id: profile.modelProvider.rawValue) {
             await loadProviderAccounts()
         }
+        .task { await loadProviderCatalog() }
         .task { await loadEditorPayloadIfNeeded() }
         .task { await loadDaemonGitHubAuthStatus() }
     }
@@ -1134,7 +1141,9 @@ public struct ProfileEditorView: View {
                 RuntimeModelOptions.options(
                     for: profile.defaultRuntime,
                     role: role,
-                    currentValue: selection.wrappedValue
+                    currentValue: selection.wrappedValue,
+                    catalog: providerCatalog,
+                    providerId: profile.modelProvider.rawValue
                 ),
                 id: \.value
             ) { option in
@@ -1179,10 +1188,45 @@ public struct ProfileEditorView: View {
     private func handleModelProviderChanged(_ newValue: ModelProvider) {
         profile.providerAccountId = nil
         providerAccountsError = nil
+        if providerCatalog?.provider(id: newValue.rawValue)?.implementation.kind == "generic-pi-api" {
+            profile.defaultRuntime = .pi
+        }
         if newValue == .openai || newValue == .openrouter {
             profile.defaultRuntime = .codex
             normalizeRuntimeModelSelections(resetCodexRestrictedModel: true)
         }
+    }
+
+    private func loadProviderCatalog() async {
+        guard let onLoadProviderCatalog else {
+            await MainActor.run {
+                providerCatalogError = "Provider catalog unavailable while offline. Current values are preserved."
+            }
+            return
+        }
+        do {
+            let catalog = try await onLoadProviderCatalog()
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                providerCatalog = catalog
+                providerCatalogError = nil
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                providerCatalogError = "Provider catalog unavailable: \(error.localizedDescription). Current values are preserved."
+            }
+        }
+    }
+
+    private var modelProviderOptions: [(ModelProvider, String)] {
+        var options = providerCatalog?.providers.map {
+            (ModelProvider(rawValue: $0.id), $0.displayName)
+        } ?? ModelProvider.legacyValues.map { ($0, $0.label) }
+        if !options.contains(where: { $0.0 == profile.modelProvider }) {
+            options.append((profile.modelProvider, "\(profile.modelProvider.label) (unavailable)"))
+        }
+        return options
     }
 
     private func loadProviderAccounts() async {
@@ -1439,12 +1483,20 @@ public struct ProfileEditorView: View {
 
         fieldRow("Model Provider", help: "Authentication backend for AI model API calls.") {
             Picker("", selection: $profile.modelProvider) {
-                ForEach(ModelProvider.allCases, id: \.self) { p in
-                    Text(p.label).tag(p)
+                ForEach(modelProviderOptions, id: \.0) { option in
+                    Text(option.1).tag(option.0)
                 }
             }
             .labelsHidden()
             .frame(width: 160)
+        }
+
+        if let provider = providerCatalog?.provider(id: profile.modelProvider.rawValue) {
+            providerPolicySummary(provider)
+        } else if let providerCatalogError {
+            Label(providerCatalogError, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption2)
+                .foregroundStyle(.yellow)
         }
 
         fieldRow("Provider Account", help: "Shared provider account id for model-provider auth. Leave empty to use profile credentials or daemon environment auth.") {
@@ -1624,6 +1676,28 @@ public struct ProfileEditorView: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
+    }
+
+    @ViewBuilder
+    private func providerPolicySummary(_ provider: ProviderCatalogProvider) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(
+                provider.policy.runnable
+                    ? "Supported for unattended pods"
+                    : "Not runnable — \(provider.policy.authorization)",
+                systemImage: provider.policy.runnable ? "checkmark.shield" : "hand.raised.fill"
+            )
+            .foregroundStyle(provider.policy.runnable ? .green : .orange)
+            ForEach(provider.policy.caveats, id: \.message) { caveat in
+                Text("\(caveat.kind.capitalized): \(caveat.message)")
+                    .foregroundStyle(caveat.severity == "blocking" ? .orange : .secondary)
+            }
+            if let credential = provider.credentialOptions.first {
+                Text("\(credential.label): \(credential.acquisition)")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption2)
     }
 
     // MARK: - Container (was Infrastructure)
@@ -3041,7 +3115,7 @@ public struct ProfileEditorView: View {
         // MARK: Providers
         case "modelProvider":
             enumCard(field, selection: $profile.modelProvider,
-                     options: ModelProvider.allCases.map { ($0, $0.label) },
+                     options: modelProviderOptions,
                      parent: editorPayload?.parent?.modelProvider ?? "")
         case "providerAccountId":
             providerAccountCard(field, parent: editorPayload?.parent?.providerAccountId ?? "")

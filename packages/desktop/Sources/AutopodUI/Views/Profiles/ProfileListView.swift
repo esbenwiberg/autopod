@@ -29,6 +29,7 @@ public struct ProfileListView: View {
     public var onCreate: ((Profile) async throws -> Void)?
     public var onAuthenticate: ProfileAuthHandler?
     public var onLoadProviderAccounts: ProviderAccountsLoadHandler?
+    public var onLoadProviderCatalog: ProviderCatalogLoadHandler?
     public var onLoadDaemonGitHubAuthStatus: DaemonGitHubAuthStatusLoadHandler?
     public var onLoadEditor: ((String) async throws -> ProfileEditorResponse)?
     public var onSaveWithInheritance: (
@@ -44,6 +45,7 @@ public struct ProfileListView: View {
                 onSave: ((Profile) async throws -> Void)? = nil, onCreate: ((Profile) async throws -> Void)? = nil,
                 onAuthenticate: ProfileAuthHandler? = nil,
                 onLoadProviderAccounts: ProviderAccountsLoadHandler? = nil,
+                onLoadProviderCatalog: ProviderCatalogLoadHandler? = nil,
                 onLoadDaemonGitHubAuthStatus: DaemonGitHubAuthStatusLoadHandler? = nil,
                 onLoadEditor: ((String) async throws -> ProfileEditorResponse)? = nil,
                 onSaveWithInheritance: (
@@ -59,6 +61,7 @@ public struct ProfileListView: View {
         self.onSave = onSave; self.onCreate = onCreate
         self.onAuthenticate = onAuthenticate
         self.onLoadProviderAccounts = onLoadProviderAccounts
+        self.onLoadProviderCatalog = onLoadProviderCatalog
         self.onLoadDaemonGitHubAuthStatus = onLoadDaemonGitHubAuthStatus
         self.onLoadEditor = onLoadEditor
         self.onSaveWithInheritance = onSaveWithInheritance
@@ -97,6 +100,7 @@ public struct ProfileListView: View {
                 onSave: onSave,
                 onAuthenticate: onAuthenticate,
                 onLoadProviderAccounts: onLoadProviderAccounts,
+                onLoadProviderCatalog: onLoadProviderCatalog,
                 onLoadDaemonGitHubAuthStatus: onLoadDaemonGitHubAuthStatus,
                 onLoadEditor: onLoadEditor,
                 onSaveWithInheritance: onSaveWithInheritance,
@@ -122,6 +126,7 @@ public struct ProfileListView: View {
                 builtinSkills: builtinSkills,
                 onSave: onCreate,
                 onLoadProviderAccounts: onLoadProviderAccounts,
+                onLoadProviderCatalog: onLoadProviderCatalog,
                 onLoadDaemonGitHubAuthStatus: onLoadDaemonGitHubAuthStatus
             )
         }
@@ -137,6 +142,7 @@ public struct ProfileListView: View {
                 builtinSkills: builtinSkills,
                 onSave: onCreate,
                 onLoadProviderAccounts: onLoadProviderAccounts,
+                onLoadProviderCatalog: onLoadProviderCatalog,
                 onLoadDaemonGitHubAuthStatus: onLoadDaemonGitHubAuthStatus,
                 onLoadEditor: onLoadEditor,
                 onSaveWithInheritance: onSaveWithInheritance,
