@@ -8,19 +8,13 @@ const legacy = (
   id: string,
   displayName: string,
   adapterId: string,
-  credentialKind: 'api-key' | 'oauth' | 'managed-identity' | 'opaque',
+  credentialOptions: CompiledProviderManifest['providers'][number]['credentialOptions'],
 ): CompiledProviderManifest['providers'][number] => ({
   id,
   displayName,
   description: `${displayName} compatibility provider`,
   implementation: { kind: 'legacy', adapterId },
-  credentialOptions: [
-    {
-      kind: credentialKind,
-      label: 'Existing Autopod credentials',
-      acquisition: 'Continue using the existing provider account or profile credential flow.',
-    },
-  ],
+  credentialOptions,
   modelIds: [],
   requiredHosts: [],
   policy: { lifecycle: 'active', authorization: 'supported', runnable: true, caveats: [] },
@@ -34,13 +28,70 @@ export const COMPILED_PROVIDER_MANIFEST = {
     source: 'pinned-distribution',
   },
   providers: [
-    legacy('anthropic', 'Anthropic API', 'anthropic', 'api-key'),
-    legacy('max', 'Claude MAX/PRO', 'max', 'oauth'),
-    legacy('openai', 'OpenAI', 'openai', 'opaque'),
-    legacy('foundry', 'Azure AI Foundry', 'foundry', 'managed-identity'),
-    legacy('copilot', 'GitHub Copilot', 'copilot', 'oauth'),
-    legacy('openrouter', 'OpenRouter', 'openrouter', 'api-key'),
-    legacy('pi', 'Pi OAuth', 'pi-oauth', 'opaque'),
+    legacy('anthropic', 'Anthropic API', 'anthropic', [
+      {
+        kind: 'api-key',
+        label: 'Anthropic API key',
+        acquisition: 'Continue using the existing daemon environment credential flow.',
+      },
+    ]),
+    legacy('max', 'Claude MAX/PRO', 'max', [
+      {
+        kind: 'oauth',
+        label: 'Claude MAX/PRO OAuth',
+        acquisition: 'Continue using the existing setup-token or refresh credential flow.',
+      },
+    ]),
+    legacy('openai', 'OpenAI', 'openai', [
+      {
+        kind: 'api-key',
+        label: 'OpenAI API key',
+        acquisition: 'Continue using the existing daemon environment credential flow.',
+      },
+      {
+        kind: 'opaque',
+        label: 'ChatGPT authentication state',
+        acquisition: 'Continue using the existing Codex login capture flow.',
+      },
+    ]),
+    legacy('foundry', 'Azure AI Foundry', 'foundry', [
+      {
+        kind: 'api-key',
+        label: 'Foundry API key',
+        acquisition: 'Continue using the existing Foundry provider account flow.',
+      },
+      {
+        kind: 'managed-identity',
+        label: 'Azure identity',
+        acquisition: 'Continue using the existing managed identity or Azure CLI flow.',
+      },
+    ]),
+    legacy('copilot', 'GitHub Copilot', 'copilot', [
+      {
+        kind: 'oauth',
+        label: 'GitHub OAuth token',
+        acquisition: 'Continue using the existing Copilot authentication flow.',
+      },
+      {
+        kind: 'opaque',
+        label: 'Supported GitHub token',
+        acquisition: 'Continue using a supported fine-grained PAT or GitHub App token.',
+      },
+    ]),
+    legacy('openrouter', 'OpenRouter', 'openrouter', [
+      {
+        kind: 'api-key',
+        label: 'OpenRouter API key',
+        acquisition: 'Continue using the existing OpenRouter provider account flow.',
+      },
+    ]),
+    legacy('pi', 'Pi OAuth', 'pi-oauth', [
+      {
+        kind: 'opaque',
+        label: 'Pi OAuth provider entry',
+        acquisition: 'Continue using the existing Pi authentication capture flow.',
+      },
+    ]),
     {
       id: 'opencode-zen',
       displayName: 'OpenCode Zen',

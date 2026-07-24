@@ -50,7 +50,7 @@ function assertSafePublicHostname(host: string, providerId: string): void {
   }
 }
 
-function assertProvider(provider: CompiledProvider, modelIds: Set<string>): void {
+function assertProvider(provider: CompiledProvider, modelOwners: Map<string, string>): void {
   if (!STABLE_ID.test(provider.id)) fail(`provider ID '${provider.id}' is not stable`);
   if (provider.displayName.trim().length === 0)
     fail(`provider '${provider.id}' has no display name`);
@@ -70,8 +70,12 @@ function assertProvider(provider: CompiledProvider, modelIds: Set<string>): void
   );
   assertUnique(provider.modelIds, `model reference on provider '${provider.id}'`);
   for (const modelId of provider.modelIds) {
-    if (!modelIds.has(modelId)) {
+    const owner = modelOwners.get(modelId);
+    if (!owner) {
       fail(`provider '${provider.id}' references unknown model '${modelId}'`);
+    }
+    if (owner !== provider.id) {
+      fail(`provider '${provider.id}' references model '${modelId}' owned by '${owner}'`);
     }
   }
   assertUnique(provider.requiredHosts, `required host on provider '${provider.id}'`);
@@ -117,8 +121,14 @@ export function validateProviderManifest(
       fail(`model '${model.id}' references unknown provider '${model.providerId}'`);
     }
   }
-  const modelIds = new Set(manifest.models.map(({ id }) => id));
-  for (const provider of manifest.providers) assertProvider(provider, modelIds);
+  const modelOwners = new Map(manifest.models.map(({ id, providerId }) => [id, providerId]));
+  for (const provider of manifest.providers) assertProvider(provider, modelOwners);
+  const providerById = new Map(manifest.providers.map((provider) => [provider.id, provider]));
+  for (const model of manifest.models) {
+    if (!providerById.get(model.providerId)?.modelIds.includes(model.id)) {
+      fail(`model '${model.id}' is not referenced by its provider '${model.providerId}'`);
+    }
+  }
   return manifest;
 }
 

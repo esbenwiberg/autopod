@@ -106,6 +106,20 @@ describe('provider catalog validation', () => {
     );
   });
 
+  it('rejects models referenced by a provider other than their owner', () => {
+    const manifest = syntheticManifest();
+    manifest.providers.push({
+      ...structuredClone(firstProvider(manifest)),
+      id: 'other-cloud',
+      modelIds: ['fixture/reviewed-model'],
+    });
+    firstProvider(manifest).modelIds = [];
+
+    expect(() => createProviderCatalog(manifest)).toThrow(
+      "Invalid provider manifest: provider 'other-cloud' references model 'fixture/reviewed-model' owned by 'fixture-cloud'",
+    );
+  });
+
   it('rejects unsupported credential mechanisms', () => {
     const manifest = syntheticManifest();
     const credential = firstProvider(manifest).credentialOptions[0];
