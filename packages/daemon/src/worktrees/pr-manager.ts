@@ -392,7 +392,6 @@ export class GhPrManager implements PrManager {
 
     try {
       await this.execGh(args, {
-        cwd: config.worktreePath,
         timeout: 30_000,
       });
     } catch (err) {
@@ -403,7 +402,6 @@ export class GhPrManager implements PrManager {
     // Check if the merge completed immediately or auto-merge was scheduled
     const status = await this.getPrStatus({
       prUrl: config.prUrl,
-      worktreePath: config.worktreePath,
     });
     if (status.merged) {
       this.logger.info({ prUrl: config.prUrl }, 'Pull request merged immediately');
@@ -427,7 +425,6 @@ export class GhPrManager implements PrManager {
     ];
 
     const { stdout } = await this.execGh(args, {
-      cwd: config.worktreePath,
       timeout: 15_000,
     });
 

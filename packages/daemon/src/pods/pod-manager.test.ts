@@ -1920,6 +1920,57 @@ describe('PodManager', () => {
       expect(ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
     });
 
+    it('polls and merges a clean PR when the parent worktree is stale', async () => {
+      vi.useFakeTimers();
+      try {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Do stuff' },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'merge_pending',
+          prUrl: 'https://github.com/org/repo/pull/42',
+          worktreePath: `/tmp/autopod-missing-parent-${pod.id}`,
+        });
+        vi.mocked(ctx.prManager.getPrStatus)
+          .mockResolvedValueOnce({
+            merged: false,
+            open: true,
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+            reviewDecision: 'APPROVED',
+          })
+          .mockResolvedValueOnce({
+            merged: true,
+            open: false,
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+          });
+        vi.mocked(ctx.prManager.mergePr).mockResolvedValueOnce({
+          merged: true,
+          autoMergeScheduled: false,
+        });
+
+        // A fresh manager resumes merge polling for persisted merge_pending pods.
+        createPodManager(ctx.deps);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(ctx.prManager.mergePr).toHaveBeenCalledWith({
+          prUrl: 'https://github.com/org/repo/pull/42',
+        });
+        expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(manager.getSession(pod.id).status).toBe('complete');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('passes squash option to PR merge', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);

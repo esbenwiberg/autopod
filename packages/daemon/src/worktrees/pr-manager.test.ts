@@ -90,6 +90,8 @@ describe('GhPrManager', () => {
     });
 
     expect(result).toEqual({ merged: true, autoMergeScheduled: false });
+    expect(execCalls[0]?.[2]).not.toHaveProperty('cwd');
+    expect(execCalls[1]?.[2]).not.toHaveProperty('cwd');
   });
 
   it('mergePr returns merged:false when auto-merge is scheduled', async () => {
@@ -141,6 +143,7 @@ describe('GhPrManager', () => {
       reviewComments: [],
       reviewDecision: 'APPROVED',
     });
+    expect(execCalls[0]?.[2]).not.toHaveProperty('cwd');
   });
 
   it('getPrStatus returns blockReason with pending checks', async () => {

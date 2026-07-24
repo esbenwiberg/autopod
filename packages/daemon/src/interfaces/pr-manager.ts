@@ -62,8 +62,8 @@ export interface CreatePrConfig {
 }
 
 export interface MergePrConfig {
-  /** Worktree path to run `gh` from */
-  worktreePath: string;
+  /** Worktree path for repository-bound implementations; URL-addressed operations may omit it. */
+  worktreePath?: string;
   /** PR URL or number to merge */
   prUrl: string;
   /** Squash merge instead of regular merge */
