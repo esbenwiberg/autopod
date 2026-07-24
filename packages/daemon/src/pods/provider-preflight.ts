@@ -90,6 +90,7 @@ export function resolveProviderPreflight(
     reject('Selected provider is not in the reviewed provider catalog', 'PROVIDER_UNKNOWN');
   }
   if (provider.implementation.kind !== 'generic-pi-api') {
+    const auth = resolveProviderAuth(profile, options);
     return { runtime, model, account: auth.account, manifestProvider: null };
   }
 
