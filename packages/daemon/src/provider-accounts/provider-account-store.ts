@@ -122,6 +122,16 @@ export function createProviderAccountStore(
           400,
         );
       }
+      if (
+        catalogProvider.policy.authorization !== 'supported' ||
+        catalogProvider.policy.runnable !== true
+      ) {
+        throw new AutopodError(
+          `Generic API-key credentials require a supported, runnable provider, not "${credentials.providerId}"`,
+          'PROVIDER_ACCOUNT_PROVIDER_NOT_RUNNABLE',
+          400,
+        );
+      }
     }
     if (credentialProviderId && credentialProviderId !== provider) {
       throw new AutopodError(

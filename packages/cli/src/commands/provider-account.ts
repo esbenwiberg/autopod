@@ -498,6 +498,25 @@ function confirm(question: string): Promise<boolean> {
   });
 }
 
+export interface SecretChunkResult {
+  value: string;
+  outcome?: 'submit' | 'cancel';
+}
+
+export function processSecretChunk(currentValue: string, chunk: string): SecretChunkResult {
+  let value = currentValue;
+  for (const character of chunk) {
+    if (character === '\u0003') return { value, outcome: 'cancel' };
+    if (character === '\r' || character === '\n') return { value, outcome: 'submit' };
+    if (character === '\u007f' || character === '\b') {
+      value = value.slice(0, -1);
+    } else if (character >= ' ') {
+      value += character;
+    }
+  }
+  return { value };
+}
+
 function readSecret(prompt: string): Promise<string> {
   if (!process.stdin.isTTY || !process.stdin.setRawMode) {
     return Promise.reject(
@@ -517,16 +536,14 @@ function readSecret(prompt: string): Promise<string> {
       process.stderr.write('\n');
     };
     const onData = (chunk: string): void => {
-      if (chunk === '\u0003') {
+      const result = processSecretChunk(value, chunk);
+      value = result.value;
+      if (result.outcome === 'cancel') {
         restore();
         reject(new Error('Secret entry cancelled.'));
-      } else if (chunk === '\r' || chunk === '\n') {
+      } else if (result.outcome === 'submit') {
         restore();
         resolve(value.trim());
-      } else if (chunk === '\u007f') {
-        value = value.slice(0, -1);
-      } else if (chunk >= ' ') {
-        value += chunk;
       }
     };
     process.stdin.on('data', onData);

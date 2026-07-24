@@ -84,6 +84,21 @@ describe('ProviderAccountStore', () => {
     ).toThrow(/not "copilot"/);
   });
 
+  it('rejects updateCredentials for non-runnable generic providers', () => {
+    const db = createTestDb();
+    const store = createProviderAccountStore(db, reversibleCipher);
+    const account = store.create({ name: 'Pending Zen', provider: 'opencode-zen' });
+
+    expect(() =>
+      store.updateCredentials(account.id, {
+        provider: 'api-key',
+        providerId: 'opencode-zen',
+        apiKey: 'must-not-be-stored',
+      }),
+    ).toThrow(/supported, runnable provider/);
+    expect(store.get(account.id).credentials).toBeNull();
+  });
+
   it('tracks last-used metadata without exposing credentials through list filters', () => {
     const db = createTestDb();
     const store = createProviderAccountStore(db);
