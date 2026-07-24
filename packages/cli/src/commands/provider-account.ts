@@ -1,6 +1,8 @@
 import type {
   ProviderAccountProvider,
   ProviderCredentials,
+  ProviderFailoverPolicy,
+  ProviderFailoverTarget,
   PublicProviderAccount,
 } from '@autopod/shared';
 import { providerAccountProviderSchema } from '@autopod/shared';
@@ -37,6 +39,45 @@ const accountColumns: ColumnDef<PublicProviderAccount>[] = [
 
 function collectOption(value: string, previous: string[]): string[] {
   return [...previous, value];
+}
+
+function parseFailoverTarget(value: string): ProviderFailoverTarget {
+  const [providerAccountId, runtime, ...modelParts] = value.split(':');
+  const model = modelParts.join(':');
+  if (
+    !providerAccountId ||
+    !runtime ||
+    !['claude', 'codex', 'copilot', 'pi'].includes(runtime) ||
+    !model
+  ) {
+    throw new Error(
+      `Invalid failover target "${value}"; expected <account-id>:<runtime>:<model>`,
+    );
+  }
+  return {
+    providerAccountId,
+    runtime: runtime as ProviderFailoverTarget['runtime'],
+    model,
+  };
+}
+
+function parsePositiveInteger(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error('max hops must be a positive integer');
+  }
+  return parsed;
+}
+
+function buildFailoverPolicy(
+  targetValues: string[],
+  maxHops?: number,
+): ProviderFailoverPolicy | undefined {
+  if (targetValues.length === 0 && maxHops === undefined) return undefined;
+  return {
+    targets: targetValues.map(parseFailoverTarget),
+    ...(maxHops === undefined ? {} : { maxHops }),
+  };
 }
 
 function parseProvider(value: string): ProviderAccountProvider {
@@ -120,6 +161,15 @@ export function registerProviderAccountCommands(
         if (data.lastUsedAt) {
           console.log(`${chalk.bold('Last used:')} ${data.lastUsedAt}`);
         }
+        console.log(`${chalk.bold('Failover:')}  ${data.failoverPolicy ? '' : 'none'}`);
+        data.failoverPolicy?.targets.forEach((target, index) => {
+          console.log(
+            `  ${index + 1}. ${target.providerAccountId} · ${target.runtime} · ${target.model}`,
+          );
+        });
+        if (data.failoverPolicy?.maxHops !== undefined) {
+          console.log(`${chalk.bold('Max hops:')}  ${data.failoverPolicy.maxHops}`);
+        }
       });
     });
 
@@ -128,6 +178,13 @@ export function registerProviderAccountCommands(
     .description('Create a shared provider account')
     .requiredOption('--provider <provider>', 'Provider for this account')
     .option('--id <id>', 'Stable lowercase account id')
+    .option(
+      '--failover-target <account:runtime:model>',
+      'Ordered failover target; repeat to add targets',
+      collectOption,
+      [] as string[],
+    )
+    .option('--max-failover-hops <count>', 'Maximum automatic failover hops', parsePositiveInteger)
     .option(
       '--link-profile <profile>',
       'Link a profile after creation; repeat for multiple profiles',
@@ -146,14 +203,25 @@ export function registerProviderAccountCommands(
           provider: string;
           id?: string;
           linkProfile: string[];
+          failoverTarget: string[];
+          maxFailoverHops?: number;
           keepLegacyCredentials?: boolean;
           json?: boolean;
         },
       ) => {
         const client = getClient();
         const provider = parseProvider(opts.provider);
+        const failoverPolicy = buildFailoverPolicy(
+          opts.failoverTarget,
+          opts.maxFailoverHops,
+        );
         const account = await withSpinner('Creating provider account...', () =>
-          client.createProviderAccount({ name, id: opts.id, provider }),
+          client.createProviderAccount({
+            name,
+            id: opts.id,
+            provider,
+            ...(failoverPolicy === undefined ? {} : { failoverPolicy }),
+          }),
         );
 
         for (const profileName of opts.linkProfile) {
@@ -182,6 +250,39 @@ export function registerProviderAccountCommands(
         client.updateProviderAccount(id, { name }),
       );
       console.log(chalk.green(`Provider account "${account.id}" renamed to "${account.name}".`));
+    });
+
+  accounts
+    .command('set-failover <id>')
+    .description('Replace an account default failover chain')
+    .requiredOption(
+      '--target <account:runtime:model>',
+      'Ordered complete failover target; repeat to add targets',
+      collectOption,
+      [] as string[],
+    )
+    .option('--max-hops <count>', 'Maximum automatic failover hops', parsePositiveInteger)
+    .action(async (id: string, opts: { target: string[]; maxHops?: number }) => {
+      const client = getClient();
+      const failoverPolicy = buildFailoverPolicy(opts.target, opts.maxHops);
+      const account = await withSpinner('Updating failover policy...', () =>
+        client.updateProviderAccount(id, { failoverPolicy }),
+      );
+      console.log(
+        chalk.green(
+          `Provider account "${account.id}" failover policy updated (${opts.target.length} targets).`,
+        ),
+      );
+    });
+
+  accounts
+    .command('clear-failover <id>')
+    .description('Remove an account default failover chain')
+    .action(async (id: string) => {
+      const account = await withSpinner('Clearing failover policy...', () =>
+        getClient().updateProviderAccount(id, { failoverPolicy: null }),
+      );
+      console.log(chalk.green(`Provider account "${account.id}" failover policy cleared.`));
     });
 
   accounts

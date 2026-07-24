@@ -17,6 +17,7 @@ import type {
   Profile,
   ProviderAccountProvider,
   ProviderCredentials,
+  ProviderFailoverPolicy,
   PublicProfile,
   PublicProviderAccount,
   ReadinessStatus,
@@ -405,13 +406,18 @@ export class AutopodClient {
     name: string;
     provider: ProviderAccountProvider;
     credentials?: ProviderCredentials | null;
+    failoverPolicy?: ProviderFailoverPolicy | null;
   }): Promise<PublicProviderAccount> {
     return this.request<PublicProviderAccount>('POST', '/provider-accounts', account);
   }
 
   async updateProviderAccount(
     id: string,
-    changes: { name?: string; credentials?: ProviderCredentials | null },
+    changes: {
+      name?: string;
+      credentials?: ProviderCredentials | null;
+      failoverPolicy?: ProviderFailoverPolicy | null;
+    },
   ): Promise<PublicProviderAccount> {
     return this.request<PublicProviderAccount>('PATCH', `/provider-accounts/${id}`, changes);
   }

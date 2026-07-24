@@ -22,6 +22,7 @@ function createAccount(overrides: Record<string, unknown> = {}) {
     provider: 'openai',
     credentials: { provider: 'openai' },
     hasCredentials: true,
+    failoverPolicy: null,
     lastAuthenticatedAt: '2026-01-01T00:00:00.000Z',
     lastUsedAt: null,
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -134,6 +135,72 @@ describe('provider-account commands', () => {
     // No flag → undefined → daemon default clears the linked profile's inline creds.
     expect(mockClient.linkProviderAccount).toHaveBeenCalledWith('team-openai', 'my-app', {
       clearLegacyCredentials: undefined,
+    });
+  });
+
+  it('creates and replaces ordered failover policies', async () => {
+    await program.parseAsync([
+      'node',
+      'ap',
+      'provider-account',
+      'create',
+      'Primary',
+      '--provider',
+      'openai',
+      '--failover-target',
+      'claude-max:claude:opus',
+      '--failover-target',
+      'copilot:copilot:auto',
+      '--max-failover-hops',
+      '2',
+    ]);
+    expect(mockClient.createProviderAccount).toHaveBeenCalledWith({
+      name: 'Primary',
+      id: undefined,
+      provider: 'openai',
+      failoverPolicy: {
+        targets: [
+          { providerAccountId: 'claude-max', runtime: 'claude', model: 'opus' },
+          { providerAccountId: 'copilot', runtime: 'copilot', model: 'auto' },
+        ],
+        maxHops: 2,
+      },
+    });
+
+    await program.parseAsync([
+      'node',
+      'ap',
+      'provider-account',
+      'set-failover',
+      'team-openai',
+      '--target',
+      'copilot:copilot:auto',
+      '--target',
+      'claude-max:claude:sonnet',
+      '--max-hops',
+      '1',
+    ]);
+    expect(mockClient.updateProviderAccount).toHaveBeenCalledWith('team-openai', {
+      failoverPolicy: {
+        targets: [
+          { providerAccountId: 'copilot', runtime: 'copilot', model: 'auto' },
+          { providerAccountId: 'claude-max', runtime: 'claude', model: 'sonnet' },
+        ],
+        maxHops: 1,
+      },
+    });
+  });
+
+  it('clears an account failover policy', async () => {
+    await program.parseAsync([
+      'node',
+      'ap',
+      'provider-account',
+      'clear-failover',
+      'team-openai',
+    ]);
+    expect(mockClient.updateProviderAccount).toHaveBeenCalledWith('team-openai', {
+      failoverPolicy: null,
     });
   });
 
