@@ -1,6 +1,7 @@
-import { CONTAINER_HOME_DIR } from '@autopod/shared';
+import { CONTAINER_HOME_DIR, PROVIDER_CATALOG } from '@autopod/shared';
 import type {
   FoundryCredentials,
+  GenericApiKeyCredentials,
   MaxCredentials,
   MaxRefreshCredentials,
   MaxSetupTokenCredentials,
@@ -140,6 +141,7 @@ const SECRET_DIR = '/run/autopod';
 const CODEX_HOME_DIR = `${CONTAINER_HOME_DIR}/.codex`;
 const PI_AGENT_DIR = `${CONTAINER_HOME_DIR}/.pi/agent`;
 const PI_AUTH_PATH = `${PI_AGENT_DIR}/auth.json`;
+const GENERIC_MODEL_PROVIDER_KEY_PATH = `${SECRET_DIR}/model-provider-key`;
 
 function isMaxSetupTokenCredentials(creds: MaxCredentials): creds is MaxSetupTokenCredentials {
   return (
@@ -351,8 +353,54 @@ function isPiOAuthCredentials(creds: unknown): creds is PiOAuthCredentials {
   );
 }
 
+function isGenericApiKeyCredentials(creds: unknown): creds is GenericApiKeyCredentials {
+  return (
+    !!creds &&
+    typeof creds === 'object' &&
+    !Array.isArray(creds) &&
+    (creds as { provider?: unknown }).provider === 'api-key' &&
+    typeof (creds as { providerId?: unknown }).providerId === 'string' &&
+    typeof (creds as { apiKey?: unknown }).apiKey === 'string'
+  );
+}
+
 function buildPiEnv(profile: Profile, auth: ProviderAuthResolution): ProviderEnvResult {
   const creds = auth.credentials;
+
+  if (isGenericApiKeyCredentials(creds)) {
+    const provider = PROVIDER_CATALOG.providers.find(
+      (candidate) => candidate.id === creds.providerId,
+    );
+    if (!provider || provider.implementation.kind !== 'generic-pi-api') {
+      throw new Error(
+        `Profile "${profile.name}" uses API-key credentials for a provider that is not a generic Pi provider`,
+      );
+    }
+    if (auth.account && auth.account.provider !== creds.providerId) {
+      throw new Error(
+        `Profile "${profile.name}" uses API-key credentials that do not match provider account "${auth.account.name}"`,
+      );
+    }
+
+    const authJson = JSON.stringify(
+      {
+        [provider.implementation.piProviderId]: {
+          type: 'api_key',
+          key: `!cat ${GENERIC_MODEL_PROVIDER_KEY_PATH}`,
+        },
+      },
+      null,
+      2,
+    );
+    return {
+      env: withRuntimeTelemetryOptOutEnv({ PI_CODING_AGENT_DIR: PI_AGENT_DIR }),
+      containerFiles: [...buildClaudeConfigFiles(), { path: PI_AUTH_PATH, content: authJson }],
+      secretFiles: [{ path: GENERIC_MODEL_PROVIDER_KEY_PATH, content: creds.apiKey }],
+      requiresPostExecPersistence: false,
+      requiresPiAuthJsonPersistence: false,
+      credentialOwner: auth.owner ?? undefined,
+    };
+  }
 
   if (!isPiOAuthCredentials(creds)) {
     throw new Error(

@@ -1,4 +1,8 @@
-import type { ProviderAccount, ProviderAccountProvider, ProviderCredentials } from '@autopod/shared';
+import type {
+  ProviderAccount,
+  ProviderAccountProvider,
+  ProviderCredentials,
+} from '@autopod/shared';
 import {
   AutopodError,
   createProviderAccountSchema,
