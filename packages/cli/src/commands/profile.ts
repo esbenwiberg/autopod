@@ -269,7 +269,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
     .description('Edit a profile in $EDITOR')
     .action(async (name: string) => {
       const client = getClient();
-      const existing = await client.getProfile(name);
+      const existing = (await client.getProfileEditor(name)).raw;
 
       // Strip server-managed fields for editing
       const {

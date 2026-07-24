@@ -498,5 +498,20 @@ describe('provider account routes', () => {
     });
     expect(selfReferential.statusCode).toBeGreaterThanOrEqual(400);
     expect(profileStore.getRaw('app').providerAccountId).toBe('primary');
+
+    const inheritedSelfReference = await app.inject({
+      method: 'POST',
+      url: '/profiles',
+      payload: {
+        ...validProfile,
+        name: 'child',
+        extends: 'app',
+        providerFailover: {
+          targets: [{ providerAccountId: 'primary', runtime: 'codex', model: 'gpt-5' }],
+        },
+      },
+    });
+    expect(inheritedSelfReference.statusCode).toBeGreaterThanOrEqual(400);
+    expect(profileStore.exists('child')).toBe(false);
   });
 });

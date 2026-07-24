@@ -66,6 +66,13 @@ function createProfile(overrides: Record<string, unknown> = {}) {
 function createMockClient() {
   return {
     getProfile: vi.fn().mockResolvedValue(createProfile()),
+    getProfileEditor: vi.fn().mockResolvedValue({
+      raw: createProfile(),
+      resolved: createProfile(),
+      parent: null,
+      sourceMap: {},
+      credentialOwner: null,
+    }),
     createProfile: vi.fn().mockImplementation((profile) =>
       Promise.resolve({
         ...createProfile(),
@@ -345,9 +352,13 @@ printf '{"anthropic":{"accessToken":""}}' > "$PI_CODING_AGENT_DIR/auth.json"
 
   it('does not submit legacy GitHub PAT fields from profile edit', async () => {
     process.env.EDITOR = 'true';
-    vi.mocked(mockClient.getProfile).mockResolvedValueOnce(
-      createProfile({ githubPat: 'legacy-value', githubPatExpiresAt: '2026-08-01' }),
-    );
+    vi.mocked(mockClient.getProfileEditor).mockResolvedValueOnce({
+      raw: createProfile({ githubPat: 'legacy-value', githubPatExpiresAt: '2026-08-01' }),
+      resolved: createProfile(),
+      parent: null,
+      sourceMap: {},
+      credentialOwner: null,
+    });
 
     await program.parseAsync(['node', 'ap', 'profile', 'edit', 'my-app']);
 
@@ -365,7 +376,13 @@ printf '{"anthropic":{"accessToken":""}}' > "$PI_CODING_AGENT_DIR/auth.json"
     const providerFailover = {
       targets: [{ providerAccountId: 'backup', runtime: 'codex', model: 'gpt-5' }],
     };
-    vi.mocked(mockClient.getProfile).mockResolvedValueOnce(createProfile({ providerFailover }));
+    vi.mocked(mockClient.getProfileEditor).mockResolvedValueOnce({
+      raw: createProfile({ providerFailover }),
+      resolved: createProfile({ providerFailover }),
+      parent: null,
+      sourceMap: {},
+      credentialOwner: null,
+    });
 
     await program.parseAsync(['node', 'ap', 'profile', 'edit', 'my-app']);
 
@@ -374,5 +391,27 @@ printf '{"anthropic":{"accessToken":""}}' > "$PI_CODING_AGENT_DIR/auth.json"
       unknown
     >;
     expect(updates.providerFailover).toEqual(providerFailover);
+  });
+
+  it('preserves a raw null failover policy when editing a derived profile', async () => {
+    process.env.EDITOR = 'true';
+    const inheritedPolicy = {
+      targets: [{ providerAccountId: 'backup', runtime: 'codex', model: 'gpt-5' }],
+    };
+    vi.mocked(mockClient.getProfileEditor).mockResolvedValueOnce({
+      raw: createProfile({ extends: 'base', providerFailover: null }),
+      resolved: createProfile({ extends: 'base', providerFailover: inheritedPolicy }),
+      parent: createProfile({ name: 'base', providerFailover: inheritedPolicy }),
+      sourceMap: { providerFailover: 'inherited' },
+      credentialOwner: null,
+    });
+
+    await program.parseAsync(['node', 'ap', 'profile', 'edit', 'my-app']);
+
+    const updates = vi.mocked(mockClient.updateProfile).mock.calls[0]?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(updates.providerFailover).toBeNull();
   });
 });

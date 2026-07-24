@@ -15,6 +15,7 @@ import type {
   Pod,
   PodStatus,
   Profile,
+  ProfileEditorPayload,
   ProviderAccountProvider,
   ProviderCredentials,
   ProviderFailoverPolicy,
@@ -355,6 +356,10 @@ export class AutopodClient {
 
   async getProfile(name: string): Promise<PublicProfile> {
     return this.request<PublicProfile>('GET', `/profiles/${name}`);
+  }
+
+  async getProfileEditor(name: string): Promise<ProfileEditorPayload> {
+    return this.request<ProfileEditorPayload>('GET', `/profiles/${name}/editor`);
   }
 
   async getGitHubAuthStatus(): Promise<

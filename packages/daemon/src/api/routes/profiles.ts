@@ -90,7 +90,12 @@ export function profileRoutes(
   // POST /profiles — create profile
   app.post('/profiles', async (request, reply) => {
     const input = request.body as Record<string, unknown>;
-    const accountId = typeof input.providerAccountId === 'string' ? input.providerAccountId : null;
+    const accountId =
+      typeof input.providerAccountId === 'string'
+        ? input.providerAccountId
+        : typeof input.extends === 'string'
+          ? profileStore.get(input.extends).providerAccountId
+          : null;
     validateProviderFailover(
       accountId,
       input.providerFailover as ProviderFailoverPolicy | null | undefined,
