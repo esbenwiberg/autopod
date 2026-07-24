@@ -132,6 +132,13 @@ export function createProviderAccountStore(
           400,
         );
       }
+      if (!catalogProvider.credentialOptions.some((option) => option.kind === 'api-key')) {
+        throw new AutopodError(
+          `Generic API-key credentials require API-key capability for "${credentials.providerId}"`,
+          'PROVIDER_ACCOUNT_CREDENTIAL_KIND_MISMATCH',
+          400,
+        );
+      }
     }
     if (credentialProviderId && credentialProviderId !== provider) {
       throw new AutopodError(

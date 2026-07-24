@@ -399,16 +399,22 @@ struct ProviderAccountsSettingsView: View {
     guard let catalogProvider = providerCatalog?.provider(id: provider) else {
       throw DaemonError.badRequest("Provider catalog unavailable. Refresh before creating an account.")
     }
-    guard catalogProvider.policy.runnable else {
+    guard catalogProvider.policy.authorization == "supported", catalogProvider.policy.runnable else {
       throw DaemonError.badRequest(
         "\(catalogProvider.displayName) is \(catalogProvider.policy.authorization) and cannot accept credentials."
+      )
+    }
+    if catalogProvider.implementation.kind == "generic-pi-api",
+       !catalogProvider.canAcceptGenericAPIKey {
+      throw DaemonError.badRequest(
+        "\(catalogProvider.displayName) does not advertise API-key authentication."
       )
     }
     _ = try await api.createProviderAccount(
       name: name,
       provider: provider,
       id: id,
-      apiKey: catalogProvider.implementation.kind == "generic-pi-api" ? apiKey : nil
+      apiKey: catalogProvider.canAcceptGenericAPIKey ? apiKey : nil
     )
     await loadAccounts()
   }

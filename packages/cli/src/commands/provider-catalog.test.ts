@@ -138,6 +138,14 @@ describe('daemon-driven provider catalog', () => {
     if (!provider || !runnableProvider) return;
     expect(canSubmitGenericApiKey(provider)).toBe(false);
     expect(canSubmitGenericApiKey(runnableProvider)).toBe(true);
+    expect(
+      canSubmitGenericApiKey({
+        ...runnableProvider,
+        credentialOptions: runnableProvider.credentialOptions.filter(
+          (option) => option.kind !== 'api-key',
+        ),
+      }),
+    ).toBe(false);
   });
 
   it('wires synthetic providers through account and profile commands', async () => {

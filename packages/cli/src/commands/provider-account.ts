@@ -58,7 +58,8 @@ export function canSubmitGenericApiKey(provider: CompiledProvider): boolean {
   return (
     provider.implementation.kind === 'generic-pi-api' &&
     provider.policy.authorization === 'supported' &&
-    provider.policy.runnable
+    provider.policy.runnable &&
+    provider.credentialOptions.some((option) => option.kind === 'api-key')
   );
 }
 

@@ -108,6 +108,13 @@ export const genericApiKeyCredentialsSchema = z
         path: ['providerId'],
         message: 'Generic API-key credentials require a supported, runnable provider',
       });
+    } else if (!provider.credentialOptions.some((option) => option.kind === 'api-key')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['providerId'],
+        message:
+          'Generic API-key credentials require a provider that supports API-key authentication',
+      });
     }
   });
 

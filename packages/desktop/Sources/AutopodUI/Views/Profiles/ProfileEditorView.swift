@@ -343,7 +343,6 @@ public struct ProfileEditorView: View {
         }
         .frame(width: 880, height: 720)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { normalizeRuntimeModelSelections() }
         .onChange(of: profile.defaultRuntime) { _, _ in
             normalizeRuntimeModelSelections()
         }
