@@ -229,13 +229,36 @@ export function createProviderAccountStore(
       .map((row) => row.id);
   }
 
+  function listProfileFailoverReferrers(
+    targetId: string,
+  ): Array<{ name: string; policy: ProviderFailoverPolicy }> {
+    const rows = db
+      .prepare(
+        `SELECT name, provider_failover
+         FROM profiles
+         WHERE provider_failover IS NOT NULL
+         ORDER BY name`,
+      )
+      .all() as Array<{ name: string; provider_failover: string }>;
+    return rows.flatMap((row) => {
+      const policy = parseFailoverPolicy(row.provider_failover);
+      return policy?.targets.some((target) => target.providerAccountId === targetId)
+        ? [{ name: row.name, policy }]
+        : [];
+    });
+  }
+
   function assertInboundPoliciesRemainValid(proposedAccount: ProviderAccount): void {
     const referrerIds = listFailoverReferrerIds(proposedAccount.id);
-    if (referrerIds.length === 0) return;
+    const profileReferrers = listProfileFailoverReferrers(proposedAccount.id);
+    if (referrerIds.length === 0 && profileReferrers.length === 0) return;
     const overrides = new Map([[proposedAccount.id, proposedAccount]]);
     for (const referrerId of referrerIds) {
       const referrer = fetchRaw(referrerId);
       assertValidFailoverPolicy(referrer.id, referrer.failoverPolicy, overrides);
+    }
+    for (const referrer of profileReferrers) {
+      assertValidFailoverPolicy(null, referrer.policy, overrides);
     }
   }
 
@@ -394,9 +417,14 @@ export function createProviderAccountStore(
     delete(id: string): void {
       fetchRaw(id);
       const failoverReferrers = listFailoverReferrerIds(id);
-      if (failoverReferrers.length > 0) {
+      const profileFailoverReferrers = listProfileFailoverReferrers(id);
+      if (failoverReferrers.length > 0 || profileFailoverReferrers.length > 0) {
+        const references = [
+          ...failoverReferrers,
+          ...profileFailoverReferrers.map((profile) => `profile:${profile.name}`),
+        ];
         throw new AutopodError(
-          `Cannot delete provider account "${id}" while referenced by failover policies: ${failoverReferrers.join(', ')}`,
+          `Cannot delete provider account "${id}" while referenced by failover policies: ${references.join(', ')}`,
           'PROVIDER_ACCOUNT_FAILOVER_TARGET_IN_USE',
           409,
         );

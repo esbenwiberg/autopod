@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CredentialsCipher } from '../crypto/credentials-cipher.js';
+import { createProfileStore } from '../profiles/profile-store.js';
 import { createTestDb } from '../test-utils/mock-helpers.js';
 import { createProviderAccountStore } from './provider-account-store.js';
 
@@ -209,6 +210,44 @@ describe('ProviderAccountStore', () => {
       }),
     ).toThrow(/incompatible/);
     expect(store.get('foundry-target').credentials).toEqual(originalCredentials);
+  });
+
+  it('protects accounts referenced by profile failover policies', () => {
+    const db = createTestDb();
+    const store = createProviderAccountStore(db);
+    const profileStore = createProfileStore(db);
+    const credentials = {
+      provider: 'foundry' as const,
+      endpoint: 'https://example.services.ai.azure.com',
+      projectId: 'project',
+      apiSurface: 'openai' as const,
+    };
+    store.create({
+      id: 'profile-target',
+      name: 'Profile Target',
+      provider: 'foundry',
+      credentials,
+    });
+    profileStore.create({
+      name: 'profile-referrer',
+      repoUrl: null,
+      providerFailover: {
+        targets: [{ providerAccountId: 'profile-target', runtime: 'codex', model: 'gpt-5' }],
+      },
+    });
+
+    expect(() => store.delete('profile-target')).toThrow(/profile:profile-referrer/);
+    expect(store.exists('profile-target')).toBe(true);
+
+    expect(() => store.updateCredentials('profile-target', null)).toThrow(/not authenticated/);
+    expect(store.get('profile-target').credentials).toEqual(credentials);
+
+    expect(() =>
+      store.update('profile-target', {
+        credentials: { ...credentials, apiSurface: 'anthropic' },
+      }),
+    ).toThrow(/incompatible/);
+    expect(store.get('profile-target').credentials).toEqual(credentials);
   });
 
   it('creates, reads, lists, updates, and deletes provider accounts', () => {
