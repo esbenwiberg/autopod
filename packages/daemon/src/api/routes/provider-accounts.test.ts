@@ -473,16 +473,17 @@ describe('provider account routes', () => {
       providerAccountId: 'primary',
     });
 
-    for (const providerFailover of [
-      { targets: [{ providerAccountId: 'missing', runtime: 'codex', model: 'gpt-5' }] },
-      { targets: [{ providerAccountId: 'missing', runtime: 'codex' }] },
-    ]) {
+    for (const [providerFailover, expectedStatus] of [
+      [{ targets: [{ providerAccountId: 'missing', runtime: 'codex', model: 'gpt-5' }] }, 404],
+      [{ targets: [{ providerAccountId: 'missing', runtime: 'codex' }] }, 400],
+      ['not-a-policy', 400],
+    ] as const) {
       const response = await app.inject({
         method: 'PATCH',
         url: '/profiles/app',
         payload: { providerFailover },
       });
-      expect(response.statusCode).toBeGreaterThanOrEqual(400);
+      expect(response.statusCode).toBe(expectedStatus);
       expect(profileStore.getRaw('app').providerFailover).toBeNull();
     }
 
@@ -513,5 +514,39 @@ describe('provider account routes', () => {
     });
     expect(inheritedSelfReference.statusCode).toBeGreaterThanOrEqual(400);
     expect(profileStore.exists('child')).toBe(false);
+
+    profileStore.update('app', {
+      providerAccountId: 'backup',
+      providerFailover: null,
+    });
+    profileStore.create({
+      ...validProfile,
+      name: 'policy-parent',
+      providerFailover: {
+        targets: [{ providerAccountId: 'backup', runtime: 'codex', model: 'gpt-5' }],
+      },
+    });
+
+    const omittedPolicySelfReference = await app.inject({
+      method: 'POST',
+      url: '/profiles',
+      payload: {
+        ...validProfile,
+        name: 'inherited-child',
+        extends: 'policy-parent',
+        providerAccountId: 'backup',
+      },
+    });
+    expect(omittedPolicySelfReference.statusCode).toBe(400);
+    expect(profileStore.exists('inherited-child')).toBe(false);
+
+    profileStore.create({ ...validProfile, name: 'reparent-child', providerAccountId: 'backup' });
+    const invalidReparent = await app.inject({
+      method: 'PATCH',
+      url: '/profiles/reparent-child',
+      payload: { extends: 'policy-parent' },
+    });
+    expect(invalidReparent.statusCode).toBe(400);
+    expect(profileStore.getRaw('reparent-child').extends).toBeNull();
   });
 });

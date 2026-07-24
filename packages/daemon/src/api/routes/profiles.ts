@@ -1,4 +1,4 @@
-import { AutopodError } from '@autopod/shared';
+import { AutopodError, createProfileSchema, updateProfileSchema } from '@autopod/shared';
 import type {
   ProfileEditorPayload,
   ProviderAuthSource,
@@ -56,6 +56,42 @@ export function profileRoutes(
     providerAccountStore.validateFailoverPolicy(accountId, policy);
   }
 
+  function parseCreateProfile(input: unknown) {
+    const result = createProfileSchema.safeParse(input);
+    if (!result.success) {
+      throw new AutopodError(
+        result.error.issues.map((issue) => issue.message).join('; '),
+        'INVALID_PROFILE',
+        400,
+      );
+    }
+    return result.data;
+  }
+
+  function parseProfileUpdate(input: unknown) {
+    const result = updateProfileSchema.safeParse(input);
+    if (!result.success) {
+      throw new AutopodError(
+        result.error.issues.map((issue) => issue.message).join('; '),
+        'INVALID_PROFILE',
+        400,
+      );
+    }
+    return result.data;
+  }
+
+  function resolveProspectiveProviderConfig(raw: {
+    extends: string | null;
+    providerAccountId: string | null;
+    providerFailover: ProviderFailoverPolicy | null;
+  }): { accountId: string | null; policy: ProviderFailoverPolicy | null } {
+    const parent = raw.extends ? profileStore.get(raw.extends) : null;
+    return {
+      accountId: raw.providerAccountId ?? parent?.providerAccountId ?? null,
+      policy: raw.providerFailover ?? parent?.providerFailover ?? null,
+    };
+  }
+
   function resolveAuthSource(
     name: string,
     sourceMap: Record<string, 'own' | 'inherited' | 'merged'>,
@@ -89,18 +125,10 @@ export function profileRoutes(
 
   // POST /profiles — create profile
   app.post('/profiles', async (request, reply) => {
-    const input = request.body as Record<string, unknown>;
-    const accountId =
-      typeof input.providerAccountId === 'string'
-        ? input.providerAccountId
-        : typeof input.extends === 'string'
-          ? profileStore.get(input.extends).providerAccountId
-          : null;
-    validateProviderFailover(
-      accountId,
-      input.providerFailover as ProviderFailoverPolicy | null | undefined,
-    );
-    const profile = profileStore.create(input);
+    const parsed = parseCreateProfile(request.body);
+    const prospective = resolveProspectiveProviderConfig(parsed);
+    validateProviderFailover(prospective.accountId, prospective.policy);
+    const profile = profileStore.create(parsed);
     reply.status(201);
     return redactProfileSecrets(profile);
   });
@@ -157,18 +185,21 @@ export function profileRoutes(
   // PUT/PATCH /profiles/:name — update profile
   const updateHandler = async (request: import('fastify').FastifyRequest) => {
     const { name } = request.params as { name: string };
-    const changes = request.body as Record<string, unknown>;
+    const changes = parseProfileUpdate(request.body);
     validateProviderAccountMismatch(name, changes);
-    const existing = profileStore.get(name);
-    const nextAccountId =
-      changes.providerAccountId === undefined
-        ? existing.providerAccountId
-        : (changes.providerAccountId as string | null);
-    const nextProviderFailover =
-      changes.providerFailover === undefined
-        ? existing.providerFailover
-        : (changes.providerFailover as ProviderFailoverPolicy | null);
-    validateProviderFailover(nextAccountId, nextProviderFailover);
+    const existing = profileStore.getRaw(name);
+    const prospective = resolveProspectiveProviderConfig({
+      extends: changes.extends === undefined ? existing.extends : changes.extends,
+      providerAccountId:
+        changes.providerAccountId === undefined
+          ? existing.providerAccountId
+          : changes.providerAccountId,
+      providerFailover:
+        changes.providerFailover === undefined
+          ? existing.providerFailover
+          : changes.providerFailover,
+    });
+    validateProviderFailover(prospective.accountId, prospective.policy);
     const updated = profileStore.update(name, changes);
     // Fire-and-forget: re-apply network policy to running containers using this profile
     refreshNetworkPolicy(name).catch(() => {
