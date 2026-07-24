@@ -45,8 +45,8 @@ private func failoverAccount(
 
 @Test func failoverEligibilityRejectsUnauthenticatedAndUnsafeProvider() throws {
     let unauthenticated = try failoverAccount(
-        id: "openai",
-        provider: "openai",
+        id: "copilot",
+        provider: "copilot",
         authenticated: false
     )
     let foundry = try failoverAccount(id: "foundry", provider: "foundry")
@@ -54,6 +54,22 @@ private func failoverAccount(
     #expect(!ProviderFailoverTargetEligibility.isEligible(unauthenticated))
     #expect(!ProviderFailoverTargetEligibility.isEligible(foundry))
     #expect(ProviderFailoverTargetEligibility.compatibleRuntime(for: foundry) == nil)
+}
+
+@Test func failoverEligibilityAcceptsEnvironmentAuthenticatedApiProviders() throws {
+    let anthropic = try failoverAccount(
+        id: "anthropic-env",
+        provider: "anthropic",
+        authenticated: false
+    )
+    let openai = try failoverAccount(
+        id: "openai-env",
+        provider: "openai",
+        authenticated: false
+    )
+
+    #expect(ProviderFailoverTargetEligibility.isEligible(anthropic))
+    #expect(ProviderFailoverTargetEligibility.isEligible(openai))
 }
 
 @Test func failoverValidationAcceptsCompleteOrderedTargets() throws {

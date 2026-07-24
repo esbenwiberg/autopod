@@ -15,7 +15,9 @@ public enum ProviderFailoverTargetEligibility {
     }
 
     public static func isEligible(_ account: PublicProviderAccountResponse) -> Bool {
-        account.hasCredentials && compatibleRuntime(for: account) != nil
+        guard compatibleRuntime(for: account) != nil else { return false }
+        // These API-backed providers may authenticate through the daemon environment.
+        return account.hasCredentials || account.provider == "anthropic" || account.provider == "openai"
     }
 }
 
