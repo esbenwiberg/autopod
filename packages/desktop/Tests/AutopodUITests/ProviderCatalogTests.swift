@@ -126,6 +126,7 @@ final class ProviderCatalogTests: XCTestCase {
     XCTAssertTrue(switchedOptions.last?.label.contains("unavailable") == true)
     XCTAssertNotNil(ProviderModelSaveEligibility.errorMessage(
       profileProviderId: "pi",
+      hasLinkedAccount: true,
       accountProviderId: "fixture-cloud",
       model: previousModel,
       catalog: catalog
@@ -133,7 +134,38 @@ final class ProviderCatalogTests: XCTestCase {
 
     XCTAssertNil(ProviderModelSaveEligibility.errorMessage(
       profileProviderId: "pi",
+      hasLinkedAccount: true,
       accountProviderId: "fixture-cloud",
+      model: "fixture/model-a",
+      catalog: catalog
+    ))
+    XCTAssertNotNil(ProviderModelSaveEligibility.profileErrorMessage(
+      profileProviderId: "pi",
+      hasLinkedAccount: true,
+      accountProviderId: "fixture-cloud",
+      defaultModel: "fixture/model-a",
+      reviewerModel: "another-provider/model",
+      catalog: catalog
+    ))
+    XCTAssertNil(ProviderModelSaveEligibility.profileErrorMessage(
+      profileProviderId: "pi",
+      hasLinkedAccount: true,
+      accountProviderId: "fixture-cloud",
+      defaultModel: "fixture/model-a",
+      reviewerModel: "fixture/model-a",
+      catalog: catalog
+    ))
+    XCTAssertNotNil(ProviderModelSaveEligibility.errorMessage(
+      profileProviderId: "pi",
+      hasLinkedAccount: true,
+      accountProviderId: "fixture-cloud",
+      model: "another-provider/model",
+      catalog: catalog
+    ))
+    XCTAssertNotNil(ProviderModelSaveEligibility.errorMessage(
+      profileProviderId: "pi",
+      hasLinkedAccount: true,
+      accountProviderId: nil,
       model: "fixture/model-a",
       catalog: catalog
     ))

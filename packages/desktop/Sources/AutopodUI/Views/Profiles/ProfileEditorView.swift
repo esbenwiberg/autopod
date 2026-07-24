@@ -1249,10 +1249,12 @@ public struct ProfileEditorView: View {
     }
 
     private var providerModelSaveError: String? {
-        ProviderModelSaveEligibility.errorMessage(
+        ProviderModelSaveEligibility.profileErrorMessage(
             profileProviderId: profile.modelProvider.rawValue,
+            hasLinkedAccount: profile.providerAccountId != nil,
             accountProviderId: selectedAccountProviderId,
-            model: profile.defaultModel,
+            defaultModel: profile.defaultModel,
+            reviewerModel: profile.reviewerModel,
             catalog: providerCatalog
         )
     }

@@ -1,15 +1,46 @@
 import AutopodClient
 
 enum ProviderModelSaveEligibility {
+    static func profileErrorMessage(
+        profileProviderId: String,
+        hasLinkedAccount: Bool,
+        accountProviderId: String?,
+        defaultModel: String,
+        reviewerModel: String,
+        catalog: ProviderCatalogResponse?
+    ) -> String? {
+        let defaultError = errorMessage(
+            profileProviderId: profileProviderId,
+            hasLinkedAccount: hasLinkedAccount,
+            accountProviderId: accountProviderId,
+            model: defaultModel,
+            catalog: catalog
+        )
+        if let defaultError { return defaultError }
+        guard !reviewerModel.isEmpty else { return nil }
+        return errorMessage(
+            profileProviderId: profileProviderId,
+            hasLinkedAccount: hasLinkedAccount,
+            accountProviderId: accountProviderId,
+            model: reviewerModel,
+            catalog: catalog
+        )
+    }
+
     static func errorMessage(
         profileProviderId: String,
+        hasLinkedAccount: Bool,
         accountProviderId: String?,
         model: String,
         catalog: ProviderCatalogResponse?
     ) -> String? {
-        guard profileProviderId == "pi", let accountProviderId, accountProviderId != "pi" else {
+        guard profileProviderId == "pi", hasLinkedAccount else {
             return nil
         }
+        guard let accountProviderId else {
+            return "Provider account unavailable. Keep the current selection, but reconnect before saving."
+        }
+        guard accountProviderId != "pi" else { return nil }
         guard let provider = catalog?.provider(id: accountProviderId) else {
             return "Provider catalog unavailable. Keep the current selection, but reconnect before saving."
         }
