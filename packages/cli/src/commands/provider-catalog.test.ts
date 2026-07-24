@@ -94,6 +94,18 @@ const catalog: PublicProviderCatalog = {
       displayName: 'Fixture Model A',
       lifecycle: 'active',
     },
+    {
+      id: 'fixture/unreviewed-model',
+      providerId: 'fixture-cloud',
+      displayName: 'Fixture Unreviewed Model',
+      lifecycle: 'active',
+    },
+    {
+      id: 'fixture/deprecated-model',
+      providerId: 'fixture-cloud',
+      displayName: 'Fixture Deprecated Model',
+      lifecycle: 'deprecated',
+    },
   ],
 };
 

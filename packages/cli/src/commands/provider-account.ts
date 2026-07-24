@@ -51,7 +51,17 @@ export function catalogProviderModels(
   catalog: PublicProviderCatalog,
   providerId: string,
 ): PublicProviderCatalog['models'] {
-  return catalog.models.filter((model) => model.providerId === providerId);
+  const provider = findCatalogProvider(catalog, providerId);
+  if (!provider) {
+    return [];
+  }
+  const reviewedModelIds = new Set(provider.modelIds);
+  return catalog.models.filter(
+    (model) =>
+      model.providerId === providerId &&
+      model.lifecycle === 'active' &&
+      reviewedModelIds.has(model.id),
+  );
 }
 
 export function canSubmitGenericApiKey(provider: CompiledProvider): boolean {

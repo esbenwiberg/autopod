@@ -2,6 +2,26 @@ import SwiftUI
 import AutopodClient
 import AutopodUI
 
+private func loadProviderAccountsResult(
+  from api: DaemonAPI
+) async -> (accounts: [PublicProviderAccountResponse]?, error: String?) {
+  do {
+    return (try await api.listProviderAccounts(), nil)
+  } catch {
+    return (nil, error.localizedDescription)
+  }
+}
+
+private func loadProviderCatalogResult(
+  from api: DaemonAPI
+) async -> (catalog: ProviderCatalogResponse?, error: String?) {
+  do {
+    return (try await api.fetchModelProviderCatalog(), nil)
+  } catch {
+    return (nil, error.localizedDescription)
+  }
+}
+
 struct ProviderAccountsSettingsView: View {
   let api: DaemonAPI?
   let profiles: [Profile]
@@ -392,21 +412,33 @@ struct ProviderAccountsSettingsView: View {
     }
     isLoading = true
     defer { isLoading = false }
-    do {
-      async let loadedAccounts = api.listProviderAccounts()
-      async let loadedCatalog = api.fetchModelProviderCatalog()
-      accounts = try await loadedAccounts
-      providerCatalog = try await loadedCatalog
-      errorMessage = nil
-    } catch {
+
+    async let accountLoad = loadProviderAccountsResult(from: api)
+    async let catalogLoad = loadProviderCatalogResult(from: api)
+    let (accountResult, catalogResult) = await (accountLoad, catalogLoad)
+
+    var loadErrors: [String] = []
+    if let loadedAccounts = accountResult.accounts {
+      accounts = loadedAccounts
+    } else if let accountError = accountResult.error {
+      loadErrors.append(
+        "Provider accounts unavailable: \(accountError). "
+          + "Existing accounts are preserved; refresh to try again."
+      )
+    }
+
+    if let loadedCatalog = catalogResult.catalog {
+      providerCatalog = loadedCatalog
+    } else if let catalogError = catalogResult.error {
       let failure = ProviderAccountsCatalogFailure(
         preserving: accounts,
-        error: error
+        error: DaemonError.networkError(catalogError)
       )
       accounts = failure.accounts
       providerCatalog = failure.catalog
-      errorMessage = failure.errorMessage
+      loadErrors.append(failure.errorMessage)
     }
+    errorMessage = loadErrors.isEmpty ? nil : loadErrors.joined(separator: "\n")
   }
 
   @MainActor
