@@ -1195,25 +1195,16 @@ public struct ProfileEditorView: View {
     }
 
     private func loadProviderCatalog() async {
-        guard let onLoadProviderCatalog else {
-            await MainActor.run {
-                providerCatalogError = "Provider catalog unavailable while offline. Current values are preserved."
-            }
-            return
-        }
-        do {
-            let catalog = try await onLoadProviderCatalog()
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                providerCatalog = catalog
-                providerCatalogError = nil
-            }
-        } catch {
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                providerCatalogError = "Provider catalog unavailable: \(error.localizedDescription). Current values are preserved."
-            }
-        }
+        let result = await loadProviderCatalogForEditor(
+            currentProvider: profile.modelProvider,
+            currentModel: profile.defaultModel,
+            loader: onLoadProviderCatalog
+        )
+        guard !Task.isCancelled else { return }
+        providerCatalog = result.catalog
+        providerCatalogError = result.errorMessage
+        profile.modelProvider = result.provider
+        profile.defaultModel = result.model
     }
 
     private var modelProviderOptions: [(ModelProvider, String)] {

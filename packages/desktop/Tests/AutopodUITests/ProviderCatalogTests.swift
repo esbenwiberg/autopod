@@ -111,15 +111,34 @@ final class ProviderCatalogTests: XCTestCase {
     })
   }
 
-  func testCatalogFailurePreservesCurrentSelection() {
-    let current = "temporarily-unavailable/model"
+  @MainActor
+  func testCatalogFailurePreservesCurrentSelection() async {
+    let currentProvider = ModelProvider.pi
+    let currentModel = "temporarily-unavailable/model"
+    let result = await loadProviderCatalogForEditor(
+      currentProvider: currentProvider,
+      currentModel: currentModel,
+      loader: {
+        throw NSError(
+          domain: "ProviderCatalogTests",
+          code: 1,
+          userInfo: [NSLocalizedDescriptionKey: "daemon unavailable"]
+        )
+      }
+    )
+    XCTAssertEqual(result.provider, currentProvider)
+    XCTAssertEqual(result.model, currentModel)
+    XCTAssertNil(result.catalog)
+    XCTAssertTrue(result.errorMessage?.contains("Provider catalog unavailable") == true)
+    XCTAssertTrue(result.errorMessage?.contains("Current values are preserved") == true)
+
     let options = RuntimeModelOptions.options(
       for: .pi,
       role: .defaultModel,
-      currentValue: current,
-      catalog: nil,
+      currentValue: result.model,
+      catalog: result.catalog,
       providerId: "temporarily-unavailable"
     )
-    XCTAssertEqual(options.last?.value, current)
+    XCTAssertEqual(options.last?.value, currentModel)
   }
 }
