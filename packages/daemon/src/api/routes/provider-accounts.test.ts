@@ -466,6 +466,7 @@ describe('provider account routes', () => {
 
   it('rejects invalid profile failover targets without changing the profile', async () => {
     providerAccountStore.create({ id: 'primary', name: 'Primary', provider: 'openai' });
+    providerAccountStore.create({ id: 'backup', name: 'Backup', provider: 'openai' });
     profileStore.create({
       ...validProfile,
       modelProvider: 'openai',
@@ -484,5 +485,18 @@ describe('provider account routes', () => {
       expect(response.statusCode).toBeGreaterThanOrEqual(400);
       expect(profileStore.getRaw('app').providerFailover).toBeNull();
     }
+
+    profileStore.update('app', {
+      providerFailover: {
+        targets: [{ providerAccountId: 'backup', runtime: 'codex', model: 'gpt-5' }],
+      },
+    });
+    const selfReferential = await app.inject({
+      method: 'PATCH',
+      url: '/profiles/app',
+      payload: { providerAccountId: 'backup' },
+    });
+    expect(selfReferential.statusCode).toBeGreaterThanOrEqual(400);
+    expect(profileStore.getRaw('app').providerAccountId).toBe('primary');
   });
 });

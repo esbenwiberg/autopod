@@ -33,6 +33,7 @@ import {
   createProfileSchema,
   escalationConfigSchema,
   outputModeFromPodOptions,
+  providerFailoverPolicySchema,
   updateProfileSchema,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
@@ -112,7 +113,8 @@ function canonicalizeLegacyEscalationConfig(config: unknown): unknown {
 function parseProviderFailover(raw: unknown): ProviderFailoverPolicy | null {
   if (typeof raw !== 'string' || raw.length === 0) return null;
   try {
-    return JSON.parse(raw) as ProviderFailoverPolicy;
+    const parsed = providerFailoverPolicySchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }

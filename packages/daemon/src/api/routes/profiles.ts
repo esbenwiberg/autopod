@@ -159,10 +159,11 @@ export function profileRoutes(
       changes.providerAccountId === undefined
         ? existing.providerAccountId
         : (changes.providerAccountId as string | null);
-    validateProviderFailover(
-      nextAccountId,
-      changes.providerFailover as ProviderFailoverPolicy | null | undefined,
-    );
+    const nextProviderFailover =
+      changes.providerFailover === undefined
+        ? existing.providerFailover
+        : (changes.providerFailover as ProviderFailoverPolicy | null);
+    validateProviderFailover(nextAccountId, nextProviderFailover);
     const updated = profileStore.update(name, changes);
     // Fire-and-forget: re-apply network policy to running containers using this profile
     refreshNetworkPolicy(name).catch(() => {
