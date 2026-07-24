@@ -49,10 +49,16 @@ export function resolveCatalogProfileSelection(
   modelId: string,
 ): { modelProvider: string; defaultRuntime?: 'pi'; defaultModel: string } | undefined {
   const provider = catalog.providers.find((candidate) => candidate.id === providerId);
-  if (!provider?.policy.runnable || !provider.modelIds.includes(modelId)) return undefined;
+  if (
+    provider?.implementation.kind !== 'generic-pi-api' ||
+    !provider.policy.runnable ||
+    !provider.modelIds.includes(modelId)
+  ) {
+    return undefined;
+  }
   return {
-    modelProvider: provider.implementation.kind === 'generic-pi-api' ? 'pi' : provider.id,
-    defaultRuntime: provider.implementation.kind === 'generic-pi-api' ? 'pi' : undefined,
+    modelProvider: 'pi',
+    defaultRuntime: 'pi',
     defaultModel: modelId,
   };
 }
@@ -196,7 +202,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
 
   profile
     .command('set-provider <name> <provider>')
-    .description('Select a daemon-catalog provider and compatible model')
+    .description('Select a manifest-backed generic Pi provider and compatible model')
     .requiredOption('--model <model>', 'Provider-qualified model from the daemon catalog')
     .option('--account <id>', 'Matching provider account (required for generic providers)')
     .action(async (name: string, providerId: string, opts: { model: string; account?: string }) => {
@@ -215,6 +221,14 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         );
         process.exit(1);
       }
+      if (provider.implementation.kind !== 'generic-pi-api') {
+        console.error(
+          chalk.red(
+            `${provider.displayName} uses a specialized legacy flow; use its existing profile authentication command.`,
+          ),
+        );
+        process.exit(1);
+      }
       const selection = resolveCatalogProfileSelection(catalog, providerId, opts.model);
       if (!selection) {
         console.error(
@@ -224,11 +238,9 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         );
         process.exit(1);
       }
-      if (provider.implementation.kind === 'generic-pi-api') {
-        if (!opts.account) {
-          console.error(chalk.red('Generic providers require --account to bind the spend source.'));
-          process.exit(1);
-        }
+      if (!opts.account) {
+        console.error(chalk.red('Generic providers require --account to bind the spend source.'));
+        process.exit(1);
       }
       if (opts.account) {
         const account = await client.getProviderAccount(opts.account);

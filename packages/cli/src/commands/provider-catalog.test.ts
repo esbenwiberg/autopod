@@ -1,4 +1,4 @@
-import type { PublicProviderCatalog } from '@autopod/shared';
+import { type PublicProviderCatalog, updateProfileSchema } from '@autopod/shared';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
@@ -117,6 +117,14 @@ describe('daemon-driven provider catalog', () => {
       defaultRuntime: 'pi',
       defaultModel: 'fixture/model-a',
     });
+    expect(() =>
+      updateProfileSchema.parse(
+        resolveCatalogProfileSelection(catalog, 'fixture-cloud', 'fixture/model-a'),
+      ),
+    ).not.toThrow();
+    expect(
+      resolveCatalogProfileSelection(catalog, 'legacy-fixture', 'legacy/model'),
+    ).toBeUndefined();
   });
 
   it('exposes policy, credential guidance, and caveats without secrets', () => {
@@ -198,21 +206,6 @@ describe('daemon-driven provider catalog', () => {
       defaultRuntime: 'pi',
       defaultModel: 'fixture/model-a',
       providerAccountId: 'fixture-account',
-    });
-
-    await run([
-      'profile',
-      'set-provider',
-      'fixture-profile',
-      'legacy-fixture',
-      '--model',
-      'legacy/model',
-    ]);
-    expect(client.updateProfile).toHaveBeenCalledWith('fixture-profile', {
-      modelProvider: 'legacy-fixture',
-      defaultRuntime: undefined,
-      defaultModel: 'legacy/model',
-      providerAccountId: null,
     });
   });
 });
