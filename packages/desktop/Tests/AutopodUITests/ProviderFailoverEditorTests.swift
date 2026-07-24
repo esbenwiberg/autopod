@@ -39,7 +39,7 @@ private func failoverAccount(
     for (provider, runtime) in cases {
         let account = try failoverAccount(id: provider, provider: provider)
         #expect(ProviderFailoverTargetEligibility.isEligible(account))
-        #expect(ProviderFailoverTargetEligibility.compatibleRuntime(for: account) == runtime)
+        #expect(ProviderFailoverTargetEligibility.compatibleRuntimes(for: account) == [runtime])
     }
 }
 
@@ -49,11 +49,11 @@ private func failoverAccount(
         provider: "copilot",
         authenticated: false
     )
-    let foundry = try failoverAccount(id: "foundry", provider: "foundry")
+    let unknown = try failoverAccount(id: "unknown", provider: "unknown")
 
     #expect(!ProviderFailoverTargetEligibility.isEligible(unauthenticated))
-    #expect(!ProviderFailoverTargetEligibility.isEligible(foundry))
-    #expect(ProviderFailoverTargetEligibility.compatibleRuntime(for: foundry) == nil)
+    #expect(!ProviderFailoverTargetEligibility.isEligible(unknown))
+    #expect(ProviderFailoverTargetEligibility.compatibleRuntimes(for: unknown).isEmpty)
 }
 
 @Test func failoverEligibilityAcceptsEnvironmentAuthenticatedApiProviders() throws {
@@ -70,6 +70,16 @@ private func failoverAccount(
 
     #expect(ProviderFailoverTargetEligibility.isEligible(anthropic))
     #expect(ProviderFailoverTargetEligibility.isEligible(openai))
+}
+
+@Test func failoverEligibilityOffersBothRedactedFoundrySurfaces() throws {
+    let foundry = try failoverAccount(id: "foundry", provider: "foundry")
+
+    #expect(ProviderFailoverTargetEligibility.isEligible(foundry))
+    #expect(
+        ProviderFailoverTargetEligibility.compatibleRuntimes(for: foundry)
+            == ["claude", "codex"]
+    )
 }
 
 @Test func failoverValidationAcceptsCompleteOrderedTargets() throws {

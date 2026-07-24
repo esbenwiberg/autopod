@@ -2,20 +2,23 @@ import SwiftUI
 import AutopodClient
 
 public enum ProviderFailoverTargetEligibility {
-    public static func compatibleRuntime(
+    public static func compatibleRuntimes(
         for account: PublicProviderAccountResponse
-    ) -> String? {
+    ) -> [String] {
         switch account.provider {
-        case "anthropic", "max": return "claude"
-        case "openai", "openrouter": return "codex"
-        case "copilot": return "copilot"
-        case "pi": return "pi"
-        default: return nil
+        case "anthropic", "max": return ["claude"]
+        case "openai", "openrouter": return ["codex"]
+        case "copilot": return ["copilot"]
+        case "pi": return ["pi"]
+        // The public response redacts Foundry's API surface, so the operator chooses and
+        // the daemon remains authoritative about the account's configured surface.
+        case "foundry": return ["claude", "codex"]
+        default: return []
         }
     }
 
     public static func isEligible(_ account: PublicProviderAccountResponse) -> Bool {
-        guard compatibleRuntime(for: account) != nil else { return false }
+        guard !compatibleRuntimes(for: account).isEmpty else { return false }
         // These API-backed providers may authenticate through the daemon environment.
         return account.hasCredentials || account.provider == "anthropic" || account.provider == "openai"
     }
@@ -41,11 +44,12 @@ public func validateProviderFailoverPolicy(
             return "Target \(index + 1) references an unavailable provider account."
         }
         guard ProviderFailoverTargetEligibility.isEligible(account),
-              let runtime = ProviderFailoverTargetEligibility.compatibleRuntime(for: account)
+              !ProviderFailoverTargetEligibility.compatibleRuntimes(for: account).isEmpty
         else {
             return "\(account.name) is not authenticated or its runtime cannot be selected safely."
         }
-        if runtime != target.runtime {
+        if !ProviderFailoverTargetEligibility.compatibleRuntimes(for: account)
+            .contains(target.runtime) {
             return "\(account.name) is incompatible with the selected runtime."
         }
         if target.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -172,16 +176,21 @@ public struct ProviderFailoverEditor: View {
             .frame(width: 205)
             .onChange(of: policy.targets[index].providerAccountId) { _, accountId in
                 guard let account = accounts.first(where: { $0.id == accountId }),
-                      let runtime = compatibleRuntime(for: account) else { return }
+                      let runtime = compatibleRuntimes(for: account).first else { return }
                 policy.targets[index].runtime = runtime
             }
 
             Picker("Runtime", selection: targetBinding(index, \.runtime)) {
-                Text(runtimeLabel(target.runtime)).tag(target.runtime)
+                ForEach(
+                    runtimeOptions(for: target),
+                    id: \.self
+                ) { runtime in
+                    Text(runtimeLabel(runtime)).tag(runtime)
+                }
             }
             .labelsHidden()
             .frame(width: 90)
-            .disabled(true)
+            .disabled(runtimeOptions(for: target).count < 2)
 
             TextField("Model", text: targetBinding(index, \.model))
                 .textFieldStyle(.roundedBorder)
@@ -235,7 +244,7 @@ public struct ProviderFailoverEditor: View {
 
     private func addTarget() {
         guard let account = nextAvailableAccount,
-              let runtime = compatibleRuntime(for: account) else { return }
+              let runtime = compatibleRuntimes(for: account).first else { return }
         policy.targets.append(
             ProviderFailoverTargetResponse(
                 providerAccountId: account.id,
@@ -276,8 +285,16 @@ public struct ProviderFailoverEditor: View {
         ProviderFailoverTargetEligibility.isEligible(account)
     }
 
-    private func compatibleRuntime(for account: PublicProviderAccountResponse) -> String? {
-        ProviderFailoverTargetEligibility.compatibleRuntime(for: account)
+    private func compatibleRuntimes(for account: PublicProviderAccountResponse) -> [String] {
+        ProviderFailoverTargetEligibility.compatibleRuntimes(for: account)
+    }
+
+    private func runtimeOptions(for target: ProviderFailoverTargetResponse) -> [String] {
+        guard let account = accounts.first(where: { $0.id == target.providerAccountId }) else {
+            return [target.runtime]
+        }
+        let options = compatibleRuntimes(for: account)
+        return options.contains(target.runtime) ? options : [target.runtime] + options
     }
 
     private func defaultModel(for provider: String) -> String {
