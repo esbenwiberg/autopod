@@ -1,12 +1,10 @@
 import SwiftUI
 import AutopodClient
 
-public func validateProviderFailoverPolicy(
-    _ policy: ProviderFailoverPolicyResponse,
-    accounts: [PublicProviderAccountResponse],
-    excludedAccountId: String?
-) -> String? {
-    func compatibleRuntime(_ account: PublicProviderAccountResponse) -> String? {
+public enum ProviderFailoverTargetEligibility {
+    public static func compatibleRuntime(
+        for account: PublicProviderAccountResponse
+    ) -> String? {
         switch account.provider {
         case "anthropic", "max": return "claude"
         case "openai", "openrouter": return "codex"
@@ -16,6 +14,16 @@ public func validateProviderFailoverPolicy(
         }
     }
 
+    public static func isEligible(_ account: PublicProviderAccountResponse) -> Bool {
+        account.hasCredentials && compatibleRuntime(for: account) != nil
+    }
+}
+
+public func validateProviderFailoverPolicy(
+    _ policy: ProviderFailoverPolicyResponse,
+    accounts: [PublicProviderAccountResponse],
+    excludedAccountId: String?
+) -> String? {
     if policy.targets.count > 8 {
         return "Failover chains can contain at most 8 targets."
     }
@@ -30,7 +38,9 @@ public func validateProviderFailoverPolicy(
         guard let account = accounts.first(where: { $0.id == target.providerAccountId }) else {
             return "Target \(index + 1) references an unavailable provider account."
         }
-        guard account.hasCredentials, let runtime = compatibleRuntime(account) else {
+        guard ProviderFailoverTargetEligibility.isEligible(account),
+              let runtime = ProviderFailoverTargetEligibility.compatibleRuntime(for: account)
+        else {
             return "\(account.name) is not authenticated or its runtime cannot be selected safely."
         }
         if runtime != target.runtime {
@@ -261,20 +271,11 @@ public struct ProviderFailoverEditor: View {
     }
 
     private func accountIsEligible(_ account: PublicProviderAccountResponse) -> Bool {
-        guard compatibleRuntime(for: account) != nil else { return false }
-        return account.hasCredentials
+        ProviderFailoverTargetEligibility.isEligible(account)
     }
 
     private func compatibleRuntime(for account: PublicProviderAccountResponse) -> String? {
-        switch account.provider {
-        case "anthropic", "max": return "claude"
-        case "openai", "openrouter": return "codex"
-        case "copilot": return "copilot"
-        case "pi": return "pi"
-        // The redacted account response does not expose Foundry's API surface.
-        case "foundry": return nil
-        default: return nil
-        }
+        ProviderFailoverTargetEligibility.compatibleRuntime(for: account)
     }
 
     private func defaultModel(for provider: String) -> String {
