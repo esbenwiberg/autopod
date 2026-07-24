@@ -1,5 +1,5 @@
 import type { ModelProvider, Profile, ProviderAccount, ProviderCredentials } from '@autopod/shared';
-import { AutopodError } from '@autopod/shared';
+import { AutopodError, PROVIDER_CATALOG } from '@autopod/shared';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 
@@ -44,7 +44,13 @@ export function resolveProviderAuth(
     }
 
     const account = options.providerAccountStore.get(providerAccountId);
-    if (account.provider !== provider) {
+    const catalogProvider = PROVIDER_CATALOG.providers.find(
+      (candidate) => candidate.id === account.provider,
+    );
+    const matchesLegacyProvider = account.provider === provider;
+    const matchesGenericPiProvider =
+      provider === 'pi' && catalogProvider?.implementation.kind === 'generic-pi-api';
+    if (!matchesLegacyProvider && !matchesGenericPiProvider) {
       throw new AutopodError(
         `Profile "${profile.name}" uses modelProvider=${provider} but provider account "${account.name}" is for ${account.provider}`,
         'PROVIDER_ACCOUNT_PROVIDER_MISMATCH',

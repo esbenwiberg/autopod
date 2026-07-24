@@ -1,5 +1,6 @@
 import {
   AutopodError,
+  PROVIDER_CATALOG,
   importProviderAccountFromProfileSchema,
   providerAccountIdSchema,
   providerAccountProviderSchema,
@@ -30,7 +31,13 @@ function assertAccountMatchesProfile(
   account: ReturnType<ProviderAccountStore['get']>,
   profile: ReturnType<ProfileStore['get']>,
 ): void {
-  if (profile.modelProvider !== account.provider) {
+  const catalogProvider = PROVIDER_CATALOG.providers.find(
+    (provider) => provider.id === account.provider,
+  );
+  const matchesLegacyProvider = profile.modelProvider === account.provider;
+  const matchesGenericPiProvider =
+    profile.modelProvider === 'pi' && catalogProvider?.implementation.kind === 'generic-pi-api';
+  if (!matchesLegacyProvider && !matchesGenericPiProvider) {
     throw new AutopodError(
       `Profile "${profile.name}" uses modelProvider=${profile.modelProvider ?? 'none'} but provider account "${account.name}" is for ${account.provider}`,
       'PROVIDER_ACCOUNT_PROVIDER_MISMATCH',

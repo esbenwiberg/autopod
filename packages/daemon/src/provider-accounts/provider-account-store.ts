@@ -1,4 +1,4 @@
-import type { ModelProvider, ProviderAccount, ProviderCredentials } from '@autopod/shared';
+import type { ProviderAccount, ProviderAccountProvider, ProviderCredentials } from '@autopod/shared';
 import {
   AutopodError,
   createProviderAccountSchema,
@@ -10,7 +10,7 @@ import type { CredentialsCipher } from '../crypto/credentials-cipher.js';
 export interface ProviderAccountStore {
   create(input: Record<string, unknown>): ProviderAccount;
   get(id: string): ProviderAccount;
-  list(filter?: { provider?: ModelProvider }): ProviderAccount[];
+  list(filter?: { provider?: ProviderAccountProvider }): ProviderAccount[];
   update(id: string, changes: Record<string, unknown>): ProviderAccount;
   updateCredentials(
     id: string,
@@ -101,12 +101,14 @@ export function createProviderAccountStore(
   }
 
   function assertCredentialsMatchProvider(
-    provider: ModelProvider,
+    provider: ProviderAccountProvider,
     credentials: ProviderCredentials | null | undefined,
   ): void {
-    if (credentials && credentials.provider !== provider) {
+    const credentialProviderId =
+      credentials?.provider === 'api-key' ? credentials.providerId : credentials?.provider;
+    if (credentialProviderId && credentialProviderId !== provider) {
       throw new AutopodError(
-        `Provider account credentials are for "${credentials.provider}", not "${provider}"`,
+        `Provider account credentials are for "${credentialProviderId}", not "${provider}"`,
         'PROVIDER_ACCOUNT_PROVIDER_MISMATCH',
         400,
       );
@@ -153,7 +155,7 @@ export function createProviderAccountStore(
       return fetchRaw(id);
     },
 
-    list(filter: { provider?: ModelProvider } = {}): ProviderAccount[] {
+    list(filter: { provider?: ProviderAccountProvider } = {}): ProviderAccount[] {
       const rows = filter.provider
         ? (db
             .prepare('SELECT * FROM provider_accounts WHERE provider = ? ORDER BY lower(name)')
