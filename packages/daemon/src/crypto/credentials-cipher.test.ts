@@ -39,12 +39,14 @@ describe('loadOrCreateKey', () => {
   it('throws on startup when key file has permissions wider than 0600', () => {
     const key = Buffer.alloc(32, 0xab);
     writeFileSync(keyPath, key, { mode: 0o644 });
+    chmodSync(keyPath, 0o644);
     expect(() => loadOrCreateKey(keyPath)).toThrow('must be 0600');
   });
 
   it('throws when key file has group-readable permissions', () => {
     const key = Buffer.alloc(32, 0xcd);
     writeFileSync(keyPath, key, { mode: 0o640 });
+    chmodSync(keyPath, 0o640);
     expect(() => loadOrCreateKey(keyPath)).toThrow('must be 0600');
   });
 
