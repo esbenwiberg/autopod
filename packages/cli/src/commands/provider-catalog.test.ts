@@ -208,4 +208,49 @@ describe('daemon-driven provider catalog', () => {
       providerAccountId: 'fixture-account',
     });
   });
+
+  it('rejects a deprecated catalog model before updating a profile', async () => {
+    const deprecatedCatalog: PublicProviderCatalog = {
+      ...catalog,
+      models: catalog.models.map((model) =>
+        model.id === 'fixture/model-a' ? { ...model, lifecycle: 'deprecated' } : model,
+      ),
+    };
+    const client = {
+      getModelProviderCatalog: vi.fn().mockResolvedValue(deprecatedCatalog),
+      getProviderAccount: vi.fn(),
+      updateProfile: vi.fn(),
+    } as unknown as AutopodClient;
+    const program = new Command();
+    program.exitOverride();
+    registerProfileCommands(program, () => client);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+      throw new Error(`process.exit ${code}`);
+    });
+
+    expect(
+      resolveCatalogProfileSelection(deprecatedCatalog, 'fixture-cloud', 'fixture/model-a'),
+    ).toBeUndefined();
+    await expect(
+      program.parseAsync([
+        'node',
+        'ap',
+        'profile',
+        'set-provider',
+        'fixture-profile',
+        'fixture-cloud',
+        '--model',
+        'fixture/model-a',
+        '--account',
+        'fixture-account',
+      ]),
+    ).rejects.toThrow('process.exit 1');
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('deprecated and cannot be selected for pod launch'),
+    );
+    expect(client.getProviderAccount).not.toHaveBeenCalled();
+    expect(client.updateProfile).not.toHaveBeenCalled();
+  });
 });

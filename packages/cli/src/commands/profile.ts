@@ -49,10 +49,13 @@ export function resolveCatalogProfileSelection(
   modelId: string,
 ): { modelProvider: string; defaultRuntime?: 'pi'; defaultModel: string } | undefined {
   const provider = catalog.providers.find((candidate) => candidate.id === providerId);
+  const model = catalog.models.find((candidate) => candidate.id === modelId);
   if (
     provider?.implementation.kind !== 'generic-pi-api' ||
     !provider.policy.runnable ||
-    !provider.modelIds.includes(modelId)
+    !provider.modelIds.includes(modelId) ||
+    model?.providerId !== providerId ||
+    model.lifecycle !== 'active'
   ) {
     return undefined;
   }
@@ -225,6 +228,15 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         console.error(
           chalk.red(
             `${provider.displayName} uses a specialized legacy flow; use its existing profile authentication command.`,
+          ),
+        );
+        process.exit(1);
+      }
+      const catalogModel = catalog.models.find((candidate) => candidate.id === opts.model);
+      if (catalogModel?.providerId === provider.id && catalogModel.lifecycle !== 'active') {
+        console.error(
+          chalk.red(
+            `Model "${opts.model}" is ${catalogModel.lifecycle} and cannot be selected for pod launch.`,
           ),
         );
         process.exit(1);
