@@ -1,5 +1,6 @@
 import type { PublicProviderCatalog } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
+import { resolveCatalogProfileSelection } from './profile.js';
 import {
   canSubmitGenericApiKey,
   catalogProviderModels,
@@ -77,6 +78,12 @@ describe('daemon-driven provider catalog', () => {
     expect(catalogProviderModels(catalog, 'fixture-cloud')).toEqual([
       expect.objectContaining({ id: 'fixture/model-a' }),
     ]);
+    expect(catalog.providers[0]?.modelIds).toContain('fixture/model-a');
+    expect(resolveCatalogProfileSelection(catalog, 'fixture-cloud', 'fixture/model-a')).toEqual({
+      modelProvider: 'fixture-cloud',
+      defaultRuntime: 'pi',
+      defaultModel: 'fixture/model-a',
+    });
   });
 
   it('exposes policy, credential guidance, and caveats without secrets', () => {

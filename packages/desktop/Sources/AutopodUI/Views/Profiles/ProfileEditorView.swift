@@ -1687,7 +1687,7 @@ public struct ProfileEditorView: View {
                     : "Not runnable — \(provider.policy.authorization)",
                 systemImage: provider.policy.runnable ? "checkmark.shield" : "hand.raised.fill"
             )
-            .foregroundStyle(provider.policy.runnable ? .green : .orange)
+            .foregroundStyle(provider.policy.runnable ? Color.green : Color.orange)
             ForEach(provider.policy.caveats, id: \.message) { caveat in
                 Text("\(caveat.kind.capitalized): \(caveat.message)")
                     .foregroundStyle(caveat.severity == "blocking" ? .orange : .secondary)

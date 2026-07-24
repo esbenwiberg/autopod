@@ -276,7 +276,7 @@ struct ProviderAccountsSettingsView: View {
           Spacer()
         }
         .font(.caption2)
-        .foregroundStyle(provider.policy.runnable ? .secondary : .orange)
+        .foregroundStyle(provider.policy.runnable ? Color.secondary : Color.orange)
       }
 
       metadataRow(account)
@@ -647,7 +647,7 @@ private struct ProviderAccountCreateSheet: View {
               }
             }
             .font(.caption)
-            .foregroundStyle(selectedProvider.policy.runnable ? .secondary : .orange)
+            .foregroundStyle(selectedProvider.policy.runnable ? Color.secondary : Color.orange)
           }
           if selectedProvider.implementation.kind == "generic-pi-api" {
             GridRow {
@@ -689,7 +689,7 @@ private struct ProviderAccountCreateSheet: View {
     .frame(width: 420)
     .onAppear {
       if !providers.contains(where: { $0.id == provider && $0.policy.runnable }),
-         let first = providers.first(where: \.policy.runnable) {
+         let first = providers.first(where: { $0.policy.runnable }) {
         provider = first.id
       }
     }

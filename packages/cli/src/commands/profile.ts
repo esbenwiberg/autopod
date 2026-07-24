@@ -8,6 +8,7 @@ import type {
   Profile,
   ProviderCredentials,
   PublicProfile,
+  PublicProviderCatalog,
   ValidationSuite,
 } from '@autopod/shared';
 import {
@@ -41,6 +42,20 @@ const profileColumns: ColumnDef<Profile>[] = [
   { header: 'Model', key: 'defaultModel', width: 10 },
   { header: 'Runtime', key: 'defaultRuntime', width: 10 },
 ];
+
+export function resolveCatalogProfileSelection(
+  catalog: PublicProviderCatalog,
+  providerId: string,
+  modelId: string,
+): { modelProvider: string; defaultRuntime?: 'pi'; defaultModel: string } | undefined {
+  const provider = catalog.providers.find((candidate) => candidate.id === providerId);
+  if (!provider?.policy.runnable || !provider.modelIds.includes(modelId)) return undefined;
+  return {
+    modelProvider: provider.id,
+    defaultRuntime: provider.implementation.kind === 'generic-pi-api' ? 'pi' : undefined,
+    defaultModel: modelId,
+  };
+}
 
 function parseValidationSuite(value: string): ValidationSuite {
   if (isValidationSuite(value)) return value;
@@ -177,6 +192,45 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
           }
         }
       });
+    });
+
+  profile
+    .command('set-provider <name> <provider>')
+    .description('Select a daemon-catalog provider and compatible model')
+    .requiredOption('--model <model>', 'Provider-qualified model from the daemon catalog')
+    .action(async (name: string, providerId: string, opts: { model: string }) => {
+      const client = getClient();
+      const catalog = await client.getModelProviderCatalog();
+      const provider = catalog.providers.find((candidate) => candidate.id === providerId);
+      if (!provider) {
+        console.error(chalk.red(`Unknown provider "${providerId}".`));
+        process.exit(1);
+      }
+      if (!provider.policy.runnable) {
+        console.error(
+          chalk.red(
+            `${provider.displayName} cannot be selected for pods (${provider.policy.authorization}).`,
+          ),
+        );
+        process.exit(1);
+      }
+      const selection = resolveCatalogProfileSelection(catalog, providerId, opts.model);
+      if (!selection) {
+        console.error(
+          chalk.red(
+            `Model "${opts.model}" is not reviewed for ${provider.displayName}: ${provider.modelIds.join(', ') || 'none'}.`,
+          ),
+        );
+        process.exit(1);
+      }
+      const updated = await withSpinner('Updating profile provider...', () =>
+        client.updateProfile(name, {
+          ...selection,
+        }),
+      );
+      console.log(
+        chalk.green(`Profile "${updated.name}" now uses ${provider.displayName} (${opts.model}).`),
+      );
     });
 
   profile
