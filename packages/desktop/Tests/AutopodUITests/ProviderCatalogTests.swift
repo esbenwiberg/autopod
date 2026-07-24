@@ -115,6 +115,10 @@ final class ProviderCatalogTests: XCTestCase {
     XCTAssertTrue(provider.canAcceptGenericAPIKey)
     XCTAssertTrue(provider.isCompatible(profileProviderId: "pi"))
     XCTAssertFalse(provider.isCompatible(profileProviderId: "openai"))
+    XCTAssertEqual(ProviderCatalogProfileOptions.modelProvider(for: provider), .pi)
+    XCTAssertTrue(ProviderCatalogProfileOptions.options(from: catalog).contains {
+      $0.0 == .pi && $0.1.contains("Fixture Cloud")
+    })
     let linkableProfileProviders = ["anthropic", "pi", "openai"].filter {
       provider.isCompatible(profileProviderId: $0)
     }
