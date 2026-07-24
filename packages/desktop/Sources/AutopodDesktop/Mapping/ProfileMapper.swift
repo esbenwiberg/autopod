@@ -59,6 +59,7 @@ public enum ProfileMapper {
       modelProvider: provider,
       providerAccountId: response.providerAccountId,
       providerFailover: response.providerFailover,
+      providerFailoverResolution: response.providerFailoverResolution,
       prProvider: prProvider,
       customInstructions: response.customInstructions,
       agentDonePrompt: response.agentDonePrompt,

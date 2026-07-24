@@ -55,6 +55,8 @@ public struct Profile: Identifiable, Sendable {
     public var providerAccountId: String?
     /// Nil inherits provider-account defaults; non-nil replaces them, including an empty target list.
     public var providerFailover: ProviderFailoverPolicyResponse?
+    /// Read-only effective policy/source from newer daemon responses.
+    public var providerFailoverResolution: ResolvedProviderFailoverPolicyResponse?
     public var prProvider: PRProvider
     public var customInstructions: String?
     public var agentDonePrompt: String?
@@ -214,6 +216,7 @@ public struct Profile: Identifiable, Sendable {
         modelProvider: ModelProvider = .anthropic,
         providerAccountId: String? = nil,
         providerFailover: ProviderFailoverPolicyResponse? = nil,
+        providerFailoverResolution: ResolvedProviderFailoverPolicyResponse? = nil,
         prProvider: PRProvider = .github,
         customInstructions: String? = nil, agentDonePrompt: String? = nil,
         containerMemoryGb: Double? = nil,
@@ -281,6 +284,7 @@ public struct Profile: Identifiable, Sendable {
         self.executionTarget = executionTarget; self.modelProvider = modelProvider
         self.providerAccountId = providerAccountId
         self.providerFailover = providerFailover
+        self.providerFailoverResolution = providerFailoverResolution
         self.prProvider = prProvider; self.customInstructions = customInstructions
         self.agentDonePrompt = agentDonePrompt
         self.containerMemoryGb = containerMemoryGb

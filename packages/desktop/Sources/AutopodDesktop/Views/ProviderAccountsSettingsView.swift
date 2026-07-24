@@ -424,7 +424,14 @@ struct ProviderAccountsSettingsView: View {
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.small)
-        .disabled(isAccountBusy(account.id))
+        .disabled(
+          isAccountBusy(account.id)
+            || validateProviderFailoverPolicy(
+              failoverBinding(for: account).wrappedValue,
+              accounts: accounts,
+              excludedAccountId: account.id
+            ) != nil
+        )
       }
 
       ProviderFailoverEditor(

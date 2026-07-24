@@ -1,6 +1,52 @@
 import SwiftUI
 import AutopodClient
 
+public func validateProviderFailoverPolicy(
+    _ policy: ProviderFailoverPolicyResponse,
+    accounts: [PublicProviderAccountResponse],
+    excludedAccountId: String?
+) -> String? {
+    func compatibleRuntime(_ account: PublicProviderAccountResponse) -> String? {
+        switch account.provider {
+        case "anthropic", "max": return "claude"
+        case "openai", "openrouter": return "codex"
+        case "copilot": return "copilot"
+        case "pi": return "pi"
+        default: return nil
+        }
+    }
+
+    if policy.targets.count > 8 {
+        return "Failover chains can contain at most 8 targets."
+    }
+    let ids = policy.targets.map(\.providerAccountId)
+    if Set(ids).count != ids.count {
+        return "Each provider account can appear only once."
+    }
+    if let excludedAccountId, ids.contains(excludedAccountId) {
+        return "A provider account cannot fail over to itself."
+    }
+    for (index, target) in policy.targets.enumerated() {
+        guard let account = accounts.first(where: { $0.id == target.providerAccountId }) else {
+            return "Target \(index + 1) references an unavailable provider account."
+        }
+        guard account.hasCredentials, let runtime = compatibleRuntime(account) else {
+            return "\(account.name) is not authenticated or its runtime cannot be selected safely."
+        }
+        if runtime != target.runtime {
+            return "\(account.name) is incompatible with the selected runtime."
+        }
+        if target.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Target \(index + 1) needs a model."
+        }
+    }
+    if let maxHops = policy.maxHops,
+       maxHops < 1 || maxHops > policy.targets.count {
+        return "Maximum hops must be between 1 and the number of targets."
+    }
+    return nil
+}
+
 /// Ordered editor for complete provider-account/runtime/model failover targets.
 public struct ProviderFailoverEditor: View {
     @Binding private var policy: ProviderFailoverPolicyResponse
@@ -24,35 +70,11 @@ public struct ProviderFailoverEditor: View {
     }
 
     public var validationMessage: String? {
-        if policy.targets.count > 8 {
-            return "Failover chains can contain at most 8 targets."
-        }
-        let ids = policy.targets.map(\.providerAccountId)
-        if Set(ids).count != ids.count {
-            return "Each provider account can appear only once."
-        }
-        if let excludedAccountId, ids.contains(excludedAccountId) {
-            return "A provider account cannot fail over to itself."
-        }
-        for (index, target) in policy.targets.enumerated() {
-            guard let account = accounts.first(where: { $0.id == target.providerAccountId }) else {
-                return "Target \(index + 1) references an unavailable provider account."
-            }
-            guard accountIsEligible(account) else {
-                return "\(account.name) is not authenticated or its runtime cannot be selected safely."
-            }
-            guard compatibleRuntime(for: account) == target.runtime else {
-                return "\(account.name) is incompatible with the selected runtime."
-            }
-            if target.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return "Target \(index + 1) needs a model."
-            }
-        }
-        if let maxHops = policy.maxHops,
-           maxHops < 1 || maxHops > policy.targets.count {
-            return "Maximum hops must be between 1 and the number of targets."
-        }
-        return nil
+        validateProviderFailoverPolicy(
+            policy,
+            accounts: accounts,
+            excludedAccountId: excludedAccountId
+        )
     }
 
     private var availableAccounts: [PublicProviderAccountResponse] {
@@ -240,7 +262,7 @@ public struct ProviderFailoverEditor: View {
 
     private func accountIsEligible(_ account: PublicProviderAccountResponse) -> Bool {
         guard compatibleRuntime(for: account) != nil else { return false }
-        return account.hasCredentials || account.provider == "anthropic" || account.provider == "openai"
+        return account.hasCredentials
     }
 
     private func compatibleRuntime(for account: PublicProviderAccountResponse) -> String? {

@@ -709,6 +709,7 @@ public struct ProfileEditorView: View {
                         || isDeleting
                         || (isNew && profile.name.isEmpty)
                         || (showOverridesView && editorLoadState != .loaded)
+                        || profileFailoverValidationMessage != nil
                     )
             }
         }
@@ -1409,6 +1410,18 @@ public struct ProfileEditorView: View {
         )
     }
 
+    private var profileFailoverValidationMessage: String? {
+        if showOverridesView && inheritedFields.contains("providerFailover") {
+            return nil
+        }
+        guard let policy = profile.providerFailover else { return nil }
+        return validateProviderFailoverPolicy(
+            policy,
+            accounts: providerAccounts,
+            excludedAccountId: profile.providerAccountId
+        )
+    }
+
     @ViewBuilder
     private var providerAccountPicker: some View {
         HStack(spacing: 8) {
@@ -1483,7 +1496,7 @@ public struct ProfileEditorView: View {
                 loadError: providerAccountsError
             )
         } else {
-            Text("This profile inherits the linked provider account's default failover chain.")
+            Text(inheritedFailoverDescription)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1665,6 +1678,21 @@ public struct ProfileEditorView: View {
                  : "Azure DevOps — PRs created via ADO API. Issue Watcher monitors ADO Work Items. Authenticate with an ADO PAT in Credentials.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+        }
+    }
+
+    private var inheritedFailoverDescription: String {
+        let resolution = profile.providerFailoverResolution
+            ?? editorPayload?.resolved.providerFailoverResolution
+        switch resolution?.source {
+        case "profile":
+            let count = resolution?.policy?.targets.count ?? 0
+            return "Inherited from the profile family (\(count) target\(count == 1 ? "" : "s"))."
+        case "account-default":
+            let count = resolution?.policy?.targets.count ?? 0
+            return "Using the linked provider account default (\(count) target\(count == 1 ? "" : "s"))."
+        default:
+            return "No inherited or provider-account failover policy is configured."
         }
     }
 

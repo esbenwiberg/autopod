@@ -230,6 +230,39 @@ import AutopodUI
   #expect((policy?["targets"] as? [[String: String]])?.isEmpty == true)
 }
 
+@Test func profileMapperCarriesResolvedFailoverAsReadOnlyPresentationState() throws {
+  let response = try JSONDecoder().decode(
+    ProfileResponse.self,
+    from: Data(
+      """
+      {
+        "name": "inheriting",
+        "providerFailover": null,
+        "providerFailoverResolution": {
+          "policy": {
+            "targets": [
+              { "providerAccountId": "openai-pro", "runtime": "codex", "model": "gpt-5" }
+            ]
+          },
+          "source": "account-default"
+        },
+        "version": 1,
+        "createdAt": "",
+        "updatedAt": ""
+      }
+      """.utf8
+    )
+  )
+  let mapped = ProfileMapper.map(response)
+  let fields = ProfileMapper.mapToFields(mapped)
+
+  #expect(mapped.providerFailover == nil)
+  #expect(mapped.providerFailoverResolution?.source == "account-default")
+  #expect(mapped.providerFailoverResolution?.policy?.targets.count == 1)
+  #expect(fields["providerFailover"] is NSNull)
+  #expect(fields["providerFailoverResolution"] == nil)
+}
+
 private func decodeMapperProfile(advisoryBrowserQaFragment: String) throws -> ProfileResponse {
   let json = """
   {
