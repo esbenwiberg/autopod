@@ -46,6 +46,25 @@ function assertAccountMatchesProfile(
   }
 }
 
+function asProviderAccountValidationError(error: unknown): never {
+  if (error instanceof z.ZodError) {
+    throw new AutopodError(
+      error.issues.map((issue) => issue.message).join('; '),
+      'PROVIDER_ACCOUNT_VALIDATION_FAILED',
+      400,
+    );
+  }
+  throw error;
+}
+
+function validateProviderAccountRequest<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    asProviderAccountValidationError(error);
+  }
+}
+
 export function providerAccountRoutes(
   app: FastifyInstance,
   providerAccountStore: ProviderAccountStore,
@@ -61,7 +80,9 @@ export function providerAccountRoutes(
   });
 
   app.post('/provider-accounts', async (request, reply) => {
-    const account = providerAccountStore.create(request.body as Record<string, unknown>);
+    const account = validateProviderAccountRequest(() =>
+      providerAccountStore.create(request.body as Record<string, unknown>),
+    );
     reply.status(201);
     return redactProviderAccountSecrets(account);
   });
@@ -73,7 +94,9 @@ export function providerAccountRoutes(
 
   app.patch('/provider-accounts/:id', async (request) => {
     const { id } = request.params as { id: string };
-    const account = providerAccountStore.update(id, request.body as Record<string, unknown>);
+    const account = validateProviderAccountRequest(() =>
+      providerAccountStore.update(id, request.body as Record<string, unknown>),
+    );
     return redactProviderAccountSecrets(account);
   });
 

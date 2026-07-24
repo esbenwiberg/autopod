@@ -229,6 +229,8 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
           console.error(chalk.red('Generic providers require --account to bind the spend source.'));
           process.exit(1);
         }
+      }
+      if (opts.account) {
         const account = await client.getProviderAccount(opts.account);
         if (account.provider !== provider.id) {
           console.error(chalk.red(`Provider account "${opts.account}" is not for ${provider.id}.`));

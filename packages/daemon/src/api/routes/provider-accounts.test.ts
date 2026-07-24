@@ -87,7 +87,7 @@ describe('provider account routes', () => {
         credentials: blockedCredentials,
       },
     });
-    expect(createResponse.statusCode).toBe(500);
+    expect(createResponse.statusCode).toBe(400);
     expect(createResponse.body).not.toContain('must-not-be-stored');
 
     const accountResponse = await app.inject({
@@ -101,7 +101,7 @@ describe('provider account routes', () => {
       url: `/provider-accounts/${accountResponse.json().id}`,
       payload: { credentials: blockedCredentials },
     });
-    expect(patchResponse.statusCode).toBe(500);
+    expect(patchResponse.statusCode).toBe(400);
     expect(patchResponse.body).not.toContain('must-not-be-stored');
   });
 
