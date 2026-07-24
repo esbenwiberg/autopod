@@ -675,6 +675,16 @@ public struct ProfileEditorView: View {
 
     private var actionBar: some View {
         VStack(spacing: 8) {
+            if let providerModelSaveError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(providerModelSaveError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+            }
             if let saveError {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -716,6 +726,7 @@ public struct ProfileEditorView: View {
                         || isDeleting
                         || (isNew && profile.name.isEmpty)
                         || (showOverridesView && editorLoadState != .loaded)
+                        || providerModelSaveError != nil
                     )
             }
         }
@@ -754,6 +765,10 @@ public struct ProfileEditorView: View {
     }
 
     private func submit() {
+        if let providerModelSaveError {
+            saveError = providerModelSaveError
+            return
+        }
         isSaving = true
         saveError = nil
         Task {
@@ -1226,6 +1241,20 @@ public struct ProfileEditorView: View {
         }
         return providerCatalog?.models.first(where: { $0.id == profile.defaultModel })?.providerId
             ?? profile.modelProvider.rawValue
+    }
+
+    private var selectedAccountProviderId: String? {
+        guard let accountId = profile.providerAccountId else { return nil }
+        return providerAccounts.first(where: { $0.id == accountId })?.provider
+    }
+
+    private var providerModelSaveError: String? {
+        ProviderModelSaveEligibility.errorMessage(
+            profileProviderId: profile.modelProvider.rawValue,
+            accountProviderId: selectedAccountProviderId,
+            model: profile.defaultModel,
+            catalog: providerCatalog
+        )
     }
 
     private func loadProviderAccounts() async {

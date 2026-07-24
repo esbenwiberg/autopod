@@ -111,6 +111,34 @@ final class ProviderCatalogTests: XCTestCase {
     })
   }
 
+  func testSwitchingGenericAccountPreservesModelButBlocksSaveUntilCompatible() throws {
+    let catalog = try catalog()
+    let previousModel = "auto"
+
+    let switchedOptions = RuntimeModelOptions.options(
+      for: .pi,
+      role: .defaultModel,
+      currentValue: previousModel,
+      catalog: catalog,
+      providerId: "fixture-cloud"
+    )
+    XCTAssertEqual(switchedOptions.last?.value, previousModel)
+    XCTAssertTrue(switchedOptions.last?.label.contains("unavailable") == true)
+    XCTAssertNotNil(ProviderModelSaveEligibility.errorMessage(
+      profileProviderId: "pi",
+      accountProviderId: "fixture-cloud",
+      model: previousModel,
+      catalog: catalog
+    ))
+
+    XCTAssertNil(ProviderModelSaveEligibility.errorMessage(
+      profileProviderId: "pi",
+      accountProviderId: "fixture-cloud",
+      model: "fixture/model-a",
+      catalog: catalog
+    ))
+  }
+
   @MainActor
   func testCatalogFailurePreservesCurrentSelection() async {
     let currentProvider = ModelProvider.pi

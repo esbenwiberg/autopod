@@ -187,7 +187,12 @@ enum RuntimeModelOptions {
 
         options.append(RuntimeModelOption(
             value: canonicalCurrentValue,
-            label: modelLabels[canonicalCurrentValue] ?? canonicalCurrentValue
+            label: unavailableLabel(
+                for: canonicalCurrentValue,
+                runtime: runtime,
+                catalog: catalog,
+                providerId: providerId
+            )
         ))
         return options
     }
@@ -312,5 +317,19 @@ enum RuntimeModelOptions {
 
     private static func canonicalValue(for model: String) -> String {
         ClaudeModelCanonicalizer.normalizedLegacyAlias(model)
+    }
+
+    private static func unavailableLabel(
+        for model: String,
+        runtime: RuntimeType,
+        catalog: ProviderCatalogResponse?,
+        providerId: String?
+    ) -> String {
+        let label = modelLabels[model] ?? model
+        guard runtime == .pi, let providerId,
+              catalog?.provider(id: providerId)?.implementation.kind == "generic-pi-api" else {
+            return label
+        }
+        return "\(label) (unavailable)"
     }
 }
