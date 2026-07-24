@@ -3128,7 +3128,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         const status = await prManager.getPrStatus({
           prUrl: pod.prUrl,
-          worktreePath: pod.worktreePath ?? undefined,
         });
 
         if (status.merged) {
@@ -3206,13 +3205,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // purely observational. The `status.merged` branch above handles the
           // transition to `complete` on a subsequent tick once the merge lands.
           const reviewOk = !status.reviewDecision || status.reviewDecision === 'APPROVED';
-          if (reviewOk && pod.worktreePath && pod.prUrl) {
+          if (reviewOk && pod.prUrl) {
             const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
-            const worktreePath = pod.worktreePath;
             const prUrl = pod.prUrl;
             try {
               await mergeQueue.enqueueMerge(profile.repoUrl ?? null, baseBranch, async () => {
-                const result = await prManager.mergePr({ worktreePath, prUrl });
+                const result = await prManager.mergePr({ prUrl });
                 if (result.merged) emitActivityStatus(podId, 'PR merged by poller');
               });
             } catch (err) {
@@ -3230,6 +3228,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Serialized with approveSession via the merge queue so two pods on the
         // same base never race.
         if (pod.worktreePath && pod.branch) {
+          try {
+            await access(pod.worktreePath);
+          } catch (err) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code === 'ENOENT' || code === 'ENOTDIR') {
+              logger.info(
+                { podId, worktreePath: pod.worktreePath },
+                'Merge poller: parent worktree no longer exists — skipping branch self-heal',
+              );
+              return;
+            }
+            logger.warn({ err, podId }, 'Merge poller worktree check failed');
+            emitActivityStatus(
+              podId,
+              `Self-heal worktree check failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            return;
+          }
+
           try {
             const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
             const queueKey = MergeQueue.keyFor(profile.repoUrl ?? null, baseBranch);
