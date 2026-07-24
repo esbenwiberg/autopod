@@ -37,7 +37,7 @@ const accountColumns: ColumnDef<PublicProviderAccount>[] = [
   },
 ];
 
-function collectOption(value: string, previous: string[]): string[] {
+function collectOption(value: string, previous: string[] = []): string[] {
   return [...previous, value];
 }
 
@@ -254,7 +254,6 @@ export function registerProviderAccountCommands(
       '--target <account:runtime:model>',
       'Ordered complete failover target; repeat to add targets',
       collectOption,
-      [] as string[],
     )
     .option('--max-hops <count>', 'Maximum automatic failover hops', parsePositiveInteger)
     .action(async (id: string, opts: { target: string[]; maxHops?: number }) => {

@@ -191,6 +191,15 @@ describe('provider-account commands', () => {
     });
   });
 
+  it('rejects set-failover without a target', async () => {
+    await expect(
+      program.parseAsync(['node', 'ap', 'provider-account', 'set-failover', 'team-openai']),
+    ).rejects.toMatchObject({ code: 'commander.missingMandatoryOptionValue' });
+
+    expect(mockClient.updateProviderAccount).not.toHaveBeenCalled();
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('failover policy updated'));
+  });
+
   it('clears an account failover policy', async () => {
     await program.parseAsync(['node', 'ap', 'provider-account', 'clear-failover', 'team-openai']);
     expect(mockClient.updateProviderAccount).toHaveBeenCalledWith('team-openai', {
