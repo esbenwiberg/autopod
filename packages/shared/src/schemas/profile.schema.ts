@@ -11,7 +11,10 @@ import {
   injectedSkillSchema,
 } from './injection.schema.js';
 import { withCanonicalModelIdPolicy } from './model.schema.js';
-import { providerAccountIdSchema } from './provider-account.schema.js';
+import {
+  genericApiKeyCredentialsSchema,
+  providerAccountIdSchema,
+} from './provider-account.schema.js';
 
 // ---------------------------------------------------------------------------
 // Model provider credentials schemas
@@ -90,12 +93,6 @@ const piOAuthCredentialsSchema = z.object({
         ),
       'Pi credential must contain a non-empty access token',
     ),
-});
-
-const genericApiKeyCredentialsSchema = z.object({
-  provider: z.literal('api-key'),
-  providerId: providerAccountIdSchema,
-  apiKey: z.string().min(1),
 });
 
 export const providerCredentialsSchema = z.union([

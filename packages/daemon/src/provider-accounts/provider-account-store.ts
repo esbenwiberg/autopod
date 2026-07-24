@@ -5,6 +5,7 @@ import type {
 } from '@autopod/shared';
 import {
   AutopodError,
+  PROVIDER_CATALOG,
   createProviderAccountSchema,
   updateProviderAccountSchema,
 } from '@autopod/shared';
@@ -110,6 +111,18 @@ export function createProviderAccountStore(
   ): void {
     const credentialProviderId =
       credentials?.provider === 'api-key' ? credentials.providerId : credentials?.provider;
+    if (credentials?.provider === 'api-key') {
+      const catalogProvider = PROVIDER_CATALOG.providers.find(
+        (candidate) => candidate.id === credentials.providerId,
+      );
+      if (catalogProvider?.implementation.kind !== 'generic-pi-api') {
+        throw new AutopodError(
+          `Generic API-key credentials require a generic Pi provider, not "${credentials.providerId}"`,
+          'PROVIDER_ACCOUNT_CREDENTIAL_KIND_MISMATCH',
+          400,
+        );
+      }
+    }
     if (credentialProviderId && credentialProviderId !== provider) {
       throw new AutopodError(
         `Provider account credentials are for "${credentialProviderId}", not "${provider}"`,

@@ -86,11 +86,24 @@ const piOAuthCredentialsSchema = z.object({
     ),
 });
 
-const genericApiKeyCredentialsSchema = z.object({
-  provider: z.literal('api-key'),
-  providerId: providerAccountIdSchema,
-  apiKey: z.string().min(1),
-});
+export const genericApiKeyCredentialsSchema = z
+  .object({
+    provider: z.literal('api-key'),
+    providerId: providerAccountIdSchema,
+    apiKey: z.string().min(1),
+  })
+  .superRefine((credentials, ctx) => {
+    const provider = PROVIDER_CATALOG.providers.find(
+      (candidate) => candidate.id === credentials.providerId,
+    );
+    if (provider?.implementation.kind !== 'generic-pi-api') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['providerId'],
+        message: 'Generic API-key credentials require a generic Pi provider from the catalog',
+      });
+    }
+  });
 
 const providerAccountCredentialsSchema = z.union([
   anthropicCredentialsSchema,

@@ -398,6 +398,7 @@ export {
 
 export {
   createProviderAccountSchema,
+  genericApiKeyCredentialsSchema,
   importProviderAccountFromProfileSchema,
   linkProviderAccountSchema,
   providerAccountIdSchema,

@@ -132,5 +132,13 @@ describe('generic API-key provider accounts', () => {
         },
       }),
     ).toThrow(/compiled provider catalog/i);
+
+    expect(() =>
+      providerAccountStore.create({
+        name: 'Legacy provider with generic credentials',
+        provider: 'anthropic',
+        credentials: { provider: 'api-key', providerId: 'anthropic', apiKey: rawKey },
+      }),
+    ).toThrow(/generic Pi provider/i);
   });
 });
