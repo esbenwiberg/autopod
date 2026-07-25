@@ -3344,6 +3344,150 @@ describe('PodManager', () => {
       }
     });
 
+    it('persists a sandbox series pod handover to daemon-hosted artifacts', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-handover-sync-'));
+      const previousDataDir = process.env.DATA_DIR;
+      process.env.DATA_DIR = dataDir;
+      const manager = createPodManager(ctx.deps);
+
+      try {
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Write parent handover',
+            seriesId: 'handover-series',
+            seriesName: 'Handover series',
+            skipValidation: true,
+          },
+          'user-1',
+        );
+        const containerHandoverPath = `/autopod/artifacts/handovers/${pod.id}.md`;
+        vi.mocked(ctx.containerManager.readFile).mockImplementation(async (_containerId, path) =>
+          path === containerHandoverPath ? '# Parent handover\n' : '',
+        );
+
+        await manager.processPod(pod.id);
+
+        expect(ctx.containerManager.readFile).toHaveBeenCalledWith(
+          'container-123',
+          containerHandoverPath,
+        );
+        expect(
+          fs.readFileSync(
+            path.join(dataDir, 'pod-artifacts', 'handover-series', 'handovers', `${pod.id}.md`),
+            'utf8',
+          ),
+        ).toBe('# Parent handover\n');
+      } finally {
+        if (previousDataDir === undefined) {
+          process.env.DATA_DIR = undefined;
+        } else {
+          process.env.DATA_DIR = previousDataDir;
+        }
+        fs.rmSync(dataDir, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves sibling handovers when syncing a sandbox series pod handover', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+      });
+      const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-handover-sibling-'));
+      const previousDataDir = process.env.DATA_DIR;
+      process.env.DATA_DIR = dataDir;
+      const handoversDir = path.join(dataDir, 'pod-artifacts', 'handover-series', 'handovers');
+      fs.mkdirSync(handoversDir, { recursive: true });
+      fs.writeFileSync(path.join(handoversDir, 'sibling-pod.md'), '# Sibling handover\n');
+      const manager = createPodManager(ctx.deps);
+
+      try {
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Write another handover',
+            seriesId: 'handover-series',
+            seriesName: 'Handover series',
+            skipValidation: true,
+          },
+          'user-1',
+        );
+        vi.mocked(ctx.containerManager.readFile).mockImplementation(
+          async (_containerId, filePath) =>
+            filePath === `/autopod/artifacts/handovers/${pod.id}.md`
+              ? '# Current handover\n'
+              : '',
+        );
+
+        await manager.processPod(pod.id);
+
+        expect(fs.readFileSync(path.join(handoversDir, 'sibling-pod.md'), 'utf8')).toBe(
+          '# Sibling handover\n',
+        );
+        expect(fs.readFileSync(path.join(handoversDir, `${pod.id}.md`), 'utf8')).toBe(
+          '# Current handover\n',
+        );
+      } finally {
+        if (previousDataDir === undefined) {
+          process.env.DATA_DIR = undefined;
+        } else {
+          process.env.DATA_DIR = previousDataDir;
+        }
+        fs.rmSync(dataDir, { recursive: true, force: true });
+      }
+    });
+
+    it.each([
+      ['missing', Object.assign(new Error('not found'), { code: 'ENOENT' })],
+      ['unreadable', Object.assign(new Error('read failed'), { code: 'EIO' })],
+    ])(
+      'keeps sandbox series completion non-blocking when its handover is %s',
+      async (_condition, readError) => {
+        const ctx = createTestContext(undefined, {
+          executionTarget: 'sandbox',
+          warmImageTag: 'example.azurecr.io/autopod/test-profile:latest',
+        });
+        const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-handover-error-'));
+        const previousDataDir = process.env.DATA_DIR;
+        process.env.DATA_DIR = dataDir;
+        const manager = createPodManager(ctx.deps);
+
+        try {
+          const pod = manager.createSession(
+            {
+              profileName: 'test-profile',
+              task: 'Complete without a handover',
+              seriesId: 'handover-series',
+              seriesName: 'Handover series',
+              skipValidation: true,
+            },
+            'user-1',
+          );
+          vi.mocked(ctx.containerManager.readFile).mockRejectedValue(readError);
+
+          await expect(manager.processPod(pod.id)).resolves.toBeUndefined();
+
+          expect(manager.getSession(pod.id).status).toBe('validated');
+          expect(
+            fs.existsSync(
+              path.join(dataDir, 'pod-artifacts', 'handover-series', 'handovers', `${pod.id}.md`),
+            ),
+          ).toBe(false);
+        } finally {
+          if (previousDataDir === undefined) {
+            process.env.DATA_DIR = undefined;
+          } else {
+            process.env.DATA_DIR = previousDataDir;
+          }
+          fs.rmSync(dataDir, { recursive: true, force: true });
+        }
+      },
+    );
+
     it('fails when the agent reports an execution-environment blocker on completion', async () => {
       const ctx = createTestContext();
       (ctx.runtime.spawn as ReturnType<typeof vi.fn>).mockImplementationOnce(
