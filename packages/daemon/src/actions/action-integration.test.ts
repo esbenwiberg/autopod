@@ -31,6 +31,10 @@ function createTestDb(): Database.Database {
     .sort();
   for (const file of files) {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+    if (/--\s*@execute-whole/i.test(sql)) {
+      db.exec(sql);
+      continue;
+    }
     const statements = sql
       .split(';')
       .map((s) => s.trim())

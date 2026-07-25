@@ -15,6 +15,14 @@ export {
   type PodFilters,
 } from './pod-repository.js';
 export {
+  createProviderAttemptRepository,
+  type ProviderAttemptRepository,
+  type OpenProviderAttempt,
+  type CloseProviderAttempt,
+  type ProviderAttemptTotals,
+  type UpdateActiveProviderAttempt,
+} from './provider-attempt-repository.js';
+export {
   createEventRepository,
   type EventRepository,
   type StoredEvent,

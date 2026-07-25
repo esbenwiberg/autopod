@@ -230,6 +230,104 @@ import AutopodUI
   #expect(fields["modelProvider"] as? String == "pi")
 }
 
+@Test func providerAccountFailoverContractDecodesWithoutCredentials() throws {
+  let account = try JSONDecoder().decode(
+    PublicProviderAccountResponse.self,
+    from: Data(
+      """
+      {
+        "id": "claude-max",
+        "name": "Claude Max",
+        "provider": "max",
+        "credentials": null,
+        "hasCredentials": true,
+        "failoverPolicy": {
+          "targets": [
+            { "providerAccountId": "openai-pro", "runtime": "codex", "model": "gpt-5.6-terra" }
+          ]
+        },
+        "lastAuthenticatedAt": null,
+        "lastUsedAt": null,
+        "createdAt": "2026-07-24T00:00:00Z",
+        "updatedAt": "2026-07-24T00:00:00Z"
+      }
+      """.utf8
+    )
+  )
+
+  #expect(account.failoverPolicy?.targets.first?.providerAccountId == "openai-pro")
+  #expect(account.failoverPolicy?.targets.first?.runtime == "codex")
+  #expect(account.credentials == nil)
+}
+
+@Test func legacyProviderAccountDecodesMissingFailoverPolicyAsNil() throws {
+  let account = try JSONDecoder().decode(
+    PublicProviderAccountResponse.self,
+    from: Data(
+      """
+      {
+        "id": "legacy",
+        "name": "Legacy",
+        "provider": "openai",
+        "credentials": null,
+        "hasCredentials": false,
+        "createdAt": "",
+        "updatedAt": ""
+      }
+      """.utf8
+    )
+  )
+
+  #expect(account.failoverPolicy == nil)
+}
+
+@Test func profileEditorDecodesTopLevelFailoverResolutionOptionally() throws {
+  let payload = try JSONDecoder().decode(
+    ProfileEditorResponse.self,
+    from: Data(
+      """
+      {
+        "raw": { "name": "child", "version": 1, "createdAt": "", "updatedAt": "" },
+        "resolved": { "name": "child", "version": 1, "createdAt": "", "updatedAt": "" },
+        "parent": null,
+        "sourceMap": {},
+        "credentialOwner": null,
+        "providerFailoverResolution": {
+          "policy": {
+            "targets": [
+              { "providerAccountId": "openai-pro", "runtime": "codex", "model": "gpt-5" }
+            ]
+          },
+          "source": "account-default"
+        }
+      }
+      """.utf8
+    )
+  )
+
+  #expect(payload.providerFailoverResolution?.source == "account-default")
+  #expect(payload.providerFailoverResolution?.policy?.targets.first?.runtime == "codex")
+}
+
+@Test func legacyProfileEditorDecodesMissingFailoverResolutionAsNil() throws {
+  let payload = try JSONDecoder().decode(
+    ProfileEditorResponse.self,
+    from: Data(
+      """
+      {
+        "raw": { "name": "legacy", "version": 1, "createdAt": "", "updatedAt": "" },
+        "resolved": { "name": "legacy", "version": 1, "createdAt": "", "updatedAt": "" },
+        "parent": null,
+        "sourceMap": {},
+        "credentialOwner": null
+      }
+      """.utf8
+    )
+  )
+
+  #expect(payload.providerFailoverResolution == nil)
+}
+
 private actor RequestRecorder {
   private(set) var authorizationHeaders: [String?] = []
 

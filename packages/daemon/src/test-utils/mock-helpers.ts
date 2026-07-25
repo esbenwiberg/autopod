@@ -53,6 +53,10 @@ export function createTestDb(): Database.Database {
     .sort();
   for (const file of files) {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+    if (/--\s*@execute-whole/i.test(sql)) {
+      db.exec(sql);
+      continue;
+    }
     // Split multi-statement migrations and tolerate "duplicate column" errors
     // that arise from 001_initial.sql already having columns that later
     // ALTER TABLE migrations re-add.

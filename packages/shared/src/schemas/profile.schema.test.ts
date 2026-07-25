@@ -264,6 +264,37 @@ describe('createProfileSchema model validation', () => {
     expect(updateProfileSchema.safeParse({ providerAccountId: '-openai' }).success).toBe(false);
   });
 
+  it('accepts profile failover replacement, inheritance, and explicit disable', () => {
+    const policy = {
+      targets: [{ providerAccountId: 'backup-openai', runtime: 'codex', model: 'gpt-5' }],
+    };
+    expect(updateProfileSchema.parse({ providerFailover: policy }).providerFailover).toEqual(
+      policy,
+    );
+    expect(updateProfileSchema.parse({ providerFailover: null }).providerFailover).toBeNull();
+    expect(
+      updateProfileSchema.parse({ providerFailover: { targets: [] } }).providerFailover,
+    ).toEqual({ targets: [] });
+  });
+
+  it('rejects partial and duplicate profile failover targets', () => {
+    expect(
+      updateProfileSchema.safeParse({
+        providerFailover: { targets: [{ providerAccountId: 'backup', runtime: 'codex' }] },
+      }).success,
+    ).toBe(false);
+    expect(
+      updateProfileSchema.safeParse({
+        providerFailover: {
+          targets: [
+            { providerAccountId: 'backup', runtime: 'codex', model: 'gpt-5' },
+            { providerAccountId: 'backup', runtime: 'codex', model: 'gpt-5-mini' },
+          ],
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it('rejects empty Pi OAuth credentials on profiles', () => {
     expect(
       createProfileSchema.safeParse({

@@ -63,6 +63,10 @@ function createTestDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   for (const sql of MIGRATION_FILES) {
+    if (/--\s*@execute-whole/i.test(sql)) {
+      db.exec(sql);
+      continue;
+    }
     const statements = sql
       .split(';')
       .map((s) => s.trim())
