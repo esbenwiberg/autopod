@@ -1865,6 +1865,34 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
   }
 
+  async function syncSandboxSeriesHandover(podId: string): Promise<void> {
+    const pod = podRepo.getOrThrow(podId);
+    if (pod.executionTarget !== 'sandbox' || !pod.seriesId || !pod.containerId) return;
+
+    const handoverFileName = `${safeFsSegment(pod.id)}.md`;
+    const containerPath = `${POD_ARTIFACTS_CONTAINER_DIR}/handovers/${handoverFileName}`;
+    const hostPath = path.join(
+      dataDir(),
+      'pod-artifacts',
+      safeFsSegment(pod.seriesId),
+      'handovers',
+      handoverFileName,
+    );
+
+    try {
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      const content = await cm.readFile(pod.containerId, containerPath);
+      await mkdir(path.dirname(hostPath), { recursive: true });
+      await writeFile(hostPath, content, 'utf8');
+      logger.info({ podId, seriesId: pod.seriesId, hostPath }, 'Sandbox series handover synced');
+    } catch (err) {
+      logger.warn(
+        { err, podId, seriesId: pod.seriesId, containerPath },
+        'Sandbox series handover missing or unreadable — continuing without it',
+      );
+    }
+  }
+
   /**
    * Sequential merge queue keyed by `repo+baseBranch`.
    *
@@ -8035,6 +8063,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         if (outcome === 'completed') {
+          await syncSandboxSeriesHandover(podId);
           visibleFailurePhase = 'completion';
           await this.handleCompletion(podId);
         }
