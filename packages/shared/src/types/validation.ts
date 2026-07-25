@@ -25,6 +25,8 @@ export interface ValidationResult {
   sast?: SastResult;
   factValidation?: FactValidationResult | null;
   taskReview: TaskReviewResult | null;
+  /** Metered reviewer usage when a paid call ran but did not produce a parseable verdict. */
+  reviewTokenUsage?: TaskReviewResult['tokenUsage'];
   /**
    * Screenshot-backed exploratory browser QA. Advisory only: required facts
    * remain the blocking proof layer and this result must not affect `overall`.

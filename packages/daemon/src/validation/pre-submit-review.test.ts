@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 
-vi.mock('../runtimes/run-claude-cli.js', () => ({
-  runClaudeCli: vi.fn(),
-}));
+vi.mock('../runtimes/run-claude-cli.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../runtimes/run-claude-cli.js')>();
+  return { ...actual, runClaudeCli: vi.fn() };
+});
 
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { hashDiff, runPreSubmitReview } from './pre-submit-review.js';
@@ -64,6 +65,12 @@ describe('runPreSubmitReview', () => {
         reasoning: 'Looks good — scope matches the task.',
         issues: [],
       }),
+      tokenUsage: {
+        inputTokens: 4321,
+        cachedInputTokens: 3000,
+        outputTokens: 123,
+        costUsd: 0.045,
+      },
     });
 
     const result = await runPreSubmitReview({
@@ -75,6 +82,12 @@ describe('runPreSubmitReview', () => {
     expect(result.status).toBe('pass');
     expect(result.issues).toEqual([]);
     expect(result.diffHash).toBeTruthy();
+    expect(result.tokenUsage).toEqual({
+      inputTokens: 4321,
+      cachedInputTokens: 3000,
+      outputTokens: 123,
+      costUsd: 0.045,
+    });
     expect(mockRunClaudeCli).toHaveBeenCalledTimes(1);
   });
 
@@ -83,6 +96,16 @@ describe('runPreSubmitReview', () => {
     const timeouts: number[] = [];
     const containerManager = {
       writeFile: vi.fn(),
+      readFile: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          type: 'turn.completed',
+          usage: {
+            input_tokens: 20_000,
+            cached_input_tokens: 12_000,
+            output_tokens: 800,
+          },
+        }),
+      ),
       execInContainer: vi.fn(
         async (_containerId: string, command: string[], options?: { timeout?: number }) => {
           commands.push(command[2] ?? '');
@@ -115,6 +138,12 @@ describe('runPreSubmitReview', () => {
     expect(commands.some((cmd) => cmd.includes('codex exec'))).toBe(true);
     expect(commands.some((cmd) => cmd.includes("--model 'gpt-5'"))).toBe(true);
     expect(timeouts).toEqual([300_000]);
+    expect(result.tokenUsage).toEqual({
+      inputTokens: 20_000,
+      cachedInputTokens: 12_000,
+      outputTokens: 800,
+      costUsd: 0.0195,
+    });
     expect(mockRunClaudeCli).not.toHaveBeenCalled();
   });
 
@@ -124,9 +153,13 @@ describe('runPreSubmitReview', () => {
       writeFile: vi.fn().mockResolvedValue(undefined),
       execInContainer: vi.fn().mockResolvedValue({
         stdout: JSON.stringify({
-          status: 'pass',
-          reasoning: 'Container Claude says clean.',
-          issues: [],
+          result: JSON.stringify({
+            status: 'pass',
+            reasoning: 'Container Claude says clean.',
+            issues: [],
+          }),
+          usage: { input_tokens: 4321, cache_read_input_tokens: 3000, output_tokens: 123 },
+          total_cost_usd: 0.045,
         }),
         stderr: '',
         exitCode: 0,
@@ -150,6 +183,12 @@ describe('runPreSubmitReview', () => {
 
     expect(result.status).toBe('pass');
     expect(result.reasoning).toBe('Container Claude says clean.');
+    expect(result.tokenUsage).toEqual({
+      inputTokens: 4321,
+      cachedInputTokens: 3000,
+      outputTokens: 123,
+      costUsd: 0.045,
+    });
     expect(containerManager.writeFile).toHaveBeenCalledWith(
       'container-1',
       expect.stringContaining('/tmp/autopod-claude-review-pod-1-'),

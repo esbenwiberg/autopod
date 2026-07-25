@@ -224,7 +224,7 @@ export function runClaudeCli(opts: {
   });
 }
 
-function parseClaudeCliStdout(
+export function parseClaudeCliStdout(
   stdout: string,
   outputFormat: 'text' | 'json',
 ): { stdout: string; tokenUsage?: ClaudeCliTokenUsage } {

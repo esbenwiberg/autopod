@@ -7,6 +7,13 @@ export interface AgenticReviewConfig {
   timeout: number;
 }
 
+export interface AgenticReviewTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens?: number;
+  costUsd?: number;
+}
+
 /**
  * Tier 3: Runs a review using the `claude` CLI in agentic mode with
  * read-only tool access scoped to the worktree directory.
@@ -14,7 +21,9 @@ export interface AgenticReviewConfig {
  * The reviewer gets access to Bash (read-only git commands), Read, and Grep
  * tools, but cannot edit files or run arbitrary commands.
  */
-export async function runAgenticReview(config: AgenticReviewConfig): Promise<{ stdout: string }> {
+export async function runAgenticReview(
+  config: AgenticReviewConfig,
+): Promise<{ stdout: string; tokenUsage?: AgenticReviewTokenUsage }> {
   const maxBuf = 2 * 1024 * 1024;
 
   return new Promise((resolve, reject) => {
@@ -33,7 +42,7 @@ export async function runAgenticReview(config: AgenticReviewConfig): Promise<{ s
         '--model',
         config.model,
         '--output-format',
-        'text',
+        'json',
         '--allowedTools',
         'Read',
         'Bash(git log:*)',
@@ -105,7 +114,7 @@ export async function runAgenticReview(config: AgenticReviewConfig): Promise<{ s
           ),
         );
       } else {
-        settle(() => resolve({ stdout }));
+        settle(() => resolve(parseAgenticReviewOutput(stdout)));
       }
     });
 
@@ -114,4 +123,50 @@ export async function runAgenticReview(config: AgenticReviewConfig): Promise<{ s
       settle(() => reject(err));
     });
   });
+}
+
+export function parseAgenticReviewOutput(stdout: string): {
+  stdout: string;
+  tokenUsage?: AgenticReviewTokenUsage;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return { stdout };
+  }
+
+  const record = asRecord(parsed);
+  if (!record) return { stdout };
+  const result = typeof record.result === 'string' ? record.result : stdout;
+  const usage = asRecord(record.usage);
+  const inputTokens = numberField(usage?.input_tokens) ?? numberField(record.input_tokens);
+  const outputTokens = numberField(usage?.output_tokens) ?? numberField(record.output_tokens);
+  const cachedInputTokens =
+    numberField(usage?.cache_read_input_tokens) ?? numberField(record.cache_read_input_tokens);
+  const costUsd = numberField(record.total_cost_usd);
+  const tokenUsage =
+    inputTokens !== undefined ||
+    outputTokens !== undefined ||
+    cachedInputTokens !== undefined ||
+    costUsd !== undefined
+      ? {
+          inputTokens: inputTokens ?? 0,
+          outputTokens: outputTokens ?? 0,
+          ...(cachedInputTokens !== undefined && { cachedInputTokens }),
+          ...(costUsd !== undefined && { costUsd }),
+        }
+      : undefined;
+
+  return { stdout: result, ...(tokenUsage && { tokenUsage }) };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function numberField(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }

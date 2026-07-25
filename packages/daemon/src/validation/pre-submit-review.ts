@@ -5,7 +5,11 @@ import type { ContainerManager } from '../interfaces/container-manager.js';
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { runContainerReviewer } from './container-reviewer-runner.js';
 import { parseReviewJson } from './local-validation-engine.js';
-import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
+import {
+  CodexReviewError,
+  type CodexReviewTokenUsage,
+  runCodexReview,
+} from './review-codex-runner.js';
 
 export type PreSubmitSkipReason = 'no-diff' | 'no-task' | 'parse-failure' | 'cli-error';
 
@@ -36,6 +40,8 @@ export interface PreSubmitReviewResult {
   /** Hash of the diff this verdict applies to — useful for caching. */
   diffHash: string;
   durationMs: number;
+  /** Telemetry for a newly executed reviewer call. Absent for cache hits and unmetered runners. */
+  tokenUsage?: CodexReviewTokenUsage;
 }
 
 const PRE_SUBMIT_PROMPT_HEADER = `You are a senior engineer doing a fast pre-submit review of an AI agent's diff. The agent is about to declare its task complete; your job is to catch significant problems BEFORE the full reviewer runs.
@@ -68,7 +74,11 @@ export async function runPreSubmitReview(
   const diffHash = hashDiff(opts.diff);
   const startedAt = Date.now();
 
-  const skipped = (reason: PreSubmitSkipReason, explanation: string): PreSubmitReviewResult => ({
+  const skipped = (
+    reason: PreSubmitSkipReason,
+    explanation: string,
+    tokenUsage?: CodexReviewTokenUsage,
+  ): PreSubmitReviewResult => ({
     status: 'skipped',
     reasoning: explanation,
     issues: [],
@@ -76,6 +86,7 @@ export async function runPreSubmitReview(
     model: opts.reviewerModel,
     diffHash,
     durationMs: Date.now() - startedAt,
+    ...(tokenUsage && { tokenUsage }),
   });
 
   if (!opts.diff?.trim()) return skipped('no-diff', 'No diff to review.');
@@ -101,12 +112,13 @@ export async function runPreSubmitReview(
 
   try {
     let stdout: string;
+    let tokenUsage: CodexReviewTokenUsage | undefined;
     if (reviewerRunner === 'codex') {
       if (!opts.containerId || !opts.containerManager) {
         return skipped('cli-error', 'Codex pre-submit reviewer requires a live pod container.');
       }
       runner = 'codex';
-      ({ stdout } = await runCodexReview({
+      ({ stdout, tokenUsage } = await runCodexReview({
         podId: opts.podId ?? 'pre-submit',
         containerId: opts.containerId,
         containerManager: opts.containerManager,
@@ -116,7 +128,7 @@ export async function runPreSubmitReview(
       }));
     } else if (opts.containerId && opts.containerManager) {
       runner = 'container-claude';
-      ({ stdout } = await runContainerReviewer({
+      ({ stdout, tokenUsage } = await runContainerReviewer({
         podId: opts.podId ?? 'pre-submit',
         containerId: opts.containerId,
         containerManager: opts.containerManager,
@@ -130,7 +142,7 @@ export async function runPreSubmitReview(
         logger: log,
       }));
     } else {
-      ({ stdout } = await runClaudeCli({
+      ({ stdout, tokenUsage } = await runClaudeCli({
         model: opts.reviewerModel,
         input: prompt,
         timeout: timeoutMs,
@@ -139,7 +151,11 @@ export async function runPreSubmitReview(
     const parsed = parseReviewJson(stdout.trim());
     if (!parsed) {
       log?.warn({ rawOutput: stdout.slice(0, 500) }, 'pre-submit review: failed to parse response');
-      return skipped('parse-failure', 'Pre-submit reviewer returned an unparseable response.');
+      return skipped(
+        'parse-failure',
+        'Pre-submit reviewer returned an unparseable response.',
+        tokenUsage,
+      );
     }
     return {
       status: parsed.status,
@@ -148,6 +164,7 @@ export async function runPreSubmitReview(
       model: opts.reviewerModel,
       diffHash,
       durationMs: Date.now() - startedAt,
+      ...(tokenUsage && { tokenUsage }),
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
