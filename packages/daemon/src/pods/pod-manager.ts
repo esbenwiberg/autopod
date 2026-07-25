@@ -3470,18 +3470,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             return;
           }
 
+          await worktreeManager.pushBranch(worktreePath, branch, {
+            force: true,
+            pat: await resolveGitCredential(profile),
+          });
+          branchPushed = true;
           if (!rebaseResult.alreadyUpToDate) {
-            await worktreeManager.pushBranch(worktreePath, branch, {
-              force: true,
-              pat: await resolveGitCredential(profile),
-            });
-            branchPushed = true;
             emitActivityStatus(podId, 'Rebased fix branch pushed');
           } else {
-            await worktreeManager.pushBranch(worktreePath, branch, {
-              pat: await resolveGitCredential(profile),
-            });
-            branchPushed = true;
             emitActivityStatus(podId, 'Fix branch pushed');
           }
         });

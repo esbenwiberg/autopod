@@ -8835,6 +8835,26 @@ describe('PodManager', () => {
       expect(manager.getSession(fix.id).status).toBe('complete');
     });
 
+    it('retains force-with-lease when retry rebase is already up to date', async () => {
+      const ctx = createTestContext();
+      const { manager, fix } = setupParkedFixDeliveryFailure(ctx);
+      (ctx.worktreeManager.rebaseOntoBase as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        rebased: true,
+        alreadyUpToDate: true,
+        conflicts: [],
+      });
+
+      await manager.resumePod(fix.id);
+
+      expect(ctx.worktreeManager.pullBranch).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledWith(
+        '/tmp/worktree/fix',
+        fix.branch,
+        expect.objectContaining({ force: true }),
+      );
+      expect(manager.getSession(fix.id).status).toBe('complete');
+    });
+
     it('re-parks a validated fix pod when retry delivery fails again', async () => {
       const ctx = createTestContext();
       const { manager, fix } = setupParkedFixDeliveryFailure(ctx);
