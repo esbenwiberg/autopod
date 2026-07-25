@@ -10574,19 +10574,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         podRepo.update(podId, { lastValidationResult: result });
 
         // Accumulate phase-level token usage for harness cost attribution
-        if (result.taskReview?.tokenUsage) {
+        const reviewTokenUsage = result.taskReview?.tokenUsage ?? result.reviewTokenUsage;
+        if (reviewTokenUsage) {
           const currentPod = podRepo.getOrThrow(podId);
           const existing = currentPod.phaseTokenUsage ?? {};
           const prev = existing.review ?? { inputTokens: 0, outputTokens: 0 };
           const cachedInputTokens =
-            (prev.cachedInputTokens ?? 0) + (result.taskReview.tokenUsage.cachedInputTokens ?? 0);
-          const costUsd = (prev.costUsd ?? 0) + (result.taskReview.tokenUsage.costUsd ?? 0);
+            (prev.cachedInputTokens ?? 0) + (reviewTokenUsage.cachedInputTokens ?? 0);
+          const costUsd = (prev.costUsd ?? 0) + (reviewTokenUsage.costUsd ?? 0);
           podRepo.update(podId, {
             phaseTokenUsage: {
               ...existing,
               review: {
-                inputTokens: prev.inputTokens + result.taskReview.tokenUsage.inputTokens,
-                outputTokens: prev.outputTokens + result.taskReview.tokenUsage.outputTokens,
+                inputTokens: prev.inputTokens + reviewTokenUsage.inputTokens,
+                outputTokens: prev.outputTokens + reviewTokenUsage.outputTokens,
                 ...(cachedInputTokens > 0 && { cachedInputTokens }),
                 ...(costUsd > 0 && { costUsd }),
               },
@@ -11412,20 +11413,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         podRepo.update(podId, { lastValidationResult: result });
 
         // Accumulate phase-level token usage for harness cost attribution
-        if (result.taskReview?.tokenUsage) {
+        const reviewTokenUsage = result.taskReview?.tokenUsage ?? result.reviewTokenUsage;
+        if (reviewTokenUsage) {
           const currentPod = podRepo.getOrThrow(podId);
           const existingUsage = currentPod.phaseTokenUsage ?? {};
           const prevReview = existingUsage.review ?? { inputTokens: 0, outputTokens: 0 };
           const cachedInputTokens =
-            (prevReview.cachedInputTokens ?? 0) +
-            (result.taskReview.tokenUsage.cachedInputTokens ?? 0);
-          const costUsd = (prevReview.costUsd ?? 0) + (result.taskReview.tokenUsage.costUsd ?? 0);
+            (prevReview.cachedInputTokens ?? 0) + (reviewTokenUsage.cachedInputTokens ?? 0);
+          const costUsd = (prevReview.costUsd ?? 0) + (reviewTokenUsage.costUsd ?? 0);
           podRepo.update(podId, {
             phaseTokenUsage: {
               ...existingUsage,
               review: {
-                inputTokens: prevReview.inputTokens + result.taskReview.tokenUsage.inputTokens,
-                outputTokens: prevReview.outputTokens + result.taskReview.tokenUsage.outputTokens,
+                inputTokens: prevReview.inputTokens + reviewTokenUsage.inputTokens,
+                outputTokens: prevReview.outputTokens + reviewTokenUsage.outputTokens,
                 ...(cachedInputTokens > 0 && { cachedInputTokens }),
                 ...(costUsd > 0 && { costUsd }),
               },

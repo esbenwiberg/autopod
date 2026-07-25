@@ -385,6 +385,7 @@ export function createLocalValidationEngine(
         // ── Phase 8: AI Task Review ────────────────────────────────────
         checkAbort();
         let taskReview: TaskReviewResult | null;
+        let reviewTokenUsage: TaskReviewResult['tokenUsage'];
         let reviewSkipReason: string | undefined;
         let reviewSkipKind: ValidationResult['reviewSkipKind'];
         if (skipPhases.includes('review')) {
@@ -423,6 +424,7 @@ export function createLocalValidationEngine(
 
           const reviewRun = await runTaskReview(containerManager, config, log, reviewContext);
           taskReview = reviewRun.result;
+          reviewTokenUsage = reviewRun.tokenUsage;
           reviewSkipReason = reviewRun.skipReason;
           if (taskReview === null && reviewRun.skipReason) {
             reviewSkipKind = classifyReviewSkipKind(reviewRun.skipReason);
@@ -485,6 +487,7 @@ export function createLocalValidationEngine(
           sast: sastResult,
           factValidation,
           taskReview,
+          ...(reviewTokenUsage && { reviewTokenUsage }),
           advisoryBrowserQa: null,
           reviewSkipReason,
           reviewSkipKind,
@@ -2542,7 +2545,12 @@ async function runTaskReview(
 ): Promise<{
   result: TaskReviewResult | null;
   skipReason?: string;
-  tokenUsage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens?: number;
+    costUsd?: number;
+  };
 }> {
   if (!config.reviewerModel || !config.diff || !config.task) {
     const reason = !config.diff
@@ -2664,7 +2672,11 @@ async function runTaskReview(
         );
         if (!tier1Parsed) {
           log?.warn({ rawOutput: stdout.slice(0, 500) }, 'failed to parse task review response');
-          return { result: null, skipReason: 'Failed to parse Tier 1 review response' };
+          return {
+            result: null,
+            skipReason: 'Failed to parse Tier 1 review response',
+            tokenUsage: tier1TokenUsage,
+          };
         }
       }
     } else {
@@ -2823,7 +2835,11 @@ async function runTaskReview(
       // Fall back to best available result (Tier 2 if parsed, else Tier 1 if available)
       const bestParsed = tier2Parsed ?? tier1Parsed;
       if (!bestParsed) {
-        return { result: null, skipReason: 'All review tiers failed to produce a result' };
+        return {
+          result: null,
+          skipReason: 'All review tiers failed to produce a result',
+          tokenUsage: accumulatedTokenUsage,
+        };
       }
       return {
         result: {

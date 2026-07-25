@@ -9465,6 +9465,43 @@ describe('PodManager', () => {
       });
     });
 
+    it('attributes metered review calls that did not produce a verdict', async () => {
+      const ctx = createTestContext({
+        overall: 'pass',
+        taskReview: null,
+        reviewSkipReason: 'Failed to parse Tier 1 review response',
+        reviewSkipKind: 'review-failed',
+        reviewTokenUsage: {
+          inputTokens: 2000,
+          outputTokens: 150,
+          cachedInputTokens: 1200,
+          costUsd: 0.42,
+        },
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Unparseable review task' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        phaseTokenUsage: { agent_initial: { inputTokens: 1000, outputTokens: 500 } },
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(manager.getSession(pod.id).phaseTokenUsage).toMatchObject({
+        agent_initial: { inputTokens: 1000, outputTokens: 500 },
+        review: {
+          inputTokens: 2000,
+          outputTokens: 150,
+          cachedInputTokens: 1200,
+          costUsd: 0.42,
+        },
+      });
+    });
+
     it('recovery-case: pod with prior phaseTokenUsage starts next write at agent_rework_3', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
