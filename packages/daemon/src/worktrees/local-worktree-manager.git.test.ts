@@ -107,7 +107,7 @@ describe('LocalWorktreeManager real Git regressions', () => {
   it('starts from fresh origin/main while stale local main is linked elsewhere', async () => {
     await manager.create({
       repoUrl: 'https://github.com/org/repo.git',
-      branch: 'linked-main',
+      branch: 'main',
       baseBranch: 'main',
       sessionId: 'linked-main',
     });
