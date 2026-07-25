@@ -2793,6 +2793,7 @@ async function runTaskReview(
       }
 
       // ── Tier 3: Agentic review (still uncertain) ────────────────────
+      let allTierTokenUsage = accumulatedTokenUsage;
       if (tier2Parsed?.status === 'uncertain') {
         log?.info('Tier 2 returned uncertain, escalating to Tier 3 agentic review');
 
@@ -2803,6 +2804,11 @@ async function runTaskReview(
             worktreePath,
             timeout: reviewTimeout,
           });
+          allTierTokenUsage = combineReviewTokenUsage(
+            config.reviewerModel,
+            accumulatedTokenUsage,
+            tier3Result.tokenUsage,
+          );
 
           const tier3Parsed = applyDiffFilterToParsed(
             enforceRequirementsStatus(parseReviewJson(tier3Result.stdout.trim())),
@@ -2822,9 +2828,9 @@ async function runTaskReview(
                 diff: config.diff,
                 requirementsCheck: tier3Parsed.requirementsCheck,
                 deviationsAssessment: tier3Parsed.deviationsAssessment,
-                tokenUsage: accumulatedTokenUsage,
+                tokenUsage: allTierTokenUsage,
               },
-              tokenUsage: accumulatedTokenUsage,
+              tokenUsage: allTierTokenUsage,
             };
           }
         } catch (err) {
@@ -2851,9 +2857,9 @@ async function runTaskReview(
           diff: config.diff,
           requirementsCheck: bestParsed.requirementsCheck,
           deviationsAssessment: bestParsed.deviationsAssessment,
-          tokenUsage: accumulatedTokenUsage,
+          tokenUsage: allTierTokenUsage,
         },
-        tokenUsage: accumulatedTokenUsage,
+        tokenUsage: allTierTokenUsage,
       };
     } catch (err) {
       log?.warn({ err }, 'Tier 2 tool-use review failed');
