@@ -2,12 +2,12 @@ import type {
   ProviderAccount,
   ProviderAccountProvider,
   ProviderCredentials,
+  PublicProviderCatalog,
 } from '@autopod/shared';
 import {
   AutopodError,
   PROVIDER_CATALOG,
-  createProviderAccountSchema,
-  updateProviderAccountSchema,
+  createProviderAccountSchemas,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { CredentialsCipher } from '../crypto/credentials-cipher.js';
@@ -61,7 +61,10 @@ function rowToProviderAccount(
 export function createProviderAccountStore(
   db: Database.Database,
   cipher?: CredentialsCipher,
+  catalog: PublicProviderCatalog = PROVIDER_CATALOG,
 ): ProviderAccountStore {
+  const { createProviderAccountSchema, updateProviderAccountSchema } =
+    createProviderAccountSchemas(catalog);
   function encryptCredentials(credentials: ProviderCredentials | null | undefined): string | null {
     if (!credentials) return null;
     const json = JSON.stringify(credentials);
@@ -112,7 +115,7 @@ export function createProviderAccountStore(
     const credentialProviderId =
       credentials?.provider === 'api-key' ? credentials.providerId : credentials?.provider;
     if (credentials?.provider === 'api-key') {
-      const catalogProvider = PROVIDER_CATALOG.providers.find(
+      const catalogProvider = catalog.providers.find(
         (candidate) => candidate.id === credentials.providerId,
       );
       if (catalogProvider?.implementation.kind !== 'generic-pi-api') {

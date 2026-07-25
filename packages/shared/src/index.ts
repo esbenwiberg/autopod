@@ -397,6 +397,7 @@ export {
 } from './schemas/profile.schema.js';
 
 export {
+  createProviderAccountSchemas,
   createProviderAccountSchema,
   genericApiKeyCredentialsSchema,
   importProviderAccountFromProfileSchema,

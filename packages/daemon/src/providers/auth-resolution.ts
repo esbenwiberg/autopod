@@ -1,4 +1,10 @@
-import type { ModelProvider, Profile, ProviderAccount, ProviderCredentials } from '@autopod/shared';
+import type {
+  ModelProvider,
+  Profile,
+  ProviderAccount,
+  ProviderCredentials,
+  PublicProviderCatalog,
+} from '@autopod/shared';
 import { AutopodError, PROVIDER_CATALOG } from '@autopod/shared';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
@@ -23,6 +29,7 @@ export function resolveProviderAuth(
   options: {
     profileStore?: ProfileStore;
     providerAccountStore?: ProviderAccountStore;
+    providerCatalog?: PublicProviderCatalog;
   } = {},
 ): ProviderAuthResolution {
   const provider = profile.modelProvider;
@@ -44,7 +51,7 @@ export function resolveProviderAuth(
     }
 
     const account = options.providerAccountStore.get(providerAccountId);
-    const catalogProvider = PROVIDER_CATALOG.providers.find(
+    const catalogProvider = (options.providerCatalog ?? PROVIDER_CATALOG).providers.find(
       (candidate) => candidate.id === account.provider,
     );
     const matchesLegacyProvider = account.provider === provider;

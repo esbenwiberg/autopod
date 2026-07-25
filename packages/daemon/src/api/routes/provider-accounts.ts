@@ -1,9 +1,10 @@
 import {
   AutopodError,
+  type PublicProviderCatalog,
   PROVIDER_CATALOG,
+  createProviderAccountSchemas,
   importProviderAccountFromProfileSchema,
   providerAccountIdSchema,
-  providerAccountProviderSchema,
 } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -30,8 +31,9 @@ const linkProviderProfileSchema = z.object({
 function assertAccountMatchesProfile(
   account: ReturnType<ProviderAccountStore['get']>,
   profile: ReturnType<ProfileStore['get']>,
+  catalog: PublicProviderCatalog,
 ): void {
-  const catalogProvider = PROVIDER_CATALOG.providers.find(
+  const catalogProvider = catalog.providers.find(
     (provider) => provider.id === account.provider,
   );
   const matchesLegacyProvider = profile.modelProvider === account.provider;
@@ -69,11 +71,14 @@ export function providerAccountRoutes(
   app: FastifyInstance,
   providerAccountStore: ProviderAccountStore,
   profileStore: ProfileStore,
+  catalog: PublicProviderCatalog = PROVIDER_CATALOG,
 ): void {
+  const { providerAccountProviderSchema: catalogProviderSchema } =
+    createProviderAccountSchemas(catalog);
   app.get('/provider-accounts', async (request) => {
     const query = request.query as { provider?: string };
     const provider = query.provider
-      ? providerAccountProviderSchema.parse(query.provider)
+      ? catalogProviderSchema.parse(query.provider)
       : undefined;
     const accounts = providerAccountStore.list(provider ? { provider } : undefined);
     return accounts.map(redactProviderAccountSecrets);
@@ -111,7 +116,7 @@ export function providerAccountRoutes(
     const body = linkProviderProfileSchema.parse(request.body ?? {});
     const account = providerAccountStore.get(id);
     const profile = profileStore.get(body.profileName);
-    assertAccountMatchesProfile(account, profile);
+    assertAccountMatchesProfile(account, profile, catalog);
     // Clear legacy inline creds by default when linking — the account is now the
     // source of truth; a leftover stale copy only breaks daemon-side paths later.
     const clearLegacy = body.clearLegacyCredentials ?? true;
@@ -141,7 +146,7 @@ export function providerAccountRoutes(
 
     const account = providerAccountStore.get(body.accountId);
     const profile = profileStore.get(name);
-    assertAccountMatchesProfile(account, profile);
+    assertAccountMatchesProfile(account, profile, catalog);
     // Link: clear legacy inline creds by default (see schema note above).
     const clearLegacy = body.clearLegacyCredentials ?? true;
     const updated = profileStore.update(name, {
