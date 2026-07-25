@@ -3418,9 +3418,7 @@ describe('PodManager', () => {
         );
         vi.mocked(ctx.containerManager.readFile).mockImplementation(
           async (_containerId, filePath) =>
-            filePath === `/autopod/artifacts/handovers/${pod.id}.md`
-              ? '# Current handover\n'
-              : '',
+            filePath === `/autopod/artifacts/handovers/${pod.id}.md` ? '# Current handover\n' : '',
         );
 
         await manager.processPod(pod.id);
