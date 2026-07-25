@@ -11,6 +11,7 @@ import type {
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
+import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import type { ValidationRepository } from './validation-repository.js';
 
@@ -22,6 +23,8 @@ export interface QualitySignalsDeps {
   qualityScoreRepo?: QualityScoreRepository;
   /** Optional — when wired, determines whether smoke validation passed. */
   validationRepo?: ValidationRepository;
+  /** Optional — immutable attempt accounting replaces mutable pod totals when present. */
+  providerAttemptRepo?: ProviderAttemptRepository;
 }
 
 // Patterns derived from real low-scoring pod sessions via history scan pod.
@@ -151,6 +154,8 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
   // Surface the persisted score + model string when available. Both are null
   // until the recorder writes a row on PodCompletedEvent.
   const persisted = deps.qualityScoreRepo?.get(podId) ?? null;
+  const attemptTotals = deps.providerAttemptRepo?.totals(podId);
+  const hasAttempts = (deps.providerAttemptRepo?.list(podId).length ?? 0) > 0;
 
   const browserChecks =
     browserCalls === 0
@@ -174,9 +179,9 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
     validationPassed,
     browserChecks,
     tokens: {
-      input: pod.inputTokens,
-      output: pod.outputTokens,
-      costUsd: pod.costUsd,
+      input: hasAttempts ? (attemptTotals?.inputTokens ?? 0) : pod.inputTokens,
+      output: hasAttempts ? (attemptTotals?.outputTokens ?? 0) : pod.outputTokens,
+      costUsd: hasAttempts ? (attemptTotals?.costUsd ?? 0) : pod.costUsd,
     },
     grade: grade({ readEditRatio, editCount, editsWithoutPriorRead, userInterrupts }),
     score: persisted?.score ?? null,

@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { JwtPayload, ReadinessReview } from '@autopod/shared';
 import Database from 'better-sqlite3';
-import type { FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from '../../api/server.js';
@@ -19,6 +19,7 @@ import {
   createPodManager,
   createPodQueue,
   createPodRepository,
+  createProviderAttemptRepository,
 } from '../../pods/index.js';
 import { createMemoryRepository } from '../../pods/memory-repository.js';
 import { createMemoryUsageRepository } from '../../pods/memory-usage-repository.js';
@@ -26,6 +27,7 @@ import { createNudgeRepository } from '../../pods/nudge-repository.js';
 import { createQualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { createProfileStore } from '../../profiles/index.js';
 import { createSafetyEventsRepository } from '../../safety/safety-events-repository.js';
+import { podRoutes } from './pods.js';
 
 // ── DB setup (mirrors routes-extended.test.ts pattern) ────────────────────────
 
@@ -53,6 +55,10 @@ function createTestDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   for (const sql of MIGRATION_FILES) {
+    if (/--\s*@execute-whole/i.test(sql)) {
+      db.exec(sql);
+      continue;
+    }
     const statements = sql
       .split(';')
       .map((s) => s.trim())
@@ -68,6 +74,200 @@ function createTestDb(): Database.Database {
   }
   return db;
 }
+
+describe('GET /pods/:podId provider-attempt projection', () => {
+  let db: Database.Database;
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    db = createTestDb();
+    db.prepare(`
+      INSERT INTO profiles (
+        name, repo_url, default_branch, template, build_command, start_command,
+        health_path, health_timeout, validation_pages, max_validation_attempts,
+        default_model, default_runtime, escalation_config
+      ) VALUES (
+        'test-profile', 'https://example.test/repo', 'main', 'node22', 'build', 'start',
+        '/health', 120, '[]', 3, 'opus', 'claude', '{}'
+      )
+    `).run();
+    app = Fastify({ logger: false });
+    const podRepo = createPodRepository(db);
+    const eventRepo = createEventRepository(db);
+    const escalationRepo = createEscalationRepository(db);
+    const podManager = {
+      getSession: (podId: string) => podRepo.getOrThrow(podId),
+      listSessions: () => [],
+      getSessionStats: () => ({}),
+    } as unknown as ReturnType<typeof createPodManager>;
+    podRoutes(
+      app,
+      podManager,
+      eventRepo,
+      undefined,
+      podRepo,
+      escalationRepo,
+      undefined,
+      undefined,
+      db,
+    );
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    db.close();
+  });
+
+  it('provider-attempt returns ordered redacted attempts and ledger projections', async () => {
+    insertPod(db, { id: 'provider-attempt-pod', status: 'running', completedAt: undefined });
+    db.prepare(`
+      UPDATE pods SET
+        input_tokens = 999, output_tokens = 999, cost_usd = 999,
+        claude_session_id = 'stale-legacy-session'
+      WHERE id = 'provider-attempt-pod'
+    `).run();
+    const attempts = createProviderAttemptRepository(db);
+    attempts.open({
+      podId: 'provider-attempt-pod',
+      provider: 'max',
+      providerAccountId: 'claude-max',
+      runtime: 'claude',
+      model: 'opus',
+      profileReference: 'pod:provider-attempt-pod@profile-snapshot#abcdef1',
+      profileSnapshot: { name: 'test-profile' },
+      startedAt: '2026-07-24T10:00:00.000Z',
+    });
+    attempts.close('provider-attempt-pod', {
+      nativeSessionId: 'source-session',
+      endedAt: '2026-07-24T10:10:00.000Z',
+      outcome: 'quota_exhausted',
+      inputTokens: 100,
+      outputTokens: 25,
+      costUsd: 1.5,
+    });
+    attempts.open({
+      podId: 'provider-attempt-pod',
+      provider: 'openai',
+      providerAccountId: 'openai-pro',
+      runtime: 'codex',
+      model: 'gpt-5',
+      profileReference: 'pod:provider-attempt-pod@profile-snapshot#abcdef1',
+      profileSnapshot: { name: 'test-profile' },
+      startedAt: '2026-07-24T10:11:00.000Z',
+    });
+    attempts.updateActive('provider-attempt-pod', {
+      nativeSessionId: 'target-session',
+      inputTokens: 20,
+      outputTokens: 5,
+      costUsd: 0.2,
+    });
+
+    const response = await app.inject({ method: 'GET', url: '/pods/provider-attempt-pod' });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.providerAttempts.map((attempt: { ordinal: number }) => attempt.ordinal)).toEqual([
+      1, 2,
+    ]);
+    expect(body.providerAttempts[0]).toMatchObject({
+      providerAccountId: 'claude-max',
+      nativeSessionId: 'source-session',
+      inputTokens: 100,
+      outputTokens: 25,
+      costUsd: 1.5,
+    });
+    expect(JSON.stringify(body.providerAttempts)).not.toContain('credential');
+    expect(body.providerAttempts[0].profileReference).toBe(
+      'pod:provider-attempt-pod@profile-snapshot#abcdef1',
+    );
+    expect(body).toMatchObject({
+      runtime: 'codex',
+      model: 'gpt-5',
+      claudeSessionId: null,
+      codexSessionId: 'target-session',
+      inputTokens: 120,
+      outputTokens: 30,
+      costUsd: 1.7,
+    });
+  });
+
+  it('provider-attempt quality route replaces stale pod accounting with attempt totals', async () => {
+    insertPod(db, { id: 'provider-attempt-quality', status: 'complete' });
+    db.prepare(`
+      UPDATE pods SET input_tokens = 999, output_tokens = 999, cost_usd = 999
+      WHERE id = 'provider-attempt-quality'
+    `).run();
+    const attempts = createProviderAttemptRepository(db);
+    attempts.open({
+      podId: 'provider-attempt-quality',
+      provider: 'max',
+      providerAccountId: 'claude-max',
+      runtime: 'claude',
+      model: 'opus',
+      profileReference: 'pod:provider-attempt-quality@profile-snapshot#abcdef1',
+      profileSnapshot: { name: 'test-profile' },
+    });
+    attempts.close('provider-attempt-quality', {
+      outcome: 'quota_exhausted',
+      inputTokens: 100,
+      outputTokens: 25,
+      costUsd: 1.5,
+    });
+    attempts.open({
+      podId: 'provider-attempt-quality',
+      provider: 'openai',
+      providerAccountId: 'openai-pro',
+      runtime: 'codex',
+      model: 'gpt-5.6-terra',
+      profileReference: 'pod:provider-attempt-quality@profile-snapshot#abcdef1',
+      profileSnapshot: { name: 'test-profile' },
+    });
+    attempts.close('provider-attempt-quality', {
+      outcome: 'completed',
+      inputTokens: 200,
+      outputTokens: 50,
+      costUsd: 0.75,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods/provider-attempt-quality/quality',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      podId: 'provider-attempt-quality',
+      tokens: { input: 300, output: 75, costUsd: 2.25 },
+    });
+  });
+
+  it('provider-attempt keeps legacy compatibility fields when no ledger exists', async () => {
+    insertPod(db, { id: 'legacy-provider-attempt-pod' });
+    db.prepare(`
+      UPDATE pods SET
+        runtime = 'claude', model = 'legacy-opus', claude_session_id = 'legacy-session',
+        input_tokens = 12, output_tokens = 4, cost_usd = 0.25
+      WHERE id = 'legacy-provider-attempt-pod'
+    `).run();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods/legacy-provider-attempt-pod',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      providerAttempts: [],
+      runtime: 'claude',
+      model: 'legacy-opus',
+      claudeSessionId: 'legacy-session',
+      inputTokens: 12,
+      outputTokens: 4,
+      costUsd: 0.25,
+    });
+  });
+});
 
 function createMockAuthModule(): AuthModule {
   return {

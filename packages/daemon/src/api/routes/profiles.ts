@@ -1,5 +1,14 @@
-import { AutopodError, PROVIDER_CATALOG } from '@autopod/shared';
-import type { ProfileEditorPayload, ProviderAuthSource } from '@autopod/shared';
+import {
+  AutopodError,
+  ProfileNotFoundError,
+  createProfileSchema,
+  updateProfileSchema,
+} from '@autopod/shared';
+import type {
+  ProfileEditorPayload,
+  ProviderAuthSource,
+  ProviderFailoverPolicy,
+} from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { DaemonGitHubAuth } from '../../github/daemon-github-auth.js';
 import type { ImageBuilder } from '../../images/index.js';
@@ -35,18 +44,115 @@ export function profileRoutes(
     const account = providerAccountStore.get(nextAccountId);
     const nextProvider =
       typeof changes.modelProvider === 'string' ? changes.modelProvider : existing.modelProvider;
-    const catalogProvider = PROVIDER_CATALOG.providers.find(
-      (provider) => provider.id === account.provider,
-    );
-    const matchesLegacyProvider = nextProvider === account.provider;
-    const matchesGenericPiProvider =
-      nextProvider === 'pi' && catalogProvider?.implementation.kind === 'generic-pi-api';
-    if (!matchesLegacyProvider && !matchesGenericPiProvider) {
+    if (nextProvider !== account.provider) {
       throw new AutopodError(
         `Profile "${name}" uses modelProvider=${nextProvider ?? 'none'} but provider account "${account.name}" is for ${account.provider}`,
         'PROVIDER_ACCOUNT_PROVIDER_MISMATCH',
         400,
       );
+    }
+  }
+
+  function validateProviderFailover(
+    accountId: string | null,
+    policy: ProviderFailoverPolicy | null | undefined,
+  ): void {
+    if (!providerAccountStore || policy === undefined) return;
+    providerAccountStore.validateFailoverPolicy(accountId, policy);
+  }
+
+  function parseCreateProfile(input: unknown) {
+    const result = createProfileSchema.safeParse(input);
+    if (!result.success) {
+      throw new AutopodError(
+        result.error.issues.map((issue) => issue.message).join('; '),
+        'INVALID_PROFILE',
+        400,
+      );
+    }
+    return result.data;
+  }
+
+  function parseProfileUpdate(input: unknown) {
+    const result = updateProfileSchema.safeParse(input);
+    if (!result.success) {
+      throw new AutopodError(
+        result.error.issues.map((issue) => issue.message).join('; '),
+        'INVALID_PROFILE',
+        400,
+      );
+    }
+    return result.data;
+  }
+
+  function resolveProspectiveProviderConfig(raw: {
+    extends: string | null;
+    providerAccountId: string | null;
+    providerFailover: ProviderFailoverPolicy | null;
+  }): { accountId: string | null; policy: ProviderFailoverPolicy | null } {
+    const parent = raw.extends ? profileStore.get(raw.extends) : null;
+    return {
+      accountId: raw.providerAccountId ?? parent?.providerAccountId ?? null,
+      policy: raw.providerFailover ?? parent?.providerFailover ?? null,
+    };
+  }
+
+  function validateProspectiveProfileFamily(
+    targetName: string,
+    targetRaw: {
+      extends: string | null;
+      providerAccountId: string | null;
+      providerFailover: ProviderFailoverPolicy | null;
+    },
+  ): void {
+    const profiles = profileStore.list();
+    const rawByName = new Map(
+      profiles.map((profile) => [
+        profile.name,
+        profile.name === targetName ? targetRaw : profileStore.getRaw(profile.name),
+      ]),
+    );
+    const memo = new Map<
+      string,
+      { accountId: string | null; policy: ProviderFailoverPolicy | null }
+    >();
+    const visiting = new Set<string>();
+
+    const resolveConfig = (
+      name: string,
+    ): { accountId: string | null; policy: ProviderFailoverPolicy | null } => {
+      const cached = memo.get(name);
+      if (cached) return cached;
+      if (visiting.has(name)) {
+        throw new AutopodError('Circular profile inheritance', 'CIRCULAR_INHERITANCE', 400);
+      }
+      visiting.add(name);
+      const raw = rawByName.get(name);
+      if (!raw) throw new ProfileNotFoundError(name);
+      const parent = raw.extends ? resolveConfig(raw.extends) : { accountId: null, policy: null };
+      const resolved = {
+        accountId: raw.providerAccountId ?? parent.accountId,
+        policy: raw.providerFailover ?? parent.policy,
+      };
+      visiting.delete(name);
+      memo.set(name, resolved);
+      return resolved;
+    };
+
+    const belongsToTargetFamily = (name: string): boolean => {
+      const seen = new Set<string>();
+      let current: string | null = name;
+      while (current !== null && !seen.has(current)) {
+        if (current === targetName) return true;
+        seen.add(current);
+        current = rawByName.get(current)?.extends ?? null;
+      }
+      return false;
+    };
+
+    for (const profile of profiles.filter((candidate) => belongsToTargetFamily(candidate.name))) {
+      const config = resolveConfig(profile.name);
+      validateProviderFailover(config.accountId, config.policy);
     }
   }
 
@@ -83,7 +189,10 @@ export function profileRoutes(
 
   // POST /profiles — create profile
   app.post('/profiles', async (request, reply) => {
-    const profile = profileStore.create(request.body as Record<string, unknown>);
+    const parsed = parseCreateProfile(request.body);
+    const prospective = resolveProspectiveProviderConfig(parsed);
+    validateProviderFailover(prospective.accountId, prospective.policy);
+    const profile = profileStore.create(parsed);
     reply.status(201);
     return redactProfileSecrets(profile);
   });
@@ -124,6 +233,7 @@ export function profileRoutes(
     const sourceMap = buildSourceMap(raw, parent);
     const credentialOwner = profileStore.resolveCredentialOwner(name);
     const authSource = resolveAuthSource(name, sourceMap);
+    const providerFailoverResolution = profileStore.resolveProviderFailover(name);
     return {
       raw: redactProfileSecrets(raw),
       resolved: redactProfileSecrets(resolved),
@@ -131,6 +241,7 @@ export function profileRoutes(
       sourceMap,
       authSource,
       providerAccountId: resolved.providerAccountId,
+      providerFailoverResolution,
       credentialOwner,
     } satisfies ProfileEditorPayload;
   });
@@ -138,8 +249,21 @@ export function profileRoutes(
   // PUT/PATCH /profiles/:name — update profile
   const updateHandler = async (request: import('fastify').FastifyRequest) => {
     const { name } = request.params as { name: string };
-    const changes = request.body as Record<string, unknown>;
+    const changes = parseProfileUpdate(request.body);
     validateProviderAccountMismatch(name, changes);
+    const existing = profileStore.getRaw(name);
+    const prospectiveRaw = {
+      extends: changes.extends === undefined ? existing.extends : changes.extends,
+      providerAccountId:
+        changes.providerAccountId === undefined
+          ? existing.providerAccountId
+          : changes.providerAccountId,
+      providerFailover:
+        changes.providerFailover === undefined
+          ? existing.providerFailover
+          : changes.providerFailover,
+    };
+    validateProspectiveProfileFamily(name, prospectiveRaw);
     const updated = profileStore.update(name, changes);
     // Fire-and-forget: re-apply network policy to running containers using this profile
     refreshNetworkPolicy(name).catch(() => {

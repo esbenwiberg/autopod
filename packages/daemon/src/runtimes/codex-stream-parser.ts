@@ -3,6 +3,7 @@ import type { Readable } from 'node:stream';
 import { canonicalModelKey, computeCostWithCache } from '@autopod/shared';
 import type { AgentEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
+import { classifyProviderError } from './provider-error-classifier.js';
 
 /**
  * Codex CLI JSONL parser.
@@ -506,7 +507,19 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
           : msg.type === 'turn_aborted'
             ? 'Codex turn aborted'
             : 'Codex error';
-      return { type: 'error', timestamp: ts, message, fatal: true };
+      const classification = classifyProviderError('codex', {
+        message,
+        code: msg.code,
+        status: msg.status,
+        retryAfter: msg.retry_after,
+      });
+      return {
+        type: 'error',
+        timestamp: ts,
+        message: classification.sanitizedMessage,
+        fatal: true,
+        classification,
+      };
     }
 
     // Stateful events handled in `parse()` — `mapEvent` returns null so a
@@ -647,11 +660,19 @@ async function* parse(
 
     if (msg.type === 'turn.failed') {
       const error = msg.error as Record<string, unknown> | undefined;
+      const message = typeof error?.message === 'string' ? error.message : 'Codex turn failed';
+      const classification = classifyProviderError('codex', {
+        message,
+        code: error?.code ?? error?.type,
+        status: error?.status,
+        retryAfter: error?.retry_after,
+      });
       yield {
         type: 'error',
         timestamp: tsOf(env),
-        message: typeof error?.message === 'string' ? error.message : 'Codex turn failed',
+        message: classification.sanitizedMessage,
         fatal: true,
+        classification,
       };
       continue;
     }

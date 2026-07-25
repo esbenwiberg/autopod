@@ -145,6 +145,8 @@ export interface WorktreeResult {
 
 export interface WorktreeManager {
   create(config: WorktreeCreateConfig): Promise<WorktreeResult>;
+  /** Install daemon-managed commit exclusions. Throws when protection cannot be proven. */
+  ensureExcludes?(worktreePath: string, entries: string[]): Promise<void>;
   cleanup(worktreePath: string): Promise<void>;
   getDiffStats(worktreePath: string, baseBranch?: string, sinceCommit?: string): Promise<DiffStats>;
   /**

@@ -1778,6 +1778,7 @@ describe('LocalWorktreeManager', () => {
       expect(String(excludeWrite?.[1])).toContain('.mcp.json');
       // The Pi handoff mirror is excluded from the host-side auto-commit here.
       expect(String(excludeWrite?.[1])).toContain('.autopod/pi-handoff.md');
+      expect(String(excludeWrite?.[1])).toContain('.autopod/provider-failover.md');
     });
 
     it('does not duplicate excludes when info/exclude already lists them', async () => {
@@ -1795,7 +1796,9 @@ describe('LocalWorktreeManager', () => {
           return {} as ChildProcess;
         },
       );
-      fsReadFileMock.mockResolvedValueOnce('# pre-existing\n.mcp.json\n.autopod/pi-handoff.md\n');
+      fsReadFileMock.mockResolvedValueOnce(
+        '# pre-existing\n.mcp.json\n.autopod/pi-handoff.md\n.autopod/provider-failover.md\n',
+      );
 
       await manager.create({
         repoUrl: 'https://github.com/org/repo.git',

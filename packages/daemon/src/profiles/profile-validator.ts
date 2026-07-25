@@ -1,4 +1,8 @@
-import { type StackTemplate, VALIDATION_SUITES } from '@autopod/shared';
+import {
+  type StackTemplate,
+  VALIDATION_SUITES,
+  providerFailoverPolicySchema,
+} from '@autopod/shared';
 import { isPrivateUrl } from '../api/ssrf-guard.js';
 
 export interface ProfileValidationResult {
@@ -158,6 +162,17 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
   const defaultRuntime = input.defaultRuntime;
   if (defaultRuntime !== undefined && !KNOWN_RUNTIMES.includes(defaultRuntime as string)) {
     errors.push(`defaultRuntime must be one of: ${KNOWN_RUNTIMES.join(', ')}`);
+  }
+
+  const providerFailover = input.providerFailover;
+  if (
+    providerFailover !== undefined &&
+    providerFailover !== null &&
+    !providerFailoverPolicySchema.safeParse(providerFailover).success
+  ) {
+    errors.push(
+      'providerFailover must contain complete, unique account/runtime/model targets and valid maxHops',
+    );
   }
 
   // Max validation attempts

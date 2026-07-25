@@ -3,8 +3,9 @@ import type { SpecContract } from './contract.js';
 import type { EscalationRequest } from './escalation.js';
 import type { PodOptions } from './pod-options.js';
 import type { ExecutionTarget, NetworkPolicyMode, PimGroupConfig, Profile } from './profile.js';
+import type { ProviderAccountProvider } from './provider-account.js';
 import type { ReadinessReview } from './readiness.js';
-import type { RuntimeType } from './runtime.js';
+import type { ProviderFailureClassification, RuntimeType } from './runtime.js';
 import type { TaskSummary } from './task-summary.js';
 import type { ValidationFinding, ValidationOverride, ValidationResult } from './validation.js';
 
@@ -80,6 +81,32 @@ export interface PodCostBreakdownResponse {
   inputTokens: number;
   outputTokens: number;
   segments: PodCostSegment[];
+}
+
+export type ProviderAttemptOutcome = 'completed' | 'failed' | 'aborted' | 'quota_exhausted';
+
+/**
+ * Immutable identity and terminal accounting for one contiguous provider run.
+ * `profileReference` identifies the pod's persisted, resolved profile snapshot
+ * by content hash without copying credential-bearing JSON into the ledger or API.
+ */
+export interface ProviderAttempt {
+  podId: string;
+  ordinal: number;
+  provider: ProviderAccountProvider;
+  providerAccountId: string | null;
+  runtime: RuntimeType;
+  model: string;
+  profileReference: string;
+  nativeSessionId: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  outcome: ProviderAttemptOutcome | null;
+  classification: ProviderFailureClassification | null;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  handoffReference: string | null;
 }
 
 export type PodStatus =
@@ -216,6 +243,11 @@ export interface Pod {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  /**
+   * Ordered provider execution history when attempt-ledger persistence is available.
+   * Undefined on internal/legacy repository objects; full pod API responses project `[]`.
+   */
+  providerAttempts?: ProviderAttempt[];
   commitCount: number;
   lastCommitAt: string | null;
   startCommitSha: string | null;
@@ -247,8 +279,8 @@ export interface Pod {
   tokenBudget: number | null;
   /** Number of times the user has approved a budget extension for this pod. */
   budgetExtensionsUsed: number;
-  /** Why the pod is paused. 'budget' = waiting for budget approval, 'manual' = user-paused mid-run. */
-  pauseReason: 'budget' | 'manual' | null;
+  /** Why the pod is paused. Provider limits use a distinct queue-driven continuation flow. */
+  pauseReason: 'budget' | 'manual' | 'provider_limit' | null;
   /** Reference repos cloned read-only into the container for research pods. */
   referenceRepos: ReferenceRepo[] | null;
   /** Host path where /workspace was extracted on pod completion (artifact mode). */

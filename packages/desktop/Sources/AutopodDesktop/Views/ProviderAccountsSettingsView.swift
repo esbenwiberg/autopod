@@ -36,6 +36,9 @@ struct ProviderAccountsSettingsView: View {
   @State private var inFlightAction: String?
   @State private var deleteTarget: PublicProviderAccountResponse?
   @State private var apiKeyTarget: PublicProviderAccountResponse?
+  @State private var expandedFailoverAccounts: Set<String> = []
+  @State private var failoverDrafts: [String: ProviderFailoverPolicyResponse] = [:]
+  @State private var failoverSaveErrors: [String: String] = [:]
 
   private var sortedAccounts: [PublicProviderAccountResponse] {
     accounts.sorted {
@@ -280,6 +283,15 @@ struct ProviderAccountsSettingsView: View {
 
         authControl(account)
 
+        Button {
+          toggleFailoverEditor(account)
+        } label: {
+          Image(systemName: "arrow.triangle.branch")
+        }
+        .buttonStyle(.borderless)
+        .disabled(isAccountBusy(account.id))
+        .help("Edit default failover chain")
+
         Menu {
           if linkableProfiles.isEmpty {
             Text("No matching profiles")
@@ -330,6 +342,11 @@ struct ProviderAccountsSettingsView: View {
       }
 
       metadataRow(account)
+
+      if expandedFailoverAccounts.contains(account.id) {
+        Divider()
+        defaultFailoverEditor(account)
+      }
     }
     .padding(12)
     .background(Color(nsColor: .controlBackgroundColor))
@@ -420,6 +437,10 @@ struct ProviderAccountsSettingsView: View {
     var loadErrors: [String] = []
     if let loadedAccounts = accountResult.accounts {
       accounts = loadedAccounts
+      for account in loadedAccounts where failoverDrafts[account.id] == nil {
+        failoverDrafts[account.id] =
+          account.failoverPolicy ?? ProviderFailoverPolicyResponse(targets: [])
+      }
     } else if let accountError = accountResult.error {
       loadErrors.append(
         "Provider accounts unavailable: \(accountError). "
@@ -440,6 +461,110 @@ struct ProviderAccountsSettingsView: View {
       loadErrors.append(failure.errorMessage)
     }
     errorMessage = loadErrors.isEmpty ? nil : loadErrors.joined(separator: "\n")
+  }
+
+  private func toggleFailoverEditor(_ account: PublicProviderAccountResponse) {
+    if expandedFailoverAccounts.contains(account.id) {
+      expandedFailoverAccounts.remove(account.id)
+    } else {
+      failoverDrafts[account.id] =
+        failoverDrafts[account.id] ?? account.failoverPolicy ?? ProviderFailoverPolicyResponse(targets: [])
+      expandedFailoverAccounts.insert(account.id)
+    }
+  }
+
+  private func failoverBinding(for account: PublicProviderAccountResponse)
+    -> Binding<ProviderFailoverPolicyResponse>
+  {
+    Binding(
+      get: {
+        failoverDrafts[account.id]
+          ?? account.failoverPolicy
+          ?? ProviderFailoverPolicyResponse(targets: [])
+      },
+      set: { failoverDrafts[account.id] = $0 }
+    )
+  }
+
+  @ViewBuilder
+  private func defaultFailoverEditor(_ account: PublicProviderAccountResponse) -> some View {
+    VStack(alignment: .leading, spacing: 9) {
+      HStack {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Default failover chain")
+            .font(.callout.weight(.semibold))
+          Text("Used unless a profile defines its own policy.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        Spacer()
+        Button("Revert") {
+          failoverDrafts[account.id] =
+            account.failoverPolicy ?? ProviderFailoverPolicyResponse(targets: [])
+          failoverSaveErrors[account.id] = nil
+        }
+        .buttonStyle(.borderless)
+        .disabled(isAccountBusy(account.id))
+
+        Button {
+          Task { await saveFailoverPolicy(account) }
+        } label: {
+          if inFlightAction == "failover:\(account.id)" {
+            ProgressView().scaleEffect(0.6)
+          } else {
+            Text("Save")
+          }
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+        .disabled(
+          isAccountBusy(account.id)
+            || validateProviderFailoverPolicy(
+              failoverBinding(for: account).wrappedValue,
+              accounts: accounts,
+              excludedAccountId: account.id
+            ) != nil
+        )
+      }
+
+      ProviderFailoverEditor(
+        policy: failoverBinding(for: account),
+        accounts: accounts,
+        excludedAccountId: account.id,
+        isLoading: isLoading,
+        loadError: errorMessage
+      )
+
+      if let message = failoverSaveErrors[account.id] {
+        HStack(alignment: .top, spacing: 5) {
+          Image(systemName: "exclamationmark.triangle.fill")
+          Text(message).fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.caption2)
+        .foregroundStyle(.red)
+      }
+    }
+  }
+
+  @MainActor
+  private func saveFailoverPolicy(_ account: PublicProviderAccountResponse) async {
+    guard let api else { return }
+    let draft = failoverDrafts[account.id] ?? ProviderFailoverPolicyResponse(targets: [])
+    inFlightAction = "failover:\(account.id)"
+    failoverSaveErrors[account.id] = nil
+    defer { inFlightAction = nil }
+    do {
+      let value: Any = draft.targets.isEmpty ? NSNull() : draft.dictionary
+      let updated = try await api.updateProviderAccount(account.id, fields: ["failoverPolicy": value])
+      if let index = accounts.firstIndex(where: { $0.id == account.id }) {
+        accounts[index] = updated
+      }
+      failoverDrafts[account.id] =
+        updated.failoverPolicy ?? ProviderFailoverPolicyResponse(targets: [])
+    } catch {
+      // Keep the draft untouched so the administrator can correct and retry.
+      failoverSaveErrors[account.id] = error.localizedDescription
+    }
   }
 
   @MainActor

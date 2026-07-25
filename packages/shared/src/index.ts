@@ -15,6 +15,8 @@ export type {
   PodCostBreakdownResponse,
   PodCostBucket,
   PodCostSegment,
+  ProviderAttempt,
+  ProviderAttemptOutcome,
   PodStatus,
   Pod,
   CreatePodRequest,
@@ -34,6 +36,11 @@ export type {
 } from './types/pod.js';
 
 export type {
+  ProviderFailureCategory,
+  ProviderFailureClassification,
+} from './types/runtime.js';
+
+export type {
   ReadinessApproval,
   ReadinessArea,
   ReadinessAreaReview,
@@ -50,6 +57,8 @@ export type {
   Profile,
   PublicProfile,
   ProfileEditorPayload,
+  ProviderFailoverPolicySource,
+  ResolvedProviderFailoverPolicy,
   StackTemplate,
   ExecutionTarget,
   SmokePage,
@@ -191,6 +200,8 @@ export type {
   PublicProviderAccount,
   PublicProviderCredentials,
   ProviderAccountProvider,
+  ProviderFailoverPolicy,
+  ProviderFailoverTarget,
   ProviderAuthSource,
 } from './types/provider-account.js';
 
@@ -356,6 +367,9 @@ export {
   MAX_BUILD_LOG_LENGTH,
   MAX_DIFF_LENGTH,
   MAX_HANDOFF_INSTRUCTIONS_LENGTH,
+  MAX_PROVIDER_FAILOVER_HANDOFF_LENGTH,
+  PROVIDER_FAILOVER_HANDOFF_PATH,
+  PROVIDER_FAILOVER_HANDOFF_CONTAINER_PATH,
   WORKSPACE_PI_HANDOFF_PATH,
   SCREENSHOT_QUALITY,
   EVENT_LOG_RETENTION_DAYS,
@@ -405,6 +419,8 @@ export {
   providerAccountIdSchema,
   providerAccountNameSchema,
   providerAccountProviderSchema,
+  providerFailoverPolicySchema,
+  providerFailoverTargetSchema,
   updateProviderAccountSchema,
 } from './schemas/provider-account.schema.js';
 

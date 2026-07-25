@@ -16,6 +16,8 @@ import { createEventRepository } from './event-repository.js';
 import type { EventRepository } from './event-repository.js';
 import { type NewPod, createPodRepository } from './pod-repository.js';
 import type { PodRepository } from './pod-repository.js';
+import { createProviderAttemptRepository } from './provider-attempt-repository.js';
+import { createQualityScoreRepository } from './quality-score-repository.js';
 import { computeQualitySignals } from './quality-signals.js';
 import { createValidationRepository } from './validation-repository.js';
 import type { ValidationRepository } from './validation-repository.js';
@@ -136,6 +138,7 @@ function validationResult(overall: 'pass' | 'fail'): ValidationResult {
 }
 
 describe('computeQualitySignals', () => {
+  let db: ReturnType<typeof createTestDb>;
   let podRepo: PodRepository;
   let eventRepo: EventRepository;
   let escalationRepo: EscalationRepository;
@@ -146,7 +149,7 @@ describe('computeQualitySignals', () => {
   };
 
   beforeEach(() => {
-    const db = createTestDb();
+    db = createTestDb();
     insertTestProfile(db);
     podRepo = createPodRepository(db);
     eventRepo = createEventRepository(db);
@@ -165,6 +168,77 @@ describe('computeQualitySignals', () => {
     expect(signals.editCount).toBe(0);
     expect(signals.editsWithoutPriorRead).toBe(0);
     expect(signals.grade).toBe('green');
+  });
+
+  it('provider-attempt uses summed accounting and latest immutable quality projection', () => {
+    podRepo.insert(basePod({ runtime: 'codex', model: 'mutable-projection' }));
+    const providerAttemptRepo = createProviderAttemptRepository(db);
+    providerAttemptRepo.open({
+      podId: POD_ID,
+      provider: 'max',
+      providerAccountId: null,
+      runtime: 'claude',
+      model: 'claude-opus-4-7',
+      profileReference: `pod:${POD_ID}@profile-snapshot#abcdef1`,
+      profileSnapshot: {},
+    });
+    providerAttemptRepo.close(POD_ID, {
+      outcome: 'quota_exhausted',
+      classification: {
+        category: 'quota_exhausted',
+        definitive: true,
+        sanitizedMessage: 'Provider limit reached',
+      },
+      inputTokens: 100,
+      outputTokens: 20,
+      costUsd: 1.25,
+    });
+    providerAttemptRepo.open({
+      podId: POD_ID,
+      provider: 'openai',
+      providerAccountId: null,
+      runtime: 'codex',
+      model: 'gpt-5.6-terra',
+      profileReference: `pod:${POD_ID}@profile-snapshot#abcdef1`,
+      profileSnapshot: {},
+    });
+    providerAttemptRepo.close(POD_ID, {
+      outcome: 'completed',
+      inputTokens: 200,
+      outputTokens: 40,
+      costUsd: 0.75,
+    });
+
+    const qualityScoreRepo = createQualityScoreRepository(db);
+    db.prepare(`
+      INSERT INTO pod_quality_scores (
+        pod_id, score, runtime, profile_name, model, final_status, completed_at,
+        input_tokens, output_tokens, cost_usd
+      ) VALUES (?, 90, 'claude', 'test-profile', 'stale-model', 'complete', ?, 999, 999, 99)
+    `).run(POD_ID, new Date().toISOString());
+
+    const signals = computeQualitySignals(POD_ID, {
+      ...deps,
+      providerAttemptRepo,
+      qualityScoreRepo,
+    });
+
+    expect(signals.tokens).toEqual({ input: 300, output: 60, costUsd: 2 });
+    expect(signals.score).toBe(90);
+    expect(signals.model).toBe('gpt-5.6-terra');
+  });
+
+  it('provider-attempt preserves legacy quality accounting without ledger rows', () => {
+    podRepo.insert(basePod());
+    podRepo.update(POD_ID, { inputTokens: 12, outputTokens: 3, costUsd: 0.5 });
+
+    const signals = computeQualitySignals(POD_ID, {
+      ...deps,
+      providerAttemptRepo: createProviderAttemptRepository(db),
+    });
+
+    expect(signals.tokens).toEqual({ input: 12, output: 3, costUsd: 0.5 });
+    expect(signals.model).toBe('opus');
   });
 
   it('counts reads and edits, marks green when the ratio is healthy', () => {

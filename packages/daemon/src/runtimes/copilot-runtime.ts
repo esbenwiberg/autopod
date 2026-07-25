@@ -4,6 +4,7 @@ import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { CopilotStreamParser } from './copilot-stream-parser.js';
+import { classifyProviderError, sanitizeProviderMessage } from './provider-error-classifier.js';
 import {
   awaitExitCodeBounded,
   withIdleLivenessProbe,
@@ -84,14 +85,17 @@ export class CopilotRuntime implements Runtime {
 
     try {
       yield* withPostCompleteGrace(
-        withIdleLivenessProbe(CopilotStreamParser.parse(handle.stdout, config.podId, this.logger), {
-          streams: [handle.stdout, handle.stderr],
-          runtimeName: 'copilot-runtime',
-          podId: config.podId,
-          logger: this.logger,
-          containerManager: this.containerManager,
-          containerId: config.containerId,
-        }),
+        withIdleLivenessProbe(
+          CopilotStreamParser.parse(handle.stdout, config.podId, this.logger, false),
+          {
+            streams: [handle.stdout, handle.stderr],
+            runtimeName: 'copilot-runtime',
+            podId: config.podId,
+            logger: this.logger,
+            containerManager: this.containerManager,
+            containerId: config.containerId,
+          },
+        ),
         {
           streams: [handle.stdout, handle.stderr],
           runtimeName: 'copilot-runtime',
@@ -119,7 +123,7 @@ export class CopilotRuntime implements Runtime {
         {
           component: 'copilot-runtime',
           podId: config.podId,
-          stderr: stderrText.slice(0, 1000),
+          stderr: sanitizeProviderMessage(stderrText.slice(0, 1000)),
         },
         'copilot stderr',
       );
@@ -132,13 +136,32 @@ export class CopilotRuntime implements Runtime {
         message: 'Copilot exit code did not resolve — container may be unresponsive',
         fatal: false,
       };
+      // stdout closed cleanly, which was Copilot's completion signal before
+      // provider classification moved terminal handling to the runtime.
+      yield {
+        type: 'complete',
+        timestamp: new Date().toISOString(),
+        result: 'Copilot agent completed',
+      };
     } else if (exitResult.code !== 0) {
-      const stderrSummary = stderrText.trim() ? `: ${stderrText.trim().slice(-500)}` : '';
+      const stderrLines = stderrText
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const evidenceMessage = stderrLines.at(-1) ?? 'Copilot provider error';
+      const classification = classifyProviderError('copilot', { message: evidenceMessage });
       yield {
         type: 'error',
         timestamp: new Date().toISOString(),
-        message: `Copilot process exited with code ${exitResult.code}${stderrSummary}`,
+        message: `Copilot process exited with code ${exitResult.code}: ${classification.sanitizedMessage}`,
         fatal: true,
+        classification,
+      };
+    } else {
+      yield {
+        type: 'complete',
+        timestamp: new Date().toISOString(),
+        result: 'Copilot agent completed',
       };
     }
   }

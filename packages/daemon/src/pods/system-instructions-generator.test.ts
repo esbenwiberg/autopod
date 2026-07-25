@@ -446,6 +446,42 @@ human_review: []
     expect(md).not.toContain('<!-- BEGIN HANDOFF CONTEXT -->');
   });
 
+  it('references the protected provider handoff for continued attempts', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        providerAttempts: [
+          {
+            podId: 'abc12345',
+            ordinal: 1,
+            provider: 'anthropic',
+            providerAccountId: 'source',
+            runtime: 'claude',
+            model: 'opus',
+            profileReference: 'snapshot',
+            nativeSessionId: 'native-1',
+            startedAt: '2026-01-01T00:00:00Z',
+            endedAt: '2026-01-01T01:00:00Z',
+            outcome: 'quota_exhausted',
+            classification: {
+              category: 'quota_exhausted',
+              definitive: true,
+              sanitizedMessage: 'Provider quota exhausted',
+            },
+            inputTokens: 10,
+            outputTokens: 5,
+            costUsd: 0.1,
+            handoffReference: '.autopod/provider-failover.md',
+          },
+        ],
+      }),
+      'http://localhost:8080/mcp/x',
+    );
+
+    expect(md).toContain('## Provider continuation');
+    expect(md).toContain('/workspace/.autopod/provider-failover.md');
+  });
+
   it('includes validate_in_browser tool in MCP tools list', () => {
     const md = generateSystemInstructions(
       makeProfile(),

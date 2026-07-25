@@ -120,6 +120,44 @@ describe('ClaudeStreamParser.mapEvent', () => {
     expect(result).toMatchObject({ type: 'complete', result: 'Done!' });
   });
 
+  it('maps an error result to a classified fatal error instead of completion', () => {
+    const result = ClaudeStreamParser.mapEvent(
+      {
+        type: 'result',
+        subtype: 'error_during_execution',
+        is_error: true,
+        result: "You've hit your usage limit",
+        error: { code: 'usage_limit_reached' },
+      },
+      POD_ID,
+      fakeLogger(),
+    );
+    expect(result).toMatchObject({
+      type: 'error',
+      fatal: true,
+      message: "You've hit your usage limit",
+      classification: { category: 'quota_exhausted', definitive: true },
+    });
+  });
+
+  it('fails closed for malformed Claude error-result evidence', () => {
+    const result = ClaudeStreamParser.mapEvent(
+      {
+        type: 'result',
+        subtype: 'error_during_execution',
+        is_error: true,
+        result: 'Claude changed its terminal error format',
+      },
+      POD_ID,
+      fakeLogger(),
+    );
+    expect(result).toMatchObject({
+      type: 'error',
+      fatal: true,
+      classification: { category: 'unknown', definitive: false },
+    });
+  });
+
   it('extracts costUsd from total_cost_usd in result event', () => {
     const event = { type: 'result', subtype: 'success', result: 'Done!', total_cost_usd: 0.0234 };
     const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
@@ -199,7 +237,64 @@ describe('ClaudeStreamParser.mapEvent', () => {
   it('maps error event to fatal error', () => {
     const event = { type: 'error', error: { message: 'rate limit' } };
     const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
-    expect(result).toMatchObject({ type: 'error', message: 'rate limit', fatal: true });
+    expect(result).toMatchObject({
+      type: 'error',
+      message: 'rate limit',
+      fatal: true,
+      classification: { category: 'transient', definitive: false },
+    });
+  });
+
+  it.each([
+    {
+      name: 'definitive quota',
+      error: {
+        code: 'usage_limit_reached',
+        message: "You've hit your usage limit",
+        retry_after: '2026-07-25T17:00:00Z',
+      },
+      category: 'quota_exhausted',
+      definitive: true,
+    },
+    {
+      name: 'authentication',
+      error: { code: 'authentication_error', message: 'Authentication failed.' },
+      category: 'auth',
+      definitive: false,
+    },
+    {
+      name: 'provider outage',
+      error: { code: 'service_unavailable', message: 'Service temporarily unavailable.' },
+      category: 'provider_unavailable',
+      definitive: false,
+    },
+    {
+      name: 'malformed payload',
+      error: undefined,
+      category: 'unknown',
+      definitive: false,
+    },
+    {
+      name: 'unknown text',
+      error: { message: 'New unrecognized Claude failure' },
+      category: 'unknown',
+      definitive: false,
+    },
+  ])('classifies $name terminal evidence conservatively', ({ error, category, definitive }) => {
+    const result = ClaudeStreamParser.mapEvent({ type: 'error', error }, POD_ID, fakeLogger());
+    expect(result).toMatchObject({ classification: { category, definitive } });
+  });
+
+  it('sanitizes Claude provider text in both terminal error fields', () => {
+    const result = ClaudeStreamParser.mapEvent(
+      { type: 'error', error: { message: 'Unknown failure token=claude-secret' } },
+      POD_ID,
+      fakeLogger(),
+    );
+    expect(result).toMatchObject({
+      message: 'Unknown failure token=[REDACTED]',
+      classification: { sanitizedMessage: 'Unknown failure token=[REDACTED]' },
+    });
   });
 
   it('returns null for unknown event types', () => {

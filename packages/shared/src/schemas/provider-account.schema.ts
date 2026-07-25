@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_PROVIDER_FAILOVER_TARGETS } from '../constants.js';
 import { PROVIDER_CATALOG } from '../provider-catalog/compiled-manifest.js';
 import type { PublicProviderCatalog } from '../types/provider-catalog.js';
 
@@ -80,6 +81,41 @@ const piOAuthCredentialsSchema = z.object({
     ),
 });
 
+export const providerFailoverTargetSchema = z
+  .object({
+    providerAccountId: providerAccountIdSchema,
+    runtime: z.enum(['claude', 'codex', 'copilot', 'pi']),
+    model: z.string().trim().min(1).max(256),
+  })
+  .strict();
+
+export const providerFailoverPolicySchema = z
+  .object({
+    targets: z.array(providerFailoverTargetSchema).max(MAX_PROVIDER_FAILOVER_TARGETS),
+    maxHops: z.number().int().min(1).max(MAX_PROVIDER_FAILOVER_TARGETS).optional(),
+  })
+  .strict()
+  .superRefine((policy, ctx) => {
+    const seen = new Set<string>();
+    for (const [index, target] of policy.targets.entries()) {
+      if (seen.has(target.providerAccountId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['targets', index],
+          message: 'Failover targets must not contain duplicate provider accounts',
+        });
+      }
+      seen.add(target.providerAccountId);
+    }
+    if (policy.maxHops !== undefined && policy.maxHops > policy.targets.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['maxHops'],
+        message: 'maxHops cannot exceed the number of failover targets',
+      });
+    }
+  });
+
 export function createProviderAccountSchemas(catalog: PublicProviderCatalog = PROVIDER_CATALOG) {
   const catalogProviderIds = new Set(catalog.providers.map((provider) => provider.id));
   const providerSchema = providerAccountIdSchema.refine(
@@ -137,6 +173,7 @@ export function createProviderAccountSchemas(catalog: PublicProviderCatalog = PR
       name: providerAccountNameSchema,
       provider: providerSchema,
       credentials: credentialsSchema.nullable().optional().default(null),
+      failoverPolicy: providerFailoverPolicySchema.nullable().optional().default(null),
     })
     .superRefine((data, ctx) => {
       const credentialProviderId =
@@ -150,13 +187,30 @@ export function createProviderAccountSchemas(catalog: PublicProviderCatalog = PR
           message: 'Provider account credentials must match the account provider',
         });
       }
+      if (data.failoverPolicy && data.failoverPolicy.targets.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['failoverPolicy', 'targets'],
+          message: 'Provider account failover policies must contain at least one target',
+        });
+      }
     });
   const updateSchema = z
     .object({
       name: providerAccountNameSchema.optional(),
       credentials: credentialsSchema.nullable().optional(),
+      failoverPolicy: providerFailoverPolicySchema.nullable().optional(),
     })
-    .strict();
+    .strict()
+    .superRefine((data, ctx) => {
+      if (data.failoverPolicy && data.failoverPolicy.targets.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['failoverPolicy', 'targets'],
+          message: 'Provider account failover policies must contain at least one target',
+        });
+      }
+    });
 
   return {
     providerAccountProviderSchema: providerSchema,

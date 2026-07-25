@@ -24,6 +24,52 @@ export interface QualityScoreRepository {
   getQualityAnalytics(days: number): QualityAnalyticsResponse;
 }
 
+const ATTEMPT_COMPATIBILITY_PROJECTION = `
+  SELECT q.pod_id,
+         q.score,
+         q.read_count,
+         q.edit_count,
+         q.read_edit_ratio,
+         q.edits_without_prior_read,
+         q.user_interrupts,
+         q.tells_count,
+         q.profile_name,
+         q.final_status,
+         q.completed_at,
+         q.computed_at,
+         q.edit_churn_count,
+         q.pr_fix_attempts,
+         q.validation_passed,
+         COALESCE((
+           SELECT a.runtime FROM provider_attempts a
+           WHERE a.pod_id = q.pod_id
+           ORDER BY a.ordinal DESC LIMIT 1
+         ), q.runtime) AS runtime,
+         COALESCE((
+           SELECT a.model FROM provider_attempts a
+           WHERE a.pod_id = q.pod_id
+           ORDER BY a.ordinal DESC LIMIT 1
+         ), q.model) AS model,
+         CASE WHEN EXISTS (
+           SELECT 1 FROM provider_attempts a WHERE a.pod_id = q.pod_id
+         ) THEN (
+           SELECT COALESCE(SUM(a.input_tokens), 0)
+           FROM provider_attempts a WHERE a.pod_id = q.pod_id
+         ) ELSE q.input_tokens END AS input_tokens,
+         CASE WHEN EXISTS (
+           SELECT 1 FROM provider_attempts a WHERE a.pod_id = q.pod_id
+         ) THEN (
+           SELECT COALESCE(SUM(a.output_tokens), 0)
+           FROM provider_attempts a WHERE a.pod_id = q.pod_id
+         ) ELSE q.output_tokens END AS output_tokens,
+         CASE WHEN EXISTS (
+           SELECT 1 FROM provider_attempts a WHERE a.pod_id = q.pod_id
+         ) THEN (
+           SELECT COALESCE(SUM(a.cost_usd), 0)
+           FROM provider_attempts a WHERE a.pod_id = q.pod_id
+         ) ELSE q.cost_usd END AS cost_usd
+  FROM pod_quality_scores q`;
+
 function rowToScore(row: Record<string, unknown>): PodQualityScore {
   return {
     podId: row.pod_id as string,
@@ -126,7 +172,7 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
     },
 
     get(podId: string): PodQualityScore | null {
-      const row = db.prepare('SELECT * FROM pod_quality_scores WHERE pod_id = ?').get(podId) as
+      const row = db.prepare(`${ATTEMPT_COMPATIBILITY_PROJECTION} WHERE q.pod_id = ?`).get(podId) as
         | Record<string, unknown>
         | undefined;
       return row ? rowToScore(row) : null;
@@ -136,26 +182,26 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
       const where: string[] = [];
       const params: Record<string, unknown> = {};
       if (filters.runtime) {
-        where.push('runtime = @runtime');
+        where.push('projected.runtime = @runtime');
         params.runtime = filters.runtime;
       }
       if (filters.model) {
-        where.push('model = @model');
+        where.push('projected.model = @model');
         params.model = filters.model;
       }
       if (filters.profileName) {
-        where.push('profile_name = @profileName');
+        where.push('projected.profile_name = @profileName');
         params.profileName = filters.profileName;
       }
       if (filters.since) {
-        where.push('computed_at >= @since');
+        where.push('projected.computed_at >= @since');
         params.since = filters.since;
       }
       const limit = filters.limit ?? 200;
       params.limit = limit;
-      const sql = `SELECT * FROM pod_quality_scores${
+      const sql = `SELECT * FROM (${ATTEMPT_COMPATIBILITY_PROJECTION}) projected${
         where.length ? ` WHERE ${where.join(' AND ')}` : ''
-      } ORDER BY computed_at DESC LIMIT @limit`;
+      } ORDER BY projected.computed_at DESC LIMIT @limit`;
       const rows = db.prepare(sql).all(params) as Record<string, unknown>[];
       return rows.map(rowToScore);
     },
@@ -167,11 +213,11 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
             date(completed_at) AS day,
             ROUND(AVG(score), 1) AS avg_score,
             COUNT(*) AS pod_count,
-            runtime,
-            model
-          FROM pod_quality_scores
+            projected.runtime,
+            projected.model
+          FROM (${ATTEMPT_COMPATIBILITY_PROJECTION}) projected
           WHERE completed_at > datetime('now', '-' || @days || ' days')
-          GROUP BY date(completed_at), runtime, model
+          GROUP BY date(completed_at), projected.runtime, projected.model
           ORDER BY day DESC`,
         )
         .all({ days }) as Record<string, unknown>[];
@@ -182,7 +228,7 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
       // Fetch all scores in the trailing window.
       const scoreRows = db
         .prepare(
-          `SELECT * FROM pod_quality_scores
+          `SELECT * FROM (${ATTEMPT_COMPATIBILITY_PROJECTION}) projected
            WHERE completed_at >= datetime('now', '-' || @days || ' days')
            ORDER BY completed_at DESC`,
         )

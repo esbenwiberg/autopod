@@ -47,6 +47,26 @@ describe('ProfileValidator', () => {
     expect(result.valid).toBe(true);
   });
 
+  it('validates complete profile failover policies and allows explicit disablement', () => {
+    expect(
+      validateProfile({
+        ...validInput,
+        providerFailover: {
+          targets: [{ providerAccountId: 'backup', runtime: 'codex', model: 'gpt-5' }],
+        },
+      }).valid,
+    ).toBe(true);
+    expect(validateProfile({ ...validInput, providerFailover: { targets: [] } }).valid).toBe(true);
+    expect(
+      validateProfile({
+        ...validInput,
+        providerFailover: {
+          targets: [{ providerAccountId: 'backup', runtime: 'codex' }],
+        },
+      }).errors,
+    ).toContainEqual(expect.stringContaining('providerFailover'));
+  });
+
   it('should reject non-https repoUrl', () => {
     const result = validateProfile({ ...validInput, repoUrl: 'http://github.com/org/repo' });
     expect(result.valid).toBe(false);
