@@ -8807,10 +8807,7 @@ describe('PodManager', () => {
       const result = await manager.resumePod(fix.id);
 
       expect(result).toEqual({ action: 'retry-fix-delivery' });
-      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledWith(
-        '/tmp/worktree/fix',
-        'daemon-gh-token',
-      );
+      expect(ctx.worktreeManager.pullBranch).not.toHaveBeenCalled();
       expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalledWith(
         expect.objectContaining({
           worktreePath: '/tmp/worktree/fix',
@@ -8836,25 +8833,6 @@ describe('PodManager', () => {
       expect(result).toEqual({ action: 'retry-fix-delivery' });
       expect(ctx.worktreeManager.pushBranch).toHaveBeenCalled();
       expect(manager.getSession(fix.id).status).toBe('complete');
-    });
-
-    it('parks without pushing when the remote fix branch has diverged', async () => {
-      const ctx = createTestContext();
-      const { manager, fix } = setupParkedFixDeliveryFailure(ctx);
-      (ctx.worktreeManager.pullBranch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-        new Error('Not possible to fast-forward'),
-      );
-
-      const result = await manager.resumePod(fix.id);
-
-      expect(result).toEqual({ action: 'retry-fix-delivery' });
-      expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
-      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
-      const refreshed = manager.getSession(fix.id);
-      expect(refreshed.status).toBe('awaiting_input');
-      expect(refreshed.mergeBlockReason).toBe(
-        'Validated fix could not be pushed: Not possible to fast-forward',
-      );
     });
 
     it('re-parks a validated fix pod when retry delivery fails again', async () => {

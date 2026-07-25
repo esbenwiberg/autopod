@@ -1206,13 +1206,24 @@ export class LocalWorktreeManager implements WorktreeManager {
         `Expected HEAD to be on branch '${expectedBranch}' but it is on '${actualBranch.trim()}'`,
       );
     }
-    // --force-with-lease (not --force) — refuses the push if origin/<branch> moved
-    // since our last fetch. Protects against clobbering a teammate's commits when
-    // pushing a rebased branch.
     const refspec = `HEAD:refs/heads/${expectedBranch}`;
-    const pushArgs = force
-      ? ['push', '--no-verify', '--force-with-lease', remote.url, refspec]
-      : ['push', '--no-verify', remote.url, refspec];
+    let pushArgs = ['push', '--no-verify', remote.url, refspec];
+    if (force) {
+      // URL pushes do not reliably associate an implicit lease with origin/<branch>.
+      // Pin the lease to the remote-tracking OID captured by the rebase fetch so a
+      // concurrent remote advance is rejected without relying on remote config.
+      const trackingRef = `refs/remotes/origin/${expectedBranch}`;
+      const { stdout: expectedRemoteOid } = await git(['rev-parse', '--verify', trackingRef], {
+        cwd: worktreePath,
+      });
+      pushArgs = [
+        'push',
+        '--no-verify',
+        `--force-with-lease=refs/heads/${expectedBranch}:${expectedRemoteOid.trim()}`,
+        remote.url,
+        refspec,
+      ];
+    }
     try {
       await git(pushArgs, {
         cwd: worktreePath,
@@ -1689,12 +1700,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     const { remote, bareRepoPath, branch, purpose } = params;
     try {
       await git(
-        [
-          'fetch',
-          remote.url,
-          `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
-          `+refs/heads/${branch}:refs/heads/${branch}`,
-        ],
+        ['fetch', remote.url, `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
         {
           cwd: bareRepoPath,
           credential: remote.credential,

@@ -1167,6 +1167,41 @@ describe('LocalWorktreeManager', () => {
         'HEAD:refs/heads/feat/security',
       ]);
     });
+
+    it('pins a force push lease to the remote-tracking branch OID', async () => {
+      const pushedArgs: string[][] = [];
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('rev-parse --abbrev-ref HEAD')) {
+            cb(null, { stdout: 'feat/security\n', stderr: '' });
+          } else if (cmd.includes('rev-parse --git-common-dir')) {
+            cb(null, { stdout: '.git\n', stderr: '' });
+          } else if (cmd.includes('remote get-url origin')) {
+            cb(null, { stdout: 'https://github.com/org/repo.git\n', stderr: '' });
+          } else if (
+            cmd.includes('rev-parse --verify refs/remotes/origin/feat/security')
+          ) {
+            cb(null, { stdout: 'abc123\n', stderr: '' });
+          } else {
+            pushedArgs.push(args);
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await manager.pushBranch('/tmp/worktree/sess', 'feat/security', { force: true });
+
+      expect(pushedArgs.find((args) => args.includes('push'))).toEqual([
+        'push',
+        '--no-verify',
+        '--force-with-lease=refs/heads/feat/security:abc123',
+        'https://github.com/org/repo.git',
+        'HEAD:refs/heads/feat/security',
+      ]);
+    });
   });
 
   describe('ensureRemoteBranch', () => {
@@ -1746,6 +1781,28 @@ describe('LocalWorktreeManager', () => {
       // Should use the local ref, not refs/remotes/origin/...
       expect(worktreeAddCmd).toContain('refs/heads/autopod/parent-branch');
       expect(result.worktreePath).toContain('autopod_forked-pod');
+    });
+
+    it('fetches the base branch only into its remote-tracking ref', async () => {
+      setupExecFileMock({
+        'rev-parse --git-dir': { stdout: '.\n' },
+        'rev-parse --git-path info/exclude': { stdout: '.git/info/exclude\n' },
+      });
+
+      await manager.create({
+        repoUrl: 'https://github.com/org/repo.git',
+        branch: 'feat/fresh-base',
+        baseBranch: 'main',
+      });
+
+      const fetchCall = execFileMock.mock.calls
+        .map((call: string[][]) => call[1] ?? [])
+        .find((args: string[]) => args[0] === 'fetch' && args.some((arg) => arg.includes('main')));
+      expect(fetchCall).toEqual([
+        'fetch',
+        'https://github.com/org/repo.git',
+        '+refs/heads/main:refs/remotes/origin/main',
+      ]);
     });
 
     it('appends .mcp.json to per-worktree info/exclude after worktree add', async () => {

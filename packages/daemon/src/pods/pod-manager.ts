@@ -13570,16 +13570,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           );
         }
 
-        const profile = profileStore.get(pod.profileName);
-        emitActivityStatus(podId, 'Resume: checking remote fix branch before retry…');
         const validated = transition(pod, 'validated', { mergeBlockReason: null });
-        try {
-          await worktreeManager.pullBranch(pod.worktreePath, await resolveGitCredential(profile));
-        } catch (err) {
-          parkFixPodDeliveryFailure(podRepo.getOrThrow(podId), err);
-          return { action: 'retry-fix-delivery' };
-        }
-
         emitActivityStatus(podId, 'Resume: retrying validated fix delivery…');
         await completeFixPodAfterPush(validated);
         return { action: 'retry-fix-delivery' };
