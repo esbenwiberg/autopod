@@ -282,6 +282,11 @@ describe('provider portability integration', () => {
       '/run/autopod/model-provider-key',
       sentinelKey,
     );
+    expect(managerContext.containerManager.execInContainer).toHaveBeenCalledWith(
+      'container-123',
+      ['chmod', '0400', '/run/autopod/model-provider-key'],
+      { timeout: 5_000 },
+    );
     expect(managerContext.containerManager.writeFile).toHaveBeenCalledWith(
       'container-123',
       '/home/autopod/.pi/agent/auth.json',
