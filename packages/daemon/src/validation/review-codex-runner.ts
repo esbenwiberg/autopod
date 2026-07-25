@@ -1,3 +1,4 @@
+import { computeCostWithCache } from '@autopod/shared';
 import type {
   ContainerManager,
   ExecOptions,
@@ -42,6 +43,7 @@ export interface CodexReviewTokenUsage {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens?: number;
+  costUsd?: number;
 }
 
 const SHIM_PATH = '/run/autopod/agent-shim.sh';
@@ -122,7 +124,24 @@ export async function runCodexReview(
       logPath,
     );
 
-    return { stdout: result.stdout, ...(tokenUsage && { tokenUsage }) };
+    const costUsd = tokenUsage
+      ? computeCostWithCache(
+          config.model,
+          tokenUsage.inputTokens,
+          tokenUsage.outputTokens,
+          tokenUsage.cachedInputTokens ?? 0,
+        )
+      : 0;
+
+    return {
+      stdout: result.stdout,
+      ...(tokenUsage && {
+        tokenUsage: {
+          ...tokenUsage,
+          ...(costUsd > 0 && { costUsd }),
+        },
+      }),
+    };
   } catch (err) {
     if (err instanceof CodexReviewError) throw err;
     const message = err instanceof Error ? err.message : String(err);
@@ -232,10 +251,15 @@ function parseCodexReviewTokenUsage(log: string): CodexReviewTokenUsage | undefi
     }
 
     const message = unwrapCodexReviewEvent(envelope);
-    if (!message || message.type !== 'token_count') continue;
+    if (!message) continue;
 
-    const info = asRecord(message.info);
-    const usage = asRecord(info?.total_token_usage) ?? asRecord(info?.last_token_usage);
+    let usage: Record<string, unknown> | null = null;
+    if (message.type === 'token_count') {
+      const info = asRecord(message.info);
+      usage = asRecord(info?.total_token_usage) ?? asRecord(info?.last_token_usage);
+    } else if (message.type === 'turn.completed') {
+      usage = asRecord(message.usage);
+    }
     if (usage) latestUsage = usage;
   }
 

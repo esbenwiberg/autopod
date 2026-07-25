@@ -1,7 +1,7 @@
 import type { ModelProvider, Profile } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
-import { runCodexReview } from './review-codex-runner.js';
+import { type CodexReviewTokenUsage, runCodexReview } from './review-codex-runner.js';
 
 export class ContainerReviewerUnavailableError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -26,7 +26,7 @@ const SHIM_PATH = '/run/autopod/agent-shim.sh';
 
 export async function runContainerReviewer(
   config: ContainerReviewerRunnerConfig,
-): Promise<{ stdout: string }> {
+): Promise<{ stdout: string; tokenUsage?: CodexReviewTokenUsage }> {
   if (!config.containerId) {
     throw new ContainerReviewerUnavailableError(
       'Container reviewer unavailable: pod has no live container',

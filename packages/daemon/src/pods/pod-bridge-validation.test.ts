@@ -789,8 +789,17 @@ describe('PodBridge.runPreSubmitReview', () => {
       kill: vi.fn(),
     });
 
+    let phaseTokenUsage: Record<
+      string,
+      { inputTokens: number; outputTokens: number; cachedInputTokens?: number; costUsd?: number }
+    > | null = {
+      agent_initial: { inputTokens: 1000, outputTokens: 500, costUsd: 0.25 },
+    };
     const podRepo = {
-      update: vi.fn(),
+      getOrThrow: vi.fn(() => ({ phaseTokenUsage })),
+      update: vi.fn((_podId: string, changes: { phaseTokenUsage?: typeof phaseTokenUsage }) => {
+        if (changes.phaseTokenUsage !== undefined) phaseTokenUsage = changes.phaseTokenUsage;
+      }),
     } as unknown as Deps['podRepo'];
 
     const stub = {} as never;
@@ -1082,6 +1091,80 @@ describe('PodBridge.runPreSubmitReview', () => {
         }),
       }),
     );
+  });
+
+  it('attributes a fresh metered review once while preserving agent usage', async () => {
+    const { bridge, podId, podRepo } = buildBridgeWithWorktree({
+      containerDiff: SAMPLE_DIFF,
+      runResult: {
+        status: 'pass',
+        reasoning: 'all good',
+        issues: [],
+        model: 'gpt-5',
+        diffHash: 'metered-hash',
+        durationMs: 17,
+        tokenUsage: {
+          inputTokens: 20_000,
+          cachedInputTokens: 12_000,
+          outputTokens: 800,
+          costUsd: 0.0195,
+        },
+      },
+    });
+
+    await bridge.runPreSubmitReview(podId, {});
+
+    const update = (podRepo as unknown as { update: ReturnType<typeof vi.fn> }).update;
+    expect(update).toHaveBeenCalledWith(podId, {
+      phaseTokenUsage: {
+        agent_initial: { inputTokens: 1000, outputTokens: 500, costUsd: 0.25 },
+        review: {
+          inputTokens: 20_000,
+          cachedInputTokens: 12_000,
+          outputTokens: 800,
+          costUsd: 0.0195,
+        },
+      },
+    });
+  });
+
+  it('does not attribute reviewer usage again when returning a cached verdict', async () => {
+    const { hashDiff } = await import('../validation/pre-submit-review.js');
+    const expectedHash = hashDiff(SAMPLE_DIFF);
+    const { bridge, podId, podRepo } = buildBridgeWithWorktree({
+      containerDiff: SAMPLE_DIFF,
+      cachedVerdict: {
+        status: 'pass',
+        diffHash: expectedHash,
+        diffSource: 'container',
+        filesReviewed: 1,
+        linesAdded: 1,
+        linesRemoved: 0,
+        containerId: 'container-abc',
+        worktreePath: '/tmp/worktree',
+        startCommitSha: 'start-sha',
+        reasoning: 'cached pass',
+        issues: [],
+        model: 'gpt-5',
+        checkedAt: '2025-01-01T00:00:00.000Z',
+      },
+      runResult: {
+        status: 'pass',
+        reasoning: 'must not run',
+        issues: [],
+        model: 'gpt-5',
+        diffHash: expectedHash,
+        durationMs: 1,
+        tokenUsage: { inputTokens: 20_000, outputTokens: 800, costUsd: 0.0195 },
+      },
+    });
+
+    const result = await bridge.runPreSubmitReview(podId, {});
+
+    expect(result.reusedCache).toBe(true);
+    expect(mockRunPreSubmitReview).not.toHaveBeenCalled();
+    const update = (podRepo as unknown as { update: ReturnType<typeof vi.fn> }).update;
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('passes plannedSummary and plannedDeviations through', async () => {

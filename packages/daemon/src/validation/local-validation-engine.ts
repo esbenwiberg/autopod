@@ -2634,6 +2634,7 @@ async function runTaskReview(
             logger: log,
           });
           stdout = containerReview.stdout;
+          tier1TokenUsage = containerReview.tokenUsage;
         } else if (shouldUseProfileBoundAnthropicReviewer(config)) {
           const providerReview = await runProfileBoundAnthropicReview(
             config,

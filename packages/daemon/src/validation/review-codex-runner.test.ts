@@ -100,13 +100,49 @@ describe('runCodexReview', () => {
       timeout: 1234,
     });
 
-    expect(result.tokenUsage).toEqual({
+    expect(result.tokenUsage).toMatchObject({
       inputTokens: 12_345,
       cachedInputTokens: 10_000,
       outputTokens: 678,
     });
+    expect(result.tokenUsage?.costUsd).toBeCloseTo(0.01096125);
     expect(harness.reads[0]?.containerId).toBe('container-1');
     expect(harness.reads[0]?.path).toContain('/tmp/autopod-codex-review-pod-1-0-');
+  });
+
+  it('captures public turn.completed usage from wrapped Codex JSONL', async () => {
+    const harness = createHarness(
+      { stdout: '{"status":"pass"}', stderr: '', exitCode: 0 },
+      [
+        JSON.stringify({
+          type: 'event',
+          msg: {
+            type: 'turn.completed',
+            usage: {
+              input_tokens: 20_000,
+              cached_input_tokens: 12_000,
+              output_tokens: 800,
+            },
+          },
+        }),
+      ].join('\n'),
+    );
+
+    const result = await runCodexReview({
+      podId: 'pod-1',
+      containerId: 'container-1',
+      containerManager: harness.manager,
+      model: 'gpt-5',
+      prompt: 'review prompt',
+      timeout: 1234,
+    });
+
+    expect(result.tokenUsage).toEqual({
+      inputTokens: 20_000,
+      cachedInputTokens: 12_000,
+      outputTokens: 800,
+      costUsd: 0.0195,
+    });
   });
 
   it('omits --model when model is auto', async () => {

@@ -83,6 +83,16 @@ describe('runPreSubmitReview', () => {
     const timeouts: number[] = [];
     const containerManager = {
       writeFile: vi.fn(),
+      readFile: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          type: 'turn.completed',
+          usage: {
+            input_tokens: 20_000,
+            cached_input_tokens: 12_000,
+            output_tokens: 800,
+          },
+        }),
+      ),
       execInContainer: vi.fn(
         async (_containerId: string, command: string[], options?: { timeout?: number }) => {
           commands.push(command[2] ?? '');
@@ -115,6 +125,12 @@ describe('runPreSubmitReview', () => {
     expect(commands.some((cmd) => cmd.includes('codex exec'))).toBe(true);
     expect(commands.some((cmd) => cmd.includes("--model 'gpt-5'"))).toBe(true);
     expect(timeouts).toEqual([300_000]);
+    expect(result.tokenUsage).toEqual({
+      inputTokens: 20_000,
+      cachedInputTokens: 12_000,
+      outputTokens: 800,
+      costUsd: 0.0195,
+    });
     expect(mockRunClaudeCli).not.toHaveBeenCalled();
   });
 
