@@ -142,7 +142,7 @@ export async function runPreSubmitReview(
         logger: log,
       }));
     } else {
-      ({ stdout } = await runClaudeCli({
+      ({ stdout, tokenUsage } = await runClaudeCli({
         model: opts.reviewerModel,
         input: prompt,
         timeout: timeoutMs,

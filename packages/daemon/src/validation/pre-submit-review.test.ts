@@ -64,6 +64,12 @@ describe('runPreSubmitReview', () => {
         reasoning: 'Looks good — scope matches the task.',
         issues: [],
       }),
+      tokenUsage: {
+        inputTokens: 4321,
+        cachedInputTokens: 3000,
+        outputTokens: 123,
+        costUsd: 0.045,
+      },
     });
 
     const result = await runPreSubmitReview({
@@ -75,6 +81,12 @@ describe('runPreSubmitReview', () => {
     expect(result.status).toBe('pass');
     expect(result.issues).toEqual([]);
     expect(result.diffHash).toBeTruthy();
+    expect(result.tokenUsage).toEqual({
+      inputTokens: 4321,
+      cachedInputTokens: 3000,
+      outputTokens: 123,
+      costUsd: 0.045,
+    });
     expect(mockRunClaudeCli).toHaveBeenCalledTimes(1);
   });
 
