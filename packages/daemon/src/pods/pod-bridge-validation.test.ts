@@ -485,7 +485,7 @@ describe('PodBridge.callReviewerModel', () => {
         'sh',
         '-c',
         expect.stringContaining(
-          "sh '/run/autopod/agent-shim.sh' claude -p --model 'sonnet' --output-format text",
+          "sh '/run/autopod/agent-shim.sh' claude -p --model 'sonnet' --output-format json",
         ),
       ],
       expect.objectContaining({
@@ -590,7 +590,7 @@ describe('PodBridge.generateBrowserValidationScript', () => {
         'sh',
         '-c',
         expect.stringContaining(
-          "sh '/run/autopod/agent-shim.sh' claude -p --model 'sonnet' --output-format text",
+          "sh '/run/autopod/agent-shim.sh' claude -p --model 'sonnet' --output-format json",
         ),
       ],
       expect.objectContaining({ cwd: '/workspace', timeout: 60_000 }),
