@@ -13,6 +13,7 @@ import type {
   ValidationOverride,
   ValidationResult,
 } from '@autopod/shared';
+import { computeCostWithCache } from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
@@ -2756,6 +2757,11 @@ async function runTaskReview(
         2,
       );
       const tier2TokenUsage = tier2Result.tokenUsage;
+      const accumulatedTokenUsage = combineReviewTokenUsage(
+        config.reviewerModel,
+        tier1TokenUsage,
+        tier2TokenUsage,
+      );
       if (tier2Parsed && tier2Parsed.status !== 'uncertain') {
         log?.info({ status: tier2Parsed.status, tier: 2 }, 'Tier 2 tool-use review resolved');
         return {
@@ -2768,9 +2774,9 @@ async function runTaskReview(
             diff: config.diff,
             requirementsCheck: tier2Parsed.requirementsCheck,
             deviationsAssessment: tier2Parsed.deviationsAssessment,
-            tokenUsage: tier2TokenUsage,
+            tokenUsage: accumulatedTokenUsage,
           },
-          tokenUsage: tier2TokenUsage,
+          tokenUsage: accumulatedTokenUsage,
         };
       }
 
@@ -2804,7 +2810,9 @@ async function runTaskReview(
                 diff: config.diff,
                 requirementsCheck: tier3Parsed.requirementsCheck,
                 deviationsAssessment: tier3Parsed.deviationsAssessment,
+                tokenUsage: accumulatedTokenUsage,
               },
+              tokenUsage: accumulatedTokenUsage,
             };
           }
         } catch (err) {
@@ -2827,9 +2835,9 @@ async function runTaskReview(
           diff: config.diff,
           requirementsCheck: bestParsed.requirementsCheck,
           deviationsAssessment: bestParsed.deviationsAssessment,
-          tokenUsage: tier2TokenUsage,
+          tokenUsage: accumulatedTokenUsage,
         },
-        tokenUsage: tier2TokenUsage,
+        tokenUsage: accumulatedTokenUsage,
       };
     } catch (err) {
       log?.warn({ err }, 'Tier 2 tool-use review failed');
@@ -2877,6 +2885,33 @@ async function runTaskReview(
     log?.warn({ err }, 'task review failed, continuing without review');
     return { result: null, skipReason: `Review failed: ${message}` };
   }
+}
+
+function combineReviewTokenUsage(
+  model: string,
+  ...usages: Array<
+    | { inputTokens: number; outputTokens: number; cachedInputTokens?: number; costUsd?: number }
+    | undefined
+  >
+):
+  | { inputTokens: number; outputTokens: number; cachedInputTokens?: number; costUsd?: number }
+  | undefined {
+  const present = usages.filter((usage) => usage !== undefined);
+  if (present.length === 0) return undefined;
+
+  const inputTokens = present.reduce((sum, usage) => sum + usage.inputTokens, 0);
+  const outputTokens = present.reduce((sum, usage) => sum + usage.outputTokens, 0);
+  const cachedInputTokens = present.reduce((sum, usage) => sum + (usage.cachedInputTokens ?? 0), 0);
+  const computedCost = computeCostWithCache(model, inputTokens, outputTokens, cachedInputTokens);
+  const reportedCost = present.reduce((sum, usage) => sum + (usage.costUsd ?? 0), 0);
+  const costUsd = computedCost > 0 ? computedCost : reportedCost;
+
+  return {
+    inputTokens,
+    outputTokens,
+    ...(cachedInputTokens > 0 && { cachedInputTokens }),
+    ...(costUsd > 0 && { costUsd }),
+  };
 }
 
 function classifyReviewSkipKind(reason: string): ValidationResult['reviewSkipKind'] {

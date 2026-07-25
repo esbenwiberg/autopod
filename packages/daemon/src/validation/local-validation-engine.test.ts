@@ -1916,6 +1916,52 @@ describe('validate() — facts + review gate', () => {
     });
   });
 
+  it('accumulates telemetry across newly executed task-review tiers', async () => {
+    const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-tiered-review-'));
+    vi.mocked(runClaudeCli).mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        status: 'uncertain',
+        reasoning: 'Need repository context',
+        issues: [],
+      }),
+      tokenUsage: { inputTokens: 100, outputTokens: 10 },
+    });
+    vi.mocked(runToolUseReview).mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        status: 'pass',
+        reasoning: 'Repository context resolves the concern',
+        issues: [],
+      }),
+      tokenUsage: { inputTokens: 200, outputTokens: 20 },
+    });
+    const engine = createLocalValidationEngine(stubContainerManager());
+
+    const result = await engine.validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        reviewDepth: 'deep',
+        worktreePath,
+        diff: `diff --git a/src/app.ts b/src/app.ts
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-old
++new
+`,
+      }),
+    );
+
+    expect(result.taskReview).toMatchObject({
+      status: 'pass',
+      tokenUsage: {
+        inputTokens: 300,
+        outputTokens: 30,
+      },
+    });
+    expect(result.taskReview?.tokenUsage?.costUsd).toBeGreaterThan(0);
+    expect(runToolUseReview).toHaveBeenCalledTimes(1);
+  });
+
   it('runs Max full-validation Review through the live container Claude reviewer', async () => {
     const reviewerExecEnv = {
       CLAUDE_CODE_OAUTH_TOKEN_FILE: '/run/autopod/claude-code-oauth-token',
