@@ -9,7 +9,12 @@ import type { Logger } from 'pino';
  * Copilot CLI does not emit structured JSON — output is plain text lines. Each non-empty
  * line is emitted as a status event. The complete event is synthesized when the stream ends.
  */
-async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIterable<AgentEvent> {
+async function* parse(
+  stream: Readable,
+  podId: string,
+  logger: Logger,
+  synthesizeComplete = true,
+): AsyncIterable<AgentEvent> {
   const rl = createInterface({ input: stream });
   let hasOutput = false;
 
@@ -32,7 +37,10 @@ async function* parse(stream: Readable, podId: string, logger: Logger): AsyncIte
     };
   }
 
-  // Synthesize a complete event when the stream closes cleanly
+  if (!synthesizeComplete) return;
+
+  // Standalone parser callers may synthesize completion. The runtime suppresses
+  // this until it has authoritative process-exit evidence.
   yield {
     type: 'complete',
     timestamp: new Date().toISOString(),

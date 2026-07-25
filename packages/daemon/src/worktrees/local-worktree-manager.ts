@@ -529,6 +529,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       await this.appendWorktreeExcludes(worktreePath, [
         '.mcp.json',
         '.autopod/pi-handoff.md',
+        '.autopod/provider-failover.md',
       ]).catch((err) => {
         this.logger.warn(
           { err, worktreePath },
@@ -585,6 +586,13 @@ export class LocalWorktreeManager implements WorktreeManager {
     if (toAppend.length === 0) return;
     const prefix = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
     await fs.writeFile(excludePath, `${existing}${prefix}${toAppend.join('\n')}\n`, 'utf8');
+  }
+
+  async ensureExcludes(worktreePath: string, entries: string[]): Promise<void> {
+    await this.appendWorktreeExcludes(worktreePath, entries);
+    for (const entry of entries) {
+      await git(['check-ignore', '-q', '--', entry], { cwd: worktreePath });
+    }
   }
 
   async cleanup(worktreePath: string): Promise<void> {

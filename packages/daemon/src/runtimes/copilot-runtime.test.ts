@@ -266,6 +266,161 @@ describe('CopilotRuntime', () => {
       expect(errorEvent?.fatal).toBe(true);
     });
 
+    it.each([
+      {
+        name: 'definitive quota',
+        stderr: 'You have exhausted your premium requests.',
+        category: 'quota_exhausted',
+        definitive: true,
+      },
+      {
+        name: 'transient throttling',
+        stderr: 'Too many requests.',
+        category: 'transient',
+        definitive: false,
+      },
+      {
+        name: 'authentication',
+        stderr: 'Not authenticated.',
+        category: 'auth',
+        definitive: false,
+      },
+      {
+        name: 'provider outage',
+        stderr: 'Provider temporarily unavailable.',
+        category: 'provider_unavailable',
+        definitive: false,
+      },
+      {
+        name: 'malformed payload',
+        stderr: '{"broken":',
+        category: 'unknown',
+        definitive: false,
+      },
+      {
+        name: 'unknown text',
+        stderr: 'Copilot changed its failure text',
+        category: 'unknown',
+        definitive: false,
+      },
+    ])(
+      'classifies non-zero exit $name evidence conservatively',
+      async ({ stderr, category, definitive }) => {
+        const handle = createMockHandle({ exitCode: 1 });
+        const runtime = new CopilotRuntime(logger, createMockContainerManager(handle));
+        setTimeout(() => {
+          (handle.stderr as PassThrough).write(`${stderr}\n`);
+          (handle as { finish?: (code?: number) => void }).finish?.(1);
+        }, 10);
+
+        const events: AgentEvent[] = [];
+        for await (const event of runtime.spawn({
+          podId: `copilot-${category}`,
+          task: 'fail',
+          model: 'sonnet',
+          workDir: '/workspace',
+          containerId: 'container-123',
+          env: {},
+        })) {
+          events.push(event);
+        }
+
+        expect(events.find((event) => event.type === 'error')).toMatchObject({
+          classification: { category, definitive },
+        });
+        expect(events.some((event) => event.type === 'complete')).toBe(false);
+      },
+    );
+
+    it('does not classify quota-like stdout when Copilot exits successfully', async () => {
+      const handle = createMockHandle({ exitCode: 0 });
+      const runtime = new CopilotRuntime(logger, createMockContainerManager(handle));
+      setTimeout(() => {
+        (handle.stdout as PassThrough).write('You have exhausted your premium requests.\n');
+        (handle as { finish?: (code?: number) => void }).finish?.(0);
+      }, 10);
+
+      const events: AgentEvent[] = [];
+      for await (const event of runtime.spawn({
+        podId: 'copilot-success-text',
+        task: 'quote a fixture',
+        model: 'sonnet',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      })) {
+        events.push(event);
+      }
+
+      expect(events.some((event) => event.type === 'error')).toBe(false);
+      expect(events.at(-1)).toMatchObject({ type: 'complete' });
+    });
+
+    it('sanitizes Copilot stderr in the terminal event and classification', async () => {
+      const handle = createMockHandle({ exitCode: 1 });
+      const runtime = new CopilotRuntime(logger, createMockContainerManager(handle));
+      setTimeout(() => {
+        (handle.stderr as PassThrough).write('Unknown failure token=copilot-secret\n');
+        (handle as { finish?: (code?: number) => void }).finish?.(1);
+      }, 10);
+
+      const events: AgentEvent[] = [];
+      for await (const event of runtime.spawn({
+        podId: 'copilot-secret',
+        task: 'fail',
+        model: 'sonnet',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      })) {
+        events.push(event);
+      }
+      const error = events.find((event): event is AgentErrorEvent => event.type === 'error');
+      expect(error?.message).not.toContain('copilot-secret');
+      expect(error?.classification?.sanitizedMessage).not.toContain('copilot-secret');
+    });
+
+    it('preserves completion when stdout closes but exit-code resolution times out', async () => {
+      process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '50';
+      try {
+        const handle = createMockHandle();
+        const runtime = new CopilotRuntime(logger, createMockContainerManager(handle));
+        setTimeout(() => {
+          (handle.stdout as PassThrough).write('Done.\n');
+          (handle.stdout as PassThrough).push(null);
+          (handle.stderr as PassThrough).push(null);
+          // Deliberately leave handle.exitCode unresolved.
+        }, 10);
+
+        const events: AgentEvent[] = [];
+        for await (const event of runtime.spawn({
+          podId: 'copilot-delayed-exit',
+          task: 'finish normally',
+          model: 'sonnet',
+          workDir: '/workspace',
+          containerId: 'container-123',
+          env: {},
+        })) {
+          events.push(event);
+        }
+
+        expect(events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              type: 'error',
+              fatal: false,
+              message: expect.stringContaining('exit code did not resolve'),
+            }),
+            expect.objectContaining({ type: 'complete', result: 'Copilot agent completed' }),
+          ]),
+        );
+        expect(events.some((event) => event.type === 'error' && event.fatal)).toBe(false);
+      } finally {
+        // biome-ignore lint/performance/noDelete: must actually unset, `= undefined` stringifies to "undefined"
+        delete process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+      }
+    });
+
     it('terminates within idle window when stdout stalls and probe says wedged', async () => {
       // Copilot's parser only emits `complete` after stdout closes — so a
       // mid-stream wedge can't be caught by withPostCompleteGrace alone.

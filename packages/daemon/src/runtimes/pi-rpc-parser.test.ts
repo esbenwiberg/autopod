@@ -147,4 +147,386 @@ describe('PiRpcParser', () => {
       }),
     ]);
   });
+
+  it.each([
+    {
+      name: 'quota payload without native settlement',
+      record: {
+        type: 'error',
+        fatal: true,
+        code: 'quota_exceeded',
+        message: 'Provider quota exhausted',
+        retrySettled: true,
+      },
+      category: 'transient',
+      definitive: false,
+    },
+    {
+      name: 'authentication',
+      record: {
+        type: 'error',
+        fatal: true,
+        code: 'invalid_api_key',
+        message: 'Invalid API key.',
+      },
+      category: 'auth',
+      definitive: false,
+    },
+    {
+      name: 'provider outage',
+      record: {
+        type: 'error',
+        fatal: true,
+        code: 'provider_unavailable',
+        message: 'Provider unavailable.',
+      },
+      category: 'provider_unavailable',
+      definitive: false,
+    },
+    {
+      name: 'unknown text',
+      record: { type: 'error', fatal: true, message: 'New Pi provider failure' },
+      category: 'unknown',
+      definitive: false,
+    },
+  ])('classifies $name conservatively', async ({ record, category, definitive }) => {
+    const { events } = await parseLines([JSON.stringify(record)]);
+    expect(events[0]).toMatchObject({ classification: { category, definitive } });
+  });
+
+  it('derives definitive Pi quota only from the native retry and agent-settled sequence', async () => {
+    const assistantError = {
+      role: 'assistant',
+      stopReason: 'error',
+      errorMessage: '429 quota_exceeded: Provider quota exhausted',
+    };
+    const nativeFixture = [
+      { type: 'message_end', message: assistantError },
+      { type: 'agent_end', messages: [assistantError], willRetry: true },
+      {
+        type: 'auto_retry_start',
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 2_000,
+        errorMessage: assistantError.errorMessage,
+      },
+      {
+        type: 'auto_retry_start',
+        attempt: 2,
+        maxAttempts: 3,
+        delayMs: 4_000,
+        errorMessage: assistantError.errorMessage,
+      },
+      {
+        type: 'auto_retry_start',
+        attempt: 3,
+        maxAttempts: 3,
+        delayMs: 8_000,
+        errorMessage: assistantError.errorMessage,
+      },
+      { type: 'message_end', message: assistantError },
+      { type: 'agent_end', messages: [assistantError], willRetry: false },
+      {
+        type: 'auto_retry_end',
+        success: false,
+        attempt: 3,
+        finalError: assistantError.errorMessage,
+      },
+      { type: 'agent_settled' },
+    ];
+
+    const beforeSettlement = await parseLines(
+      nativeFixture.slice(0, -1).map((record) => JSON.stringify(record)),
+    );
+    expect(
+      beforeSettlement.events.some(
+        (event) =>
+          event.type === 'error' &&
+          event.classification?.category === 'quota_exhausted' &&
+          event.classification.definitive,
+      ),
+    ).toBe(false);
+    expect(beforeSettlement.stats.sawTerminal).toBe(false);
+
+    const settled = await parseLines(nativeFixture.map((record) => JSON.stringify(record)));
+    expect(settled.events.at(-1)).toMatchObject({
+      type: 'error',
+      fatal: true,
+      classification: { category: 'quota_exhausted', definitive: true },
+    });
+    expect(settled.stats.sawTerminal).toBe(true);
+  });
+
+  it('does not make quota definitive when agent_settled lacks a failed native retry', async () => {
+    const { events } = await parseLines([
+      JSON.stringify({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'error',
+          errorMessage: '429 quota_exceeded: Provider quota exhausted',
+        },
+      }),
+      JSON.stringify({ type: 'agent_settled' }),
+    ]);
+
+    expect(events.at(-1)).toMatchObject({
+      type: 'error',
+      fatal: true,
+      classification: { category: 'transient', definitive: false },
+    });
+  });
+
+  it('clears stale quota evidence when a native retry recovers', async () => {
+    const assistantError = {
+      role: 'assistant',
+      stopReason: 'error',
+      errorMessage: '429 quota_exceeded: Provider quota exhausted',
+    };
+    const { events, stats } = await parseLines([
+      JSON.stringify({ type: 'message_end', message: assistantError }),
+      JSON.stringify({ type: 'agent_end', messages: [assistantError], willRetry: true }),
+      JSON.stringify({
+        type: 'auto_retry_start',
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 2_000,
+        errorMessage: assistantError.errorMessage,
+      }),
+      JSON.stringify({ type: 'auto_retry_end', success: true, attempt: 2 }),
+      JSON.stringify({
+        type: 'message_end',
+        message: { role: 'assistant', stopReason: 'stop', content: [] },
+      }),
+      JSON.stringify({
+        type: 'agent_end',
+        messages: [{ role: 'assistant', stopReason: 'stop', content: [] }],
+        willRetry: false,
+      }),
+      JSON.stringify({ type: 'agent_settled' }),
+    ]);
+
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'error' &&
+          event.classification?.category === 'quota_exhausted' &&
+          event.classification.definitive,
+      ),
+    ).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: 'status', message: 'Pi provider retry succeeded' });
+    expect(stats.sawTerminal).toBe(false);
+  });
+
+  it.each([
+    {
+      type: 'auto_retry_end',
+      success: false,
+      finalError: '429 quota_exceeded: Provider quota exhausted',
+    },
+    { type: 'auto_retry_end', finalError: '429 quota_exceeded: Provider quota exhausted' },
+  ])('fails closed for isolated or malformed retry completion: %j', async (retryEnd) => {
+    const { events } = await parseLines([
+      JSON.stringify({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'error',
+          errorMessage: '429 quota_exceeded: Provider quota exhausted',
+        },
+      }),
+      JSON.stringify(retryEnd),
+      JSON.stringify({ type: 'agent_settled' }),
+    ]);
+
+    expect(events.at(-1)).toMatchObject({
+      type: 'error',
+      fatal: true,
+      classification: { category: 'transient', definitive: false },
+    });
+  });
+
+  it.each([
+    { type: 'auto_retry_end', success: false, attempt: 3 },
+    {
+      type: 'auto_retry_end',
+      success: false,
+      attempt: 2,
+      finalError: '429 quota_exceeded: Provider quota exhausted',
+    },
+  ])('fails closed for incomplete or inconsistent native retry metadata: %j', async (retryEnd) => {
+    const errorMessage = '429 quota_exceeded: Provider quota exhausted';
+    const { events } = await parseLines([
+      JSON.stringify({
+        type: 'agent_end',
+        messages: [{ role: 'assistant', stopReason: 'error', errorMessage }],
+        willRetry: true,
+      }),
+      JSON.stringify({
+        type: 'auto_retry_start',
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 2_000,
+        errorMessage,
+      }),
+      JSON.stringify(retryEnd),
+      JSON.stringify({ type: 'agent_settled' }),
+    ]);
+
+    expect(events.at(-1)).toMatchObject({
+      type: 'error',
+      fatal: true,
+      classification: { category: 'transient', definitive: false },
+    });
+  });
+
+  it('fails closed when native retry attempts skip directly to exhaustion', async () => {
+    const errorMessage = '429 quota_exceeded: Provider quota exhausted';
+    const { events } = await parseLines([
+      JSON.stringify({
+        type: 'agent_end',
+        messages: [{ role: 'assistant', stopReason: 'error', errorMessage }],
+        willRetry: true,
+      }),
+      JSON.stringify({
+        type: 'auto_retry_start',
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 2_000,
+        errorMessage,
+      }),
+      JSON.stringify({
+        type: 'auto_retry_end',
+        success: false,
+        attempt: 3,
+        finalError: errorMessage,
+      }),
+      JSON.stringify({ type: 'agent_settled' }),
+    ]);
+
+    expect(events.at(-1)).toMatchObject({
+      type: 'error',
+      fatal: true,
+      classification: { category: 'transient', definitive: false },
+    });
+  });
+
+  it('fails closed when retry exhaustion omits the final agent_end', async () => {
+    const errorMessage = '429 quota_exceeded: Provider quota exhausted';
+    const records: object[] = [
+      {
+        type: 'agent_end',
+        messages: [{ role: 'assistant', stopReason: 'error', errorMessage }],
+        willRetry: true,
+      },
+    ];
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      records.push({
+        type: 'auto_retry_start',
+        attempt,
+        maxAttempts: 3,
+        delayMs: attempt * 2_000,
+        errorMessage,
+      });
+    }
+    records.push(
+      { type: 'auto_retry_end', success: false, attempt: 3, finalError: errorMessage },
+      { type: 'agent_settled' },
+    );
+
+    const { events } = await parseLines(records.map((record) => JSON.stringify(record)));
+    expect(events.at(-1)).toMatchObject({
+      type: 'error',
+      fatal: true,
+      classification: { category: 'transient', definitive: false },
+    });
+  });
+
+  it.each([
+    {
+      driftAt: 'retry start',
+      startError: '529 provider_unavailable: Provider unavailable',
+      finalError: '429 quota_exceeded: Provider quota exhausted',
+    },
+    {
+      driftAt: 'retry end',
+      startError: '429 quota_exceeded: Provider quota exhausted',
+      finalError: '529 provider_unavailable: Provider unavailable',
+    },
+  ])(
+    'fails closed when provider evidence changes at $driftAt',
+    async ({ startError, finalError }) => {
+      const quotaError = '429 quota_exceeded: Provider quota exhausted';
+      const records: object[] = [
+        {
+          type: 'agent_end',
+          messages: [{ role: 'assistant', stopReason: 'error', errorMessage: quotaError }],
+          willRetry: true,
+        },
+      ];
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        records.push({
+          type: 'auto_retry_start',
+          attempt,
+          maxAttempts: 3,
+          delayMs: attempt * 2_000,
+          errorMessage: startError,
+        });
+      }
+      records.push(
+        { type: 'auto_retry_end', success: false, attempt: 3, finalError },
+        { type: 'agent_settled' },
+      );
+
+      const { events } = await parseLines(records.map((record) => JSON.stringify(record)));
+      expect(events.at(-1)).toMatchObject({
+        type: 'error',
+        fatal: true,
+        classification: { definitive: false },
+      });
+    },
+  );
+
+  it('keeps malformed Pi records non-terminal and unclassified', async () => {
+    const { events, stats } = await parseLines(['{not-json']);
+    expect(events[0]).not.toHaveProperty('classification');
+    expect(stats.sawTerminal).toBe(false);
+  });
+
+  it('sanitizes Pi provider text in both terminal error fields', async () => {
+    const { events } = await parseLines([
+      JSON.stringify({
+        type: 'error',
+        fatal: true,
+        message: 'Unknown failure password=pi-secret',
+      }),
+    ]);
+    expect(events[0]).toMatchObject({
+      message: 'Unknown failure password=[REDACTED]',
+      classification: { sanitizedMessage: 'Unknown failure password=[REDACTED]' },
+    });
+  });
+
+  it('classifies and sanitizes terminal Pi command response errors', async () => {
+    const { events } = await parseLines([
+      JSON.stringify({
+        type: 'response',
+        id: 'cmd-1',
+        error: {
+          code: 'quota_exceeded',
+          message: 'Provider quota exhausted; resets tomorrow token=pi-secret',
+        },
+      }),
+    ]);
+    expect(events[0]).toMatchObject({
+      type: 'error',
+      message: 'Provider quota exhausted; resets tomorrow token=[REDACTED]',
+      classification: {
+        // The appended credential makes this drift from the accepted fixture.
+        category: 'unknown',
+        definitive: false,
+        sanitizedMessage: 'Provider quota exhausted; resets tomorrow token=[REDACTED]',
+      },
+    });
+  });
 });

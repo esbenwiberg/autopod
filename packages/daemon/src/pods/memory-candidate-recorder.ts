@@ -25,6 +25,7 @@ import {
 } from './memory-extraction.js';
 import type { MemoryRepository } from './memory-repository.js';
 import type { PodRepository } from './pod-repository.js';
+import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import { computeQualitySignals } from './quality-signals.js';
 import { resolveReviewerModel } from './runtime-resolver.js';
 import type { ValidationRepository } from './validation-repository.js';
@@ -49,6 +50,7 @@ export interface MemoryCandidateRecorderDeps {
   eventRepo: EventRepository;
   escalationRepo: EscalationRepository;
   validationRepo?: ValidationRepository;
+  providerAttemptRepo?: ProviderAttemptRepository;
   containerManagerFactory?: MemoryRecorderContainerManagerFactory;
   logger: Logger;
 }
@@ -79,6 +81,7 @@ export function createMemoryCandidateRecorder(
     eventRepo,
     escalationRepo,
     validationRepo,
+    providerAttemptRepo,
     containerManagerFactory,
     logger,
   } = deps;
@@ -175,6 +178,7 @@ export function createMemoryCandidateRecorder(
       eventRepo,
       escalationRepo,
       validationRepo,
+      providerAttemptRepo,
     });
 
     const { score, signals: lessonSignals } = computeLessonPotential(pod, signals);

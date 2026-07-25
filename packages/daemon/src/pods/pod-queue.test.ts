@@ -146,6 +146,31 @@ describe('pod-queue', () => {
     expect(processor).toHaveBeenCalledTimes(1);
   });
 
+  it('requeues an active pod only after its current processor exits', async () => {
+    const processed: string[] = [];
+    const queueRef: { current?: ReturnType<typeof createPodQueue> } = {};
+    const processor = vi.fn(async (id: string) => {
+      processed.push(id);
+      if (processed.length === 1) {
+        const queue = queueRef.current;
+        if (!queue) throw new Error('Queue was not initialized');
+        queue.requeueAfterCurrent(id);
+        expect(queue.pending).toBe(0);
+        expect(queue.processing).toBe(1);
+      }
+    });
+
+    const queue = createPodQueue(1, processor, logger);
+    queueRef.current = queue;
+    queue.enqueue('provider-failover');
+    await queue.drain();
+
+    expect(processed).toEqual(['provider-failover', 'provider-failover']);
+    expect(processor).toHaveBeenCalledTimes(2);
+    expect(queue.pending).toBe(0);
+    expect(queue.processing).toBe(0);
+  });
+
   it('clearStuckEntry recovers a pod whose finally never ran', async () => {
     const processed: string[] = [];
     // Concurrency=1 so the second enqueue can't slip in even without dedup —

@@ -4,6 +4,21 @@ import type { MemoryOutcomeItem, ReviewFeedbackResponseItem } from './task-summa
 
 export type RuntimeType = 'claude' | 'codex' | 'copilot' | 'pi';
 
+export type ProviderFailureCategory =
+  | 'transient'
+  | 'quota_exhausted'
+  /** Canonical wire value for the design's authentication failure category. */
+  | 'auth'
+  | 'provider_unavailable'
+  | 'unknown';
+
+export interface ProviderFailureClassification {
+  category: ProviderFailureCategory;
+  definitive: boolean;
+  sanitizedMessage: string;
+  retryAfter?: string | null;
+}
+
 export interface Runtime {
   type: RuntimeType;
   spawn(config: SpawnConfig): AsyncIterable<AgentEvent>;
@@ -110,6 +125,8 @@ export interface AgentErrorEvent {
   timestamp: string;
   message: string;
   fatal: boolean;
+  /** Adapter-normalized terminal provider evidence. Absent for non-provider/runtime errors. */
+  classification?: ProviderFailureClassification;
 }
 
 export interface AgentEscalationEvent {

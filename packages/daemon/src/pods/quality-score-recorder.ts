@@ -4,6 +4,7 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
+import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import { computeScore } from './quality-score.js';
 import { computeQualitySignals } from './quality-signals.js';
@@ -23,6 +24,7 @@ export interface QualityScoreRecorderDeps {
   logger: Logger;
   /** Optional — when wired, validation outcome is included in the score. */
   validationRepo?: ValidationRepository;
+  providerAttemptRepo?: ProviderAttemptRepository;
 }
 
 /**
@@ -31,8 +33,16 @@ export interface QualityScoreRecorderDeps {
  * block the pod lifecycle. Idempotent via `INSERT … ON CONFLICT` in the repo.
  */
 export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): QualityScoreRecorder {
-  const { eventBus, podRepo, eventRepo, escalationRepo, qualityScoreRepo, validationRepo, logger } =
-    deps;
+  const {
+    eventBus,
+    podRepo,
+    eventRepo,
+    escalationRepo,
+    qualityScoreRepo,
+    validationRepo,
+    providerAttemptRepo,
+    logger,
+  } = deps;
   const unsubscribers: Array<() => void> = [];
 
   function recordFor(event: PodCompletedEvent): void {
@@ -43,6 +53,7 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
         eventRepo,
         escalationRepo,
         validationRepo,
+        providerAttemptRepo,
       });
       const score = computeScore({ signals, finalStatus: event.finalStatus });
 
@@ -58,9 +69,9 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
         tellsCount: signals.tellsCount,
         prFixAttempts: signals.prFixAttempts,
         validationPassed: signals.validationPassed,
-        inputTokens: pod.inputTokens,
-        outputTokens: pod.outputTokens,
-        costUsd: pod.costUsd,
+        inputTokens: signals.tokens.input,
+        outputTokens: signals.tokens.output,
+        costUsd: signals.tokens.costUsd,
         runtime: pod.runtime,
         profileName: pod.profileName,
         // Record the exact model string at completion time — critical for 3d,

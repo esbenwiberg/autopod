@@ -3,6 +3,12 @@ import type { Logger } from 'pino';
 export interface PodQueue {
   enqueue(podId: string): void;
   /**
+   * Request another queue pass for a pod that may currently be active. Unlike
+   * enqueue(), an active ID is remembered and moved to the waiting queue only
+   * after the current processor finally releases it.
+   */
+  requeueAfterCurrent(podId: string): void;
+  /**
    * Operator-only: clear a stale `activeIds` entry whose `processPod` finally
    * never ran (e.g. uncaught throw above the try/finally, or a hot-reload that
    * dropped the closure). Caller must assert no `processPod` is running for
@@ -26,6 +32,7 @@ export function createPodQueue(
   // dedup, this prevents a concurrent second processPod() run from racing the first
   // and killing the pod when it fails the queued→provisioning state transition.
   const activeIds = new Set<string>();
+  const deferredRequeues = new Set<string>();
   let activeCount = 0;
   let drainResolvers: (() => void)[] = [];
 
@@ -52,6 +59,9 @@ export function createPodQueue(
     } finally {
       activeCount--;
       activeIds.delete(podId);
+      if (deferredRequeues.delete(podId) && !queue.includes(podId)) {
+        queue.push(podId);
+      }
       checkDrain();
       processNext(); // pick up next item
     }
@@ -65,6 +75,14 @@ export function createPodQueue(
       // twice — the second processPod run would fail the queued→provisioning state
       // transition and the error handler would kill the pod.
       if (!queue.includes(podId) && !activeIds.has(podId)) {
+        queue.push(podId);
+      }
+      processNext();
+    },
+    requeueAfterCurrent(podId: string) {
+      if (activeIds.has(podId)) {
+        deferredRequeues.add(podId);
+      } else if (!queue.includes(podId)) {
         queue.push(podId);
       }
       processNext();

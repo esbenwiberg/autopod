@@ -325,12 +325,76 @@ describe('CodexStreamParser', () => {
         timestamp: expect.any(String),
         message: 'rate limited',
         fatal: true,
+        classification: {
+          category: 'transient',
+          definitive: false,
+          sanitizedMessage: 'rate limited',
+          retryAfter: null,
+        },
       });
     });
+
+    it.each([
+      {
+        name: 'definitive quota',
+        error: {
+          code: 'usage_limit_reached',
+          message: "You've hit your usage limit.",
+          retry_after: '3600',
+        },
+        category: 'quota_exhausted',
+        definitive: true,
+      },
+      {
+        name: 'authentication',
+        error: { code: 'unauthorized', message: 'Unauthorized.' },
+        category: 'auth',
+        definitive: false,
+      },
+      {
+        name: 'provider outage',
+        error: { code: 'provider_unavailable', message: 'Provider unavailable.' },
+        category: 'provider_unavailable',
+        definitive: false,
+      },
+      {
+        name: 'malformed payload',
+        error: {},
+        category: 'unknown',
+        definitive: false,
+      },
+      {
+        name: 'unknown text',
+        error: { message: 'Codex changed its error format' },
+        category: 'unknown',
+        definitive: false,
+      },
+    ])(
+      'classifies turn.failed $name evidence conservatively',
+      async ({ error, category, definitive }) => {
+        const stream = Readable.from([`${JSON.stringify({ type: 'turn.failed', error })}\n`]);
+        const events: AgentEvent[] = [];
+        for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
+          events.push(event);
+        }
+        expect(events[0]).toMatchObject({ classification: { category, definitive } });
+      },
+    );
 
     it('maps turn_aborted to a fatal AgentErrorEvent', () => {
       const e = CodexStreamParser.mapEvent({ id: 's', msg: { type: 'turn_aborted' } }, 'pod-1');
       expect(e).toMatchObject({ type: 'error', fatal: true });
+    });
+
+    it('sanitizes Codex provider text in both terminal error fields', () => {
+      const e = CodexStreamParser.mapEvent(
+        { id: 's', msg: { type: 'error', message: 'Unknown failure api_key=codex-secret' } },
+        'pod-1',
+      );
+      expect(e).toMatchObject({
+        message: 'Unknown failure api_key=[REDACTED]',
+        classification: { sanitizedMessage: 'Unknown failure api_key=[REDACTED]' },
+      });
     });
 
     it('returns null for stateful events (token_count, turn_complete, task_complete)', () => {
