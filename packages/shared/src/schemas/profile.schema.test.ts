@@ -279,6 +279,42 @@ describe('createProfileSchema model validation', () => {
 });
 
 describe('provider account schemas', () => {
+  it('rejects generic API keys for blocked and authorization-pending providers', () => {
+    expect(() =>
+      createProviderAccountSchema.parse({
+        name: 'Blocked Kimi',
+        provider: 'kimi-code',
+        credentials: {
+          provider: 'api-key',
+          providerId: 'kimi-code',
+          apiKey: 'not-stored',
+        },
+      }),
+    ).toThrow('supported, runnable provider');
+
+    expect(() =>
+      updateProviderAccountSchema.parse({
+        credentials: {
+          provider: 'api-key',
+          providerId: 'kimi-code',
+          apiKey: 'not-stored',
+        },
+      }),
+    ).toThrow('supported, runnable provider');
+
+    expect(() =>
+      createProviderAccountSchema.parse({
+        name: 'Pending Zen',
+        provider: 'opencode-zen',
+        credentials: {
+          provider: 'api-key',
+          providerId: 'opencode-zen',
+          apiKey: 'not-stored',
+        },
+      }),
+    ).toThrow('supported, runnable provider');
+  });
+
   it('accepts account create and update payloads without raw secret redaction assumptions', () => {
     const created = createProviderAccountSchema.parse({
       name: 'Team OpenAI',

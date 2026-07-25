@@ -28,6 +28,7 @@ import type {
   PodStatus,
   PrivateRegistry,
   Profile,
+  PublicProviderCatalog,
   ReadinessApproval,
   ReadinessReview,
   ReadinessStatus,
@@ -161,6 +162,7 @@ import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
 import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
+import { resolveProviderPreflight } from './provider-preflight.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import { createReadinessService } from './readiness-review.js';
 import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
@@ -1238,6 +1240,8 @@ export interface PodManagerDependencies {
   /** Canonical credential source for every GitHub operation. Legacy profile PATs are ignored. */
   githubAuth?: DaemonGitHubAuth;
   providerAccountStore?: ProviderAccountStore;
+  /** Validated catalog override for deterministic manifest-only conformance tests. */
+  providerCatalog?: PublicProviderCatalog;
   eventBus: EventBus;
   containerManagerFactory: ContainerManagerFactory;
   worktreeManager: WorktreeManager;
@@ -1708,6 +1712,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     fixFeedbackRepo,
     profileStore,
     providerAccountStore,
+    providerCatalog,
     eventBus,
     containerManagerFactory,
     worktreeManager,
@@ -3533,7 +3538,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const result = await buildProviderEnv(profile, pod.id, logger, {
       profileStore,
       providerAccountStore,
+      providerCatalog,
       runtime: pod.runtime,
+      ...(pod.providerIdSnapshot
+        ? {
+            providerBinding: {
+              accountId: pod.providerAccountIdSnapshot,
+              providerId: pod.providerIdSnapshot,
+            },
+          }
+        : {}),
     });
     rememberMaxCredentialLineage(pod.id, result);
     // Re-write credential files to container in case tokens were rotated.
@@ -5653,8 +5667,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     createSession(request: CreatePodRequest, userId: string, creator?: PodCreator): Pod {
       const profile = profileStore.get(request.profileName);
       assertNoExpiredPat(profile);
-      const runtime = resolvePodRuntime(profile, request.runtime, logger);
-      const model = resolvePodModel(profile, request.model, runtime, logger);
+      const providerPreflight = resolveProviderPreflight(profile, request.runtime, request.model, {
+        profileStore,
+        providerAccountStore,
+        manifest: providerCatalog,
+      });
+      const { runtime, model } = providerPreflight;
       const executionTarget = request.executionTarget ?? profile.executionTarget ?? 'local';
       const skipValidation = request.skipValidation ?? false;
       const normalizedDependsOnPodIds =
@@ -5869,6 +5887,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             status: 'queued',
             model,
             runtime,
+            providerAccountIdSnapshot: providerPreflight.account?.id ?? null,
+            providerIdSnapshot:
+              providerPreflight.manifestProvider?.id ??
+              providerPreflight.account?.provider ??
+              profile.modelProvider ??
+              null,
             executionTarget,
             branch,
             userId,
@@ -6268,7 +6292,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           provisioningUpdates.worktreeCompromised = false;
         }
 
-        // Transition to provisioning
+        const providerPreflight = resolveProviderPreflight(profile, pod.runtime, pod.model, {
+          profileStore,
+          providerAccountStore,
+          manifest: providerCatalog,
+          ...(pod.providerIdSnapshot
+            ? {
+                expectedBinding: {
+                  accountId: pod.providerAccountIdSnapshot,
+                  providerId: pod.providerIdSnapshot,
+                },
+              }
+            : {}),
+        });
+
+        // Transition only after the complete provider tuple has passed preflight.
         pod = transition(pod, 'provisioning', provisioningUpdates);
         assertSandboxAgentStreamingExecSupported(profile, pod.executionTarget, pod.options);
 
@@ -6444,6 +6482,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           profile.networkPolicy,
           profile,
           pod.runtime,
+          providerPreflight.manifestProvider,
         );
         const runtimeNetworkPolicyMode = runtimeNetworkPolicy?.enabled
           ? (runtimeNetworkPolicy.mode ?? 'restricted')
@@ -7603,7 +7642,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const providerResult = await buildProviderEnv(profile, podId, logger, {
           profileStore,
           providerAccountStore,
+          providerCatalog,
           runtime: pod.runtime,
+          ...(pod.providerIdSnapshot
+            ? {
+                providerBinding: {
+                  accountId: pod.providerAccountIdSnapshot,
+                  providerId: pod.providerIdSnapshot,
+                },
+              }
+            : {}),
         });
         rememberMaxCredentialLineage(podId, providerResult);
         const secretEnv: Record<string, string> = {
@@ -8086,7 +8134,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               });
             } else if (canKill(pod.status)) {
               // Fallback for states not yet reachable via 'failed' (validated, review_required, etc.)
-              transition(pod, 'killing');
+              transition(pod, 'killing', { failureReason });
               pod = podRepo.getOrThrow(podId);
               transition(pod, 'killed', { completedAt: new Date().toISOString() });
             }
@@ -12529,10 +12577,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       await Promise.all(
         runningSessions.map(async (pod) => {
           try {
+            const providerPreflight = resolveProviderPreflight(profile, pod.runtime, pod.model, {
+              profileStore,
+              providerAccountStore,
+              manifest: providerCatalog,
+              ...(pod.providerIdSnapshot
+                ? {
+                    expectedBinding: {
+                      accountId: pod.providerAccountIdSnapshot,
+                      providerId: pod.providerIdSnapshot,
+                    },
+                  }
+                : {}),
+            });
             const runtimeNetworkPolicy = addRuntimeNetworkDefaults(
               profile.networkPolicy,
               profile,
               pod.runtime,
+              providerPreflight.manifestProvider,
             );
             // biome-ignore lint/style/noNonNullAssertion: runningSessions always have a containerId
             const containerId = pod.containerId!;

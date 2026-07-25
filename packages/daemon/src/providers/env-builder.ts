@@ -1,11 +1,13 @@
-import { CONTAINER_HOME_DIR } from '@autopod/shared';
+import { AutopodError, CONTAINER_HOME_DIR, PROVIDER_CATALOG } from '@autopod/shared';
 import type {
   FoundryCredentials,
+  GenericApiKeyCredentials,
   MaxCredentials,
   MaxRefreshCredentials,
   MaxSetupTokenCredentials,
   PiOAuthCredentials,
   Profile,
+  PublicProviderCatalog,
   RuntimeType,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
@@ -26,6 +28,13 @@ export interface BuildProviderEnvOptions {
   profileStore?: ProfileStore;
   providerAccountStore?: ProviderAccountStore;
   runtime?: RuntimeType;
+  /** Validated catalog override for deterministic conformance fixtures. */
+  providerCatalog?: PublicProviderCatalog;
+  /** Creation-time binding that prevents queued profile edits from changing spend source. */
+  providerBinding?: {
+    accountId: string | null;
+    providerId: string;
+  };
 }
 
 /**
@@ -84,10 +93,23 @@ export async function buildProviderEnv(
   logger: Logger,
   options: BuildProviderEnvOptions = {},
 ): Promise<ProviderEnvResult> {
-  const provider = profile.modelProvider;
-  const auth = resolveProviderAuth(profile, options);
+  const boundProfile = options.providerBinding
+    ? { ...profile, providerAccountId: options.providerBinding.accountId }
+    : profile;
+  const provider = boundProfile.modelProvider;
+  const auth = resolveProviderAuth(boundProfile, options);
+  if (options.providerBinding) {
+    const resolvedProviderId = auth.account?.provider ?? auth.provider;
+    if (resolvedProviderId !== options.providerBinding.providerId) {
+      throw new AutopodError(
+        'Selected provider binding changed after pod creation',
+        'PROVIDER_BINDING_MISMATCH',
+        400,
+      );
+    }
+  }
   if (options.runtime === 'pi') {
-    assertPiEnvironmentCompatible(profile, auth);
+    assertPiEnvironmentCompatible(boundProfile, auth);
   }
   if (auth.owner?.type === 'provider-account') {
     options.providerAccountStore?.touchLastUsed(auth.owner.id);
@@ -98,22 +120,22 @@ export async function buildProviderEnv(
       return buildAnthropicEnv();
 
     case 'max':
-      return buildMaxEnv(profile, auth, logger, options);
+      return buildMaxEnv(boundProfile, auth, logger, options);
 
     case 'openai':
       return buildOpenAiEnv(auth);
 
     case 'foundry':
-      return buildFoundryEnv(profile, auth, logger);
+      return buildFoundryEnv(boundProfile, auth, logger);
 
     case 'copilot':
-      return buildCopilotEnv(profile, auth);
+      return buildCopilotEnv(boundProfile, auth);
 
     case 'openrouter':
-      return buildOpenRouterEnv(profile, auth);
+      return buildOpenRouterEnv(boundProfile, auth);
 
     case 'pi':
-      return buildPiEnv(profile, auth);
+      return buildPiEnv(boundProfile, auth, options.providerCatalog ?? PROVIDER_CATALOG);
 
     default:
       // Exhaustiveness check
@@ -140,6 +162,7 @@ const SECRET_DIR = '/run/autopod';
 const CODEX_HOME_DIR = `${CONTAINER_HOME_DIR}/.codex`;
 const PI_AGENT_DIR = `${CONTAINER_HOME_DIR}/.pi/agent`;
 const PI_AUTH_PATH = `${PI_AGENT_DIR}/auth.json`;
+const GENERIC_MODEL_PROVIDER_KEY_PATH = `${SECRET_DIR}/model-provider-key`;
 
 function isMaxSetupTokenCredentials(creds: MaxCredentials): creds is MaxSetupTokenCredentials {
   return (
@@ -351,8 +374,62 @@ function isPiOAuthCredentials(creds: unknown): creds is PiOAuthCredentials {
   );
 }
 
-function buildPiEnv(profile: Profile, auth: ProviderAuthResolution): ProviderEnvResult {
+function isGenericApiKeyCredentials(creds: unknown): creds is GenericApiKeyCredentials {
+  return (
+    !!creds &&
+    typeof creds === 'object' &&
+    !Array.isArray(creds) &&
+    (creds as { provider?: unknown }).provider === 'api-key' &&
+    typeof (creds as { providerId?: unknown }).providerId === 'string' &&
+    typeof (creds as { apiKey?: unknown }).apiKey === 'string'
+  );
+}
+
+function buildPiEnv(
+  profile: Profile,
+  auth: ProviderAuthResolution,
+  providerCatalog: PublicProviderCatalog,
+): ProviderEnvResult {
   const creds = auth.credentials;
+
+  if (isGenericApiKeyCredentials(creds)) {
+    if (!auth.account || auth.account.provider !== creds.providerId) {
+      throw new Error(
+        `Profile "${profile.name}" uses generic API-key credentials without a matching provider account`,
+      );
+    }
+    const provider = providerCatalog.providers.find(
+      (candidate) => candidate.id === creds.providerId,
+    );
+    if (!provider || provider.implementation.kind !== 'generic-pi-api') {
+      throw new Error(
+        `Profile "${profile.name}" uses API-key credentials for a provider that is not a generic Pi provider`,
+      );
+    }
+    if (!provider.policy.runnable) {
+      throw new Error(
+        `Profile "${profile.name}" uses provider "${provider.id}", which is not authorized to run`,
+      );
+    }
+    const authJson = JSON.stringify(
+      {
+        [provider.implementation.piProviderId]: {
+          type: 'api_key',
+          key: `!cat ${GENERIC_MODEL_PROVIDER_KEY_PATH}`,
+        },
+      },
+      null,
+      2,
+    );
+    return {
+      env: withRuntimeTelemetryOptOutEnv({ PI_CODING_AGENT_DIR: PI_AGENT_DIR }),
+      containerFiles: [...buildClaudeConfigFiles(), { path: PI_AUTH_PATH, content: authJson }],
+      secretFiles: [{ path: GENERIC_MODEL_PROVIDER_KEY_PATH, content: creds.apiKey }],
+      requiresPostExecPersistence: false,
+      requiresPiAuthJsonPersistence: false,
+      credentialOwner: auth.owner ?? undefined,
+    };
+  }
 
   if (!isPiOAuthCredentials(creds)) {
     throw new Error(

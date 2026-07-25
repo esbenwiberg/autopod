@@ -72,6 +72,42 @@ describe('provider account routes', () => {
     expect(patchResponse.json().name).toBe('Shared OpenAI');
   });
 
+  it.each([
+    ['blocked', 'kimi-code'],
+    ['authorization-pending', 'opencode-zen'],
+  ])('rejects %s provider credentials on create and update', async (_, providerId) => {
+    const blockedCredentials = {
+      provider: 'api-key',
+      providerId,
+      apiKey: 'must-not-be-stored',
+    };
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/provider-accounts',
+      payload: {
+        name: `Rejected ${providerId}`,
+        provider: providerId,
+        credentials: blockedCredentials,
+      },
+    });
+    expect(createResponse.statusCode).toBe(400);
+    expect(createResponse.body).not.toContain('must-not-be-stored');
+
+    const accountResponse = await app.inject({
+      method: 'POST',
+      url: '/provider-accounts',
+      payload: { name: `Rejected ${providerId}`, provider: providerId },
+    });
+    expect(accountResponse.statusCode).toBe(201);
+    const patchResponse = await app.inject({
+      method: 'PATCH',
+      url: `/provider-accounts/${accountResponse.json().id}`,
+      payload: { credentials: blockedCredentials },
+    });
+    expect(patchResponse.statusCode).toBe(400);
+    expect(patchResponse.body).not.toContain('must-not-be-stored');
+  });
+
   it('links and unlinks a profile with mismatch rejection', async () => {
     profileStore.create({
       ...validProfile,

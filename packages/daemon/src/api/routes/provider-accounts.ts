@@ -1,8 +1,10 @@
 import {
   AutopodError,
+  PROVIDER_CATALOG,
+  type PublicProviderCatalog,
+  createProviderAccountSchemas,
   importProviderAccountFromProfileSchema,
   providerAccountIdSchema,
-  providerAccountProviderSchema,
 } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -29,8 +31,13 @@ const linkProviderProfileSchema = z.object({
 function assertAccountMatchesProfile(
   account: ReturnType<ProviderAccountStore['get']>,
   profile: ReturnType<ProfileStore['get']>,
+  catalog: PublicProviderCatalog,
 ): void {
-  if (profile.modelProvider !== account.provider) {
+  const catalogProvider = catalog.providers.find((provider) => provider.id === account.provider);
+  const matchesLegacyProvider = profile.modelProvider === account.provider;
+  const matchesGenericPiProvider =
+    profile.modelProvider === 'pi' && catalogProvider?.implementation.kind === 'generic-pi-api';
+  if (!matchesLegacyProvider && !matchesGenericPiProvider) {
     throw new AutopodError(
       `Profile "${profile.name}" uses modelProvider=${profile.modelProvider ?? 'none'} but provider account "${account.name}" is for ${account.provider}`,
       'PROVIDER_ACCOUNT_PROVIDER_MISMATCH',
@@ -39,22 +46,44 @@ function assertAccountMatchesProfile(
   }
 }
 
+function asProviderAccountValidationError(error: unknown): never {
+  if (error instanceof z.ZodError) {
+    throw new AutopodError(
+      error.issues.map((issue) => issue.message).join('; '),
+      'PROVIDER_ACCOUNT_VALIDATION_FAILED',
+      400,
+    );
+  }
+  throw error;
+}
+
+function validateProviderAccountRequest<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    asProviderAccountValidationError(error);
+  }
+}
+
 export function providerAccountRoutes(
   app: FastifyInstance,
   providerAccountStore: ProviderAccountStore,
   profileStore: ProfileStore,
+  catalog: PublicProviderCatalog = PROVIDER_CATALOG,
 ): void {
+  const { providerAccountProviderSchema: catalogProviderSchema } =
+    createProviderAccountSchemas(catalog);
   app.get('/provider-accounts', async (request) => {
     const query = request.query as { provider?: string };
-    const provider = query.provider
-      ? providerAccountProviderSchema.parse(query.provider)
-      : undefined;
+    const provider = query.provider ? catalogProviderSchema.parse(query.provider) : undefined;
     const accounts = providerAccountStore.list(provider ? { provider } : undefined);
     return accounts.map(redactProviderAccountSecrets);
   });
 
   app.post('/provider-accounts', async (request, reply) => {
-    const account = providerAccountStore.create(request.body as Record<string, unknown>);
+    const account = validateProviderAccountRequest(() =>
+      providerAccountStore.create(request.body as Record<string, unknown>),
+    );
     reply.status(201);
     return redactProviderAccountSecrets(account);
   });
@@ -66,7 +95,9 @@ export function providerAccountRoutes(
 
   app.patch('/provider-accounts/:id', async (request) => {
     const { id } = request.params as { id: string };
-    const account = providerAccountStore.update(id, request.body as Record<string, unknown>);
+    const account = validateProviderAccountRequest(() =>
+      providerAccountStore.update(id, request.body as Record<string, unknown>),
+    );
     return redactProviderAccountSecrets(account);
   });
 
@@ -81,7 +112,7 @@ export function providerAccountRoutes(
     const body = linkProviderProfileSchema.parse(request.body ?? {});
     const account = providerAccountStore.get(id);
     const profile = profileStore.get(body.profileName);
-    assertAccountMatchesProfile(account, profile);
+    assertAccountMatchesProfile(account, profile, catalog);
     // Clear legacy inline creds by default when linking — the account is now the
     // source of truth; a leftover stale copy only breaks daemon-side paths later.
     const clearLegacy = body.clearLegacyCredentials ?? true;
@@ -111,7 +142,7 @@ export function providerAccountRoutes(
 
     const account = providerAccountStore.get(body.accountId);
     const profile = profileStore.get(name);
-    assertAccountMatchesProfile(account, profile);
+    assertAccountMatchesProfile(account, profile, catalog);
     // Link: clear legacy inline creds by default (see schema note above).
     const clearLegacy = body.clearLegacyCredentials ?? true;
     const updated = profileStore.update(name, {
@@ -159,7 +190,7 @@ export function providerAccountRoutes(
       body.linkProfileNames.length > 0 ? body.linkProfileNames : [body.profileName];
     const linkedProfiles = requestedProfileNames.map((profileName) => {
       const profile = profileStore.get(profileName);
-      assertAccountMatchesProfile(account, profile);
+      assertAccountMatchesProfile(account, profile, catalog);
       return profileStore.update(profileName, { providerAccountId: account.id });
     });
 

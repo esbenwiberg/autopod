@@ -164,6 +164,18 @@ export interface PiOAuthCredentials {
   credential: Record<string, unknown>;
 }
 
+/**
+ * Static API-key credentials for a manifest-backed generic Pi provider.
+ *
+ * `provider` identifies the credential mechanism, while `providerId` identifies
+ * the product/account in the compiled provider catalog.
+ */
+export interface GenericApiKeyCredentials {
+  provider: 'api-key';
+  providerId: string;
+  apiKey: string;
+}
+
 export type ProviderCredentials =
   | AnthropicCredentials
   | OpenAiCredentials
@@ -171,4 +183,5 @@ export type ProviderCredentials =
   | FoundryCredentials
   | CopilotCredentials
   | OpenRouterCredentials
-  | PiOAuthCredentials;
+  | PiOAuthCredentials
+  | GenericApiKeyCredentials;

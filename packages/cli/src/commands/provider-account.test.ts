@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { Command } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
-import { registerProviderAccountCommands } from './provider-account.js';
+import { processSecretChunk, registerProviderAccountCommands } from './provider-account.js';
 
 vi.mock('ora', () => ({
   default: () => ({
@@ -41,6 +41,32 @@ function createProfile(overrides: Record<string, unknown> = {}) {
 
 function createMockClient() {
   return {
+    getModelProviderCatalog: vi.fn().mockResolvedValue({
+      manifestVersion: 1,
+      piCompatibility: {
+        packageName: '@earendil-works/pi-coding-agent',
+        packageVersion: '0.80.6',
+        source: 'pinned-distribution',
+      },
+      providers: [
+        {
+          id: 'openai',
+          displayName: 'OpenAI',
+          description: 'OpenAI compatibility provider',
+          implementation: { kind: 'legacy', adapterId: 'openai' },
+          credentialOptions: [],
+          modelIds: [],
+          requiredHosts: [],
+          policy: {
+            lifecycle: 'active',
+            authorization: 'supported',
+            runnable: true,
+            caveats: [],
+          },
+        },
+      ],
+      models: [],
+    }),
     listProviderAccounts: vi.fn().mockResolvedValue([createAccount()]),
     getProviderAccount: vi.fn().mockResolvedValue(createAccount()),
     createProviderAccount: vi.fn().mockResolvedValue(createAccount()),
@@ -86,6 +112,21 @@ describe('provider-account commands', () => {
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     tempDirs = [];
+  });
+
+  it('processes pasted secret chunks character by character', () => {
+    expect(processSecretChunk('', 'paste-key\n')).toEqual({
+      value: 'paste-key',
+      outcome: 'submit',
+    });
+    expect(processSecretChunk('abc', 'de\u007fF\r')).toEqual({
+      value: 'abcdF',
+      outcome: 'submit',
+    });
+    expect(processSecretChunk('partial', 'more\u0003ignored')).toEqual({
+      value: 'partialmore',
+      outcome: 'cancel',
+    });
   });
 
   afterEach(() => {

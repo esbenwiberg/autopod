@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { PROVIDER_CATALOG } from '../provider-catalog/compiled-manifest.js';
+import type { PublicProviderCatalog } from '../types/provider-catalog.js';
 
 export const providerAccountIdSchema = z
   .string()
@@ -15,16 +17,6 @@ export const providerAccountNameSchema = z
     /^[A-Za-z0-9][A-Za-z0-9 ._-]*[A-Za-z0-9]$|^[A-Za-z0-9]$/,
     'Provider account name must be human-readable and cannot start or end with punctuation',
   );
-
-export const providerAccountProviderSchema = z.enum([
-  'anthropic',
-  'max',
-  'openai',
-  'foundry',
-  'copilot',
-  'openrouter',
-  'pi',
-]);
 
 const anthropicCredentialsSchema = z.object({
   provider: z.literal('anthropic'),
@@ -88,40 +80,98 @@ const piOAuthCredentialsSchema = z.object({
     ),
 });
 
-const providerAccountCredentialsSchema = z.union([
-  anthropicCredentialsSchema,
-  openAiCredentialsSchema,
-  maxRefreshCredentialsSchema,
-  maxSetupTokenCredentialsSchema,
-  foundryCredentialsSchema,
-  copilotCredentialsSchema,
-  openRouterCredentialsSchema,
-  piOAuthCredentialsSchema,
-]);
+export function createProviderAccountSchemas(catalog: PublicProviderCatalog = PROVIDER_CATALOG) {
+  const catalogProviderIds = new Set(catalog.providers.map((provider) => provider.id));
+  const providerSchema = providerAccountIdSchema.refine(
+    (providerId) => catalogProviderIds.has(providerId),
+    'Provider account provider must exist in the compiled provider catalog',
+  );
+  const apiKeyCredentialsSchema = z
+    .object({
+      provider: z.literal('api-key'),
+      providerId: providerAccountIdSchema,
+      apiKey: z.string().min(1),
+    })
+    .superRefine((credentials, ctx) => {
+      const provider = catalog.providers.find(
+        (candidate) => candidate.id === credentials.providerId,
+      );
+      if (provider?.implementation.kind !== 'generic-pi-api') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['providerId'],
+          message: 'Generic API-key credentials require a generic Pi provider from the catalog',
+        });
+      } else if (
+        provider.policy.authorization !== 'supported' ||
+        provider.policy.runnable !== true
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['providerId'],
+          message: 'Generic API-key credentials require a supported, runnable provider',
+        });
+      } else if (!provider.credentialOptions.some((option) => option.kind === 'api-key')) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['providerId'],
+          message:
+            'Generic API-key credentials require a provider that supports API-key authentication',
+        });
+      }
+    });
+  const credentialsSchema = z.union([
+    anthropicCredentialsSchema,
+    openAiCredentialsSchema,
+    maxRefreshCredentialsSchema,
+    maxSetupTokenCredentialsSchema,
+    foundryCredentialsSchema,
+    copilotCredentialsSchema,
+    openRouterCredentialsSchema,
+    piOAuthCredentialsSchema,
+    apiKeyCredentialsSchema,
+  ]);
+  const createSchema = z
+    .object({
+      id: providerAccountIdSchema.optional(),
+      name: providerAccountNameSchema,
+      provider: providerSchema,
+      credentials: credentialsSchema.nullable().optional().default(null),
+    })
+    .superRefine((data, ctx) => {
+      const credentialProviderId =
+        data.credentials?.provider === 'api-key'
+          ? data.credentials.providerId
+          : data.credentials?.provider;
+      if (credentialProviderId && credentialProviderId !== data.provider) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['credentials'],
+          message: 'Provider account credentials must match the account provider',
+        });
+      }
+    });
+  const updateSchema = z
+    .object({
+      name: providerAccountNameSchema.optional(),
+      credentials: credentialsSchema.nullable().optional(),
+    })
+    .strict();
 
-export const createProviderAccountSchema = z
-  .object({
-    id: providerAccountIdSchema.optional(),
-    name: providerAccountNameSchema,
-    provider: providerAccountProviderSchema,
-    credentials: providerAccountCredentialsSchema.nullable().optional().default(null),
-  })
-  .superRefine((data, ctx) => {
-    if (data.credentials && data.credentials.provider !== data.provider) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['credentials'],
-        message: 'Provider account credentials must match the account provider',
-      });
-    }
-  });
+  return {
+    providerAccountProviderSchema: providerSchema,
+    genericApiKeyCredentialsSchema: apiKeyCredentialsSchema,
+    createProviderAccountSchema: createSchema,
+    updateProviderAccountSchema: updateSchema,
+  };
+}
 
-export const updateProviderAccountSchema = z
-  .object({
-    name: providerAccountNameSchema.optional(),
-    credentials: providerAccountCredentialsSchema.nullable().optional(),
-  })
-  .strict();
+export const {
+  providerAccountProviderSchema,
+  genericApiKeyCredentialsSchema,
+  createProviderAccountSchema,
+  updateProviderAccountSchema,
+} = createProviderAccountSchemas();
 
 export const linkProviderAccountSchema = z.object({
   profileName: z.string().min(1),

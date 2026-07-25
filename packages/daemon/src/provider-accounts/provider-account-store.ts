@@ -1,16 +1,17 @@
-import type { ModelProvider, ProviderAccount, ProviderCredentials } from '@autopod/shared';
-import {
-  AutopodError,
-  createProviderAccountSchema,
-  updateProviderAccountSchema,
+import type {
+  ProviderAccount,
+  ProviderAccountProvider,
+  ProviderCredentials,
+  PublicProviderCatalog,
 } from '@autopod/shared';
+import { AutopodError, PROVIDER_CATALOG, createProviderAccountSchemas } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { CredentialsCipher } from '../crypto/credentials-cipher.js';
 
 export interface ProviderAccountStore {
   create(input: Record<string, unknown>): ProviderAccount;
   get(id: string): ProviderAccount;
-  list(filter?: { provider?: ModelProvider }): ProviderAccount[];
+  list(filter?: { provider?: ProviderAccountProvider }): ProviderAccount[];
   update(id: string, changes: Record<string, unknown>): ProviderAccount;
   updateCredentials(
     id: string,
@@ -56,7 +57,10 @@ function rowToProviderAccount(
 export function createProviderAccountStore(
   db: Database.Database,
   cipher?: CredentialsCipher,
+  catalog: PublicProviderCatalog = PROVIDER_CATALOG,
 ): ProviderAccountStore {
+  const { createProviderAccountSchema, updateProviderAccountSchema } =
+    createProviderAccountSchemas(catalog);
   function encryptCredentials(credentials: ProviderCredentials | null | undefined): string | null {
     if (!credentials) return null;
     const json = JSON.stringify(credentials);
@@ -101,12 +105,43 @@ export function createProviderAccountStore(
   }
 
   function assertCredentialsMatchProvider(
-    provider: ModelProvider,
+    provider: ProviderAccountProvider,
     credentials: ProviderCredentials | null | undefined,
   ): void {
-    if (credentials && credentials.provider !== provider) {
+    const credentialProviderId =
+      credentials?.provider === 'api-key' ? credentials.providerId : credentials?.provider;
+    if (credentials?.provider === 'api-key') {
+      const catalogProvider = catalog.providers.find(
+        (candidate) => candidate.id === credentials.providerId,
+      );
+      if (catalogProvider?.implementation.kind !== 'generic-pi-api') {
+        throw new AutopodError(
+          `Generic API-key credentials require a generic Pi provider, not "${credentials.providerId}"`,
+          'PROVIDER_ACCOUNT_CREDENTIAL_KIND_MISMATCH',
+          400,
+        );
+      }
+      if (
+        catalogProvider.policy.authorization !== 'supported' ||
+        catalogProvider.policy.runnable !== true
+      ) {
+        throw new AutopodError(
+          `Generic API-key credentials require a supported, runnable provider, not "${credentials.providerId}"`,
+          'PROVIDER_ACCOUNT_PROVIDER_NOT_RUNNABLE',
+          400,
+        );
+      }
+      if (!catalogProvider.credentialOptions.some((option) => option.kind === 'api-key')) {
+        throw new AutopodError(
+          `Generic API-key credentials require API-key capability for "${credentials.providerId}"`,
+          'PROVIDER_ACCOUNT_CREDENTIAL_KIND_MISMATCH',
+          400,
+        );
+      }
+    }
+    if (credentialProviderId && credentialProviderId !== provider) {
       throw new AutopodError(
-        `Provider account credentials are for "${credentials.provider}", not "${provider}"`,
+        `Provider account credentials are for "${credentialProviderId}", not "${provider}"`,
         'PROVIDER_ACCOUNT_PROVIDER_MISMATCH',
         400,
       );
@@ -153,7 +188,7 @@ export function createProviderAccountStore(
       return fetchRaw(id);
     },
 
-    list(filter: { provider?: ModelProvider } = {}): ProviderAccount[] {
+    list(filter: { provider?: ProviderAccountProvider } = {}): ProviderAccount[] {
       const rows = filter.provider
         ? (db
             .prepare('SELECT * FROM provider_accounts WHERE provider = ? ORDER BY lower(name)')

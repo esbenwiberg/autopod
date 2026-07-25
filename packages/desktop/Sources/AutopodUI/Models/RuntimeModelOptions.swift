@@ -1,3 +1,4 @@
+import AutopodClient
 import Foundation
 
 struct RuntimeModelOption: Hashable, Sendable {
@@ -165,9 +166,23 @@ enum RuntimeModelOptions {
     static func options(
         for runtime: RuntimeType,
         role: RuntimeModelRole,
-        currentValue: String? = nil
+        currentValue: String? = nil,
+        catalog: ProviderCatalogResponse? = nil,
+        providerId: String? = nil
     ) -> [RuntimeModelOption] {
         var options = baseOptions(for: runtime, role: role)
+        if runtime == .pi, let catalog, let providerId,
+           let provider = catalog.provider(id: providerId),
+           provider.implementation.kind == "generic-pi-api" {
+            options = catalog.models
+                .filter {
+                    $0.providerId == providerId
+                        && provider.modelIds.contains($0.id)
+                        && provider.policy.runnable
+                }
+                .filter { $0.lifecycle == "active" }
+                .map { RuntimeModelOption(value: $0.id, label: $0.displayName) }
+        }
         guard let currentValue, !currentValue.isEmpty else { return options }
 
         let canonicalCurrentValue = canonicalValue(for: currentValue)
@@ -176,7 +191,12 @@ enum RuntimeModelOptions {
 
         options.append(RuntimeModelOption(
             value: canonicalCurrentValue,
-            label: modelLabels[canonicalCurrentValue] ?? canonicalCurrentValue
+            label: unavailableLabel(
+                for: canonicalCurrentValue,
+                runtime: runtime,
+                catalog: catalog,
+                providerId: providerId
+            )
         ))
         return options
     }
@@ -301,5 +321,19 @@ enum RuntimeModelOptions {
 
     private static func canonicalValue(for model: String) -> String {
         ClaudeModelCanonicalizer.normalizedLegacyAlias(model)
+    }
+
+    private static func unavailableLabel(
+        for model: String,
+        runtime: RuntimeType,
+        catalog: ProviderCatalogResponse?,
+        providerId: String?
+    ) -> String {
+        let label = modelLabels[model] ?? model
+        guard runtime == .pi, let providerId,
+              catalog?.provider(id: providerId)?.implementation.kind == "generic-pi-api" else {
+            return label
+        }
+        return "\(label) (unavailable)"
     }
 }

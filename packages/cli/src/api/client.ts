@@ -19,6 +19,7 @@ import type {
   ProviderCredentials,
   PublicProfile,
   PublicProviderAccount,
+  PublicProviderCatalog,
   ReadinessStatus,
   ScheduledJob,
   ScheduledJobTemplate,
@@ -387,6 +388,10 @@ export class AutopodClient {
   }
 
   // Provider Accounts
+  async getModelProviderCatalog(): Promise<PublicProviderCatalog> {
+    return this.request<PublicProviderCatalog>('GET', '/model-providers');
+  }
+
   async listProviderAccounts(filters?: {
     provider?: ProviderAccountProvider;
   }): Promise<PublicProviderAccount[]> {

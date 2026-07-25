@@ -519,10 +519,18 @@ public actor DaemonAPI {
   public func createProviderAccount(
     name: String,
     provider: String,
-    id: String? = nil
+    id: String? = nil,
+    apiKey: String? = nil
   ) async throws -> PublicProviderAccountResponse {
     var fields: [String: Any] = ["name": name, "provider": provider]
     if let id { fields["id"] = id }
+    if let apiKey {
+      fields["credentials"] = [
+        "provider": "api-key",
+        "providerId": provider,
+        "apiKey": apiKey,
+      ]
+    }
     let body = try JSONSerialization.data(withJSONObject: fields)
     return try await request("POST", "/provider-accounts", body: body)
   }
@@ -598,6 +606,10 @@ public actor DaemonAPI {
 
   public func fetchActionCatalog() async throws -> [ActionCatalogEntry] {
     try await request("GET", "/actions/catalog")
+  }
+
+  public func fetchModelProviderCatalog() async throws -> ProviderCatalogResponse {
+    try await request("GET", "/model-providers")
   }
 
   // MARK: - Skills

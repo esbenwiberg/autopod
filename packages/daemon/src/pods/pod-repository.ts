@@ -38,6 +38,8 @@ export interface NewPod {
   status: PodStatus;
   model: string;
   runtime: string;
+  providerAccountIdSnapshot?: string | null;
+  providerIdSnapshot?: string | null;
   executionTarget: ExecutionTarget;
   branch: string;
   userId: string;
@@ -291,6 +293,8 @@ function rowToSession(row: Record<string, unknown>): Pod {
     status: row.status as PodStatus,
     model: row.model as string,
     runtime: row.runtime as Pod['runtime'],
+    providerAccountIdSnapshot: (row.provider_account_id_snapshot as string) ?? null,
+    providerIdSnapshot: (row.provider_id_snapshot as string) ?? null,
     executionTarget: (row.execution_target as Pod['executionTarget']) ?? 'local',
     branch: row.branch as string,
     containerId: (row.container_id as string) ?? null,
@@ -447,7 +451,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
             : [];
       db.prepare(`
         INSERT INTO pods (
-          id, profile_name, task, status, model, runtime, execution_target, branch,
+          id, profile_name, task, status, model, runtime,
+          provider_account_id_snapshot, provider_id_snapshot, execution_target, branch,
           user_id, creator_email, creator_name, max_validation_attempts, skip_validation, contract,
           output_mode, agent_mode, output_target, validate, validation_suite, advisory_browser_qa_enabled, promotable,
           start_branch, base_branch, handoff_instructions, spec_files, spec_context_files, linked_pod_id, pim_groups, pr_url,
@@ -456,7 +461,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
           series_design, brief_title, touches, does_not_touch, pr_mode, wait_for_merge,
           require_sidecars, auto_approve, disable_ask_human
         ) VALUES (
-          @id, @profileName, @task, @status, @model, @runtime, @executionTarget, @branch,
+          @id, @profileName, @task, @status, @model, @runtime,
+          @providerAccountIdSnapshot, @providerIdSnapshot, @executionTarget, @branch,
           @userId, @creatorEmail, @creatorName, @maxValidationAttempts, @skipValidation, @contract,
           @outputMode, @agentMode, @outputTarget, @validate, @validationSuite, @advisoryBrowserQaEnabled, @promotable,
           @startBranch, @baseBranch, @handoffInstructions, @specFiles, @specContextFiles, @linkedPodId, @pimGroups, @prUrl,
@@ -472,6 +478,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
         status: pod.status,
         model: pod.model,
         runtime: pod.runtime,
+        providerAccountIdSnapshot: pod.providerAccountIdSnapshot ?? null,
+        providerIdSnapshot: pod.providerIdSnapshot ?? null,
         executionTarget: pod.executionTarget,
         branch: pod.branch,
         userId: pod.userId,

@@ -1,9 +1,10 @@
 import type {
+  CompiledProvider,
   ProviderAccountProvider,
   ProviderCredentials,
   PublicProviderAccount,
+  PublicProviderCatalog,
 } from '@autopod/shared';
-import { providerAccountProviderSchema } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
@@ -39,15 +40,54 @@ function collectOption(value: string, previous: string[]): string[] {
   return [...previous, value];
 }
 
-function parseProvider(value: string): ProviderAccountProvider {
-  const parsed = providerAccountProviderSchema.safeParse(value);
-  if (!parsed.success) {
+export function findCatalogProvider(
+  catalog: PublicProviderCatalog,
+  value: string,
+): CompiledProvider | undefined {
+  return catalog.providers.find((provider) => provider.id === value);
+}
+
+export function catalogProviderModels(
+  catalog: PublicProviderCatalog,
+  providerId: string,
+): PublicProviderCatalog['models'] {
+  const provider = findCatalogProvider(catalog, providerId);
+  if (!provider) {
+    return [];
+  }
+  const reviewedModelIds = new Set(provider.modelIds);
+  return catalog.models.filter(
+    (model) =>
+      model.providerId === providerId &&
+      model.lifecycle === 'active' &&
+      reviewedModelIds.has(model.id),
+  );
+}
+
+export function canSubmitGenericApiKey(provider: CompiledProvider): boolean {
+  return (
+    provider.implementation.kind === 'generic-pi-api' &&
+    provider.policy.authorization === 'supported' &&
+    provider.policy.runnable &&
+    provider.credentialOptions.some((option) => option.kind === 'api-key')
+  );
+}
+
+async function requireCatalogProvider(
+  client: AutopodClient,
+  value: string,
+): Promise<CompiledProvider> {
+  const catalog = await client.getModelProviderCatalog();
+  const provider = findCatalogProvider(catalog, value);
+  if (!provider) {
     console.error(
-      chalk.red(`provider must be one of: ${providerAccountProviderSchema.options.join(', ')}`),
+      chalk.red(
+        `provider must be one of: ${catalog.providers.map((candidate) => candidate.id).join(', ')}`,
+      ),
     );
     process.exit(1);
   }
-  return parsed.data;
+  return provider;
 }
 
 async function requireAccountProvider(
@@ -83,7 +123,9 @@ export function registerProviderAccountCommands(
     .option('--json', 'Output as JSON')
     .action(async (opts: { provider?: string; json?: boolean }) => {
       const client = getClient();
-      const provider = opts.provider ? parseProvider(opts.provider) : undefined;
+      const provider = opts.provider
+        ? (await requireCatalogProvider(client, opts.provider)).id
+        : undefined;
       const data = await withSpinner('Fetching provider accounts...', () =>
         client.listProviderAccounts(provider ? { provider } : undefined),
       );
@@ -151,7 +193,19 @@ export function registerProviderAccountCommands(
         },
       ) => {
         const client = getClient();
-        const provider = parseProvider(opts.provider);
+        const catalogProvider = await requireCatalogProvider(client, opts.provider);
+        const provider = catalogProvider.id;
+        if (!catalogProvider.policy.runnable) {
+          console.error(
+            chalk.red(
+              `${catalogProvider.displayName} cannot accept credentials: ${catalogProvider.policy.authorization}.`,
+            ),
+          );
+          for (const caveat of catalogProvider.policy.caveats) {
+            console.error(chalk.yellow(`${caveat.kind}: ${caveat.message}`));
+          }
+          process.exit(1);
+        }
         const account = await withSpinner('Creating provider account...', () =>
           client.createProviderAccount({ name, id: opts.id, provider }),
         );
@@ -172,6 +226,34 @@ export function registerProviderAccountCommands(
         });
       },
     );
+
+  accounts
+    .command('catalog')
+    .description('List daemon-reviewed model providers and compatible models')
+    .option('--json', 'Output as JSON')
+    .action(async (opts: { json?: boolean }) => {
+      const catalog = await withSpinner('Fetching provider catalog...', () =>
+        getClient().getModelProviderCatalog(),
+      );
+      withJsonOutput(opts, catalog, (data) => {
+        for (const provider of data.providers) {
+          const state = provider.policy.runnable
+            ? chalk.green('runnable')
+            : chalk.yellow(provider.policy.authorization);
+          console.log(`${chalk.bold(provider.displayName)} (${provider.id}) — ${state}`);
+          console.log(chalk.dim(provider.description));
+          for (const credential of provider.credentialOptions) {
+            console.log(`  ${credential.label}: ${credential.acquisition}`);
+          }
+          for (const model of catalogProviderModels(data, provider.id)) {
+            console.log(`  ${model.displayName} (${model.id})`);
+          }
+          for (const caveat of provider.policy.caveats) {
+            console.log(chalk.yellow(`  ${caveat.kind}: ${caveat.message}`));
+          }
+        }
+      });
+    });
 
   accounts
     .command('rename <id> <name>')
@@ -283,6 +365,41 @@ export function registerProviderAccountCommands(
     );
 
   accounts
+    .command('auth-api-key <id>')
+    .description('Submit an API key for a runnable generic provider account')
+    .action(async (id: string) => {
+      const client = getClient();
+      const account = await client.getProviderAccount(id);
+      const provider = await requireCatalogProvider(client, account.provider);
+      if (!canSubmitGenericApiKey(provider)) {
+        console.error(
+          chalk.red(
+            `${provider.displayName} cannot accept an API key (${provider.policy.authorization}).`,
+          ),
+        );
+        for (const caveat of provider.policy.caveats) {
+          console.error(chalk.yellow(`${caveat.kind}: ${caveat.message}`));
+        }
+        process.exit(1);
+      }
+      const apiKey =
+        process.env.AUTOPOD_PROVIDER_API_KEY?.trim() || (await readSecret('API key: '));
+      if (!apiKey) {
+        console.error(chalk.red('API key cannot be empty.'));
+        process.exit(1);
+      }
+      const credentials = {
+        provider: 'api-key',
+        providerId: provider.id,
+        apiKey,
+      } satisfies ProviderCredentials;
+      await withSpinner(`Saving credentials for "${id}"...`, () =>
+        client.updateProviderAccount(id, { credentials }),
+      );
+      console.log(chalk.green(`Provider account "${id}" is authenticated.`));
+    });
+
+  accounts
     .command('auth-pi <id> <provider>')
     .description(
       'Authenticate a Pi provider account with a subscription provider (anthropic|openai-codex|github-copilot)',
@@ -389,5 +506,57 @@ function confirm(question: string): Promise<boolean> {
       rl.close();
       resolve(answer.toLowerCase() === 'y');
     });
+  });
+}
+
+export interface SecretChunkResult {
+  value: string;
+  outcome?: 'submit' | 'cancel';
+}
+
+export function processSecretChunk(currentValue: string, chunk: string): SecretChunkResult {
+  let value = currentValue;
+  for (const character of chunk) {
+    if (character === '\u0003') return { value, outcome: 'cancel' };
+    if (character === '\r' || character === '\n') return { value, outcome: 'submit' };
+    if (character === '\u007f' || character === '\b') {
+      value = value.slice(0, -1);
+    } else if (character >= ' ') {
+      value += character;
+    }
+  }
+  return { value };
+}
+
+function readSecret(prompt: string): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdin.setRawMode) {
+    return Promise.reject(
+      new Error('Interactive secret entry requires a TTY; set AUTOPOD_PROVIDER_API_KEY instead.'),
+    );
+  }
+  process.stderr.write(prompt);
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  process.stdin.setEncoding('utf8');
+  return new Promise((resolve, reject) => {
+    let value = '';
+    const restore = (): void => {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdin.removeListener('data', onData);
+      process.stderr.write('\n');
+    };
+    const onData = (chunk: string): void => {
+      const result = processSecretChunk(value, chunk);
+      value = result.value;
+      if (result.outcome === 'cancel') {
+        restore();
+        reject(new Error('Secret entry cancelled.'));
+      } else if (result.outcome === 'submit') {
+        restore();
+        resolve(value.trim());
+      }
+    };
+    process.stdin.on('data', onData);
   });
 }

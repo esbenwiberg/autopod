@@ -545,18 +545,45 @@ public enum ExecutionTarget: String, CaseIterable, Sendable {
     }
 }
 
-public enum ModelProvider: String, CaseIterable, Sendable {
-    case anthropic, max, openai, foundry, copilot, openrouter, pi
+public struct ModelProvider: RawRepresentable, Hashable, Codable, Sendable {
+    public let rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(from decoder: Decoder) throws {
+        self.rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    public static let anthropic = Self(rawValue: "anthropic")
+    public static let max = Self(rawValue: "max")
+    public static let openai = Self(rawValue: "openai")
+    public static let foundry = Self(rawValue: "foundry")
+    public static let copilot = Self(rawValue: "copilot")
+    public static let openrouter = Self(rawValue: "openrouter")
+    public static let pi = Self(rawValue: "pi")
+
+    /// Offline legacy adapters. Manifest-backed providers come from the daemon catalog.
+    public static let legacyValues: [Self] = [
+        .anthropic, .max, .openai, .foundry, .copilot, .openrouter, .pi,
+    ]
 
     public var label: String {
-        switch self {
-        case .anthropic:   "Anthropic"
-        case .max:         "Max"
-        case .openai:      "OpenAI (Codex)"
-        case .foundry:     "Foundry"
-        case .copilot:     "Copilot"
-        case .openrouter:  "OpenRouter"
-        case .pi:          "Pi Subscription"
+        switch rawValue {
+        case "anthropic": "Anthropic"
+        case "max": "Max"
+        case "openai": "OpenAI (Codex)"
+        case "foundry": "Foundry"
+        case "copilot": "Copilot"
+        case "openrouter": "OpenRouter"
+        case "pi": "Pi Subscription"
+        default: rawValue
         }
     }
 }

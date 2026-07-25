@@ -8,6 +8,7 @@ import type {
   Profile,
   ProviderCredentials,
   PublicProfile,
+  PublicProviderCatalog,
   ValidationSuite,
 } from '@autopod/shared';
 import {
@@ -41,6 +42,29 @@ const profileColumns: ColumnDef<Profile>[] = [
   { header: 'Model', key: 'defaultModel', width: 10 },
   { header: 'Runtime', key: 'defaultRuntime', width: 10 },
 ];
+
+export function resolveCatalogProfileSelection(
+  catalog: PublicProviderCatalog,
+  providerId: string,
+  modelId: string,
+): { modelProvider: string; defaultRuntime?: 'pi'; defaultModel: string } | undefined {
+  const provider = catalog.providers.find((candidate) => candidate.id === providerId);
+  const model = catalog.models.find((candidate) => candidate.id === modelId);
+  if (
+    provider?.implementation.kind !== 'generic-pi-api' ||
+    !provider.policy.runnable ||
+    !provider.modelIds.includes(modelId) ||
+    model?.providerId !== providerId ||
+    model.lifecycle !== 'active'
+  ) {
+    return undefined;
+  }
+  return {
+    modelProvider: 'pi',
+    defaultRuntime: 'pi',
+    defaultModel: modelId,
+  };
+}
 
 function parseValidationSuite(value: string): ValidationSuite {
   if (isValidationSuite(value)) return value;
@@ -178,6 +202,100 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         }
       });
     });
+
+  profile
+    .command('set-provider <name> <provider>')
+    .description('Select a manifest-backed generic Pi provider and compatible model')
+    .requiredOption('--model <model>', 'Provider-qualified model from the daemon catalog')
+    .option(
+      '--reviewer-model <model>',
+      'Active provider-qualified reviewer model (required when the current reviewer is incompatible)',
+    )
+    .option('--account <id>', 'Matching provider account (required for generic providers)')
+    .action(
+      async (
+        name: string,
+        providerId: string,
+        opts: { model: string; reviewerModel?: string; account?: string },
+      ) => {
+        const client = getClient();
+        const catalog = await client.getModelProviderCatalog();
+        const provider = catalog.providers.find((candidate) => candidate.id === providerId);
+        if (!provider) {
+          console.error(chalk.red(`Unknown provider "${providerId}".`));
+          process.exit(1);
+        }
+        if (!provider.policy.runnable) {
+          console.error(
+            chalk.red(
+              `${provider.displayName} cannot be selected for pods (${provider.policy.authorization}).`,
+            ),
+          );
+          process.exit(1);
+        }
+        if (provider.implementation.kind !== 'generic-pi-api') {
+          console.error(
+            chalk.red(
+              `${provider.displayName} uses a specialized legacy flow; use its existing profile authentication command.`,
+            ),
+          );
+          process.exit(1);
+        }
+        const catalogModel = catalog.models.find((candidate) => candidate.id === opts.model);
+        if (catalogModel?.providerId === provider.id && catalogModel.lifecycle !== 'active') {
+          console.error(
+            chalk.red(
+              `Model "${opts.model}" is ${catalogModel.lifecycle} and cannot be selected for pod launch.`,
+            ),
+          );
+          process.exit(1);
+        }
+        const selection = resolveCatalogProfileSelection(catalog, providerId, opts.model);
+        if (!selection) {
+          console.error(
+            chalk.red(
+              `Model "${opts.model}" is not reviewed for ${provider.displayName}: ${provider.modelIds.join(', ') || 'none'}.`,
+            ),
+          );
+          process.exit(1);
+        }
+        if (!opts.account) {
+          console.error(chalk.red('Generic providers require --account to bind the spend source.'));
+          process.exit(1);
+        }
+        const currentProfile = opts.reviewerModel ? undefined : await client.getProfile(name);
+        const reviewerModel = opts.reviewerModel ?? currentProfile?.reviewerModel;
+        if (reviewerModel && !resolveCatalogProfileSelection(catalog, providerId, reviewerModel)) {
+          console.error(
+            chalk.red(
+              `Reviewer model "${reviewerModel}" is not an active reviewed model for ${provider.displayName}. Pass --reviewer-model with one of: ${provider.modelIds.join(', ') || 'none'}.`,
+            ),
+          );
+          process.exit(1);
+        }
+        if (opts.account) {
+          const account = await client.getProviderAccount(opts.account);
+          if (account.provider !== provider.id) {
+            console.error(
+              chalk.red(`Provider account "${opts.account}" is not for ${provider.id}.`),
+            );
+            process.exit(1);
+          }
+        }
+        const updated = await withSpinner('Updating profile provider...', () =>
+          client.updateProfile(name, {
+            ...selection,
+            ...(opts.reviewerModel ? { reviewerModel: opts.reviewerModel } : {}),
+            providerAccountId: opts.account ?? null,
+          }),
+        );
+        console.log(
+          chalk.green(
+            `Profile "${updated.name}" now uses ${provider.displayName} (${opts.model}).`,
+          ),
+        );
+      },
+    );
 
   profile
     .command('create')

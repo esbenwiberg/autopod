@@ -165,6 +165,7 @@ struct HelpBadge: View {
 /// Parameters: profile name, provider ("max", "openai", or "copilot"), completion callback (error message or nil).
 public typealias ProfileAuthHandler = (String, String, @escaping (String?) -> Void) -> Void
 public typealias ProviderAccountsLoadHandler = (String?) async throws -> [PublicProviderAccountResponse]
+public typealias ProviderCatalogLoadHandler = () async throws -> ProviderCatalogResponse
 public typealias DaemonGitHubAuthStatusLoadHandler = () async throws -> DaemonGitHubAuthStatusResponse
 
 /// Profile editor — settings-style layout with sidebar section navigation and inline help.
@@ -176,6 +177,7 @@ public struct ProfileEditorView: View {
     public var onSave: ((Profile) async throws -> Void)?
     public var onAuthenticate: ProfileAuthHandler?
     public var onLoadProviderAccounts: ProviderAccountsLoadHandler?
+    public var onLoadProviderCatalog: ProviderCatalogLoadHandler?
     public var onLoadDaemonGitHubAuthStatus: DaemonGitHubAuthStatusLoadHandler?
     public var memoryEntries: [MemoryEntry] = []
     public var onApproveMemory: (String) -> Void = { _ in }
@@ -224,6 +226,7 @@ public struct ProfileEditorView: View {
                 onSave: ((Profile) async throws -> Void)? = nil,
                 onAuthenticate: ProfileAuthHandler? = nil,
                 onLoadProviderAccounts: ProviderAccountsLoadHandler? = nil,
+                onLoadProviderCatalog: ProviderCatalogLoadHandler? = nil,
                 onLoadDaemonGitHubAuthStatus: DaemonGitHubAuthStatusLoadHandler? = nil,
                 memoryEntries: [MemoryEntry] = [],
                 onApproveMemory: @escaping (String) -> Void = { _ in },
@@ -245,6 +248,7 @@ public struct ProfileEditorView: View {
         self.onSave = onSave
         self.onAuthenticate = onAuthenticate
         self.onLoadProviderAccounts = onLoadProviderAccounts
+        self.onLoadProviderCatalog = onLoadProviderCatalog
         self.onLoadDaemonGitHubAuthStatus = onLoadDaemonGitHubAuthStatus
         self.memoryEntries = memoryEntries
         self.onApproveMemory = onApproveMemory
@@ -267,6 +271,8 @@ public struct ProfileEditorView: View {
     @State private var isDeleting: Bool = false
     @State private var showDeleteConfirmation: Bool = false
     @State private var providerAccounts: [PublicProviderAccountResponse] = []
+    @State private var providerCatalog: ProviderCatalogResponse?
+    @State private var providerCatalogError: String?
     @State private var isLoadingProviderAccounts = false
     @State private var providerAccountsError: String?
     @State private var daemonGitHubAuthStatus: DaemonGitHubAuthStatusResponse?
@@ -337,7 +343,6 @@ public struct ProfileEditorView: View {
         }
         .frame(width: 880, height: 720)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { normalizeRuntimeModelSelections() }
         .onChange(of: profile.defaultRuntime) { _, _ in
             normalizeRuntimeModelSelections()
         }
@@ -347,6 +352,7 @@ public struct ProfileEditorView: View {
         .task(id: profile.modelProvider.rawValue) {
             await loadProviderAccounts()
         }
+        .task { await loadProviderCatalog() }
         .task { await loadEditorPayloadIfNeeded() }
         .task { await loadDaemonGitHubAuthStatus() }
     }
@@ -668,6 +674,16 @@ public struct ProfileEditorView: View {
 
     private var actionBar: some View {
         VStack(spacing: 8) {
+            if let providerModelSaveError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(providerModelSaveError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+            }
             if let saveError {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -709,6 +725,7 @@ public struct ProfileEditorView: View {
                         || isDeleting
                         || (isNew && profile.name.isEmpty)
                         || (showOverridesView && editorLoadState != .loaded)
+                        || providerModelSaveError != nil
                     )
             }
         }
@@ -747,6 +764,10 @@ public struct ProfileEditorView: View {
     }
 
     private func submit() {
+        if let providerModelSaveError {
+            saveError = providerModelSaveError
+            return
+        }
         isSaving = true
         saveError = nil
         Task {
@@ -1134,7 +1155,9 @@ public struct ProfileEditorView: View {
                 RuntimeModelOptions.options(
                     for: profile.defaultRuntime,
                     role: role,
-                    currentValue: selection.wrappedValue
+                    currentValue: selection.wrappedValue,
+                    catalog: providerCatalog,
+                    providerId: selectedCatalogProviderId
                 ),
                 id: \.value
             ) { option in
@@ -1182,7 +1205,57 @@ public struct ProfileEditorView: View {
         if newValue == .openai || newValue == .openrouter {
             profile.defaultRuntime = .codex
             normalizeRuntimeModelSelections(resetCodexRestrictedModel: true)
+        } else if newValue == .pi {
+            profile.defaultRuntime = .pi
+            normalizeRuntimeModelSelections()
         }
+    }
+
+    private func loadProviderCatalog() async {
+        let result = await loadProviderCatalogForEditor(
+            currentProvider: profile.modelProvider,
+            currentModel: profile.defaultModel,
+            loader: onLoadProviderCatalog
+        )
+        guard !Task.isCancelled else { return }
+        providerCatalog = result.catalog
+        providerCatalogError = result.errorMessage
+        profile.modelProvider = result.provider
+        profile.defaultModel = result.model
+    }
+
+    private var modelProviderOptions: [(ModelProvider, String)] {
+        var options = providerCatalog.map { ProviderCatalogProfileOptions.options(from: $0) }
+            ?? ModelProvider.legacyValues.map { ($0, $0.label) }
+        if !options.contains(where: { $0.0 == profile.modelProvider }) {
+            options.append((profile.modelProvider, "\(profile.modelProvider.label) (unavailable)"))
+        }
+        return options
+    }
+
+    private var selectedCatalogProviderId: String? {
+        if let accountId = profile.providerAccountId,
+           let account = providerAccounts.first(where: { $0.id == accountId }) {
+            return account.provider
+        }
+        return providerCatalog?.models.first(where: { $0.id == profile.defaultModel })?.providerId
+            ?? profile.modelProvider.rawValue
+    }
+
+    private var selectedAccountProviderId: String? {
+        guard let accountId = profile.providerAccountId else { return nil }
+        return providerAccounts.first(where: { $0.id == accountId })?.provider
+    }
+
+    private var providerModelSaveError: String? {
+        ProviderModelSaveEligibility.profileErrorMessage(
+            profileProviderId: profile.modelProvider.rawValue,
+            hasLinkedAccount: profile.providerAccountId != nil,
+            accountProviderId: selectedAccountProviderId,
+            defaultModel: profile.defaultModel,
+            reviewerModel: profile.reviewerModel,
+            catalog: providerCatalog
+        )
     }
 
     private func loadProviderAccounts() async {
@@ -1194,7 +1267,7 @@ public struct ProfileEditorView: View {
             }
             return
         }
-        let provider = profile.modelProvider.rawValue
+        let provider = profile.modelProvider == .pi ? nil : profile.modelProvider.rawValue
         await MainActor.run {
             isLoadingProviderAccounts = true
             providerAccountsError = nil
@@ -1377,7 +1450,11 @@ public struct ProfileEditorView: View {
 
     private var sortedProviderAccounts: [PublicProviderAccountResponse] {
         providerAccounts
-            .filter { $0.provider == profile.modelProvider.rawValue }
+            .filter { account in
+                return providerCatalog?.provider(id: account.provider)?
+                    .isCompatible(profileProviderId: profile.modelProvider.rawValue)
+                    ?? (account.provider == profile.modelProvider.rawValue)
+            }
             .sorted {
                 if $0.name == $1.name { return $0.id < $1.id }
                 return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
@@ -1439,12 +1516,21 @@ public struct ProfileEditorView: View {
 
         fieldRow("Model Provider", help: "Authentication backend for AI model API calls.") {
             Picker("", selection: $profile.modelProvider) {
-                ForEach(ModelProvider.allCases, id: \.self) { p in
-                    Text(p.label).tag(p)
+                ForEach(modelProviderOptions, id: \.0) { option in
+                    Text(option.1).tag(option.0)
                 }
             }
             .labelsHidden()
             .frame(width: 160)
+        }
+
+        if let providerId = selectedCatalogProviderId,
+           let provider = providerCatalog?.provider(id: providerId) {
+            providerPolicySummary(provider)
+        } else if let providerCatalogError {
+            Label(providerCatalogError, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption2)
+                .foregroundStyle(.yellow)
         }
 
         fieldRow("Provider Account", help: "Shared provider account id for model-provider auth. Leave empty to use profile credentials or daemon environment auth.") {
@@ -1624,6 +1710,28 @@ public struct ProfileEditorView: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
+    }
+
+    @ViewBuilder
+    private func providerPolicySummary(_ provider: ProviderCatalogProvider) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(
+                provider.policy.runnable
+                    ? "Supported for unattended pods"
+                    : "Not runnable — \(provider.policy.authorization)",
+                systemImage: provider.policy.runnable ? "checkmark.shield" : "hand.raised.fill"
+            )
+            .foregroundStyle(provider.policy.runnable ? Color.green : Color.orange)
+            ForEach(provider.policy.caveats, id: \.message) { caveat in
+                Text("\(caveat.kind.capitalized): \(caveat.message)")
+                    .foregroundStyle(caveat.severity == "blocking" ? .orange : .secondary)
+            }
+            if let credential = provider.credentialOptions.first {
+                Text("\(credential.label): \(credential.acquisition)")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption2)
     }
 
     // MARK: - Container (was Infrastructure)
@@ -3041,7 +3149,7 @@ public struct ProfileEditorView: View {
         // MARK: Providers
         case "modelProvider":
             enumCard(field, selection: $profile.modelProvider,
-                     options: ModelProvider.allCases.map { ($0, $0.label) },
+                     options: modelProviderOptions,
                      parent: editorPayload?.parent?.modelProvider ?? "")
         case "providerAccountId":
             providerAccountCard(field, parent: editorPayload?.parent?.providerAccountId ?? "")

@@ -2,18 +2,40 @@ import SwiftUI
 import AutopodClient
 import AutopodUI
 
+private func loadProviderAccountsResult(
+  from api: DaemonAPI
+) async -> (accounts: [PublicProviderAccountResponse]?, error: String?) {
+  do {
+    return (try await api.listProviderAccounts(), nil)
+  } catch {
+    return (nil, error.localizedDescription)
+  }
+}
+
+private func loadProviderCatalogResult(
+  from api: DaemonAPI
+) async -> (catalog: ProviderCatalogResponse?, error: String?) {
+  do {
+    return (try await api.fetchModelProviderCatalog(), nil)
+  } catch {
+    return (nil, error.localizedDescription)
+  }
+}
+
 struct ProviderAccountsSettingsView: View {
   let api: DaemonAPI?
   let profiles: [Profile]
   let onProfilesChanged: (() async -> Void)?
 
   @State private var accounts: [PublicProviderAccountResponse] = []
+  @State private var providerCatalog: ProviderCatalogResponse?
   @State private var isLoading = false
   @State private var errorMessage: String?
   @State private var showCreateSheet = false
   @State private var showImportSheet = false
   @State private var inFlightAction: String?
   @State private var deleteTarget: PublicProviderAccountResponse?
+  @State private var apiKeyTarget: PublicProviderAccountResponse?
 
   private var sortedAccounts: [PublicProviderAccountResponse] {
     accounts.sorted {
@@ -61,8 +83,11 @@ struct ProviderAccountsSettingsView: View {
       await loadAccounts()
     }
     .sheet(isPresented: $showCreateSheet) {
-      ProviderAccountCreateSheet(isPresented: $showCreateSheet) { name, provider, id in
-        try await createAccount(name: name, provider: provider, id: id)
+      ProviderAccountCreateSheet(
+        isPresented: $showCreateSheet,
+        providers: providerCatalog?.providers ?? []
+      ) { name, provider, id, apiKey in
+        try await createAccount(name: name, provider: provider, id: id, apiKey: apiKey)
       }
     }
     .sheet(isPresented: $showImportSheet) {
@@ -76,6 +101,26 @@ struct ProviderAccountsSettingsView: View {
           accountName: accountName,
           clearLegacyCredentials: clearLegacyCredentials
         )
+      }
+    }
+    .sheet(
+      isPresented: Binding(
+        get: { apiKeyTarget != nil },
+        set: { if !$0 { apiKeyTarget = nil } }
+      )
+    ) {
+      if let account = apiKeyTarget,
+         let provider = providerCatalog?.provider(id: account.provider) {
+        ProviderAPIKeySheet(
+          isPresented: Binding(
+            get: { apiKeyTarget != nil },
+            set: { if !$0 { apiKeyTarget = nil } }
+          ),
+          accountName: account.name,
+          provider: provider
+        ) { apiKey in
+          try await replaceAPIKey(account, apiKey: apiKey)
+        }
       }
     }
     .alert(
@@ -134,8 +179,12 @@ struct ProviderAccountsSettingsView: View {
       }
       .buttonStyle(.borderedProminent)
       .controlSize(.small)
-      .disabled(api == nil)
-      .help("Create provider account")
+      .disabled(api == nil || providerCatalog == nil)
+      .help(
+        providerCatalog == nil
+          ? "Refresh the provider catalog before creating an account"
+          : "Create provider account"
+      )
     }
   }
 
@@ -192,7 +241,12 @@ struct ProviderAccountsSettingsView: View {
       .filter { $0.providerAccountId == account.id }
       .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     let linkableProfiles = profiles
-      .filter { $0.modelProvider.rawValue == account.provider && $0.providerAccountId != account.id }
+      .filter { profile in
+        guard profile.providerAccountId != account.id else { return false }
+        return providerCatalog?.provider(id: account.provider)?
+          .isCompatible(profileProviderId: profile.modelProvider.rawValue)
+          ?? (profile.modelProvider.rawValue == account.provider)
+      }
       .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
     return VStack(alignment: .leading, spacing: 10) {
@@ -256,6 +310,23 @@ struct ProviderAccountsSettingsView: View {
 
       if !linkedProfiles.isEmpty {
         linkedProfilesRow(linkedProfiles)
+      }
+
+      if let provider = providerCatalog?.provider(id: account.provider) {
+        HStack(alignment: .top, spacing: 6) {
+          Image(systemName: provider.policy.runnable ? "checkmark.shield" : "hand.raised.fill")
+          VStack(alignment: .leading, spacing: 2) {
+            Text(provider.policy.runnable
+              ? "Supported for unattended pods"
+              : "Not runnable — \(provider.policy.authorization)")
+            ForEach(provider.policy.caveats, id: \.message) { caveat in
+              Text("\(caveat.kind.capitalized): \(caveat.message)")
+            }
+          }
+          Spacer()
+        }
+        .font(.caption2)
+        .foregroundStyle(provider.policy.runnable ? Color.secondary : Color.orange)
       }
 
       metadataRow(account)
@@ -341,18 +412,64 @@ struct ProviderAccountsSettingsView: View {
     }
     isLoading = true
     defer { isLoading = false }
-    do {
-      accounts = try await api.listProviderAccounts()
-      errorMessage = nil
-    } catch {
-      errorMessage = error.localizedDescription
+
+    async let accountLoad = loadProviderAccountsResult(from: api)
+    async let catalogLoad = loadProviderCatalogResult(from: api)
+    let (accountResult, catalogResult) = await (accountLoad, catalogLoad)
+
+    var loadErrors: [String] = []
+    if let loadedAccounts = accountResult.accounts {
+      accounts = loadedAccounts
+    } else if let accountError = accountResult.error {
+      loadErrors.append(
+        "Provider accounts unavailable: \(accountError). "
+          + "Existing accounts are preserved; refresh to try again."
+      )
     }
+
+    if let loadedCatalog = catalogResult.catalog {
+      providerCatalog = loadedCatalog
+    } else if let catalogError = catalogResult.error {
+      let failure = ProviderAccountsCatalogFailure(
+        preserving: accounts,
+        catalog: providerCatalog,
+        error: DaemonError.networkError(catalogError)
+      )
+      accounts = failure.accounts
+      providerCatalog = failure.catalog
+      loadErrors.append(failure.errorMessage)
+    }
+    errorMessage = loadErrors.isEmpty ? nil : loadErrors.joined(separator: "\n")
   }
 
   @MainActor
-  private func createAccount(name: String, provider: String, id: String?) async throws {
+  private func createAccount(
+    name: String,
+    provider: String,
+    id: String?,
+    apiKey: String?
+  ) async throws {
     guard let api else { throw DaemonError.networkError("Not connected to daemon") }
-    _ = try await api.createProviderAccount(name: name, provider: provider, id: id)
+    guard let catalogProvider = providerCatalog?.provider(id: provider) else {
+      throw DaemonError.badRequest("Provider catalog unavailable. Refresh before creating an account.")
+    }
+    guard catalogProvider.policy.authorization == "supported", catalogProvider.policy.runnable else {
+      throw DaemonError.badRequest(
+        "\(catalogProvider.displayName) is \(catalogProvider.policy.authorization) and cannot accept credentials."
+      )
+    }
+    if catalogProvider.implementation.kind == "generic-pi-api",
+       !catalogProvider.canAcceptGenericAPIKey {
+      throw DaemonError.badRequest(
+        "\(catalogProvider.displayName) does not advertise API-key authentication."
+      )
+    }
+    _ = try await api.createProviderAccount(
+      name: name,
+      provider: provider,
+      id: id,
+      apiKey: catalogProvider.canAcceptGenericAPIKey ? apiKey : nil
+    )
     await loadAccounts()
   }
 
@@ -418,6 +535,30 @@ struct ProviderAccountsSettingsView: View {
   }
 
   @MainActor
+  private func replaceAPIKey(
+    _ account: PublicProviderAccountResponse,
+    apiKey: String
+  ) async throws {
+    guard let api else { throw DaemonError.networkError("Not connected to daemon") }
+    guard let provider = providerCatalog?.provider(id: account.provider),
+          provider.canAcceptGenericAPIKey else {
+      throw DaemonError.badRequest(
+        "Provider catalog unavailable or \(providerLabel(account.provider)) cannot accept API keys."
+      )
+    }
+    inFlightAction = "auth:\(account.id)"
+    defer { inFlightAction = nil }
+    _ = try await api.updateProviderAccount(account.id, fields: [
+      "credentials": [
+        "provider": "api-key",
+        "providerId": account.provider,
+        "apiKey": apiKey,
+      ],
+    ])
+    await loadAccounts()
+  }
+
+  @MainActor
   private func link(_ account: PublicProviderAccountResponse, profileName: String) async {
     guard let api else { return }
     inFlightAction = "link:\(account.id)"
@@ -463,6 +604,9 @@ struct ProviderAccountsSettingsView: View {
   }
 
   private func providerLabel(_ provider: String) -> String {
+    if let label = providerCatalog?.provider(id: provider)?.displayName {
+      return label
+    }
     switch provider {
     case "anthropic": "Anthropic"
     case "max": "Claude Max"
@@ -476,6 +620,9 @@ struct ProviderAccountsSettingsView: View {
   }
 
   private func providerIcon(_ provider: String) -> String {
+    if let icon = providerCatalog?.provider(id: provider)?.systemImage {
+      return icon
+    }
     switch provider {
     case "anthropic", "max": "sparkles"
     case "openai", "openrouter": "cpu"
@@ -488,7 +635,16 @@ struct ProviderAccountsSettingsView: View {
 
   @ViewBuilder
   private func authControl(_ account: PublicProviderAccountResponse) -> some View {
-    if account.provider == "pi" {
+    if providerCatalog?.provider(id: account.provider)?.canAcceptGenericAPIKey == true {
+      Button {
+        apiKeyTarget = account
+      } label: {
+        Image(systemName: account.hasCredentials ? "arrow.triangle.2.circlepath" : "person.badge.key")
+      }
+      .buttonStyle(.borderless)
+      .disabled(isAccountBusy(account.id))
+      .help(account.hasCredentials ? "Replace API key" : "Add API key")
+    } else if account.provider == "pi" {
       Menu {
         ForEach(ProfileAuthenticator.PiOAuthProvider.allCases, id: \.rawValue) { providerId in
           Button(piProviderLabel(providerId)) {
@@ -522,17 +678,85 @@ struct ProviderAccountsSettingsView: View {
   }
 }
 
+private struct ProviderAPIKeySheet: View {
+  @Binding var isPresented: Bool
+  let accountName: String
+  let provider: ProviderCatalogProvider
+  let onSave: (String) async throws -> Void
+
+  @State private var apiKey = ""
+  @State private var isSaving = false
+  @State private var errorMessage: String?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      Text("Replace \(provider.displayName) API Key")
+        .font(.headline)
+      Text("Enter a new key for \(accountName). The stored secret is never displayed.")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+
+      if let guidance = provider.credentialOptions.first?.acquisition {
+        Text(guidance)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      if let errorMessage {
+        Text(errorMessage)
+          .font(.caption)
+          .foregroundStyle(.red)
+      }
+
+      SecureField(provider.credentialOptions.first?.label ?? "API key", text: $apiKey)
+        .textFieldStyle(.roundedBorder)
+
+      HStack {
+        Spacer()
+        Button("Cancel") { isPresented = false }
+          .keyboardShortcut(.cancelAction)
+        Button("Save") {
+          Task { await save() }
+        }
+        .keyboardShortcut(.defaultAction)
+        .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+      }
+    }
+    .padding(20)
+    .frame(width: 420)
+  }
+
+  @MainActor
+  private func save() async {
+    let secret = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !secret.isEmpty else { return }
+    isSaving = true
+    errorMessage = nil
+    defer { isSaving = false }
+    do {
+      try await onSave(secret)
+      apiKey = ""
+      isPresented = false
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+}
+
 private struct ProviderAccountCreateSheet: View {
   @Binding var isPresented: Bool
-  let onCreate: (String, String, String?) async throws -> Void
+  let providers: [ProviderCatalogProvider]
+  let onCreate: (String, String, String?, String?) async throws -> Void
 
   @State private var name = ""
   @State private var accountId = ""
   @State private var provider = "openai"
+  @State private var apiKey = ""
   @State private var isSaving = false
   @State private var errorMessage: String?
 
-  private let providers = ["anthropic", "max", "openai", "foundry", "copilot", "openrouter", "pi"]
+  private var selectedProvider: ProviderCatalogProvider? {
+    providers.first { $0.id == provider }
+  }
 
   private var trimmedName: String {
     name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -575,12 +799,36 @@ private struct ProviderAccountCreateSheet: View {
           Text("Provider")
             .foregroundStyle(.secondary)
           Picker("", selection: $provider) {
-            ForEach(providers, id: \.self) { value in
-              Text(providerLabel(value)).tag(value)
+            ForEach(providers) { value in
+              Text(value.displayName).tag(value.id)
+                .disabled(!value.policy.runnable)
             }
           }
           .labelsHidden()
           .frame(width: 180)
+        }
+        if let selectedProvider {
+          GridRow {
+            Text("Policy").foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+              Text(selectedProvider.policy.runnable
+                ? "Supported"
+                : "Not runnable — \(selectedProvider.policy.authorization)")
+              ForEach(selectedProvider.policy.caveats, id: \.message) { caveat in
+                Text("\(caveat.kind.capitalized): \(caveat.message)")
+              }
+            }
+            .font(.caption)
+            .foregroundStyle(selectedProvider.policy.runnable ? Color.secondary : Color.orange)
+          }
+          if selectedProvider.implementation.kind == "generic-pi-api" {
+            GridRow {
+              Text("API Key").foregroundStyle(.secondary)
+              SecureField(selectedProvider.credentialOptions.first?.label ?? "API key", text: $apiKey)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 260)
+            }
+          }
         }
       }
 
@@ -602,11 +850,21 @@ private struct ProviderAccountCreateSheet: View {
           }
         }
         .keyboardShortcut(.defaultAction)
-        .disabled(trimmedName.isEmpty || isSaving)
+        .disabled(
+          trimmedName.isEmpty || isSaving || selectedProvider?.policy.runnable != true
+            || (selectedProvider?.implementation.kind == "generic-pi-api"
+              && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        )
       }
     }
     .padding(20)
     .frame(width: 420)
+    .onAppear {
+      if !providers.contains(where: { $0.id == provider && $0.policy.runnable }),
+         let first = providers.first(where: { $0.policy.runnable }) {
+        provider = first.id
+      }
+    }
   }
 
   @MainActor
@@ -615,25 +873,15 @@ private struct ProviderAccountCreateSheet: View {
     errorMessage = nil
     defer { isSaving = false }
     do {
-      try await onCreate(trimmedName, provider, trimmedId)
+      let secret = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+      try await onCreate(trimmedName, provider, trimmedId, secret.isEmpty ? nil : secret)
+      apiKey = ""
       isPresented = false
     } catch {
       errorMessage = error.localizedDescription
     }
   }
 
-  private func providerLabel(_ provider: String) -> String {
-    switch provider {
-    case "anthropic": "Anthropic"
-    case "max": "Claude Max"
-    case "openai": "OpenAI"
-    case "foundry": "Foundry"
-    case "copilot": "Copilot"
-    case "openrouter": "OpenRouter"
-    case "pi": "Pi"
-    default: provider
-    }
-  }
 }
 
 private struct ProviderAccountImportSheet: View {

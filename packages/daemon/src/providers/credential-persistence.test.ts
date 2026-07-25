@@ -482,6 +482,27 @@ describe('persistPiAuthJson', () => {
       },
     });
   });
+
+  it('generic static API key skips Pi auth read-back and preserves account credentials', async () => {
+    const cm = makeContainerManager(
+      JSON.stringify({
+        opencode: { type: 'api_key', key: '!cat /run/autopod/model-provider-key' },
+      }),
+    );
+    const ps = makeOpenAiProfileStore({ providerAccountId: 'zen-account' });
+    const providerAccountStore = makeProviderAccountStore({
+      provider: 'api-key',
+      providerId: 'opencode-zen',
+      apiKey: 'original-static-key',
+    });
+
+    await persistPiAuthJson('ctr-1', cm, ps, 'test-profile', logger, {
+      providerAccountStore,
+    });
+
+    expect(cm.readFile).not.toHaveBeenCalled();
+    expect(providerAccountStore.updateCredentials).not.toHaveBeenCalled();
+  });
 });
 
 describe('persistOpenAiAuthJson', () => {

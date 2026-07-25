@@ -487,6 +487,15 @@ export async function persistPiAuthJson(
     return;
   }
 
+  const initialCredentials = getOwnerCredentials(profileStore, options.providerAccountStore, owner);
+  if (initialCredentials?.provider === 'api-key') {
+    logger.debug(
+      { profileName, ...ownerLogFields(owner), providerId: initialCredentials.providerId },
+      'Skipping Pi auth.json persist for generic static API key credentials',
+    );
+    return;
+  }
+
   let rawContent: string;
   try {
     rawContent = await containerManager.readFile(containerId, PI_AUTH_PATH);
