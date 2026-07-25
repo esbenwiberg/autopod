@@ -1,6 +1,7 @@
 import type { PodQualityScore } from '@autopod/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createTestDb } from '../test-utils/mock-helpers.js';
+import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 import {
   type QualityScoreRepository,
   createQualityScoreRepository,
@@ -34,10 +35,12 @@ function baseScore(overrides: Partial<PodQualityScore> = {}): PodQualityScore {
 }
 
 describe('QualityScoreRepository', () => {
+  // biome-ignore lint/suspicious/noExplicitAny: sqlite db
+  let db: any;
   let repo: QualityScoreRepository;
 
   beforeEach(() => {
-    const db = createTestDb();
+    db = createTestDb();
     // Foreign key from pod_quality_scores → pods requires a matching pod row.
     // Disable FKs for these focused repo tests; integration coverage in the
     // recorder test exercises the real relationship.
@@ -92,6 +95,108 @@ describe('QualityScoreRepository', () => {
 
     const recentP1 = repo.list({ profileName: 'p1', since: '2026-04-10T00:00:00.000Z' });
     expect(recentP1.map((r) => r.podId)).toEqual(['new']);
+  });
+
+  it('uses provider-attempt compatibility values in wrapped list, trend, and analytics queries', () => {
+    const attemptRepo = createProviderAttemptRepository(db);
+    repo.insert(
+      baseScore({
+        podId: 'attempt-pod',
+        runtime: 'claude',
+        model: 'stale-model',
+        inputTokens: 999,
+        outputTokens: 888,
+        costUsd: 99,
+      }),
+    );
+    attemptRepo.open({
+      podId: 'attempt-pod',
+      provider: 'max',
+      providerAccountId: null,
+      runtime: 'claude',
+      model: 'claude-opus-4-7',
+      profileReference: 'pod:attempt-pod@profile-snapshot#abcdef1',
+      profileSnapshot: {},
+    });
+    attemptRepo.close('attempt-pod', {
+      nativeSessionId: null,
+      outcome: 'quota_exhausted',
+      inputTokens: 100,
+      outputTokens: 20,
+      costUsd: 1.25,
+    });
+    attemptRepo.open({
+      podId: 'attempt-pod',
+      provider: 'openai',
+      providerAccountId: null,
+      runtime: 'codex',
+      model: 'gpt-5.6-terra',
+      profileReference: 'pod:attempt-pod@profile-snapshot#abcdef1',
+      profileSnapshot: {},
+    });
+    attemptRepo.close('attempt-pod', {
+      nativeSessionId: null,
+      outcome: 'completed',
+      inputTokens: 200,
+      outputTokens: 40,
+      costUsd: 0.75,
+    });
+    repo.insert(
+      baseScore({
+        podId: 'legacy-pod',
+        runtime: 'claude',
+        model: 'legacy-model',
+        inputTokens: 12,
+        outputTokens: 3,
+        costUsd: 0.5,
+      }),
+    );
+
+    expect(repo.list({ runtime: 'codex', model: 'gpt-5.6-terra' })).toEqual([
+      expect.objectContaining({
+        podId: 'attempt-pod',
+        runtime: 'codex',
+        model: 'gpt-5.6-terra',
+        inputTokens: 300,
+        outputTokens: 60,
+        costUsd: 2,
+      }),
+    ]);
+    expect(repo.list({ runtime: 'claude' }).map((score) => score.podId)).toEqual(['legacy-pod']);
+
+    expect(repo.getTrends()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runtime: 'codex',
+          model: 'gpt-5.6-terra',
+          podCount: 1,
+        }),
+        expect.objectContaining({ runtime: 'claude', model: 'legacy-model', podCount: 1 }),
+      ]),
+    );
+
+    const analytics = repo.getQualityAnalytics(30);
+    expect(analytics.summary.totalPodsScored).toBe(2);
+    expect(analytics.scores).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          podId: 'attempt-pod',
+          runtime: 'codex',
+          model: 'gpt-5.6-terra',
+          inputTokens: 300,
+          outputTokens: 60,
+          costUsd: 2,
+        }),
+        expect.objectContaining({
+          podId: 'legacy-pod',
+          runtime: 'claude',
+          model: 'legacy-model',
+          inputTokens: 12,
+          outputTokens: 3,
+          costUsd: 0.5,
+        }),
+      ]),
+    );
   });
 });
 

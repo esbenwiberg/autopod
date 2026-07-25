@@ -172,7 +172,7 @@ export interface PodUpdates {
   lastFixPodSpawnedAt?: string | null;
   tokenBudget?: number | null;
   budgetExtensionsUsed?: number;
-  pauseReason?: 'budget' | 'manual' | null;
+  pauseReason?: 'budget' | 'manual' | 'provider_limit' | null;
   referenceRepos?: ReferenceRepo[] | null;
   artifactsPath?: string | null;
   handoffInstructions?: string | null;
@@ -381,7 +381,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
     lastFixPodSpawnedAt: (row.last_fix_pod_spawned_at as string) ?? null,
     tokenBudget: (row.token_budget as number | null) ?? null,
     budgetExtensionsUsed: (row.budget_extensions_used as number) ?? 0,
-    pauseReason: (row.pause_reason as 'budget' | 'manual' | null) ?? null,
+    pauseReason: (row.pause_reason as 'budget' | 'manual' | 'provider_limit' | null) ?? null,
     referenceRepos: row.reference_repos
       ? (JSON.parse(row.reference_repos as string) as ReferenceRepo[])
       : null,

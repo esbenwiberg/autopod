@@ -28,6 +28,9 @@ import type {
   PodStatus,
   PrivateRegistry,
   Profile,
+  ProviderAccountProvider,
+  ProviderFailoverTarget,
+  ProviderFailureClassification,
   PublicProviderCatalog,
   ReadinessApproval,
   ReadinessReview,
@@ -57,6 +60,8 @@ import {
   CONTAINER_HOME_DIR,
   DEFAULT_CONTAINER_MEMORY_GB,
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
+  PROVIDER_CATALOG,
+  PROVIDER_FAILOVER_HANDOFF_PATH,
   WORKSPACE_PI_HANDOFF_PATH,
   generateId,
   generatePodId,
@@ -162,10 +167,16 @@ import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
 import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
+import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import { resolveProviderPreflight } from './provider-preflight.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import { createReadinessService } from './readiness-review.js';
-import { buildContinuationPrompt, buildRecoveryTask, buildReworkTask } from './recovery-context.js';
+import {
+  buildContinuationPrompt,
+  buildRecoveryTask,
+  buildReworkTask,
+  writeProviderFailoverHandoff,
+} from './recovery-context.js';
 import { deriveReferenceRepos, resolveRefRepoPat } from './reference-repos.js';
 import {
   CREDENTIAL_GUARD_HOOK,
@@ -1230,6 +1241,7 @@ export interface NetworkManager {
 
 export interface PodManagerDependencies {
   podRepo: PodRepository;
+  providerAttemptRepo?: ProviderAttemptRepository;
   escalationRepo: EscalationRepository;
   nudgeRepo: NudgeRepository;
   /** Queue of feedback messages drained into the next fix-pod iteration. */
@@ -1265,6 +1277,8 @@ export interface PodManagerDependencies {
   beforeContainerCleanup?: (podId: string) => Promise<void>;
   pendingOverrideRepo?: import('./pending-override-repository.js').PendingOverrideRepository;
   enqueueSession: (podId: string) => void;
+  /** Queue-safe self-requeue used from inside the current processPod run. */
+  requeueSessionAfterCurrent?: (podId: string) => void;
   /**
    * Operator-only: clear a stale `activeIds` entry from the queue. Used by
    * `kickPod` to recover from the stuck-queued bug where a previous run's
@@ -1491,6 +1505,11 @@ export interface PodManager {
   resumePod(podId: string): Promise<{
     action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery';
   }>;
+  /** Continue a provider-limit pause through normal provisioning on the same pod ID. */
+  continueProvider(
+    podId: string,
+    target?: ProviderFailoverTarget,
+  ): Promise<{ action: 'same-provider' | 'alternate-provider' }>;
   /**
    * Operator admin override: force-transition a `failed` pod to `complete`,
    * skipping push, PR creation, and validation. Persists `forceCompletedAt`
@@ -1737,6 +1756,426 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   } = deps;
   const reviewInfrastructureRetryBackoffMs =
     deps.reviewInfrastructureRetryBackoffMs ?? REVIEW_INFRA_RETRY_BACKOFF_MS;
+
+  function providerForAttempt(pod: Pod, profile: Profile): ProviderAccountProvider {
+    if (pod.providerIdSnapshot) return pod.providerIdSnapshot;
+    if (pod.providerAccountIdSnapshot && providerAccountStore) {
+      try {
+        return providerAccountStore.get(pod.providerAccountIdSnapshot).provider;
+      } catch {
+        // Fall through to the compatibility projection for legacy pod rows.
+      }
+    }
+    if (profile.modelProvider) return profile.modelProvider;
+    if (pod.runtime === 'codex') return 'openai';
+    if (pod.runtime === 'copilot') return 'copilot';
+    if (pod.runtime === 'pi') return 'pi';
+    return 'anthropic';
+  }
+
+  function redactedProfileSnapshot(pod: Pod, profile: Profile): Record<string, unknown> {
+    const snapshot = pod.profileSnapshot ?? profile;
+    const redact = (value: unknown, key = ''): unknown => {
+      const normalizedKey = key.toLowerCase();
+      if (
+        normalizedKey.includes('credential') ||
+        normalizedKey.includes('password') ||
+        normalizedKey.includes('secret') ||
+        normalizedKey.includes('token') ||
+        normalizedKey.includes('apikey') ||
+        normalizedKey.includes('api_key') ||
+        normalizedKey.includes('authorization') ||
+        normalizedKey.includes('header') ||
+        normalizedKey === 'env' ||
+        normalizedKey.endsWith('pat') ||
+        normalizedKey === 'auth'
+      ) {
+        return null;
+      }
+      if (Array.isArray(value)) return value.map((item) => redact(item));
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(
+          Object.entries(value).map(([childKey, childValue]) => [
+            childKey,
+            redact(childValue, childKey),
+          ]),
+        );
+      }
+      if (typeof value === 'string' && value.includes('://')) {
+        try {
+          const url = new URL(value);
+          url.username = '';
+          url.password = '';
+          // Query strings and fragments can carry API keys, signed-URL credentials, and
+          // bearer tokens under provider-specific names. They are not execution identity.
+          url.search = '';
+          url.hash = '';
+          return url.toString();
+        } catch {
+          // Not a URL; preserve ordinary profile text.
+        }
+      }
+      return value;
+    };
+    return redact(snapshot) as Record<string, unknown>;
+  }
+
+  function profileReferenceForAttempt(pod: Pod, redactedSnapshot: Record<string, unknown>): string {
+    const hash = createHash('sha256')
+      .update(JSON.stringify(redactedSnapshot))
+      .digest('hex')
+      .slice(0, 16);
+    return `pod:${pod.id}@profile-snapshot#${hash}`;
+  }
+
+  function nativeSessionId(pod: Pod): string | null {
+    if (pod.runtime === 'claude') return pod.claudeSessionId;
+    if (pod.runtime === 'codex') return pod.codexSessionId;
+    if (pod.runtime === 'pi') return pod.piSessionId;
+    return null;
+  }
+
+  function ensureProviderAttempt(pod: Pod, profile: Profile): void {
+    const repository = deps.providerAttemptRepo;
+    if (!repository) return;
+    const provider = providerForAttempt(pod, profile);
+    const profileSnapshot = redactedProfileSnapshot(pod, profile);
+    const profileReference = profileReferenceForAttempt(pod, profileSnapshot);
+    const active = repository.getActive(pod.id);
+    if (active) {
+      const identityMatches =
+        active.provider === provider &&
+        active.providerAccountId === profile.providerAccountId &&
+        active.runtime === pod.runtime &&
+        active.model === pod.model &&
+        active.profileReference === profileReference;
+      if (!identityMatches) {
+        throw new Error(`Active provider attempt identity mismatch for pod ${pod.id}`);
+      }
+      return;
+    }
+    if (
+      repository.list(pod.id).length === 0 &&
+      (pod.inputTokens > 0 || pod.outputTokens > 0 || pod.costUsd > 0)
+    ) {
+      repository.open({
+        podId: pod.id,
+        provider,
+        providerAccountId: profile.providerAccountId,
+        runtime: pod.runtime,
+        model: pod.model,
+        profileReference,
+        profileSnapshot,
+        startedAt: pod.startedAt ?? pod.createdAt,
+      });
+      repository.close(pod.id, {
+        nativeSessionId: nativeSessionId(pod),
+        endedAt: new Date().toISOString(),
+        outcome: 'completed',
+        inputTokens: pod.inputTokens,
+        outputTokens: pod.outputTokens,
+        costUsd: pod.costUsd,
+      });
+    }
+    repository.open({
+      podId: pod.id,
+      provider,
+      providerAccountId: profile.providerAccountId,
+      runtime: pod.runtime,
+      model: pod.model,
+      profileReference,
+      profileSnapshot,
+    });
+  }
+
+  function closeProviderAttempt(
+    podId: string,
+    outcome: 'completed' | 'failed' | 'aborted' | 'quota_exhausted',
+    classification: ProviderFailureClassification | null = null,
+    handoffReference: string | null = null,
+  ): void {
+    const repository = deps.providerAttemptRepo;
+    const active = repository?.getActive(podId);
+    if (!repository || !active) return;
+    const pod = podRepo.getOrThrow(podId);
+    repository.close(podId, {
+      nativeSessionId: nativeSessionId(pod),
+      outcome,
+      classification,
+      inputTokens: active.inputTokens,
+      outputTokens: active.outputTokens,
+      costUsd: active.costUsd,
+      handoffReference,
+    });
+  }
+
+  function isCompatibleTarget(
+    target: ProviderFailoverTarget,
+    account: ReturnType<NonNullable<typeof providerAccountStore>['get']>,
+  ): boolean {
+    if (!account.credentials) return false;
+    const catalogProvider = (providerCatalog ?? PROVIDER_CATALOG).providers.find(
+      (candidate) => candidate.id === account.provider,
+    );
+    if (catalogProvider?.implementation.kind === 'generic-pi-api') {
+      return target.runtime === 'pi';
+    }
+    if (account.provider === 'anthropic' || account.provider === 'max') {
+      return target.runtime === 'claude';
+    }
+    if (account.provider === 'openai' || account.provider === 'openrouter') {
+      return target.runtime === 'codex';
+    }
+    if (account.provider === 'copilot') return target.runtime === 'copilot';
+    if (account.provider === 'pi') return target.runtime === 'pi';
+    if (account.provider === 'foundry') {
+      return account.credentials?.provider === 'foundry' &&
+        account.credentials.apiSurface === 'openai'
+        ? target.runtime === 'codex'
+        : target.runtime === 'claude';
+    }
+    return false;
+  }
+
+  function selectProviderFailoverTarget(pod: Pod): ProviderFailoverTarget | null {
+    if (!providerAccountStore || !deps.providerAttemptRepo) return null;
+    const resolved = profileStore.resolveProviderFailover(pod.profileName);
+    const policy = resolved.policy;
+    if (!policy || policy.targets.length === 0) return null;
+    const attempts = deps.providerAttemptRepo.list(pod.id);
+    const used = new Set(
+      attempts.map(
+        (attempt) => `${attempt.providerAccountId ?? ''}\0${attempt.runtime}\0${attempt.model}`,
+      ),
+    );
+    const maxHops = Math.min(policy.maxHops ?? policy.targets.length, policy.targets.length);
+    const attemptedTargets = policy.targets.filter((target) =>
+      attempts.some(
+        (attempt) =>
+          attempt.providerAccountId === target.providerAccountId &&
+          attempt.runtime === target.runtime &&
+          attempt.model === target.model,
+      ),
+    );
+    if (attemptedTargets.length >= maxHops) return null;
+    for (const target of policy.targets) {
+      const key = `${target.providerAccountId}\0${target.runtime}\0${target.model}`;
+      if (used.has(key)) continue;
+      try {
+        const account = providerAccountStore.get(target.providerAccountId);
+        if (isCompatibleTarget(target, account)) return target;
+      } catch {
+        // Deleted, unauthenticated, or otherwise ineligible targets fail closed.
+      }
+    }
+    return null;
+  }
+
+  function profileForProviderTarget(profile: Profile, target: ProviderFailoverTarget): Profile {
+    if (!providerAccountStore) throw new Error('Provider account store is unavailable');
+    const account = providerAccountStore.get(target.providerAccountId);
+    if (!isCompatibleTarget(target, account)) {
+      throw new AutopodError(
+        'Selected provider target is not eligible',
+        'INVALID_PROVIDER_TARGET',
+        409,
+      );
+    }
+    const catalogProvider = (providerCatalog ?? PROVIDER_CATALOG).providers.find(
+      (candidate) => candidate.id === account.provider,
+    );
+    return {
+      ...profile,
+      providerAccountId: target.providerAccountId,
+      modelProvider:
+        catalogProvider?.implementation.kind === 'generic-pi-api' ? 'pi' : account.provider,
+      defaultRuntime: target.runtime,
+      defaultModel: target.model,
+    };
+  }
+
+  function openProviderTargetAttempt(pod: Pod, target: ProviderFailoverTarget): void {
+    const repository = deps.providerAttemptRepo;
+    if (!repository) throw new Error('Provider attempt repository is unavailable');
+    const profile = profileForProviderTarget(profileStore.get(pod.profileName), target);
+    const targetProvider = providerAccountStore?.get(target.providerAccountId).provider ?? null;
+    const projectedPod = {
+      ...pod,
+      runtime: target.runtime,
+      model: target.model,
+      providerAccountIdSnapshot: target.providerAccountId,
+      providerIdSnapshot: targetProvider,
+      profileSnapshot: profile,
+    };
+    const snapshot = redactedProfileSnapshot(projectedPod, profile);
+    repository.open({
+      podId: pod.id,
+      provider: providerForAttempt(projectedPod, profile),
+      providerAccountId: target.providerAccountId,
+      runtime: target.runtime,
+      model: target.model,
+      profileReference: profileReferenceForAttempt(projectedPod, snapshot),
+      profileSnapshot: snapshot,
+    });
+  }
+
+  function visibleProviderHandoffActivity(podId: string): string[] {
+    const events = deps.eventRepo?.getForSession(podId, {
+      type: 'pod.agent_activity',
+      latest: 80,
+    });
+    if (!events) return [];
+    return events.flatMap((stored) => {
+      if (stored.payload.type !== 'pod.agent_activity') return [];
+      const event = stored.payload.event;
+      if (event.type === 'status') return [`Status: ${event.message}`];
+      if (event.type === 'tool_use') {
+        const outcome = event.output ? ` — ${event.output}` : '';
+        return [`Tool outcome (${event.tool})${outcome}`];
+      }
+      return [];
+    });
+  }
+
+  async function prepareProviderContinuationHandoff(
+    pod: Pod,
+    classification: ProviderFailureClassification,
+  ): Promise<void> {
+    if (!pod.worktreePath || !worktreeManager.ensureExcludes) {
+      throw new Error('Provider handoff exclusion protection is unavailable');
+    }
+    await worktreeManager.ensureExcludes(pod.worktreePath, [PROVIDER_FAILOVER_HANDOFF_PATH]);
+    await writeProviderFailoverHandoff(
+      pod,
+      pod.worktreePath,
+      classification,
+      visibleProviderHandoffActivity(pod.id),
+    );
+  }
+
+  async function queueProviderContinuation(
+    pod: Pod,
+    target: ProviderFailoverTarget,
+    classification: ProviderFailureClassification,
+    deferUntilCurrentRunExits = false,
+    handoffPrepared = false,
+  ): Promise<void> {
+    if (!handoffPrepared) {
+      await prepareProviderContinuationHandoff(pod, classification);
+    }
+    const sourceAttempt = deps.providerAttemptRepo
+      ?.list(pod.id)
+      .findLast((attempt) => attempt.endedAt !== null);
+    const preservesNativeSession =
+      sourceAttempt?.providerAccountId === target.providerAccountId &&
+      sourceAttempt.runtime === target.runtime &&
+      sourceAttempt.model === target.model;
+    const targetProfile = profileForProviderTarget(profileStore.get(pod.profileName), target);
+    const targetProvider = providerAccountStore?.get(target.providerAccountId).provider ?? null;
+    openProviderTargetAttempt(pod, target);
+    try {
+      podRepo.update(pod.id, {
+        runtime: target.runtime,
+        model: target.model,
+        providerAccountIdSnapshot: target.providerAccountId,
+        providerIdSnapshot: targetProvider,
+        containerId: null,
+        recoveryWorktreePath: pod.worktreePath,
+        pauseReason: null,
+        failureReason: null,
+        ...(!preservesNativeSession && {
+          claudeSessionId: null,
+          codexSessionId: null,
+          piSessionId: null,
+        }),
+      });
+      transition(podRepo.getOrThrow(pod.id), 'queued');
+    } catch (err) {
+      closeProviderAttempt(pod.id, 'aborted');
+      podRepo.update(pod.id, {
+        runtime: pod.runtime,
+        model: pod.model,
+        providerAccountIdSnapshot: pod.providerAccountIdSnapshot,
+        providerIdSnapshot: pod.providerIdSnapshot,
+        containerId: pod.containerId,
+        recoveryWorktreePath: pod.recoveryWorktreePath,
+        pauseReason: pod.pauseReason,
+        failureReason: pod.failureReason,
+        claudeSessionId: pod.claudeSessionId,
+        codexSessionId: pod.codexSessionId,
+        piSessionId: pod.piSessionId,
+      });
+      throw err;
+    }
+    if (deferUntilCurrentRunExits && deps.requeueSessionAfterCurrent) {
+      deps.requeueSessionAfterCurrent(pod.id);
+    } else {
+      enqueueSession(pod.id);
+    }
+    emitActivityStatus(pod.id, `Provider continuation queued: ${target.runtime}/${target.model}`);
+  }
+
+  async function handleProviderLimit(
+    podId: string,
+    classification: ProviderFailureClassification,
+  ): Promise<void> {
+    const source = podRepo.getOrThrow(podId);
+    try {
+      await runtimeRegistry.get(source.runtime).abort(podId);
+    } catch (err) {
+      logger.warn({ err, podId }, 'Provider-limit runtime drain failed; pausing');
+      return;
+    }
+    if (source.containerId && source.worktreePath) {
+      try {
+        await syncWorkspaceBack(
+          source.containerId,
+          source.worktreePath,
+          containerManagerFactory.get(source.executionTarget),
+          source.id,
+          source.executionTarget,
+        );
+      } catch (err) {
+        logger.warn({ err, podId }, 'Provider-limit worktree synchronization failed; pausing');
+        return;
+      }
+    }
+    if (source.containerId) {
+      const cm = containerManagerFactory.get(source.executionTarget);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await stopSandboxPreviewProxy(source.id);
+        await stopHaproxyDenyReceiver(source.id);
+        await Promise.race([
+          cm.kill(source.containerId),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(
+              () => reject(new Error('Provider-limit container teardown timed out')),
+              CONTAINER_CLEANUP_TIMEOUT_MS,
+            );
+          }),
+        ]);
+      } catch (err) {
+        logger.warn({ err, podId }, 'Provider-limit container teardown could not be proven');
+        return;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+      forgetMaxCredentialLineage(source.id);
+    }
+    podRepo.update(podId, { containerId: null });
+    const target = selectProviderFailoverTarget(podRepo.getOrThrow(podId));
+    if (!target) {
+      emitActivityStatus(podId, 'Provider limit reached — no eligible automatic target');
+      return;
+    }
+    try {
+      await queueProviderContinuation(podRepo.getOrThrow(podId), target, classification, true);
+    } catch (err) {
+      logger.warn({ err, podId }, 'Automatic provider continuation failed closed');
+      emitActivityStatus(podId, 'Provider limit reached — automatic continuation is unsafe');
+    }
+  }
 
   async function resolveGitCredential(profile: Profile): Promise<string | undefined> {
     if (profile.prProvider === 'ado') return profile.adoPat ?? undefined;
@@ -6144,7 +6583,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // and transitions the pod to 'failed' instead of orphaning it as 'queued' forever —
         // the queue's finally block frees activeIds, and without a status update nothing
         // ever re-enqueues the pod.
-        const profile = profileStore.get(pod.profileName);
+        let profile = profileStore.get(pod.profileName);
+        const queuedProviderAttempt = deps.providerAttemptRepo?.getActive(podId);
+        if (
+          queuedProviderAttempt?.providerAccountId &&
+          queuedProviderAttempt.runtime === pod.runtime &&
+          queuedProviderAttempt.model === pod.model &&
+          queuedProviderAttempt.providerAccountId !== profile.providerAccountId
+        ) {
+          profile = profileForProviderTarget(profile, {
+            providerAccountId: queuedProviderAttempt.providerAccountId,
+            runtime: queuedProviderAttempt.runtime,
+            model: queuedProviderAttempt.model,
+          });
+        }
 
         // For handoff pods the interactive container is still running. Persist
         // the human's work before stopping that container; if we cannot prove the
@@ -6963,6 +7415,33 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           }
 
+          const hasProviderHandoff = (deps.providerAttemptRepo?.list(podId).length ?? 0) > 1;
+          if (hasProviderHandoff) {
+            const marker = '# autopod: provider failover handoff';
+            const guard = await containerManager.execInContainer(
+              containerId,
+              [
+                'sh',
+                '-c',
+                [
+                  'set -e',
+                  'mkdir -p /workspace/.git/info',
+                  'touch /workspace/.git/info/exclude',
+                  `if ! grep -qFx ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} /workspace/.git/info/exclude; then`,
+                  `  printf '\\n%s\\n%s\\n' ${shellQuote(marker)} ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} >> /workspace/.git/info/exclude`,
+                  'fi',
+                  `git -C /workspace check-ignore -q ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)}`,
+                ].join('\n'),
+              ],
+              { timeout: 10_000 },
+            );
+            if (guard.exitCode !== 0) {
+              throw new Error(
+                `Failed to protect provider failover handoff before workspace cleanup (exit ${guard.exitCode}): ${guard.stderr}`,
+              );
+            }
+          }
+
           // Strip untracked files left behind by the warm image. The image is built with
           // `RUN git clone --depth 1` of the base branch at image-build time, then runs
           // pre-warm install + build, then `rm -rf /workspace/.git`. Source files from
@@ -7089,6 +7568,33 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             if (guard.exitCode !== 0) {
               throw new Error(
                 `Failed to exclude pi-handoff.md from workspace commits (exit ${guard.exitCode}): ${guard.stderr}`,
+              );
+            }
+          }
+
+          if (hasProviderHandoff) {
+            const marker = '# autopod: provider failover handoff';
+            const guard = await containerManager.execInContainer(
+              containerId,
+              [
+                'sh',
+                '-c',
+                [
+                  'set -e',
+                  'test -f /workspace/.autopod/provider-failover.md',
+                  'mkdir -p /workspace/.git/info',
+                  'touch /workspace/.git/info/exclude',
+                  `if ! grep -qFx ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} /workspace/.git/info/exclude; then`,
+                  `  printf '\\n%s\\n%s\\n' ${shellQuote(marker)} ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} >> /workspace/.git/info/exclude`,
+                  'fi',
+                  `git -C /workspace check-ignore -q ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)}`,
+                ].join('\n'),
+              ],
+              { timeout: 10_000 },
+            );
+            if (guard.exitCode !== 0) {
+              throw new Error(
+                `Failed to protect provider failover handoff (exit ${guard.exitCode}): ${guard.stderr}`,
               );
             }
           }
@@ -7800,7 +8306,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
-        const systemInstructions = generateSystemInstructions(profile, pod, mcpUrl, {
+        const instructionPod = deps.providerAttemptRepo
+          ? { ...pod, providerAttempts: deps.providerAttemptRepo.list(podId) }
+          : pod;
+        const systemInstructions = generateSystemInstructions(profile, instructionPod, mcpUrl, {
           injectedSections: resolvedSections,
           injectedMcpServers: [...proxiedMcpServers, ...workingStdioServers],
           availableActions,
@@ -7963,6 +8472,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitStatus('Spawning agent…');
         const runtime = runtimeRegistry.get(pod.runtime);
         let events: AsyncIterable<AgentEvent>;
+        ensureProviderAttempt(pod, profile);
 
         // Codex and Copilot need the generated Autopod instructions passed through the
         // runtime adapter. Claude reads the same file via --append-system-prompt-file.
@@ -8153,9 +8663,79 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             'Failed to persist rotated credentials after pod error — proceeding',
           );
         }
+        const attemptHistory = deps.providerAttemptRepo?.list(podId) ?? [];
+        const activeContinuityAttempt = deps.providerAttemptRepo?.getActive(podId);
+        const precedingAttempt = activeContinuityAttempt
+          ? attemptHistory.find(
+              (attempt) => attempt.ordinal === activeContinuityAttempt.ordinal - 1,
+            )
+          : undefined;
+        const followsProviderLimit =
+          !!activeContinuityAttempt &&
+          precedingAttempt?.handoffReference === PROVIDER_FAILOVER_HANDOFF_PATH;
+        if (followsProviderLimit) {
+          try {
+            closeProviderAttempt(
+              podId,
+              'failed',
+              {
+                category: 'unknown',
+                definitive: false,
+                sanitizedMessage: failureReason,
+                retryAfter: null,
+              },
+              PROVIDER_FAILOVER_HANDOFF_PATH,
+            );
+            pod = podRepo.getOrThrow(podId);
+            if (pod.containerId) {
+              const cm = containerManagerFactory.get(pod.executionTarget);
+              let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+              try {
+                await Promise.race([
+                  cm.kill(pod.containerId),
+                  new Promise<never>((_resolve, reject) => {
+                    cleanupTimer = setTimeout(
+                      () => reject(new Error('Continuation startup cleanup timed out')),
+                      CONTAINER_CLEANUP_TIMEOUT_MS,
+                    );
+                  }),
+                ]);
+                podRepo.update(podId, { containerId: null });
+                pod = podRepo.getOrThrow(podId);
+              } catch (cleanupErr) {
+                logger.warn(
+                  { err: cleanupErr, podId, containerId: pod.containerId },
+                  'Continuation startup container cleanup could not be proven',
+                );
+              } finally {
+                if (cleanupTimer) clearTimeout(cleanupTimer);
+              }
+            }
+            if (pod.status === 'queued') {
+              pod = transition(pod, 'provisioning');
+            }
+            if (pod.status === 'provisioning' || pod.status === 'running') {
+              transition(pod, 'paused', {
+                pauseReason: 'provider_limit',
+                failureReason,
+              });
+            }
+            emitActivityStatus(
+              podId,
+              'Provider target failed to start — source work and continuation history preserved',
+            );
+            return;
+          } catch (continuityErr) {
+            logger.warn(
+              { err: continuityErr, podId },
+              'Failed to park provider continuation startup failure',
+            );
+          }
+        }
         // Transition to failed — keeps series dependents queued so they can run once the parent
         // is recovered/retried. 'killed' is reserved for explicit user termination only.
         try {
+          closeProviderAttempt(podId, 'failed');
           pod = podRepo.getOrThrow(podId);
           if (!isTerminalState(pod.status)) {
             if (canFail(pod.status)) {
@@ -8185,7 +8765,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       events: AsyncIterable<AgentEvent>,
       attempt = 0,
     ): Promise<AgentRunOutcome> {
-      let outcome: AgentRunOutcome = 'completed';
+      const attemptPod = podRepo.getOrThrow(podId);
+      let attemptProfile = profileStore.get(attemptPod.profileName);
+      const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
+      if (
+        activeAttempt?.providerAccountId &&
+        activeAttempt.providerAccountId !== attemptProfile.providerAccountId
+      ) {
+        attemptProfile = profileForProviderTarget(attemptProfile, {
+          providerAccountId: activeAttempt.providerAccountId,
+          runtime: activeAttempt.runtime,
+          model: activeAttempt.model,
+        });
+      }
+      ensureProviderAttempt(attemptPod, attemptProfile);
+      // Legacy/injected managers without the ledger retain the historical empty-stream
+      // completion behavior. Production always injects the ledger and fails closed.
+      let outcome: AgentRunOutcome = deps.providerAttemptRepo ? 'failed' : 'completed';
+      let terminalClassification: ProviderFailureClassification | null = null;
       const seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
       startCommitPolling(podId);
       try {
@@ -8271,6 +8868,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             else if (sessionPod.runtime === 'codex') sessionUpdate.codexSessionId = event.sessionId;
             else if (sessionPod.runtime === 'pi') sessionUpdate.piSessionId = event.sessionId;
             if (Object.keys(sessionUpdate).length > 0) podRepo.update(podId, sessionUpdate);
+            const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
+            if (activeAttempt) {
+              deps.providerAttemptRepo?.updateActive(podId, {
+                nativeSessionId: event.sessionId,
+                inputTokens: activeAttempt.inputTokens,
+                outputTokens: activeAttempt.outputTokens,
+                costUsd: activeAttempt.costUsd,
+              });
+            }
           } else if (event.type === 'complete') {
             outcome = 'completed';
             // Accumulate token counts and cost cumulatively across all runs in this pod
@@ -8299,6 +8905,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
             if (Object.keys(tokenUpdates).length > 0) {
               podRepo.update(podId, tokenUpdates);
+            }
+            const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
+            if (activeAttempt) {
+              deps.providerAttemptRepo?.updateActive(podId, {
+                nativeSessionId: nativeSessionId(podRepo.getOrThrow(podId)),
+                inputTokens: activeAttempt.inputTokens + (event.totalInputTokens ?? 0),
+                outputTokens: activeAttempt.outputTokens + (event.totalOutputTokens ?? 0),
+                costUsd: activeAttempt.costUsd + (event.costUsd ?? 0),
+              });
             }
 
             const blockerSummary = summarizeAgentCompletionBlocker(event.result);
@@ -8385,13 +9000,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           } else if (event.type === 'error' && event.fatal) {
             const pod = podRepo.getOrThrow(podId);
+            terminalClassification =
+              event.classification ??
+              ({
+                category: 'unknown',
+                definitive: false,
+                sanitizedMessage: sanitizeFailureReason(event.message, 'Agent failed'),
+                retryAfter: null,
+              } satisfies ProviderFailureClassification);
             if (canFail(pod.status)) {
               const failureReason = sanitizeFailureReason(event.message, 'Agent failed');
               emitActivityStatus(podId, failureReason);
-              transition(pod, 'failed', {
-                completedAt: new Date().toISOString(),
-                failureReason,
-              });
+              if (
+                terminalClassification.category === 'quota_exhausted' &&
+                terminalClassification.definitive
+              ) {
+                transition(pod, 'paused', {
+                  pauseReason: 'provider_limit',
+                  failureReason,
+                });
+              } else {
+                transition(pod, 'failed', {
+                  completedAt: new Date().toISOString(),
+                  failureReason,
+                });
+              }
             }
             outcome = 'failed';
             break;
@@ -8399,10 +9032,58 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             touchHeartbeat(podId);
           }
         }
+      } catch (err) {
+        outcome = 'failed';
+        terminalClassification = {
+          category: 'unknown',
+          definitive: false,
+          sanitizedMessage: sanitizeFailureReason(
+            err instanceof Error ? err.message : String(err),
+            'Agent failed',
+          ),
+          retryAfter: null,
+        };
+        throw err;
       } finally {
-        await syncSandboxRuntimeSessionState(podId);
-        stopCommitPolling(podId);
-        lastEventWriteAt.delete(podId);
+        try {
+          await syncSandboxRuntimeSessionState(podId);
+        } finally {
+          const current = podRepo.getOrThrow(podId);
+          const providerLimit =
+            current.pauseReason === 'provider_limit' &&
+            terminalClassification?.category === 'quota_exhausted' &&
+            terminalClassification.definitive;
+          if (providerLimit) {
+            closeProviderAttempt(
+              podId,
+              'quota_exhausted',
+              terminalClassification,
+              PROVIDER_FAILOVER_HANDOFF_PATH,
+            );
+            await handleProviderLimit(podId, terminalClassification);
+          } else if (
+            current.pauseReason === 'provider_limit' &&
+            outcome === 'failed' &&
+            terminalClassification
+          ) {
+            closeProviderAttempt(podId, 'failed', terminalClassification);
+          } else if (outcome === 'paused' || current.status === 'paused') {
+            closeProviderAttempt(podId, 'aborted');
+          } else if (outcome === 'completed' || outcome === 'failed') {
+            const classification =
+              outcome === 'failed'
+                ? (terminalClassification ?? {
+                    category: 'unknown',
+                    definitive: false,
+                    sanitizedMessage: 'Provider attempt ended without classified evidence',
+                    retryAfter: null,
+                  })
+                : null;
+            closeProviderAttempt(podId, outcome, classification);
+          }
+          stopCommitPolling(podId);
+          lastEventWriteAt.delete(podId);
+        }
       }
       return outcome;
     },
@@ -9700,6 +10381,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         ),
       ]);
 
+      const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
+      if (activeAttempt) {
+        const latestPod = podRepo.getOrThrow(podId);
+        deps.providerAttemptRepo?.close(podId, {
+          nativeSessionId: nativeSessionId(latestPod),
+          outcome: 'aborted',
+          inputTokens: activeAttempt.inputTokens,
+          outputTokens: activeAttempt.outputTokens,
+          costUsd: activeAttempt.costUsd,
+        });
+      }
       const killingSession = podRepo.getOrThrow(podId);
       transition(killingSession, 'killed', { completedAt: new Date().toISOString() });
       forgetMaxCredentialLineage(podId);
@@ -12947,6 +13639,181 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
       await this.revalidateSession(podId, { force: true });
       return { action: 'revalidate' };
+    },
+
+    async continueProvider(
+      podId: string,
+      requestedTarget?: ProviderFailoverTarget,
+    ): Promise<{ action: 'same-provider' | 'alternate-provider' }> {
+      const pod = podRepo.getOrThrow(podId);
+      if (pod.status !== 'paused' || pod.pauseReason !== 'provider_limit') {
+        throw new AutopodError(
+          `Cannot continue provider for pod ${podId} outside a provider-limit pause`,
+          'INVALID_STATE',
+          409,
+        );
+      }
+      if (!pod.worktreePath || pod.worktreeCompromised) {
+        throw new AutopodError(
+          `Pod ${podId} does not have a safe worktree for provider continuation`,
+          'WORKTREE_COMPROMISED',
+          409,
+        );
+      }
+      const attempts = deps.providerAttemptRepo?.list(podId) ?? [];
+      const strandedActive = attempts.find((attempt) => attempt.endedAt === null);
+      const settledAttempts = attempts.filter((attempt) => attempt.endedAt !== null);
+      const source = settledAttempts.findLast(
+        (attempt) =>
+          attempt.outcome === 'quota_exhausted' &&
+          attempt.classification?.category === 'quota_exhausted' &&
+          attempt.classification.definitive,
+      );
+      if (!source) {
+        throw new AutopodError(
+          `Pod ${podId} has no definitive provider-limit evidence`,
+          'PROVIDER_LIMIT_NOT_DEFINITIVE',
+          409,
+        );
+      }
+      const target =
+        requestedTarget ??
+        ({
+          providerAccountId: source.providerAccountId,
+          runtime: source.runtime,
+          model: source.model,
+        } as ProviderFailoverTarget);
+      if (!target.providerAccountId) {
+        throw new AutopodError(
+          'Same-provider continuation requires a provider account',
+          'INVALID_PROVIDER_TARGET',
+          409,
+        );
+      }
+      profileForProviderTarget(profileStore.get(pod.profileName), target);
+      const sameProvider =
+        target.providerAccountId === source.providerAccountId &&
+        target.runtime === source.runtime &&
+        target.model === source.model;
+      if (sameProvider) {
+        const sameProviderAttempts = settledAttempts.filter(
+          (attempt) =>
+            attempt.outcome !== 'aborted' &&
+            attempt.providerAccountId === target.providerAccountId &&
+            attempt.runtime === target.runtime &&
+            attempt.model === target.model,
+        );
+        if (sameProviderAttempts.length >= 2) {
+          throw new AutopodError(
+            'Same-provider continuation has already been attempted once',
+            'PROVIDER_FAILOVER_HOP_LIMIT',
+            409,
+          );
+        }
+      } else {
+        const resolved = profileStore.resolveProviderFailover(pod.profileName);
+        const policy = resolved.policy;
+        const isConfigured = policy?.targets.some(
+          (configured) =>
+            configured.providerAccountId === target.providerAccountId &&
+            configured.runtime === target.runtime &&
+            configured.model === target.model,
+        );
+        const maxHops = policy
+          ? Math.min(policy.maxHops ?? policy.targets.length, policy.targets.length)
+          : 0;
+        const attemptedTargets =
+          policy?.targets.filter((configured) =>
+            settledAttempts.some(
+              (attempt) =>
+                attempt.providerAccountId === configured.providerAccountId &&
+                attempt.runtime === configured.runtime &&
+                attempt.model === configured.model,
+            ),
+          ) ?? [];
+        if (!isConfigured || attemptedTargets.length >= maxHops) {
+          throw new AutopodError(
+            'Provider target is not authorized by the effective failover policy',
+            'INVALID_PROVIDER_TARGET',
+            409,
+          );
+        }
+        const used = settledAttempts.some(
+          (attempt) =>
+            attempt.providerAccountId === target.providerAccountId &&
+            attempt.runtime === target.runtime &&
+            attempt.model === target.model,
+        );
+        if (used) {
+          throw new AutopodError(
+            'Provider target was already attempted for this pod',
+            'PROVIDER_FAILOVER_LOOP',
+            409,
+          );
+        }
+      }
+      if (pod.containerId) {
+        try {
+          await runtimeRegistry.get(pod.runtime).abort(podId);
+          await syncWorkspaceBack(
+            pod.containerId,
+            pod.worktreePath,
+            containerManagerFactory.get(pod.executionTarget),
+            pod.id,
+            pod.executionTarget,
+          );
+          await stopSandboxPreviewProxy(pod.id);
+          await stopHaproxyDenyReceiver(pod.id);
+          const cm = containerManagerFactory.get(pod.executionTarget);
+          let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            await Promise.race([
+              cm.kill(pod.containerId),
+              new Promise<never>((_resolve, reject) => {
+                cleanupTimer = setTimeout(
+                  () => reject(new Error('Provider continuation teardown timed out')),
+                  CONTAINER_CLEANUP_TIMEOUT_MS,
+                );
+              }),
+            ]);
+          } finally {
+            if (cleanupTimer) clearTimeout(cleanupTimer);
+          }
+          forgetMaxCredentialLineage(pod.id);
+          podRepo.update(podId, { containerId: null });
+        } catch (err) {
+          throw new AutopodError(
+            `Provider continuation could not safely drain the source runtime: ${operatorErrorMessage(err, 'agent')}`,
+            'PROVIDER_CONTINUATION_UNSAFE',
+            409,
+          );
+        }
+      }
+      try {
+        await prepareProviderContinuationHandoff(podRepo.getOrThrow(podId), source.classification);
+      } catch (err) {
+        throw new AutopodError(
+          `Provider continuation could not safely prepare its handoff: ${operatorErrorMessage(err, 'agent')}`,
+          'PROVIDER_CONTINUATION_UNSAFE',
+          409,
+        );
+      }
+      if (strandedActive) {
+        closeProviderAttempt(podId, 'aborted');
+        podRepo.update(podId, {
+          runtime: source.runtime,
+          model: source.model,
+          pauseReason: 'provider_limit',
+        });
+      }
+      await queueProviderContinuation(
+        podRepo.getOrThrow(podId),
+        target,
+        source.classification,
+        false,
+        true,
+      );
+      return { action: sameProvider ? 'same-provider' : 'alternate-provider' };
     },
 
     async forceComplete(podId: string, reason?: string): Promise<void> {

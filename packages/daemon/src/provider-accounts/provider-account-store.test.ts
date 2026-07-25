@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CredentialsCipher } from '../crypto/credentials-cipher.js';
+import { createProfileStore } from '../profiles/profile-store.js';
 import { createTestDb } from '../test-utils/mock-helpers.js';
 import { createProviderAccountStore } from './provider-account-store.js';
 
@@ -14,6 +15,241 @@ const reversibleCipher: CredentialsCipher = {
 };
 
 describe('ProviderAccountStore', () => {
+  it('round-trips ordered failover defaults and preserves null for legacy rows', () => {
+    const db = createTestDb();
+    const store = createProviderAccountStore(db);
+    store.create({
+      id: 'claude-max',
+      name: 'Claude Max',
+      provider: 'max',
+      credentials: { provider: 'max', oauthToken: 'max-token' },
+    });
+    store.create({
+      id: 'copilot',
+      name: 'Copilot',
+      provider: 'copilot',
+      credentials: { provider: 'copilot', token: 'copilot-token' },
+    });
+    const source = store.create({
+      id: 'openai-primary',
+      name: 'OpenAI Primary',
+      provider: 'openai',
+      failoverPolicy: {
+        targets: [
+          { providerAccountId: 'claude-max', runtime: 'claude', model: 'opus' },
+          { providerAccountId: 'copilot', runtime: 'copilot', model: 'auto' },
+        ],
+        maxHops: 2,
+      },
+    });
+    expect(source.failoverPolicy?.targets.map((target) => target.providerAccountId)).toEqual([
+      'claude-max',
+      'copilot',
+    ]);
+
+    const updated = store.update(source.id, {
+      failoverPolicy: {
+        targets: [
+          { providerAccountId: 'copilot', runtime: 'copilot', model: 'auto' },
+          { providerAccountId: 'claude-max', runtime: 'claude', model: 'sonnet' },
+        ],
+        maxHops: 1,
+      },
+    });
+    expect(updated.failoverPolicy).toEqual({
+      targets: [
+        { providerAccountId: 'copilot', runtime: 'copilot', model: 'auto' },
+        { providerAccountId: 'claude-max', runtime: 'claude', model: 'sonnet' },
+      ],
+      maxHops: 1,
+    });
+
+    db.prepare(
+      `INSERT INTO provider_accounts (id, name, provider, created_at, updated_at)
+       VALUES ('legacy', 'Legacy', 'anthropic', datetime('now'), datetime('now'))`,
+    ).run();
+    expect(store.get('legacy').failoverPolicy).toBeNull();
+    expect(store.update(source.id, { failoverPolicy: null }).failoverPolicy).toBeNull();
+  });
+
+  it('rejects invalid failover defaults without changing the existing policy', () => {
+    const db = createTestDb();
+    const store = createProviderAccountStore(db);
+    store.create({
+      id: 'claude-max',
+      name: 'Claude Max',
+      provider: 'max',
+      credentials: { provider: 'max', oauthToken: 'max-token' },
+    });
+    store.create({
+      id: 'copilot',
+      name: 'Copilot',
+      provider: 'copilot',
+      credentials: { provider: 'copilot', token: 'copilot-token' },
+    });
+    store.create({ id: 'unauthenticated', name: 'Unauthenticated', provider: 'copilot' });
+    const source = store.create({ id: 'primary', name: 'Primary', provider: 'openai' });
+    const validPolicy = {
+      targets: [{ providerAccountId: 'claude-max', runtime: 'claude', model: 'opus' as const }],
+      maxHops: 1,
+    };
+    store.update(source.id, { failoverPolicy: validPolicy });
+
+    const invalidPolicies = [
+      { targets: [{ providerAccountId: 'primary', runtime: 'codex', model: 'gpt-5' }] },
+      {
+        targets: [
+          { providerAccountId: 'copilot', runtime: 'copilot', model: 'auto' },
+          { providerAccountId: 'copilot', runtime: 'copilot', model: 'gpt-5' },
+        ],
+      },
+      { targets: [{ providerAccountId: 'missing', runtime: 'claude', model: 'opus' }] },
+      {
+        targets: [{ providerAccountId: 'unauthenticated', runtime: 'copilot', model: 'auto' }],
+      },
+      { targets: [{ providerAccountId: 'claude-max', runtime: 'codex', model: 'gpt-5' }] },
+      { targets: [{ providerAccountId: 'copilot', runtime: 'copilot' }] },
+      { targets: [] },
+      {
+        targets: [{ providerAccountId: 'copilot', runtime: 'copilot', model: 'auto' }],
+        maxHops: 2,
+      },
+    ];
+
+    for (const failoverPolicy of invalidPolicies) {
+      expect(() => store.update(source.id, { failoverPolicy })).toThrow();
+      expect(store.get(source.id).failoverPolicy).toEqual(validPolicy);
+    }
+  });
+
+  it('rejects failover cycles across provider accounts', () => {
+    const db = createTestDb();
+    const store = createProviderAccountStore(db);
+    store.create({ id: 'one', name: 'One', provider: 'openai' });
+    store.create({
+      id: 'two',
+      name: 'Two',
+      provider: 'max',
+      credentials: { provider: 'max', oauthToken: 'max-token' },
+    });
+    store.update('one', {
+      failoverPolicy: {
+        targets: [{ providerAccountId: 'two', runtime: 'claude', model: 'opus' }],
+      },
+    });
+    expect(() =>
+      store.update('two', {
+        failoverPolicy: {
+          targets: [{ providerAccountId: 'one', runtime: 'codex', model: 'gpt-5' }],
+        },
+      }),
+    ).toThrow(/cycle/);
+  });
+
+  it('rejects deleting an account referenced by a failover policy', () => {
+    const db = createTestDb();
+    const store = createProviderAccountStore(db);
+    store.create({
+      id: 'target',
+      name: 'Target',
+      provider: 'copilot',
+      credentials: { provider: 'copilot', token: 'copilot-token' },
+    });
+    store.create({
+      id: 'source',
+      name: 'Source',
+      provider: 'openai',
+      failoverPolicy: {
+        targets: [{ providerAccountId: 'target', runtime: 'copilot', model: 'auto' }],
+      },
+    });
+
+    expect(() => store.delete('target')).toThrow(/referenced by failover policies: source/);
+    expect(store.exists('target')).toBe(true);
+    expect(store.get('source').failoverPolicy?.targets[0]?.providerAccountId).toBe('target');
+  });
+
+  it('rejects credential changes that invalidate inbound failover policies atomically', () => {
+    const db = createTestDb();
+    const store = createProviderAccountStore(db);
+    const originalCredentials = {
+      provider: 'foundry' as const,
+      endpoint: 'https://example.services.ai.azure.com',
+      projectId: 'project',
+      apiSurface: 'openai' as const,
+    };
+    store.create({
+      id: 'foundry-target',
+      name: 'Foundry Target',
+      provider: 'foundry',
+      credentials: originalCredentials,
+    });
+    store.create({
+      id: 'source',
+      name: 'Source',
+      provider: 'openai',
+      failoverPolicy: {
+        targets: [{ providerAccountId: 'foundry-target', runtime: 'codex', model: 'gpt-5' }],
+      },
+    });
+
+    expect(() => store.updateCredentials('foundry-target', null)).toThrow(/not authenticated/);
+    expect(store.get('foundry-target').credentials).toEqual(originalCredentials);
+
+    expect(() =>
+      store.updateCredentials('foundry-target', {
+        ...originalCredentials,
+        apiSurface: 'anthropic',
+      }),
+    ).toThrow(/incompatible/);
+    expect(store.get('foundry-target').credentials).toEqual(originalCredentials);
+
+    expect(() =>
+      store.update('foundry-target', {
+        credentials: { ...originalCredentials, apiSurface: 'anthropic' },
+      }),
+    ).toThrow(/incompatible/);
+    expect(store.get('foundry-target').credentials).toEqual(originalCredentials);
+  });
+
+  it('protects accounts referenced by profile failover policies', () => {
+    const db = createTestDb();
+    const store = createProviderAccountStore(db);
+    const profileStore = createProfileStore(db);
+    const credentials = {
+      provider: 'foundry' as const,
+      endpoint: 'https://example.services.ai.azure.com',
+      projectId: 'project',
+      apiSurface: 'openai' as const,
+    };
+    store.create({
+      id: 'profile-target',
+      name: 'Profile Target',
+      provider: 'foundry',
+      credentials,
+    });
+    profileStore.create({
+      name: 'profile-referrer',
+      repoUrl: null,
+      providerFailover: {
+        targets: [{ providerAccountId: 'profile-target', runtime: 'codex', model: 'gpt-5' }],
+      },
+    });
+
+    expect(() => store.delete('profile-target')).toThrow(/profile:profile-referrer/);
+    expect(store.exists('profile-target')).toBe(true);
+
+    expect(() => store.updateCredentials('profile-target', null)).toThrow(/not authenticated/);
+    expect(store.get('profile-target').credentials).toEqual(credentials);
+
+    expect(() =>
+      store.update('profile-target', {
+        credentials: { ...credentials, apiSurface: 'anthropic' },
+      }),
+    ).toThrow(/incompatible/);
+    expect(store.get('profile-target').credentials).toEqual(credentials);
+  });
+
   it('creates, reads, lists, updates, and deletes provider accounts', () => {
     const db = createTestDb();
     const store = createProviderAccountStore(db, reversibleCipher);
