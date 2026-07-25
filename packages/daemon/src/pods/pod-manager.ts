@@ -1879,18 +1879,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       handoverFileName,
     );
 
+    const cm = containerManagerFactory.get(pod.executionTarget);
+    let content: string;
     try {
-      const cm = containerManagerFactory.get(pod.executionTarget);
-      const content = await cm.readFile(pod.containerId, containerPath);
-      await mkdir(path.dirname(hostPath), { recursive: true });
-      await writeFile(hostPath, content, 'utf8');
-      logger.info({ podId, seriesId: pod.seriesId, hostPath }, 'Sandbox series handover synced');
+      content = await cm.readFile(pod.containerId, containerPath);
     } catch (err) {
       logger.warn(
         { err, podId, seriesId: pod.seriesId, containerPath },
         'Sandbox series handover missing or unreadable — continuing without it',
       );
+      return;
     }
+
+    await mkdir(path.dirname(hostPath), { recursive: true });
+    await writeFile(hostPath, content, 'utf8');
+    logger.info({ podId, seriesId: pod.seriesId, hostPath }, 'Sandbox series handover synced');
   }
 
   /**
@@ -8063,7 +8066,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         if (outcome === 'completed') {
-          await syncSandboxSeriesHandover(podId);
           visibleFailurePhase = 'completion';
           await this.handleCompletion(podId);
         }
@@ -8355,6 +8357,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       ) {
         return;
       }
+
+      await syncSandboxSeriesHandover(podId);
 
       // Artifact pods: extract /workspace, optionally push branch, skip validation entirely
       if (pod.options.output === 'artifact') {
