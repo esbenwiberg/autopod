@@ -4,11 +4,7 @@ import type {
   ProviderCredentials,
   PublicProviderCatalog,
 } from '@autopod/shared';
-import {
-  AutopodError,
-  PROVIDER_CATALOG,
-  createProviderAccountSchemas,
-} from '@autopod/shared';
+import { AutopodError, PROVIDER_CATALOG, createProviderAccountSchemas } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { CredentialsCipher } from '../crypto/credentials-cipher.js';
 

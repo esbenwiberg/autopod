@@ -1,7 +1,7 @@
 import {
   AutopodError,
-  type PublicProviderCatalog,
   PROVIDER_CATALOG,
+  type PublicProviderCatalog,
   createProviderAccountSchemas,
   importProviderAccountFromProfileSchema,
   providerAccountIdSchema,
@@ -33,9 +33,7 @@ function assertAccountMatchesProfile(
   profile: ReturnType<ProfileStore['get']>,
   catalog: PublicProviderCatalog,
 ): void {
-  const catalogProvider = catalog.providers.find(
-    (provider) => provider.id === account.provider,
-  );
+  const catalogProvider = catalog.providers.find((provider) => provider.id === account.provider);
   const matchesLegacyProvider = profile.modelProvider === account.provider;
   const matchesGenericPiProvider =
     profile.modelProvider === 'pi' && catalogProvider?.implementation.kind === 'generic-pi-api';
@@ -77,9 +75,7 @@ export function providerAccountRoutes(
     createProviderAccountSchemas(catalog);
   app.get('/provider-accounts', async (request) => {
     const query = request.query as { provider?: string };
-    const provider = query.provider
-      ? catalogProviderSchema.parse(query.provider)
-      : undefined;
+    const provider = query.provider ? catalogProviderSchema.parse(query.provider) : undefined;
     const accounts = providerAccountStore.list(provider ? { provider } : undefined);
     return accounts.map(redactProviderAccountSecrets);
   });
@@ -194,7 +190,7 @@ export function providerAccountRoutes(
       body.linkProfileNames.length > 0 ? body.linkProfileNames : [body.profileName];
     const linkedProfiles = requestedProfileNames.map((profileName) => {
       const profile = profileStore.get(profileName);
-      assertAccountMatchesProfile(account, profile);
+      assertAccountMatchesProfile(account, profile, catalog);
       return profileStore.update(profileName, { providerAccountId: account.id });
     });
 

@@ -1,4 +1,4 @@
-import { type PublicProviderCatalog, PROVIDER_CATALOG } from '@autopod/shared';
+import { PROVIDER_CATALOG, type PublicProviderCatalog } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 
 export function modelProviderRoutes(

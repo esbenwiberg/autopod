@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   type CompiledProviderManifest,
-  type Profile,
   PROVIDER_CATALOG,
+  type Profile,
   createProviderCatalog,
 } from '@autopod/shared';
 import Fastify from 'fastify';
@@ -69,8 +69,7 @@ function fixtureManifest(): CompiledProviderManifest {
 
 const reversibleTestCipher: CredentialsCipher = {
   encrypt: (value) => `ciphertext:${Buffer.from(value, 'utf8').toString('base64')}`,
-  decrypt: (value) =>
-    Buffer.from(value.slice('ciphertext:'.length), 'base64').toString('utf8'),
+  decrypt: (value) => Buffer.from(value.slice('ciphertext:'.length), 'base64').toString('utf8'),
 };
 
 function createHarness() {
