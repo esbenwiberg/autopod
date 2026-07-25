@@ -28,6 +28,7 @@ import type {
   PodStatus,
   PrivateRegistry,
   Profile,
+  PublicProviderCatalog,
   ReadinessApproval,
   ReadinessReview,
   ReadinessStatus,
@@ -1239,6 +1240,8 @@ export interface PodManagerDependencies {
   /** Canonical credential source for every GitHub operation. Legacy profile PATs are ignored. */
   githubAuth?: DaemonGitHubAuth;
   providerAccountStore?: ProviderAccountStore;
+  /** Validated catalog override for deterministic manifest-only conformance tests. */
+  providerCatalog?: PublicProviderCatalog;
   eventBus: EventBus;
   containerManagerFactory: ContainerManagerFactory;
   worktreeManager: WorktreeManager;
@@ -1709,6 +1712,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     fixFeedbackRepo,
     profileStore,
     providerAccountStore,
+    providerCatalog,
     eventBus,
     containerManagerFactory,
     worktreeManager,
@@ -3517,6 +3521,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const result = await buildProviderEnv(profile, pod.id, logger, {
       profileStore,
       providerAccountStore,
+      providerCatalog,
       runtime: pod.runtime,
       ...(pod.providerIdSnapshot
         ? {
@@ -5648,6 +5653,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const providerPreflight = resolveProviderPreflight(profile, request.runtime, request.model, {
         profileStore,
         providerAccountStore,
+        manifest: providerCatalog,
       });
       const { runtime, model } = providerPreflight;
       const executionTarget = request.executionTarget ?? profile.executionTarget ?? 'local';
@@ -6272,6 +6278,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const providerPreflight = resolveProviderPreflight(profile, pod.runtime, pod.model, {
           profileStore,
           providerAccountStore,
+          manifest: providerCatalog,
           ...(pod.providerIdSnapshot
             ? {
                 expectedBinding: {
@@ -7618,6 +7625,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const providerResult = await buildProviderEnv(profile, podId, logger, {
           profileStore,
           providerAccountStore,
+          providerCatalog,
           runtime: pod.runtime,
           ...(pod.providerIdSnapshot
             ? {
@@ -12553,6 +12561,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const providerPreflight = resolveProviderPreflight(profile, pod.runtime, pod.model, {
               profileStore,
               providerAccountStore,
+              manifest: providerCatalog,
               ...(pod.providerIdSnapshot
                 ? {
                     expectedBinding: {

@@ -4,6 +4,7 @@ import {
   type CompiledProviderManifest,
   PROVIDER_CATALOG,
   type Profile,
+  type Runtime,
   createProviderCatalog,
 } from '@autopod/shared';
 import Fastify from 'fastify';
@@ -13,12 +14,16 @@ import { modelProviderRoutes } from './api/routes/model-providers.js';
 import { profileRoutes } from './api/routes/profiles.js';
 import { providerAccountRoutes } from './api/routes/provider-accounts.js';
 import type { CredentialsCipher } from './crypto/credentials-cipher.js';
+import { type NetworkManager, createPodManager } from './pods/pod-manager.js';
 import { resolveProviderPreflight } from './pods/provider-preflight.js';
 import { addRuntimeNetworkDefaults } from './pods/runtime-network-defaults.js';
 import { createProfileStore } from './profiles/index.js';
 import { createProviderAccountStore } from './provider-accounts/index.js';
 import { buildProviderEnv } from './providers/index.js';
-import { createTestDb } from './test-utils/mock-helpers.js';
+import {
+  createTestContext as createPodManagerTestContext,
+  createTestDb,
+} from './test-utils/mock-helpers.js';
 
 const fixtureProviderId = 'fixture-cloud';
 const fixturePiProviderId = 'fixture-wire';
@@ -185,6 +190,95 @@ describe('provider portability integration', () => {
     expect(providerEnv.requiresPostExecPersistence).toBe(false);
     expect(providerEnv.requiresPiAuthJsonPersistence).toBe(false);
 
+    const runtimeSpawn = vi.fn<Runtime['spawn']>(async function* () {});
+    const managerContext = createPodManagerTestContext({
+      runtime: {
+        type: 'pi',
+        spawn: runtimeSpawn,
+        resume: vi.fn(async function* () {}),
+        abort: vi.fn(async () => {}),
+        suspend: vi.fn(async () => {}),
+      },
+    });
+    managerContext.profileStore.get = vi.fn(() => ({
+      ...profile,
+      name: 'test-profile',
+    }));
+    managerContext.profileStore.resolveProviderAccountId = vi.fn(() => 'fixture-account');
+    const managerLogs: string[] = [];
+    managerContext.deps.logger = pino(
+      { level: 'trace' },
+      { write: (message) => managerLogs.push(message) },
+    );
+    const buildNetworkConfig = vi.fn<NetworkManager['buildNetworkConfig']>(async () => ({
+      networkName: 'autopod-fixture',
+      firewallScript: 'fixture-firewall',
+    }));
+    managerContext.deps.providerAccountStore = providerAccountStore;
+    managerContext.deps.providerCatalog = catalog;
+    managerContext.deps.networkManager = {
+      buildNetworkConfig,
+      getGatewayIp: vi.fn(async () => '172.18.0.1'),
+    };
+    const manager = createPodManager(managerContext.deps);
+    const pod = manager.createSession(
+      {
+        profileName: 'test-profile',
+        task: 'Exercise manifest-only provider orchestration',
+        skipValidation: true,
+      },
+      'fixture-user',
+    );
+    await manager.processPod(pod.id);
+
+    expect(manager.getSession(pod.id)).toMatchObject({
+      status: 'validated',
+      runtime: 'pi',
+      model: fixtureModelId,
+      providerIdSnapshot: fixtureProviderId,
+      providerAccountIdSnapshot: 'fixture-account',
+    });
+    expect(buildNetworkConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ allowedHosts: ['github.com', fixtureHost] }),
+      expect.any(Array),
+      '172.18.0.1',
+      expect.any(Array),
+      pod.id,
+      [],
+      ['localhost'],
+      8080,
+    );
+    expect(managerContext.containerManager.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        networkName: 'autopod-fixture',
+        firewallScript: 'fixture-firewall',
+      }),
+    );
+    expect(managerContext.containerManager.writeFile).toHaveBeenCalledWith(
+      'container-123',
+      '/run/autopod/model-provider-key',
+      sentinelKey,
+    );
+    expect(managerContext.containerManager.writeFile).toHaveBeenCalledWith(
+      'container-123',
+      '/home/autopod/.pi/agent/auth.json',
+      expect.stringContaining('!cat /run/autopod/model-provider-key'),
+    );
+    const spawnConfig = runtimeSpawn.mock.calls[0]?.[0];
+    expect(spawnConfig).toMatchObject({ model: fixtureModelId });
+    expect(JSON.stringify(spawnConfig)).not.toContain(sentinelKey);
+    expect(
+      JSON.stringify(vi.mocked(managerContext.containerManager.spawn).mock.calls),
+    ).not.toContain(sentinelKey);
+    expect(
+      JSON.stringify(vi.mocked(managerContext.containerManager.execInContainer).mock.calls),
+    ).not.toContain(sentinelKey);
+    expect(JSON.stringify(managerLogs)).not.toContain(sentinelKey);
+    const ordinaryWrites = vi
+      .mocked(managerContext.containerManager.writeFile)
+      .mock.calls.filter(([, filePath]) => filePath !== '/run/autopod/model-provider-key');
+    expect(JSON.stringify(ordinaryWrites)).not.toContain(sentinelKey);
+
     await app.close();
   });
 
@@ -229,21 +323,6 @@ describe('provider portability integration', () => {
       credentials: { provider: 'api-key', providerId: fixtureProviderId },
       hasCredentials: true,
     });
-
-    // Pin the real pod-manager boundary: only the non-secret env reaches runtime
-    // spawn, while secret contents are written to their restricted files.
-    const podManagerSource = fs.readFileSync(
-      path.resolve(import.meta.dirname, 'pods/pod-manager.ts'),
-      'utf8',
-    );
-    expect(podManagerSource).toContain('...providerResult.env');
-    expect(podManagerSource).toContain('env: secretEnv');
-    expect(podManagerSource).toContain(
-      'await containerManager.writeFile(containerId, sf.path, sf.content);',
-    );
-    expect(podManagerSource).not.toMatch(/runtime\.spawn\(\{[^}]*sf\.content/s);
-    expect(podManagerSource).not.toMatch(/runtime\.spawn\(\{[^}]*secretFiles/s);
-    expect(podManagerSource).not.toMatch(/logger\.\w+\([^)]*sf\.content/s);
 
     await app.close();
   });
