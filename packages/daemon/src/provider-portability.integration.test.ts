@@ -107,20 +107,31 @@ async function createLinkedFixture() {
   });
   expect(accountResponse.statusCode).toBe(201);
 
-  harness.profileStore.create({
-    name: 'fixture-profile',
-    repoUrl: 'https://github.com/example/repository',
-    buildCommand: 'npx pnpm build',
-    startCommand: 'npx pnpm start',
+  const profileResponse = await harness.app.inject({
+    method: 'POST',
+    url: '/profiles',
+    payload: {
+      name: 'fixture-profile',
+      repoUrl: 'https://github.com/example/repository',
+      buildCommand: 'npx pnpm build',
+      startCommand: 'npx pnpm start',
+      defaultRuntime: 'pi',
+      defaultModel: fixtureModelId,
+      reviewerModel: fixtureModelId,
+      modelProvider: 'pi',
+      networkPolicy: {
+        enabled: true,
+        mode: 'restricted',
+        allowedHosts: ['github.com'],
+      },
+    },
+  });
+  expect(profileResponse.statusCode).toBe(201);
+  expect(profileResponse.json()).toMatchObject({
     defaultRuntime: 'pi',
     defaultModel: fixtureModelId,
     reviewerModel: fixtureModelId,
     modelProvider: 'pi',
-    networkPolicy: {
-      enabled: true,
-      mode: 'restricted',
-      allowedHosts: ['github.com'],
-    },
   });
   const linkResponse = await harness.app.inject({
     method: 'POST',
@@ -128,8 +139,20 @@ async function createLinkedFixture() {
     payload: { profileName: 'fixture-profile' },
   });
   expect(linkResponse.statusCode).toBe(200);
+  const selectedProfileResponse = await harness.app.inject({
+    method: 'GET',
+    url: '/profiles/fixture-profile',
+  });
+  expect(selectedProfileResponse.statusCode).toBe(200);
+  expect(selectedProfileResponse.json()).toMatchObject({
+    defaultRuntime: 'pi',
+    defaultModel: fixtureModelId,
+    reviewerModel: fixtureModelId,
+    modelProvider: 'pi',
+    providerAccountId: 'fixture-account',
+  });
 
-  return { ...harness, accountResponse, linkResponse };
+  return { ...harness, accountResponse, linkResponse, profileResponse, selectedProfileResponse };
 }
 
 describe('provider portability integration', () => {

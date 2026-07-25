@@ -215,7 +215,7 @@ Falsification evidence includes any required provider-specific runtime/client br
 
 ## Results
 
-Implementation series `provider-portability` integrated five ordered pods:
+Implementation series `provider-portability` ran five ordered pods, but remains blocked and incomplete pending required validation and independently authorized real-provider evidence:
 
 1. `colorful` — provider catalog contract and API;
 2. `blushing` — generic API-key custody and Pi provisioning;
