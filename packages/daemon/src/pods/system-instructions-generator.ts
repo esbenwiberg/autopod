@@ -5,6 +5,7 @@ import type {
   Pod,
   Profile,
 } from '@autopod/shared';
+import { PROVIDER_FAILOVER_HANDOFF_CONTAINER_PATH } from '@autopod/shared';
 import type { RelevantMemory } from './memory-selector.js';
 import type { ResolvedSection } from './section-resolver.js';
 
@@ -100,6 +101,15 @@ export function generateSystemInstructions(
     lines.push('<!-- BEGIN HANDOFF CONTEXT -->');
     lines.push(pod.handoffContext);
     lines.push('<!-- END HANDOFF CONTEXT -->');
+    lines.push('');
+  }
+
+  if (pod.providerAttempts?.some((attempt) => attempt.handoffReference)) {
+    lines.push('## Provider continuation');
+    lines.push('');
+    lines.push(
+      `A sanitized provider-failover handoff is available at \`${PROVIDER_FAILOVER_HANDOFF_CONTAINER_PATH}\`. Read it, inspect the current Git state, and continue the original task without recreating completed work.`,
+    );
     lines.push('');
   }
 

@@ -939,6 +939,26 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         logger,
       );
 
+      if (result.tokenUsage) {
+        const currentPod = podRepo.getOrThrow(podId);
+        const existingUsage = currentPod.phaseTokenUsage ?? {};
+        const previousReview = existingUsage.review ?? { inputTokens: 0, outputTokens: 0 };
+        const cachedInputTokens =
+          (previousReview.cachedInputTokens ?? 0) + (result.tokenUsage.cachedInputTokens ?? 0);
+        const costUsd = (previousReview.costUsd ?? 0) + (result.tokenUsage.costUsd ?? 0);
+        podRepo.update(podId, {
+          phaseTokenUsage: {
+            ...existingUsage,
+            review: {
+              inputTokens: previousReview.inputTokens + result.tokenUsage.inputTokens,
+              outputTokens: previousReview.outputTokens + result.tokenUsage.outputTokens,
+              ...(cachedInputTokens > 0 && { cachedInputTokens }),
+              ...(costUsd > 0 && { costUsd }),
+            },
+          },
+        });
+      }
+
       // Cache the verdict on the pod so the daemon's full reviewer can skip
       // Tier 1 when the diff hasn't changed since this pre-submit pass.
       try {

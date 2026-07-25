@@ -351,7 +351,9 @@ export interface FailureStageRow {
 export interface PerModelAggregate {
   /** Canonical model key. For the unknown bucket: literal '<unknown>'. */
   model: string;
+  /** Provider attempts attributed to this model; legacy pods contribute one compatibility row. */
   podCount: number;
+  /** Attempt outcomes in provider/model views, not logical pod funnel outcomes. */
   completeCount: number;
   killedCount: number;
   failedCount: number;
@@ -376,6 +378,7 @@ export interface PerModelAggregate {
 
 export interface PerRuntimeAggregate {
   runtime: string;
+  /** Provider attempts attributed to this runtime; legacy pods contribute one compatibility row. */
   podCount: number;
   completeCount: number;
   killedCount: number;
@@ -408,6 +411,7 @@ export interface ModelsSummary {
   /** Canonical model with the highest podCount (no MIN_COHORT gate). May be '<unknown>'. Null if empty. */
   mostUsedModel: string | null;
   mostUsedPodCount: number | null;
+  /** Logical terminal pods in the window; never multiplied by provider attempts. */
   cohortSize: number;
   /** Daily pod count for mostUsedModel. Length === days. Zero-padded. */
   mostUsedDailySparkline: Array<{ day: string; count: number }>;

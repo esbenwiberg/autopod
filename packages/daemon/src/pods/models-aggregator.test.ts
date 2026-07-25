@@ -88,6 +88,43 @@ function insertValidation(db: Database.Database, podId: string, result: object):
   `).run({ id, podId, result: JSON.stringify(result), createdAt: new Date().toISOString() });
 }
 
+function insertProviderAttempt(
+  db: Database.Database,
+  input: {
+    podId: string;
+    ordinal: number;
+    runtime: string;
+    model: string;
+    outcome: 'completed' | 'quota_exhausted';
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+  },
+): void {
+  db.prepare(`
+    INSERT INTO provider_attempts (
+      pod_id, ordinal, provider, provider_account_id, runtime, model,
+      profile_reference, profile_snapshot, native_session_id,
+      started_at, ended_at, outcome,
+      classification_category, classification_definitive, classification_message,
+      input_tokens, output_tokens, cost_usd
+    ) VALUES (
+      @podId, @ordinal, @runtime, NULL, @runtime, @model,
+      'profile-ref', '{}', 'session-id',
+      @startedAt, @endedAt, @outcome,
+      @classificationCategory, @classificationDefinitive, @classificationMessage,
+      @inputTokens, @outputTokens, @costUsd
+    )
+  `).run({
+    ...input,
+    startedAt: hoursAgo(2),
+    endedAt: hoursAgo(1),
+    classificationCategory: input.outcome === 'quota_exhausted' ? 'quota_exhausted' : null,
+    classificationDefinitive: input.outcome === 'quota_exhausted' ? 1 : null,
+    classificationMessage: input.outcome === 'quota_exhausted' ? 'Provider limit reached' : null,
+  });
+}
+
 function expectDefined<T>(value: T | undefined): T {
   expect(value).toBeDefined();
   return value as T;
@@ -576,5 +613,80 @@ describe('computeModelsAnalytics', () => {
     const result = computeModelsAnalytics(db, 30);
 
     expect(result.summary.cheapestDollarPerPrDelta).toEqual({ value: 0, direction: 'flat' });
+  });
+
+  it('provider-attempt attributes two-provider usage without duplicating logical cohort cost', () => {
+    const podId = insertPod(db, {
+      id: 'provider-attempt-pod',
+      runtime: 'codex',
+      model: 'gpt-5.6-terra',
+      inputTokens: 999,
+      outputTokens: 999,
+      costUsd: 99,
+      createdAt: hoursAgo(4),
+      completedAt: hoursAgo(0),
+    });
+    insertProviderAttempt(db, {
+      podId,
+      ordinal: 1,
+      runtime: 'claude',
+      model: 'claude-opus-4-7',
+      outcome: 'quota_exhausted',
+      inputTokens: 100,
+      outputTokens: 20,
+      costUsd: 1.25,
+    });
+    insertProviderAttempt(db, {
+      podId,
+      ordinal: 2,
+      runtime: 'codex',
+      model: 'gpt-5.6-terra',
+      outcome: 'completed',
+      inputTokens: 200,
+      outputTokens: 40,
+      costUsd: 0.75,
+    });
+
+    const result = computeModelsAnalytics(db, 30);
+    const claude = expectDefined(result.byModel.find((row) => row.model === 'claude-opus-4-7'));
+    const codex = expectDefined(result.byModel.find((row) => row.model === 'gpt-5.6-terra'));
+
+    expect(result.summary.cohortSize).toBe(1);
+    expect(claude).toMatchObject({
+      podCount: 1,
+      failedCount: 1,
+      completeCount: 0,
+      totalCostUsd: 1.25,
+    });
+    expect(codex).toMatchObject({
+      podCount: 1,
+      failedCount: 0,
+      completeCount: 1,
+      totalCostUsd: 0.75,
+    });
+    expect(codex.meanTtmSeconds).toBeCloseTo(4 * 60 * 60, 0);
+    expect(
+      result.byRuntime.reduce((total, runtime) => total + runtime.totalCostUsd, 0),
+    ).toBeCloseTo(2);
+  });
+
+  it('provider-attempt preserves legacy pod attribution when no ledger rows exist', () => {
+    insertPod(db, {
+      runtime: 'claude',
+      model: 'claude-opus-4-7',
+      inputTokens: 100,
+      outputTokens: 20,
+      costUsd: 2.5,
+    });
+
+    const result = computeModelsAnalytics(db, 30);
+
+    expect(result.summary.cohortSize).toBe(1);
+    expect(result.byModel[0]).toMatchObject({
+      model: 'claude-opus-4-7',
+      podCount: 1,
+      completeCount: 1,
+      totalCostUsd: 2.5,
+    });
   });
 });

@@ -532,4 +532,42 @@ describe('computeReliabilityAnalytics', () => {
       'complete',
     ]);
   });
+
+  it('provider-attempt keeps one logical pod in the reliability denominator', () => {
+    const podId = insertPod(db, { id: 'provider-attempt-reliability', status: 'complete' });
+    insertStatusEvent(db, podId, 'merging', 'complete');
+    for (const [ordinal, runtime, model, outcome] of [
+      [1, 'claude', 'claude-opus-4-7', 'quota_exhausted'],
+      [2, 'codex', 'gpt-5.6-terra', 'completed'],
+    ] as const) {
+      db.prepare(`
+        INSERT INTO provider_attempts (
+          pod_id, ordinal, provider, runtime, model, profile_reference, profile_snapshot,
+          started_at, ended_at, outcome,
+          classification_category, classification_definitive, classification_message
+        ) VALUES (
+          @podId, @ordinal, @runtime, @runtime, @model, 'profile-ref', '{}',
+          @startedAt, @endedAt, @outcome,
+          @category, @definitive, @message
+        )
+      `).run({
+        podId,
+        ordinal,
+        runtime,
+        model,
+        outcome,
+        startedAt: new Date(Date.now() - 60_000).toISOString(),
+        endedAt: new Date().toISOString(),
+        category: outcome === 'quota_exhausted' ? 'quota_exhausted' : null,
+        definitive: outcome === 'quota_exhausted' ? 1 : null,
+        message: outcome === 'quota_exhausted' ? 'Provider limit reached' : null,
+      });
+    }
+
+    const result = computeReliabilityAnalytics(db, 30);
+
+    expect(result.summary.totalPodsInWindow).toBe(1);
+    expect(result.firstPassRate).toBe(1);
+    expect(result.funnel.bands.find((band) => band.band === 'complete')?.count).toBe(1);
+  });
 });

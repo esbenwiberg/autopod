@@ -87,7 +87,19 @@ describe('runContainerReviewer', () => {
   });
 
   it('runs Claude CLI in the live pod container for Anthropic-compatible profiles', async () => {
-    const cm = containerManager();
+    const cm = containerManager({
+      stdout: JSON.stringify({
+        result: 'review output\n',
+        usage: {
+          input_tokens: 4321,
+          cache_read_input_tokens: 3000,
+          output_tokens: 123,
+        },
+        total_cost_usd: 0.045,
+      }),
+      stderr: '',
+      exitCode: 0,
+    });
 
     const result = await runContainerReviewer({
       podId: 'sess-1',
@@ -101,6 +113,12 @@ describe('runContainerReviewer', () => {
     });
 
     expect(result.stdout).toBe('review output\n');
+    expect(result.tokenUsage).toEqual({
+      inputTokens: 4321,
+      cachedInputTokens: 3000,
+      outputTokens: 123,
+      costUsd: 0.045,
+    });
     expect(cm.writeFile).toHaveBeenCalledWith(
       'container-abc',
       expect.stringContaining('/tmp/autopod-claude-review-sess-1-'),
@@ -114,6 +132,9 @@ describe('runContainerReviewer', () => {
         env: { ANTHROPIC_API_KEY_FILE: '/run/autopod/anthropic-api-key' },
         timeout: 60_000,
       }),
+    );
+    expect((cm.execInContainer as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
+      '--output-format json',
     );
     expect(mockRunCodexReview).not.toHaveBeenCalled();
   });

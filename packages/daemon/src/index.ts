@@ -53,6 +53,7 @@ import {
   createPodQueue,
   createPodRepository,
   createProgressEventRepository,
+  createProviderAttemptRepository,
   createQualityScoreRecorder,
   createQualityScoreRepository,
   createValidationRepository,
@@ -207,6 +208,7 @@ const providerAccountStore = createProviderAccountStore(db, credentialsCipher);
 // the same live provider-account credentials the agent authenticates with.
 const llmDeps = { profileStore, providerAccountStore };
 const podRepo = createPodRepository(db);
+const providerAttemptRepo = createProviderAttemptRepository(db);
 const eventRepo = createEventRepository(db);
 const escalationRepo = createEscalationRepository(db);
 const nudgeRepo = createNudgeRepository(db);
@@ -671,6 +673,7 @@ let preCleanupMemoryExtraction: (podId: string) => Promise<void> = async () => {
 
 podManager = createPodManager({
   podRepo,
+  providerAttemptRepo,
   escalationRepo,
   nudgeRepo,
   fixFeedbackRepo,
@@ -691,6 +694,7 @@ podManager = createPodManager({
   prManagerFactory,
   actionEngine: actionRegistry,
   enqueueSession: (id) => podQueue.enqueue(id),
+  requeueSessionAfterCurrent: (id) => podQueue.requeueAfterCurrent(id),
   clearStuckQueueEntry: (id) => podQueue.clearStuckEntry(id),
   mcpBaseUrl: MCP_BASE_URL,
   daemonConfig: {
@@ -794,6 +798,7 @@ const qualityScoreRecorder = createQualityScoreRecorder({
   escalationRepo,
   qualityScoreRepo,
   validationRepo,
+  providerAttemptRepo,
   logger,
 });
 qualityScoreRecorder.start();
@@ -810,6 +815,7 @@ const memoryCandidateRecorder = createMemoryCandidateRecorder({
   eventRepo,
   escalationRepo,
   validationRepo,
+  providerAttemptRepo,
   containerManagerFactory,
   logger,
 });

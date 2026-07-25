@@ -9,6 +9,7 @@ vi.mock('node:child_process', () => ({
 import { execFile } from 'node:child_process';
 import {
   buildContinuationPrompt,
+  buildProviderFailoverHandoff,
   buildRecoveryTask,
   buildReworkPrompt,
   buildReworkTask,
@@ -127,6 +128,35 @@ describe('buildContinuationPrompt', () => {
     expect(prompt).toContain('Recent commits on this branch:');
     expect(prompt).toContain('abc1234 Complete implementation');
     expect(prompt).toContain('No uncommitted changes.');
+  });
+});
+
+describe('buildProviderFailoverHandoff', () => {
+  it('sanitizes selected context and bounds the provider handoff', async () => {
+    mockExecFileResults([{ stdout: 'abc1234 safe commit' }, { stdout: ' src/app.ts | 2 ++' }]);
+    const pod = makeSession({
+      task: `Continue work for dev@example.com ${'x'.repeat(40_000)}`,
+      plan: { summary: 'Implement safely', steps: ['Inspect', 'Change', 'Test'] },
+      progress: {
+        phase: 'Build',
+        description: 'Halfway',
+        currentPhase: 2,
+        totalPhases: 4,
+      },
+    });
+    const handoff = await buildProviderFailoverHandoff(pod, '/tmp/worktree/recovery', {
+      category: 'quota_exhausted',
+      definitive: true,
+      sanitizedMessage: 'Provider quota exhausted for dev@example.com',
+    });
+
+    expect(handoff.length).toBeLessThanOrEqual(24_000);
+    expect(handoff).toContain('## Task');
+    expect(handoff).toContain('## Plan');
+    expect(handoff).toContain('## Progress');
+    expect(handoff).toContain('## Terminal reason');
+    expect(handoff).toContain('## Recent commits');
+    expect(handoff).not.toContain('dev@example.com');
   });
 });
 

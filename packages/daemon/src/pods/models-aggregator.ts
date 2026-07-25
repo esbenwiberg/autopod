@@ -73,6 +73,11 @@ interface PodRow {
   costUsd: number;
 }
 
+interface AttributionRow extends PodRow {
+  attemptOrdinal: number | null;
+  attemptOutcome: string | null;
+}
+
 interface QualityRow {
   podId: string;
   score: number;
@@ -198,13 +203,27 @@ function cheapestDollarPerPrForWindow(
 ): number | null {
   const rows = db
     .prepare(
-      `SELECT model, status,
-              input_tokens AS inputTokens, output_tokens AS outputTokens, cost_usd AS costUsd
-       FROM pods
-       WHERE output_mode != 'workspace'
-         AND status IN ('complete', 'killed', 'failed')
-         AND completed_at >= datetime('now', '-' || @startDays || ' days')
-         AND completed_at <  datetime('now', '-' || @endDays   || ' days')`,
+      `WITH cohort AS (
+         SELECT *
+         FROM pods
+         WHERE output_mode != 'workspace'
+           AND status IN ('complete', 'killed', 'failed')
+           AND completed_at >= datetime('now', '-' || @startDays || ' days')
+           AND completed_at <  datetime('now', '-' || @endDays   || ' days')
+       )
+       SELECT a.model, a.outcome AS status,
+              a.input_tokens AS inputTokens,
+              a.output_tokens AS outputTokens,
+              a.cost_usd AS costUsd
+       FROM provider_attempts a
+       JOIN cohort p ON p.id = a.pod_id
+       UNION ALL
+       SELECT p.model, p.status,
+              p.input_tokens AS inputTokens,
+              p.output_tokens AS outputTokens,
+              p.cost_usd AS costUsd
+       FROM cohort p
+       WHERE NOT EXISTS (SELECT 1 FROM provider_attempts a WHERE a.pod_id = p.id)`,
     )
     .all({ startDays: startDaysAgo, endDays: endDaysAgo }) as Array<{
     model: string | null;
@@ -225,7 +244,7 @@ function cheapestDollarPerPrForWindow(
       outputTokens: row.outputTokens,
       costUsd: row.costUsd,
     });
-    if (row.status === 'complete') entry.completeCount++;
+    if (row.status === 'complete' || row.status === 'completed') entry.completeCount++;
     acc.set(canonical, entry);
   }
 
@@ -260,6 +279,39 @@ export function computeModelsAnalytics(
 
   if (podRows.length === 0) return emptyResponse(days);
 
+  // Provider/model attribution is attempt-level when immutable ledger rows
+  // exist. Pods without attempts retain their historical compatibility fields.
+  const attributionRows = db
+    .prepare(
+      `WITH cohort AS (
+         SELECT *
+         FROM pods
+         WHERE ${terminalCohortWhere()}
+       )
+       SELECT p.id, a.model, a.runtime, p.status,
+              p.created_at AS createdAt,
+              p.completed_at AS completedAt,
+              a.input_tokens AS inputTokens,
+              a.output_tokens AS outputTokens,
+              a.cost_usd AS costUsd,
+              a.ordinal AS attemptOrdinal,
+              a.outcome AS attemptOutcome
+       FROM provider_attempts a
+       JOIN cohort p ON p.id = a.pod_id
+       UNION ALL
+       SELECT p.id, p.model, p.runtime, p.status,
+              p.created_at AS createdAt,
+              p.completed_at AS completedAt,
+              p.input_tokens AS inputTokens,
+              p.output_tokens AS outputTokens,
+              p.cost_usd AS costUsd,
+              NULL AS attemptOrdinal,
+              NULL AS attemptOutcome
+       FROM cohort p
+       WHERE NOT EXISTS (SELECT 1 FROM provider_attempts a WHERE a.pod_id = p.id)`,
+    )
+    .all({ days }) as AttributionRow[];
+
   // ── Accumulate byModel and byRuntime ────────────────────────────────────────
   const byModelAccum = new Map<string, ModelAccum>();
   const byRuntimeAccum = new Map<string, RuntimeAccum>(
@@ -267,7 +319,13 @@ export function computeModelsAnalytics(
   );
 
   const unknownRaw = new Map<string, number>(); // raw model string → pod count
-  const podModelMap = new Map<string, string>(); // podId → canonical model
+  const podModelMap = new Map<string, string>(); // podId → latest canonical model
+  const latestOrdinal = new Map<string, number>();
+  for (const row of attributionRows) {
+    if (row.attemptOrdinal !== null) {
+      latestOrdinal.set(row.id, Math.max(latestOrdinal.get(row.id) ?? 0, row.attemptOrdinal));
+    }
+  }
 
   function getOrCreateModel(canonical: string): ModelAccum {
     let m = byModelAccum.get(canonical);
@@ -290,9 +348,11 @@ export function computeModelsAnalytics(
     return m;
   }
 
-  for (const pod of podRows) {
+  for (const pod of attributionRows) {
     const canonical = canonicalModelKey(pod.model) ?? '<unknown>';
-    podModelMap.set(pod.id, canonical);
+    if (pod.attemptOrdinal === null || pod.attemptOrdinal === latestOrdinal.get(pod.id)) {
+      podModelMap.set(pod.id, canonical);
+    }
 
     if (canonical === '<unknown>' && pod.model) {
       unknownRaw.set(pod.model, (unknownRaw.get(pod.model) ?? 0) + 1);
@@ -324,7 +384,16 @@ export function computeModelsAnalytics(
 
     mAccum.totalCostUsd += modelCost;
 
-    if (pod.status === 'complete') {
+    const attributedStatus =
+      pod.attemptOutcome === 'completed'
+        ? 'complete'
+        : pod.attemptOutcome === 'aborted' && pod.status === 'killed'
+          ? 'killed'
+          : pod.attemptOutcome === null
+            ? pod.status
+            : 'failed';
+
+    if (attributedStatus === 'complete') {
       mAccum.completeCount++;
       mAccum.completeCostUsd += modelCost;
       const ttmSeconds =
@@ -336,7 +405,7 @@ export function computeModelsAnalytics(
         rtAccum.totalCostUsd += rtCost;
         rtAccum.sumTtmSeconds += ttmSeconds;
       }
-    } else if (pod.status === 'killed') {
+    } else if (attributedStatus === 'killed') {
       mAccum.killedCount++;
       if (rtAccum) {
         rtAccum.killedCount++;
@@ -357,7 +426,15 @@ export function computeModelsAnalytics(
   // Uses subquery to avoid SQLITE_MAX_VARIABLE_NUMBER on large cohorts.
   const qualityRows = db
     .prepare(
-      `SELECT q.pod_id AS podId, q.score, p.model, p.runtime
+      `SELECT q.pod_id AS podId, q.score,
+              COALESCE((
+                SELECT a.model FROM provider_attempts a
+                WHERE a.pod_id = p.id ORDER BY a.ordinal DESC LIMIT 1
+              ), p.model) AS model,
+              COALESCE((
+                SELECT a.runtime FROM provider_attempts a
+                WHERE a.pod_id = p.id ORDER BY a.ordinal DESC LIMIT 1
+              ), p.runtime) AS runtime
        FROM pod_quality_scores q
        JOIN pods p ON p.id = q.pod_id
        WHERE q.pod_id IN (SELECT id FROM pods WHERE ${terminalCohortWhere()})`,
@@ -383,7 +460,15 @@ export function computeModelsAnalytics(
   // Uses subquery to avoid SQLITE_MAX_VARIABLE_NUMBER on large cohorts.
   const escalationRows = db
     .prepare(
-      `SELECT DISTINCT e.pod_id AS podId, p.model, p.runtime
+      `SELECT DISTINCT e.pod_id AS podId,
+              COALESCE((
+                SELECT a.model FROM provider_attempts a
+                WHERE a.pod_id = p.id ORDER BY a.ordinal DESC LIMIT 1
+              ), p.model) AS model,
+              COALESCE((
+                SELECT a.runtime FROM provider_attempts a
+                WHERE a.pod_id = p.id ORDER BY a.ordinal DESC LIMIT 1
+              ), p.runtime) AS runtime
        FROM escalations e
        JOIN pods p ON p.id = e.pod_id
        WHERE e.type IN ${HUMAN_ATTENTION_SQL}
@@ -468,8 +553,8 @@ export function computeModelsAnalytics(
   // Sparkline: daily pod count for most-used model only
   const dayBuckets = new Map<string, number>();
   if (mostUsedModel) {
-    for (const pod of podRows) {
-      const canonical = podModelMap.get(pod.id);
+    for (const pod of attributionRows) {
+      const canonical = canonicalModelKey(pod.model) ?? '<unknown>';
       if (canonical !== mostUsedModel) continue;
       const day = pod.completedAt.slice(0, 10);
       dayBuckets.set(day, (dayBuckets.get(day) ?? 0) + 1);

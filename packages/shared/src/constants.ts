@@ -7,6 +7,10 @@ export const DEFAULT_HEALTH_TIMEOUT = 120;
 export const DEFAULT_HUMAN_RESPONSE_TIMEOUT = 3600;
 export const DEFAULT_MAX_AI_ESCALATIONS = 5;
 export const DEFAULT_AUTO_PAUSE_AFTER = 3;
+export const MAX_PROVIDER_FAILOVER_TARGETS = 8;
+export const PROVIDER_FAILOVER_HANDOFF_PATH = '.autopod/provider-failover.md';
+export const PROVIDER_FAILOVER_HANDOFF_CONTAINER_PATH = `/workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`;
+export const MAX_PROVIDER_FAILOVER_HANDOFF_LENGTH = 24_000;
 export const MAX_BUILD_LOG_LENGTH = 10_000;
 export const MAX_DIFF_LENGTH = 50_000;
 /**
@@ -98,7 +102,7 @@ export const AUTOPOD_INSTRUCTIONS_PATH = '/home/autopod/.autopod/system-instruct
 
 export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   queued: ['provisioning', 'killing'],
-  provisioning: ['running', 'killing', 'failed'],
+  provisioning: ['running', 'paused', 'killing', 'failed'],
   running: ['awaiting_input', 'validating', 'paused', 'handoff', 'killing', 'complete', 'failed'],
   // `validating` covers the case where the daemon parked the pod after a
   // post-validation push failed on missing/invalid credentials — once the
@@ -108,7 +112,7 @@ export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   // a pod parked here (e.g. on a validation_override escalation) jumps straight
   // to validated without re-running the agent or validation.
   awaiting_input: ['running', 'validating', 'validated', 'killing', 'failed'],
-  paused: ['running', 'killing', 'failed'],
+  paused: ['queued', 'running', 'killing', 'failed'],
   validating: ['validated', 'running', 'failed', 'review_required', 'killing', 'awaiting_input'],
   // `awaiting_input` covers post-validation delivery failures (for example a
   // fix pod validated, then the daemon could not push its branch). Park rather

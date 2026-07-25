@@ -2,6 +2,7 @@ import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
 import type { AgentEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
+import { classifyProviderError } from './provider-error-classifier.js';
 
 /**
  * Claude CLI `--output-format stream-json` event shape.
@@ -45,7 +46,14 @@ interface ClaudeStreamEvent {
   message?: ClaudeStreamMessage;
   tool_use_result?: ClaudeToolUseResult;
   result?: string;
-  error?: { message: string };
+  is_error?: boolean;
+  error?: {
+    message?: string;
+    type?: string;
+    code?: string;
+    status?: number;
+    retry_after?: string;
+  };
   [key: string]: unknown;
 }
 
@@ -203,6 +211,21 @@ export class ClaudeStreamParser {
       case 'result': {
         const resultText =
           (typeof event.result === 'string' ? event.result : null) ?? 'Claude agent completed';
+        if (event.is_error === true) {
+          const classification = classifyProviderError('claude', {
+            message: resultText,
+            code: event.error?.code ?? event.error?.type,
+            status: event.error?.status,
+            retryAfter: event.error?.retry_after,
+          });
+          return {
+            type: 'error',
+            timestamp: ts,
+            message: classification.sanitizedMessage,
+            fatal: true,
+            classification,
+          };
+        }
         const costUsd = typeof event.total_cost_usd === 'number' ? event.total_cost_usd : undefined;
         const totalInputTokens =
           typeof event.usage?.input_tokens === 'number'
@@ -227,11 +250,19 @@ export class ClaudeStreamParser {
       }
 
       case 'error': {
+        const message = event.error?.message ?? 'Unknown Claude error';
+        const classification = classifyProviderError('claude', {
+          message,
+          code: event.error?.code ?? event.error?.type,
+          status: event.error?.status,
+          retryAfter: event.error?.retry_after,
+        });
         return {
           type: 'error',
           timestamp: ts,
-          message: event.error?.message ?? 'Unknown Claude error',
+          message: classification.sanitizedMessage,
           fatal: true,
+          classification,
         };
       }
 

@@ -1,6 +1,14 @@
 import { execFile } from 'node:child_process';
+import { mkdir, open, rename, rm } from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
-import type { Pod } from '@autopod/shared';
+import {
+  MAX_PROVIDER_FAILOVER_HANDOFF_LENGTH,
+  PROVIDER_FAILOVER_HANDOFF_PATH,
+  type Pod,
+  type ProviderFailureClassification,
+  processContent,
+} from '@autopod/shared';
 
 const execFileAsync = promisify(execFile);
 
@@ -12,6 +20,93 @@ export interface RecoveryContext {
   branch: string;
   gitLog: string;
   uncommittedDiff: string;
+}
+
+function sanitizeHandoffText(value: string): string {
+  return processContent(value, {
+    sanitization: { preset: 'standard' },
+    quarantine: { enabled: true },
+  }).text;
+}
+
+function boundedSection(heading: string, content: string | null | undefined, max: number): string {
+  const sanitized = sanitizeHandoffText(content?.trim() ?? '');
+  if (!sanitized) return '';
+  return `## ${heading}\n\n${sanitized.slice(0, max)}`;
+}
+
+export async function buildProviderFailoverHandoff(
+  pod: Pod,
+  worktreePath: string,
+  classification: ProviderFailureClassification,
+  visibleActivity: readonly string[] = [],
+): Promise<string> {
+  const [gitLog, uncommittedDiff] = await Promise.all([
+    getGitLog(worktreePath, 20),
+    getUncommittedDiff(worktreePath),
+  ]);
+  const visibleProgress = pod.progress
+    ? `${pod.progress.phase} (${pod.progress.currentPhase}/${pod.progress.totalPhases}): ${pod.progress.description}`
+    : null;
+  const summary = pod.taskSummary
+    ? [
+        pod.taskSummary.actualSummary,
+        pod.taskSummary.how,
+        ...pod.taskSummary.deviations.map(
+          (item) => `${item.step}: ${item.actual} (${item.reason})`,
+        ),
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : null;
+  const sections = [
+    '# Autopod provider failover handoff',
+    '',
+    'This bounded document contains selected visible continuity context. Re-check the worktree before continuing.',
+    boundedSection('Task', pod.task, 8_000),
+    boundedSection(
+      'Plan',
+      pod.plan ? [pod.plan.summary, ...pod.plan.steps].join('\n') : null,
+      3_000,
+    ),
+    boundedSection('Progress', visibleProgress, 2_000),
+    boundedSection('Task summary', summary, 4_000),
+    boundedSection('Visible runtime activity', visibleActivity.join('\n'), 4_000),
+    boundedSection('Terminal reason', classification.sanitizedMessage, 2_000),
+    boundedSection('Recent commits', gitLog, 3_000),
+    boundedSection('Uncommitted Git state', uncommittedDiff, 2_000),
+  ].filter(Boolean);
+  return sections.join('\n\n').slice(0, MAX_PROVIDER_FAILOVER_HANDOFF_LENGTH);
+}
+
+export async function writeProviderFailoverHandoff(
+  pod: Pod,
+  worktreePath: string,
+  classification: ProviderFailureClassification,
+  visibleActivity: readonly string[] = [],
+): Promise<string> {
+  const content = await buildProviderFailoverHandoff(
+    pod,
+    worktreePath,
+    classification,
+    visibleActivity,
+  );
+  const destination = path.join(worktreePath, PROVIDER_FAILOVER_HANDOFF_PATH);
+  await mkdir(path.dirname(destination), { recursive: true });
+  const temporary = `${destination}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    const handle = await open(temporary, 'wx', 0o600);
+    try {
+      await handle.writeFile(content, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, destination);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+  return destination;
 }
 
 async function getGitLog(worktreePath: string, maxCommits: number): Promise<string> {
