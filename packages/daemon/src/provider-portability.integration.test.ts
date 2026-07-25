@@ -218,7 +218,6 @@ describe('provider portability integration', () => {
       profileLinkApi: linkResponse.body,
       containerFiles: result.containerFiles,
       environment: result.env,
-      arguments: ['pi', '--model', fixtureModelId],
       logs,
       persistence: {
         requiresPostExecPersistence: result.requiresPostExecPersistence,
@@ -230,6 +229,21 @@ describe('provider portability integration', () => {
       credentials: { provider: 'api-key', providerId: fixtureProviderId },
       hasCredentials: true,
     });
+
+    // Pin the real pod-manager boundary: only the non-secret env reaches runtime
+    // spawn, while secret contents are written to their restricted files.
+    const podManagerSource = fs.readFileSync(
+      path.resolve(import.meta.dirname, 'pods/pod-manager.ts'),
+      'utf8',
+    );
+    expect(podManagerSource).toContain('...providerResult.env');
+    expect(podManagerSource).toContain('env: secretEnv');
+    expect(podManagerSource).toContain(
+      'await containerManager.writeFile(containerId, sf.path, sf.content);',
+    );
+    expect(podManagerSource).not.toMatch(/runtime\.spawn\(\{[^}]*sf\.content/s);
+    expect(podManagerSource).not.toMatch(/runtime\.spawn\(\{[^}]*secretFiles/s);
+    expect(podManagerSource).not.toMatch(/logger\.\w+\([^)]*sf\.content/s);
 
     await app.close();
   });
