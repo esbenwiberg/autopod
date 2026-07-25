@@ -1,6 +1,7 @@
 import type { ModelProvider, Profile } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import { parseClaudeCliStdout } from '../runtimes/run-claude-cli.js';
 import { type CodexReviewTokenUsage, runCodexReview } from './review-codex-runner.js';
 
 export class ContainerReviewerUnavailableError extends Error {
@@ -97,7 +98,7 @@ async function runClaudeContainerReview(
   const claudeCommand = [
     `sh ${shellQuote(SHIM_PATH)} claude -p`,
     modelArgs.trim(),
-    '--output-format text',
+    '--output-format json',
     `< ${shellQuote(promptPath)}`,
     `> ${shellQuote(outputPath)} 2> ${shellQuote(logPath)}`,
   ]
@@ -132,7 +133,7 @@ async function runClaudeContainerReview(
       );
     }
 
-    return { stdout: result.stdout };
+    return parseClaudeCliStdout(result.stdout, 'json');
   } catch (err) {
     if (err instanceof ContainerReviewerUnavailableError) throw err;
     const message = err instanceof Error ? err.message : String(err);

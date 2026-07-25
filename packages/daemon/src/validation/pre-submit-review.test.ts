@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 
-vi.mock('../runtimes/run-claude-cli.js', () => ({
-  runClaudeCli: vi.fn(),
-}));
+vi.mock('../runtimes/run-claude-cli.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../runtimes/run-claude-cli.js')>();
+  return { ...actual, runClaudeCli: vi.fn() };
+});
 
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { hashDiff, runPreSubmitReview } from './pre-submit-review.js';
@@ -152,9 +153,13 @@ describe('runPreSubmitReview', () => {
       writeFile: vi.fn().mockResolvedValue(undefined),
       execInContainer: vi.fn().mockResolvedValue({
         stdout: JSON.stringify({
-          status: 'pass',
-          reasoning: 'Container Claude says clean.',
-          issues: [],
+          result: JSON.stringify({
+            status: 'pass',
+            reasoning: 'Container Claude says clean.',
+            issues: [],
+          }),
+          usage: { input_tokens: 4321, cache_read_input_tokens: 3000, output_tokens: 123 },
+          total_cost_usd: 0.045,
         }),
         stderr: '',
         exitCode: 0,
@@ -178,6 +183,12 @@ describe('runPreSubmitReview', () => {
 
     expect(result.status).toBe('pass');
     expect(result.reasoning).toBe('Container Claude says clean.');
+    expect(result.tokenUsage).toEqual({
+      inputTokens: 4321,
+      cachedInputTokens: 3000,
+      outputTokens: 123,
+      costUsd: 0.045,
+    });
     expect(containerManager.writeFile).toHaveBeenCalledWith(
       'container-1',
       expect.stringContaining('/tmp/autopod-claude-review-pod-1-'),
