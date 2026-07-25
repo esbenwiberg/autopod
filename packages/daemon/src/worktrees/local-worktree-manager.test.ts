@@ -1180,9 +1180,7 @@ describe('LocalWorktreeManager', () => {
             cb(null, { stdout: '.git\n', stderr: '' });
           } else if (cmd.includes('remote get-url origin')) {
             cb(null, { stdout: 'https://github.com/org/repo.git\n', stderr: '' });
-          } else if (
-            cmd.includes('rev-parse --verify refs/remotes/origin/feat/security')
-          ) {
+          } else if (cmd.includes('rev-parse --verify refs/remotes/origin/feat/security')) {
             cb(null, { stdout: 'abc123\n', stderr: '' });
           } else {
             pushedArgs.push(args);

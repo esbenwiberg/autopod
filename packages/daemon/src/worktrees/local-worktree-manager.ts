@@ -1699,14 +1699,11 @@ export class LocalWorktreeManager implements WorktreeManager {
   }): Promise<string> {
     const { remote, bareRepoPath, branch, purpose } = params;
     try {
-      await git(
-        ['fetch', remote.url, `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
-        {
-          cwd: bareRepoPath,
-          credential: remote.credential,
-          credentialUrl: remote.url,
-        },
-      );
+      await git(['fetch', remote.url, `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
+        cwd: bareRepoPath,
+        credential: remote.credential,
+        credentialUrl: remote.url,
+      });
       return `refs/remotes/origin/${branch}`;
     } catch (fetchErr) {
       this.logger.debug(
