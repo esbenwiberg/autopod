@@ -45,6 +45,7 @@ import type {
 } from '../interfaces/index.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
+import { createProviderAccountStore } from '../provider-accounts/index.js';
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
 import { ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import { DeletionGuardError } from '../worktrees/local-worktree-manager.js';
@@ -66,6 +67,7 @@ import {
 } from './pod-manager.js';
 import { createPodRepository } from './pod-repository.js';
 import type { PodRepository } from './pod-repository.js';
+import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 import { createValidationRepository } from './validation-repository.js';
 
 const logger = pino({ level: 'silent' });
@@ -107,6 +109,10 @@ function createTestDb(): Database.Database {
     .sort();
   for (const file of files) {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+    if (/--\s*@execute-whole/i.test(sql)) {
+      db.exec(sql);
+      continue;
+    }
     const statements = sql
       .split(';')
       .map((s) => s.trim())
@@ -125,6 +131,7 @@ function createTestDb(): Database.Database {
 
 interface TestProfileOverrides {
   name?: string;
+  repoUrl?: string;
   defaultBranch?: string;
   privateRegistries?: string;
   registryPat?: string;
@@ -168,7 +175,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     )
   `).run({
     name,
-    repoUrl: 'https://github.com/org/repo',
+    repoUrl: opts.repoUrl ?? 'https://github.com/org/repo',
     defaultBranch: opts.defaultBranch ?? 'main',
     template: 'node22',
     buildCommand: 'npm run build',
@@ -321,6 +328,7 @@ function createMockWorktreeManager(): WorktreeManager {
       startCommitSha: 'abc1234567890abcdef1234567890abcdef1234',
     })),
     cleanup: vi.fn(async () => {}),
+    ensureExcludes: vi.fn(async () => {}),
     getDiffStats: vi.fn(async () => ({ filesChanged: 3, linesAdded: 50, linesRemoved: 10 })),
     hasChangesAgainstBase: vi.fn(async () => true),
     getDiff: vi.fn(async () => 'diff --git a/file.ts b/file.ts\n+added line'),
@@ -712,6 +720,28 @@ function createTestContext(
         | undefined;
       return row?.provider_account_id ?? null;
     }),
+    resolveProviderFailover: vi.fn((name: string) => {
+      const row = db
+        .prepare('SELECT provider_failover, provider_account_id FROM profiles WHERE name = ?')
+        .get(name) as
+        | { provider_failover: string | null; provider_account_id: string | null }
+        | undefined;
+      if (row?.provider_failover) {
+        return { policy: JSON.parse(row.provider_failover), source: 'profile' as const };
+      }
+      if (row?.provider_account_id) {
+        const account = db
+          .prepare('SELECT failover_policy FROM provider_accounts WHERE id = ?')
+          .get(row.provider_account_id) as { failover_policy: string | null } | undefined;
+        if (account?.failover_policy) {
+          return {
+            policy: JSON.parse(account.failover_policy),
+            source: 'account-default' as const,
+          };
+        }
+      }
+      return { policy: null, source: 'none' as const };
+    }),
   };
 
   const runtime = createMockRuntime();
@@ -773,6 +803,769 @@ function createTestContext(
 describe('PodManager', () => {
   beforeEach(() => {
     mockExecFileSuccess();
+  });
+
+  it('ledgers successful, resumed, failed, paused, and killed runtime segments', async () => {
+    const ctx = createTestContext(undefined, {
+      repoUrl:
+        'https://user:password@example.com/org/repo?token=secret&X-Amz-Signature=signed#api_key=hidden',
+    });
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Ledger runtime attempts' },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, { inputTokens: 5, outputTokens: 1, costUsd: 0.05 });
+
+    await manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        yield {
+          type: 'status',
+          timestamp: '2026-07-24T10:00:00.000Z',
+          message: 'ready',
+          sessionId: 's1',
+        } as const;
+        yield {
+          type: 'complete',
+          timestamp: '2026-07-24T10:01:00.000Z',
+          result: 'done',
+          totalInputTokens: 10,
+          totalOutputTokens: 2,
+          costUsd: 0.1,
+        } as const;
+      })(),
+    );
+    await manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        yield {
+          type: 'status',
+          timestamp: '2026-07-24T10:02:00.000Z',
+          message: 'ready',
+          sessionId: 's2',
+        } as const;
+        yield {
+          type: 'error',
+          timestamp: '2026-07-24T10:03:00.000Z',
+          message: 'provider stopped',
+          fatal: true,
+          classification: {
+            category: 'quota_exhausted',
+            definitive: true,
+            sanitizedMessage: 'Provider quota exhausted',
+            retryAfter: '2026-07-25T10:03:00Z',
+          },
+        } as const;
+      })(),
+    );
+
+    ctx.podRepo.update(pod.id, { status: 'paused' });
+    await manager.consumeAgentEvents(pod.id, (async function* () {})());
+    ctx.podRepo.update(pod.id, { status: 'running' });
+    attempts.open({
+      podId: pod.id,
+      provider: 'anthropic',
+      providerAccountId: null,
+      runtime: 'claude',
+      model: pod.model,
+      profileReference: attempts.list(pod.id)[0]?.profileReference ?? '',
+      profileSnapshot: { name: 'test-profile' },
+    });
+    await manager.killSession(pod.id);
+
+    expect(attempts.list(pod.id).map(({ ordinal, outcome }) => ({ ordinal, outcome }))).toEqual([
+      { ordinal: 1, outcome: 'completed' },
+      { ordinal: 2, outcome: 'completed' },
+      { ordinal: 3, outcome: 'failed' },
+      { ordinal: 4, outcome: 'aborted' },
+      { ordinal: 5, outcome: 'aborted' },
+    ]);
+    expect(attempts.list(pod.id)[0]).toMatchObject({
+      inputTokens: 5,
+      outputTokens: 1,
+      costUsd: 0.05,
+    });
+    const storedSnapshot = ctx.db
+      .prepare('SELECT profile_snapshot FROM provider_attempts WHERE pod_id = ? AND ordinal = 1')
+      .pluck()
+      .get(pod.id) as string;
+    expect(JSON.parse(storedSnapshot)).toMatchObject({
+      repoUrl: 'https://example.com/org/repo',
+    });
+    expect(attempts.list(pod.id)[1]).toMatchObject({
+      nativeSessionId: 's1',
+      inputTokens: 10,
+      outputTokens: 2,
+      costUsd: 0.1,
+    });
+    expect(attempts.list(pod.id)[2]?.classification).toMatchObject({
+      category: 'quota_exhausted',
+      definitive: true,
+      sanitizedMessage: 'Provider quota exhausted',
+      retryAfter: '2026-07-25T10:03:00Z',
+    });
+  });
+
+  it('same-pod-provider-failover closes, drains, protects, and requeues in order', async () => {
+    const ctx = createTestContext();
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    insertProviderAccount(ctx.db, 'source', 'anthropic', {
+      provider: 'anthropic',
+      apiKey: 'source-key',
+    });
+    insertProviderAccount(ctx.db, 'target', 'openai', {
+      provider: 'openai',
+      apiKey: 'target-key',
+    });
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'source');
+    ctx.db.prepare('UPDATE profiles SET provider_failover = ? WHERE name = ?').run(
+      JSON.stringify({
+        targets: [{ providerAccountId: 'target', runtime: 'codex', model: 'gpt-next' }],
+        maxHops: 1,
+      }),
+      'test-profile',
+    );
+    ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+    const deferredRequeue = vi.fn();
+    ctx.deps.requeueSessionAfterCurrent = deferredRequeue;
+    const order: string[] = [];
+    let podId = '';
+    vi.mocked(ctx.runtime.abort).mockImplementation(async () => {
+      expect(attempts.getActive(podId)).toBeNull();
+      order.push('abort');
+    });
+    const ensureExcludes = ctx.worktreeManager.ensureExcludes;
+    if (!ensureExcludes) throw new Error('Test worktree manager lacks ensureExcludes');
+    vi.mocked(ensureExcludes).mockImplementation(async () => {
+      order.push('exclude');
+    });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Continue after quota' },
+      'user-1',
+    );
+    podId = pod.id;
+    ctx.enqueuedSessions.length = 0;
+    ctx.podRepo.update(podId, {
+      status: 'running',
+      worktreePath: '/tmp/worktree/provider-failover-pod',
+      containerId: 'container-source',
+      validationAttempts: 2,
+      reworkCount: 3,
+    });
+
+    await manager.consumeAgentEvents(
+      podId,
+      (async function* () {
+        yield {
+          type: 'status',
+          timestamp: '2026-07-24T10:00:00.000Z',
+          message: 'ready',
+          sessionId: 'source-session',
+        } as const;
+        yield {
+          type: 'error',
+          timestamp: '2026-07-24T10:01:00.000Z',
+          message: 'quota exhausted',
+          fatal: true,
+          classification: {
+            category: 'quota_exhausted',
+            definitive: true,
+            sanitizedMessage: 'Provider quota exhausted',
+          },
+        } as const;
+      })(),
+    );
+
+    const continued = manager.getSession(podId);
+    expect(continued).toMatchObject({
+      id: podId,
+      status: 'queued',
+      runtime: 'codex',
+      model: 'gpt-next',
+      validationAttempts: 2,
+      reworkCount: 3,
+      claudeSessionId: null,
+    });
+    expect(attempts.list(podId)).toMatchObject([
+      {
+        ordinal: 1,
+        outcome: 'quota_exhausted',
+        nativeSessionId: 'source-session',
+        handoffReference: '.autopod/provider-failover.md',
+      },
+      {
+        ordinal: 2,
+        provider: 'openai',
+        providerAccountId: 'target',
+        runtime: 'codex',
+        model: 'gpt-next',
+        outcome: null,
+      },
+    ]);
+    expect(order).toEqual(['abort', 'exclude']);
+    expect(ctx.containerManager.kill).toHaveBeenCalledWith('container-source');
+    expect(deferredRequeue).toHaveBeenCalledWith(podId);
+    expect(ctx.enqueuedSessions).toEqual([]);
+
+    vi.mocked(ctx.containerManager.spawn).mockRejectedValueOnce(new Error('target startup failed'));
+    await manager.processPod(podId);
+    expect(manager.getSession(podId)).toMatchObject({
+      status: 'paused',
+      pauseReason: 'provider_limit',
+      claudeSessionId: null,
+      validationAttempts: 2,
+      reworkCount: 3,
+    });
+    expect(attempts.list(podId).at(-1)).toMatchObject({
+      providerAccountId: 'target',
+      outcome: 'failed',
+    });
+    await expect(
+      manager.continueProvider(podId, {
+        providerAccountId: 'target',
+        runtime: 'codex',
+        model: 'gpt-next',
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_PROVIDER_TARGET' });
+  });
+
+  it('provider-failover-fails ambiguous errors and supports explicit quota continuation', async () => {
+    const ctx = createTestContext();
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    insertProviderAccount(ctx.db, 'source', 'anthropic', {
+      provider: 'anthropic',
+      apiKey: 'source-key',
+    });
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'source');
+    ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Pause safely' },
+      'user-1',
+    );
+    ctx.enqueuedSessions.length = 0;
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      worktreePath: `/tmp/worktree/${pod.id}`,
+      containerId: 'source-container',
+    });
+    await manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        yield {
+          type: 'status',
+          timestamp: '2026-07-24T10:00:00.000Z',
+          message: 'ready',
+          sessionId: 'native-source',
+        } as const;
+        yield {
+          type: 'error',
+          timestamp: '2026-07-24T10:01:00.000Z',
+          message: 'quota exhausted',
+          fatal: true,
+          classification: {
+            category: 'quota_exhausted',
+            definitive: true,
+            sanitizedMessage: 'Provider quota exhausted',
+          },
+        } as const;
+      })(),
+    );
+    expect(manager.getSession(pod.id)).toMatchObject({
+      status: 'paused',
+      pauseReason: 'provider_limit',
+      claudeSessionId: 'native-source',
+    });
+    expect(ctx.enqueuedSessions).toEqual([]);
+
+    const restartedManager = createPodManager(ctx.deps);
+    await restartedManager.continueProvider(pod.id);
+    expect(restartedManager.getSession(pod.id)).toMatchObject({
+      status: 'queued',
+      runtime: 'claude',
+      model: 'opus',
+      claudeSessionId: 'native-source',
+      validationAttempts: 0,
+      reworkCount: 0,
+    });
+    expect(ctx.enqueuedSessions).toEqual([pod.id]);
+
+    const ambiguous = manager.createSession(
+      { profileName: 'test-profile', task: 'Ambiguous error' },
+      'user-1',
+    );
+    ctx.podRepo.update(ambiguous.id, {
+      status: 'running',
+      worktreePath: `/tmp/worktree/${ambiguous.id}`,
+    });
+    await manager.consumeAgentEvents(
+      ambiguous.id,
+      (async function* () {
+        yield {
+          type: 'error',
+          timestamp: '2026-07-24T11:00:00.000Z',
+          message: 'rate limited',
+          fatal: true,
+          classification: {
+            category: 'transient',
+            definitive: false,
+            sanitizedMessage: 'Provider throttled',
+          },
+        } as const;
+      })(),
+    );
+    expect(manager.getSession(ambiguous.id)).toMatchObject({
+      status: 'failed',
+      pauseReason: null,
+    });
+
+    const ordinary = manager.createSession(
+      { profileName: 'test-profile', task: 'Ordinary agent failure' },
+      'user-1',
+    );
+    ctx.podRepo.update(ordinary.id, { status: 'running' });
+    await manager.consumeAgentEvents(
+      ordinary.id,
+      (async function* () {
+        yield {
+          type: 'error',
+          timestamp: '2026-07-24T12:00:00.000Z',
+          message: 'agent process crashed',
+          fatal: true,
+        } as const;
+      })(),
+    );
+    expect(manager.getSession(ordinary.id).status).toBe('failed');
+  });
+
+  it('provider-failover-pauses across unsafe policy and protection cases', async () => {
+    const cases: Array<{
+      name: string;
+      policy: {
+        targets: Array<{ providerAccountId: string; runtime: RuntimeType; model: string }>;
+      } | null;
+      targetProvider?: 'openai' | 'copilot';
+      targetCredentials?: ProviderCredentials | null;
+      failExclusion?: boolean;
+    }> = [
+      { name: 'no policy', policy: null },
+      { name: 'explicit disable', policy: { targets: [] } },
+      {
+        name: 'missing credentials',
+        policy: {
+          targets: [{ providerAccountId: 'target', runtime: 'codex', model: 'gpt-next' }],
+        },
+        targetProvider: 'openai',
+        targetCredentials: null,
+      },
+      {
+        name: 'incompatible runtime',
+        policy: {
+          targets: [{ providerAccountId: 'target', runtime: 'claude', model: 'gpt-next' }],
+        },
+        targetProvider: 'openai',
+        targetCredentials: { provider: 'openai', apiKey: 'target-key' },
+      },
+      {
+        name: 'exclusion failure',
+        policy: {
+          targets: [{ providerAccountId: 'target', runtime: 'codex', model: 'gpt-next' }],
+        },
+        targetProvider: 'openai',
+        targetCredentials: { provider: 'openai', apiKey: 'target-key' },
+        failExclusion: true,
+      },
+    ];
+
+    for (const scenario of cases) {
+      const ctx = createTestContext();
+      const attempts = createProviderAttemptRepository(ctx.db);
+      ctx.deps.providerAttemptRepo = attempts;
+      insertProviderAccount(ctx.db, 'source', 'anthropic', {
+        provider: 'anthropic',
+        apiKey: 'source-key',
+      });
+      linkProfileToProviderAccount(ctx.db, 'test-profile', 'source');
+      if (scenario.targetProvider) {
+        insertProviderAccount(
+          ctx.db,
+          'target',
+          scenario.targetProvider,
+          scenario.targetCredentials ?? null,
+        );
+      }
+      if (scenario.policy !== null) {
+        ctx.db
+          .prepare('UPDATE profiles SET provider_failover = ? WHERE name = ?')
+          .run(JSON.stringify(scenario.policy), 'test-profile');
+      }
+      ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+      if (scenario.failExclusion) {
+        const ensureExcludes = ctx.worktreeManager.ensureExcludes;
+        if (!ensureExcludes) throw new Error('Test worktree manager lacks ensureExcludes');
+        vi.mocked(ensureExcludes).mockRejectedValue(new Error('exclude unavailable'));
+      }
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: scenario.name },
+        'user-1',
+      );
+      ctx.enqueuedSessions.length = 0;
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        worktreePath: `/tmp/worktree/${pod.id}`,
+        validationAttempts: 1,
+        reworkCount: 2,
+      });
+      await manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          yield {
+            type: 'error',
+            timestamp: '2026-07-24T13:00:00.000Z',
+            message: 'quota exhausted',
+            fatal: true,
+            classification: {
+              category: 'quota_exhausted',
+              definitive: true,
+              sanitizedMessage: 'Provider quota exhausted',
+            },
+          } as const;
+        })(),
+      );
+      expect(manager.getSession(pod.id), scenario.name).toMatchObject({
+        status: 'paused',
+        pauseReason: 'provider_limit',
+        worktreePath: `/tmp/worktree/${pod.id}`,
+        validationAttempts: 1,
+        reworkCount: 2,
+      });
+      expect(attempts.list(pod.id), scenario.name).toHaveLength(1);
+      expect(ctx.enqueuedSessions, scenario.name).toEqual([]);
+    }
+  });
+
+  it('provider-failover-fails auth and outage but pauses on unproven teardown', async () => {
+    for (const category of ['auth', 'provider_unavailable'] as const) {
+      const ctx = createTestContext();
+      const attempts = createProviderAttemptRepository(ctx.db);
+      ctx.deps.providerAttemptRepo = attempts;
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: `${category} failure` },
+        'user-1',
+      );
+      ctx.enqueuedSessions.length = 0;
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        worktreePath: `/tmp/worktree/${pod.id}`,
+      });
+      await manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          yield {
+            type: 'error',
+            timestamp: '2026-07-24T14:00:00.000Z',
+            message: category,
+            fatal: true,
+            classification: {
+              category,
+              definitive: true,
+              sanitizedMessage: `Provider ${category}`,
+            },
+          } as const;
+        })(),
+      );
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'failed',
+        pauseReason: null,
+      });
+      expect(ctx.enqueuedSessions).toEqual([]);
+    }
+
+    const ctx = createTestContext();
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    insertProviderAccount(ctx.db, 'source', 'anthropic', {
+      provider: 'anthropic',
+      apiKey: 'source-key',
+    });
+    insertProviderAccount(ctx.db, 'target', 'openai', {
+      provider: 'openai',
+      apiKey: 'target-key',
+    });
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'source');
+    ctx.db.prepare('UPDATE profiles SET provider_failover = ? WHERE name = ?').run(
+      JSON.stringify({
+        targets: [{ providerAccountId: 'target', runtime: 'codex', model: 'gpt-next' }],
+      }),
+      'test-profile',
+    );
+    ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+    vi.mocked(ctx.containerManager.kill).mockRejectedValue(new Error('kill failed'));
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'teardown failure' },
+      'user-1',
+    );
+    ctx.enqueuedSessions.length = 0;
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      worktreePath: `/tmp/worktree/${pod.id}`,
+      containerId: 'source-container',
+    });
+    await manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        yield {
+          type: 'error',
+          timestamp: '2026-07-24T15:00:00.000Z',
+          message: 'quota exhausted',
+          fatal: true,
+          classification: {
+            category: 'quota_exhausted',
+            definitive: true,
+            sanitizedMessage: 'Provider quota exhausted',
+          },
+        } as const;
+      })(),
+    );
+    expect(manager.getSession(pod.id)).toMatchObject({
+      status: 'paused',
+      containerId: 'source-container',
+    });
+    expect(ctx.enqueuedSessions).toEqual([]);
+  });
+
+  it('provider-failover-pauses without mutating rejected operator continuations', async () => {
+    const makeContext = () => {
+      const ctx = createTestContext();
+      const attempts = createProviderAttemptRepository(ctx.db);
+      ctx.deps.providerAttemptRepo = attempts;
+      insertProviderAccount(ctx.db, 'source', 'anthropic', {
+        provider: 'anthropic',
+        apiKey: 'source-key',
+      });
+      insertProviderAccount(ctx.db, 'target', 'openai', {
+        provider: 'openai',
+        apiKey: 'target-key',
+      });
+      insertProviderAccount(ctx.db, 'rogue', 'openai', {
+        provider: 'openai',
+        apiKey: 'rogue-key',
+      });
+      linkProfileToProviderAccount(ctx.db, 'test-profile', 'source');
+      ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+      return { ctx, attempts, manager: createPodManager(ctx.deps) };
+    };
+
+    {
+      const { ctx, attempts, manager } = makeContext();
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Reject invalid evidence' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'paused',
+        pauseReason: 'provider_limit',
+        worktreePath: `/tmp/worktree/${pod.id}`,
+      });
+      attempts.open({
+        podId: pod.id,
+        provider: 'anthropic',
+        providerAccountId: 'source',
+        runtime: 'claude',
+        model: 'opus',
+        profileReference: `pod:${pod.id}@profile-snapshot#abcdef1`,
+        profileSnapshot: { name: 'test-profile' },
+      });
+      const podBefore = manager.getSession(pod.id);
+      const attemptsBefore = attempts.list(pod.id);
+
+      await expect(manager.continueProvider(pod.id)).rejects.toMatchObject({
+        code: 'PROVIDER_LIMIT_NOT_DEFINITIVE',
+      });
+      expect(manager.getSession(pod.id)).toEqual(podBefore);
+      expect(attempts.list(pod.id)).toEqual(attemptsBefore);
+      expect(attempts.getActive(pod.id)).not.toBeNull();
+    }
+
+    {
+      const { ctx, attempts, manager } = makeContext();
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Reject unauthorized target' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'paused',
+        pauseReason: 'provider_limit',
+        worktreePath: `/tmp/worktree/${pod.id}`,
+        runtime: 'codex',
+        model: 'gpt-next',
+        claudeSessionId: null,
+      });
+      attempts.open({
+        podId: pod.id,
+        provider: 'anthropic',
+        providerAccountId: 'source',
+        runtime: 'claude',
+        model: 'opus',
+        profileReference: `pod:${pod.id}@profile-snapshot#abcdef1`,
+        profileSnapshot: { name: 'test-profile' },
+      });
+      attempts.close(pod.id, {
+        nativeSessionId: 'source-native-session',
+        outcome: 'quota_exhausted',
+        classification: {
+          category: 'quota_exhausted',
+          definitive: true,
+          sanitizedMessage: 'Provider quota exhausted',
+        },
+        inputTokens: 10,
+        outputTokens: 5,
+        costUsd: 0.1,
+        handoffReference: '.autopod/provider-failover.md',
+      });
+      attempts.open({
+        podId: pod.id,
+        provider: 'openai',
+        providerAccountId: 'target',
+        runtime: 'codex',
+        model: 'gpt-next',
+        profileReference: `pod:${pod.id}@profile-snapshot#abcdef2`,
+        profileSnapshot: { name: 'test-profile' },
+      });
+      const podBefore = manager.getSession(pod.id);
+      const attemptsBefore = attempts.list(pod.id);
+
+      await expect(
+        manager.continueProvider(pod.id, {
+          providerAccountId: 'rogue',
+          runtime: 'codex',
+          model: 'gpt-rogue',
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_PROVIDER_TARGET' });
+      expect(manager.getSession(pod.id)).toEqual(podBefore);
+      expect(attempts.list(pod.id)).toEqual(attemptsBefore);
+      expect(attempts.getActive(pod.id)).toMatchObject({
+        providerAccountId: 'target',
+        runtime: 'codex',
+        model: 'gpt-next',
+      });
+    }
+
+    {
+      const { ctx, attempts, manager } = makeContext();
+      ctx.db.prepare('UPDATE profiles SET provider_failover = ? WHERE name = ?').run(
+        JSON.stringify({
+          targets: [{ providerAccountId: 'target', runtime: 'codex', model: 'gpt-next' }],
+          maxHops: 1,
+        }),
+        'test-profile',
+      );
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Continue validated stranded target' },
+        'user-1',
+      );
+      ctx.enqueuedSessions.length = 0;
+      ctx.podRepo.update(pod.id, {
+        status: 'paused',
+        pauseReason: 'provider_limit',
+        worktreePath: `/tmp/worktree/${pod.id}`,
+        runtime: 'codex',
+        model: 'gpt-next',
+      });
+      attempts.open({
+        podId: pod.id,
+        provider: 'anthropic',
+        providerAccountId: 'source',
+        runtime: 'claude',
+        model: 'opus',
+        profileReference: `pod:${pod.id}@profile-snapshot#abcdef1`,
+        profileSnapshot: { name: 'test-profile' },
+      });
+      attempts.close(pod.id, {
+        nativeSessionId: 'source-native-session',
+        outcome: 'quota_exhausted',
+        classification: {
+          category: 'quota_exhausted',
+          definitive: true,
+          sanitizedMessage: 'Provider quota exhausted',
+        },
+        inputTokens: 10,
+        outputTokens: 5,
+        costUsd: 0.1,
+        handoffReference: '.autopod/provider-failover.md',
+      });
+      attempts.open({
+        podId: pod.id,
+        provider: 'openai',
+        providerAccountId: 'target',
+        runtime: 'codex',
+        model: 'gpt-next',
+        profileReference: `pod:${pod.id}@profile-snapshot#abcdef2`,
+        profileSnapshot: { name: 'test-profile' },
+      });
+
+      ctx.podRepo.update(pod.id, { containerId: 'stranded-container' });
+      vi.mocked(ctx.containerManager.kill).mockRejectedValueOnce(new Error('teardown failed'));
+      const teardownPodBefore = manager.getSession(pod.id);
+      const teardownAttemptsBefore = attempts.list(pod.id);
+      await expect(
+        manager.continueProvider(pod.id, {
+          providerAccountId: 'target',
+          runtime: 'codex',
+          model: 'gpt-next',
+        }),
+      ).rejects.toMatchObject({ code: 'PROVIDER_CONTINUATION_UNSAFE' });
+      expect(manager.getSession(pod.id)).toEqual(teardownPodBefore);
+      expect(attempts.list(pod.id)).toEqual(teardownAttemptsBefore);
+      expect(attempts.getActive(pod.id)).not.toBeNull();
+
+      ctx.podRepo.update(pod.id, { containerId: null });
+      const ensureExcludes = ctx.worktreeManager.ensureExcludes;
+      if (!ensureExcludes) throw new Error('Test worktree manager lacks ensureExcludes');
+      vi.mocked(ensureExcludes).mockRejectedValueOnce(new Error('exclude failed'));
+      const exclusionPodBefore = manager.getSession(pod.id);
+      const exclusionAttemptsBefore = attempts.list(pod.id);
+      await expect(
+        manager.continueProvider(pod.id, {
+          providerAccountId: 'target',
+          runtime: 'codex',
+          model: 'gpt-next',
+        }),
+      ).rejects.toMatchObject({ code: 'PROVIDER_CONTINUATION_UNSAFE' });
+      expect(manager.getSession(pod.id)).toEqual(exclusionPodBefore);
+      expect(attempts.list(pod.id)).toEqual(exclusionAttemptsBefore);
+      expect(attempts.getActive(pod.id)).not.toBeNull();
+
+      await expect(
+        manager.continueProvider(pod.id, {
+          providerAccountId: 'target',
+          runtime: 'codex',
+          model: 'gpt-next',
+        }),
+      ).resolves.toEqual({ action: 'alternate-provider' });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'queued',
+        runtime: 'codex',
+        model: 'gpt-next',
+        validationAttempts: 0,
+        reworkCount: 0,
+      });
+      expect(attempts.list(pod.id)).toMatchObject([
+        { ordinal: 1, outcome: 'quota_exhausted' },
+        { ordinal: 2, outcome: 'aborted' },
+        { ordinal: 3, providerAccountId: 'target', outcome: null },
+      ]);
+      expect(ctx.enqueuedSessions).toEqual([pod.id]);
+    }
   });
 
   describe('sandbox warm image preflight', () => {
@@ -3418,9 +4211,7 @@ describe('PodManager', () => {
         );
         vi.mocked(ctx.containerManager.readFile).mockImplementation(
           async (_containerId, filePath) =>
-            filePath === `/autopod/artifacts/handovers/${pod.id}.md`
-              ? '# Current handover\n'
-              : '',
+            filePath === `/autopod/artifacts/handovers/${pod.id}.md` ? '# Current handover\n' : '',
         );
 
         await manager.processPod(pod.id);
@@ -9462,6 +10253,43 @@ describe('PodManager', () => {
       expect(result.phaseTokenUsage?.agent_initial).toEqual({
         inputTokens: 1000,
         outputTokens: 500,
+      });
+    });
+
+    it('attributes metered review calls that did not produce a verdict', async () => {
+      const ctx = createTestContext({
+        overall: 'pass',
+        taskReview: null,
+        reviewSkipReason: 'Failed to parse Tier 1 review response',
+        reviewSkipKind: 'review-failed',
+        reviewTokenUsage: {
+          inputTokens: 2000,
+          outputTokens: 150,
+          cachedInputTokens: 1200,
+          costUsd: 0.42,
+        },
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Unparseable review task' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        phaseTokenUsage: { agent_initial: { inputTokens: 1000, outputTokens: 500 } },
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(manager.getSession(pod.id).phaseTokenUsage).toMatchObject({
+        agent_initial: { inputTokens: 1000, outputTokens: 500 },
+        review: {
+          inputTokens: 2000,
+          outputTokens: 150,
+          cachedInputTokens: 1200,
+          costUsd: 0.42,
+        },
       });
     });
 

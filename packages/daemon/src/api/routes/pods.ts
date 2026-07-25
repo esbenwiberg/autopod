@@ -27,6 +27,10 @@ import { computeModelsAnalytics } from '../../pods/models-aggregator.js';
 import type { PendingOverrideRepository } from '../../pods/pending-override-repository.js';
 import { computePodCostBreakdown } from '../../pods/pod-cost-breakdown.js';
 import type { PodRepository } from '../../pods/pod-repository.js';
+import {
+  type ProviderAttemptRepository,
+  createProviderAttemptRepository,
+} from '../../pods/provider-attempt-repository.js';
 import type { QualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { computeQualitySignals } from '../../pods/quality-signals.js';
 import { computeReliabilityAnalytics } from '../../pods/reliability-aggregator.js';
@@ -126,8 +130,23 @@ function rewritePreviewUrlForRequest(
 function serializePodForRequest(
   pod: ReturnType<PodManager['getSession']>,
   request: FastifyRequest,
+  providerAttemptRepo?: ProviderAttemptRepository,
 ): unknown {
-  const wire = serializePodForWire(pod) as Record<string, unknown>;
+  const attempts = providerAttemptRepo?.list(pod.id) ?? [];
+  const latestAttempt = attempts.at(-1);
+  const projectedPod = latestAttempt
+    ? {
+        ...pod,
+        runtime: latestAttempt.runtime,
+        model: latestAttempt.model,
+        claudeSessionId: latestAttempt.runtime === 'claude' ? latestAttempt.nativeSessionId : null,
+        codexSessionId: latestAttempt.runtime === 'codex' ? latestAttempt.nativeSessionId : null,
+        piSessionId: latestAttempt.runtime === 'pi' ? latestAttempt.nativeSessionId : null,
+        ...providerAttemptRepo?.totals(pod.id),
+      }
+    : pod;
+  const wire = serializePodForWire(projectedPod) as Record<string, unknown>;
+  wire.providerAttempts = attempts;
   if (typeof wire.previewUrl === 'string') {
     wire.previewUrl = rewritePreviewUrlForRequest(pod.id, wire.previewUrl, request);
   }
@@ -296,6 +315,7 @@ export function podRoutes(
   safetyEventsRepo?: SafetyEventsRepository,
   actionAuditRepo?: ActionAuditRepository,
 ): void {
+  const providerAttemptRepo = db ? createProviderAttemptRepository(db) : undefined;
   // POST /pods — create a new pod
   app.post('/pods', async (request, reply) => {
     const body = createPodRequestSchema.parse(request.body);
@@ -361,7 +381,7 @@ export function podRoutes(
         name: request.user.name,
       });
       reply.status(201);
-      return serializePodForRequest(pod, request);
+      return serializePodForRequest(pod, request, providerAttemptRepo);
     } catch (err) {
       if (err instanceof AutopodError) {
         reply.status(err.statusCode ?? 400);
@@ -407,7 +427,7 @@ export function podRoutes(
       limit,
     });
     if (query.compact === 'true') return pods.map((pod) => compactPod(pod, request));
-    return pods.map((pod) => serializePodForRequest(pod, request));
+    return pods.map((pod) => serializePodForRequest(pod, request, providerAttemptRepo));
   });
 
   // GET /pods/stats — pod counts grouped by status
@@ -421,7 +441,7 @@ export function podRoutes(
   // GET /pods/:podId — get pod
   app.get('/pods/:podId', async (request) => {
     const { podId } = request.params as { podId: string };
-    return serializePodForRequest(podManager.getSession(podId), request);
+    return serializePodForRequest(podManager.getSession(podId), request, providerAttemptRepo);
   });
 
   // POST /pods/:podId/message — send message
@@ -588,6 +608,7 @@ export function podRoutes(
       escalationRepo,
       qualityScoreRepo,
       validationRepo,
+      providerAttemptRepo,
     });
   });
 
@@ -816,6 +837,29 @@ export function podRoutes(
     const { podId } = request.params as { podId: string };
     try {
       const result = await podManager.resumePod(podId);
+      return { ok: true, action: result.action };
+    } catch (err) {
+      if (err instanceof AutopodError) {
+        reply.status(err.statusCode ?? 400);
+        return { error: err.message, code: err.code };
+      }
+      throw err;
+    }
+  });
+
+  // POST /pods/:podId/continue-provider — provider-limit continuation only.
+  // Kept separate from downstream-only Resume semantics.
+  app.post('/pods/:podId/continue-provider', async (request, reply) => {
+    const { podId } = request.params as { podId: string };
+    const body = (request.body ?? {}) as {
+      target?: {
+        providerAccountId: string;
+        runtime: 'claude' | 'codex' | 'copilot' | 'pi';
+        model: string;
+      };
+    };
+    try {
+      const result = await podManager.continueProvider(podId, body.target);
       return { ok: true, action: result.action };
     } catch (err) {
       if (err instanceof AutopodError) {

@@ -15,8 +15,10 @@ import type {
   Pod,
   PodStatus,
   Profile,
+  ProfileEditorPayload,
   ProviderAccountProvider,
   ProviderCredentials,
+  ProviderFailoverPolicy,
   PublicProfile,
   PublicProviderAccount,
   PublicProviderCatalog,
@@ -357,6 +359,10 @@ export class AutopodClient {
     return this.request<PublicProfile>('GET', `/profiles/${name}`);
   }
 
+  async getProfileEditor(name: string): Promise<ProfileEditorPayload> {
+    return this.request<ProfileEditorPayload>('GET', `/profiles/${name}/editor`);
+  }
+
   async getGitHubAuthStatus(): Promise<
     | { available: true; login: string | null; setup: string }
     | { available: false; reason: string; setup: string }
@@ -410,13 +416,18 @@ export class AutopodClient {
     name: string;
     provider: ProviderAccountProvider;
     credentials?: ProviderCredentials | null;
+    failoverPolicy?: ProviderFailoverPolicy | null;
   }): Promise<PublicProviderAccount> {
     return this.request<PublicProviderAccount>('POST', '/provider-accounts', account);
   }
 
   async updateProviderAccount(
     id: string,
-    changes: { name?: string; credentials?: ProviderCredentials | null },
+    changes: {
+      name?: string;
+      credentials?: ProviderCredentials | null;
+      failoverPolicy?: ProviderFailoverPolicy | null;
+    },
   ): Promise<PublicProviderAccount> {
     return this.request<PublicProviderAccount>('PATCH', `/provider-accounts/${id}`, changes);
   }

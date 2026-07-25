@@ -572,6 +572,39 @@ describe('computePodCostBreakdown', () => {
     expect(result.totalCostUsd).toBeCloseTo(2.0);
   });
 
+  it('includes newly attributed reviewer cost in validation and session totals', () => {
+    const podId = insertPod(db, {
+      model: 'claude-opus-4-8',
+      costUsd: 0.75,
+      inputTokens: 50_000,
+      outputTokens: 2_000,
+      phaseTokenUsage: {
+        agent_initial: {
+          inputTokens: 50_000,
+          outputTokens: 2_000,
+          costUsd: 0.75,
+        },
+        review: {
+          inputTokens: 20_000,
+          cachedInputTokens: 12_000,
+          outputTokens: 800,
+          costUsd: 0.0195,
+        },
+      },
+    });
+
+    const result = computePodCostBreakdown(podRepo.getOrThrow(podId));
+    const validation = result.segments.find((segment) => segment.bucket === 'validation');
+
+    expect(validation).toMatchObject({
+      inputTokens: 20_000,
+      outputTokens: 800,
+      costUsd: 0.0195,
+      sourcePhases: ['review'],
+    });
+    expect(result.totalCostUsd).toBeCloseTo(0.7695);
+  });
+
   it('puts legacy pods with no phase token usage into unattributed', () => {
     const podId = insertPod(db, {
       model: 'gpt-5',
