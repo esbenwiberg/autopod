@@ -21,8 +21,8 @@ import { buildProviderEnv } from './providers/index.js';
 import { createTestDb } from './test-utils/mock-helpers.js';
 
 const fixtureProviderId = 'fixture-cloud';
-const fixturePiProviderId = 'fixture';
-const fixtureModelId = 'fixture/reviewed-model';
+const fixturePiProviderId = 'fixture-wire';
+const fixtureModelId = 'fixture-wire/reviewed-model';
 const fixtureHost = 'api.fixture.example';
 const sentinelKey = 'sentinel-provider-key-must-not-leak';
 
@@ -280,6 +280,14 @@ describe('provider portability integration', () => {
 
   it('keeps the fixture out of runtime and product source inventories', () => {
     const root = path.resolve(import.meta.dirname, '../../..');
+    const fixtureIdentifiers = [
+      fixtureProviderId,
+      fixturePiProviderId,
+      fixtureModelId,
+      fixtureHost,
+      'unknown-fixture-icon',
+      sentinelKey,
+    ];
     const runtimeTypeSource = fs.readFileSync(
       path.join(root, 'packages/shared/src/types/runtime.ts'),
       'utf8',
@@ -287,10 +295,10 @@ describe('provider portability integration', () => {
     expect(runtimeTypeSource).toContain(
       "export type RuntimeType = 'claude' | 'codex' | 'copilot' | 'pi';",
     );
-    expect(runtimeTypeSource).not.toContain(fixtureProviderId);
 
     for (const relativeDirectory of [
-      'packages/daemon/src/runtimes',
+      'packages/shared/src',
+      'packages/daemon/src',
       'packages/cli/src',
       'packages/desktop/Sources',
     ]) {
@@ -305,7 +313,13 @@ describe('provider portability integration', () => {
         );
       for (const file of files) {
         const filePath = path.join(file.parentPath, file.name);
-        expect(fs.readFileSync(filePath, 'utf8'), filePath).not.toContain(fixtureProviderId);
+        const source = fs.readFileSync(filePath, 'utf8');
+        for (const identifier of fixtureIdentifiers) {
+          expect(
+            source,
+            `${identifier} must remain fixture data; found in ${filePath}`,
+          ).not.toContain(identifier);
+        }
       }
     }
   });
