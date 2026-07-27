@@ -109,7 +109,7 @@ private func compactPage(id: String, hasNext: Bool) -> String {
   let nextCursor = hasNext ? #""next-page""# : "null"
   return """
   {"pods":[{
-    "id":"\(id)","title":"\(id) title","taskSummary":"Browse summary","profileName":"test",
+    "id":"\(id)","title":"\(id) title","taskExcerpt":"Searchable second line","taskSummary":null,"profileName":"test",
     "status":"complete","model":"sonnet","runtime":"claude","executionTarget":"local",
     "branch":"autopod/\(id)","baseBranch":"main","seriesId":null,"seriesName":null,
     "options":{"agentMode":"auto","output":"pr","validationSuite":"full"},

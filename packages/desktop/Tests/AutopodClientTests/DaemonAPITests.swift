@@ -117,7 +117,7 @@ import AutopodUI
     let next = hasCursor ? "null" : #""next-page""#
     let body = """
     {"pods":[{
-      "id":"\(id)","title":"\(id) title","taskSummary":null,"profileName":"test",
+      "id":"\(id)","title":"\(id) title","taskExcerpt":"Searchable second line","taskSummary":null,"profileName":"test",
       "status":"complete","model":"sonnet","runtime":"claude","executionTarget":"local",
       "branch":"autopod/\(id)","baseBranch":"main","seriesId":null,"seriesName":null,
       "options":{"agentMode":"auto","output":"pr","validationSuite":"full"},

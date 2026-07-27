@@ -411,6 +411,8 @@ describe('Extended Route Tests', () => {
       expect(pods).toHaveLength(1);
       expect(pods[0]?.status).toBe('failed');
       expect(pods[0]?.title).toBe('Compact title');
+      expect(String(pods[0]?.taskExcerpt)).toContain('x');
+      expect(String(pods[0]?.taskExcerpt)).toHaveLength(2_000);
       expect(String(pods[0]?.failureReason)).toHaveLength(500);
       expect(pods[0]?.hasWebUi).toBe(true);
       expect(pods[0]?.previewUrl).toBe(

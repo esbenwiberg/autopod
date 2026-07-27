@@ -578,6 +578,7 @@ export interface PodSummary {
 export interface CompactPod {
   id: string;
   title: string;
+  taskExcerpt: string;
   taskSummary: string | null;
   profileName: string;
   status: PodStatus;

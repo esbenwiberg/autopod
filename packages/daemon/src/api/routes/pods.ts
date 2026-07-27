@@ -63,6 +63,7 @@ const LOG_REPLAY_EVENT_TYPES = ['pod.agent_activity', 'pod.firewall_denied'];
 const MAX_POD_LIST_LIMIT = 500;
 const COMPACT_TITLE_MAX_CHARS = 160;
 const COMPACT_SUMMARY_MAX_CHARS = 500;
+const COMPACT_TASK_MAX_CHARS = 2_000;
 
 interface PodListCursor {
   createdAt: string;
@@ -110,6 +111,7 @@ function compactPod(
   return {
     id: pod.id,
     title,
+    taskExcerpt: pod.task.slice(0, COMPACT_TASK_MAX_CHARS),
     taskSummary: compactText(pod.taskSummary?.actualSummary),
     profileName: pod.profileName,
     status: pod.status,

@@ -52,6 +52,7 @@ public struct CompactPodPageResponse: Codable, Sendable {
 public struct CompactPodResponse: Codable, Sendable {
   public let id: String
   public let title: String
+  public let taskExcerpt: String?
   public let taskSummary: String?
   public let profileName: String
   public let status: String

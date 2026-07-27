@@ -66,6 +66,9 @@ public enum PodMapper {
   // MARK: - API responses → Pod
 
   public static func map(_ response: CompactPodResponse, baseURL: URL? = nil) -> Pod {
+    let searchableTask = [response.taskSummary, response.taskExcerpt]
+      .compactMap { $0 }
+      .joined(separator: "\n")
     let config = PodConfig(
       agentMode: AgentMode(rawValue: response.options.agentMode) ?? .auto,
       output: OutputTarget(rawValue: response.options.output) ?? .pr,
@@ -82,7 +85,7 @@ public enum PodMapper {
       hasWorktree: response.worktreePath != nil,
       branch: response.branch,
       profileName: response.profileName,
-      task: response.taskSummary ?? response.title,
+      task: searchableTask.isEmpty ? response.title : searchableTask,
       model: response.model,
       startedAt: parseDate(response.startedAt ?? response.createdAt),
       updatedAt: parseDate(response.updatedAt),
