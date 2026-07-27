@@ -63,7 +63,44 @@ public enum PodMapper {
     return ScreenshotRef(url: url, source: source, label: dto.path)
   }
 
-  // MARK: - SessionResponse → Pod
+  // MARK: - API responses → Pod
+
+  public static func map(_ response: CompactPodResponse, baseURL: URL? = nil) -> Pod {
+    let config = PodConfig(
+      agentMode: AgentMode(rawValue: response.options.agentMode) ?? .auto,
+      output: OutputTarget(rawValue: response.options.output) ?? .pr,
+      validate: response.options.validate,
+      validationSuite: response.options.validationSuite
+        ?? (response.options.validate ? "full" : "off"),
+      advisoryBrowserQaEnabled: response.options.advisoryBrowserQaEnabled,
+      promotable: response.options.promotable
+    )
+    return Pod(
+      id: response.id,
+      status: PodStatus(rawValue: response.status) ?? .queued,
+      pod: config,
+      hasWorktree: response.worktreePath != nil,
+      branch: response.branch,
+      profileName: response.profileName,
+      task: response.taskSummary ?? response.title,
+      model: response.model,
+      startedAt: parseDate(response.startedAt ?? response.createdAt),
+      updatedAt: parseDate(response.updatedAt),
+      baseBranch: response.baseBranch,
+      escalationQuestion: response.pendingEscalationSummary,
+      containerUrl: response.previewUrl.flatMap(URL.init(string:)),
+      hasWebUi: response.hasWebUi,
+      latestActivity: response.progressSummary
+        ?? response.lastCorrectionMessage
+        ?? response.mergeBlockReason
+        ?? response.failureReason,
+      errorSummary: response.failureReason,
+      briefTitle: response.title,
+      seriesId: response.seriesId,
+      seriesName: response.seriesName,
+      runningAt: response.runningAt.map { parseDate($0) }
+    )
+  }
 
   public static func map(_ response: SessionResponse, baseURL: URL? = nil) -> Pod {
     let status = PodStatus(rawValue: response.status) ?? .queued
@@ -510,6 +547,10 @@ public enum PodMapper {
   // MARK: - Batch mapping
 
   public static func map(_ responses: [SessionResponse], baseURL: URL? = nil) -> [Pod] {
+    responses.map { map($0, baseURL: baseURL) }
+  }
+
+  public static func map(_ responses: [CompactPodResponse], baseURL: URL? = nil) -> [Pod] {
     responses.map { map($0, baseURL: baseURL) }
   }
 

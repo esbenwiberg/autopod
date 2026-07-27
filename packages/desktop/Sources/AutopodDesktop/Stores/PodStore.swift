@@ -70,6 +70,29 @@ public final class PodStore {
     return progress.advisoryDetail != nil && pod.validationChecks?.advisoryQa == nil
   }
 
+  private func mergeRestPod(
+    _ incoming: Pod,
+    with current: Pod?,
+    preferIncomingOnEqual: Bool
+  ) -> Pod {
+    guard let current else { return incoming }
+    if !preferIncomingOnEqual
+      && (current.updatedAt > incoming.updatedAt || current.updatedAt == incoming.updatedAt) {
+      return current
+    }
+    var merged = incoming
+    if current.updatedAt > incoming.updatedAt {
+      // Full hydration may race a newer WebSocket status. Keep the detail payload,
+      // but never regress the lifecycle state or its freshness marker.
+      merged.status = current.status
+      merged.updatedAt = current.updatedAt
+    }
+    if shouldPreserveValidationProgress(current.validationProgress, for: merged) {
+      merged.validationProgress = current.validationProgress
+    }
+    return merged
+  }
+
   // MARK: - Load
 
   public func loadSessions() async {
@@ -80,21 +103,11 @@ public final class PodStore {
     isLoading = true
     error = nil
     do {
-      let responses = try await api.listPods()
+      let responses = try await api.listAllCompactPods()
       let fresh = PodMapper.map(responses, baseURL: api.baseURL)
-      // Preserve in-memory WebSocket state that REST doesn't carry (validationProgress is
-      // transient — set by phase events, never serialised to the database).
-      let savedProgress = Dictionary(
-        uniqueKeysWithValues: pods.compactMap { p in
-          p.validationProgress.map { (p.id, $0) }
-        }
-      )
-      pods = fresh.map { pod in
-        guard let progress = savedProgress[pod.id] else { return pod }
-        guard shouldPreserveValidationProgress(progress, for: pod) else { return pod }
-        var updated = pod
-        updated.validationProgress = progress
-        return updated
+      let currentById = Dictionary(uniqueKeysWithValues: pods.map { ($0.id, $0) })
+      pods = fresh.map {
+        mergeRestPod($0, with: currentById[$0.id], preferIncomingOnEqual: false)
       }
     } catch {
       print("[PodStore] Failed to load pods: \(error)")
@@ -129,11 +142,8 @@ public final class PodStore {
       let response = try await api.getPod(id)
       var updated = PodMapper.map(response, baseURL: api.baseURL)
       if let index = pods.firstIndex(where: { $0.id == id }) {
-        // Preserve WebSocket phase state while validation is active, and while
-        // post-validation advisory QA is still running or not yet reflected by REST.
-        if shouldPreserveValidationProgress(pods[index].validationProgress, for: updated) {
-          updated.validationProgress = pods[index].validationProgress
-        } else if updated.status == .validating {
+        updated = mergeRestPod(updated, with: pods[index], preferIncomingOnEqual: true)
+        if updated.validationProgress == nil && updated.status == .validating {
           updated.validationProgress = ValidationProgress.initial(attempt: updated.attempts?.current ?? 1)
         }
         pods[index] = updated
@@ -196,6 +206,8 @@ public final class PodStore {
   public func updateStatus(_ podId: String, to status: PodStatus) {
     guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
     pods[index].status = status
+    // Mark WebSocket state as newer than any in-flight REST response.
+    pods[index].updatedAt = Date()
   }
 
   public func upsertSession(_ pod: Pod) {

@@ -53,6 +53,101 @@ import AutopodUI
 
 // MARK: - Response decoding tests
 
+@Test func partialPodOptionsDeriveResolvedDefaults() throws {
+  let decoder = JSONDecoder()
+  let suiteWins = try decoder.decode(
+    PodConfigResponse.self,
+    from: Data(#"{"agentMode":"auto","output":"pr","validationSuite":"off","validate":1}"#.utf8)
+  )
+  #expect(suiteWins.validate == false)
+  #expect(suiteWins.promotable == false)
+
+  let explicit = try decoder.decode(
+    PodConfigResponse.self,
+    from: Data(#"{"agentMode":"interactive","output":"none","validate":1,"promotable":0}"#.utf8)
+  )
+  #expect(explicit.validate == true)
+  #expect(explicit.promotable == false)
+
+  let profile = try decoder.decode(
+    ProfileResponse.self,
+    from: Data(
+      #"{"name":"partial","pod":{"agentMode":"interactive","output":"branch","validationSuite":"full"},"version":1,"createdAt":"2026-07-01T00:00:00Z","updatedAt":"2026-07-01T00:00:00Z"}"#.utf8
+    )
+  )
+  #expect(profile.pod?.validate == true)
+  #expect(profile.pod?.promotable == true)
+}
+
+@Test func sessionNestedPartialProfilePodOptionsDecode() throws {
+  let json = """
+  {
+    "id":"reduced-gopher","profileName":"mint","task":"Historical pod","status":"complete",
+    "model":"sonnet","runtime":"claude","executionTarget":"local","branch":"autopod/reduced-gopher",
+    "containerId":null,"worktreePath":null,"validationAttempts":1,"maxValidationAttempts":3,
+    "lastValidationResult":null,"pendingEscalation":null,"escalationCount":0,"skipValidation":false,
+    "createdAt":"2026-07-01T00:00:00Z","startedAt":"2026-07-01T00:00:01Z",
+    "completedAt":"2026-07-01T00:10:00Z","updatedAt":"2026-07-01T00:10:00Z","userId":"user",
+    "filesChanged":1,"linesAdded":2,"linesRemoved":0,"previewUrl":null,"prUrl":null,
+    "plan":null,"progress":null,"claudeSessionId":null,"outputMode":"pr",
+    "options":{"agentMode":"auto","output":"pr","validate":true,"promotable":false},
+    "inputTokens":0,"outputTokens":0,"costUsd":0,"commitCount":1,
+    "profileSnapshot":{
+      "name":"mint",
+      "pod":{"agentMode":"auto","output":"pr","validationSuite":"full"},
+      "version":1,"createdAt":"2026-07-01T00:00:00Z","updatedAt":"2026-07-01T00:00:00Z"
+    }
+  }
+  """.data(using: .utf8)!
+
+  let session = try JSONDecoder().decode(SessionResponse.self, from: json)
+  #expect(session.profileSnapshot?.pod?.validate == true)
+  #expect(session.profileSnapshot?.pod?.promotable == false)
+}
+
+@Test func compactPodAPITraversesPagesWithoutDetailRequests() async throws {
+  let recorder = PathRecorder()
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [RecordingURLProtocol.self]
+  RecordingURLProtocol.handler = { request in
+    await recorder.record(request.url!)
+    let hasCursor = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+      .queryItems?.contains(where: { $0.name == "cursor" }) == true
+    let id = hasCursor ? "older" : "newer"
+    let next = hasCursor ? "null" : #""next-page""#
+    let body = """
+    {"pods":[{
+      "id":"\(id)","title":"\(id) title","taskSummary":null,"profileName":"test",
+      "status":"complete","model":"sonnet","runtime":"claude","executionTarget":"local",
+      "branch":"autopod/\(id)","baseBranch":"main","seriesId":null,"seriesName":null,
+      "options":{"agentMode":"auto","output":"pr","validationSuite":"full"},
+      "hasWebUi":false,"previewUrl":null,"containerId":null,"worktreePath":null,
+      "createdAt":"2026-07-01T00:00:00Z","startedAt":null,"runningAt":null,
+      "updatedAt":"2026-07-01T00:00:00Z","completedAt":null,"lastHeartbeatAt":null,
+      "failureReason":null,"mergeBlockReason":null,"lastCorrectionMessage":null,
+      "pendingEscalationSummary":null,"progressSummary":null
+    }],"nextCursor":\(next)}
+    """
+    let response = HTTPURLResponse(
+      url: request.url!, statusCode: 200, httpVersion: nil,
+      headerFields: ["Content-Type": "application/json"]
+    )!
+    return (response, Data(body.utf8))
+  }
+  defer { RecordingURLProtocol.handler = nil }
+
+  let api = DaemonAPI(
+    baseURL: URL(string: "https://daemon.example.com")!,
+    token: "token",
+    session: URLSession(configuration: configuration)
+  )
+  let pods = try await api.listAllCompactPods(limit: 1)
+
+  #expect(pods.map(\.id) == ["newer", "older"])
+  #expect(await recorder.paths == ["/pods", "/pods"])
+  #expect(await recorder.queries.allSatisfy { $0.contains("compact=true") })
+}
+
 @Test func sessionResponseDecodes() throws {
   let json = """
   {
@@ -333,6 +428,16 @@ private actor RequestRecorder {
 
   func record(_ header: String?) {
     authorizationHeaders.append(header)
+  }
+}
+
+private actor PathRecorder {
+  private(set) var paths: [String] = []
+  private(set) var queries: [String] = []
+
+  func record(_ url: URL) {
+    paths.append(url.path)
+    queries.append(url.query ?? "")
   }
 }
 

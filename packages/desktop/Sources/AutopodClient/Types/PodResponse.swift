@@ -31,15 +31,53 @@ public struct PodConfigResponse: Codable, Sendable {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     agentMode = try c.decode(String.self, forKey: .agentMode)
     output = try c.decode(String.self, forKey: .output)
-    validate = try decodeBoolOrInt(c, key: .validate)
     validationSuite = try c.decodeIfPresent(String.self, forKey: .validationSuite)
+    let explicitValidate = try decodeBoolOrIntIfPresent(c, key: .validate)
+    validate = validationSuite.map { $0 != "off" } ?? explicitValidate ?? (output == "pr")
     advisoryBrowserQaEnabled = try decodeBoolOrIntIfPresent(c, key: .advisoryBrowserQaEnabled)
-    promotable = try decodeBoolOrInt(c, key: .promotable)
+    promotable = try decodeBoolOrIntIfPresent(c, key: .promotable)
+      ?? (agentMode == "interactive")
   }
 
   private enum CodingKeys: String, CodingKey {
     case agentMode, output, validate, validationSuite, advisoryBrowserQaEnabled, promotable
   }
+}
+
+public struct CompactPodPageResponse: Codable, Sendable {
+  public let pods: [CompactPodResponse]
+  public let nextCursor: String?
+}
+
+public struct CompactPodResponse: Codable, Sendable {
+  public let id: String
+  public let title: String
+  public let taskSummary: String?
+  public let profileName: String
+  public let status: String
+  public let model: String
+  public let runtime: String
+  public let executionTarget: String
+  public let branch: String
+  public let baseBranch: String?
+  public let seriesId: String?
+  public let seriesName: String?
+  public let options: PodConfigResponse
+  public let hasWebUi: Bool
+  public let previewUrl: String?
+  public let containerId: String?
+  public let worktreePath: String?
+  public let createdAt: String
+  public let startedAt: String?
+  public let runningAt: String?
+  public let updatedAt: String
+  public let completedAt: String?
+  public let lastHeartbeatAt: String?
+  public let failureReason: String?
+  public let mergeBlockReason: String?
+  public let lastCorrectionMessage: String?
+  public let pendingEscalationSummary: String?
+  public let progressSummary: String?
 }
 
 // Partial PodConfig for create/update requests — every field is optional.
