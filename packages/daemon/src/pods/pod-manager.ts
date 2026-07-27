@@ -35,6 +35,7 @@ import type {
   ReadinessApproval,
   ReadinessReview,
   ReadinessStatus,
+  ReasoningEffort,
   RequestCredentialPayload,
   ReviewFeedbackResponseItem,
   Runtime,
@@ -1836,13 +1837,36 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return null;
   }
 
+  function reasoningEffortFromSnapshot(
+    snapshot: Record<string, unknown> | null | undefined,
+  ): ReasoningEffort | null {
+    const value = snapshot?.reasoningEffort;
+    return value === 'auto' ||
+      value === 'low' ||
+      value === 'medium' ||
+      value === 'high' ||
+      value === 'xhigh'
+      ? value
+      : null;
+  }
+
+  function resolvedReasoningEffort(
+    profile: Profile,
+    snapshot?: Record<string, unknown> | null,
+  ): ReasoningEffort {
+    return reasoningEffortFromSnapshot(snapshot) ?? profile.reasoningEffort ?? 'auto';
+  }
+
   function ensureProviderAttempt(pod: Pod, profile: Profile): void {
     const repository = deps.providerAttemptRepo;
     if (!repository) return;
-    const provider = providerForAttempt(pod, profile);
+    const active = repository.getActive(pod.id);
+    const provider = providerForAttempt(
+      active ? { ...pod, providerIdSnapshot: active.provider } : pod,
+      profile,
+    );
     const profileSnapshot = redactedProfileSnapshot(pod, profile);
     const profileReference = profileReferenceForAttempt(pod, profileSnapshot);
-    const active = repository.getActive(pod.id);
     if (active) {
       const identityMatches =
         active.provider === provider &&
@@ -2264,6 +2288,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podId: pod.id,
       task: '',
       model: pod.model,
+      reasoningEffort: resolvedReasoningEffort(
+        profile,
+        pod.profileSnapshot as unknown as Record<string, unknown> | null,
+      ),
       workDir: '/workspace',
       containerId,
       customInstructions: 'resume',
@@ -6594,6 +6622,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             model: queuedProviderAttempt.model,
           });
         }
+        const reasoningEffort = resolvedReasoningEffort(
+          profile,
+          queuedProviderAttempt?.profileSnapshot,
+        );
+        profile = { ...profile, reasoningEffort };
 
         // For handoff pods the interactive container is still running. Persist
         // the human's work before stopping that container; if we cannot prove the
@@ -6776,11 +6809,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           profileStore,
           providerAccountStore,
           manifest: providerCatalog,
-          ...(pod.providerIdSnapshot
+          ...(queuedProviderAttempt?.providerAccountId || pod.providerIdSnapshot
             ? {
                 expectedBinding: {
-                  accountId: pod.providerAccountIdSnapshot,
-                  providerId: pod.providerIdSnapshot,
+                  accountId:
+                    queuedProviderAttempt?.providerAccountId ?? pod.providerAccountIdSnapshot,
+                  providerId: queuedProviderAttempt?.providerAccountId
+                    ? (providerAccountStore?.get(queuedProviderAttempt.providerAccountId)
+                        .provider ?? pod.providerIdSnapshot)
+                    : pod.providerIdSnapshot,
                 },
               }
             : {}),
@@ -8178,11 +8215,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           providerAccountStore,
           providerCatalog,
           runtime: pod.runtime,
-          ...(pod.providerIdSnapshot
+          ...(queuedProviderAttempt?.providerAccountId || pod.providerIdSnapshot
             ? {
                 providerBinding: {
-                  accountId: pod.providerAccountIdSnapshot,
-                  providerId: pod.providerIdSnapshot,
+                  accountId:
+                    queuedProviderAttempt?.providerAccountId ?? pod.providerAccountIdSnapshot,
+                  providerId: queuedProviderAttempt?.providerAccountId
+                    ? (providerAccountStore?.get(queuedProviderAttempt.providerAccountId)
+                        .provider ?? pod.providerIdSnapshot)
+                    : pod.providerIdSnapshot,
                 },
               }
             : {}),
@@ -8508,6 +8549,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId,
             task: reworkTask,
             model: pod.model,
+            reasoningEffort,
             workDir: '/workspace',
             containerId,
             customInstructions: runtimeInstructions,
@@ -8567,6 +8609,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 podId,
                 task: recoveryTask,
                 model: podModel,
+                reasoningEffort,
                 workDir: '/workspace',
                 containerId: containerIdRef,
                 customInstructions: customInstructionsRef,
@@ -8604,6 +8647,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId,
             task: recoveryTask,
             model: pod.model,
+            reasoningEffort,
             workDir: '/workspace',
             containerId,
             customInstructions: runtimeInstructions,
@@ -8617,6 +8661,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId,
             task: pod.task,
             model: pod.model,
+            reasoningEffort,
             workDir: '/workspace',
             containerId,
             customInstructions: runtimeInstructions,

@@ -119,6 +119,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         );
         console.log(`${chalk.bold('Model:')}      ${data.defaultModel}`);
         console.log(`${chalk.bold('Runtime:')}    ${data.defaultRuntime}`);
+        console.log(`${chalk.bold('Effort:')}     ${data.reasoningEffort}`);
         console.log(`${chalk.bold('Provider:')}   ${data.modelProvider ?? 'none'}`);
         if (data.prProvider !== 'ado' && githubAuth) {
           console.log(
@@ -333,6 +334,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         defaultModel: 'claude-opus-5',
         reviewerModel: 'claude-sonnet-5',
         defaultRuntime: 'claude',
+        reasoningEffort: 'auto',
         customInstructions: null,
         agentDonePrompt: null,
         escalation: {

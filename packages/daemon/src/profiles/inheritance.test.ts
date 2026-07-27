@@ -16,6 +16,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     maxValidationAttempts: 3,
     defaultModel: 'opus',
     defaultRuntime: 'claude',
+    reasoningEffort: 'auto',
     executionTarget: 'local',
     customInstructions: null,
     agentDonePrompt: null,
@@ -78,6 +79,28 @@ describe('resolveInheritance', () => {
 
     const resolved = resolveInheritance(child, parent);
     expect(resolved.providerAccountId).toBe('team-openai');
+  });
+
+  it('inherits reasoning effort when the child value is null', () => {
+    const parent = makeProfile({ name: 'parent', reasoningEffort: 'high' });
+    const child = makeProfile({
+      name: 'child',
+      extends: 'parent',
+      reasoningEffort: null,
+    });
+
+    expect(resolveInheritance(child, parent).reasoningEffort).toBe('high');
+  });
+
+  it('uses an explicit child reasoning effort override', () => {
+    const parent = makeProfile({ name: 'parent', reasoningEffort: 'low' });
+    const child = makeProfile({
+      name: 'child',
+      extends: 'parent',
+      reasoningEffort: 'xhigh',
+    });
+
+    expect(resolveInheritance(child, parent).reasoningEffort).toBe('xhigh');
   });
 
   it('should append smokePages (parent first, child second)', () => {

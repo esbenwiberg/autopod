@@ -31,6 +31,7 @@ function createProfile(overrides: Record<string, unknown> = {}) {
     defaultModel: 'claude-opus-4-8',
     reviewerModel: 'claude-sonnet-4-6',
     defaultRuntime: 'claude',
+    reasoningEffort: 'auto',
     customInstructions: null,
     escalation: null,
     extends: null,
@@ -216,6 +217,26 @@ describe('profile commands', () => {
     );
   });
 
+  it('uses auto reasoning effort in new profile templates', async () => {
+    process.env.EDITOR = 'true';
+
+    await program.parseAsync(['node', 'ap', 'profile', 'create']);
+
+    expect(mockClient.createProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ reasoningEffort: 'auto' }),
+    );
+  });
+
+  it('shows the exact reasoning effort wire value', async () => {
+    vi.mocked(mockClient.getProfile).mockResolvedValueOnce(
+      createProfile({ reasoningEffort: 'xhigh' }),
+    );
+
+    await program.parseAsync(['node', 'ap', 'profile', 'show', 'my-app']);
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('xhigh'));
+  });
+
   it('sets the profile validation suite', async () => {
     await program.parseAsync([
       'node',
@@ -245,6 +266,24 @@ describe('profile commands', () => {
     expect(mockClient.updateProfile).toHaveBeenCalledWith(
       'my-app',
       expect.objectContaining({ validationSetupCommand: 'pip install -e ".[dev]" semgrep' }),
+    );
+  });
+
+  it('preserves reasoning effort through profile edit updates', async () => {
+    process.env.EDITOR = 'true';
+    vi.mocked(mockClient.getProfileEditor).mockResolvedValueOnce({
+      raw: createProfile({ reasoningEffort: 'medium' }),
+      resolved: createProfile({ reasoningEffort: 'medium' }),
+      parent: null,
+      sourceMap: {},
+      credentialOwner: null,
+    });
+
+    await program.parseAsync(['node', 'ap', 'profile', 'edit', 'my-app']);
+
+    expect(mockClient.updateProfile).toHaveBeenCalledWith(
+      'my-app',
+      expect.objectContaining({ reasoningEffort: 'medium' }),
     );
   });
 

@@ -148,6 +148,7 @@ interface TestProfileOverrides {
   warmImageTag?: string | null;
   modelProvider?: Profile['modelProvider'];
   validationSetupCommand?: string | null;
+  reasoningEffort?: Profile['reasoningEffort'];
 }
 
 function insertTestProfile(db: Database.Database, overrides: TestProfileOverrides | string = {}) {
@@ -164,6 +165,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       private_registries, registry_pat, registry_pat_expires_at, branch_prefix,
       pr_provider, github_pat, github_pat_expires_at, ado_pat, ado_pat_expires_at,
       model_provider
+      , reasoning_effort
     ) VALUES (
       @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
       @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
@@ -172,6 +174,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix,
       @prProvider, @githubPat, @githubPatExpiresAt, @adoPat, @adoPatExpiresAt,
       @modelProvider
+      , @reasoningEffort
     )
   `).run({
     name,
@@ -204,6 +207,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     adoPat: opts.adoPat ?? null,
     adoPatExpiresAt: opts.adoPatExpiresAt ?? null,
     modelProvider: opts.modelProvider ?? 'anthropic',
+    reasoningEffort: opts.reasoningEffort ?? 'auto',
   });
 }
 
@@ -630,6 +634,7 @@ function createTestContext(
         maxValidationAttempts: row.max_validation_attempts as number,
         defaultModel: row.default_model as string,
         defaultRuntime: row.default_runtime as RuntimeType,
+        reasoningEffort: row.reasoning_effort as Profile['reasoningEffort'],
         customInstructions: (row.custom_instructions as string) ?? null,
         escalation: JSON.parse(row.escalation_config as string),
         executionTarget: profileOverrides?.executionTarget ?? 'local',
@@ -803,6 +808,82 @@ function createTestContext(
 describe('PodManager', () => {
   beforeEach(() => {
     mockExecFileSuccess();
+  });
+
+  it('passes auto reasoning effort to a fresh runtime spawn', async () => {
+    const ctx = createTestContext(undefined, { reasoningEffort: 'auto' });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Use runtime default', skipValidation: true },
+      'user-1',
+    );
+
+    await manager.processPod(pod.id);
+
+    expect(ctx.runtime.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ reasoningEffort: 'auto' }),
+    );
+  });
+
+  it('preserves reasoning effort for a provider failover attempt', async () => {
+    const ctx = createTestContext(undefined, { reasoningEffort: 'xhigh' });
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    insertProviderAccount(ctx.db, 'source', 'anthropic', {
+      provider: 'anthropic',
+      apiKey: 'source-key',
+    });
+    insertProviderAccount(ctx.db, 'target', 'openai', {
+      provider: 'openai',
+      apiKey: 'target-key',
+    });
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'source');
+    ctx.db.prepare('UPDATE profiles SET provider_failover = ? WHERE name = ?').run(
+      JSON.stringify({
+        targets: [{ providerAccountId: 'target', runtime: 'codex', model: 'gpt-next' }],
+        maxHops: 1,
+      }),
+      'test-profile',
+    );
+    ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+    ctx.deps.requeueSessionAfterCurrent = vi.fn();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Keep effort across failover', skipValidation: true },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      worktreePath: `/tmp/worktree/${pod.id}`,
+      containerId: 'source-container',
+    });
+
+    await manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        yield {
+          type: 'error',
+          timestamp: '2026-07-27T10:00:00.000Z',
+          message: 'quota exhausted',
+          fatal: true,
+          classification: {
+            category: 'quota_exhausted',
+            definitive: true,
+            sanitizedMessage: 'Provider quota exhausted',
+          },
+        } as const;
+      })(),
+    );
+
+    expect(attempts.getActive(pod.id)).toMatchObject({ providerAccountId: 'target' });
+    await manager.processPod(pod.id);
+
+    expect(ctx.runtime.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'gpt-next',
+        reasoningEffort: 'xhigh',
+      }),
+    );
   });
 
   it('ledgers successful, resumed, failed, paused, and killed runtime segments', async () => {
