@@ -1,0 +1,5 @@
+{
+  "defaultProfile": "autopod-self",
+  "allowedProfiles": ["autopod-self"],
+  "validationSuite": "deterministic"
+}

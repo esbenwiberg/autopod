@@ -39,3 +39,4 @@
 | `ADR-032` | ADR-032: Prompt-only helper containers for daemon LLM helpers | Proposed | Autopod already has live pod container reviewer paths for validation, |
 | `ADR-033` | ADR-033: Add Pi as an Autopod-native worker beside vendor runtimes | Accepted | Autopod already supervises Claude Code, Codex, and Copilot through a common runtime interface and exposes worker capabil |
 | `ADR-034` | ADR-034: Preserve provider continuity with immutable same-pod attempts | Accepted | A provider subscription or quota limit can interrupt useful work without invalidating the pod, |
+| `ADR-035` | ADR-035: Portable common-subset reasoning effort | Accepted | Autopod supervises Claude Code, Codex, GitHub Copilot CLI, and Pi through one runtime interface. Each runtime now expose |

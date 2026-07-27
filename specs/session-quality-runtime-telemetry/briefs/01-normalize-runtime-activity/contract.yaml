@@ -1,0 +1,49 @@
+contract_version: 1
+title: "Normalize runtime quality activity"
+depends_on: []
+scenarios:
+  - id: codex-content-inspection
+    given:
+      - "a Codex Bash event uses a recognized read-only command to inspect a repository file"
+      - "a later mutation references the same file"
+    when:
+      - "runtime activity evidence is normalized"
+    then:
+      - "the command contributes inspection evidence for the canonical file path"
+      - "arbitrary or mutating Bash commands do not contribute inspection evidence"
+  - id: canonical-workspace-path
+    given:
+      - "one event references a relative repository path"
+      - "another references the same path under /workspace"
+    when:
+      - "the paths are canonicalized"
+    then:
+      - "they produce the same repository-relative identity"
+      - "unrelated paths sharing a suffix remain distinct"
+  - id: pi-tool-execution
+    given:
+      - "Pi RPC emits documented tool_execution_start and tool_execution_end records"
+    when:
+      - "the parser handles lowercase read and mutation tools"
+    then:
+      - "one logical invocation produces one quality-relevant activity event"
+      - "tool arguments and call identity are preserved"
+required_facts:
+  - id: fact-runtime-activity-fixtures
+    proves:
+      - codex-content-inspection
+      - canonical-workspace-path
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/quality-activity.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- quality-activity.test.ts
+  - id: fact-pi-tool-events
+    proves:
+      - pi-tool-execution
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/runtimes/pi-rpc-parser.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pi-rpc-parser.test.ts -t "normalizes native tool execution"
+human_review: []
