@@ -6,11 +6,13 @@ import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
+import { QUALITY_SCORE_ALGORITHM_VERSION } from './quality-score-repository.js';
 import { computeScore } from './quality-score.js';
 import { computeQualitySignals } from './quality-signals.js';
 import type { ValidationRepository } from './validation-repository.js';
 
 export interface QualityScoreRecorder {
+  upgradeHistory(limit?: number): number;
   start(): void;
   stop(): void;
 }
@@ -45,62 +47,66 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
   } = deps;
   const unsubscribers: Array<() => void> = [];
 
+  function persistScore(
+    podId: string,
+    finalStatus: 'complete' | 'killed',
+    completedAt: string,
+  ): void {
+    const pod = podRepo.getOrThrow(podId);
+    const signals = computeQualitySignals(podId, {
+      podRepo,
+      eventRepo,
+      escalationRepo,
+      validationRepo,
+      providerAttemptRepo,
+    });
+    const computedScore = computeScore({ signals, finalStatus });
+    const available = signals.inspectionAvailability === 'available';
+
+    qualityScoreRepo.insert({
+      podId,
+      score: available ? computedScore : null,
+      algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+      inspectionAvailability: signals.inspectionAvailability,
+      readCount: signals.readCount,
+      editCount: signals.editCount,
+      readEditRatio: signals.readEditRatio,
+      editsWithoutPriorRead: signals.editsWithoutPriorRead,
+      userInterrupts: signals.userInterrupts,
+      editChurnCount: signals.editChurnCount,
+      tellsCount: signals.tellsCount,
+      prFixAttempts: signals.prFixAttempts,
+      validationPassed: signals.validationPassed,
+      inputTokens: signals.tokens.input,
+      outputTokens: signals.tokens.output,
+      costUsd: signals.tokens.costUsd,
+      runtime: pod.runtime,
+      profileName: pod.profileName,
+      model: pod.model,
+      finalStatus,
+      completedAt,
+      computedAt: new Date().toISOString(),
+    });
+
+    logger.debug(
+      {
+        podId,
+        score: available ? computedScore : null,
+        algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+        inspectionAvailability: signals.inspectionAvailability,
+        grade: signals.grade,
+        runtime: pod.runtime,
+        model: pod.model,
+        tellsCount: signals.tellsCount,
+        editChurnCount: signals.editChurnCount,
+      },
+      'Recorded pod quality score',
+    );
+  }
+
   function recordFor(event: PodCompletedEvent): void {
     try {
-      const pod = podRepo.getOrThrow(event.podId);
-      const signals = computeQualitySignals(event.podId, {
-        podRepo,
-        eventRepo,
-        escalationRepo,
-        validationRepo,
-        providerAttemptRepo,
-      });
-      const score = computeScore({ signals, finalStatus: event.finalStatus });
-      // The versioned persistence brief will store availability explicitly.
-      // Until then, keep legacy non-null columns writable without changing the
-      // live contract: unavailable values are neutral projections and must not
-      // be interpreted as measured telemetry.
-      const persistedReadCount = signals.readCount ?? 0;
-      const persistedReadEditRatio = signals.readEditRatio ?? 5;
-      const persistedEditsWithoutPriorRead = signals.editsWithoutPriorRead ?? 0;
-
-      qualityScoreRepo.insert({
-        podId: event.podId,
-        score,
-        readCount: persistedReadCount,
-        editCount: signals.editCount,
-        readEditRatio: persistedReadEditRatio,
-        editsWithoutPriorRead: persistedEditsWithoutPriorRead,
-        userInterrupts: signals.userInterrupts,
-        editChurnCount: signals.editChurnCount,
-        tellsCount: signals.tellsCount,
-        prFixAttempts: signals.prFixAttempts,
-        validationPassed: signals.validationPassed,
-        inputTokens: signals.tokens.input,
-        outputTokens: signals.tokens.output,
-        costUsd: signals.tokens.costUsd,
-        runtime: pod.runtime,
-        profileName: pod.profileName,
-        // Record the exact model string at completion time — critical for 3d,
-        // since a silent server-side model swap is invisible without it.
-        model: pod.model,
-        finalStatus: event.finalStatus,
-        completedAt: event.timestamp,
-        computedAt: new Date().toISOString(),
-      });
-
-      logger.debug(
-        {
-          podId: event.podId,
-          score,
-          grade: signals.grade,
-          runtime: pod.runtime,
-          model: pod.model,
-          tellsCount: signals.tellsCount,
-          editChurnCount: signals.editChurnCount,
-        },
-        'Recorded pod quality score',
-      );
+      persistScore(event.podId, event.finalStatus, event.timestamp);
     } catch (err) {
       logger.warn({ err, podId: event.podId }, 'Failed to record pod quality score');
     }
@@ -112,6 +118,24 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
   }
 
   return {
+    upgradeHistory(limit = 100): number {
+      const stale = qualityScoreRepo.listStale(limit);
+      let upgraded = 0;
+      for (const score of stale) {
+        try {
+          persistScore(score.podId, score.finalStatus, score.completedAt);
+          upgraded += 1;
+        } catch (err) {
+          logger.warn({ err, podId: score.podId }, 'Failed to upgrade pod quality score');
+        }
+      }
+      logger.info(
+        { upgraded, selected: stale.length, limit },
+        'Quality score history upgrade completed',
+      );
+      return upgraded;
+    },
+
     start(): void {
       const unsub = eventBus.subscribe(handleEvent);
       unsubscribers.push(unsub);

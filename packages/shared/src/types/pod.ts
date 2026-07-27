@@ -666,11 +666,14 @@ export interface QualitySignals {
  */
 export interface PodQualityScore {
   podId: string;
-  score: number;
-  readCount: number;
+  /** Null when inspection-dependent scoring cannot be supported honestly. */
+  score: number | null;
+  algorithmVersion: number;
+  inspectionAvailability: QualityInspectionAvailability;
+  readCount: number | null;
   editCount: number;
-  readEditRatio: number;
-  editsWithoutPriorRead: number;
+  readEditRatio: number | null;
+  editsWithoutPriorRead: number | null;
   userInterrupts: number;
   editChurnCount: number;
   tellsCount: number;

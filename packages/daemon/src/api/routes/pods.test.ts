@@ -25,6 +25,7 @@ import { createMemoryRepository } from '../../pods/memory-repository.js';
 import { createMemoryUsageRepository } from '../../pods/memory-usage-repository.js';
 import { createNudgeRepository } from '../../pods/nudge-repository.js';
 import { createQualityScoreRepository } from '../../pods/quality-score-repository.js';
+import { QUALITY_SCORE_ALGORITHM_VERSION } from '../../pods/quality-score-repository.js';
 import { createProfileStore } from '../../profiles/index.js';
 import { createSafetyEventsRepository } from '../../safety/safety-events-repository.js';
 import { podRoutes } from './pods.js';
@@ -935,6 +936,8 @@ describe('GET /pods/analytics/quality', () => {
     qualityRepo.insert({
       podId: 'q1',
       score: 85,
+      algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+      inspectionAvailability: 'available',
       readCount: 10,
       editCount: 5,
       readEditRatio: 2,
@@ -967,6 +970,82 @@ describe('GET /pods/analytics/quality', () => {
     expect(body.summary.greenCount).toBe(1);
     expect(body.scores).toHaveLength(1);
     expect(body.scores[0].podId).toBe('q1');
+  });
+
+  it('quality algorithm version excludes legacy and unavailable rows', async () => {
+    qualityRepo.insert({
+      podId: 'current',
+      score: 85,
+      algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+      inspectionAvailability: 'available',
+      readCount: 2,
+      editCount: 1,
+      readEditRatio: 2,
+      editsWithoutPriorRead: 0,
+      userInterrupts: 0,
+      editChurnCount: 0,
+      tellsCount: 0,
+      prFixAttempts: 0,
+      validationPassed: true,
+      inputTokens: 10,
+      outputTokens: 5,
+      costUsd: 0.01,
+      runtime: 'codex',
+      profileName: 'test-profile',
+      model: 'gpt-5',
+      finalStatus: 'complete',
+      completedAt: new Date().toISOString(),
+      computedAt: new Date().toISOString(),
+    });
+    qualityRepo.insert({
+      podId: 'unavailable',
+      score: null,
+      algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+      inspectionAvailability: 'unavailable',
+      readCount: null,
+      editCount: 0,
+      readEditRatio: null,
+      editsWithoutPriorRead: null,
+      userInterrupts: 0,
+      editChurnCount: 0,
+      tellsCount: 0,
+      prFixAttempts: 0,
+      validationPassed: null,
+      inputTokens: 10,
+      outputTokens: 5,
+      costUsd: 0.01,
+      runtime: 'pi',
+      profileName: 'test-profile',
+      model: 'pi-model',
+      finalStatus: 'complete',
+      completedAt: new Date().toISOString(),
+      computedAt: new Date().toISOString(),
+    });
+    db.prepare(`
+      INSERT INTO pod_quality_scores (
+        pod_id, score, runtime, profile_name, final_status, completed_at
+      ) VALUES ('legacy', 99, 'claude', 'test-profile', 'complete', datetime('now'))
+    `).run();
+
+    const analytics = await app.inject({
+      method: 'GET',
+      url: '/pods/analytics/quality?days=30',
+      headers: authHeaders,
+    });
+    expect(analytics.json().scores.map((score: { podId: string }) => score.podId)).toEqual([
+      'current',
+    ]);
+
+    const unavailable = qualityRepo.get('unavailable');
+    expect(unavailable).toEqual(
+      expect.objectContaining({
+        score: null,
+        inspectionAvailability: 'unavailable',
+        readCount: null,
+        readEditRatio: null,
+        editsWithoutPriorRead: null,
+      }),
+    );
   });
 });
 

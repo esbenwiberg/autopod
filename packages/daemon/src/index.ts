@@ -801,6 +801,7 @@ const qualityScoreRecorder = createQualityScoreRecorder({
   providerAttemptRepo,
   logger,
 });
+qualityScoreRecorder.upgradeHistory();
 qualityScoreRecorder.start();
 
 // Memory candidate recorder: background LLM extraction of durable lessons from

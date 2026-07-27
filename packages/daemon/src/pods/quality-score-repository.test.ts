@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createTestDb } from '../test-utils/mock-helpers.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 import {
+  QUALITY_SCORE_ALGORITHM_VERSION,
   type QualityScoreRepository,
   createQualityScoreRepository,
 } from './quality-score-repository.js';
@@ -12,6 +13,8 @@ function baseScore(overrides: Partial<PodQualityScore> = {}): PodQualityScore {
   return {
     podId: 'pod-1',
     score: 85,
+    algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+    inspectionAvailability: 'available',
     readCount: 10,
     editCount: 2,
     readEditRatio: 5,
@@ -62,6 +65,50 @@ describe('QualityScoreRepository', () => {
     repo.insert(baseScore({ score: 40 }));
     repo.insert(baseScore({ score: 92 }));
     expect(repo.get('pod-1')?.score).toBe(92);
+  });
+
+  it('migration defaults legacy rows to unavailable algorithm version 1', () => {
+    db.prepare(`
+      INSERT INTO pod_quality_scores (
+        pod_id, score, runtime, profile_name, final_status, completed_at
+      ) VALUES ('legacy', 12, 'pi', 'test-profile', 'complete', datetime('now'))
+    `).run();
+
+    expect(repo.get('legacy')).toEqual(
+      expect.objectContaining({
+        podId: 'legacy',
+        score: null,
+        algorithmVersion: 1,
+        inspectionAvailability: 'unavailable',
+        readCount: null,
+        readEditRatio: null,
+        editsWithoutPriorRead: null,
+      }),
+    );
+  });
+
+  it('excludes stale and unavailable rows from lists, trends, and analytics', () => {
+    repo.insert(baseScore({ podId: 'current' }));
+    repo.insert(
+      baseScore({
+        podId: 'unavailable',
+        score: null,
+        inspectionAvailability: 'unavailable',
+        readCount: null,
+        readEditRatio: null,
+        editsWithoutPriorRead: null,
+      }),
+    );
+    db.prepare(`
+      INSERT INTO pod_quality_scores (
+        pod_id, score, runtime, profile_name, final_status, completed_at
+      ) VALUES ('legacy', 99, 'claude', 'test-profile', 'complete', datetime('now'))
+    `).run();
+
+    expect(repo.list().map((score) => score.podId)).toEqual(['current']);
+    expect(repo.getTrends().map((trend) => trend.podCount)).toEqual([1]);
+    expect(repo.getQualityAnalytics(30).summary.totalPodsScored).toBe(1);
+    expect(repo.listStale(10).map((score) => score.podId)).toEqual(['legacy']);
   });
 
   it('filters by runtime and model', () => {

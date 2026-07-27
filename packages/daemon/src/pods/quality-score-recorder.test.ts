@@ -7,6 +7,7 @@ import { createEventRepository } from './event-repository.js';
 import { type NewPod, createPodRepository } from './pod-repository.js';
 import { createQualityScoreRecorder } from './quality-score-recorder.js';
 import { createQualityScoreRepository } from './quality-score-repository.js';
+import { QUALITY_SCORE_ALGORITHM_VERSION } from './quality-score-repository.js';
 
 const POD_ID = 'pod-rec-01';
 
@@ -44,6 +45,16 @@ function editEvent(path: string): AgentActivityEvent {
     timestamp: new Date().toISOString(),
     path,
     action: 'modify',
+  };
+  return { type: 'pod.agent_activity', timestamp: event.timestamp, podId: POD_ID, event };
+}
+
+function codexInspectionEvent(command: string): AgentActivityEvent {
+  const event: AgentToolUseEvent = {
+    type: 'tool_use',
+    timestamp: new Date().toISOString(),
+    tool: 'Bash',
+    input: { command },
   };
   return { type: 'pod.agent_activity', timestamp: event.timestamp, podId: POD_ID, event };
 }
@@ -108,6 +119,8 @@ describe('QualityScoreRecorder', () => {
     expect(persisted?.inputTokens).toBe(1200);
     expect(persisted?.outputTokens).toBe(300);
     expect(persisted?.costUsd).toBe(0.05);
+    expect(persisted?.algorithmVersion).toBe(QUALITY_SCORE_ALGORITHM_VERSION);
+    expect(persisted?.inspectionAvailability).toBe('available');
     // 3 reads / 1 edit = 3.0 ratio, no blind edits, no interrupts, completed
     // reading 30*clamp(3/5)=18, blind 20, tells 20, interrupts 15, complete 10, churn 10 = 93
     expect(persisted?.score).toBe(93);
@@ -143,7 +156,7 @@ describe('QualityScoreRecorder', () => {
     expect(persisted?.score).toBe(90);
   });
 
-  it('records unavailable inspection telemetry through legacy non-null columns', () => {
+  it('records unavailable inspection telemetry without exposing invented counters', () => {
     ctx.podRepo.insert(basePod({ runtime: 'pi' }));
 
     ctx.recorder.start();
@@ -167,10 +180,62 @@ describe('QualityScoreRecorder', () => {
 
     const persisted = ctx.qualityScoreRepo.get(POD_ID);
     expect(persisted).not.toBeNull();
-    expect(persisted?.score).toBe(100);
-    expect(persisted?.readCount).toBe(0);
-    expect(persisted?.readEditRatio).toBe(5);
-    expect(persisted?.editsWithoutPriorRead).toBe(0);
+    expect(persisted?.score).toBeNull();
+    expect(persisted?.algorithmVersion).toBe(QUALITY_SCORE_ALGORITHM_VERSION);
+    expect(persisted?.inspectionAvailability).toBe('unavailable');
+    expect(persisted?.readCount).toBeNull();
+    expect(persisted?.readEditRatio).toBeNull();
+    expect(persisted?.editsWithoutPriorRead).toBeNull();
+  });
+
+  it('rebuilds retained Codex history once with normalized inspection evidence', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5' }));
+    ctx.eventRepo.insert(codexInspectionEvent('cat src/a.ts'));
+    ctx.eventRepo.insert(editEvent('src/a.ts'));
+    ctx.db
+      .prepare(`
+      INSERT INTO pod_quality_scores (
+        pod_id, score, runtime, profile_name, model, final_status, completed_at
+      ) VALUES (?, 40, 'codex', 'test-profile', 'gpt-5', 'complete', ?)
+    `)
+      .run(POD_ID, '2026-04-23T12:00:00.000Z');
+
+    expect(ctx.recorder.upgradeHistory()).toBe(1);
+    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
+      expect.objectContaining({
+        algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+        inspectionAvailability: 'available',
+        readCount: 1,
+        editCount: 1,
+        readEditRatio: 1,
+        editsWithoutPriorRead: 0,
+      }),
+    );
+    expect(ctx.recorder.upgradeHistory()).toBe(0);
+  });
+
+  it('marks discarded historical Pi activity unavailable and upgrades in bounded batches', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'pi', model: 'pi-model' }));
+    ctx.db
+      .prepare(`
+      INSERT INTO pod_quality_scores (
+        pod_id, score, runtime, profile_name, model, final_status, completed_at
+      ) VALUES (?, 10, 'pi', 'test-profile', 'pi-model', 'complete', ?)
+    `)
+      .run(POD_ID, '2026-04-23T12:00:00.000Z');
+
+    expect(ctx.recorder.upgradeHistory(1)).toBe(1);
+    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
+      expect.objectContaining({
+        algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+        inspectionAvailability: 'unavailable',
+        score: null,
+        readCount: null,
+        readEditRatio: null,
+        editsWithoutPriorRead: null,
+      }),
+    );
+    expect(ctx.recorder.upgradeHistory(1)).toBe(0);
   });
 
   it('unsubscribes on stop()', () => {
