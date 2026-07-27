@@ -3,7 +3,7 @@ import SwiftUI
 
 // MARK: - Profile section navigation
 
-enum ProfileSection: String, CaseIterable, Identifiable {
+public enum ProfileSection: String, CaseIterable, Identifiable {
     case general
     case buildRun
     case agent
@@ -20,7 +20,7 @@ enum ProfileSection: String, CaseIterable, Identifiable {
     case memory
     case deployment
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
     var label: String {
         switch self {
@@ -240,8 +240,10 @@ public struct ProfileEditorView: View {
                 onCreateWithInheritance: (
                     (Profile, Set<String>, [String: MergeMode]) async throws -> Void
                 )? = nil,
-                onDelete: ((String) async throws -> Void)? = nil) {
+                onDelete: ((String) async throws -> Void)? = nil,
+                initialSection: ProfileSection = .general) {
         self._profile = State(initialValue: profile)
+        self._selectedSection = State(initialValue: initialSection)
         self.isNew = isNew
         self.actionCatalog = actionCatalog
         self.builtinSkills = builtinSkills
@@ -262,7 +264,7 @@ public struct ProfileEditorView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedSection: ProfileSection = .general
+    @State private var selectedSection: ProfileSection
     @State private var authStatus: AuthStatus?
     @State private var searchText: String = ""
     @State private var searchLastSection: ProfileSection = .general
@@ -1089,6 +1091,21 @@ public struct ProfileEditorView: View {
                 .labelsHidden()
                 .frame(width: 130)
             }
+        }
+        fieldRow("Reasoning effort", help: ReasoningEffortField.help) {
+            Picker(
+                "",
+                selection: Binding(
+                    get: { profile.reasoningEffort ?? .auto },
+                    set: { profile.reasoningEffort = $0 }
+                )
+            ) {
+                ForEach(ReasoningEffortField.options, id: \.value) { option in
+                    Text(option.label).tag(option.value)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 180)
         }
         fieldRow("Custom Instructions", help: "Appended to the agent's system prompt. Use for project conventions, constraints, or domain context.") {
             TextEditor(text: Binding(
@@ -3054,6 +3071,12 @@ public struct ProfileEditorView: View {
                                     inheritedFields.remove(field.key)
                                     if field.key == "providerFailover" {
                                         profile.providerFailover = ProviderFailoverPolicyResponse(targets: [])
+                                    } else if field.key == "reasoningEffort" {
+                                        profile.reasoningEffort =
+                                            ReasoningEffortField.activatedOverrideValue(
+                                                current: profile.reasoningEffort,
+                                                parent: editorPayload?.parent?.reasoningEffort
+                                            )
                                     }
                                 }
                             }
@@ -3202,6 +3225,8 @@ public struct ProfileEditorView: View {
                       role: .reviewerModel,
                       parent: editorPayload?.parent?.reviewerModel ?? "",
                       parentRuntime: parentRuntime)
+        case "reasoningEffort":
+            reasoningEffortCard(field)
         case "defaultRuntime":
             enumCard(field, selection: $profile.defaultRuntime,
                      options: RuntimeType.allCases.map { ($0, $0.rawValue.capitalized) },
@@ -3409,6 +3434,34 @@ public struct ProfileEditorView: View {
         overrideCardShell(field: field) {
             providerAccountPicker
             parentLine(parent.isEmpty ? "(none)" : parent)
+        }
+    }
+
+    private func reasoningEffortCard(_ field: ProfileOverrideField) -> some View {
+        let parent = editorPayload?.parent?.reasoningEffort ?? .auto
+        return overrideCardShell(field: field) {
+            Picker(
+                "",
+                selection: Binding(
+                    get: {
+                        ReasoningEffortField.explicitValue(
+                            current: profile.reasoningEffort,
+                            parent: parent
+                        )
+                    },
+                    set: { profile.reasoningEffort = $0 }
+                )
+            ) {
+                ForEach(ReasoningEffortField.options, id: \.value) { option in
+                    Text(option.label).tag(option.value)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 180)
+            parentLine(
+                ReasoningEffortField.options.first { $0.value == parent }?.label
+                    ?? parent.rawValue
+            )
         }
     }
 

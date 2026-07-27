@@ -31,3 +31,46 @@ import AutopodClient
     #expect(unavailable.login == nil)
     #expect(unavailable.reason == "authentication rejected")
 }
+
+@Test func baseProfileReasoningEffortSelectionPreservesPortableValue() {
+    var profile = Profile(name: "base", repoUrl: "https://example.com/repo.git")
+
+    profile.reasoningEffort = .xhigh
+
+    #expect(profile.reasoningEffort == .xhigh)
+}
+
+@Test func derivedReasoningEffortStaysInheritedUntilOverrideIsActivated() {
+    var profile = Profile(
+        name: "child",
+        repoUrl: "https://example.com/repo.git",
+        reasoningEffort: nil
+    )
+
+    #expect(profile.reasoningEffort == nil)
+
+    profile.reasoningEffort = ReasoningEffortField.activatedOverrideValue(
+        current: profile.reasoningEffort,
+        parent: .high
+    )
+
+    #expect(profile.reasoningEffort == .high)
+}
+
+@Test func derivedReasoningEffortOverrideSelectionDoesNotMutateParent() {
+    let parent = ReasoningEffort.medium
+    var child = Profile(
+        name: "child",
+        repoUrl: "https://example.com/repo.git",
+        reasoningEffort: nil
+    )
+
+    child.reasoningEffort = ReasoningEffortField.activatedOverrideValue(
+        current: child.reasoningEffort,
+        parent: parent
+    )
+    child.reasoningEffort = .low
+
+    #expect(parent == .medium)
+    #expect(child.reasoningEffort == .low)
+}
