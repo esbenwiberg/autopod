@@ -44,6 +44,10 @@ import AutopodUI
 
   #expect(store.pods.map(\.id) == ["websocket-pod", "newer-pod", "older-pod"])
   #expect(await recorder.podPaths == ["/pods", "/pods"])
+
+  store.updateStatus("newer-pod", to: .running)
+  await store.loadSessions()
+  #expect(store.pods.first(where: { $0.id == "newer-pod" })?.status == .running)
 }
 
 @MainActor

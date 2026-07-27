@@ -57,6 +57,7 @@ public final class PodStore {
   private var api: DaemonAPI?
   private var hydratedPodIds = Set<String>()
   private var hydratingPodIds = Set<String>()
+  private var locallyUpdatedStatusPodIds = Set<String>()
 
   public func configure(api: DaemonAPI) {
     self.api = api
@@ -83,7 +84,9 @@ public final class PodStore {
       return current
     }
     var merged = incoming
-    if current.updatedAt > incoming.updatedAt {
+    if locallyUpdatedStatusPodIds.contains(current.id) {
+      merged.status = current.status
+    } else if current.updatedAt > incoming.updatedAt {
       // Full hydration may race a newer WebSocket status. Keep the detail payload,
       // but never regress the lifecycle state or its freshness marker.
       merged.status = current.status
@@ -108,6 +111,13 @@ public final class PodStore {
       let responses = try await api.listAllCompactPods()
       let fresh = PodMapper.map(responses, baseURL: api.baseURL)
       let currentById = Dictionary(uniqueKeysWithValues: pods.map { ($0.id, $0) })
+      for pod in fresh {
+        if let current = currentById[pod.id],
+           locallyUpdatedStatusPodIds.contains(pod.id),
+           current.status == pod.status {
+          locallyUpdatedStatusPodIds.remove(pod.id)
+        }
+      }
       let discoveredIds = Set(fresh.map(\.id))
       let retained = pods.filter { !discoveredIds.contains($0.id) }
       let merged = fresh.map { pod in
@@ -152,6 +162,9 @@ public final class PodStore {
       let response = try await api.getPod(id)
       var updated = PodMapper.map(response, baseURL: api.baseURL)
       if let index = pods.firstIndex(where: { $0.id == id }) {
+        if locallyUpdatedStatusPodIds.contains(id), pods[index].status == updated.status {
+          locallyUpdatedStatusPodIds.remove(id)
+        }
         updated = mergeRestPod(updated, with: pods[index], preferIncomingOnEqual: true)
         if updated.validationProgress == nil && updated.status == .validating {
           updated.validationProgress = ValidationProgress.initial(attempt: updated.attempts?.current ?? 1)
@@ -224,8 +237,9 @@ public final class PodStore {
   public func updateStatus(_ podId: String, to status: PodStatus) {
     guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
     pods[index].status = status
-    // Mark WebSocket state as newer than any in-flight REST response.
-    pods[index].updatedAt = Date()
+    // REST timestamps come from another machine, so wall-clock comparison cannot
+    // prove whether an in-flight response predates this WebSocket event.
+    locallyUpdatedStatusPodIds.insert(podId)
   }
 
   public func upsertSession(_ pod: Pod) {
@@ -240,6 +254,7 @@ public final class PodStore {
     pods.removeAll { $0.id == id }
     hydratedPodIds.remove(id)
     hydratingPodIds.remove(id)
+    locallyUpdatedStatusPodIds.remove(id)
     if selectedSessionId == id {
       selectedSessionId = nil
     }
