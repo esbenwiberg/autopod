@@ -71,7 +71,7 @@ interface PodListCursor {
 }
 
 const POD_CURSOR_TIMESTAMP_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+  /^(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z|\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{3})?)$/;
 
 function encodePodListCursor(cursor: PodListCursor): string {
   return Buffer.from(JSON.stringify(cursor)).toString('base64url');
@@ -84,9 +84,7 @@ function decodePodListCursor(raw: string): PodListCursor | null {
       typeof parsed !== 'object' ||
       parsed === null ||
       typeof (parsed as Record<string, unknown>).createdAt !== 'string' ||
-      !POD_CURSOR_TIMESTAMP_PATTERN.test(
-        (parsed as Record<string, unknown>).createdAt as string,
-      ) ||
+      !POD_CURSOR_TIMESTAMP_PATTERN.test((parsed as Record<string, unknown>).createdAt as string) ||
       Number.isNaN(Date.parse((parsed as Record<string, unknown>).createdAt as string)) ||
       typeof (parsed as Record<string, unknown>).id !== 'string' ||
       ((parsed as Record<string, unknown>).id as string).length === 0
@@ -492,9 +490,7 @@ export function podRoutes(
       const response: CompactPodPage = {
         pods: records.map((pod) => compactPod(pod, request)),
         nextCursor:
-          hasMore && last
-            ? encodePodListCursor({ createdAt: last.createdAt, id: last.id })
-            : null,
+          hasMore && last ? encodePodListCursor({ createdAt: last.createdAt, id: last.id }) : null,
       };
       return response;
     }
