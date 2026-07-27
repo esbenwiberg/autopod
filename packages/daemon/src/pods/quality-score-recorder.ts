@@ -1,4 +1,9 @@
-import type { PodCompletedEvent, SystemEvent } from '@autopod/shared';
+import type {
+  AgentActivityEvent,
+  AgentToolUseEvent,
+  PodCompletedEvent,
+  SystemEvent,
+} from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
@@ -54,7 +59,6 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
     podId: string,
     finalStatus: 'complete' | 'killed',
     completedAt: string,
-    options: { historical?: boolean } = {},
   ): void {
     const pod = podRepo.getOrThrow(podId);
     const signals = computeQualitySignals(podId, {
@@ -65,11 +69,18 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
       providerAttemptRepo,
     });
     const computedScore = computeScore({ signals, finalStatus });
-    const hasHistoricalPiAttempt =
-      options.historical === true &&
-      (pod.runtime === 'pi' ||
-        (providerAttemptRepo?.list(podId).some((attempt) => attempt.runtime === 'pi') ?? false));
-    const available = signals.inspectionAvailability === 'available' && !hasHistoricalPiAttempt;
+    const hasPiAttempt =
+      pod.runtime === 'pi' ||
+      (providerAttemptRepo?.list(podId).some((attempt) => attempt.runtime === 'pi') ?? false);
+    const hasRetainedPiActivity = eventRepo.getForSession(podId).some((stored) => {
+      if (stored.type !== 'pod.agent_activity') return false;
+      const activity = stored.payload as AgentActivityEvent;
+      if (activity.event.type !== 'tool_use') return false;
+      const tool = (activity.event as AgentToolUseEvent).tool;
+      return tool === tool.toLowerCase();
+    });
+    const missingPiEvidence = hasPiAttempt && !hasRetainedPiActivity;
+    const available = signals.inspectionAvailability === 'available' && !missingPiEvidence;
     const inspectionAvailability = available ? 'available' : 'unavailable';
 
     qualityScoreRepo.insert({
@@ -132,7 +143,7 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
       let upgraded = 0;
       for (const score of stale) {
         try {
-          persistScore(score.podId, score.finalStatus, score.completedAt, { historical: true });
+          persistScore(score.podId, score.finalStatus, score.completedAt);
           upgraded += 1;
         } catch (err) {
           logger.warn({ err, podId: score.podId }, 'Failed to upgrade pod quality score');

@@ -191,6 +191,54 @@ describe('QualityScoreRecorder', () => {
     expect(persisted?.editsWithoutPriorRead).toBeNull();
   });
 
+  it('records a live mixed Pi to Codex outcome unavailable when Pi activity is missing', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5' }));
+    ctx.eventRepo.insert(codexInspectionEvent('cat src/a.ts'));
+    ctx.eventRepo.insert(editEvent('src/a.ts'));
+    ctx.providerAttemptRepo.open({
+      podId: POD_ID,
+      provider: 'openrouter',
+      providerAccountId: null,
+      runtime: 'pi',
+      model: 'pi-model',
+      profileReference: `pod:${POD_ID}@profile-snapshot#abcdef1`,
+      profileSnapshot: {},
+    });
+    ctx.providerAttemptRepo.close(POD_ID, {
+      outcome: 'quota_exhausted',
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsd: 0,
+    });
+
+    ctx.recorder.start();
+    ctx.eventBus.emit({
+      type: 'pod.completed',
+      timestamp: '2026-04-23T12:00:00.000Z',
+      podId: POD_ID,
+      finalStatus: 'complete',
+      summary: {
+        id: POD_ID,
+        profileName: 'test-profile',
+        task: 'do the thing',
+        status: 'complete',
+        model: 'gpt-5',
+        runtime: 'codex',
+        duration: 1000,
+        filesChanged: 1,
+        createdAt: '2026-04-23T11:50:00.000Z',
+      },
+    });
+
+    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
+      expect.objectContaining({
+        inspectionAvailability: 'unavailable',
+        score: null,
+        readCount: null,
+      }),
+    );
+  });
+
   it('rebuilds retained Codex history once with normalized inspection evidence', () => {
     ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5' }));
     ctx.eventRepo.insert(codexInspectionEvent('cat src/a.ts'));
