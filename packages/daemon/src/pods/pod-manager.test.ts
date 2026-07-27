@@ -8986,6 +8986,7 @@ describe('PodManager', () => {
         worktreePath?: string | null;
         worktreeCompromised?: boolean;
         containerId?: string | null;
+        autoApprove?: boolean;
       } = {},
     ) {
       const manager = createPodManager(ctx.deps);
@@ -9022,6 +9023,9 @@ describe('PodManager', () => {
       }
       if (overrides.worktreeCompromised) {
         ctx.podRepo.update(pod.id, { worktreeCompromised: true });
+      }
+      if (overrides.autoApprove !== undefined) {
+        ctx.podRepo.update(pod.id, { autoApprove: overrides.autoApprove });
       }
       ctx.podRepo.update(pod.id, { status: 'failed' });
       return { manager, pod };
@@ -9151,6 +9155,7 @@ describe('PodManager', () => {
       const { manager, pod } = setupFailedPod(ctx, {
         validationOverall: 'pass',
         prUrl: null,
+        autoApprove: true,
       });
 
       const result = await manager.resumePod(pod.id);
@@ -9168,6 +9173,12 @@ describe('PodManager', () => {
       const refreshed = manager.getSession(pod.id);
       expect(refreshed.status).toBe('validated');
       expect(refreshed.prUrl).toBe('https://github.com/org/repo/pull/42');
+      expect(
+        ctx.eventRepo.getForSession(pod.id, { type: 'pod.agent_activity' }).some((stored) => {
+          const payload = stored.payload as { event?: { message?: unknown } };
+          return payload.event?.message === 'Auto-approving…';
+        }),
+      ).toBe(true);
     });
 
     it('Path 1: surfaces push failures as BRANCH_PUSH_FAILED without flipping the pod', async () => {

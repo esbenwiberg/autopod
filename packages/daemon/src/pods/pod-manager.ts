@@ -13661,6 +13661,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, `Resume succeeded — PR ready: ${newPrUrl}`);
         logger.info({ podId, prUrl: newPrUrl }, 'Pod resumed via push + PR');
         if (validated.autoApprove) {
+          emitActivityStatus(podId, 'Auto-approving…');
           setImmediate(() => {
             this.approveSession(podId, { automation: true }).catch((err) =>
               logger.warn({ err, podId }, 'Auto-approve failed after resume'),
