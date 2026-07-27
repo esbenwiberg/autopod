@@ -5428,6 +5428,16 @@ describe('PodManager', () => {
   });
 
   describe('triggerValidation', () => {
+    function activityMessages(ctx: TestContext, podId: string): string[] {
+      return ctx.eventRepo
+        .getForSession(podId, { type: 'pod.agent_activity' })
+        .map((stored) => {
+          const payload = stored.payload as { event?: { message?: unknown } };
+          return payload.event?.message;
+        })
+        .filter((message): message is string => typeof message === 'string');
+    }
+
     it('transitions to validated on pass', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       const manager = createPodManager(ctx.deps);
@@ -5446,6 +5456,172 @@ describe('PodManager', () => {
 
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('validated');
+    });
+
+    it('surfaces ordered post-review finalization, sync, shutdown, and auto-approval work', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(
+        async (config, _onProgress, _signal, callbacks) => {
+          callbacks?.onPhaseCompleted?.('review', 'pass', {
+            status: 'pass',
+            reasoning: 'Looks good',
+            issues: [],
+            model: 'reviewer',
+          });
+          return makeValidationResult({ validationSuite: config.validationSuite });
+        },
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        autoApprove: true,
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const messages = activityMessages(ctx, pod.id);
+      const finalizing = messages.indexOf('Validation checks finished — finalizing result…');
+      const syncStarted = messages.indexOf('Syncing post-validation workspace…');
+      const syncCompleted = messages.findIndex((message) =>
+        /^Workspace sync complete \(\d+\.\d+s\)$/.test(message),
+      );
+      const resultHandled = messages.findIndex((message) =>
+        message.startsWith('Validation pass —'),
+      );
+      const stopping = messages.indexOf('Stopping post-validation container…');
+      const autoApproving = messages.indexOf('Auto-approving…');
+
+      expect(finalizing).toBeGreaterThanOrEqual(0);
+      expect(syncStarted).toBeGreaterThan(finalizing);
+      expect(syncCompleted).toBeGreaterThan(syncStarted);
+      expect(resultHandled).toBeGreaterThan(syncCompleted);
+      expect(stopping).toBeGreaterThan(resultHandled);
+      expect(autoApproving).toBeGreaterThan(stopping);
+      expect(messages).toContain('Branch validated — pushing…');
+      expect(messages).toContain('Creating PR…');
+      expect(messages).not.toContain('Collecting validation screenshots…');
+      expect(messages).not.toContain('Collecting host fact evidence…');
+      expect(messages).not.toContain('Collecting synced fact evidence…');
+    });
+
+    it('surfaces degraded post-validation sync and evidence collection work', async () => {
+      const ctx = createTestContext(
+        {
+          overall: 'fail',
+          smoke: {
+            status: 'fail',
+            build: { status: 'pass', output: '', duration: 1 },
+            health: { status: 'pass', url: '', responseCode: 200, duration: 1 },
+            pages: [{ path: '/', status: 'fail', screenshotPath: '/workspace/page.png' }],
+          },
+          factValidation: {
+            status: 'fail',
+            results: [
+              {
+                factId: 'visible-evidence',
+                proves: ['activity-visible'],
+                kind: 'unit-test',
+                artifactPath: 'artifact.txt',
+                command: 'test -f artifact.txt',
+                passed: false,
+                attachments: [
+                  {
+                    kind: 'screenshot',
+                    path: '.autopod/evidence/visible-evidence/failure.png',
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        {
+          executionTarget: 'sandbox',
+          warmImageTag: 'registry.azurecr.io/autopod/test:latest',
+        },
+      );
+      let validationReturned = false;
+      vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(async (config) => {
+        validationReturned = true;
+        return makeValidationResult({
+          validationSuite: config.validationSuite,
+          overall: 'fail',
+          smoke: {
+            status: 'fail',
+            build: { status: 'pass', output: '', duration: 1 },
+            health: { status: 'pass', url: '', responseCode: 200, duration: 1 },
+            pages: [{ path: '/', status: 'fail', screenshotPath: '/workspace/page.png' }],
+          },
+          factValidation: {
+            status: 'fail',
+            results: [
+              {
+                factId: 'visible-evidence',
+                proves: ['activity-visible'],
+                kind: 'unit-test',
+                artifactPath: 'artifact.txt',
+                command: 'test -f artifact.txt',
+                passed: false,
+                attachments: [
+                  {
+                    kind: 'screenshot',
+                    path: '.autopod/evidence/visible-evidence/failure.png',
+                  },
+                ],
+              },
+            ],
+          },
+        });
+      });
+      vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementation(async () => {
+        if (validationReturned) throw new Error('archive extraction failed');
+      });
+      ctx.deps.screenshotStore = {
+        write: vi.fn(),
+        read: vi.fn(),
+        list: vi.fn(async () => []),
+        delete: vi.fn(),
+      };
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        maxValidationAttempts: 1,
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      const messages = activityMessages(ctx, pod.id);
+      const syncStarted = messages.indexOf('Syncing post-validation workspace…');
+      const syncFailed = messages.findIndex((message) =>
+        /^Workspace sync failed after \d+\.\d+s — continuing with degraded safeguards$/.test(
+          message,
+        ),
+      );
+      const resultHandled = messages.findIndex((message) =>
+        message.startsWith('Validation fail —'),
+      );
+
+      expect(messages).toContain('Collecting validation screenshots…');
+      expect(messages).not.toContain('Collecting host fact evidence…');
+      expect(messages).not.toContain('Collecting synced fact evidence…');
+      expect(messages).toContain('Collecting available fact evidence after degraded sync…');
+      expect(syncFailed).toBeGreaterThan(syncStarted);
+      expect(resultHandled).toBeGreaterThan(syncFailed);
+      expect(messages.indexOf('Stopping post-validation container…')).toBeGreaterThan(
+        resultHandled,
+      );
+      expect(messages.some((message) => message.startsWith('Workspace sync complete'))).toBe(false);
     });
 
     it('passes the effective advisory browser QA setting to validation', async () => {
@@ -5934,6 +6110,84 @@ describe('PodManager', () => {
       ).toBe(true);
     });
 
+    it('surfaces ordered revalidation finalization, shutdown, and auto-approval work', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(
+        async (config, _onProgress, _signal, callbacks) => {
+          callbacks?.onPhaseCompleted?.('review', 'pass', {
+            status: 'pass',
+            reasoning: 'Looks good',
+            issues: [],
+            model: 'reviewer',
+          });
+          return makeValidationResult({ validationSuite: config.validationSuite });
+        },
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fix reviewed feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        autoApprove: true,
+      });
+
+      await manager.revalidateSession(pod.id, { force: true });
+
+      const messages = activityMessages(ctx, pod.id);
+      const finalizing = messages.indexOf('Validation checks finished — finalizing result…');
+      const resultHandled = messages.indexOf('Revalidation passed — human fix worked!');
+      const stopping = messages.indexOf('Stopping post-validation container…');
+      const autoApproving = messages.indexOf('Auto-approving…');
+
+      expect(finalizing).toBeGreaterThanOrEqual(0);
+      expect(resultHandled).toBeGreaterThan(finalizing);
+      expect(stopping).toBeGreaterThan(resultHandled);
+      expect(autoApproving).toBeGreaterThan(stopping);
+    });
+
+    it('surfaces shutdown and auto-approval after a recovered host push', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Recover validated push' },
+        'user-1',
+      );
+      const pendingEscalation = {
+        id: 'credential-escalation',
+        podId: pod.id,
+        type: 'request_credential' as const,
+        timestamp: new Date().toISOString(),
+        payload: {
+          service: 'github' as const,
+          reason: 'Host push authentication failed',
+          source: 'host_push' as const,
+        },
+        response: null,
+      };
+      ctx.escalationRepo.insert(pendingEscalation);
+      ctx.podRepo.update(pod.id, {
+        status: 'awaiting_input',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        autoApprove: true,
+        lastValidationResult: makeValidationResult(),
+        pendingEscalation,
+      });
+
+      await manager.sendMessage(pod.id, 'Credentials updated');
+
+      const messages = activityMessages(ctx, pod.id);
+      const stopping = messages.indexOf('Stopping post-validation container…');
+      const autoApproving = messages.indexOf('Auto-approving…');
+
+      expect(stopping).toBeGreaterThanOrEqual(0);
+      expect(autoApproving).toBeGreaterThan(stopping);
+    });
+
     it('recovers from live container when workspace sync fails before validation', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       (ctx.containerManager.execInContainer as ReturnType<typeof vi.fn>).mockImplementation(
@@ -6286,6 +6540,11 @@ describe('PodManager', () => {
             return payload.event?.message;
           });
         expect(messages).toContain('Review infrastructure failure — retrying in 10s (1/3)');
+        expect(
+          messages.filter(
+            (message) => message === 'Validation checks finished — finalizing result…',
+          ),
+        ).toHaveLength(1);
       } finally {
         vi.useRealTimers();
       }
@@ -6335,6 +6594,7 @@ describe('PodManager', () => {
         expect(messages).toContain(
           'Review infrastructure failed after 3 retries — needs human review',
         );
+        expect(messages).toContain('Stopping post-validation container…');
       } finally {
         vi.useRealTimers();
       }
@@ -8916,6 +9176,7 @@ describe('PodManager', () => {
         worktreePath?: string | null;
         worktreeCompromised?: boolean;
         containerId?: string | null;
+        autoApprove?: boolean;
       } = {},
     ) {
       const manager = createPodManager(ctx.deps);
@@ -8952,6 +9213,9 @@ describe('PodManager', () => {
       }
       if (overrides.worktreeCompromised) {
         ctx.podRepo.update(pod.id, { worktreeCompromised: true });
+      }
+      if (overrides.autoApprove !== undefined) {
+        ctx.podRepo.update(pod.id, { autoApprove: overrides.autoApprove });
       }
       ctx.podRepo.update(pod.id, { status: 'failed' });
       return { manager, pod };
@@ -9081,6 +9345,7 @@ describe('PodManager', () => {
       const { manager, pod } = setupFailedPod(ctx, {
         validationOverall: 'pass',
         prUrl: null,
+        autoApprove: true,
       });
 
       const result = await manager.resumePod(pod.id);
@@ -9098,6 +9363,12 @@ describe('PodManager', () => {
       const refreshed = manager.getSession(pod.id);
       expect(refreshed.status).toBe('validated');
       expect(refreshed.prUrl).toBe('https://github.com/org/repo/pull/42');
+      expect(
+        ctx.eventRepo.getForSession(pod.id, { type: 'pod.agent_activity' }).some((stored) => {
+          const payload = stored.payload as { event?: { message?: unknown } };
+          return payload.event?.message === 'Auto-approving…';
+        }),
+      ).toBe(true);
     });
 
     it('Path 1: surfaces push failures as BRANCH_PUSH_FAILED without flipping the pod', async () => {
@@ -9230,6 +9501,13 @@ describe('PodManager', () => {
       expect(ctx.runtime.spawn).not.toHaveBeenCalled();
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
       expect(manager.getSession(pod.id).status).toBe('validated');
+      const finalizationMessages = ctx.eventRepo
+        .getForSession(pod.id, { type: 'pod.agent_activity' })
+        .filter((stored) => {
+          const payload = stored.payload as { event?: { message?: unknown } };
+          return payload.event?.message === 'Validation checks finished — finalizing result…';
+        });
+      expect(finalizationMessages).toHaveLength(1);
     });
 
     it('Path 2: ignores legacy GitHub PAT when pulling during forced revalidation', async () => {
