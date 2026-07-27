@@ -144,14 +144,10 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
           @runtime, @profileName, @model, @finalStatus, @completedAt, @computedAt
         )
         ON CONFLICT(pod_id) DO UPDATE SET
-          score = excluded.score,
           score_v2 = excluded.score_v2,
           algorithm_version = excluded.algorithm_version,
           inspection_availability = excluded.inspection_availability,
-          read_count = excluded.read_count,
           edit_count = excluded.edit_count,
-          read_edit_ratio = excluded.read_edit_ratio,
-          edits_without_prior_read = excluded.edits_without_prior_read,
           read_count_v2 = excluded.read_count_v2,
           read_edit_ratio_v2 = excluded.read_edit_ratio_v2,
           edits_without_prior_read_v2 = excluded.edits_without_prior_read_v2,

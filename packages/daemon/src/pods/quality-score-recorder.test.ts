@@ -218,6 +218,13 @@ describe('QualityScoreRecorder', () => {
         editsWithoutPriorRead: 0,
       }),
     );
+    expect(
+      (
+        ctx.db.prepare('SELECT score FROM pod_quality_scores WHERE pod_id = ?').get(POD_ID) as {
+          score: number;
+        }
+      ).score,
+    ).toBe(40);
     expect(ctx.recorder.upgradeHistory()).toEqual({
       selected: 0,
       upgraded: 0,
