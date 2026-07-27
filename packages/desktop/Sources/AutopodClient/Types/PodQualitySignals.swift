@@ -1,6 +1,7 @@
 import Foundation
 
-public enum QualityInspectionAvailability: String, Codable, Sendable {
+/// Whether retained activity can support inspection-dependent quality judgments.
+public enum QualityInspectionAvailability: String, Codable, Equatable, Sendable {
   case available
   case unavailable
 }
