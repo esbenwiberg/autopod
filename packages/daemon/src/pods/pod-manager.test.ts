@@ -5424,9 +5424,9 @@ describe('PodManager', () => {
         message.startsWith('Validation fail —'),
       );
 
-      expect(messages).toContain('Collecting host fact evidence…');
       expect(messages).toContain('Collecting validation screenshots…');
-      expect(messages).toContain('Collecting synced fact evidence…');
+      expect(messages).not.toContain('Collecting host fact evidence…');
+      expect(messages).not.toContain('Collecting synced fact evidence…');
       expect(syncFailed).toBeGreaterThan(syncStarted);
       expect(resultHandled).toBeGreaterThan(syncFailed);
       expect(messages.indexOf('Stopping post-validation container…')).toBeGreaterThan(

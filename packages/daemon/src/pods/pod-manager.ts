@@ -11198,11 +11198,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               attachment.path.toLowerCase().endsWith('.png'),
           ),
         );
+        const hasHostFactScreenshotEvidence = result.factValidation?.results.some(
+          (fact) =>
+            fact.kind === 'browser-test' &&
+            fact.attachments?.some(
+              (attachment) =>
+                attachment.kind === 'screenshot' &&
+                !path.isAbsolute(attachment.path) &&
+                attachment.path.toLowerCase().endsWith('.png'),
+            ),
+        );
         const hasValidationScreenshots = result.smoke.pages.some((page) => page.screenshotPath);
 
         // Host browser facts write evidence directly to the host worktree. Collect
         // those screenshots before syncWorkspaceBack mirrors /workspace over it.
-        if (pod.worktreePath && hasFactScreenshotEvidence && screenshotStore) {
+        if (pod.worktreePath && hasHostFactScreenshotEvidence && screenshotStore) {
           emitActivityStatus(podId, 'Collecting host fact evidence…');
           try {
             const screenshots = await collectFactScreenshots(
@@ -11276,7 +11286,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
-        if (pod.worktreePath && hasFactScreenshotEvidence && screenshotStore) {
+        if (pod.worktreePath && validationSyncOk && hasFactScreenshotEvidence && screenshotStore) {
           emitActivityStatus(podId, 'Collecting synced fact evidence…');
           try {
             const screenshots = await collectFactScreenshots(
