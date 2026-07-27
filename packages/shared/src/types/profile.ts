@@ -9,6 +9,7 @@ import type { SecurityScanPolicy } from './security-scan.js';
 import type { SidecarsConfig } from './sidecar.js';
 
 export type ExecutionTarget = 'local' | 'sandbox';
+export type ReasoningEffort = 'auto' | 'low' | 'medium' | 'high' | 'xhigh';
 
 /**
  * Fields whose inheritance behavior can be switched from merge (the default —
@@ -70,6 +71,8 @@ export interface Profile {
   defaultModel: string | null;
   reviewerModel: string | null;
   defaultRuntime: RuntimeType | null;
+  /** Portable reasoning effort. Null on derived profiles means inherit from parent. */
+  reasoningEffort: ReasoningEffort | null;
   executionTarget: ExecutionTarget | null;
   customInstructions: string | null;
   /** Profile-specific finish guidance the agent should follow before report_task_summary. */

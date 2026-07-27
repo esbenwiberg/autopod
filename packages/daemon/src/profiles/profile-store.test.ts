@@ -93,6 +93,7 @@ describe('ProfileStore', () => {
       expect(profile.defaultModel).toBe('claude-opus-5');
       expect(profile.reviewerModel).toBe('claude-sonnet-5');
       expect(profile.defaultRuntime).toBe('claude');
+      expect(profile.reasoningEffort).toBe('auto');
       expect(profile.customInstructions).toBeNull();
       expect(profile.agentDonePrompt).toBeNull();
       expect(profile.extends).toBeNull();
@@ -106,6 +107,28 @@ describe('ProfileStore', () => {
         humanResponseTimeout: 3600,
         askHumanOnTimeout: 'continue',
       });
+    });
+
+    it('round-trips reasoning effort through create, get, and list', () => {
+      const created = store.create({ ...validInput, reasoningEffort: 'xhigh' });
+
+      expect(created.reasoningEffort).toBe('xhigh');
+      expect(store.get('my-app').reasoningEffort).toBe('xhigh');
+      expect(store.list().find((profile) => profile.name === 'my-app')?.reasoningEffort).toBe(
+        'xhigh',
+      );
+    });
+
+    it('preserves raw null reasoning effort for derived profile inheritance', () => {
+      store.create({ ...validInput, name: 'parent', reasoningEffort: 'high' });
+      const created = store.create({ name: 'child', extends: 'parent' });
+
+      expect(store.getRaw('child').reasoningEffort).toBeNull();
+      expect(created.reasoningEffort).toBe('high');
+      expect(store.get('child').reasoningEffort).toBe('high');
+      expect(store.list().find((profile) => profile.name === 'child')?.reasoningEffort).toBe(
+        'high',
+      );
     });
 
     it('normalizes legacy model aliases from existing profile rows', () => {
@@ -394,6 +417,17 @@ describe('ProfileStore', () => {
   });
 
   describe('update', () => {
+    it('round-trips reasoning effort updates on base and derived profiles', () => {
+      store.create(validInput);
+      expect(store.update('my-app', { reasoningEffort: 'low' }).reasoningEffort).toBe('low');
+      expect(store.getRaw('my-app').reasoningEffort).toBe('low');
+
+      store.create({ ...validInput, name: 'parent', reasoningEffort: 'medium' });
+      store.create({ name: 'child', extends: 'parent', reasoningEffort: 'high' });
+      expect(store.update('child', { reasoningEffort: null }).reasoningEffort).toBe('medium');
+      expect(store.getRaw('child').reasoningEffort).toBeNull();
+    });
+
     it('should update specific fields only', () => {
       store.create(validInput);
       const updated = store.update('my-app', { buildCommand: 'pnpm build' });

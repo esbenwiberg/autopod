@@ -30,6 +30,8 @@ export const modelProviderSchema = z.enum([
   'pi',
 ]);
 
+export const reasoningEffortSchema = z.enum(['auto', 'low', 'medium', 'high', 'xhigh']);
+
 const anthropicCredentialsSchema = z.object({
   provider: z.literal('anthropic'),
 });
@@ -346,6 +348,7 @@ const createProfileBaseSchema = z.object({
   /** New base profiles use the curated reviewer; null remains the derived-profile inherit signal. */
   reviewerModel: canonicalModelIdSchema.nullable().default(CLAUDE_REVIEWER_MODEL),
   defaultRuntime: z.enum(['claude', 'codex', 'copilot', 'pi']).nullable().default('claude'),
+  reasoningEffort: reasoningEffortSchema.nullable().default('auto'),
   executionTarget: z.enum(['local', 'sandbox']).nullable().default('local'),
   customInstructions: z.string().max(50_000).nullable().default(null),
   agentDonePrompt: z.string().max(50_000).nullable().default(null),

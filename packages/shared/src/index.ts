@@ -63,6 +63,7 @@ export type {
   ResolvedProviderFailoverPolicy,
   StackTemplate,
   ExecutionTarget,
+  ReasoningEffort,
   SmokePage,
   PageAssertion,
   EscalationConfig,
@@ -408,6 +409,7 @@ export {
   escalationConfigSchema,
   mergeStrategySchema,
   modelProviderSchema,
+  reasoningEffortSchema,
   providerCredentialsSchema,
   pimActivationConfigSchema,
 } from './schemas/profile.schema.js';

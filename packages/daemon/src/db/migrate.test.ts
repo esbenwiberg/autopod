@@ -729,3 +729,75 @@ describe('runMigrations — migration 104 (remove acceptance criteria)', () => {
     expect(hasColumn(db, 'watched_issues', 'phase')).toBe(true);
   });
 });
+
+const MIGRATION_129_PATH = new URL(
+  '../../src/db/migrations/129_profile_reasoning_effort.sql',
+  import.meta.url,
+);
+const MIGRATION_129_SQL = fs.readFileSync(MIGRATION_129_PATH, 'utf-8');
+
+describe('runMigrations — profile reasoning effort (migration 129)', () => {
+  let migrationsDir: string;
+
+  beforeEach(() => {
+    migrationsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'migrate-129-test-'));
+    fs.writeFileSync(
+      path.join(migrationsDir, '129_profile_reasoning_effort.sql'),
+      MIGRATION_129_SQL,
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(migrationsDir, { recursive: true, force: true });
+  });
+
+  it('gives existing base profiles auto and derived profiles inheritable null without rewriting models', () => {
+    const db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE schema_version (
+        version INTEGER PRIMARY KEY,
+        applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE profiles (
+        name TEXT PRIMARY KEY,
+        extends TEXT,
+        default_model TEXT,
+        reviewer_model TEXT
+      );
+    `);
+    db.prepare('INSERT INTO schema_version (version) VALUES (128)').run();
+    db.prepare(
+      'INSERT INTO profiles (name, extends, default_model, reviewer_model) VALUES (?, ?, ?, ?)',
+    ).run('base', null, 'claude-opus-4-7', 'claude-sonnet-4-6');
+    db.prepare(
+      'INSERT INTO profiles (name, extends, default_model, reviewer_model) VALUES (?, ?, ?, ?)',
+    ).run('child', 'base', 'claude-opus-5', 'claude-sonnet-5');
+
+    runMigrations(db, migrationsDir, logger);
+
+    const rows = db
+      .prepare(
+        'SELECT name, reasoning_effort, default_model, reviewer_model FROM profiles ORDER BY name',
+      )
+      .all() as Array<{
+      name: string;
+      reasoning_effort: string | null;
+      default_model: string;
+      reviewer_model: string;
+    }>;
+    expect(rows).toEqual([
+      {
+        name: 'base',
+        reasoning_effort: 'auto',
+        default_model: 'claude-opus-4-7',
+        reviewer_model: 'claude-sonnet-4-6',
+      },
+      {
+        name: 'child',
+        reasoning_effort: null,
+        default_model: 'claude-opus-5',
+        reviewer_model: 'claude-sonnet-5',
+      },
+    ]);
+  });
+});

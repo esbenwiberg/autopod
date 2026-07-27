@@ -7,6 +7,34 @@ import {
 
 const canonicalModelMessage = 'canonical Claude model ID';
 
+describe('profile reasoning effort', () => {
+  it('accepts exactly the portable reasoning effort values', () => {
+    for (const reasoningEffort of ['auto', 'low', 'medium', 'high', 'xhigh'] as const) {
+      expect(
+        createProfileSchema.parse({ name: `effort-${reasoningEffort}`, reasoningEffort }),
+      ).toMatchObject({ reasoningEffort });
+      expect(updateProfileSchema.parse({ reasoningEffort })).toEqual({ reasoningEffort });
+    }
+
+    for (const reasoningEffort of ['off', 'minimal', 'max', 'HIGH', '']) {
+      expect(
+        createProfileSchema.safeParse({ name: 'invalid-effort', reasoningEffort }).success,
+      ).toBe(false);
+      expect(updateProfileSchema.safeParse({ reasoningEffort }).success).toBe(false);
+    }
+  });
+
+  it('defaults base reasoning effort to auto and derived reasoning effort to null', () => {
+    expect(createProfileSchema.parse({ name: 'base-effort' }).reasoningEffort).toBe('auto');
+    expect(
+      createProfileSchema.parse({ name: 'derived-effort', extends: 'base-effort' }).reasoningEffort,
+    ).toBeNull();
+    expect(updateProfileSchema.parse({ reasoningEffort: null })).toEqual({
+      reasoningEffort: null,
+    });
+  });
+});
+
 describe('createProfileSchema model validation', () => {
   it('accepts validationSetupCommand and setup as a skippable phase', () => {
     const parsed = createProfileSchema.parse({
