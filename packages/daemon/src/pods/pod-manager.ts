@@ -11287,8 +11287,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
-        if (pod.worktreePath && validationSyncOk && hasFactScreenshotEvidence && screenshotStore) {
-          emitActivityStatus(podId, 'Collecting synced fact evidence…');
+        if (pod.worktreePath && hasFactScreenshotEvidence && screenshotStore) {
+          emitActivityStatus(
+            podId,
+            validationSyncOk
+              ? 'Collecting synced fact evidence…'
+              : 'Collecting available fact evidence after degraded sync…',
+          );
           try {
             const screenshots = await collectFactScreenshots(
               pod.worktreePath,
