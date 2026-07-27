@@ -402,9 +402,7 @@ function mapNativeToolExecution(
   if (state.emittedCallIds.has(callId)) return null;
 
   const tool = stringField(record, 'toolName') ?? stringField(record, 'tool_name');
-  const args = objectField(record, 'args') ?? objectField(record, 'arguments');
-
-  if (!tool || !args) {
+  if (!tool) {
     return {
       type: 'error',
       timestamp,
@@ -412,8 +410,17 @@ function mapNativeToolExecution(
       fatal: false,
     };
   }
-
   if (!['read', 'edit', 'write'].includes(tool)) return null;
+
+  const args = objectField(record, 'args') ?? objectField(record, 'arguments');
+  if (!args) {
+    return {
+      type: 'error',
+      timestamp,
+      message: `Pi RPC emitted malformed ${kind} record`,
+      fatal: false,
+    };
+  }
   state.emittedCallIds.add(callId);
 
   const output =

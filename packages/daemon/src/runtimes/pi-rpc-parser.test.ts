@@ -131,6 +131,25 @@ describe('PiRpcParser', () => {
     ]);
   });
 
+  it('ignores unsupported native tool lifecycles whose end omits arguments', async () => {
+    const { events } = await parseLines([
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'custom-1',
+        toolName: 'custom_tool',
+        args: { value: 1 },
+      }),
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'custom-1',
+        toolName: 'custom_tool',
+        result: 'done',
+      }),
+    ]);
+
+    expect(events).toEqual([]);
+  });
+
   it.each([
     { type: 'tool_execution_start', toolName: 'read', args: { path: 'src/a.ts' } },
     { type: 'tool_execution_start', toolCallId: 'missing-tool', args: { path: 'src/a.ts' } },
