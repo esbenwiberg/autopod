@@ -5921,6 +5921,45 @@ describe('PodManager', () => {
       ).toBe(true);
     });
 
+    it('surfaces ordered revalidation finalization, shutdown, and auto-approval work', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(
+        async (config, _onProgress, _signal, callbacks) => {
+          callbacks?.onPhaseCompleted?.('review', 'pass', {
+            status: 'pass',
+            reasoning: 'Looks good',
+            issues: [],
+            model: 'reviewer',
+          });
+          return makeValidationResult({ validationSuite: config.validationSuite });
+        },
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fix reviewed feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        autoApprove: true,
+      });
+
+      await manager.revalidateSession(pod.id, { force: true });
+
+      const messages = activityMessages(ctx, pod.id);
+      const finalizing = messages.indexOf('Validation checks finished — finalizing result…');
+      const resultHandled = messages.indexOf('Revalidation passed — human fix worked!');
+      const stopping = messages.indexOf('Stopping post-validation container…');
+      const autoApproving = messages.indexOf('Auto-approving…');
+
+      expect(finalizing).toBeGreaterThanOrEqual(0);
+      expect(resultHandled).toBeGreaterThan(finalizing);
+      expect(stopping).toBeGreaterThan(resultHandled);
+      expect(autoApproving).toBeGreaterThan(stopping);
+    });
+
     it('recovers from live container when workspace sync fails before validation', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       (ctx.containerManager.execInContainer as ReturnType<typeof vi.fn>).mockImplementation(
@@ -9222,6 +9261,13 @@ describe('PodManager', () => {
       expect(ctx.runtime.spawn).not.toHaveBeenCalled();
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
       expect(manager.getSession(pod.id).status).toBe('validated');
+      const finalizationMessages = ctx.eventRepo
+        .getForSession(pod.id, { type: 'pod.agent_activity' })
+        .filter((stored) => {
+          const payload = stored.payload as { event?: { message?: unknown } };
+          return payload.event?.message === 'Validation checks finished — finalizing result…';
+        });
+      expect(finalizationMessages).toHaveLength(1);
     });
 
     it('Path 2: ignores legacy GitHub PAT when pulling during forced revalidation', async () => {

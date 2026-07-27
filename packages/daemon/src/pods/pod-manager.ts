@@ -12134,6 +12134,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           validationAbortControllers.delete(podId);
         }
 
+        emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
+
         podRepo.update(podId, { lastValidationResult: result });
 
         // Accumulate phase-level token usage for harness cost attribution
@@ -12314,6 +12316,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Stop the container
           if (postAdvisoryPod.containerId) {
             try {
+              emitActivityStatus(podId, 'Stopping post-validation container…');
               const cm2 = containerManagerFactory.get(postAdvisoryPod.executionTarget);
               await cm2.stop(postAdvisoryPod.containerId);
             } catch (err) {
@@ -12322,6 +12325,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
 
           if (postAdvisoryPod.autoApprove) {
+            emitActivityStatus(podId, 'Auto-approving…');
             logger.info({ podId }, 'Auto-approving pod after revalidation');
             setImmediate(() => {
               this.approveSession(podId, { automation: true }).catch((err) =>
@@ -12342,6 +12346,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           if (s2.containerId) {
             try {
+              emitActivityStatus(podId, 'Stopping post-validation container…');
               const cm2 = containerManagerFactory.get(s2.executionTarget);
               await cm2.stop(s2.containerId);
             } catch (err) {
@@ -12367,6 +12372,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         if (s2.containerId) {
           try {
+            emitActivityStatus(podId, 'Stopping post-validation container…');
             const cm2 = containerManagerFactory.get(s2.executionTarget);
             await cm2.stop(s2.containerId);
           } catch (err) {
