@@ -65,9 +65,11 @@ function insertPod(db: Database.Database, opts: InsertPodOpts = {}): string {
 function insertQuality(db: Database.Database, podId: string, score: number): void {
   db.prepare(`
     INSERT INTO pod_quality_scores
-      (pod_id, score, runtime, profile_name, model, final_status, completed_at)
+      (pod_id, score, runtime, profile_name, model, final_status, completed_at,
+       algorithm_version, inspection_availability, score_v2)
     VALUES
-      (@podId, @score, 'claude', 'test-profile', 'claude-opus-4-7', 'complete', @completedAt)
+      (@podId, @score, 'claude', 'test-profile', 'claude-opus-4-7', 'complete', @completedAt,
+       2, 'available', @score)
   `).run({ podId, score, completedAt: new Date().toISOString() });
 }
 
