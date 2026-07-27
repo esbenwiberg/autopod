@@ -544,18 +544,24 @@ describe('PodRepository', () => {
         repo.insert({ ...validSession, id });
       }
       db.prepare("UPDATE pods SET created_at = '2026-01-02T00:00:00Z'").run();
-      db.prepare(
-        "UPDATE pods SET created_at = '2026-01-03T00:00:00Z' WHERE id = 'sess-005'",
-      ).run();
+      db.prepare("UPDATE pods SET created_at = '2026-01-03T00:00:00Z' WHERE id = 'sess-005'").run();
 
       const first = repo.list({ limit: 2 });
+      const firstCursor = first[1];
+      if (!firstCursor) {
+        throw new Error('Expected first page to contain a cursor');
+      }
       const second = repo.list({
         limit: 2,
-        before: { createdAt: first[1]!.createdAt, id: first[1]!.id },
+        before: { createdAt: firstCursor.createdAt, id: firstCursor.id },
       });
+      const secondCursor = second[1];
+      if (!secondCursor) {
+        throw new Error('Expected second page to contain a cursor');
+      }
       const third = repo.list({
         limit: 2,
-        before: { createdAt: second[1]!.createdAt, id: second[1]!.id },
+        before: { createdAt: secondCursor.createdAt, id: secondCursor.id },
       });
 
       expect([...first, ...second, ...third].map((pod) => pod.id)).toEqual([
