@@ -15,12 +15,15 @@ const logger = {
 
 describe('resolveAnthropicModelId', () => {
   it('expands defensive Claude aliases to current canonical profile targets', () => {
-    expect(resolveAnthropicModelId('opus')).toBe('claude-opus-4-8');
-    expect(resolveAnthropicModelId('sonnet')).toBe('claude-sonnet-4-6');
+    expect(resolveAnthropicModelId('opus')).toBe('claude-opus-5');
+    expect(resolveAnthropicModelId('sonnet')).toBe('claude-sonnet-5');
     expect(resolveAnthropicModelId('haiku')).toBe('claude-haiku-4-5');
   });
 
   it('passes canonical model IDs through unchanged', () => {
+    expect(resolveAnthropicModelId('claude-fable-5')).toBe('claude-fable-5');
+    expect(resolveAnthropicModelId('claude-opus-5')).toBe('claude-opus-5');
+    expect(resolveAnthropicModelId('claude-sonnet-5')).toBe('claude-sonnet-5');
     expect(resolveAnthropicModelId('claude-opus-4-7')).toBe('claude-opus-4-7');
     expect(resolveAnthropicModelId('claude-opus-4-8')).toBe('claude-opus-4-8');
   });

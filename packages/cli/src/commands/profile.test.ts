@@ -197,6 +197,25 @@ describe('profile commands', () => {
     );
   });
 
+  it('uses Claude 5 defaults in new profile templates', async () => {
+    process.env.EDITOR = 'true';
+
+    await program.parseAsync(['node', 'ap', 'profile', 'create']);
+
+    expect(mockClient.createProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultModel: 'claude-opus-5',
+        reviewerModel: 'claude-sonnet-5',
+        escalation: expect.objectContaining({
+          askAi: expect.objectContaining({ model: 'claude-sonnet-5' }),
+        }),
+      }),
+    );
+    expect(mockClient.createProfile).not.toHaveBeenCalledWith(
+      expect.objectContaining({ defaultModel: 'claude-fable-5' }),
+    );
+  });
+
   it('sets the profile validation suite', async () => {
     await program.parseAsync([
       'node',

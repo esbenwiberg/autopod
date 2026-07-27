@@ -7,6 +7,7 @@ import type {
   Profile,
   ProviderCredentials,
 } from '@autopod/shared';
+import { CLAUDE_DEFAULT_MODEL, CLAUDE_REVIEWER_MODEL } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
@@ -22,8 +23,8 @@ const FOUNDRY_TOKEN_SCOPE = 'https://cognitiveservices.azure.com/.default';
 const MAX_OAUTH_BETA = 'oauth-2025-04-20';
 
 const MODEL_ALIASES: Record<string, string> = {
-  opus: 'claude-opus-4-8',
-  sonnet: 'claude-sonnet-4-6',
+  opus: CLAUDE_DEFAULT_MODEL,
+  sonnet: CLAUDE_REVIEWER_MODEL,
   haiku: 'claude-haiku-4-5',
 };
 

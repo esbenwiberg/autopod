@@ -94,7 +94,7 @@ describe('ClaudeRuntime', () => {
       expect(args).toContain('/home/autopod/.autopod/system-instructions.md');
     });
 
-    it('resolves short model aliases to full model IDs', () => {
+    it('keeps Claude 5 canonical IDs and resolves defensive aliases to current defaults', () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
@@ -112,11 +112,14 @@ describe('ClaudeRuntime', () => {
         });
 
       // Short aliases → full model IDs
-      expect(buildArgs('sonnet')).toContain('claude-sonnet-4-6');
-      expect(buildArgs('opus')).toContain('claude-opus-4-8');
+      expect(buildArgs('sonnet')).toContain('claude-sonnet-5');
+      expect(buildArgs('opus')).toContain('claude-opus-5');
       expect(buildArgs('haiku')).toContain('claude-haiku-4-5');
 
       // Full model IDs pass through unchanged
+      expect(buildArgs('claude-fable-5')).toContain('claude-fable-5');
+      expect(buildArgs('claude-opus-5')).toContain('claude-opus-5');
+      expect(buildArgs('claude-sonnet-5')).toContain('claude-sonnet-5');
       expect(buildArgs('claude-sonnet-4-5')).toContain('claude-sonnet-4-5');
       expect(buildArgs('claude-opus-4-7')).toContain('claude-opus-4-7');
     });

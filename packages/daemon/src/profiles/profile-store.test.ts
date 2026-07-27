@@ -90,7 +90,7 @@ describe('ProfileStore', () => {
       expect(profile.healthPath).toBe('/');
       expect(profile.healthTimeout).toBe(120);
       expect(profile.maxValidationAttempts).toBe(3);
-      expect(profile.defaultModel).toBe('claude-opus-4-8');
+      expect(profile.defaultModel).toBe('claude-opus-5');
       expect(profile.defaultRuntime).toBe('claude');
       expect(profile.customInstructions).toBeNull();
       expect(profile.agentDonePrompt).toBeNull();
@@ -99,7 +99,7 @@ describe('ProfileStore', () => {
       expect(profile.smokePages).toEqual([]);
       expect(profile.escalation).toEqual({
         askHuman: true,
-        askAi: { enabled: false, model: 'claude-sonnet-4-6', maxCalls: 5 },
+        askAi: { enabled: false, model: 'claude-sonnet-5', maxCalls: 5 },
         advisor: { enabled: false },
         autoPauseAfter: 3,
         humanResponseTimeout: 3600,
@@ -141,12 +141,12 @@ describe('ProfileStore', () => {
       });
 
       const profile = store.getRaw('legacy-models');
-      expect(profile.defaultModel).toBe('claude-opus-4-8');
-      expect(profile.reviewerModel).toBe('claude-sonnet-4-6');
+      expect(profile.defaultModel).toBe('claude-opus-5');
+      expect(profile.reviewerModel).toBe('claude-sonnet-5');
       expect(profile.escalation?.askAi.model).toBe('claude-haiku-4-5');
 
       const listed = store.list().find((item) => item.name === 'legacy-models');
-      expect(listed?.defaultModel).toBe('claude-opus-4-8');
+      expect(listed?.defaultModel).toBe('claude-opus-5');
     });
 
     it('should create with all fields specified', () => {

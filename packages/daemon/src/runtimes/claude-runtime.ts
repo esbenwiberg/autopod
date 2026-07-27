@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AUTOPOD_INSTRUCTIONS_PATH } from '@autopod/shared';
 import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
+import { CLAUDE_DEFAULT_MODEL, CLAUDE_REVIEWER_MODEL } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { ClaudeStreamParser } from './claude-stream-parser.js';
@@ -367,8 +368,8 @@ export class ClaudeRuntime implements Runtime {
 
   private resolveModelId(model: string): string {
     const aliases: Record<string, string> = {
-      opus: 'claude-opus-4-8',
-      sonnet: 'claude-sonnet-4-6',
+      opus: CLAUDE_DEFAULT_MODEL,
+      sonnet: CLAUDE_REVIEWER_MODEL,
       haiku: 'claude-haiku-4-5',
     };
     return aliases[model] ?? model;
