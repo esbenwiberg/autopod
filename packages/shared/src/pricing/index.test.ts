@@ -63,6 +63,7 @@ describe('MODEL_PRICING', () => {
   });
 
   it('keeps legacy short aliases out of the canonical price table', () => {
+    expect(MODEL_PRICING.fable).toBeUndefined();
     expect(MODEL_PRICING.opus).toBeUndefined();
     expect(MODEL_PRICING.sonnet).toBeUndefined();
     expect(MODEL_PRICING.haiku).toBeUndefined();

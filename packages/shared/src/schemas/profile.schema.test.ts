@@ -107,7 +107,7 @@ describe('createProfileSchema model validation', () => {
   });
 
   it('rejects short Claude aliases in defaultModel, reviewerModel, and escalation.askAi.model', () => {
-    for (const model of ['opus', 'sonnet', 'haiku']) {
+    for (const model of ['fable', 'opus', 'sonnet', 'haiku']) {
       const defaultModel = createProfileSchema.safeParse({ name: 'primary', defaultModel: model });
       expect(defaultModel.success).toBe(false);
       if (!defaultModel.success) {
@@ -404,7 +404,7 @@ describe('provider account schemas', () => {
 
 describe('updateProfileSchema model validation', () => {
   it('rejects short Claude aliases in defaultModel, reviewerModel, and escalation.askAi.model', () => {
-    for (const model of ['opus', 'sonnet', 'haiku']) {
+    for (const model of ['fable', 'opus', 'sonnet', 'haiku']) {
       const defaultModel = updateProfileSchema.safeParse({ defaultModel: model });
       expect(defaultModel.success).toBe(false);
       if (!defaultModel.success) {
