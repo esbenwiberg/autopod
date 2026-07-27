@@ -54,6 +54,7 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
     podId: string,
     finalStatus: 'complete' | 'killed',
     completedAt: string,
+    options: { historical?: boolean } = {},
   ): void {
     const pod = podRepo.getOrThrow(podId);
     const signals = computeQualitySignals(podId, {
@@ -73,7 +74,14 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
     // outcome therefore cannot prove that the Pi portion is complete, even
     // when unrelated normalized evidence survives from another attempt.
     const mixedPiEvidenceIncomplete = hasPiAttempt && hasNonPiAttempt;
-    const available = signals.inspectionAvailability === 'available' && !mixedPiEvidenceIncomplete;
+    // Pi activity was not durably retained before the normalized parser
+    // contract. Surviving historical events can therefore be only a subset;
+    // without a completeness marker, no stale Pi row is safe to recompute.
+    const historicalPiEvidenceIncomplete = options.historical === true && hasPiAttempt;
+    const available =
+      signals.inspectionAvailability === 'available' &&
+      !mixedPiEvidenceIncomplete &&
+      !historicalPiEvidenceIncomplete;
     const inspectionAvailability = available ? 'available' : 'unavailable';
 
     qualityScoreRepo.insert({
@@ -136,7 +144,7 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
       let upgraded = 0;
       for (const score of stale) {
         try {
-          persistScore(score.podId, score.finalStatus, score.completedAt);
+          persistScore(score.podId, score.finalStatus, score.completedAt, { historical: true });
           upgraded += 1;
         } catch (err) {
           logger.warn({ err, podId: score.podId }, 'Failed to upgrade pod quality score');

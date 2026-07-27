@@ -366,6 +366,41 @@ describe('QualityScoreRecorder', () => {
     });
   });
 
+  it('keeps historical Pi unavailable when only partial normalized activity survives', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'pi', model: 'pi-model' }));
+    ctx.eventRepo.insert({
+      type: 'pod.agent_activity',
+      timestamp: new Date().toISOString(),
+      podId: POD_ID,
+      event: {
+        type: 'tool_use',
+        timestamp: new Date().toISOString(),
+        tool: 'read',
+        input: { path: 'src/a.ts' },
+      },
+    });
+    ctx.eventRepo.insert(editEvent('src/a.ts'));
+    ctx.db
+      .prepare(`
+        INSERT INTO pod_quality_scores (
+          pod_id, score, runtime, profile_name, model, final_status, completed_at
+        ) VALUES (?, 75, 'pi', 'test-profile', 'pi-model', 'complete', ?)
+      `)
+      .run(POD_ID, '2026-04-23T12:00:00.000Z');
+
+    expect(ctx.recorder.upgradeHistory().upgraded).toBe(1);
+    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
+      expect.objectContaining({
+        algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+        inspectionAvailability: 'unavailable',
+        score: null,
+        readCount: null,
+        readEditRatio: null,
+        editsWithoutPriorRead: null,
+      }),
+    );
+  });
+
   it('keeps mixed historical Pi to Codex attempts unavailable', () => {
     ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5' }));
     ctx.eventRepo.insert(codexInspectionEvent('cat src/a.ts'));
