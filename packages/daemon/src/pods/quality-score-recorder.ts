@@ -127,6 +127,24 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
           upgraded += 1;
         } catch (err) {
           logger.warn({ err, podId: score.podId }, 'Failed to upgrade pod quality score');
+          try {
+            qualityScoreRepo.insert({
+              ...score,
+              score: null,
+              algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+              inspectionAvailability: 'unavailable',
+              readCount: null,
+              readEditRatio: null,
+              editsWithoutPriorRead: null,
+              computedAt: new Date().toISOString(),
+            });
+            upgraded += 1;
+          } catch (persistErr) {
+            logger.warn(
+              { err: persistErr, podId: score.podId },
+              'Failed to mark unrecomputable quality score unavailable',
+            );
+          }
         }
       }
       logger.info(

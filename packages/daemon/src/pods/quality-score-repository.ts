@@ -29,13 +29,16 @@ export const QUALITY_SCORE_ALGORITHM_VERSION = 2;
 
 const ATTEMPT_COMPATIBILITY_PROJECTION = `
   SELECT q.pod_id,
-         q.score,
+         CASE WHEN q.algorithm_version = 2 THEN q.score_v2 ELSE q.score END AS score,
          q.algorithm_version,
          q.inspection_availability,
-         q.read_count,
+         CASE WHEN q.algorithm_version = 2 THEN q.read_count_v2 ELSE q.read_count END AS read_count,
          q.edit_count,
-         q.read_edit_ratio,
-         q.edits_without_prior_read,
+         CASE WHEN q.algorithm_version = 2
+           THEN q.read_edit_ratio_v2 ELSE q.read_edit_ratio END AS read_edit_ratio,
+         CASE WHEN q.algorithm_version = 2
+           THEN q.edits_without_prior_read_v2
+           ELSE q.edits_without_prior_read END AS edits_without_prior_read,
          q.user_interrupts,
          q.tells_count,
          q.profile_name,
@@ -124,28 +127,34 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
       // its prior score, not raise a unique-constraint error.
       db.prepare(
         `INSERT INTO pod_quality_scores (
-          pod_id, score, algorithm_version, inspection_availability,
+          pod_id, score, score_v2, algorithm_version, inspection_availability,
           read_count, edit_count, read_edit_ratio,
-          edits_without_prior_read, user_interrupts, edit_churn_count,
+          edits_without_prior_read, read_count_v2, read_edit_ratio_v2,
+          edits_without_prior_read_v2, user_interrupts, edit_churn_count,
           tells_count, pr_fix_attempts, validation_passed,
           input_tokens, output_tokens, cost_usd,
           runtime, profile_name, model, final_status, completed_at, computed_at
         ) VALUES (
-          @podId, @score, @algorithmVersion, @inspectionAvailability,
+          @podId, @legacyScore, @score, @algorithmVersion, @inspectionAvailability,
           @readCount, @editCount, @readEditRatio,
-          @editsWithoutPriorRead, @userInterrupts, @editChurnCount,
+          @editsWithoutPriorRead, @readCountV2, @readEditRatioV2,
+          @editsWithoutPriorReadV2, @userInterrupts, @editChurnCount,
           @tellsCount, @prFixAttempts, @validationPassed,
           @inputTokens, @outputTokens, @costUsd,
           @runtime, @profileName, @model, @finalStatus, @completedAt, @computedAt
         )
         ON CONFLICT(pod_id) DO UPDATE SET
           score = excluded.score,
+          score_v2 = excluded.score_v2,
           algorithm_version = excluded.algorithm_version,
           inspection_availability = excluded.inspection_availability,
           read_count = excluded.read_count,
           edit_count = excluded.edit_count,
           read_edit_ratio = excluded.read_edit_ratio,
           edits_without_prior_read = excluded.edits_without_prior_read,
+          read_count_v2 = excluded.read_count_v2,
+          read_edit_ratio_v2 = excluded.read_edit_ratio_v2,
+          edits_without_prior_read_v2 = excluded.edits_without_prior_read_v2,
           user_interrupts = excluded.user_interrupts,
           edit_churn_count = excluded.edit_churn_count,
           tells_count = excluded.tells_count,
@@ -162,13 +171,17 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
           computed_at = excluded.computed_at`,
       ).run({
         podId: score.podId,
-        score: score.score ?? 0,
+        legacyScore: 0,
+        score: score.score,
         algorithmVersion: score.algorithmVersion,
         inspectionAvailability: score.inspectionAvailability,
-        readCount: score.readCount ?? 0,
+        readCount: 0,
+        readCountV2: score.readCount,
         editCount: score.editCount,
-        readEditRatio: score.readEditRatio ?? 0,
-        editsWithoutPriorRead: score.editsWithoutPriorRead ?? 0,
+        readEditRatio: 0,
+        readEditRatioV2: score.readEditRatio,
+        editsWithoutPriorRead: 0,
+        editsWithoutPriorReadV2: score.editsWithoutPriorRead,
         userInterrupts: score.userInterrupts,
         editChurnCount: score.editChurnCount,
         tellsCount: score.tellsCount,
@@ -337,7 +350,7 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
       const priorAgg = db
         .prepare(
           `SELECT AVG(score) AS avgScore, COUNT(*) AS cnt
-           FROM pod_quality_scores
+           FROM (${ATTEMPT_COMPATIBILITY_PROJECTION}) projected
            WHERE completed_at >= datetime('now', '-' || @priorDays || ' days')
              AND completed_at <  datetime('now', '-' || @days    || ' days')
              AND algorithm_version = @algorithmVersion
