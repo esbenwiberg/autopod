@@ -35,7 +35,7 @@ public enum ReasoningEffortField {
         value: Binding<ReasoningEffort?>,
         parent: ReasoningEffort?
     ) {
-        value.wrappedValue = explicitValue(current: value.wrappedValue, parent: parent)
+        value.wrappedValue = parent ?? .auto
     }
 }
 
