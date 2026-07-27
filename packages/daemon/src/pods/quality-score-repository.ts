@@ -144,10 +144,19 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
           @runtime, @profileName, @model, @finalStatus, @completedAt, @computedAt
         )
         ON CONFLICT(pod_id) DO UPDATE SET
+          score = CASE WHEN pod_quality_scores.algorithm_version = 1
+            THEN pod_quality_scores.score ELSE excluded.score END,
           score_v2 = excluded.score_v2,
           algorithm_version = excluded.algorithm_version,
           inspection_availability = excluded.inspection_availability,
+          read_count = CASE WHEN pod_quality_scores.algorithm_version = 1
+            THEN pod_quality_scores.read_count ELSE excluded.read_count END,
           edit_count = excluded.edit_count,
+          read_edit_ratio = CASE WHEN pod_quality_scores.algorithm_version = 1
+            THEN pod_quality_scores.read_edit_ratio ELSE excluded.read_edit_ratio END,
+          edits_without_prior_read = CASE WHEN pod_quality_scores.algorithm_version = 1
+            THEN pod_quality_scores.edits_without_prior_read
+            ELSE excluded.edits_without_prior_read END,
           read_count_v2 = excluded.read_count_v2,
           read_edit_ratio_v2 = excluded.read_edit_ratio_v2,
           edits_without_prior_read_v2 = excluded.edits_without_prior_read_v2,
@@ -167,16 +176,16 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
           computed_at = excluded.computed_at`,
       ).run({
         podId: score.podId,
-        legacyScore: 0,
+        legacyScore: score.score ?? 0,
         score: score.score,
         algorithmVersion: score.algorithmVersion,
         inspectionAvailability: score.inspectionAvailability,
-        readCount: 0,
+        readCount: score.readCount ?? 0,
         readCountV2: score.readCount,
         editCount: score.editCount,
-        readEditRatio: 0,
+        readEditRatio: score.readEditRatio ?? 5,
         readEditRatioV2: score.readEditRatio,
-        editsWithoutPriorRead: 0,
+        editsWithoutPriorRead: score.editsWithoutPriorRead ?? 0,
         editsWithoutPriorReadV2: score.editsWithoutPriorRead,
         userInterrupts: score.userInterrupts,
         editChurnCount: score.editChurnCount,

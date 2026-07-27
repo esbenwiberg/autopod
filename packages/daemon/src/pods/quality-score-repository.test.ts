@@ -55,6 +55,45 @@ describe('QualityScoreRepository', () => {
     const row = baseScore();
     repo.insert(row);
     expect(repo.get('pod-1')).toEqual(row);
+    expect(
+      db
+        .prepare(`
+          SELECT score, read_count, read_edit_ratio, edits_without_prior_read
+          FROM pod_quality_scores WHERE pod_id = 'pod-1'
+        `)
+        .get(),
+    ).toEqual({
+      score: 85,
+      read_count: 10,
+      read_edit_ratio: 5,
+      edits_without_prior_read: 0,
+    });
+  });
+
+  it('uses neutral legacy placeholders for unavailable current rows', () => {
+    repo.insert(
+      baseScore({
+        score: null,
+        inspectionAvailability: 'unavailable',
+        readCount: null,
+        readEditRatio: null,
+        editsWithoutPriorRead: null,
+      }),
+    );
+
+    expect(
+      db
+        .prepare(`
+          SELECT score, read_count, read_edit_ratio, edits_without_prior_read
+          FROM pod_quality_scores WHERE pod_id = 'pod-1'
+        `)
+        .get(),
+    ).toEqual({
+      score: 0,
+      read_count: 0,
+      read_edit_ratio: 5,
+      edits_without_prior_read: 0,
+    });
   });
 
   it('returns null for an unknown pod', () => {
@@ -65,6 +104,13 @@ describe('QualityScoreRepository', () => {
     repo.insert(baseScore({ score: 40 }));
     repo.insert(baseScore({ score: 92 }));
     expect(repo.get('pod-1')?.score).toBe(92);
+    expect(
+      (
+        db.prepare("SELECT score FROM pod_quality_scores WHERE pod_id = 'pod-1'").get() as {
+          score: number;
+        }
+      ).score,
+    ).toBe(92);
   });
 
   it('migration defaults legacy rows to unavailable algorithm version 1', () => {
