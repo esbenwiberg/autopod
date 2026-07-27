@@ -55,6 +55,7 @@ public final class PodStore {
   // MARK: - API
 
   private var api: DaemonAPI?
+  private var hydratedPodIds = Set<String>()
 
   public func configure(api: DaemonAPI) {
     self.api = api
@@ -106,9 +107,17 @@ public final class PodStore {
       let responses = try await api.listAllCompactPods()
       let fresh = PodMapper.map(responses, baseURL: api.baseURL)
       let currentById = Dictionary(uniqueKeysWithValues: pods.map { ($0.id, $0) })
-      pods = fresh.map {
-        mergeRestPod($0, with: currentById[$0.id], preferIncomingOnEqual: false)
+      let discoveredIds = Set(fresh.map(\.id))
+      let retained = pods.filter { !discoveredIds.contains($0.id) }
+      let merged = fresh.map { pod in
+        if hydratedPodIds.contains(pod.id), let current = currentById[pod.id] {
+          return current
+        }
+        return mergeRestPod(pod, with: currentById[pod.id], preferIncomingOnEqual: false)
       }
+      // Pods created over WebSocket after page one sit outside the keyset snapshot.
+      // Keep them visible until a later discovery traversal includes them.
+      pods = retained + merged
     } catch {
       print("[PodStore] Failed to load pods: \(error)")
       self.error = error.localizedDescription
@@ -150,6 +159,7 @@ public final class PodStore {
       } else {
         pods.append(updated)
       }
+      hydratedPodIds.insert(id)
     } catch {
       // Silent refresh failure — don't overwrite existing data
     }
@@ -220,6 +230,7 @@ public final class PodStore {
 
   public func removeSession(_ id: String) {
     pods.removeAll { $0.id == id }
+    hydratedPodIds.remove(id)
     if selectedSessionId == id {
       selectedSessionId = nil
     }

@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import AutopodClient
 @testable import AutopodDesktop
+import AutopodUI
 
 @MainActor
 @Test func podStoreLoadsEveryCompactPageWithoutDetailRequests() async throws {
@@ -28,9 +29,20 @@ import Testing
   )
   let store = PodStore()
   store.configure(api: api)
+  store.upsertSession(
+    Pod(
+      id: "websocket-pod",
+      status: .running,
+      branch: "autopod/websocket-pod",
+      profileName: "test",
+      model: "sonnet",
+      startedAt: Date(),
+      updatedAt: Date()
+    )
+  )
   await store.loadSessions()
 
-  #expect(store.pods.map(\.id) == ["newer-pod", "older-pod"])
+  #expect(store.pods.map(\.id) == ["websocket-pod", "newer-pod", "older-pod"])
   #expect(await recorder.podPaths == ["/pods", "/pods"])
 }
 
