@@ -145,6 +145,8 @@ import Testing
       {
         "podId": "abc12345",
         "score": 78,
+        "algorithmVersion": 2,
+        "inspectionAvailability": "available",
         "readCount": 10,
         "editCount": 5,
         "readEditRatio": 2.0,
@@ -203,6 +205,7 @@ private func makeFullFixtureJSON(days: Int) -> String {
     {
       "podId": "pod-aabbccdd",
       "score": 85,
+      "algorithmVersion": 2, "inspectionAvailability": "available",
       "readCount": 15, "editCount": 8, "readEditRatio": 1.875,
       "editsWithoutPriorRead": 0, "userInterrupts": 0, "editChurnCount": 1,
       "tellsCount": 0, "prFixAttempts": 0, "validationPassed": true,
@@ -216,6 +219,7 @@ private func makeFullFixtureJSON(days: Int) -> String {
     {
       "podId": "pod-11223344",
       "score": 42,
+      "algorithmVersion": 2, "inspectionAvailability": "available",
       "readCount": 2, "editCount": 9, "readEditRatio": 0.222,
       "editsWithoutPriorRead": 3, "userInterrupts": 2, "editChurnCount": 4,
       "tellsCount": 1, "prFixAttempts": 1, "validationPassed": false,
