@@ -233,8 +233,11 @@ describe('computeQualitySignals', () => {
     db.prepare(`
       INSERT INTO pod_quality_scores (
         pod_id, score, runtime, profile_name, model, final_status, completed_at,
-        input_tokens, output_tokens, cost_usd
-      ) VALUES (?, 90, 'claude', 'test-profile', 'stale-model', 'complete', ?, 999, 999, 99)
+        input_tokens, output_tokens, cost_usd, algorithm_version, inspection_availability
+      ) VALUES (
+        ?, 90, 'claude', 'test-profile', 'stale-model', 'complete', ?, 999, 999, 99,
+        2, 'available'
+      )
     `).run(POD_ID, new Date().toISOString());
 
     const signals = computeQualitySignals(POD_ID, {
