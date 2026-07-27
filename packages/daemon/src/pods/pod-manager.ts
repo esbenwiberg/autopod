@@ -6624,7 +6624,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
         const reasoningEffort = resolvedReasoningEffort(
           profile,
-          queuedProviderAttempt?.profileSnapshot,
+          pod.profileSnapshot as unknown as Record<string, unknown> | null,
         );
         profile = { ...profile, reasoningEffort };
 

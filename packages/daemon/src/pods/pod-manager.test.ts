@@ -847,38 +847,30 @@ describe('PodManager', () => {
     );
     ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
     ctx.deps.requeueSessionAfterCurrent = vi.fn();
+    vi.mocked(ctx.runtime.spawn).mockImplementationOnce(async function* () {
+      yield {
+        type: 'error',
+        timestamp: '2026-07-27T10:00:00.000Z',
+        message: 'quota exhausted',
+        fatal: true,
+        classification: {
+          category: 'quota_exhausted',
+          definitive: true,
+          sanitizedMessage: 'Provider quota exhausted',
+        },
+      } as const;
+    });
     const manager = createPodManager(ctx.deps);
     const pod = manager.createSession(
       { profileName: 'test-profile', task: 'Keep effort across failover', skipValidation: true },
       'user-1',
     );
-    ctx.podRepo.update(pod.id, {
-      status: 'running',
-      worktreePath: `/tmp/worktree/${pod.id}`,
-      containerId: 'source-container',
-    });
 
-    await manager.consumeAgentEvents(
-      pod.id,
-      (async function* () {
-        yield {
-          type: 'error',
-          timestamp: '2026-07-27T10:00:00.000Z',
-          message: 'quota exhausted',
-          fatal: true,
-          classification: {
-            category: 'quota_exhausted',
-            definitive: true,
-            sanitizedMessage: 'Provider quota exhausted',
-          },
-        } as const;
-      })(),
-    );
-
+    await manager.processPod(pod.id);
     expect(attempts.getActive(pod.id)).toMatchObject({ providerAccountId: 'target' });
     await manager.processPod(pod.id);
 
-    expect(ctx.runtime.spawn).toHaveBeenCalledWith(
+    expect(ctx.runtime.spawn).toHaveBeenLastCalledWith(
       expect.objectContaining({
         model: 'gpt-next',
         reasoningEffort: 'xhigh',
