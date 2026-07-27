@@ -312,6 +312,7 @@ describe('computeQualitySignals', () => {
     const signals = computeQualitySignals(POD_ID, deps);
 
     expect(signals.inspectionAvailability).toBe('unavailable');
+    expect(signals.editCount).toBe(1);
     expect(signals.readCount).toBeNull();
     expect(signals.readEditRatio).toBeNull();
     expect(signals.editsWithoutPriorRead).toBeNull();

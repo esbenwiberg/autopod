@@ -92,6 +92,7 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
       }
 
       if (normalized.action === 'write') {
+        editCount += 1;
         inspectionEvidenceComplete = false;
         continue;
       }
