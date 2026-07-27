@@ -894,15 +894,14 @@ struct OverviewTab: View {
                               label: "Score",
                               color: signals.score == nil ? .secondary : qualityColor(signals.grade))
 
-                    let readEditDisplay = signals.editCount == 0
-                        ? "—"
-                        : String(format: "%.1f", signals.readEditRatio)
+                    let readEditDisplay = signals.readEditRatio
+                        .map { String(format: "%.1f", $0) } ?? "—"
                     metricRow(icon: "doc.text.magnifyingglass",
                               value: readEditDisplay,
                               label: "Read / Edit")
 
                     metricRow(icon: "eye.slash",
-                              value: "\(signals.editsWithoutPriorRead)",
+                              value: signals.editsWithoutPriorRead.map(String.init) ?? "—",
                               label: "Blind edits")
                     metricRow(icon: "arrow.triangle.2.circlepath",
                               value: "\(signals.editChurnCount)",
