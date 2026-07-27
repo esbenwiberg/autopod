@@ -116,12 +116,13 @@ import AutopodUI
   await store.loadSessions()
   await store.hydrateSessionIfNeeded("selected-pod")
   await store.hydrateSessionIfNeeded("selected-pod")
+  store.selectedSessionId = "selected-pod"
   await mode.advance()
   await store.loadSessions()
 
   #expect(store.pods.first?.task == "Full detail task")
   #expect(store.pods.first?.status == .failed)
-  #expect(await recorder.detailPaths == ["/pods/selected-pod"])
+  #expect(await recorder.detailPaths == ["/pods/selected-pod", "/pods/selected-pod"])
 }
 
 private func compactPage(

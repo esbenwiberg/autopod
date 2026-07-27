@@ -143,6 +143,15 @@ public final class PodStore {
       let responses = try await api.listAllCompactPods()
       let fresh = PodMapper.map(responses, baseURL: api.baseURL)
       let currentById = Dictionary(uniqueKeysWithValues: pods.map { ($0.id, $0) })
+      let staleHydratedIds = Set(
+        fresh.compactMap { pod in
+          guard hydratedPodIds.contains(pod.id),
+                let current = currentById[pod.id],
+                pod.updatedAt > current.updatedAt else { return nil }
+          return pod.id
+        }
+      )
+      hydratedPodIds.subtract(staleHydratedIds)
       let discoveredIds = Set(fresh.map(\.id))
       let retained = pods.filter { !discoveredIds.contains($0.id) }
       let merged = fresh.map { pod in
@@ -167,6 +176,9 @@ public final class PodStore {
       // Pods created over WebSocket after page one sit outside the keyset snapshot.
       // Keep them visible until a later discovery traversal includes them.
       pods = retained + merged
+      if let selectedSessionId, staleHydratedIds.contains(selectedSessionId) {
+        await hydrateSessionIfNeeded(selectedSessionId)
+      }
     } catch {
       print("[PodStore] Failed to load pods: \(error)")
       self.error = error.localizedDescription
