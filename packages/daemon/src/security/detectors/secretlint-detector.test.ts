@@ -7,7 +7,7 @@ describe('secretlint-detector', () => {
   it('flags an AWS access key', async () => {
     // Synthetic AKIA-prefixed key; secretlint's preset ignores the documented
     // AWSAccessKeyID example string, so we use a non-canonical fixture.
-    const fakeKey = 'AKIAQ4Z9PXR7DNV3HM2L';
+    const fakeKey = ['AKIAQ4Z9PX', 'R7DNV3HM2L'].join('');
     const findings = await detector.scan({
       path: 'src/config.ts',
       content: `const key = '${fakeKey}';`,
@@ -33,7 +33,7 @@ describe('secretlint-detector', () => {
   });
 
   it('keeps exact-match identities private and stable across line movement', async () => {
-    const fakeKey = 'AKIAQ4Z9PXR7DNV3HM2L';
+    const fakeKey = ['AKIAQ4Z9PX', 'R7DNV3HM2L'].join('');
     const before = {
       path: 'src/config.ts',
       content: `const key = '${fakeKey}';`,
