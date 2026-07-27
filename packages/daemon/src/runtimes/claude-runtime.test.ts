@@ -704,6 +704,66 @@ describe('ClaudeRuntime', () => {
   // resume
   // ---------------------------------------------------------------------------
 
+  describe('reasoning effort', () => {
+    const efforts = ['low', 'medium', 'high', 'xhigh'] as const;
+
+    it.each(efforts)('passes %s exactly on spawn and continuation', (reasoningEffort) => {
+      const runtime = new ClaudeRuntime(logger, createMockContainerManager(createMockHandle()));
+      const privateRuntime = runtime as unknown as {
+        buildSpawnArgs: (config: SpawnConfig) => string[];
+        buildResumeArgs: (
+          message: string,
+          sessionId: string,
+          mcpServers: SpawnConfig['mcpServers'],
+          effort: SpawnConfig['reasoningEffort'],
+        ) => string[];
+      };
+      const config: SpawnConfig = {
+        podId: 'effort-pod',
+        task: 'work',
+        model: 'claude-opus-5',
+        reasoningEffort,
+        workDir: '/workspace',
+        containerId: 'c1',
+        env: {},
+      };
+
+      expect(privateRuntime.buildSpawnArgs(config)).toEqual(
+        expect.arrayContaining(['--effort', reasoningEffort]),
+      );
+      expect(privateRuntime.buildResumeArgs('continue', 'session-1', [], reasoningEffort)).toEqual(
+        expect.arrayContaining(['--effort', reasoningEffort]),
+      );
+    });
+
+    it('omits the native control for auto on spawn and continuation', () => {
+      const runtime = new ClaudeRuntime(logger, createMockContainerManager(createMockHandle()));
+      const privateRuntime = runtime as unknown as {
+        buildSpawnArgs: (config: SpawnConfig) => string[];
+        buildResumeArgs: (
+          message: string,
+          sessionId: string,
+          mcpServers: SpawnConfig['mcpServers'],
+          effort: SpawnConfig['reasoningEffort'],
+        ) => string[];
+      };
+      const config: SpawnConfig = {
+        podId: 'effort-pod',
+        task: 'work',
+        model: 'claude-opus-5',
+        reasoningEffort: 'auto',
+        workDir: '/workspace',
+        containerId: 'c1',
+        env: {},
+      };
+
+      expect(privateRuntime.buildSpawnArgs(config)).not.toContain('--effort');
+      expect(privateRuntime.buildResumeArgs('continue', 'session-1', [], 'auto')).not.toContain(
+        '--effort',
+      );
+    });
+  });
+
   describe('resume', () => {
     it('resume log has no args field (defensive snapshot)', async () => {
       const infoSpy = vi.spyOn(logger, 'info');

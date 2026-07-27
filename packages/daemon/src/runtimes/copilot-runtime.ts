@@ -247,6 +247,9 @@ export class CopilotRuntime implements Runtime {
     const args: string[] = ['-p', config.task];
     const copilotModel = config.env.COPILOT_MODEL;
     if (copilotModel) args.push('--model', copilotModel);
+    if (config.reasoningEffort !== 'auto') {
+      args.push('--effort', config.reasoningEffort);
+    }
     args.push('--allow-all', '--no-ask-user', '--no-auto-update', '-s');
     return args;
   }

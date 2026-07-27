@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream';
-import type { AgentErrorEvent, AgentEvent } from '@autopod/shared';
+import type { AgentErrorEvent, AgentEvent, SpawnConfig } from '@autopod/shared';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
@@ -510,6 +510,82 @@ describe('CopilotRuntime', () => {
       }
 
       expect((runtime as { handles: Map<string, unknown> }).handles.has('track-test')).toBe(false);
+    });
+  });
+
+  describe('reasoning effort', () => {
+    const efforts = ['low', 'medium', 'high', 'xhigh'] as const;
+
+    it.each(efforts)('passes %s exactly to Copilot', (reasoningEffort) => {
+      const runtime = new CopilotRuntime(logger, createMockContainerManager(createMockHandle()));
+      const args = (
+        runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
+      ).buildSpawnArgs({
+        podId: 'effort-pod',
+        task: 'work',
+        model: 'claude-sonnet-5',
+        reasoningEffort,
+        workDir: '/workspace',
+        containerId: 'c1',
+        env: {},
+      });
+
+      expect(args).toEqual(expect.arrayContaining(['--effort', reasoningEffort]));
+    });
+
+    it('omits the native control for auto', () => {
+      const runtime = new CopilotRuntime(logger, createMockContainerManager(createMockHandle()));
+      const args = (
+        runtime as unknown as { buildSpawnArgs: (config: SpawnConfig) => string[] }
+      ).buildSpawnArgs({
+        podId: 'effort-pod',
+        task: 'work',
+        model: 'claude-sonnet-5',
+        reasoningEffort: 'auto',
+        workDir: '/workspace',
+        containerId: 'c1',
+        env: {},
+      });
+
+      expect(args).not.toContain('--effort');
+    });
+
+    it('retains the configured effort when resume respawns Copilot', async () => {
+      const first = createMockHandle();
+      const second = createMockHandle();
+      const cm = createMockContainerManager(first);
+      vi.mocked(cm.execStreaming).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+      const runtime = new CopilotRuntime(logger, cm);
+      const spawn = runtime.spawn({
+        podId: 'effort-pod',
+        task: 'work',
+        model: 'claude-sonnet-5',
+        reasoningEffort: 'medium',
+        workDir: '/workspace',
+        containerId: 'c1',
+        env: {},
+      });
+      const spawnDone = (async () => {
+        for await (const _ of spawn) {
+          // drain
+        }
+      })();
+      (first as { finish?: (code?: number) => void }).finish?.(0);
+      await spawnDone;
+
+      const resumeDone = (async () => {
+        for await (const _ of runtime.resume('effort-pod', 'continue', 'c2')) {
+          // drain
+        }
+      })();
+      (second as { finish?: (code?: number) => void }).finish?.(0);
+      await resumeDone;
+
+      expect(cm.execStreaming).toHaveBeenLastCalledWith(
+        'c2',
+        expect.arrayContaining(['--effort', 'medium']),
+        expect.any(Object),
+      );
     });
   });
 

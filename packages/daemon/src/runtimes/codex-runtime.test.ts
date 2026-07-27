@@ -2207,6 +2207,7 @@ describe('CodexRuntime', () => {
       containerId: string,
       mcpServers: SpawnConfig['mcpServers'],
       executionTarget?: SpawnConfig['executionTarget'],
+      reasoningEffort?: SpawnConfig['reasoningEffort'],
     ) => Promise<void>;
 
     function callWriteMcpConfig(runtime: CodexRuntime): WriteMcp {
@@ -2418,6 +2419,108 @@ describe('CodexRuntime', () => {
       await callWriteMcpConfig(runtime)('c1', undefined);
 
       expect(cm.writeFile).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reasoning effort', () => {
+    const efforts = ['low', 'medium', 'high', 'xhigh'] as const;
+    type WriteConfig = (
+      containerId: string,
+      mcpServers: SpawnConfig['mcpServers'],
+      executionTarget?: SpawnConfig['executionTarget'],
+      reasoningEffort?: SpawnConfig['reasoningEffort'],
+    ) => Promise<void>;
+
+    function writer(runtime: CodexRuntime): WriteConfig {
+      return (runtime as unknown as { writeMcpConfig: WriteConfig }).writeMcpConfig.bind(runtime);
+    }
+
+    it.each(efforts)('writes exact %s effort without MCP servers and secures the file', async (effort) => {
+      const cm = createMockContainerManager(createMockHandle());
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await writer(runtime)('c1', [], undefined, effort);
+
+      expect(cm.writeFile).toHaveBeenCalledWith(
+        'c1',
+        '/home/autopod/.codex/config.toml',
+        `model_reasoning_effort = "${effort}"\n`,
+      );
+      expect(cm.execInContainer).toHaveBeenCalledWith(
+        'c1',
+        expect.arrayContaining(['sh', '-c', expect.stringContaining('chmod 0600')]),
+        { timeout: 5_000, user: 'root' },
+      );
+    });
+
+    it('omits auto and does not create an empty config', async () => {
+      const cm = createMockContainerManager(createMockHandle());
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await writer(runtime)('c1', [], undefined, 'auto');
+
+      expect(cm.writeFile).not.toHaveBeenCalled();
+      expect(cm.execInContainer).not.toHaveBeenCalled();
+    });
+
+    it('preserves mixed HTTP/stdio MCP sections and timeouts beside effort', async () => {
+      const cm = createMockContainerManager(createMockHandle());
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await writer(runtime)(
+        'c1',
+        [
+          { name: 'escalation', url: 'http://h/mcp', headers: { Authorization: 'Bearer token' } },
+          {
+            type: 'stdio',
+            name: 'serena',
+            command: 'serena',
+            args: ['--project', '/workspace'],
+            env: { LOG_LEVEL: 'info' },
+          },
+        ],
+        'sandbox',
+        'xhigh',
+      );
+
+      const content = vi.mocked(cm.writeFile).mock.calls[0]?.[2] as string;
+      expect(content).toContain('model_reasoning_effort = "xhigh"');
+      expect(content).toContain('[mcp_servers.escalation]');
+      expect(content).toContain('http_headers = { Authorization = "Bearer token" }');
+      expect(content).toContain('[mcp_servers.serena]');
+      expect(content).toContain('args = ["--project", "/workspace"]');
+      expect(content).toContain('env = { LOG_LEVEL = "info" }');
+      expect(content.match(/tool_timeout_sec = 3900\.0/g)).toHaveLength(2);
+      expect(cm.execInContainer).toHaveBeenCalledWith(
+        'c1',
+        expect.arrayContaining(['sh', '-c', expect.stringContaining('chmod 0644')]),
+        { timeout: 5_000, user: 'root' },
+      );
+    });
+
+    it('reuses the stored effort when resuming into a new container', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+      (
+        runtime as unknown as {
+          reasoningEffortBySession: Map<string, SpawnConfig['reasoningEffort']>;
+        }
+      ).reasoningEffortBySession.set('sess-1', 'high');
+
+      const consume = (async () => {
+        for await (const _ of runtime.resume('sess-1', 'continue', 'c2', {})) {
+          // drain
+        }
+      })();
+      handle.finish(0);
+      await consume;
+
+      expect(cm.writeFile).toHaveBeenCalledWith(
+        'c2',
+        '/home/autopod/.codex/config.toml',
+        expect.stringContaining('model_reasoning_effort = "high"'),
+      );
     });
   });
 

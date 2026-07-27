@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { AUTOPOD_INSTRUCTIONS_PATH } from '@autopod/shared';
-import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
+import type { AgentEvent, ReasoningEffort, Runtime, SpawnConfig } from '@autopod/shared';
 import { CLAUDE_DEFAULT_MODEL, CLAUDE_REVIEWER_MODEL } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
@@ -56,6 +56,8 @@ export class ClaudeRuntime implements Runtime {
   private claudeSessionIds = new Map<string, string>();
   /** Maps autopod podId → MCP servers so resume() can re-write the config into the new container. */
   private mcpServersBySession = new Map<string, SpawnConfig['mcpServers']>();
+  /** Maps autopod podId → portable effort so resume() preserves the initial invocation. */
+  private reasoningEffortBySession = new Map<string, ReasoningEffort>();
   private logger: Logger;
   private containerManager: ContainerManager;
 
@@ -70,6 +72,7 @@ export class ClaudeRuntime implements Runtime {
     // inside containerManager.execStreaming().
     await this.writeMcpConfig(config.containerId, config.mcpServers);
     this.mcpServersBySession.set(config.podId, config.mcpServers);
+    this.reasoningEffortBySession.set(config.podId, config.reasoningEffort);
 
     const args = this.buildSpawnArgs(config);
     const safeArgs = args.map((a, i) => (i === args.length - 1 ? `<task: ${a.length} bytes>` : a));
@@ -187,7 +190,12 @@ export class ClaudeRuntime implements Runtime {
     // Claude to error immediately and exit — which then breaks smoke-test execs with 409.
     const mcpServers = this.mcpServersBySession.get(podId);
     await this.writeMcpConfig(containerId, mcpServers);
-    const args = this.buildResumeArgs(message, claudeSessionId, mcpServers);
+    const args = this.buildResumeArgs(
+      message,
+      claudeSessionId,
+      mcpServers,
+      this.reasoningEffortBySession.get(podId),
+    );
 
     this.logger.info({
       component: 'claude-runtime',
@@ -295,6 +303,7 @@ export class ClaudeRuntime implements Runtime {
     this.handles.delete(podId);
     this.claudeSessionIds.delete(podId);
     this.mcpServersBySession.delete(podId);
+    this.reasoningEffortBySession.delete(podId);
   }
 
   async suspend(podId: string): Promise<void> {
@@ -390,6 +399,9 @@ export class ClaudeRuntime implements Runtime {
     if (process.env.AUTOPOD_DEBUG_AGENT === '1') {
       args.push('--debug');
     }
+    if (config.reasoningEffort !== 'auto') {
+      args.push('--effort', config.reasoningEffort);
+    }
 
     // Deterministic Claude CLI session ID for tracking (Claude CLI flag name — not autopod's pod ID)
     args.push('--session-id', randomUUID());
@@ -415,6 +427,7 @@ export class ClaudeRuntime implements Runtime {
     message: string,
     claudeSessionId?: string,
     mcpServers?: SpawnConfig['mcpServers'],
+    reasoningEffort?: ReasoningEffort,
   ): string[] {
     const args = [
       '-p',
@@ -427,6 +440,9 @@ export class ClaudeRuntime implements Runtime {
 
     if (process.env.AUTOPOD_DEBUG_AGENT === '1') {
       args.push('--debug');
+    }
+    if (reasoningEffort && reasoningEffort !== 'auto') {
+      args.push('--effort', reasoningEffort);
     }
 
     // Inject autopod system instructions without overwriting the repo's CLAUDE.md

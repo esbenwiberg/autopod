@@ -94,6 +94,57 @@ describe('PiRuntime', () => {
     vi.restoreAllMocks();
   });
 
+  describe('reasoning effort', () => {
+    const efforts = ['low', 'medium', 'high', 'xhigh'] as const;
+
+    it.each(efforts)('passes %s exactly to Pi', (reasoningEffort) => {
+      const runtime = new PiRuntime(logger, createContainerManager([]));
+      const args = (
+        runtime as unknown as { buildArgs: (config: SpawnConfig) => string[] }
+      ).buildArgs(config({ reasoningEffort }));
+
+      expect(args).toEqual(expect.arrayContaining(['--thinking', reasoningEffort]));
+    });
+
+    it('omits the native control for auto', () => {
+      const runtime = new PiRuntime(logger, createContainerManager([]));
+      const args = (
+        runtime as unknown as { buildArgs: (config: SpawnConfig) => string[] }
+      ).buildArgs(config({ reasoningEffort: 'auto' }));
+
+      expect(args).not.toContain('--thinking');
+    });
+
+    it('retains the configured effort for a follow-up', async () => {
+      const first = createHandle();
+      const second = createHandle();
+      const cm = createContainerManager([first, second]);
+      const runtime = new PiRuntime(logger, cm);
+
+      const spawn = collect(runtime.spawn(config({ reasoningEffort: 'high' })));
+      first.stdout.write(
+        `${JSON.stringify({ type: 'response', id: 'pod-1:1', result: { sessionId: 'pi-s1' } })}\n`,
+      );
+      first.stdout.write(`${JSON.stringify({ type: 'complete', result: 'done' })}\n`);
+      first.finish(0);
+      await spawn;
+
+      const followUp = collect(runtime.resume('pod-1', 'continue', 'ctr-2'));
+      second.stdout.write(
+        `${JSON.stringify({ type: 'response', id: 'pod-1:2', result: { sessionId: 'pi-s1' } })}\n`,
+      );
+      second.stdout.write(`${JSON.stringify({ type: 'complete', result: 'done' })}\n`);
+      second.finish(0);
+      await followUp;
+
+      expect(cm.execStreaming).toHaveBeenLastCalledWith(
+        'ctr-2',
+        expect.arrayContaining(['--thinking', 'high']),
+        expect.any(Object),
+      );
+    });
+  });
+
   it('sends the initial prompt through trusted managed-worker flags', async () => {
     const handle = createHandle();
     const cm = createContainerManager([handle]);

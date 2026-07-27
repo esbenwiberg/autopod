@@ -279,6 +279,9 @@ export class PiRuntime implements Runtime {
     if (config.customInstructions?.trim()) {
       args.push('--system-prompt-file', AUTOPOD_INSTRUCTIONS_PATH);
     }
+    if (config.reasoningEffort !== 'auto') {
+      args.push('--thinking', config.reasoningEffort);
+    }
     args.push('--jsonl');
     return args;
   }
