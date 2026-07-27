@@ -1,9 +1,4 @@
-import type {
-  AgentActivityEvent,
-  AgentToolUseEvent,
-  PodCompletedEvent,
-  SystemEvent,
-} from '@autopod/shared';
+import type { PodCompletedEvent, SystemEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
@@ -15,8 +10,6 @@ import { QUALITY_SCORE_ALGORITHM_VERSION } from './quality-score-repository.js';
 import { computeScore } from './quality-score.js';
 import { computeQualitySignals } from './quality-signals.js';
 import type { ValidationRepository } from './validation-repository.js';
-
-const PI_QUALITY_TOOL_NAMES = new Set(['read', 'write', 'edit', 'bash']);
 
 export interface QualityScoreRecorder {
   upgradeHistory(
@@ -71,18 +64,16 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
       providerAttemptRepo,
     });
     const computedScore = computeScore({ signals, finalStatus });
+    const attempts = providerAttemptRepo?.list(podId) ?? [];
     const hasPiAttempt =
-      pod.runtime === 'pi' ||
-      (providerAttemptRepo?.list(podId).some((attempt) => attempt.runtime === 'pi') ?? false);
-    const hasRetainedPiActivity = eventRepo.getForSession(podId).some((stored) => {
-      if (stored.type !== 'pod.agent_activity') return false;
-      const activity = stored.payload as AgentActivityEvent;
-      if (activity.event.type !== 'tool_use') return false;
-      const tool = (activity.event as AgentToolUseEvent).tool;
-      return PI_QUALITY_TOOL_NAMES.has(tool);
-    });
-    const missingPiEvidence = hasPiAttempt && !hasRetainedPiActivity;
-    const available = signals.inspectionAvailability === 'available' && !missingPiEvidence;
+      pod.runtime === 'pi' || attempts.some((attempt) => attempt.runtime === 'pi');
+    const hasNonPiAttempt =
+      pod.runtime !== 'pi' || attempts.some((attempt) => attempt.runtime !== 'pi');
+    // Retained events do not carry provider-attempt attribution. A mixed Pi
+    // outcome therefore cannot prove that the Pi portion is complete, even
+    // when unrelated normalized evidence survives from another attempt.
+    const mixedPiEvidenceIncomplete = hasPiAttempt && hasNonPiAttempt;
+    const available = signals.inspectionAvailability === 'available' && !mixedPiEvidenceIncomplete;
     const inspectionAvailability = available ? 'available' : 'unavailable';
 
     qualityScoreRepo.insert({

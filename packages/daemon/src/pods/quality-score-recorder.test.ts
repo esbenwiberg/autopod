@@ -250,6 +250,49 @@ describe('QualityScoreRecorder', () => {
     );
   });
 
+  it('records a pure Pi outcome when normalized evidence is retained', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'pi', model: 'pi-model' }));
+    ctx.eventRepo.insert({
+      type: 'pod.agent_activity',
+      timestamp: new Date().toISOString(),
+      podId: POD_ID,
+      event: {
+        type: 'tool_use',
+        timestamp: new Date().toISOString(),
+        tool: 'read',
+        input: { path: 'src/a.ts' },
+      },
+    });
+    ctx.eventRepo.insert(editEvent('src/a.ts'));
+
+    ctx.recorder.start();
+    ctx.eventBus.emit({
+      type: 'pod.completed',
+      timestamp: '2026-04-23T12:00:00.000Z',
+      podId: POD_ID,
+      finalStatus: 'complete',
+      summary: {
+        id: POD_ID,
+        profileName: 'test-profile',
+        task: 'do the thing',
+        status: 'complete',
+        model: 'pi-model',
+        runtime: 'pi',
+        duration: 1000,
+        filesChanged: 1,
+        createdAt: '2026-04-23T11:50:00.000Z',
+      },
+    });
+
+    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
+      expect.objectContaining({
+        inspectionAvailability: 'available',
+        readCount: 1,
+        editsWithoutPriorRead: 0,
+      }),
+    );
+  });
+
   it('rebuilds retained Codex history once with normalized inspection evidence', () => {
     ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5' }));
     ctx.eventRepo.insert(codexInspectionEvent('cat src/a.ts'));
