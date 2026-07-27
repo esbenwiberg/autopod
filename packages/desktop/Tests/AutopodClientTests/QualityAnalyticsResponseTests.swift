@@ -175,6 +175,25 @@ import Testing
     #expect(scores[0].validationPassed == true)
 }
 
+@Test func unavailablePodQualityScoreDecodesNullInspectionMetrics() throws {
+    let json = """
+    [{
+      "podId": "legacy123", "score": null, "algorithmVersion": 1,
+      "inspectionAvailability": "unavailable", "readCount": null,
+      "editCount": 2, "readEditRatio": null, "editsWithoutPriorRead": null,
+      "userInterrupts": 0, "editChurnCount": 0, "tellsCount": 0,
+      "prFixAttempts": 0, "validationPassed": null, "inputTokens": 0,
+      "outputTokens": 0, "costUsd": 0, "runtime": "pi",
+      "profileName": "legacy", "model": null, "finalStatus": "complete",
+      "completedAt": "2026-04-30T12:00:00Z", "computedAt": "2026-04-30T12:00:01Z"
+    }]
+    """.data(using: .utf8)!
+    let scores = try JSONDecoder().decode([PodQualityScore].self, from: json)
+    #expect(scores[0].inspectionAvailability == .unavailable)
+    #expect(scores[0].score == nil)
+    #expect(scores[0].readEditRatio == nil)
+}
+
 // MARK: - Helpers
 
 private func makeSparklineJSON(days: Int) -> String {

@@ -81,9 +81,10 @@ public struct AnalyticsView: View {
         if let q = qualityData { return "\(Int(q.summary.avgScore.rounded()))" }
         if qualityLoadError != nil { return "Error" }
         if scoresLoadError != nil { return "Error" }
-        guard !scores.isEmpty else { return "—" }
-        let total = scores.reduce(0) { $0 + $1.score }
-        return "\(Int((Double(total) / Double(scores.count)).rounded()))"
+        let measured = scores.compactMap(\.score)
+        guard !measured.isEmpty else { return "—" }
+        let total = measured.reduce(0, +)
+        return "\(Int((Double(total) / Double(measured.count)).rounded()))"
     }
 
     private var qualityCardSparkline: [Double]? {
@@ -686,7 +687,9 @@ private func analyticsDailyAverages(for group: [PodQualityScore]) -> [Double] {
     let byDay = Dictionary(grouping: recent) { _dayFmt.string(from: analyticsParseDate($0.completedAt)) }
     return byDay.keys.sorted().compactMap { day -> Double? in
         guard let g = byDay[day], !g.isEmpty else { return nil }
-        return Double(g.reduce(0) { $0 + $1.score }) / Double(g.count)
+        let measured = g.compactMap(\.score)
+        guard !measured.isEmpty else { return nil }
+        return Double(measured.reduce(0, +)) / Double(measured.count)
     }
 }
 

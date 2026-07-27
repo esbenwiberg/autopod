@@ -403,7 +403,7 @@ private struct SeriesSummaryView: View {
     }
 
     private var scoredRows: [Row] {
-        rows.filter { $0.quality != nil }
+        rows.filter { $0.quality?.score != nil }
     }
 
     private var averageQuality: Double? {
@@ -647,7 +647,7 @@ private struct SeriesSummaryView: View {
     }
 
     private func qualityPill(_ score: PodQualityScore?) -> some View {
-        let value = score.map { "\($0.score)" } ?? "n/a"
+        let value = score?.score.map(String.init) ?? "n/a"
         let color = qualityColor(score?.score)
         return HStack(spacing: 4) {
             Circle()
