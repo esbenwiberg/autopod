@@ -33,6 +33,8 @@ describe('normalizeQualityActivity', () => {
     'cat src/app.ts | wc -l',
     'cat $(touch owned)',
     'cat src/app.ts > copy.ts',
+    'cat src/*.ts',
+    'cat ~/src/app.ts',
     "sed -i 's/a/b/' src/app.ts",
     'rg needle .',
     'rg --files src',

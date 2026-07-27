@@ -17,7 +17,27 @@ export type QualityActivity =
     };
 
 const WORKSPACE_ROOT = '/workspace';
-const SHELL_META = new Set([';', '|', '&', '<', '>', '`', '$', '\n', '\r']);
+const SHELL_META = new Set([
+  ';',
+  '|',
+  '&',
+  '<',
+  '>',
+  '`',
+  '$',
+  '\n',
+  '\r',
+  '(',
+  ')',
+  '{',
+  '}',
+  '*',
+  '?',
+  '[',
+  ']',
+  '#',
+  '~',
+]);
 
 export function normalizeQualityActivity(event: AgentEvent): QualityActivity[] {
   if (event.type === 'file_change') return normalizeFileChange(event);
@@ -42,6 +62,7 @@ export function canonicalRepositoryPath(
   rawPath: string,
   cwd: string = WORKSPACE_ROOT,
 ): string | null {
+  if (rawPath.includes('\0') || cwd.includes('\0')) return null;
   const normalizedInput = rawPath.replaceAll('\\', '/');
   const normalizedCwd = cwd.replaceAll('\\', '/');
   let relative: string;

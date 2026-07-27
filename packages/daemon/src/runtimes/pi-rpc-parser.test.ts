@@ -43,7 +43,6 @@ describe('PiRpcParser', () => {
         type: 'tool_execution_end',
         toolCallId: 'read-1',
         toolName: 'read',
-        args: { path: '/workspace/src/read.ts', line_start: 5 },
         result: { content: 'source' },
       },
       {
@@ -56,7 +55,6 @@ describe('PiRpcParser', () => {
         type: 'tool_execution_end',
         toolCallId: 'edit-1',
         toolName: 'edit',
-        args: { path: 'src/edit.ts', oldText: 'a', newText: 'b' },
         result: 'done',
       },
       {
@@ -69,7 +67,6 @@ describe('PiRpcParser', () => {
         type: 'tool_execution_end',
         toolCallId: 'write-1',
         toolName: 'write',
-        args: { path: 'src/write.ts', content: 'new' },
         result: 'done',
       },
     ];
@@ -117,7 +114,7 @@ describe('PiRpcParser', () => {
       JSON.stringify({
         type: 'tool_execution_end',
         toolCallId: 'read-end-only',
-        toolName: 'READ',
+        toolName: 'read',
         args: { path: 'src/end-only.ts' },
         result: 'content',
       }),
