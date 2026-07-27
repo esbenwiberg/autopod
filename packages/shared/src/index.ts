@@ -27,6 +27,7 @@ export type {
   PreSubmitReviewSnapshot,
   ValidationWaiver,
   QualityGrade,
+  QualityInspectionAvailability,
   QualitySignals,
   PodQualityScore,
   QualityTrend,

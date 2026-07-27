@@ -26,9 +26,15 @@ export function computeScore(inputs: ScoreInputs): number {
 
   // A research/no-edit pod can't really be scored on read:edit — give it the
   // full reading weight so those runs don't land at 0.
-  const readingScore = signals.editCount === 0 ? 30 : 30 * clamp01(signals.readEditRatio / 5);
+  const readingScore =
+    signals.inspectionAvailability === 'unavailable' || signals.editCount === 0
+      ? 30
+      : 30 * clamp01((signals.readEditRatio ?? 0) / 5);
 
-  const blindEditScore = 20 * (1 - Math.min(signals.editsWithoutPriorRead / 5, 1));
+  const blindEditScore =
+    signals.inspectionAvailability === 'unavailable'
+      ? 20
+      : 20 * (1 - Math.min((signals.editsWithoutPriorRead ?? 0) / 5, 1));
   const tellsScore = 20 * (1 - Math.min(signals.tellsCount / 5, 1));
   const interruptScore = 15 * (1 - Math.min(signals.userInterrupts / 3, 1));
   const completeBonus = finalStatus === 'complete' ? 10 : 0;

@@ -57,6 +57,26 @@ function readTool(path: string): AgentActivityEvent {
   };
 }
 
+function toolUse(
+  tool: string,
+  input: Record<string, unknown>,
+  output?: string,
+): AgentActivityEvent {
+  const event: AgentToolUseEvent = {
+    type: 'tool_use',
+    timestamp: new Date().toISOString(),
+    tool,
+    input,
+    ...(output !== undefined && { output }),
+  };
+  return {
+    type: 'pod.agent_activity',
+    timestamp: event.timestamp,
+    podId: POD_ID,
+    event,
+  };
+}
+
 function fileChange(path: string, action: 'create' | 'modify' | 'delete'): AgentActivityEvent {
   const event: AgentFileChangeEvent = {
     type: 'file_change',
@@ -252,9 +272,49 @@ describe('computeQualitySignals', () => {
     const signals = computeQualitySignals(POD_ID, deps);
 
     expect(signals.readCount).toBe(4);
+    expect(signals.inspectionAvailability).toBe('available');
     expect(signals.editCount).toBe(1);
     expect(signals.readEditRatio).toBe(4);
     expect(signals.editsWithoutPriorRead).toBe(0);
+    expect(signals.grade).toBe('green');
+  });
+
+  it('uses canonical Codex inspection evidence before an edit', () => {
+    podRepo.insert(basePod({ runtime: 'codex' }));
+    eventRepo.insert(toolUse('Bash', { command: 'sed -n 1,80p ./src/a.ts' }));
+    eventRepo.insert(fileChange('/workspace/src/a.ts', 'modify'));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.inspectionAvailability).toBe('available');
+    expect(signals.readCount).toBe(1);
+    expect(signals.editCount).toBe(1);
+    expect(signals.editsWithoutPriorRead).toBe(0);
+  });
+
+  it('counts repeated modifications to one unread file as one blind edit', () => {
+    podRepo.insert(basePod({ runtime: 'codex' }));
+    eventRepo.insert(fileChange('src/a.ts', 'modify'));
+    eventRepo.insert(fileChange('./src/a.ts', 'modify'));
+    eventRepo.insert(fileChange('/workspace/src/a.ts', 'modify'));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.inspectionAvailability).toBe('available');
+    expect(signals.editCount).toBe(3);
+    expect(signals.editsWithoutPriorRead).toBe(1);
+  });
+
+  it('marks ambiguous native writes as unavailable instead of measured zero', () => {
+    podRepo.insert(basePod({ runtime: 'pi' }));
+    eventRepo.insert(toolUse('write', { path: 'src/a.ts' }));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.inspectionAvailability).toBe('unavailable');
+    expect(signals.readCount).toBeNull();
+    expect(signals.readEditRatio).toBeNull();
+    expect(signals.editsWithoutPriorRead).toBeNull();
     expect(signals.grade).toBe('green');
   });
 
@@ -371,6 +431,21 @@ describe('computeQualitySignals', () => {
     const signals = computeQualitySignals(POD_ID, deps);
 
     expect(signals.tellsCount).toBeGreaterThan(0);
+  });
+
+  it('does not detect tells in tool output', () => {
+    podRepo.insert(basePod());
+    eventRepo.insert(
+      toolUse(
+        'Bash',
+        { command: 'cat src/a.ts' },
+        'Unfortunately I was unable to complete this operation.',
+      ),
+    );
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.tellsCount).toBe(0);
   });
 
   it('detects tell patterns in complete event result text', () => {

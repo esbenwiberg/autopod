@@ -1,7 +1,6 @@
 import type {
   AgentActivityEvent,
   AgentCompleteEvent,
-  AgentFileChangeEvent,
   AgentTaskSummaryEvent,
   AgentToolUseEvent,
   EscalationType,
@@ -12,6 +11,7 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
+import { normalizeQualityActivity } from './quality-activity.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import type { ValidationRepository } from './validation-repository.js';
 
@@ -68,8 +68,10 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
 
   let readCount = 0;
   let editCount = 0;
-  let editsWithoutPriorRead = 0;
+  let hasQualityEvidence = false;
+  let inspectionEvidenceComplete = true;
   const readPaths = new Set<string>();
+  const blindPaths = new Set<string>();
   const fileModifyCounts = new Map<string, number>();
   const textSamples: string[] = [];
   let browserCalls = 0;
@@ -81,13 +83,29 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
     const activity = stored.payload as AgentActivityEvent;
     const event = activity.event;
 
+    for (const normalized of normalizeQualityActivity(event)) {
+      hasQualityEvidence = true;
+      if (normalized.kind === 'inspection') {
+        readCount += 1;
+        readPaths.add(normalized.path);
+        continue;
+      }
+
+      if (normalized.action === 'write') {
+        inspectionEvidenceComplete = false;
+        continue;
+      }
+      if (normalized.action === 'create' || normalized.action === 'modify') {
+        editCount += 1;
+      }
+      if (normalized.action === 'modify') {
+        if (!readPaths.has(normalized.path)) blindPaths.add(normalized.path);
+        fileModifyCounts.set(normalized.path, (fileModifyCounts.get(normalized.path) ?? 0) + 1);
+      }
+    }
+
     if (event.type === 'tool_use') {
       const tool = event as AgentToolUseEvent;
-      if (tool.tool === 'Read') {
-        readCount += 1;
-        const p = extractPath(tool.input);
-        if (p) readPaths.add(p);
-      }
       if (toolBaseName(tool.tool) === 'validate_in_browser' && tool.output) {
         browserCalls += 1;
         try {
@@ -102,20 +120,6 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
           // Tool output may be a raw error string instead of JSON — count the
           // call but don't increment check counts.
         }
-      }
-      if (tool.output) textSamples.push(tool.output);
-    } else if (event.type === 'file_change') {
-      const change = event as AgentFileChangeEvent;
-      if (change.action === 'create' || change.action === 'modify') {
-        editCount += 1;
-        // Only `modify` on a file with no prior Read counts as blind.
-        // `create` is inherently unread (the file didn't exist); that's fine.
-        if (change.action === 'modify' && !readPaths.has(change.path)) {
-          editsWithoutPriorRead += 1;
-        }
-      }
-      if (change.action === 'modify') {
-        fileModifyCounts.set(change.path, (fileModifyCounts.get(change.path) ?? 0) + 1);
       }
     } else if (event.type === 'complete') {
       const complete = event as AgentCompleteEvent;
@@ -137,7 +141,16 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
   const killed = pod.status === 'killed' ? 1 : 0;
   const userInterrupts = escalationCount + killed;
 
-  const readEditRatio = editCount > 0 ? readCount / editCount : readCount;
+  const inspectionAvailability =
+    hasQualityEvidence && inspectionEvidenceComplete ? 'available' : 'unavailable';
+  const availableReadCount = inspectionAvailability === 'available' ? readCount : null;
+  const readEditRatio =
+    inspectionAvailability === 'available'
+      ? editCount > 0
+        ? readCount / editCount
+        : readCount
+      : null;
+  const editsWithoutPriorRead = inspectionAvailability === 'available' ? blindPaths.size : null;
 
   const tellsCount = detectTells(textSamples);
   const prFixAttempts = pod.prFixAttempts ?? 0;
@@ -168,7 +181,8 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
 
   return {
     podId,
-    readCount,
+    inspectionAvailability,
+    readCount: availableReadCount,
     editCount,
     readEditRatio,
     editsWithoutPriorRead,
@@ -183,7 +197,13 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
       output: hasAttempts ? (attemptTotals?.outputTokens ?? 0) : pod.outputTokens,
       costUsd: hasAttempts ? (attemptTotals?.costUsd ?? 0) : pod.costUsd,
     },
-    grade: grade({ readEditRatio, editCount, editsWithoutPriorRead, userInterrupts }),
+    grade: grade({
+      inspectionAvailability,
+      readEditRatio,
+      editCount,
+      editsWithoutPriorRead,
+      userInterrupts,
+    }),
     score: persisted?.score ?? null,
     model: persisted?.model ?? pod.model,
   };
@@ -195,25 +215,20 @@ function toolBaseName(toolName: string): string {
   return separator === -1 ? toolName : toolName.slice(separator + 2);
 }
 
-function extractPath(input: Record<string, unknown>): string | null {
-  // Claude's Read tool uses `file_path`; be defensive about shape drift across
-  // runtimes (camelCase / generic `path`).
-  for (const key of ['file_path', 'path', 'filePath']) {
-    const v = input[key];
-    if (typeof v === 'string' && v.length > 0) return v;
-  }
-  return null;
-}
-
 function grade(s: {
-  readEditRatio: number;
+  inspectionAvailability: 'available' | 'unavailable';
+  readEditRatio: number | null;
   editCount: number;
-  editsWithoutPriorRead: number;
+  editsWithoutPriorRead: number | null;
   userInterrupts: number;
 }): QualityGrade {
   // A pod that never edited anything isn't sketchy — it's either queued,
   // validating, or a read-only research run. Don't punish it.
   if (s.editCount === 0) return 'green';
+  if (s.inspectionAvailability === 'unavailable') {
+    return s.userInterrupts <= 1 ? 'green' : 'yellow';
+  }
+  if (s.readEditRatio === null || s.editsWithoutPriorRead === null) return 'green';
   if (s.readEditRatio < 1 || s.editsWithoutPriorRead >= 3) return 'red';
   if (s.readEditRatio >= 3 && s.editsWithoutPriorRead === 0 && s.userInterrupts <= 1) {
     return 'green';

@@ -238,6 +238,10 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       podId: 'provider-attempt-quality',
+      inspectionAvailability: 'unavailable',
+      readCount: null,
+      readEditRatio: null,
+      editsWithoutPriorRead: null,
       tokens: { input: 300, output: 75, costUsd: 2.25 },
     });
   });
