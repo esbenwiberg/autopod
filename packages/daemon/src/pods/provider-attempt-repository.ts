@@ -49,6 +49,7 @@ export interface ProviderAttemptRepository {
   close(podId: string, input: CloseProviderAttempt): ProviderAttempt;
   list(podId: string): ProviderAttempt[];
   getActive(podId: string): ProviderAttempt | null;
+  getActiveProfileSnapshot(podId: string): Record<string, unknown> | null;
   totals(podId: string): ProviderAttemptTotals;
 }
 
@@ -260,6 +261,11 @@ export function createProviderAttemptRepository(db: Database.Database): Provider
     getActive(podId) {
       const row = selectActive.get(podId) as AttemptRow | undefined;
       return row ? hydrate(row) : null;
+    },
+
+    getActiveProfileSnapshot(podId) {
+      const row = selectActive.get(podId) as AttemptRow | undefined;
+      return row ? (JSON.parse(row.profile_snapshot) as Record<string, unknown>) : null;
     },
 
     totals(podId) {

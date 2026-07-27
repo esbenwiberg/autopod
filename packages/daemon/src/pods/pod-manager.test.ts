@@ -863,6 +863,13 @@ describe('PodManager', () => {
         },
       } as const;
     });
+    vi.mocked(ctx.runtime.spawn).mockImplementationOnce(async function* () {
+      yield {
+        type: 'complete',
+        timestamp: '2026-07-27T10:01:00.000Z',
+        result: 'done',
+      } as const;
+    });
     const manager = createPodManager(ctx.deps);
     const pod = manager.createSession(
       { profileName: 'test-profile', task: 'Keep effort across failover', skipValidation: true },
@@ -884,6 +891,7 @@ describe('PodManager', () => {
         reasoningEffort: 'xhigh',
       }),
     );
+    expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('validated');
   });
 
   it('ledgers successful, resumed, failed, paused, and killed runtime segments', async () => {

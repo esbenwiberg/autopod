@@ -1861,7 +1861,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const repository = deps.providerAttemptRepo;
     if (!repository) return;
     const active = repository.getActive(pod.id);
-    const profileSnapshot = redactedProfileSnapshot({ ...pod, profileSnapshot: profile }, profile);
+    const profileSnapshot =
+      (active && repository.getActiveProfileSnapshot(pod.id)) ??
+      redactedProfileSnapshot({ ...pod, profileSnapshot: profile }, profile);
     const profileReference = profileReferenceForAttempt(pod, profileSnapshot);
     const provider = providerForAttempt(
       active ? { ...pod, providerIdSnapshot: active.provider } : pod,
