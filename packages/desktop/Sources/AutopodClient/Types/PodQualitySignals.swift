@@ -1,13 +1,19 @@
 import Foundation
 
+public enum QualityInspectionAvailability: String, Codable, Sendable {
+  case available
+  case unavailable
+}
+
 /// Response from GET /pods/:id/quality — per-pod behavioural telemetry
 /// derived from the agent event stream plus escalation/pod state.
 public struct PodQualitySignals: Codable, Sendable {
   public let podId: String
-  public let readCount: Int
+  public let inspectionAvailability: QualityInspectionAvailability
+  public let readCount: Int?
   public let editCount: Int
-  public let readEditRatio: Double
-  public let editsWithoutPriorRead: Int
+  public let readEditRatio: Double?
+  public let editsWithoutPriorRead: Int?
   public let userInterrupts: Int
   /// Distinct files with 3+ modify events — indicates thrashing.
   public let editChurnCount: Int

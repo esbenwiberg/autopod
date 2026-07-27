@@ -4,7 +4,10 @@ import Foundation
 /// Written by the daemon's `QualityScoreRecorder` on `pod.completed`.
 public struct PodQualityScore: Codable, Equatable, Sendable, Identifiable {
   public let podId: String
+  /// Scores returned by the list endpoint belong to the current compatible cohort.
   public let score: Int
+  public let algorithmVersion: Int
+  public let inspectionAvailability: QualityInspectionAvailability
   public let readCount: Int
   public let editCount: Int
   public let readEditRatio: Double

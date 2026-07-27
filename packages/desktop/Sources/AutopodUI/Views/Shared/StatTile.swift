@@ -66,7 +66,7 @@ public struct StatTile: View {
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $showingInfo, arrowEdge: .bottom) {
-                    Text(description.isEmpty ? hint : description)
+                    Text(popoverText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: 240)
@@ -110,6 +110,13 @@ public struct StatTile: View {
     private var valueColor: Color {
         health == .neutral ? .primary : health.color
     }
+
+    private var popoverText: String {
+        if value == "—" && health == .neutral {
+            return hint
+        }
+        return description.isEmpty ? hint : description
+    }
 }
 
 // MARK: - PodQualitySignals → tile inputs
@@ -122,6 +129,15 @@ private func formatTokenCount(_ count: Int) -> String {
 
 public extension PodQualitySignals {
     var readEditTile: (value: String, health: StatHealth, hint: String) {
+        guard inspectionAvailability == .available,
+              let readCount,
+              let readEditRatio else {
+            return (
+                "—",
+                .neutral,
+                "Read / Edit is unavailable because retained events cannot support inspection-dependent telemetry."
+            )
+        }
         let hint = "\(readCount) Read calls vs \(editCount) Edit/Write/MultiEdit calls. Higher is better."
         if editCount == 0 {
             return ("—", .neutral, hint)
@@ -134,7 +150,14 @@ public extension PodQualitySignals {
     }
 
     var blindEditsTile: (value: String, health: StatHealth, hint: String) {
-        let n = editsWithoutPriorRead
+        guard inspectionAvailability == .available,
+              let n = editsWithoutPriorRead else {
+            return (
+                "—",
+                .neutral,
+                "Blind Edits is unavailable because retained events cannot show whether files were inspected before editing."
+            )
+        }
         let health: StatHealth = n == 0 ? .good : (n <= 2 ? .warn : .bad)
         return ("\(n)", health, "\(n) files modified without being Read first this session.")
     }
