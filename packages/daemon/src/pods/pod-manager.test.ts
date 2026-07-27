@@ -5429,6 +5429,9 @@ describe('PodManager', () => {
       expect(messages).toContain('Collecting synced fact evidence…');
       expect(syncFailed).toBeGreaterThan(syncStarted);
       expect(resultHandled).toBeGreaterThan(syncFailed);
+      expect(messages.indexOf('Stopping post-validation container…')).toBeGreaterThan(
+        resultHandled,
+      );
       expect(messages.some((message) => message.startsWith('Workspace sync complete'))).toBe(false);
     });
 

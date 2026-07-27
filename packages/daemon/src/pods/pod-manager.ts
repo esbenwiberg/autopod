@@ -11501,6 +11501,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           if (s2.containerId) {
             try {
+              emitActivityStatus(podId, 'Stopping post-validation container…');
               await stopSandboxPreviewProxy(podId);
               const cm = containerManagerFactory.get(s2.executionTarget);
               await cm.stop(s2.containerId);
@@ -11521,6 +11522,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           if (s2.containerId) {
             try {
+              emitActivityStatus(podId, 'Stopping post-validation container…');
               await stopSandboxPreviewProxy(podId);
               const cm = containerManagerFactory.get(s2.executionTarget);
               await cm.stop(s2.containerId);
@@ -11831,6 +11833,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Stop the container (not remove) so it can be restarted for preview
           if (s2.containerId) {
             try {
+              emitActivityStatus(podId, 'Stopping post-validation container…');
               await stopSandboxPreviewProxy(podId);
               const cm = containerManagerFactory.get(s2.executionTarget);
               await cm.stop(s2.containerId);
@@ -11861,6 +11864,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Stop the container (not remove) so it can be restarted for preview
         if (s2.containerId) {
           try {
+            emitActivityStatus(podId, 'Stopping post-validation container…');
             await stopSandboxPreviewProxy(podId);
             const cm = containerManagerFactory.get(s2.executionTarget);
             await cm.stop(s2.containerId);
