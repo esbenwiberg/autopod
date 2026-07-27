@@ -6405,6 +6405,7 @@ describe('PodManager', () => {
         expect(messages).toContain(
           'Review infrastructure failed after 3 retries — needs human review',
         );
+        expect(messages).toContain('Stopping post-validation container…');
       } finally {
         vi.useRealTimers();
       }

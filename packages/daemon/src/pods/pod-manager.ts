@@ -6001,6 +6001,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     if (pod.containerId) {
       try {
+        emitActivityStatus(pod.id, 'Stopping post-validation container…');
         await stopSandboxPreviewProxy(pod.id);
         const cm = containerManagerFactory.get(pod.executionTarget);
         await cm.stop(pod.containerId);
