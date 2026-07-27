@@ -7083,7 +7083,7 @@ describe('PodManager', () => {
       await expect(manager.sendMessage(pod.id, 'hello')).rejects.toThrow(AutopodError);
     });
 
-    it('primes durable Pi session and config before reply resume after restart', async () => {
+    it('preserves snapshotted reasoning effort in durable Pi resume config', async () => {
       const ctx = createTestContext(undefined, { defaultRuntime: 'pi' });
       const piRuntime = {
         ...createMockRuntime(),
@@ -7102,6 +7102,10 @@ describe('PodManager', () => {
         status: 'awaiting_input',
         containerId: 'ctr-1',
         piSessionId: 'pi-session-1',
+        profileSnapshot: {
+          ...ctx.profileStore.get('test-profile'),
+          reasoningEffort: 'xhigh',
+        },
         pendingEscalation: null,
       });
 
@@ -7113,6 +7117,7 @@ describe('PodManager', () => {
           podId: pod.id,
           containerId: 'ctr-1',
           customInstructions: 'resume',
+          reasoningEffort: 'xhigh',
           mcpServers: expect.arrayContaining([
             expect.objectContaining({
               type: 'http',
