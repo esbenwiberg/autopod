@@ -195,6 +195,17 @@ describe('QualityScoreRecorder', () => {
     ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5' }));
     ctx.eventRepo.insert(codexInspectionEvent('cat src/a.ts'));
     ctx.eventRepo.insert(editEvent('src/a.ts'));
+    ctx.eventRepo.insert({
+      type: 'pod.agent_activity',
+      timestamp: new Date().toISOString(),
+      podId: POD_ID,
+      event: {
+        type: 'tool_use',
+        timestamp: new Date().toISOString(),
+        tool: 'validate_in_browser',
+        input: {},
+      },
+    });
     ctx.providerAttemptRepo.open({
       podId: POD_ID,
       provider: 'openrouter',

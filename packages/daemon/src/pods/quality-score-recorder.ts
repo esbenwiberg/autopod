@@ -16,6 +16,8 @@ import { computeScore } from './quality-score.js';
 import { computeQualitySignals } from './quality-signals.js';
 import type { ValidationRepository } from './validation-repository.js';
 
+const PI_QUALITY_TOOL_NAMES = new Set(['read', 'write', 'edit', 'bash']);
+
 export interface QualityScoreRecorder {
   upgradeHistory(
     limit?: number,
@@ -77,7 +79,7 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
       const activity = stored.payload as AgentActivityEvent;
       if (activity.event.type !== 'tool_use') return false;
       const tool = (activity.event as AgentToolUseEvent).tool;
-      return tool === tool.toLowerCase();
+      return PI_QUALITY_TOOL_NAMES.has(tool);
     });
     const missingPiEvidence = hasPiAttempt && !hasRetainedPiActivity;
     const available = signals.inspectionAvailability === 'available' && !missingPiEvidence;
