@@ -1,0 +1,58 @@
+contract_version: 1
+title: "Version and rebuild quality scores"
+depends_on:
+  - 02-integrate-quality-availability
+scenarios:
+  - id: current-scores-are-versioned
+    given:
+      - "a pod completes with trustworthy current quality telemetry"
+    when:
+      - "the recorder persists its quality row"
+    then:
+      - "the row carries the current algorithm version and availability state"
+  - id: recoverable-codex-history-is-rebuilt
+    given:
+      - "a stale Codex quality row was computed by the Claude-specific algorithm"
+      - "the pod's source events are retained"
+    when:
+      - "quality history upgrade runs"
+    then:
+      - "the row is recomputed with normalized activity and the current algorithm version"
+      - "rerunning the upgrade is idempotent"
+  - id: unrecoverable-history-is-unavailable
+    given:
+      - "a historical session lacks the source events required for inspection judgments"
+    when:
+      - "quality history upgrade and API serialization run"
+    then:
+      - "the session remains explicitly unavailable"
+      - "the system does not invent read or blind-edit counters"
+  - id: analytics-use-compatible-scores
+    given:
+      - "quality storage contains current, legacy, and unavailable rows"
+    when:
+      - "quality lists, trends, and analytics are queried"
+    then:
+      - "incompatible rows are excluded or explicitly distinguished"
+      - "one logical pod contributes at most one compatible quality outcome"
+required_facts:
+  - id: fact-score-upgrade
+    proves:
+      - current-scores-are-versioned
+      - recoverable-codex-history-is-rebuilt
+      - unrecoverable-history-is-unavailable
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/pods/quality-score-recorder.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- quality-score-recorder.test.ts
+  - id: fact-versioned-quality-api
+    proves:
+      - analytics-use-compatible-scores
+      - unrecoverable-history-is-unavailable
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/api/routes/pods.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pods.test.ts -t "quality algorithm version"
+human_review: []

@@ -1,0 +1,65 @@
+contract_version: 1
+title: "Integrate confidence-aware quality signals"
+depends_on:
+  - 01-normalize-runtime-activity
+scenarios:
+  - id: inspected-edit-is-not-blind
+    given:
+      - "normalized evidence records an inspection before a mutation of the same canonical file"
+    when:
+      - "live quality signals are computed"
+    then:
+      - "the inspection contributes to the read/edit measure"
+      - "the file is not classified as blind"
+  - id: blind-files-are-distinct
+    given:
+      - "one unread existing file is modified multiple times"
+    when:
+      - "blind edits are counted"
+    then:
+      - "the file contributes exactly one blind edit"
+  - id: unavailable-evidence-is-neutral
+    given:
+      - "a session lacks trustworthy inspection evidence"
+    when:
+      - "quality signals, grade, and score are computed"
+    then:
+      - "inspection-dependent values are explicitly unavailable"
+      - "missing evidence does not create a red grade or reading and blind-edit penalty"
+  - id: tells-are-agent-authored
+    given:
+      - "tool output contains configured tell phrases"
+      - "agent-authored completion and task-summary text does not"
+    when:
+      - "tell patterns are computed"
+    then:
+      - "the tool output does not increment the tell count"
+  - id: claude-remains-compatible
+    given:
+      - "a Claude session reads an existing file before editing it"
+    when:
+      - "quality signals are computed through normalized activity"
+    then:
+      - "read and edit counters remain accurate"
+      - "the edit is not blind"
+required_facts:
+  - id: fact-live-quality-normalization
+    proves:
+      - inspected-edit-is-not-blind
+      - blind-files-are-distinct
+      - tells-are-agent-authored
+      - claude-remains-compatible
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/quality-signals.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- quality-signals.test.ts
+  - id: fact-unavailable-score
+    proves:
+      - unavailable-evidence-is-neutral
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/quality-score.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- quality-score.test.ts -t "unavailable inspection telemetry"
+human_review: []
