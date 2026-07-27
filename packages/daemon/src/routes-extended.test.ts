@@ -470,6 +470,9 @@ describe('Extended Route Tests', () => {
 
     it.each([
       '/pods?compact=true&page=true&cursor=not-json',
+      `/pods?compact=true&page=true&cursor=${Buffer.from(
+        JSON.stringify({ createdAt: '1', id: 'pod-id' }),
+      ).toString('base64url')}`,
       '/pods?compact=true&page=false',
       '/pods?page=true',
     ])('rejects malformed compact pagination query %s', async (url) => {
