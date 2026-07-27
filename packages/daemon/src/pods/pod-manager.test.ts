@@ -848,6 +848,9 @@ describe('PodManager', () => {
     ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
     ctx.deps.requeueSessionAfterCurrent = vi.fn();
     vi.mocked(ctx.runtime.spawn).mockImplementationOnce(async function* () {
+      ctx.db
+        .prepare('UPDATE profiles SET reasoning_effort = ? WHERE name = ?')
+        .run('low', 'test-profile');
       yield {
         type: 'error',
         timestamp: '2026-07-27T10:00:00.000Z',
@@ -868,6 +871,11 @@ describe('PodManager', () => {
 
     await manager.processPod(pod.id);
     expect(attempts.getActive(pod.id)).toMatchObject({ providerAccountId: 'target' });
+    const targetSnapshot = ctx.db
+      .prepare('SELECT profile_snapshot FROM provider_attempts WHERE pod_id = ? AND ordinal = 2')
+      .pluck()
+      .get(pod.id) as string;
+    expect(JSON.parse(targetSnapshot)).toMatchObject({ reasoningEffort: 'xhigh' });
     await manager.processPod(pod.id);
 
     expect(ctx.runtime.spawn).toHaveBeenLastCalledWith(

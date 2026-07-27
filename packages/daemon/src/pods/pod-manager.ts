@@ -1861,6 +1861,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const repository = deps.providerAttemptRepo;
     if (!repository) return;
     const active = repository.getActive(pod.id);
+    const profileSnapshot = redactedProfileSnapshot({ ...pod, profileSnapshot: profile }, profile);
+    const profileReference = profileReferenceForAttempt(pod, profileSnapshot);
     const provider = providerForAttempt(
       active ? { ...pod, providerIdSnapshot: active.provider } : pod,
       profile,
@@ -1870,14 +1872,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         active.provider === provider &&
         active.providerAccountId === profile.providerAccountId &&
         active.runtime === pod.runtime &&
-        active.model === pod.model;
+        active.model === pod.model &&
+        active.profileReference === profileReference;
       if (!identityMatches) {
         throw new Error(`Active provider attempt identity mismatch for pod ${pod.id}`);
       }
       return;
     }
-    const profileSnapshot = redactedProfileSnapshot(pod, profile);
-    const profileReference = profileReferenceForAttempt(pod, profileSnapshot);
     if (
       repository.list(pod.id).length === 0 &&
       (pod.inputTokens > 0 || pod.outputTokens > 0 || pod.costUsd > 0)
@@ -2021,7 +2022,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   function openProviderTargetAttempt(pod: Pod, target: ProviderFailoverTarget): void {
     const repository = deps.providerAttemptRepo;
     if (!repository) throw new Error('Provider attempt repository is unavailable');
-    const profile = profileForProviderTarget(profileStore.get(pod.profileName), target);
+    const currentProfile = profileStore.get(pod.profileName);
+    const profile = profileForProviderTarget(
+      {
+        ...currentProfile,
+        reasoningEffort: resolvedReasoningEffort(
+          currentProfile,
+          pod.profileSnapshot as unknown as Record<string, unknown> | null,
+        ),
+      },
+      target,
+    );
     const targetProvider = providerAccountStore?.get(target.providerAccountId).provider ?? null;
     const projectedPod = {
       ...pod,
