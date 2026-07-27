@@ -65,6 +65,7 @@ function config(overrides: Partial<SpawnConfig> = {}): SpawnConfig {
     podId: 'pod-1',
     task: 'initial task',
     model: 'claude-sonnet-4',
+    reasoningEffort: 'auto',
     workDir: '/workspace',
     containerId: 'ctr-1',
     customInstructions: 'system instructions',
