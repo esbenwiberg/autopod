@@ -30,7 +30,14 @@ interface PiNativeRetryState {
   finalAgentEndObserved: boolean;
 }
 interface PiToolExecutionState {
-  emittedCallIds: Set<string>;
+  completedCallIds: Set<string>;
+  pendingCalls: Map<
+    string,
+    {
+      tool: string;
+      args: Record<string, unknown>;
+    }
+  >;
 }
 
 const MAX_TEXT = 4_000;
@@ -50,7 +57,10 @@ export async function* parsePiRpc(
     lastAttempt: 0,
     finalAgentEndObserved: false,
   };
-  const toolState: PiToolExecutionState = { emittedCallIds: new Set() };
+  const toolState: PiToolExecutionState = {
+    completedCallIds: new Set(),
+    pendingCalls: new Map(),
+  };
   for await (const chunk of stream) {
     buffer += Buffer.isBuffer(chunk) ? chunk.toString('utf-8') : String(chunk);
     let lf = buffer.indexOf('\n');
@@ -399,7 +409,7 @@ function mapNativeToolExecution(
       fatal: false,
     };
   }
-  if (state.emittedCallIds.has(callId)) return null;
+  if (state.completedCallIds.has(callId)) return null;
 
   const tool = stringField(record, 'toolName') ?? stringField(record, 'tool_name');
   if (!tool) {
@@ -413,7 +423,23 @@ function mapNativeToolExecution(
   if (!['read', 'edit', 'write'].includes(tool)) return null;
 
   const args = objectField(record, 'args') ?? objectField(record, 'arguments');
-  if (!args) {
+  if (kind === 'tool_execution_start') {
+    if (!args) {
+      return {
+        type: 'error',
+        timestamp,
+        message: `Pi RPC emitted malformed ${kind} record`,
+        fatal: false,
+      };
+    }
+    state.pendingCalls.set(callId, { tool, args });
+    return null;
+  }
+
+  const pending = state.pendingCalls.get(callId);
+  state.pendingCalls.delete(callId);
+  state.completedCallIds.add(callId);
+  if (pending && pending.tool !== tool) {
     return {
       type: 'error',
       timestamp,
@@ -421,10 +447,22 @@ function mapNativeToolExecution(
       fatal: false,
     };
   }
-  state.emittedCallIds.add(callId);
+  const retainedArgs = pending?.args ?? args;
+  if (!retainedArgs) {
+    return {
+      type: 'error',
+      timestamp,
+      message: `Pi RPC emitted malformed ${kind} record`,
+      fatal: false,
+    };
+  }
+  // Pi emits the attempted call at start, before its result is known. Only an
+  // explicit successful end record is trustworthy evidence that a read or
+  // mutation actually happened.
+  if (record.isError !== false) return null;
 
   const output =
-    kind === 'tool_execution_end' && record.result !== undefined
+    record.result !== undefined
       ? truncate(
           typeof record.result === 'string' ? record.result : JSON.stringify(record.result),
           MAX_OUTPUT,
@@ -434,7 +472,7 @@ function mapNativeToolExecution(
     type: 'tool_use',
     timestamp,
     tool,
-    input: { ...args, call_id: callId },
+    input: { ...retainedArgs, call_id: callId },
     ...(output !== undefined && { output }),
   };
 }

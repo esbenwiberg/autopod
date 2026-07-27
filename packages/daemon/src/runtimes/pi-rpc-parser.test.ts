@@ -44,6 +44,7 @@ describe('PiRpcParser', () => {
         toolCallId: 'read-1',
         toolName: 'read',
         result: { content: 'source' },
+        isError: false,
       },
       {
         type: 'tool_execution_start',
@@ -56,6 +57,7 @@ describe('PiRpcParser', () => {
         toolCallId: 'edit-1',
         toolName: 'edit',
         result: 'done',
+        isError: false,
       },
       {
         type: 'tool_execution_start',
@@ -68,6 +70,7 @@ describe('PiRpcParser', () => {
         toolCallId: 'write-1',
         toolName: 'write',
         result: 'done',
+        isError: false,
       },
     ];
 
@@ -83,6 +86,7 @@ describe('PiRpcParser', () => {
           path: '/workspace/src/read.ts',
           line_start: 5,
         },
+        output: '{"content":"source"}',
       },
       {
         type: 'tool_use',
@@ -94,6 +98,7 @@ describe('PiRpcParser', () => {
           oldText: 'a',
           newText: 'b',
         },
+        output: 'done',
       },
       {
         type: 'tool_use',
@@ -104,6 +109,7 @@ describe('PiRpcParser', () => {
           path: 'src/write.ts',
           content: 'new',
         },
+        output: 'done',
       },
     ]);
     expect(stats).toMatchObject({ events: 3, nonStatusEvents: 3 });
@@ -117,6 +123,7 @@ describe('PiRpcParser', () => {
         toolName: 'read',
         args: { path: 'src/end-only.ts' },
         result: 'content',
+        isError: false,
       }),
     ]);
 
@@ -128,6 +135,64 @@ describe('PiRpcParser', () => {
         input: { call_id: 'read-end-only', path: 'src/end-only.ts' },
         output: 'content',
       },
+    ]);
+  });
+
+  it('does not emit activity for failed or outcome-less native tool calls', async () => {
+    const { events } = await parseLines([
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'failed-read',
+        toolName: 'read',
+        args: { path: 'src/unread.ts' },
+      }),
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'failed-read',
+        toolName: 'read',
+        result: 'not found',
+        isError: true,
+      }),
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'unknown-write',
+        toolName: 'write',
+        args: { path: 'src/not-written.ts', content: 'nope' },
+      }),
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'unknown-write',
+        toolName: 'write',
+        result: 'ambiguous legacy result',
+      }),
+    ]);
+
+    expect(events).toEqual([]);
+  });
+
+  it('rejects a correlated end record whose tool name changed', async () => {
+    const { events } = await parseLines([
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'changed-tool',
+        toolName: 'read',
+        args: { path: 'src/a.ts' },
+      }),
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'changed-tool',
+        toolName: 'write',
+        result: 'done',
+        isError: false,
+      }),
+    ]);
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        fatal: false,
+        message: 'Pi RPC emitted malformed tool_execution_end record',
+      }),
     ]);
   });
 

@@ -323,6 +323,54 @@ describe('computeQualitySignals', () => {
     expect(signals.grade).toBe('green');
   });
 
+  it('counts paired native and file-change mutations once', () => {
+    podRepo.insert(basePod({ runtime: 'pi' }));
+    eventRepo.insert(readTool('src/a.ts'));
+    eventRepo.insert(toolUse('edit', { path: 'src/a.ts', call_id: 'edit-1' }));
+    eventRepo.insert(fileChange('src/a.ts', 'modify'));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.inspectionAvailability).toBe('available');
+    expect(signals.editCount).toBe(1);
+    expect(signals.readEditRatio).toBe(1);
+    expect(signals.editsWithoutPriorRead).toBe(0);
+  });
+
+  it('does not collapse distinct native mutations to the same path', () => {
+    podRepo.insert(basePod({ runtime: 'pi' }));
+    eventRepo.insert(readTool('src/a.ts'));
+    eventRepo.insert(toolUse('edit', { path: 'src/a.ts', call_id: 'edit-1' }));
+    eventRepo.insert(toolUse('edit', { path: 'src/a.ts', call_id: 'edit-2' }));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.editCount).toBe(2);
+  });
+
+  it('does not pair a later native mutation with an earlier file change', () => {
+    podRepo.insert(basePod({ runtime: 'pi' }));
+    eventRepo.insert(readTool('src/a.ts'));
+    eventRepo.insert(fileChange('src/a.ts', 'modify'));
+    eventRepo.insert(toolUse('edit', { path: 'src/a.ts', call_id: 'edit-2' }));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.editCount).toBe(2);
+  });
+
+  it('uses a paired file-change action to resolve a native write', () => {
+    podRepo.insert(basePod({ runtime: 'pi' }));
+    eventRepo.insert(toolUse('write', { path: 'src/new.ts', call_id: 'write-1' }));
+    eventRepo.insert(fileChange('src/new.ts', 'create'));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.inspectionAvailability).toBe('available');
+    expect(signals.editCount).toBe(1);
+    expect(signals.editsWithoutPriorRead).toBe(0);
+  });
+
   it('flags edits to files that were never read', () => {
     podRepo.insert(basePod());
     eventRepo.insert(readTool('src/a.ts'));

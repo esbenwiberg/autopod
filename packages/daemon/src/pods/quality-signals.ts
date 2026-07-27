@@ -11,7 +11,7 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
-import { normalizeQualityActivity } from './quality-activity.js';
+import { type QualityActivity, normalizeQualityActivity } from './quality-activity.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import type { ValidationRepository } from './validation-repository.js';
 
@@ -66,13 +66,7 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
   const pod = deps.podRepo.getOrThrow(podId);
   const events = deps.eventRepo.getForSession(podId);
 
-  let readCount = 0;
-  let editCount = 0;
-  let hasQualityEvidence = false;
-  let inspectionEvidenceComplete = true;
-  const readPaths = new Set<string>();
-  const blindPaths = new Set<string>();
-  const fileModifyCounts = new Map<string, number>();
+  const qualityActivities: QualityActivity[] = [];
   const textSamples: string[] = [];
   let browserCalls = 0;
   let browserTotalChecks = 0;
@@ -83,27 +77,7 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
     const activity = stored.payload as AgentActivityEvent;
     const event = activity.event;
 
-    for (const normalized of normalizeQualityActivity(event)) {
-      hasQualityEvidence = true;
-      if (normalized.kind === 'inspection') {
-        readCount += 1;
-        readPaths.add(normalized.path);
-        continue;
-      }
-
-      if (normalized.action === 'write') {
-        editCount += 1;
-        inspectionEvidenceComplete = false;
-        continue;
-      }
-      if (normalized.action === 'create' || normalized.action === 'modify') {
-        editCount += 1;
-      }
-      if (normalized.action === 'modify') {
-        if (!readPaths.has(normalized.path)) blindPaths.add(normalized.path);
-        fileModifyCounts.set(normalized.path, (fileModifyCounts.get(normalized.path) ?? 0) + 1);
-      }
-    }
+    qualityActivities.push(...normalizeQualityActivity(event));
 
     if (event.type === 'tool_use') {
       const tool = event as AgentToolUseEvent;
@@ -132,6 +106,34 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
     }
   }
 
+  let readCount = 0;
+  let editCount = 0;
+  let inspectionEvidenceComplete = true;
+  const readPaths = new Set<string>();
+  const blindPaths = new Set<string>();
+  const fileModifyCounts = new Map<string, number>();
+  const correlatedActivities = correlateMutationRepresentations(qualityActivities);
+  for (const normalized of correlatedActivities) {
+    if (normalized.kind === 'inspection') {
+      readCount += 1;
+      readPaths.add(normalized.path);
+      continue;
+    }
+
+    if (normalized.action === 'write') {
+      editCount += 1;
+      inspectionEvidenceComplete = false;
+      continue;
+    }
+    if (normalized.action === 'create' || normalized.action === 'modify') {
+      editCount += 1;
+    }
+    if (normalized.action === 'modify') {
+      if (!readPaths.has(normalized.path)) blindPaths.add(normalized.path);
+      fileModifyCounts.set(normalized.path, (fileModifyCounts.get(normalized.path) ?? 0) + 1);
+    }
+  }
+
   // Files edited 3+ times indicate thrashing / rework.
   let editChurnCount = 0;
   for (const count of fileModifyCounts.values()) {
@@ -143,7 +145,7 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
   const userInterrupts = escalationCount + killed;
 
   const inspectionAvailability =
-    hasQualityEvidence && inspectionEvidenceComplete ? 'available' : 'unavailable';
+    correlatedActivities.length > 0 && inspectionEvidenceComplete ? 'available' : 'unavailable';
   const availableReadCount = inspectionAvailability === 'available' ? readCount : null;
   const readEditRatio =
     inspectionAvailability === 'available'
@@ -208,6 +210,28 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
     score: persisted?.score ?? null,
     model: persisted?.model ?? pod.model,
   };
+}
+
+function correlateMutationRepresentations(activities: QualityActivity[]): QualityActivity[] {
+  const correlated: QualityActivity[] = [];
+  for (const activity of activities) {
+    const previous = correlated.at(-1);
+    if (
+      activity.kind === 'mutation' &&
+      previous?.kind === 'mutation' &&
+      activity.path === previous.path &&
+      previous.source === 'native-tool' &&
+      activity.source === 'file-change'
+    ) {
+      // Some runtimes retain both the native edit/write call and the resulting
+      // file_change. They are adjacent representations of one operation. Keep
+      // the file_change because it carries the resolved create/modify action.
+      correlated[correlated.length - 1] = activity;
+      continue;
+    }
+    correlated.push(activity);
+  }
+  return correlated;
 }
 
 function toolBaseName(toolName: string): string {
