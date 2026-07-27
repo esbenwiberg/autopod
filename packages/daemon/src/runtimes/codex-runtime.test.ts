@@ -2499,22 +2499,37 @@ describe('CodexRuntime', () => {
     });
 
     it('reuses the stored effort when resuming into a new container', async () => {
-      const handle = createMockHandle();
-      const cm = createMockContainerManager(handle);
+      const first = createMockHandle();
+      const second = createMockHandle();
+      const cm = createMockContainerManager(first);
+      vi.mocked(cm.execStreaming).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
       const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
-      (
-        runtime as unknown as {
-          reasoningEffortBySession: Map<string, SpawnConfig['reasoningEffort']>;
-        }
-      ).reasoningEffortBySession.set('sess-1', 'high');
 
-      const consume = (async () => {
+      const spawnDone = (async () => {
+        for await (const _ of runtime.spawn({
+          podId: 'sess-1',
+          task: 'work',
+          model: 'gpt-5-codex',
+          reasoningEffort: 'high',
+          workDir: '/workspace',
+          containerId: 'c1',
+          env: {},
+          mcpServers: [],
+        })) {
+          // drain
+        }
+      })();
+      first.finish(0);
+      await spawnDone;
+      vi.mocked(cm.writeFile).mockClear();
+
+      const resumeDone = (async () => {
         for await (const _ of runtime.resume('sess-1', 'continue', 'c2', {})) {
           // drain
         }
       })();
-      handle.finish(0);
-      await consume;
+      second.finish(0);
+      await resumeDone;
 
       expect(cm.writeFile).toHaveBeenCalledWith(
         'c2',

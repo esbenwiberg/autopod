@@ -762,6 +762,44 @@ describe('ClaudeRuntime', () => {
         '--effort',
       );
     });
+
+    it('retains the configured effort through the public spawn and resume path', async () => {
+      const first = createMockHandle();
+      const second = createMockHandle();
+      const cm = createMockContainerManager(first);
+      vi.mocked(cm.execStreaming).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+      const runtime = new ClaudeRuntime(logger, cm);
+
+      const spawnDone = (async () => {
+        for await (const _ of runtime.spawn({
+          podId: 'effort-pod',
+          task: 'work',
+          model: 'claude-opus-5',
+          reasoningEffort: 'high',
+          workDir: '/workspace',
+          containerId: 'c1',
+          env: {},
+        })) {
+          // drain
+        }
+      })();
+      first.finish(0);
+      await spawnDone;
+
+      const resumeDone = (async () => {
+        for await (const _ of runtime.resume('effort-pod', 'continue', 'c2')) {
+          // drain
+        }
+      })();
+      second.finish(0);
+      await resumeDone;
+
+      expect(cm.execStreaming).toHaveBeenLastCalledWith(
+        'c2',
+        expect.arrayContaining(['--effort', 'high']),
+        expect.any(Object),
+      );
+    });
   });
 
   describe('resume', () => {
