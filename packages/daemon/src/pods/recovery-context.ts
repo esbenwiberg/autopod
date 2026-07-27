@@ -6,6 +6,7 @@ import {
   MAX_PROVIDER_FAILOVER_HANDOFF_LENGTH,
   PROVIDER_FAILOVER_HANDOFF_PATH,
   type Pod,
+  type ProviderAttempt,
   type ProviderFailureClassification,
   processContent,
 } from '@autopod/shared';
@@ -20,6 +21,24 @@ export interface RecoveryContext {
   branch: string;
   gitLog: string;
   uncommittedDiff: string;
+}
+
+export function hasPendingProviderContinuation(
+  attempts: readonly ProviderAttempt[] | null | undefined,
+): boolean {
+  if (!attempts) return false;
+  const activeAttempts = attempts.filter(
+    (attempt) => attempt.endedAt === null && attempt.outcome === null,
+  );
+  if (activeAttempts.length !== 1) return false;
+
+  const activeAttempt = activeAttempts[0];
+  if (!activeAttempt) return false;
+  return attempts.some(
+    (attempt) =>
+      attempt.ordinal === activeAttempt.ordinal - 1 &&
+      attempt.handoffReference === PROVIDER_FAILOVER_HANDOFF_PATH,
+  );
 }
 
 function sanitizeHandoffText(value: string): string {

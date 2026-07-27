@@ -1,4 +1,4 @@
-import type { Pod } from '@autopod/shared';
+import type { Pod, ProviderAttempt } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 // Mock child_process.execFile so promisify(execFile) returns our mock
@@ -13,6 +13,7 @@ import {
   buildRecoveryTask,
   buildReworkPrompt,
   buildReworkTask,
+  hasPendingProviderContinuation,
 } from './recovery-context.js';
 
 // Helper: make execFile's callback-based API behave like the promisified version
@@ -74,6 +75,109 @@ function makeSession(overrides?: Partial<Pod>): Pod {
     ...overrides,
   };
 }
+
+function makeProviderAttempt(
+  ordinal: number,
+  overrides: Partial<ProviderAttempt> = {},
+): ProviderAttempt {
+  return {
+    podId: 'ses-recovery',
+    ordinal,
+    provider: 'anthropic',
+    providerAccountId: 'account-1',
+    runtime: 'claude',
+    model: 'opus',
+    profileReference: `pod:ses-recovery@profile-snapshot#abcdef${ordinal}`,
+    nativeSessionId: null,
+    startedAt: `2026-01-0${ordinal}T00:00:00Z`,
+    endedAt: null,
+    outcome: null,
+    classification: null,
+    inputTokens: 0,
+    outputTokens: 0,
+    costUsd: 0,
+    handoffReference: null,
+    ...overrides,
+  };
+}
+
+describe('hasPendingProviderContinuation', () => {
+  it('accepts an active attempt immediately following the canonical handoff', () => {
+    const attempts = [
+      makeProviderAttempt(1, {
+        endedAt: '2026-01-01T01:00:00Z',
+        outcome: 'quota_exhausted',
+        handoffReference: '.autopod/provider-failover.md',
+      }),
+      makeProviderAttempt(2),
+    ];
+
+    expect(hasPendingProviderContinuation(attempts)).toBe(true);
+  });
+
+  it('rejects ordinary multiple attempts without a handoff', () => {
+    const attempts = [
+      makeProviderAttempt(1, {
+        endedAt: '2026-01-01T01:00:00Z',
+        outcome: 'failed',
+      }),
+      makeProviderAttempt(2),
+    ];
+
+    expect(hasPendingProviderContinuation(attempts)).toBe(false);
+  });
+
+  it('rejects a completed historical continuation', () => {
+    const attempts = [
+      makeProviderAttempt(1, {
+        endedAt: '2026-01-01T01:00:00Z',
+        outcome: 'quota_exhausted',
+        handoffReference: '.autopod/provider-failover.md',
+      }),
+      makeProviderAttempt(2, {
+        endedAt: '2026-01-02T01:00:00Z',
+        outcome: 'completed',
+      }),
+    ];
+
+    expect(hasPendingProviderContinuation(attempts)).toBe(false);
+  });
+
+  it('rejects non-adjacent historical handoff references', () => {
+    const attempts = [
+      makeProviderAttempt(1, {
+        endedAt: '2026-01-01T01:00:00Z',
+        outcome: 'quota_exhausted',
+        handoffReference: '.autopod/provider-failover.md',
+      }),
+      makeProviderAttempt(2, {
+        endedAt: '2026-01-02T01:00:00Z',
+        outcome: 'failed',
+      }),
+      makeProviderAttempt(3),
+    ];
+
+    expect(hasPendingProviderContinuation(attempts)).toBe(false);
+  });
+
+  it('rejects malformed ledgers with no active attempt or multiple active attempts', () => {
+    expect(
+      hasPendingProviderContinuation([
+        makeProviderAttempt(1, {
+          endedAt: '2026-01-01T01:00:00Z',
+          outcome: 'quota_exhausted',
+          handoffReference: '.autopod/provider-failover.md',
+        }),
+      ]),
+    ).toBe(false);
+    expect(
+      hasPendingProviderContinuation([
+        makeProviderAttempt(1, { handoffReference: '.autopod/provider-failover.md' }),
+        makeProviderAttempt(2),
+      ]),
+    ).toBe(false);
+  });
+});
 
 describe('buildContinuationPrompt', () => {
   it('includes git log and uncommitted diff when both present', async () => {

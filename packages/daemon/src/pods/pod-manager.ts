@@ -175,6 +175,7 @@ import {
   buildContinuationPrompt,
   buildRecoveryTask,
   buildReworkTask,
+  hasPendingProviderContinuation,
   writeProviderFailoverHandoff,
 } from './recovery-context.js';
 import { deriveReferenceRepos, resolveRefRepoPat } from './reference-repos.js';
@@ -7412,8 +7413,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           }
 
-          const hasProviderHandoff = (deps.providerAttemptRepo?.list(podId).length ?? 0) > 1;
-          if (hasProviderHandoff) {
+          const hasPendingHandoff = hasPendingProviderContinuation(
+            deps.providerAttemptRepo?.list(podId),
+          );
+          if (hasPendingHandoff) {
             const marker = '# autopod: provider failover handoff';
             const guard = await containerManager.execInContainer(
               containerId,
@@ -7422,6 +7425,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 '-c',
                 [
                   'set -e',
+                  `if [ ! -f ${shellQuote(`/workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} ]; then`,
+                  `  printf '%s\\n' ${shellQuote(`Missing pending provider failover handoff: /workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} >&2`,
+                  '  exit 1',
+                  'fi',
                   'mkdir -p /workspace/.git/info',
                   'touch /workspace/.git/info/exclude',
                   `if ! grep -qFx ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} /workspace/.git/info/exclude; then`,
@@ -7569,7 +7576,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           }
 
-          if (hasProviderHandoff) {
+          if (hasPendingHandoff) {
             const marker = '# autopod: provider failover handoff';
             const guard = await containerManager.execInContainer(
               containerId,
@@ -7578,7 +7585,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 '-c',
                 [
                   'set -e',
-                  'test -f /workspace/.autopod/provider-failover.md',
+                  `if [ ! -f ${shellQuote(`/workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} ]; then`,
+                  `  printf '%s\\n' ${shellQuote(`Missing pending provider failover handoff after workspace cleanup: /workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} >&2`,
+                  '  exit 1',
+                  'fi',
                   'mkdir -p /workspace/.git/info',
                   'touch /workspace/.git/info/exclude',
                   `if ! grep -qFx ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} /workspace/.git/info/exclude; then`,

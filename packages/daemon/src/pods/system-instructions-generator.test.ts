@@ -473,6 +473,24 @@ human_review: []
             costUsd: 0.1,
             handoffReference: '.autopod/provider-failover.md',
           },
+          {
+            podId: 'abc12345',
+            ordinal: 2,
+            provider: 'openai',
+            providerAccountId: 'target',
+            runtime: 'codex',
+            model: 'gpt-next',
+            profileReference: 'snapshot-2',
+            nativeSessionId: null,
+            startedAt: '2026-01-01T01:00:01Z',
+            endedAt: null,
+            outcome: null,
+            classification: null,
+            inputTokens: 0,
+            outputTokens: 0,
+            costUsd: 0,
+            handoffReference: null,
+          },
         ],
       }),
       'http://localhost:8080/mcp/x',
@@ -480,6 +498,47 @@ human_review: []
 
     expect(md).toContain('## Provider continuation');
     expect(md).toContain('/workspace/.autopod/provider-failover.md');
+  });
+
+  it('does not advertise a completed historical provider handoff', () => {
+    const sourceAttempt = {
+      podId: 'abc12345',
+      ordinal: 1,
+      provider: 'anthropic' as const,
+      providerAccountId: 'source',
+      runtime: 'claude' as const,
+      model: 'opus',
+      profileReference: 'snapshot',
+      nativeSessionId: 'native-1',
+      startedAt: '2026-01-01T00:00:00Z',
+      endedAt: '2026-01-01T01:00:00Z',
+      outcome: 'quota_exhausted' as const,
+      classification: null,
+      inputTokens: 10,
+      outputTokens: 5,
+      costUsd: 0.1,
+      handoffReference: '.autopod/provider-failover.md',
+    };
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        providerAttempts: [
+          sourceAttempt,
+          {
+            ...sourceAttempt,
+            ordinal: 2,
+            startedAt: '2026-01-01T01:00:01Z',
+            endedAt: '2026-01-01T02:00:00Z',
+            outcome: 'completed',
+            handoffReference: null,
+          },
+        ],
+      }),
+      'http://localhost:8080/mcp/x',
+    );
+
+    expect(md).not.toContain('## Provider continuation');
+    expect(md).not.toContain('/workspace/.autopod/provider-failover.md');
   });
 
   it('includes validate_in_browser tool in MCP tools list', () => {
