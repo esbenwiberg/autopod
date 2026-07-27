@@ -7,6 +7,7 @@ import AutopodUI
 @MainActor
 @Test func podStoreLoadsEveryCompactPageWithoutDetailRequests() async throws {
   let recorder = FleetRequestRecorder()
+  let mode = FleetMode()
   let configuration = URLSessionConfiguration.ephemeral
   configuration.protocolClasses = [FleetURLProtocol.self]
   FleetURLProtocol.handler = { request in
@@ -15,8 +16,13 @@ import AutopodUI
       return SelfResponse.json("[]", for: request)
     }
     let hasCursor = request.url?.query?.contains("cursor=") == true
+    let isNewer = await mode.isNewer
     return SelfResponse.json(
-      compactPage(id: hasCursor ? "older-pod" : "newer-pod", hasNext: !hasCursor),
+      compactPage(
+        id: hasCursor ? "older-pod" : "newer-pod",
+        hasNext: !hasCursor,
+        updatedAt: isNewer ? "2026-07-01T00:20:00Z" : "2026-07-01T00:00:00Z"
+      ),
       for: request
     )
   }
@@ -46,6 +52,7 @@ import AutopodUI
   #expect(await recorder.podPaths == ["/pods", "/pods"])
 
   store.updateStatus("newer-pod", to: .running)
+  await mode.advance()
   await store.loadSessions()
   // A later REST traversal is authoritative; the local event marker only protects
   // against responses that were already in flight when the event arrived.
