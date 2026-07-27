@@ -98,6 +98,32 @@ public final class PodStore {
     return merged
   }
 
+  private func mergeCompactPod(_ incoming: Pod, with hydrated: Pod) -> Pod {
+    guard incoming.updatedAt > hydrated.updatedAt else { return hydrated }
+    var merged = hydrated
+    if !locallyUpdatedStatusPodIds.contains(incoming.id) {
+      merged.status = incoming.status
+    }
+    merged.pod = incoming.pod
+    merged.hasWorktree = incoming.hasWorktree
+    merged.branch = incoming.branch
+    merged.profileName = incoming.profileName
+    merged.model = incoming.model
+    merged.startedAt = incoming.startedAt
+    merged.updatedAt = incoming.updatedAt
+    merged.baseBranch = incoming.baseBranch
+    merged.escalationQuestion = incoming.escalationQuestion
+    merged.containerUrl = incoming.containerUrl
+    merged.hasWebUi = incoming.hasWebUi
+    merged.latestActivity = incoming.latestActivity
+    merged.errorSummary = incoming.errorSummary
+    merged.briefTitle = incoming.briefTitle
+    merged.seriesId = incoming.seriesId
+    merged.seriesName = incoming.seriesName
+    merged.runningAt = incoming.runningAt
+    return merged
+  }
+
   // MARK: - Load
 
   public func loadSessions() async {
@@ -122,7 +148,7 @@ public final class PodStore {
       let retained = pods.filter { !discoveredIds.contains($0.id) }
       let merged = fresh.map { pod in
         if hydratedPodIds.contains(pod.id), let current = currentById[pod.id] {
-          return current
+          return mergeCompactPod(pod, with: current)
         }
         return mergeRestPod(pod, with: currentById[pod.id], preferIncomingOnEqual: false)
       }

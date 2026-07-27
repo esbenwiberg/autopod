@@ -79,6 +79,7 @@ import AutopodUI
 @MainActor
 @Test func podStoreHydratesSelectedSummaryOnlyOnce() async throws {
   let recorder = FleetRequestRecorder()
+  let mode = FleetMode()
   let configuration = URLSessionConfiguration.ephemeral
   configuration.protocolClasses = [FleetURLProtocol.self]
   FleetURLProtocol.handler = { request in
@@ -89,7 +90,16 @@ import AutopodUI
     case "/pods/selected-pod":
       return SelfResponse.json(fullPod(id: "selected-pod"), for: request)
     default:
-      return SelfResponse.json(compactPage(id: "selected-pod", hasNext: false), for: request)
+      let newer = await mode.isNewer
+      return SelfResponse.json(
+        compactPage(
+          id: "selected-pod",
+          hasNext: false,
+          status: newer ? "failed" : "complete",
+          updatedAt: newer ? "2026-07-01T00:20:00Z" : "2026-07-01T00:00:00Z"
+        ),
+        for: request
+      )
     }
   }
   defer { FleetURLProtocol.handler = nil }
@@ -104,22 +114,30 @@ import AutopodUI
   await store.loadSessions()
   await store.hydrateSessionIfNeeded("selected-pod")
   await store.hydrateSessionIfNeeded("selected-pod")
+  await mode.advance()
+  await store.loadSessions()
 
   #expect(store.pods.first?.task == "Full detail task")
+  #expect(store.pods.first?.status == .failed)
   #expect(await recorder.detailPaths == ["/pods/selected-pod"])
 }
 
-private func compactPage(id: String, hasNext: Bool) -> String {
+private func compactPage(
+  id: String,
+  hasNext: Bool,
+  status: String = "complete",
+  updatedAt: String = "2026-07-01T00:00:00Z"
+) -> String {
   let nextCursor = hasNext ? #""next-page""# : "null"
   return """
   {"pods":[{
     "id":"\(id)","title":"\(id) title","taskExcerpt":"Searchable second line","taskSummary":null,"profileName":"test",
-    "status":"complete","model":"sonnet","runtime":"claude","executionTarget":"local",
+    "status":"\(status)","model":"sonnet","runtime":"claude","executionTarget":"local",
     "branch":"autopod/\(id)","baseBranch":"main","seriesId":null,"seriesName":null,
     "options":{"agentMode":"auto","output":"pr","validationSuite":"full"},
     "hasWebUi":false,"previewUrl":null,"containerId":null,"worktreePath":null,
     "createdAt":"2026-07-01T00:00:00Z","startedAt":null,"runningAt":null,
-    "updatedAt":"2026-07-01T00:00:00Z","completedAt":null,"lastHeartbeatAt":null,
+    "updatedAt":"\(updatedAt)","completedAt":null,"lastHeartbeatAt":null,
     "failureReason":null,"mergeBlockReason":null,"lastCorrectionMessage":null,
     "pendingEscalationSummary":null,"progressSummary":null
   }],"nextCursor":\(nextCursor)}
@@ -165,6 +183,11 @@ private actor FleetRequestRecorder {
       detailPaths.append(url.path)
     }
   }
+}
+
+private actor FleetMode {
+  private(set) var isNewer = false
+  func advance() { isNewer = true }
 }
 
 private final class FleetURLProtocol: URLProtocol, @unchecked Sendable {
