@@ -22,6 +22,7 @@ export type {
   CreatePodRequest,
   PodSummary,
   CompactPod,
+  CompactPodPage,
   ReferenceRepo,
   SpecFile,
   PreSubmitReviewSnapshot,

@@ -134,6 +134,7 @@ public struct AppRootView: View {
         }
         if let id = podId {
           eventStream?.subscribeToSession(id)
+          Task { await podStore.hydrateSessionIfNeeded(id) }
           Task { await podStore.loadDiff(id) }
           if let api = connectionManager.api {
             eventStream?.loadHistoricalEvents(podId: id, api: api)
@@ -281,6 +282,7 @@ public struct AppRootView: View {
       // `.onChange` (used by onSelectSession) doesn't fire on mount, so a pod
       // that's already selected at launch would never trigger the historical fetch.
       guard let id = podStore.selectedSessionId, let api = connectionManager.api else { return }
+      await podStore.hydrateSessionIfNeeded(id)
       eventStream?.loadHistoricalEvents(podId: id, api: api)
     }
     .alert("Error", isPresented: $showError) {

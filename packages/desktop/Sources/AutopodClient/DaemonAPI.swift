@@ -65,6 +65,30 @@ public actor DaemonAPI {
     try await request("GET", "/pods/\(id)")
   }
 
+  public func listCompactPodPage(
+    cursor: String? = nil,
+    limit: Int = 500
+  ) async throws -> CompactPodPageResponse {
+    var query = ["compact": "true", "page": "true", "limit": String(limit)]
+    if let cursor { query["cursor"] = cursor }
+    return try await request("GET", "/pods", query: query)
+  }
+
+  public func listAllCompactPods(limit: Int = 500) async throws -> [CompactPodResponse] {
+    var pods: [CompactPodResponse] = []
+    var cursor: String?
+    var seenCursors = Set<String>()
+    repeat {
+      let page = try await listCompactPodPage(cursor: cursor, limit: limit)
+      pods.append(contentsOf: page.pods)
+      cursor = page.nextCursor
+      if let cursor, !seenCursors.insert(cursor).inserted {
+        throw URLError(.cannotParseResponse)
+      }
+    } while cursor != nil
+    return pods
+  }
+
   public func getSessionStats(profileName: String? = nil) async throws -> [String: Int] {
     var query: [String: String] = [:]
     if let p = profileName { query["profile"] = p }

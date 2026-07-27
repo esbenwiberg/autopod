@@ -1,6 +1,7 @@
 import {
   AutopodError,
   type CompactPod,
+  type CompactPodPage,
   type FirewallDeniedEvent,
   type PodStatus,
   collectPiiPatternNames,
@@ -62,6 +63,44 @@ const LOG_REPLAY_EVENT_TYPES = ['pod.agent_activity', 'pod.firewall_denied'];
 const MAX_POD_LIST_LIMIT = 500;
 const COMPACT_TITLE_MAX_CHARS = 160;
 const COMPACT_SUMMARY_MAX_CHARS = 500;
+const COMPACT_TASK_MAX_CHARS = 2_000;
+
+interface PodListCursor {
+  createdAt: string;
+  id: string;
+}
+
+const POD_CURSOR_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+
+function encodePodListCursor(cursor: PodListCursor): string {
+  return Buffer.from(JSON.stringify(cursor)).toString('base64url');
+}
+
+function decodePodListCursor(raw: string): PodListCursor | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as unknown;
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      typeof (parsed as Record<string, unknown>).createdAt !== 'string' ||
+      !POD_CURSOR_TIMESTAMP_PATTERN.test(
+        (parsed as Record<string, unknown>).createdAt as string,
+      ) ||
+      Number.isNaN(Date.parse((parsed as Record<string, unknown>).createdAt as string)) ||
+      typeof (parsed as Record<string, unknown>).id !== 'string' ||
+      ((parsed as Record<string, unknown>).id as string).length === 0
+    ) {
+      return null;
+    }
+    return {
+      createdAt: (parsed as Record<string, unknown>).createdAt as string,
+      id: (parsed as Record<string, unknown>).id as string,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function compactText(value: string | null | undefined, maxChars = COMPACT_SUMMARY_MAX_CHARS) {
   return value === null || value === undefined ? null : value.slice(0, maxChars);
@@ -78,6 +117,7 @@ function compactPod(
   return {
     id: pod.id,
     title,
+    taskExcerpt: pod.task.slice(0, COMPACT_TASK_MAX_CHARS),
     taskSummary: compactText(pod.taskSummary?.actualSummary),
     profileName: pod.profileName,
     status: pod.status,
@@ -400,6 +440,8 @@ export function podRoutes(
       userId?: string;
       limit?: string;
       compact?: string;
+      page?: string;
+      cursor?: string;
     };
     const limit = parsePositiveIntegerQueryParam(query.limit);
     if (limit === null) {
@@ -413,6 +455,20 @@ export function podRoutes(
         code: 'limit_too_large',
       };
     }
+    const paginated = query.page === 'true' || query.cursor !== undefined;
+    if (paginated && query.compact !== 'true') {
+      reply.status(400);
+      return { error: 'pagination is only supported for compact pod lists', code: 'invalid_page' };
+    }
+    if (query.page !== undefined && query.page !== 'true') {
+      reply.status(400);
+      return { error: 'page must be true when provided', code: 'invalid_page' };
+    }
+    const cursor = query.cursor === undefined ? undefined : decodePodListCursor(query.cursor);
+    if (query.cursor !== undefined && cursor === null) {
+      reply.status(400);
+      return { error: 'cursor is malformed', code: 'invalid_cursor' };
+    }
     const rawStatuses = query.status?.split(',').filter(Boolean);
     const invalidStatus = rawStatuses?.find((status) => !podStatusSchema.safeParse(status).success);
     if (invalidStatus !== undefined) {
@@ -420,13 +476,28 @@ export function podRoutes(
       return { error: `Unknown pod status: ${invalidStatus}`, code: 'invalid_status' };
     }
     const statuses = rawStatuses as PodStatus[] | undefined;
+    const paginatedLimit = limit ?? MAX_POD_LIST_LIMIT;
     const pods = podManager.listSessions({
       profileName: query.profileName ?? query.profile,
       status: statuses,
       userId: query.userId,
-      limit,
+      limit: paginated ? paginatedLimit + 1 : limit,
+      before: cursor ?? undefined,
     });
-    if (query.compact === 'true') return pods.map((pod) => compactPod(pod, request));
+    if (query.compact === 'true') {
+      if (!paginated) return pods.map((pod) => compactPod(pod, request));
+      const hasMore = pods.length > paginatedLimit;
+      const records = hasMore ? pods.slice(0, paginatedLimit) : pods;
+      const last = records.at(-1);
+      const response: CompactPodPage = {
+        pods: records.map((pod) => compactPod(pod, request)),
+        nextCursor:
+          hasMore && last
+            ? encodePodListCursor({ createdAt: last.createdAt, id: last.id })
+            : null,
+      };
+      return response;
+    }
     return pods.map((pod) => serializePodForRequest(pod, request, providerAttemptRepo));
   });
 

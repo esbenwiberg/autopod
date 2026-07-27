@@ -539,6 +539,34 @@ describe('PodRepository', () => {
       expect(repo.list()).toEqual([]);
     });
 
+    it('traverses duplicate timestamps exactly once with a keyset cursor', () => {
+      for (const id of ['sess-001', 'sess-002', 'sess-003', 'sess-004', 'sess-005']) {
+        repo.insert({ ...validSession, id });
+      }
+      db.prepare("UPDATE pods SET created_at = '2026-01-02T00:00:00Z'").run();
+      db.prepare(
+        "UPDATE pods SET created_at = '2026-01-03T00:00:00Z' WHERE id = 'sess-005'",
+      ).run();
+
+      const first = repo.list({ limit: 2 });
+      const second = repo.list({
+        limit: 2,
+        before: { createdAt: first[1]!.createdAt, id: first[1]!.id },
+      });
+      const third = repo.list({
+        limit: 2,
+        before: { createdAt: second[1]!.createdAt, id: second[1]!.id },
+      });
+
+      expect([...first, ...second, ...third].map((pod) => pod.id)).toEqual([
+        'sess-005',
+        'sess-004',
+        'sess-003',
+        'sess-002',
+        'sess-001',
+      ]);
+    });
+
     it('should filter by profileName', () => {
       db.prepare(
         `INSERT INTO profiles (name, repo_url, build_command, start_command)

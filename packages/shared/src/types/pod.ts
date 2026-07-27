@@ -578,6 +578,7 @@ export interface PodSummary {
 export interface CompactPod {
   id: string;
   title: string;
+  taskExcerpt: string;
   taskSummary: string | null;
   profileName: string;
   status: PodStatus;
@@ -604,6 +605,12 @@ export interface CompactPod {
   lastCorrectionMessage: string | null;
   pendingEscalationSummary: string | null;
   progressSummary: string | null;
+}
+
+/** Bounded keyset page used by fleet-discovery clients. */
+export interface CompactPodPage {
+  pods: CompactPod[];
+  nextCursor: string | null;
 }
 
 /**

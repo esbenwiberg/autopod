@@ -108,6 +108,10 @@ export interface PodFilters {
   status?: PodStatus | PodStatus[];
   userId?: string;
   limit?: number;
+  before?: {
+    createdAt: string;
+    id: string;
+  };
 }
 
 export interface PodUpdates {
@@ -920,12 +924,19 @@ export function createPodRepository(db: Database.Database): PodRepository {
         whereClauses.push('user_id = @userId');
         params.userId = filters.userId;
       }
+      if (filters?.before !== undefined) {
+        whereClauses.push(
+          '(created_at < @beforeCreatedAt OR (created_at = @beforeCreatedAt AND id < @beforeId))',
+        );
+        params.beforeCreatedAt = filters.before.createdAt;
+        params.beforeId = filters.before.id;
+      }
 
       const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
       const limit = filters?.limit === undefined ? '' : ' LIMIT @limit';
       if (filters?.limit !== undefined) params.limit = filters.limit;
       const rows = db
-        .prepare(`SELECT * FROM pods ${where} ORDER BY created_at DESC${limit}`)
+        .prepare(`SELECT * FROM pods ${where} ORDER BY created_at DESC, id DESC${limit}`)
         .all(params) as Record<string, unknown>[];
 
       return rows.map(rowToSession);

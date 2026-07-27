@@ -55,6 +55,9 @@ public final class PodStore {
   // MARK: - API
 
   private var api: DaemonAPI?
+  private var hydratedPodIds = Set<String>()
+  private var hydratingPodIds = Set<String>()
+  private var statusRevisions: [String: Int] = [:]
 
   public func configure(api: DaemonAPI) {
     self.api = api
@@ -70,6 +73,62 @@ public final class PodStore {
     return progress.advisoryDetail != nil && pod.validationChecks?.advisoryQa == nil
   }
 
+  private func mergeRestPod(
+    _ incoming: Pod,
+    with current: Pod?,
+    preferIncomingOnEqual: Bool,
+    preserveCurrentStatus: Bool = false
+  ) -> Pod {
+    guard let current else { return incoming }
+    if !preferIncomingOnEqual
+      && (current.updatedAt > incoming.updatedAt || current.updatedAt == incoming.updatedAt) {
+      return current
+    }
+    var merged = incoming
+    if preserveCurrentStatus {
+      merged.status = current.status
+    } else if current.updatedAt > incoming.updatedAt {
+      // Full hydration may race a newer WebSocket status. Keep the detail payload,
+      // but never regress the lifecycle state or its freshness marker.
+      merged.status = current.status
+      merged.updatedAt = current.updatedAt
+    }
+    if shouldPreserveValidationProgress(current.validationProgress, for: merged) {
+      merged.validationProgress = current.validationProgress
+    }
+    return merged
+  }
+
+  private func mergeCompactPod(
+    _ incoming: Pod,
+    with hydrated: Pod,
+    preserveCurrentStatus: Bool
+  ) -> Pod {
+    guard incoming.updatedAt > hydrated.updatedAt else { return hydrated }
+    var merged = hydrated
+    if !preserveCurrentStatus {
+      merged.status = incoming.status
+    }
+    merged.pod = incoming.pod
+    merged.hasWorktree = incoming.hasWorktree
+    merged.branch = incoming.branch
+    merged.profileName = incoming.profileName
+    merged.model = incoming.model
+    merged.startedAt = incoming.startedAt
+    merged.updatedAt = incoming.updatedAt
+    merged.baseBranch = incoming.baseBranch
+    merged.escalationQuestion = incoming.escalationQuestion
+    merged.containerUrl = incoming.containerUrl
+    merged.hasWebUi = incoming.hasWebUi
+    merged.latestActivity = incoming.latestActivity
+    merged.errorSummary = incoming.errorSummary
+    merged.briefTitle = incoming.briefTitle
+    merged.seriesId = incoming.seriesId
+    merged.seriesName = incoming.seriesName
+    merged.runningAt = incoming.runningAt
+    return merged
+  }
+
   // MARK: - Load
 
   public func loadSessions() async {
@@ -79,22 +138,46 @@ public final class PodStore {
     }
     isLoading = true
     error = nil
+    let statusRevisionSnapshot = statusRevisions
     do {
-      let responses = try await api.listPods()
+      let responses = try await api.listAllCompactPods()
       let fresh = PodMapper.map(responses, baseURL: api.baseURL)
-      // Preserve in-memory WebSocket state that REST doesn't carry (validationProgress is
-      // transient — set by phase events, never serialised to the database).
-      let savedProgress = Dictionary(
-        uniqueKeysWithValues: pods.compactMap { p in
-          p.validationProgress.map { (p.id, $0) }
+      let currentById = Dictionary(uniqueKeysWithValues: pods.map { ($0.id, $0) })
+      let staleHydratedIds = Set(
+        fresh.compactMap { pod in
+          guard hydratedPodIds.contains(pod.id),
+                let current = currentById[pod.id],
+                pod.updatedAt > current.updatedAt else { return nil }
+          return pod.id
         }
       )
-      pods = fresh.map { pod in
-        guard let progress = savedProgress[pod.id] else { return pod }
-        guard shouldPreserveValidationProgress(progress, for: pod) else { return pod }
-        var updated = pod
-        updated.validationProgress = progress
-        return updated
+      hydratedPodIds.subtract(staleHydratedIds)
+      let discoveredIds = Set(fresh.map(\.id))
+      let retained = pods.filter { !discoveredIds.contains($0.id) }
+      let merged = fresh.map { pod in
+        if hydratedPodIds.contains(pod.id), let current = currentById[pod.id] {
+          return mergeCompactPod(
+            pod,
+            with: current,
+            preserveCurrentStatus:
+              statusRevisions[pod.id, default: 0]
+                > statusRevisionSnapshot[pod.id, default: 0]
+          )
+        }
+        return mergeRestPod(
+          pod,
+          with: currentById[pod.id],
+          preferIncomingOnEqual: false,
+          preserveCurrentStatus:
+            statusRevisions[pod.id, default: 0]
+              > statusRevisionSnapshot[pod.id, default: 0]
+        )
+      }
+      // Pods created over WebSocket after page one sit outside the keyset snapshot.
+      // Keep them visible until a later discovery traversal includes them.
+      pods = retained + merged
+      if let selectedSessionId, staleHydratedIds.contains(selectedSessionId) {
+        await hydrateSessionIfNeeded(selectedSessionId)
       }
     } catch {
       print("[PodStore] Failed to load pods: \(error)")
@@ -125,24 +208,35 @@ public final class PodStore {
 
   public func refreshSession(_ id: String) async {
     guard let api else { return }
+    let statusRevision = statusRevisions[id, default: 0]
     do {
       let response = try await api.getPod(id)
       var updated = PodMapper.map(response, baseURL: api.baseURL)
       if let index = pods.firstIndex(where: { $0.id == id }) {
-        // Preserve WebSocket phase state while validation is active, and while
-        // post-validation advisory QA is still running or not yet reflected by REST.
-        if shouldPreserveValidationProgress(pods[index].validationProgress, for: updated) {
-          updated.validationProgress = pods[index].validationProgress
-        } else if updated.status == .validating {
+        updated = mergeRestPod(
+          updated,
+          with: pods[index],
+          preferIncomingOnEqual: true,
+          preserveCurrentStatus: statusRevisions[id, default: 0] > statusRevision
+        )
+        if updated.validationProgress == nil && updated.status == .validating {
           updated.validationProgress = ValidationProgress.initial(attempt: updated.attempts?.current ?? 1)
         }
         pods[index] = updated
       } else {
         pods.append(updated)
       }
+      hydratedPodIds.insert(id)
     } catch {
       // Silent refresh failure — don't overwrite existing data
     }
+  }
+
+  public func hydrateSessionIfNeeded(_ id: String) async {
+    guard !hydratedPodIds.contains(id), !hydratingPodIds.contains(id) else { return }
+    hydratingPodIds.insert(id)
+    defer { hydratingPodIds.remove(id) }
+    await refreshSession(id)
   }
 
   // MARK: - Series
@@ -196,6 +290,7 @@ public final class PodStore {
   public func updateStatus(_ podId: String, to status: PodStatus) {
     guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
     pods[index].status = status
+    statusRevisions[podId, default: 0] += 1
   }
 
   public func upsertSession(_ pod: Pod) {
@@ -208,6 +303,9 @@ public final class PodStore {
 
   public func removeSession(_ id: String) {
     pods.removeAll { $0.id == id }
+    hydratedPodIds.remove(id)
+    hydratingPodIds.remove(id)
+    statusRevisions.removeValue(forKey: id)
     if selectedSessionId == id {
       selectedSessionId = nil
     }
