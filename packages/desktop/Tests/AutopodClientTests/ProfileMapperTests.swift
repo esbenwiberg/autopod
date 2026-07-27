@@ -94,6 +94,69 @@ import AutopodUI
   #expect(fields["validationSetupCommand"] is NSNull)
 }
 
+@Test func profileResponseDefaultsMissingReasoningEffortToAuto() throws {
+  let response = try JSONDecoder().decode(
+    ProfileResponse.self,
+    from: Data(
+      #"{"name":"legacy","version":1,"createdAt":"","updatedAt":""}"#.utf8
+    )
+  )
+  let mapped = ProfileMapper.map(response)
+
+  #expect(response.reasoningEffort == .auto)
+  #expect(mapped.reasoningEffort == .auto)
+  #expect(ProfileMapper.mapToFields(mapped)["reasoningEffort"] as? String == "auto")
+}
+
+@Test(arguments: ReasoningEffort.allCases)
+func profileMapperRoundTripsPortableReasoningEffort(_ effort: ReasoningEffort) throws {
+  let json = """
+  {
+    "name": "app",
+    "reasoningEffort": "\(effort.rawValue)",
+    "version": 1,
+    "createdAt": "",
+    "updatedAt": ""
+  }
+  """.data(using: .utf8)!
+  let response = try JSONDecoder().decode(ProfileResponse.self, from: json)
+  let mapped = ProfileMapper.map(response)
+
+  #expect(response.reasoningEffort == effort)
+  #expect(mapped.reasoningEffort == effort)
+  #expect(ProfileMapper.mapToFields(mapped)["reasoningEffort"] as? String == effort.rawValue)
+
+  let encoded = try JSONEncoder().encode(response)
+  let object = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+  #expect(object?["reasoningEffort"] as? String == effort.rawValue)
+}
+
+@Test func profileMapperPreservesInheritedReasoningEffortAsNullPatch() throws {
+  let response = try JSONDecoder().decode(
+    ProfileResponse.self,
+    from: Data(
+      #"{"name":"child","reasoningEffort":null,"version":1,"createdAt":"","updatedAt":""}"#.utf8
+    )
+  )
+  let mapped = ProfileMapper.map(response)
+
+  #expect(response.reasoningEffort == nil)
+  #expect(mapped.reasoningEffort == nil)
+  #expect(ProfileMapper.mapToFields(mapped)["reasoningEffort"] is NSNull)
+}
+
+@Test func newProfileUsesClaude5AndAutoEffortDefaults() {
+  let profile = Profile(name: "app", repoUrl: "https://github.com/org/app.git")
+  let response = ProfileResponse()
+
+  #expect(profile.defaultModel == "claude-opus-5")
+  #expect(profile.reviewerModel == "claude-sonnet-5")
+  #expect(profile.reasoningEffort == .auto)
+  #expect(response.defaultModel == "claude-opus-5")
+  #expect(response.reviewerModel == "claude-sonnet-5")
+  #expect(response.reasoningEffort == .auto)
+}
+
 @Test func profileMapperCanonicalizesLegacyProfileModelAliases() throws {
   let profile = try decodeMapperProfile(
     defaultModel: "opus",
@@ -161,9 +224,9 @@ import AutopodUI
   let askAi = escalation?["askAi"] as? [String: Any]
 
   #expect(mapped.defaultModel == "claude-opus-4-8")
-  #expect(mapped.reviewerModel == "claude-sonnet-4-6")
+  #expect(mapped.reviewerModel == "claude-sonnet-5")
   #expect(mapped.escalationAskAiModel == "claude-opus-4-7")
-  #expect(askAi?["model"] as? String == "claude-sonnet-4-6")
+  #expect(askAi?["model"] as? String == "claude-sonnet-5")
 }
 
 @Test func profileMapperRoundTripsProviderAccountId() throws {

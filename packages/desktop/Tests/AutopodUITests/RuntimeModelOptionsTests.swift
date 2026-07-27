@@ -22,8 +22,45 @@ import Testing
     let defaultOptions = RuntimeModelOptions.options(for: .claude, role: .defaultModel).map(\.value)
     let reviewerOptions = RuntimeModelOptions.options(for: .claude, role: .reviewerModel).map(\.value)
 
-    #expect(defaultOptions == ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"])
-    #expect(reviewerOptions == ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"])
+    #expect(defaultOptions == [
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-fable-5",
+        "claude-opus-4-8",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5",
+    ])
+    #expect(reviewerOptions == [
+        "claude-sonnet-5",
+        "claude-opus-5",
+        "claude-fable-5",
+        "claude-sonnet-4-6",
+        "claude-opus-4-8",
+        "claude-haiku-4-5",
+    ])
+    #expect(RuntimeModelOptions.fallback(for: .claude, role: .defaultModel) == "claude-opus-5")
+    #expect(RuntimeModelOptions.fallback(for: .claude, role: .reviewerModel) == "claude-sonnet-5")
+}
+
+@Test func claude5OptionsUseExactLabelsAndStandardPrices() {
+    let options = RuntimeModelOptions.options(for: .claude, role: .defaultModel)
+    let labels = Dictionary(uniqueKeysWithValues: options.map { ($0.value, $0.label) })
+
+    #expect(labels["claude-fable-5"] == "Fable 5")
+    #expect(labels["claude-opus-5"] == "Opus 5")
+    #expect(labels["claude-sonnet-5"] == "Sonnet 5")
+    #expect(
+        RuntimeModelOptions.priceSummary(for: "claude-fable-5", runtime: .claude)
+            == "$10 in / $1 cached / $50 out per 1M"
+    )
+    #expect(
+        RuntimeModelOptions.priceSummary(for: "claude-opus-5", runtime: .claude)
+            == "$5 in / $0.50 cached / $25 out per 1M"
+    )
+    #expect(
+        RuntimeModelOptions.priceSummary(for: "claude-sonnet-5", runtime: .claude)
+            == "$3 in / $0.30 cached / $15 out per 1M"
+    )
 }
 
 @Test func runtimeModelNormalizationResetsIncompatibleSelections() {
@@ -31,10 +68,10 @@ import Testing
         RuntimeModelOptions.normalized("opus", for: .codex, role: .defaultModel) == "auto"
     )
     #expect(
-        RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .defaultModel) == "claude-opus-4-8"
+        RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .defaultModel) == "claude-opus-5"
     )
     #expect(
-        RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .reviewerModel) == "claude-sonnet-4-6"
+        RuntimeModelOptions.normalized("gpt-5", for: .claude, role: .reviewerModel) == "claude-sonnet-5"
     )
     #expect(
         RuntimeModelOptions.normalized("sonnet", for: .copilot, role: .defaultModel) == "auto"
@@ -52,20 +89,31 @@ import Testing
     )
 }
 
-@Test func claudeModelOptionsPreserveExplicitCanonicalOpus47() {
+@Test(arguments: [
+    ("claude-opus-4-7", "Opus 4.7"),
+    ("claude-opus-4-6", "Opus 4.6"),
+    ("claude-sonnet-4-5", "Sonnet 4.5"),
+])
+func claudeModelOptionsPreserveExplicitCanonical4xValues(
+    input: (String, String)
+) {
+    let (model, expectedLabel) = input
     let options = RuntimeModelOptions.options(
         for: .claude,
         role: .defaultModel,
-        currentValue: "claude-opus-4-7"
+        currentValue: model
     )
 
     #expect(options.map(\.value) == [
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-fable-5",
         "claude-opus-4-8",
         "claude-sonnet-4-6",
         "claude-haiku-4-5",
-        "claude-opus-4-7",
+        model,
     ])
-    #expect(options.last?.label == "Opus 4.7")
+    #expect(options.last?.label == expectedLabel)
 }
 
 @Test func codexModelOptionsPreserveCompatibleCustomCurrentValue() {
@@ -160,7 +208,7 @@ import Testing
     )
     #expect(
         RuntimeModelOptions.normalized("anthropic/claude-sonnet-4", for: .claude, role: .defaultModel)
-            == "claude-opus-4-8"
+            == "claude-opus-5"
     )
     #expect(RuntimeModelOptions.normalized("auto", for: .copilot, role: .defaultModel) == "auto")
 }

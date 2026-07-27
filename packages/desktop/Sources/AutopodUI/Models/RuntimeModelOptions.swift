@@ -54,6 +54,21 @@ public enum ClaudeModelCanonicalizer {
 
 enum RuntimeModelOptions {
     private static let modelPricing: [String: RuntimeModelPrice] = [
+        "claude-fable-5": RuntimeModelPrice(
+            inputPer1M: 10,
+            cachedInputPer1M: 1,
+            outputPer1M: 50
+        ),
+        "claude-opus-5": RuntimeModelPrice(
+            inputPer1M: 5,
+            cachedInputPer1M: 0.5,
+            outputPer1M: 25
+        ),
+        "claude-sonnet-5": RuntimeModelPrice(
+            inputPer1M: 3,
+            cachedInputPer1M: 0.3,
+            outputPer1M: 15
+        ),
         "claude-opus-4-8": RuntimeModelPrice(
             inputPer1M: 5,
             cachedInputPer1M: 0.5,
@@ -152,6 +167,9 @@ enum RuntimeModelOptions {
     ]
 
     private static let modelLabels: [String: String] = [
+        "claude-fable-5": "Fable 5",
+        "claude-opus-5": "Opus 5",
+        "claude-sonnet-5": "Sonnet 5",
         "claude-opus-4-8": "Opus 4.8",
         "claude-opus-4-7": "Opus 4.7",
         "claude-opus-4-6": "Opus 4.6",
@@ -270,12 +288,18 @@ enum RuntimeModelOptions {
             switch role {
             case .defaultModel:
                 return [
+                    RuntimeModelOption(value: "claude-opus-5", label: "Opus 5"),
+                    RuntimeModelOption(value: "claude-sonnet-5", label: "Sonnet 5"),
+                    RuntimeModelOption(value: "claude-fable-5", label: "Fable 5"),
                     RuntimeModelOption(value: "claude-opus-4-8", label: "Opus 4.8"),
                     RuntimeModelOption(value: "claude-sonnet-4-6", label: "Sonnet 4.6"),
                     RuntimeModelOption(value: "claude-haiku-4-5", label: "Haiku 4.5"),
                 ]
             case .reviewerModel:
                 return [
+                    RuntimeModelOption(value: "claude-sonnet-5", label: "Sonnet 5"),
+                    RuntimeModelOption(value: "claude-opus-5", label: "Opus 5"),
+                    RuntimeModelOption(value: "claude-fable-5", label: "Fable 5"),
                     RuntimeModelOption(value: "claude-sonnet-4-6", label: "Sonnet 4.6"),
                     RuntimeModelOption(value: "claude-opus-4-8", label: "Opus 4.8"),
                     RuntimeModelOption(value: "claude-haiku-4-5", label: "Haiku 4.5"),
