@@ -427,7 +427,7 @@ function mapNativeToolExecution(
     type: 'tool_use',
     timestamp,
     tool,
-    input: { call_id: callId, ...args },
+    input: { ...args, call_id: callId },
     ...(output !== undefined && { output }),
   };
 }

@@ -37,7 +37,7 @@ describe('PiRpcParser', () => {
         type: 'tool_execution_start',
         toolCallId: 'read-1',
         toolName: 'read',
-        args: { path: '/workspace/src/read.ts', line_start: 5 },
+        args: { path: '/workspace/src/read.ts', line_start: 5, call_id: 'spoofed' },
       },
       {
         type: 'tool_execution_end',

@@ -127,10 +127,9 @@ function inspectedShellPaths(command: string, cwd: string): string[] {
   const tokens = tokenizeShell(command);
   if (!tokens || tokens.length < 2) return [];
   const [program, ...args] = tokens;
-  const base = program ? posix.basename(program) : '';
   let operands: string[];
 
-  switch (base) {
+  switch (program) {
     case 'cat':
       operands = simpleFileOperands(
         args,
@@ -243,6 +242,9 @@ function sedOperands(args: string[]): string[] {
   if (!args.includes('-n') || args.some((arg) => arg === '-i' || arg.startsWith('-i'))) return [];
   const filtered = args.filter((arg) => arg !== '-n');
   if (filtered.length < 2 || filtered[0]?.startsWith('-')) return [];
+  // Only numeric-address print programs are proven read-only. Sed's broader
+  // language includes `w` and `e`, which can mutate files or execute commands.
+  if (!/^\d+(?:,\d+)?p$/.test(filtered[0] ?? '')) return [];
   return filtered.slice(1).every((arg) => !arg.startsWith('-')) ? filtered.slice(1) : [];
 }
 
