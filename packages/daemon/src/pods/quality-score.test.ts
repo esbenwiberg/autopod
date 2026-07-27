@@ -15,6 +15,7 @@ function signals(overrides: Partial<QualitySignals> = {}): QualitySignals {
     tellsCount: 0,
     prFixAttempts: 0,
     validationPassed: null,
+    browserChecks: null,
     tokens: { input: 0, output: 0, costUsd: 0 },
     grade: 'green',
     score: null,

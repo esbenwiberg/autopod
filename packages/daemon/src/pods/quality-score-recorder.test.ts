@@ -143,6 +143,36 @@ describe('QualityScoreRecorder', () => {
     expect(persisted?.score).toBe(90);
   });
 
+  it('records unavailable inspection telemetry through legacy non-null columns', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'pi' }));
+
+    ctx.recorder.start();
+    ctx.eventBus.emit({
+      type: 'pod.completed',
+      timestamp: new Date().toISOString(),
+      podId: POD_ID,
+      finalStatus: 'complete',
+      summary: {
+        id: POD_ID,
+        profileName: 'test-profile',
+        task: 'do the thing',
+        status: 'complete',
+        model: 'claude-opus-4-7',
+        runtime: 'pi',
+        duration: 0,
+        filesChanged: 0,
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+    const persisted = ctx.qualityScoreRepo.get(POD_ID);
+    expect(persisted).not.toBeNull();
+    expect(persisted?.score).toBe(100);
+    expect(persisted?.readCount).toBe(0);
+    expect(persisted?.readEditRatio).toBe(5);
+    expect(persisted?.editsWithoutPriorRead).toBe(0);
+  });
+
   it('unsubscribes on stop()', () => {
     ctx.podRepo.insert(basePod());
     ctx.recorder.start();

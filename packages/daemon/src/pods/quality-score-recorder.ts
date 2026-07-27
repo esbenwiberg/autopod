@@ -56,14 +56,21 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
         providerAttemptRepo,
       });
       const score = computeScore({ signals, finalStatus: event.finalStatus });
+      // The versioned persistence brief will store availability explicitly.
+      // Until then, keep legacy non-null columns writable without changing the
+      // live contract: unavailable values are neutral projections and must not
+      // be interpreted as measured telemetry.
+      const persistedReadCount = signals.readCount ?? 0;
+      const persistedReadEditRatio = signals.readEditRatio ?? 5;
+      const persistedEditsWithoutPriorRead = signals.editsWithoutPriorRead ?? 0;
 
       qualityScoreRepo.insert({
         podId: event.podId,
         score,
-        readCount: signals.readCount,
+        readCount: persistedReadCount,
         editCount: signals.editCount,
-        readEditRatio: signals.readEditRatio,
-        editsWithoutPriorRead: signals.editsWithoutPriorRead,
+        readEditRatio: persistedReadEditRatio,
+        editsWithoutPriorRead: persistedEditsWithoutPriorRead,
         userInterrupts: signals.userInterrupts,
         editChurnCount: signals.editChurnCount,
         tellsCount: signals.tellsCount,
