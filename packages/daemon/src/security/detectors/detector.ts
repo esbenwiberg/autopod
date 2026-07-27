@@ -13,4 +13,16 @@ export interface Detector {
   warmup(): Promise<void>;
   /** Scan a single file. Implementations MUST NOT throw — return [] on error. */
   scan(file: ScanFile): Promise<ScanFinding[]>;
+  /**
+   * Optional daemon-private scan output for safe occurrence baselining.
+   * Returns null on detector failure so callers fail closed and retain all
+   * current findings. The opaque identity must never be copied into the
+   * public finding.
+   */
+  scanWithBaselineIdentity?(file: ScanFile): Promise<BaselineFinding[] | null>;
+}
+
+export interface BaselineFinding {
+  finding: ScanFinding;
+  identity: string;
 }

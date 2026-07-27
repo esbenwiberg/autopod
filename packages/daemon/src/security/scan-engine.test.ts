@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { ScanFinding, SecurityScanPolicy } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Detector } from './detectors/detector.js';
+import type { BaselineFinding, Detector } from './detectors/detector.js';
 import { createScanEngine } from './scan-engine.js';
 import { getPreset } from './scan-policy.js';
 
@@ -20,6 +20,37 @@ function fakeDetector(
     async warmup() {},
     async scan(file) {
       return findings(file.path);
+    },
+  };
+}
+
+function baselineSecretDetector(): Detector {
+  function identified(file: { path: string; content: string }): BaselineFinding[] {
+    const findings: BaselineFinding[] = [];
+    for (const match of file.content.matchAll(/SECRET_[A-Z]+/g)) {
+      const value = match[0];
+      findings.push({
+        finding: {
+          detector: 'secrets',
+          severity: 'critical',
+          file: file.path,
+          line: file.content.slice(0, match.index).split('\n').length,
+          ruleId: 'test-secret',
+          snippet: '[REDACTED]',
+        },
+        identity: `test-secret:${value}`,
+      });
+    }
+    return findings;
+  }
+  return {
+    name: 'secrets',
+    async warmup() {},
+    async scan(file) {
+      return identified(file).map(({ finding }) => finding);
+    },
+    async scanWithBaselineIdentity(file) {
+      return identified(file);
     },
   };
 }
@@ -236,5 +267,153 @@ describe('scan-engine', () => {
     expect(seen).toContain('CLAUDE.md');
     expect(seen).not.toContain('src.ts');
     expect(result.scanIncomplete).toBe(true);
+  });
+
+  it('omits an unchanged same-path secret after surrounding content moves', async () => {
+    writeFileSync(path.join(workdir, 'src.ts'), 'const key = "SECRET_EXISTING";\n');
+    execSync('git add -A && git commit -q -m secret-fixture', { cwd: workdir });
+    const secretBase = execSync('git rev-parse HEAD', { cwd: workdir }).toString().trim();
+    writeFileSync(path.join(workdir, 'src.ts'), '// formatted\n\nconst key = "SECRET_EXISTING";\n');
+    execSync('git add -A && git commit -q -m formatting', { cwd: workdir });
+
+    const engine = createScanEngine({ detectors: [baselineSecretDetector()], logger });
+    const policy = getPreset('default');
+    policy.push.scope = 'diff';
+    const result = await engine.run({
+      podId: 'p9',
+      workdir,
+      policy,
+      checkpoint: 'push',
+      baseRef: secretBase,
+    });
+
+    expect(result.findings).toEqual([]);
+    expect(result.decision).toBe('pass');
+  });
+
+  it('blocks introduced and rotated secret values', async () => {
+    writeFileSync(path.join(workdir, 'src.ts'), 'const key = "SECRET_EXISTING";\n');
+    execSync('git add -A && git commit -q -m secret-fixture', { cwd: workdir });
+    const base = execSync('git rev-parse HEAD', { cwd: workdir }).toString().trim();
+    writeFileSync(
+      path.join(workdir, 'src.ts'),
+      'const key = "SECRET_ROTATED";\nconst added = "SECRET_NEW";\n',
+    );
+    execSync('git add -A && git commit -q -m rotate', { cwd: workdir });
+
+    const engine = createScanEngine({ detectors: [baselineSecretDetector()], logger });
+    const policy = getPreset('default');
+    policy.push.scope = 'diff';
+    const result = await engine.run({
+      podId: 'p10',
+      workdir,
+      policy,
+      checkpoint: 'push',
+      baseRef: base,
+    });
+
+    expect(result.findings).toHaveLength(2);
+    expect(result.decision).toBe('block');
+  });
+
+  it('subtracts same-path occurrences as a multiset so a duplicate blocks', async () => {
+    writeFileSync(path.join(workdir, 'src.ts'), 'const key = "SECRET_EXISTING";\n');
+    execSync('git add -A && git commit -q -m secret-fixture', { cwd: workdir });
+    const base = execSync('git rev-parse HEAD', { cwd: workdir }).toString().trim();
+    writeFileSync(
+      path.join(workdir, 'src.ts'),
+      'const first = "SECRET_EXISTING";\nconst second = "SECRET_EXISTING";\n',
+    );
+    execSync('git add -A && git commit -q -m duplicate', { cwd: workdir });
+
+    const engine = createScanEngine({ detectors: [baselineSecretDetector()], logger });
+    const policy = getPreset('default');
+    const result = await engine.run({
+      podId: 'p11',
+      workdir,
+      policy,
+      checkpoint: 'push',
+      baseRef: base,
+    });
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.decision).toBe('block');
+  });
+
+  it('does not apply a baseline across paths or when the same-path base blob is missing', async () => {
+    writeFileSync(path.join(workdir, 'src.ts'), 'const key = "SECRET_EXISTING";\n');
+    execSync('git add -A && git commit -q -m secret-fixture', { cwd: workdir });
+    const base = execSync('git rev-parse HEAD', { cwd: workdir }).toString().trim();
+    writeFileSync(path.join(workdir, 'copied.ts'), 'const key = "SECRET_EXISTING";\n');
+    writeFileSync(path.join(workdir, 'new.ts'), 'const key = "SECRET_NEW";\n');
+    execSync('git add -A && git commit -q -m copy', { cwd: workdir });
+
+    const engine = createScanEngine({ detectors: [baselineSecretDetector()], logger });
+    const policy = getPreset('default');
+    const result = await engine.run({
+      podId: 'p12',
+      workdir,
+      policy,
+      checkpoint: 'push',
+      baseRef: base,
+    });
+
+    expect(result.findings.map(({ file }) => file).sort()).toEqual(['copied.ts', 'new.ts']);
+    expect(result.decision).toBe('block');
+  });
+
+  it('retains current findings when the baseline detector fails', async () => {
+    writeFileSync(path.join(workdir, 'src.ts'), '// BASE_ERROR\nconst key = "SECRET_EXISTING";\n');
+    execSync('git add -A && git commit -q -m secret-fixture', { cwd: workdir });
+    const base = execSync('git rev-parse HEAD', { cwd: workdir }).toString().trim();
+    writeFileSync(path.join(workdir, 'src.ts'), 'const key = "SECRET_EXISTING";\n');
+    execSync('git add -A && git commit -q -m formatting', { cwd: workdir });
+
+    const detector = baselineSecretDetector();
+    const identify = detector.scanWithBaselineIdentity;
+    detector.scanWithBaselineIdentity = async (file) =>
+      file.content.includes('BASE_ERROR') ? null : (identify?.(file) ?? null);
+    const engine = createScanEngine({ detectors: [detector], logger });
+    const policy = getPreset('default');
+    const result = await engine.run({
+      podId: 'p13',
+      workdir,
+      policy,
+      checkpoint: 'push',
+      baseRef: base,
+    });
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.decision).toBe('block');
+  });
+
+  it('does not baseline full-scope push or provisioning scans', async () => {
+    writeFileSync(path.join(workdir, 'src.ts'), 'const key = "SECRET_EXISTING";\n');
+    execSync('git add -A && git commit -q -m secret-fixture', { cwd: workdir });
+    const base = execSync('git rev-parse HEAD', { cwd: workdir }).toString().trim();
+    const engine = createScanEngine({ detectors: [baselineSecretDetector()], logger });
+
+    const pushPolicy = getPreset('default');
+    pushPolicy.push.scope = 'full';
+    const push = await engine.run({
+      podId: 'p14',
+      workdir,
+      policy: pushPolicy,
+      checkpoint: 'push',
+      baseRef: base,
+    });
+
+    const provisioningPolicy = getPreset('default');
+    provisioningPolicy.provisioning.scope = 'full';
+    const provisioning = await engine.run({
+      podId: 'p15',
+      workdir,
+      policy: provisioningPolicy,
+      checkpoint: 'provisioning',
+      baseRef: base,
+    });
+
+    expect(push.findings).toHaveLength(1);
+    expect(provisioning.findings).toHaveLength(1);
   });
 });

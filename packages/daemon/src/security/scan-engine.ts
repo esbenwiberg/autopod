@@ -12,6 +12,7 @@ import {
   listAlwaysScan,
   listDiffFiles,
   listTrackedFiles,
+  loadScanFileAtRef,
   loadScanFiles,
   resolveBaseRef,
 } from './file-walker.js';
@@ -109,7 +110,7 @@ export function createScanEngine(deps: ScanEngineDeps): ScanEngine {
       }
 
       // Resolve the file set for this checkpoint.
-      const { fileSet, errors, scopeDegraded } = await resolveFileSet(input);
+      const { fileSet, errors, scopeDegraded, resolvedBaseRef } = await resolveFileSet(input);
       for (const err of errors) {
         deps.logger.warn({ err, podId: input.podId }, 'Scan file resolution warning');
       }
@@ -153,7 +154,30 @@ export function createScanEngine(deps: ScanEngineDeps): ScanEngine {
         }
         for (const detector of activeDetectors) {
           try {
-            const detFindings = await detector.scan(file);
+            const baselineCapable =
+              resolvedBaseRef !== undefined && detector.scanWithBaselineIdentity !== undefined;
+            const identified = baselineCapable
+              ? await detector.scanWithBaselineIdentity?.(file)
+              : undefined;
+            let detFindings =
+              identified === undefined || identified === null
+                ? await detector.scan(file)
+                : identified.map(({ finding }) => finding);
+
+            if (
+              identified &&
+              resolvedBaseRef &&
+              detector.scanWithBaselineIdentity &&
+              Date.now() <= deadline
+            ) {
+              const baseFile = await loadScanFileAtRef(input.workdir, resolvedBaseRef, file.path);
+              if (baseFile && Date.now() <= deadline) {
+                const baseFindings = await detector.scanWithBaselineIdentity(baseFile);
+                if (baseFindings && Date.now() <= deadline) {
+                  detFindings = subtractBaseline(identified, baseFindings);
+                }
+              }
+            }
             for (const f of detFindings) {
               if (passesThreshold(f, input.policy)) findings.push(f);
             }
@@ -232,6 +256,8 @@ interface ResolvedFileSet {
    *  silently degraded to alwaysScanPaths only. Callers should surface this
    *  via `scanIncomplete` so the scan isn't read as full-coverage. */
   scopeDegraded: boolean;
+  /** Present only for a successfully resolved push diff scan. */
+  resolvedBaseRef?: string;
 }
 
 async function resolveFileSet(input: RunScanInput): Promise<ResolvedFileSet> {
@@ -240,6 +266,7 @@ async function resolveFileSet(input: RunScanInput): Promise<ResolvedFileSet> {
   const errors: unknown[] = [];
   const set = new Set<string>();
   let scopeDegraded = false;
+  let resolvedBaseRef: string | undefined;
 
   const alwaysScanPaths =
     input.alwaysScanPaths ?? input.policy.alwaysScanPaths ?? DEFAULT_ALWAYS_SCAN_PATHS;
@@ -270,6 +297,7 @@ async function resolveFileSet(input: RunScanInput): Promise<ResolvedFileSet> {
     if (resolved) {
       try {
         const diff = await listDiffFiles(input.workdir, resolved);
+        resolvedBaseRef = input.checkpoint === 'push' ? resolved : undefined;
         for (const p of diff) set.add(p);
         if (resolved !== input.baseRef) {
           errors.push(
@@ -305,7 +333,28 @@ async function resolveFileSet(input: RunScanInput): Promise<ResolvedFileSet> {
     }
   }
 
-  return { fileSet: set, errors, scopeDegraded };
+  return { fileSet: set, errors, scopeDegraded, resolvedBaseRef };
+}
+
+function subtractBaseline(
+  current: Awaited<ReturnType<NonNullable<Detector['scanWithBaselineIdentity']>>>,
+  base: Awaited<ReturnType<NonNullable<Detector['scanWithBaselineIdentity']>>>,
+): ScanFinding[] {
+  if (!current || !base) return current?.map(({ finding }) => finding) ?? [];
+  const remaining = new Map<string, number>();
+  for (const { identity } of base) {
+    remaining.set(identity, (remaining.get(identity) ?? 0) + 1);
+  }
+  const findings: ScanFinding[] = [];
+  for (const { finding, identity } of current) {
+    const count = remaining.get(identity) ?? 0;
+    if (count > 0) {
+      remaining.set(identity, count - 1);
+    } else {
+      findings.push(finding);
+    }
+  }
+  return findings;
 }
 
 export type { ScanFile };

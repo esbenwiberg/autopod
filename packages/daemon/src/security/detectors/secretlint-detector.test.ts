@@ -32,6 +32,32 @@ describe('secretlint-detector', () => {
     expect(findings).toEqual([]);
   });
 
+  it('keeps exact-match identities private and stable across line movement', async () => {
+    const fakeKey = 'AKIAQ4Z9PXR7DNV3HM2L';
+    const before = {
+      path: 'src/config.ts',
+      content: `const key = '${fakeKey}';`,
+      sizeBytes: 100,
+    };
+    const after = {
+      ...before,
+      content: `// formatting moved the declaration\n\nconst key = '${fakeKey}';`,
+    };
+
+    const firstInternal = await detector.scanWithBaselineIdentity?.(before);
+    const movedInternal = await detector.scanWithBaselineIdentity?.(after);
+    expect(firstInternal).toHaveLength(1);
+    expect(movedInternal).toHaveLength(1);
+    expect(firstInternal?.[0]?.identity).toBe(movedInternal?.[0]?.identity);
+    expect(firstInternal?.[0]?.identity).not.toContain(fakeKey);
+
+    const publicFindings = await detector.scan(after);
+    const serialized = JSON.stringify(publicFindings);
+    expect(serialized).not.toContain(fakeKey);
+    expect(serialized).not.toContain(firstInternal?.[0]?.identity ?? 'missing-identity');
+    expect(Object.keys(publicFindings[0] ?? {})).not.toContain('identity');
+  });
+
   it('does not throw on degenerate input', async () => {
     await expect(detector.scan({ path: 'empty.ts', content: '', sizeBytes: 0 })).resolves.toEqual(
       [],
