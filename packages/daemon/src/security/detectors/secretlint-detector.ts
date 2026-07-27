@@ -1,9 +1,10 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type { ScanFinding, ScanSeverity } from '@autopod/shared';
 import { lintSource } from '@secretlint/core';
 import { creator as recommendPresetCreator } from '@secretlint/secretlint-rule-preset-recommend';
 import type { ScanFile } from '../file-walker.js';
-import type { Detector } from './detector.js';
+import type { BaselineFinding, Detector } from './detector.js';
 
 /**
  * Secretlint-backed detector. Uses the official `@secretlint/core` runner
@@ -35,46 +36,67 @@ export function createSecretlintDetector(): Detector {
     ],
   };
 
-  return {
-    name: 'secrets',
-    async warmup() {
-      // Rules are imported eagerly; nothing to do.
-    },
-    async scan(file: ScanFile): Promise<ScanFinding[]> {
-      try {
-        const result = await lintSource({
-          source: {
-            content: file.content,
-            filePath: file.path,
-            ext: path.extname(file.path),
-            contentType: 'text',
-          },
-          options: {
-            config,
-            // We mask snippets ourselves to keep redaction policy in our hands.
-            maskSecrets: false,
-          },
-        });
+  async function scanWithBaselineIdentity(file: ScanFile): Promise<BaselineFinding[] | null> {
+    try {
+      const result = await lintSource({
+        source: {
+          content: file.content,
+          filePath: file.path,
+          ext: path.extname(file.path),
+          contentType: 'text',
+        },
+        options: {
+          config,
+          // We mask snippets ourselves to keep redaction policy in our hands.
+          maskSecrets: false,
+        },
+      });
 
-        const findings: ScanFinding[] = [];
-        for (const msg of result.messages) {
-          if (msg.type !== 'message') continue;
-          findings.push({
+      const findings: BaselineFinding[] = [];
+      for (const msg of result.messages) {
+        if (msg.type !== 'message') continue;
+        findings.push({
+          finding: {
             detector: 'secrets',
             severity: severityFromSecretlint(msg.severity),
             file: file.path,
             line: msg.loc.start.line,
             ruleId: msg.ruleId,
             snippet: redactSnippet(file.content, msg.range),
-          });
-        }
-        return findings;
-      } catch {
-        // Detector contract: never throw.
-        return [];
+          },
+          identity: occurrenceIdentity(msg.ruleId, file.content, msg.range),
+        });
       }
+      return findings;
+    } catch {
+      return null;
+    }
+  }
+
+  return {
+    name: 'secrets',
+    async warmup() {
+      // Rules are imported eagerly; nothing to do.
     },
+    async scan(file: ScanFile): Promise<ScanFinding[]> {
+      const findings = await scanWithBaselineIdentity(file);
+      return findings?.map(({ finding }) => finding) ?? [];
+    },
+    scanWithBaselineIdentity,
   };
+}
+
+function occurrenceIdentity(
+  ruleId: string,
+  content: string,
+  range: readonly [number, number],
+): string {
+  const [start, end] = range;
+  return createHash('sha256')
+    .update(ruleId)
+    .update('\0')
+    .update(content.slice(start, end))
+    .digest('hex');
 }
 
 function severityFromSecretlint(level: 'info' | 'warning' | 'error'): ScanSeverity {

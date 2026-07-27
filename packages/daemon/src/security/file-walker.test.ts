@@ -8,6 +8,7 @@ import {
   listAlwaysScan,
   listDiffFiles,
   listTrackedFiles,
+  loadScanFileAtRef,
   loadScanFiles,
   resolveBaseRef,
 } from './file-walker.js';
@@ -88,6 +89,21 @@ describe('file-walker against a real git repo', () => {
     execSync('git commit -q -m feature', { cwd: workdir });
     const files = await listDiffFiles(workdir, baseBranch);
     expect(files).toContain('src/b.ts');
+  });
+
+  it('loadScanFileAtRef reads the same path from the requested revision', async () => {
+    const base = execSync('git rev-parse HEAD', { cwd: workdir }).toString().trim();
+    writeFileSync(path.join(workdir, 'src/a.ts'), 'export const x = 2;');
+
+    const file = await loadScanFileAtRef(workdir, base, 'src/a.ts');
+
+    expect(file?.content).toBe('export const x = 1;');
+    expect(file?.path).toBe('src/a.ts');
+  });
+
+  it('loadScanFileAtRef returns null when the path does not exist at the revision', async () => {
+    const base = execSync('git rev-parse HEAD', { cwd: workdir }).toString().trim();
+    await expect(loadScanFileAtRef(workdir, base, 'src/new.ts')).resolves.toBeNull();
   });
 
   it('loadScanFiles skips files larger than the limit', async () => {

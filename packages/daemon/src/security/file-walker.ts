@@ -63,6 +63,32 @@ export async function listDiffFiles(workdir: string, baseRef: string): Promise<s
 }
 
 /**
+ * Read a repo-relative path from a revision for occurrence baselining.
+ * Returns null for a missing path, git/read failure, oversized file, or
+ * binary content so callers never suppress findings without a usable blob.
+ */
+export async function loadScanFileAtRef(
+  workdir: string,
+  baseRef: string,
+  relPath: string,
+  options: FileWalkerOptions = {},
+): Promise<ScanFile | null> {
+  if (shouldSkipDir(relPath)) return null;
+  try {
+    const content = await runGitBuffer(workdir, ['show', `${baseRef}:${relPath}`]);
+    const maxBytes = options.maxBytes ?? MAX_FILE_BYTES;
+    if (content.length > maxBytes || looksBinary(content)) return null;
+    return {
+      path: relPath,
+      content: content.toString('utf-8'),
+      sizeBytes: content.length,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Probe a candidate base ref against the local repo. Returns the first ref
  * that resolves to a commit, or null if none do.
  *
@@ -235,6 +261,25 @@ function runGit(workdir: string, args: string[]): Promise<string> {
     child.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) resolve(stdout);
+      else reject(new Error(`git ${args.join(' ')} exited ${code}: ${stderr.trim()}`));
+    });
+  });
+}
+
+function runGitBuffer(workdir: string, args: string[]): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd: workdir });
+    const stdout: Buffer[] = [];
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout.push(chunk);
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString('utf-8');
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve(Buffer.concat(stdout));
       else reject(new Error(`git ${args.join(' ')} exited ${code}: ${stderr.trim()}`));
     });
   });
