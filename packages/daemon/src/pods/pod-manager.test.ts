@@ -5303,7 +5303,9 @@ describe('PodManager', () => {
       const syncCompleted = messages.findIndex((message) =>
         /^Workspace sync complete \(\d+\.\d+s\)$/.test(message),
       );
-      const resultHandled = messages.findIndex((message) => message.startsWith('Validation pass —'));
+      const resultHandled = messages.findIndex((message) =>
+        message.startsWith('Validation pass —'),
+      );
       const stopping = messages.indexOf('Stopping post-validation container…');
       const autoApproving = messages.indexOf('Auto-approving…');
 
@@ -5340,6 +5342,12 @@ describe('PodManager', () => {
                 artifactPath: 'artifact.txt',
                 command: 'test -f artifact.txt',
                 passed: false,
+                attachments: [
+                  {
+                    kind: 'screenshot',
+                    path: '.autopod/evidence/visible-evidence/failure.png',
+                  },
+                ],
               },
             ],
           },
@@ -5371,6 +5379,12 @@ describe('PodManager', () => {
                 artifactPath: 'artifact.txt',
                 command: 'test -f artifact.txt',
                 passed: false,
+                attachments: [
+                  {
+                    kind: 'screenshot',
+                    path: '.autopod/evidence/visible-evidence/failure.png',
+                  },
+                ],
               },
             ],
           },
@@ -5406,7 +5420,9 @@ describe('PodManager', () => {
           message,
         ),
       );
-      const resultHandled = messages.findIndex((message) => message.startsWith('Validation fail —'));
+      const resultHandled = messages.findIndex((message) =>
+        message.startsWith('Validation fail —'),
+      );
 
       expect(messages).toContain('Collecting host fact evidence…');
       expect(messages).toContain('Collecting validation screenshots…');

@@ -11188,9 +11188,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
 
+        const hasFactScreenshotEvidence = result.factValidation?.results.some((fact) =>
+          fact.attachments?.some(
+            (attachment) =>
+              attachment.kind === 'screenshot' &&
+              !path.isAbsolute(attachment.path) &&
+              attachment.path.toLowerCase().endsWith('.png'),
+          ),
+        );
+        const hasValidationScreenshots = result.smoke.pages.some((page) => page.screenshotPath);
+
         // Host browser facts write evidence directly to the host worktree. Collect
         // those screenshots before syncWorkspaceBack mirrors /workspace over it.
-        if (pod.worktreePath && result.factValidation?.results.length && screenshotStore) {
+        if (pod.worktreePath && hasFactScreenshotEvidence && screenshotStore) {
           emitActivityStatus(podId, 'Collecting host fact evidence…');
           try {
             const screenshots = await collectFactScreenshots(
@@ -11233,7 +11243,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         // Collect screenshots from the host worktree and write to the on-disk store
-        if (pod.worktreePath && result.smoke.pages.length > 0 && screenshotStore) {
+        if (pod.worktreePath && hasValidationScreenshots && screenshotStore) {
           emitActivityStatus(podId, 'Collecting validation screenshots…');
           try {
             const screenshots = await collectScreenshots(
@@ -11264,7 +11274,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
-        if (pod.worktreePath && result.factValidation?.results.length && screenshotStore) {
+        if (pod.worktreePath && hasFactScreenshotEvidence && screenshotStore) {
           emitActivityStatus(podId, 'Collecting synced fact evidence…');
           try {
             const screenshots = await collectFactScreenshots(
