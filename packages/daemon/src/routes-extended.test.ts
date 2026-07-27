@@ -436,7 +436,7 @@ describe('Extended Route Tests', () => {
       }
       db.prepare(
         `UPDATE pods
-         SET created_at = '2026-01-01T00:00:00Z',
+         SET created_at = '2026-01-01 00:00:00',
              profile_snapshot = '{"name":"heavy"}',
              last_validation_result = '{"large":"evidence"}'`,
       ).run();
