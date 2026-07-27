@@ -1,5 +1,6 @@
 import AutopodClient
 import Foundation
+import SwiftUI
 
 public enum ReasoningEffortField {
     public static let help =
@@ -20,11 +21,21 @@ public enum ReasoningEffortField {
         current ?? parent ?? .auto
     }
 
-    public static func activatedOverrideValue(
-        current: ReasoningEffort?,
+    public static func binding(
+        value: Binding<ReasoningEffort?>,
+        fallback: ReasoningEffort = .auto
+    ) -> Binding<ReasoningEffort> {
+        Binding(
+            get: { value.wrappedValue ?? fallback },
+            set: { value.wrappedValue = $0 }
+        )
+    }
+
+    public static func activateOverride(
+        value: Binding<ReasoningEffort?>,
         parent: ReasoningEffort?
-    ) -> ReasoningEffort {
-        explicitValue(current: current, parent: parent)
+    ) {
+        value.wrappedValue = explicitValue(current: value.wrappedValue, parent: parent)
     }
 }
 

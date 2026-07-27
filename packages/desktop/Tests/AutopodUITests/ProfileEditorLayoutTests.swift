@@ -30,7 +30,7 @@ import Testing
     let editor = ProfileEditorView(
         profile: profile,
         isNew: false,
-        initialSection: .agent
+        testingInitialSection: .agent
     )
     let hostingView = NSHostingView(rootView: editor)
     let window = NSWindow(

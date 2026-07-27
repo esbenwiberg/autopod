@@ -3,7 +3,7 @@ import SwiftUI
 
 // MARK: - Profile section navigation
 
-public enum ProfileSection: String, CaseIterable, Identifiable {
+enum ProfileSection: String, CaseIterable, Identifiable {
     case general
     case buildRun
     case agent
@@ -20,7 +20,7 @@ public enum ProfileSection: String, CaseIterable, Identifiable {
     case memory
     case deployment
 
-    public var id: String { rawValue }
+    var id: String { rawValue }
 
     var label: String {
         switch self {
@@ -240,10 +240,9 @@ public struct ProfileEditorView: View {
                 onCreateWithInheritance: (
                     (Profile, Set<String>, [String: MergeMode]) async throws -> Void
                 )? = nil,
-                onDelete: ((String) async throws -> Void)? = nil,
-                initialSection: ProfileSection = .general) {
+                onDelete: ((String) async throws -> Void)? = nil) {
         self._profile = State(initialValue: profile)
-        self._selectedSection = State(initialValue: initialSection)
+        self._selectedSection = State(initialValue: .general)
         self.isNew = isNew
         self.actionCatalog = actionCatalog
         self.builtinSkills = builtinSkills
@@ -261,6 +260,11 @@ public struct ProfileEditorView: View {
         self.onSaveWithInheritance = onSaveWithInheritance
         self.onCreateWithInheritance = onCreateWithInheritance
         self.onDelete = onDelete
+    }
+
+    init(profile: Profile, isNew: Bool, testingInitialSection: ProfileSection) {
+        self.init(profile: profile, isNew: isNew)
+        self._selectedSection = State(initialValue: testingInitialSection)
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -1095,10 +1099,7 @@ public struct ProfileEditorView: View {
         fieldRow("Reasoning effort", help: ReasoningEffortField.help) {
             Picker(
                 "",
-                selection: Binding(
-                    get: { profile.reasoningEffort ?? .auto },
-                    set: { profile.reasoningEffort = $0 }
-                )
+                selection: ReasoningEffortField.binding(value: $profile.reasoningEffort)
             ) {
                 ForEach(ReasoningEffortField.options, id: \.value) { option in
                     Text(option.label).tag(option.value)
@@ -3072,11 +3073,10 @@ public struct ProfileEditorView: View {
                                     if field.key == "providerFailover" {
                                         profile.providerFailover = ProviderFailoverPolicyResponse(targets: [])
                                     } else if field.key == "reasoningEffort" {
-                                        profile.reasoningEffort =
-                                            ReasoningEffortField.activatedOverrideValue(
-                                                current: profile.reasoningEffort,
-                                                parent: editorPayload?.parent?.reasoningEffort
-                                            )
+                                        ReasoningEffortField.activateOverride(
+                                            value: $profile.reasoningEffort,
+                                            parent: editorPayload?.parent?.reasoningEffort
+                                        )
                                     }
                                 }
                             }
@@ -3442,14 +3442,9 @@ public struct ProfileEditorView: View {
         return overrideCardShell(field: field) {
             Picker(
                 "",
-                selection: Binding(
-                    get: {
-                        ReasoningEffortField.explicitValue(
-                            current: profile.reasoningEffort,
-                            parent: parent
-                        )
-                    },
-                    set: { profile.reasoningEffort = $0 }
+                selection: ReasoningEffortField.binding(
+                    value: $profile.reasoningEffort,
+                    fallback: parent
                 )
             ) {
                 ForEach(ReasoningEffortField.options, id: \.value) { option in

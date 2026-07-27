@@ -1,7 +1,20 @@
 import Testing
 import Foundation
 import AutopodClient
+import SwiftUI
 @testable import AutopodUI
+
+private final class EffortBox: @unchecked Sendable {
+    var value: ReasoningEffort?
+
+    init(_ value: ReasoningEffort?) {
+        self.value = value
+    }
+
+    var binding: Binding<ReasoningEffort?> {
+        Binding(get: { self.value }, set: { self.value = $0 })
+    }
+}
 
 @Test func profileEditorUsesDaemonGitHubAuthAndKeepsAdoPatManagement() {
     let credentialKeys = ProfileOverrideCatalog.all
@@ -33,44 +46,34 @@ import AutopodClient
 }
 
 @Test func baseProfileReasoningEffortSelectionPreservesPortableValue() {
-    var profile = Profile(name: "base", repoUrl: "https://example.com/repo.git")
+    let stored = EffortBox(.auto)
+    let picker = ReasoningEffortField.binding(value: stored.binding)
 
-    profile.reasoningEffort = .xhigh
+    picker.wrappedValue = .xhigh
 
-    #expect(profile.reasoningEffort == .xhigh)
+    #expect(stored.value == .xhigh)
 }
 
 @Test func derivedReasoningEffortStaysInheritedUntilOverrideIsActivated() {
-    var profile = Profile(
-        name: "child",
-        repoUrl: "https://example.com/repo.git",
-        reasoningEffort: nil
-    )
+    let stored = EffortBox(nil)
+    let inheritedPicker = ReasoningEffortField.binding(value: stored.binding, fallback: .high)
 
-    #expect(profile.reasoningEffort == nil)
+    #expect(inheritedPicker.wrappedValue == .high)
+    #expect(stored.value == nil)
 
-    profile.reasoningEffort = ReasoningEffortField.activatedOverrideValue(
-        current: profile.reasoningEffort,
-        parent: .high
-    )
+    ReasoningEffortField.activateOverride(value: stored.binding, parent: .high)
 
-    #expect(profile.reasoningEffort == .high)
+    #expect(stored.value == .high)
 }
 
 @Test func derivedReasoningEffortOverrideSelectionDoesNotMutateParent() {
     let parent = ReasoningEffort.medium
-    var child = Profile(
-        name: "child",
-        repoUrl: "https://example.com/repo.git",
-        reasoningEffort: nil
-    )
+    let child = EffortBox(nil)
 
-    child.reasoningEffort = ReasoningEffortField.activatedOverrideValue(
-        current: child.reasoningEffort,
-        parent: parent
-    )
-    child.reasoningEffort = .low
+    ReasoningEffortField.activateOverride(value: child.binding, parent: parent)
+    let picker = ReasoningEffortField.binding(value: child.binding, fallback: parent)
+    picker.wrappedValue = .low
 
     #expect(parent == .medium)
-    #expect(child.reasoningEffort == .low)
+    #expect(child.value == .low)
 }
