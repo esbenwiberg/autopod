@@ -1865,20 +1865,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       active ? { ...pod, providerIdSnapshot: active.provider } : pod,
       profile,
     );
-    const profileSnapshot = redactedProfileSnapshot(pod, profile);
-    const profileReference = profileReferenceForAttempt(pod, profileSnapshot);
     if (active) {
       const identityMatches =
         active.provider === provider &&
         active.providerAccountId === profile.providerAccountId &&
         active.runtime === pod.runtime &&
-        active.model === pod.model &&
-        active.profileReference === profileReference;
+        active.model === pod.model;
       if (!identityMatches) {
         throw new Error(`Active provider attempt identity mismatch for pod ${pod.id}`);
       }
       return;
     }
+    const profileSnapshot = redactedProfileSnapshot(pod, profile);
+    const profileReference = profileReferenceForAttempt(pod, profileSnapshot);
     if (
       repository.list(pod.id).length === 0 &&
       (pod.inputTokens > 0 || pod.outputTokens > 0 || pod.costUsd > 0)
