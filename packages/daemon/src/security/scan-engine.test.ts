@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ScanFinding, SecurityScanPolicy } from '@autopod/shared';
 import pino from 'pino';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BaselineFinding, Detector } from './detectors/detector.js';
 import { createScanEngine } from './scan-engine.js';
 import { getPreset } from './scan-policy.js';
@@ -71,6 +71,7 @@ describe('scan-engine', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     rmSync(workdir, { recursive: true, force: true });
   });
 
@@ -387,6 +388,43 @@ describe('scan-engine', () => {
     expect(result.decision).toBe('block');
   });
 
+  it.each([
+    { expiryPoint: 'before base loading', expireOnScan: 1 },
+    { expiryPoint: 'during base detection', expireOnScan: 2 },
+  ])('retains current findings when the budget expires $expiryPoint', async ({ expireOnScan }) => {
+    writeFileSync(path.join(workdir, 'src.ts'), 'const key = "SECRET_EXISTING";\n');
+    execSync('git add -A && git commit -q -m secret-fixture', { cwd: workdir });
+    const base = execSync('git rev-parse HEAD', { cwd: workdir }).toString().trim();
+    writeFileSync(path.join(workdir, 'src.ts'), '// formatted\nconst key = "SECRET_EXISTING";\n');
+    execSync('git add -A && git commit -q -m formatting', { cwd: workdir });
+
+    let now = 1_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const detector = baselineSecretDetector();
+    const identify = detector.scanWithBaselineIdentity;
+    let scanCalls = 0;
+    detector.scanWithBaselineIdentity = async (file) => {
+      scanCalls += 1;
+      const findings = await identify?.(file);
+      if (scanCalls === expireOnScan) now += 2;
+      return findings ?? null;
+    };
+    const engine = createScanEngine({ detectors: [detector], logger });
+    const policy = getPreset('default');
+    const result = await engine.run({
+      podId: 'p14',
+      workdir,
+      policy,
+      checkpoint: 'push',
+      baseRef: base,
+      budgetMs: 1,
+    });
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.decision).toBe('block');
+    expect(result.scanIncomplete).toBe(true);
+  });
+
   it('does not baseline full-scope push or provisioning scans', async () => {
     writeFileSync(path.join(workdir, 'src.ts'), 'const key = "SECRET_EXISTING";\n');
     execSync('git add -A && git commit -q -m secret-fixture', { cwd: workdir });
@@ -396,7 +434,7 @@ describe('scan-engine', () => {
     const pushPolicy = getPreset('default');
     pushPolicy.push.scope = 'full';
     const push = await engine.run({
-      podId: 'p14',
+      podId: 'p15',
       workdir,
       policy: pushPolicy,
       checkpoint: 'push',
@@ -406,7 +444,7 @@ describe('scan-engine', () => {
     const provisioningPolicy = getPreset('default');
     provisioningPolicy.provisioning.scope = 'full';
     const provisioning = await engine.run({
-      podId: 'p15',
+      podId: 'p16',
       workdir,
       policy: provisioningPolicy,
       checkpoint: 'provisioning',

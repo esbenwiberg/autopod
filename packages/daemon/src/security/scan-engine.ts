@@ -164,17 +164,22 @@ export function createScanEngine(deps: ScanEngineDeps): ScanEngine {
                 ? await detector.scan(file)
                 : identified.map(({ finding }) => finding);
 
-            if (
-              identified &&
-              resolvedBaseRef &&
-              detector.scanWithBaselineIdentity &&
-              Date.now() <= deadline
-            ) {
-              const baseFile = await loadScanFileAtRef(input.workdir, resolvedBaseRef, file.path);
-              if (baseFile && Date.now() <= deadline) {
-                const baseFindings = await detector.scanWithBaselineIdentity(baseFile);
-                if (baseFindings && Date.now() <= deadline) {
-                  detFindings = subtractBaseline(identified, baseFindings);
+            if (identified && resolvedBaseRef && detector.scanWithBaselineIdentity) {
+              if (Date.now() > deadline) {
+                scanIncomplete = true;
+              } else {
+                const baseFile = await loadScanFileAtRef(input.workdir, resolvedBaseRef, file.path);
+                if (baseFile) {
+                  if (Date.now() > deadline) {
+                    scanIncomplete = true;
+                  } else {
+                    const baseFindings = await detector.scanWithBaselineIdentity(baseFile);
+                    if (Date.now() > deadline) {
+                      scanIncomplete = true;
+                    } else if (baseFindings) {
+                      detFindings = subtractBaseline(identified, baseFindings);
+                    }
+                  }
                 }
               }
             }
