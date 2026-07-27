@@ -91,6 +91,7 @@ describe('ProfileStore', () => {
       expect(profile.healthTimeout).toBe(120);
       expect(profile.maxValidationAttempts).toBe(3);
       expect(profile.defaultModel).toBe('claude-opus-5');
+      expect(profile.reviewerModel).toBe('claude-sonnet-5');
       expect(profile.defaultRuntime).toBe('claude');
       expect(profile.customInstructions).toBeNull();
       expect(profile.agentDonePrompt).toBeNull();

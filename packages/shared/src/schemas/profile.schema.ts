@@ -343,8 +343,8 @@ const createProfileBaseSchema = z.object({
   smokePages: z.array(smokePageSchema).nullable().default([]),
   maxValidationAttempts: z.number().int().min(1).max(10).nullable().default(3),
   defaultModel: canonicalModelIdSchema.nullable().default(CLAUDE_DEFAULT_MODEL),
-  /** Optional reviewer model for task review. Falls back to defaultModel when null. */
-  reviewerModel: canonicalModelIdSchema.nullable().default(null),
+  /** New base profiles use the curated reviewer; null remains the derived-profile inherit signal. */
+  reviewerModel: canonicalModelIdSchema.nullable().default(CLAUDE_REVIEWER_MODEL),
   defaultRuntime: z.enum(['claude', 'codex', 'copilot', 'pi']).nullable().default('claude'),
   executionTarget: z.enum(['local', 'sandbox']).nullable().default('local'),
   customInstructions: z.string().max(50_000).nullable().default(null),

@@ -148,6 +148,7 @@ describe('createProfileSchema model validation', () => {
 
     const defaulted = createProfileSchema.parse({ name: 'defaulted' });
     expect(defaulted.defaultModel).toBe('claude-opus-5');
+    expect(defaulted.reviewerModel).toBe('claude-sonnet-5');
     expect(defaulted.escalation?.askAi.model).toBe('claude-sonnet-5');
   });
 
