@@ -5186,6 +5186,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     bumpActivityTimestamp(podId);
   }
 
+  function formatElapsedDuration(durationMs: number): string {
+    return `${(durationMs / 1_000).toFixed(1)}s`;
+  }
+
   function emitActivityError(podId: string, message: string, fatal = true): void {
     const timestamp = new Date().toISOString();
     eventBus.emit({
@@ -11182,9 +11186,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           validationAbortControllers.delete(podId);
         }
 
+        emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
+
         // Host browser facts write evidence directly to the host worktree. Collect
         // those screenshots before syncWorkspaceBack mirrors /workspace over it.
         if (pod.worktreePath && result.factValidation?.results.length && screenshotStore) {
+          emitActivityStatus(podId, 'Collecting host fact evidence…');
           try {
             const screenshots = await collectFactScreenshots(
               pod.worktreePath,
@@ -11200,6 +11207,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Sync workspace after validation — screenshots and build artifacts are now in /workspace
         if (pod.containerId && pod.worktreePath) {
+          emitActivityStatus(podId, 'Syncing post-validation workspace…');
+          const syncStartedAt = Date.now();
           try {
             const cm = containerManagerFactory.get(pod.executionTarget);
             await syncWorkspaceBack(
@@ -11209,14 +11218,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               podId,
               pod.executionTarget,
             );
+            emitActivityStatus(
+              podId,
+              `Workspace sync complete (${formatElapsedDuration(Date.now() - syncStartedAt)})`,
+            );
           } catch (err) {
             validationSyncOk = false;
             logger.warn({ err, podId }, 'Failed to sync workspace after validation');
+            emitActivityStatus(
+              podId,
+              `Workspace sync failed after ${formatElapsedDuration(Date.now() - syncStartedAt)} — continuing with degraded safeguards`,
+            );
           }
         }
 
         // Collect screenshots from the host worktree and write to the on-disk store
         if (pod.worktreePath && result.smoke.pages.length > 0 && screenshotStore) {
+          emitActivityStatus(podId, 'Collecting validation screenshots…');
           try {
             const screenshots = await collectScreenshots(
               pod.worktreePath,
@@ -11247,6 +11265,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
 
         if (pod.worktreePath && result.factValidation?.results.length && screenshotStore) {
+          emitActivityStatus(podId, 'Collecting synced fact evidence…');
           try {
             const screenshots = await collectFactScreenshots(
               pod.worktreePath,
@@ -11708,6 +11727,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Stop the container (not remove) so it can be restarted for preview
           if (postAdvisoryPod.containerId) {
             try {
+              emitActivityStatus(podId, 'Stopping post-validation container…');
               await stopSandboxPreviewProxy(podId);
               const cm = containerManagerFactory.get(postAdvisoryPod.executionTarget);
               await cm.stop(postAdvisoryPod.containerId);
@@ -11718,6 +11738,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
 
           if (postAdvisoryPod.autoApprove) {
+            emitActivityStatus(podId, 'Auto-approving…');
             logger.info({ podId }, 'Auto-approving pod after validation');
             setImmediate(() => {
               this.approveSession(podId, { automation: true }).catch((err) =>
