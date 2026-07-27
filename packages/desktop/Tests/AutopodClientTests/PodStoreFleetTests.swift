@@ -72,6 +72,39 @@ import AutopodUI
   #expect(store.pods.map(\.id) == ["visible-pod"])
 }
 
+@MainActor
+@Test func podStoreHydratesSelectedSummaryOnlyOnce() async throws {
+  let recorder = FleetRequestRecorder()
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [FleetURLProtocol.self]
+  FleetURLProtocol.handler = { request in
+    await recorder.record(request.url!)
+    switch request.url?.path {
+    case "/pods/scores":
+      return SelfResponse.json("[]", for: request)
+    case "/pods/selected-pod":
+      return SelfResponse.json(fullPod(id: "selected-pod"), for: request)
+    default:
+      return SelfResponse.json(compactPage(id: "selected-pod", hasNext: false), for: request)
+    }
+  }
+  defer { FleetURLProtocol.handler = nil }
+
+  let api = DaemonAPI(
+    baseURL: URL(string: "https://daemon.example.com")!,
+    token: "token",
+    session: URLSession(configuration: configuration)
+  )
+  let store = PodStore()
+  store.configure(api: api)
+  await store.loadSessions()
+  await store.hydrateSessionIfNeeded("selected-pod")
+  await store.hydrateSessionIfNeeded("selected-pod")
+
+  #expect(store.pods.first?.task == "Full detail task")
+  #expect(await recorder.detailPaths == ["/pods/selected-pod"])
+}
+
 private func compactPage(id: String, hasNext: Bool) -> String {
   let nextCursor = hasNext ? #""next-page""# : "null"
   return """
@@ -89,6 +122,23 @@ private func compactPage(id: String, hasNext: Bool) -> String {
   """
 }
 
+private func fullPod(id: String) -> String {
+  """
+  {
+    "id":"\(id)","profileName":"test","task":"Full detail task","status":"complete",
+    "model":"sonnet","runtime":"claude","executionTarget":"local","branch":"autopod/\(id)",
+    "containerId":null,"worktreePath":null,"validationAttempts":1,"maxValidationAttempts":3,
+    "lastValidationResult":null,"pendingEscalation":null,"escalationCount":0,"skipValidation":false,
+    "createdAt":"2026-07-01T00:00:00Z","startedAt":"2026-07-01T00:00:01Z",
+    "completedAt":"2026-07-01T00:10:00Z","updatedAt":"2026-07-01T00:10:00Z","userId":"user",
+    "filesChanged":1,"linesAdded":2,"linesRemoved":0,"previewUrl":null,"prUrl":null,
+    "plan":null,"progress":null,"claudeSessionId":null,"outputMode":"pr",
+    "options":{"agentMode":"auto","output":"pr","validate":true,"promotable":false},
+    "inputTokens":0,"outputTokens":0,"costUsd":0,"commitCount":1
+  }
+  """
+}
+
 private enum SelfResponse {
   static func json(_ body: String, for request: URLRequest) -> (HTTPURLResponse, Data) {
     let response = HTTPURLResponse(
@@ -103,9 +153,13 @@ private enum SelfResponse {
 
 private actor FleetRequestRecorder {
   private(set) var podPaths: [String] = []
+  private(set) var detailPaths: [String] = []
 
   func record(_ url: URL) {
     if url.path == "/pods" { podPaths.append(url.path) }
+    if url.path.hasPrefix("/pods/"), url.path != "/pods/scores" {
+      detailPaths.append(url.path)
+    }
   }
 }
 

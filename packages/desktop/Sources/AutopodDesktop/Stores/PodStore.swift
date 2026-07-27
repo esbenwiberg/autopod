@@ -56,6 +56,7 @@ public final class PodStore {
 
   private var api: DaemonAPI?
   private var hydratedPodIds = Set<String>()
+  private var hydratingPodIds = Set<String>()
 
   public func configure(api: DaemonAPI) {
     self.api = api
@@ -165,6 +166,13 @@ public final class PodStore {
     }
   }
 
+  public func hydrateSessionIfNeeded(_ id: String) async {
+    guard !hydratedPodIds.contains(id), !hydratingPodIds.contains(id) else { return }
+    hydratingPodIds.insert(id)
+    defer { hydratingPodIds.remove(id) }
+    await refreshSession(id)
+  }
+
   // MARK: - Series
 
   /// Fetch and cache the full series response (metadata + cost roll-up). Pod
@@ -231,6 +239,7 @@ public final class PodStore {
   public func removeSession(_ id: String) {
     pods.removeAll { $0.id == id }
     hydratedPodIds.remove(id)
+    hydratingPodIds.remove(id)
     if selectedSessionId == id {
       selectedSessionId = nil
     }
