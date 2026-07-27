@@ -57,7 +57,7 @@ public final class PodStore {
   private var api: DaemonAPI?
   private var hydratedPodIds = Set<String>()
   private var hydratingPodIds = Set<String>()
-  private var locallyUpdatedStatusPodIds = Set<String>()
+  private var statusRevisions: [String: Int] = [:]
 
   public func configure(api: DaemonAPI) {
     self.api = api
@@ -76,7 +76,8 @@ public final class PodStore {
   private func mergeRestPod(
     _ incoming: Pod,
     with current: Pod?,
-    preferIncomingOnEqual: Bool
+    preferIncomingOnEqual: Bool,
+    preserveCurrentStatus: Bool = false
   ) -> Pod {
     guard let current else { return incoming }
     if !preferIncomingOnEqual
@@ -84,7 +85,7 @@ public final class PodStore {
       return current
     }
     var merged = incoming
-    if locallyUpdatedStatusPodIds.contains(current.id) {
+    if preserveCurrentStatus {
       merged.status = current.status
     } else if current.updatedAt > incoming.updatedAt {
       // Full hydration may race a newer WebSocket status. Keep the detail payload,
@@ -98,10 +99,14 @@ public final class PodStore {
     return merged
   }
 
-  private func mergeCompactPod(_ incoming: Pod, with hydrated: Pod) -> Pod {
+  private func mergeCompactPod(
+    _ incoming: Pod,
+    with hydrated: Pod,
+    preserveCurrentStatus: Bool
+  ) -> Pod {
     guard incoming.updatedAt > hydrated.updatedAt else { return hydrated }
     var merged = hydrated
-    if !locallyUpdatedStatusPodIds.contains(incoming.id) {
+    if !preserveCurrentStatus {
       merged.status = incoming.status
     }
     merged.pod = incoming.pod
@@ -133,24 +138,31 @@ public final class PodStore {
     }
     isLoading = true
     error = nil
+    let statusRevisionSnapshot = statusRevisions
     do {
       let responses = try await api.listAllCompactPods()
       let fresh = PodMapper.map(responses, baseURL: api.baseURL)
       let currentById = Dictionary(uniqueKeysWithValues: pods.map { ($0.id, $0) })
-      for pod in fresh {
-        if let current = currentById[pod.id],
-           locallyUpdatedStatusPodIds.contains(pod.id),
-           current.status == pod.status {
-          locallyUpdatedStatusPodIds.remove(pod.id)
-        }
-      }
       let discoveredIds = Set(fresh.map(\.id))
       let retained = pods.filter { !discoveredIds.contains($0.id) }
       let merged = fresh.map { pod in
         if hydratedPodIds.contains(pod.id), let current = currentById[pod.id] {
-          return mergeCompactPod(pod, with: current)
+          return mergeCompactPod(
+            pod,
+            with: current,
+            preserveCurrentStatus:
+              statusRevisions[pod.id, default: 0]
+                > statusRevisionSnapshot[pod.id, default: 0]
+          )
         }
-        return mergeRestPod(pod, with: currentById[pod.id], preferIncomingOnEqual: false)
+        return mergeRestPod(
+          pod,
+          with: currentById[pod.id],
+          preferIncomingOnEqual: false,
+          preserveCurrentStatus:
+            statusRevisions[pod.id, default: 0]
+              > statusRevisionSnapshot[pod.id, default: 0]
+        )
       }
       // Pods created over WebSocket after page one sit outside the keyset snapshot.
       // Keep them visible until a later discovery traversal includes them.
@@ -184,14 +196,17 @@ public final class PodStore {
 
   public func refreshSession(_ id: String) async {
     guard let api else { return }
+    let statusRevision = statusRevisions[id, default: 0]
     do {
       let response = try await api.getPod(id)
       var updated = PodMapper.map(response, baseURL: api.baseURL)
       if let index = pods.firstIndex(where: { $0.id == id }) {
-        if locallyUpdatedStatusPodIds.contains(id), pods[index].status == updated.status {
-          locallyUpdatedStatusPodIds.remove(id)
-        }
-        updated = mergeRestPod(updated, with: pods[index], preferIncomingOnEqual: true)
+        updated = mergeRestPod(
+          updated,
+          with: pods[index],
+          preferIncomingOnEqual: true,
+          preserveCurrentStatus: statusRevisions[id, default: 0] > statusRevision
+        )
         if updated.validationProgress == nil && updated.status == .validating {
           updated.validationProgress = ValidationProgress.initial(attempt: updated.attempts?.current ?? 1)
         }
@@ -263,9 +278,7 @@ public final class PodStore {
   public func updateStatus(_ podId: String, to status: PodStatus) {
     guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
     pods[index].status = status
-    // REST timestamps come from another machine, so wall-clock comparison cannot
-    // prove whether an in-flight response predates this WebSocket event.
-    locallyUpdatedStatusPodIds.insert(podId)
+    statusRevisions[podId, default: 0] += 1
   }
 
   public func upsertSession(_ pod: Pod) {
@@ -280,7 +293,7 @@ public final class PodStore {
     pods.removeAll { $0.id == id }
     hydratedPodIds.remove(id)
     hydratingPodIds.remove(id)
-    locallyUpdatedStatusPodIds.remove(id)
+    statusRevisions.removeValue(forKey: id)
     if selectedSessionId == id {
       selectedSessionId = nil
     }

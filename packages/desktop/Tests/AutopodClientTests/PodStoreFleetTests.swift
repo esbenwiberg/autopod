@@ -47,7 +47,9 @@ import AutopodUI
 
   store.updateStatus("newer-pod", to: .running)
   await store.loadSessions()
-  #expect(store.pods.first(where: { $0.id == "newer-pod" })?.status == .running)
+  // A later REST traversal is authoritative; the local event marker only protects
+  // against responses that were already in flight when the event arrived.
+  #expect(store.pods.first(where: { $0.id == "newer-pod" })?.status == .complete)
 }
 
 @MainActor
