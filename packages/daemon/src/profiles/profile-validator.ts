@@ -2,6 +2,7 @@ import {
   type StackTemplate,
   VALIDATION_SUITES,
   providerFailoverPolicySchema,
+  reasoningEffortSchema,
 } from '@autopod/shared';
 import { isPrivateUrl } from '../api/ssrf-guard.js';
 
@@ -162,6 +163,15 @@ export function validateProfile(input: Record<string, unknown>): ProfileValidati
   const defaultRuntime = input.defaultRuntime;
   if (defaultRuntime !== undefined && !KNOWN_RUNTIMES.includes(defaultRuntime as string)) {
     errors.push(`defaultRuntime must be one of: ${KNOWN_RUNTIMES.join(', ')}`);
+  }
+
+  const reasoningEffort = input.reasoningEffort;
+  if (
+    reasoningEffort !== undefined &&
+    reasoningEffort !== null &&
+    !reasoningEffortSchema.safeParse(reasoningEffort).success
+  ) {
+    errors.push('reasoningEffort must be one of: auto, low, medium, high, xhigh, or null');
   }
 
   const providerFailover = input.providerFailover;
