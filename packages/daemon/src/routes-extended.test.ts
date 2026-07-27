@@ -420,6 +420,61 @@ describe('Extended Route Tests', () => {
       expect(pods[0]).not.toHaveProperty('contract');
     });
 
+    it('paginates compact discovery without heavy fields or duplicate timestamps', async () => {
+      const ids: string[] = [];
+      for (const task of ['one', 'two', 'three', 'four', 'five']) {
+        const created = await app.inject({
+          method: 'POST',
+          url: '/pods',
+          headers: authHeaders,
+          payload: { profileName: 'test-app', task },
+        });
+        expect(created.statusCode).toBe(201);
+        ids.push(created.json<{ id: string }>().id);
+      }
+      db.prepare(
+        `UPDATE pods
+         SET created_at = '2026-01-01T00:00:00Z',
+             profile_snapshot = '{"name":"heavy"}',
+             last_validation_result = '{"large":"evidence"}'`,
+      ).run();
+
+      const seen: Record<string, unknown>[] = [];
+      let cursor: string | null = null;
+      do {
+        const suffix = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+        const res = await app.inject({
+          method: 'GET',
+          url: `/pods?compact=true&page=true&limit=2${suffix}`,
+          headers: authHeaders,
+        });
+        expect(res.statusCode).toBe(200);
+        const page = res.json<{
+          pods: Record<string, unknown>[];
+          nextCursor: string | null;
+        }>();
+        expect(page.pods.length).toBeLessThanOrEqual(2);
+        for (const pod of page.pods) {
+          expect(pod).not.toHaveProperty('profileSnapshot');
+          expect(pod).not.toHaveProperty('lastValidationResult');
+        }
+        seen.push(...page.pods);
+        cursor = page.nextCursor;
+      } while (cursor !== null);
+
+      expect(seen.map((pod) => pod.id)).toEqual([...ids].sort().reverse());
+      expect(new Set(seen.map((pod) => pod.id)).size).toBe(ids.length);
+    });
+
+    it.each([
+      '/pods?compact=true&page=true&cursor=not-json',
+      '/pods?compact=true&page=false',
+      '/pods?page=true',
+    ])('rejects malformed compact pagination query %s', async (url) => {
+      const res = await app.inject({ method: 'GET', url, headers: authHeaders });
+      expect(res.statusCode).toBe(400);
+    });
+
     it.each(['0', '-1', 'abc', '501'])('rejects invalid limit %s', async (limit) => {
       const res = await app.inject({
         method: 'GET',

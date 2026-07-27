@@ -606,6 +606,12 @@ export interface CompactPod {
   progressSummary: string | null;
 }
 
+/** Bounded keyset page used by fleet-discovery clients. */
+export interface CompactPodPage {
+  pods: CompactPod[];
+  nextCursor: string | null;
+}
+
 /**
  * Per-pod behavioural telemetry derived from the agent event stream plus
  * escalation/pod state. Surfaces how the agent actually worked — reading

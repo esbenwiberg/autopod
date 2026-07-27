@@ -1437,6 +1437,7 @@ export interface PodManager {
     status?: PodStatus | PodStatus[];
     userId?: string;
     limit?: number;
+    before?: { createdAt: string; id: string };
   }): Pod[];
   getSessionStats(filters?: { profileName?: string }): PodStats;
   getValidationHistory(podId: string): import('./validation-repository.js').StoredValidation[];
