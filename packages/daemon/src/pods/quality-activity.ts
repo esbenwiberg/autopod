@@ -150,6 +150,7 @@ function inspectedShellPaths(command: string, cwd: string): string[] {
       return [];
   }
 
+  if (operands.length === 0 || operands.some((operand) => operand === '-')) return [];
   const paths = operands.map((operand) => canonicalRepositoryPath(operand, cwd));
   return paths.every((path): path is string => path !== null) ? [...new Set(paths)] : [];
 }
