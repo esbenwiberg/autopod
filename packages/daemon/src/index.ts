@@ -801,9 +801,11 @@ const qualityScoreRecorder = createQualityScoreRecorder({
   providerAttemptRepo,
   logger,
 });
-function upgradeQualityHistory(): void {
-  const upgraded = qualityScoreRecorder.upgradeHistory();
-  if (upgraded === 100) setImmediate(upgradeQualityHistory);
+function upgradeQualityHistory(afterPodId?: string): void {
+  const result = qualityScoreRecorder.upgradeHistory(100, afterPodId);
+  if (result.selected === 100 && result.lastPodId) {
+    setImmediate(() => upgradeQualityHistory(result.lastPodId ?? undefined));
+  }
 }
 upgradeQualityHistory();
 qualityScoreRecorder.start();

@@ -5,6 +5,7 @@ import { createEscalationRepository } from './escalation-repository.js';
 import { createEventBus } from './event-bus.js';
 import { createEventRepository } from './event-repository.js';
 import { type NewPod, createPodRepository } from './pod-repository.js';
+import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 import { createQualityScoreRecorder } from './quality-score-recorder.js';
 import { createQualityScoreRepository } from './quality-score-repository.js';
 import { QUALITY_SCORE_ALGORITHM_VERSION } from './quality-score-repository.js';
@@ -67,6 +68,7 @@ describe('QualityScoreRecorder', () => {
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const qualityScoreRepo = createQualityScoreRepository(db);
+    const providerAttemptRepo = createProviderAttemptRepository(db);
     const eventBus = createEventBus(eventRepo, logger);
     const recorder = createQualityScoreRecorder({
       eventBus,
@@ -74,9 +76,10 @@ describe('QualityScoreRecorder', () => {
       eventRepo,
       escalationRepo,
       qualityScoreRepo,
+      providerAttemptRepo,
       logger,
     });
-    return { db, podRepo, eventRepo, eventBus, qualityScoreRepo, recorder };
+    return { db, podRepo, eventRepo, eventBus, providerAttemptRepo, qualityScoreRepo, recorder };
   }
 
   let ctx: ReturnType<typeof setup>;
@@ -200,7 +203,11 @@ describe('QualityScoreRecorder', () => {
     `)
       .run(POD_ID, '2026-04-23T12:00:00.000Z');
 
-    expect(ctx.recorder.upgradeHistory()).toBe(1);
+    expect(ctx.recorder.upgradeHistory()).toEqual({
+      selected: 1,
+      upgraded: 1,
+      lastPodId: POD_ID,
+    });
     expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
       expect.objectContaining({
         algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
@@ -211,7 +218,11 @@ describe('QualityScoreRecorder', () => {
         editsWithoutPriorRead: 0,
       }),
     );
-    expect(ctx.recorder.upgradeHistory()).toBe(0);
+    expect(ctx.recorder.upgradeHistory()).toEqual({
+      selected: 0,
+      upgraded: 0,
+      lastPodId: null,
+    });
   });
 
   it('marks discarded historical Pi activity unavailable and upgrades in bounded batches', () => {
@@ -224,7 +235,11 @@ describe('QualityScoreRecorder', () => {
     `)
       .run(POD_ID, '2026-04-23T12:00:00.000Z');
 
-    expect(ctx.recorder.upgradeHistory(1)).toBe(1);
+    expect(ctx.recorder.upgradeHistory(1)).toEqual({
+      selected: 1,
+      upgraded: 1,
+      lastPodId: POD_ID,
+    });
     expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
       expect.objectContaining({
         algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
@@ -235,7 +250,58 @@ describe('QualityScoreRecorder', () => {
         editsWithoutPriorRead: null,
       }),
     );
-    expect(ctx.recorder.upgradeHistory(1)).toBe(0);
+    expect(ctx.recorder.upgradeHistory(1)).toEqual({
+      selected: 0,
+      upgraded: 0,
+      lastPodId: null,
+    });
+  });
+
+  it('keeps mixed historical Pi to Codex attempts unavailable', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5' }));
+    ctx.eventRepo.insert(codexInspectionEvent('cat src/a.ts'));
+    ctx.eventRepo.insert(editEvent('src/a.ts'));
+    ctx.providerAttemptRepo.open({
+      podId: POD_ID,
+      provider: 'openrouter',
+      providerAccountId: null,
+      runtime: 'pi',
+      model: 'pi-model',
+      profileReference: `pod:${POD_ID}@profile-snapshot#abcdef1`,
+      profileSnapshot: {},
+    });
+    ctx.providerAttemptRepo.close(POD_ID, {
+      outcome: 'quota_exhausted',
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsd: 0,
+    });
+    ctx.providerAttemptRepo.open({
+      podId: POD_ID,
+      provider: 'openai',
+      providerAccountId: null,
+      runtime: 'codex',
+      model: 'gpt-5',
+      profileReference: `pod:${POD_ID}@profile-snapshot#abcdef1`,
+      profileSnapshot: {},
+    });
+    ctx.db
+      .prepare(`
+        INSERT INTO pod_quality_scores (
+          pod_id, score, runtime, profile_name, model, final_status, completed_at
+        ) VALUES (?, 40, 'codex', 'test-profile', 'gpt-5', 'complete', ?)
+      `)
+      .run(POD_ID, '2026-04-23T12:00:00.000Z');
+
+    expect(ctx.recorder.upgradeHistory().upgraded).toBe(1);
+    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
+      expect.objectContaining({
+        algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+        inspectionAvailability: 'unavailable',
+        score: null,
+        readCount: null,
+      }),
+    );
   });
 
   it('unsubscribes on stop()', () => {

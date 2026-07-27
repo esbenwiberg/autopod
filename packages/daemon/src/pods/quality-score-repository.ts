@@ -20,7 +20,7 @@ export interface QualityScoreRepository {
   insert(score: PodQualityScore): void;
   get(podId: string): PodQualityScore | null;
   list(filters?: QualityScoreFilters): PodQualityScore[];
-  listStale(limit: number): PodQualityScore[];
+  listStale(limit: number, afterPodId?: string): PodQualityScore[];
   getTrends(days?: number): QualityTrend[];
   getQualityAnalytics(days: number): QualityAnalyticsResponse;
 }
@@ -238,18 +238,20 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
       return rows.map(rowToScore);
     },
 
-    listStale(limit: number): PodQualityScore[] {
+    listStale(limit: number, afterPodId?: string): PodQualityScore[] {
       const rows = db
         .prepare(
           `SELECT * FROM (${ATTEMPT_COMPATIBILITY_PROJECTION}) projected
            WHERE projected.algorithm_version <> @algorithmVersion
-           ORDER BY projected.computed_at ASC, projected.pod_id ASC
+             AND (@afterPodId IS NULL OR projected.pod_id > @afterPodId)
+           ORDER BY projected.pod_id ASC
            LIMIT @limit`,
         )
-        .all({ algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION, limit }) as Record<
-        string,
-        unknown
-      >[];
+        .all({
+          algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+          afterPodId: afterPodId ?? null,
+          limit,
+        }) as Record<string, unknown>[];
       return rows.map(rowToScore);
     },
 

@@ -12,7 +12,10 @@ import { computeQualitySignals } from './quality-signals.js';
 import type { ValidationRepository } from './validation-repository.js';
 
 export interface QualityScoreRecorder {
-  upgradeHistory(limit?: number): number;
+  upgradeHistory(
+    limit?: number,
+    afterPodId?: string,
+  ): { selected: number; upgraded: number; lastPodId: string | null };
   start(): void;
   stop(): void;
 }
@@ -51,6 +54,7 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
     podId: string,
     finalStatus: 'complete' | 'killed',
     completedAt: string,
+    options: { historical?: boolean } = {},
   ): void {
     const pod = podRepo.getOrThrow(podId);
     const signals = computeQualitySignals(podId, {
@@ -61,17 +65,22 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
       providerAttemptRepo,
     });
     const computedScore = computeScore({ signals, finalStatus });
-    const available = signals.inspectionAvailability === 'available';
+    const hasHistoricalPiAttempt =
+      options.historical === true &&
+      (pod.runtime === 'pi' ||
+        (providerAttemptRepo?.list(podId).some((attempt) => attempt.runtime === 'pi') ?? false));
+    const available = signals.inspectionAvailability === 'available' && !hasHistoricalPiAttempt;
+    const inspectionAvailability = available ? 'available' : 'unavailable';
 
     qualityScoreRepo.insert({
       podId,
       score: available ? computedScore : null,
       algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
-      inspectionAvailability: signals.inspectionAvailability,
-      readCount: signals.readCount,
+      inspectionAvailability,
+      readCount: available ? signals.readCount : null,
       editCount: signals.editCount,
-      readEditRatio: signals.readEditRatio,
-      editsWithoutPriorRead: signals.editsWithoutPriorRead,
+      readEditRatio: available ? signals.readEditRatio : null,
+      editsWithoutPriorRead: available ? signals.editsWithoutPriorRead : null,
       userInterrupts: signals.userInterrupts,
       editChurnCount: signals.editChurnCount,
       tellsCount: signals.tellsCount,
@@ -93,7 +102,7 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
         podId,
         score: available ? computedScore : null,
         algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
-        inspectionAvailability: signals.inspectionAvailability,
+        inspectionAvailability,
         grade: signals.grade,
         runtime: pod.runtime,
         model: pod.model,
@@ -118,40 +127,26 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
   }
 
   return {
-    upgradeHistory(limit = 100): number {
-      const stale = qualityScoreRepo.listStale(limit);
+    upgradeHistory(limit = 100, afterPodId?: string) {
+      const stale = qualityScoreRepo.listStale(limit, afterPodId);
       let upgraded = 0;
       for (const score of stale) {
         try {
-          persistScore(score.podId, score.finalStatus, score.completedAt);
+          persistScore(score.podId, score.finalStatus, score.completedAt, { historical: true });
           upgraded += 1;
         } catch (err) {
           logger.warn({ err, podId: score.podId }, 'Failed to upgrade pod quality score');
-          try {
-            qualityScoreRepo.insert({
-              ...score,
-              score: null,
-              algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
-              inspectionAvailability: 'unavailable',
-              readCount: null,
-              readEditRatio: null,
-              editsWithoutPriorRead: null,
-              computedAt: new Date().toISOString(),
-            });
-            upgraded += 1;
-          } catch (persistErr) {
-            logger.warn(
-              { err: persistErr, podId: score.podId },
-              'Failed to mark unrecomputable quality score unavailable',
-            );
-          }
         }
       }
       logger.info(
         { upgraded, selected: stale.length, limit },
         'Quality score history upgrade completed',
       );
-      return upgraded;
+      return {
+        selected: stale.length,
+        upgraded,
+        lastPodId: stale.at(-1)?.podId ?? null,
+      };
     },
 
     start(): void {
