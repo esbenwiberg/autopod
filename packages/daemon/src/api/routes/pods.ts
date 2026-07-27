@@ -476,18 +476,18 @@ export function podRoutes(
       return { error: `Unknown pod status: ${invalidStatus}`, code: 'invalid_status' };
     }
     const statuses = rawStatuses as PodStatus[] | undefined;
-    const pageLimit = paginated ? (limit ?? MAX_POD_LIST_LIMIT) : limit;
+    const paginatedLimit = limit ?? MAX_POD_LIST_LIMIT;
     const pods = podManager.listSessions({
       profileName: query.profileName ?? query.profile,
       status: statuses,
       userId: query.userId,
-      limit: paginated ? pageLimit + 1 : pageLimit,
+      limit: paginated ? paginatedLimit + 1 : limit,
       before: cursor ?? undefined,
     });
     if (query.compact === 'true') {
       if (!paginated) return pods.map((pod) => compactPod(pod, request));
-      const hasMore = pods.length > pageLimit;
-      const records = hasMore ? pods.slice(0, pageLimit) : pods;
+      const hasMore = pods.length > paginatedLimit;
+      const records = hasMore ? pods.slice(0, paginatedLimit) : pods;
       const last = records.at(-1);
       const response: CompactPodPage = {
         pods: records.map((pod) => compactPod(pod, request)),
