@@ -801,6 +801,23 @@ const qualityScoreRecorder = createQualityScoreRecorder({
   providerAttemptRepo,
   logger,
 });
+function upgradeQualityHistory(
+  afterPodId?: string,
+  retryAttempt = 0,
+  cycleHadFailures = false,
+): void {
+  const result = qualityScoreRecorder.upgradeHistory(100, afterPodId);
+  const hadFailures = cycleHadFailures || result.upgraded < result.selected;
+  if (result.selected === 100 && result.lastPodId) {
+    setImmediate(() =>
+      upgradeQualityHistory(result.lastPodId ?? undefined, retryAttempt, hadFailures),
+    );
+  } else if (hadFailures && retryAttempt < 2) {
+    const retryDelayMs = (retryAttempt + 1) * 1_000;
+    setTimeout(() => upgradeQualityHistory(undefined, retryAttempt + 1), retryDelayMs);
+  }
+}
+upgradeQualityHistory();
 qualityScoreRecorder.start();
 
 // Memory candidate recorder: background LLM extraction of durable lessons from

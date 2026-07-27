@@ -5,6 +5,7 @@ import { computeScore } from './quality-score.js';
 function signals(overrides: Partial<QualitySignals> = {}): QualitySignals {
   return {
     podId: 'pod-1',
+    inspectionAvailability: 'available',
     readCount: 10,
     editCount: 2,
     readEditRatio: 5,
@@ -14,6 +15,7 @@ function signals(overrides: Partial<QualitySignals> = {}): QualitySignals {
     tellsCount: 0,
     prFixAttempts: 0,
     validationPassed: null,
+    browserChecks: null,
     tokens: { input: 0, output: 0, costUsd: 0 },
     grade: 'green',
     score: null,
@@ -23,6 +25,20 @@ function signals(overrides: Partial<QualitySignals> = {}): QualitySignals {
 }
 
 describe('computeScore', () => {
+  it('keeps unavailable inspection telemetry neutral', () => {
+    const score = computeScore({
+      signals: signals({
+        inspectionAvailability: 'unavailable',
+        readCount: null,
+        readEditRatio: null,
+        editsWithoutPriorRead: null,
+      }),
+      finalStatus: 'complete',
+    });
+
+    expect(score).toBe(100);
+  });
+
   it('awards a high score to a disciplined completed pod', () => {
     const score = computeScore({
       signals: signals({ readCount: 10, editCount: 2, readEditRatio: 5 }),

@@ -620,17 +620,20 @@ export interface CompactPodPage {
  * sessions can be spotted at a glance.
  */
 export type QualityGrade = 'green' | 'yellow' | 'red';
+export type QualityInspectionAvailability = 'available' | 'unavailable';
 
 export interface QualitySignals {
   podId: string;
-  /** Count of `Read` tool invocations on the agent stream. */
-  readCount: number;
+  /** Whether retained events support inspection-dependent judgments. */
+  inspectionAvailability: QualityInspectionAvailability;
+  /** Count of recognized repository inspections (`null` when unavailable). */
+  readCount: number | null;
   /** Count of `create` + `modify` file-change events. */
   editCount: number;
-  /** `readCount / max(editCount, 1)` — higher is better. */
-  readEditRatio: number;
-  /** Modifies to files that were never read earlier in the session. */
-  editsWithoutPriorRead: number;
+  /** `readCount / max(editCount, 1)` — higher is better; `null` when unavailable. */
+  readEditRatio: number | null;
+  /** Distinct existing files modified before inspection; `null` when unavailable. */
+  editsWithoutPriorRead: number | null;
   /** `ask_human` escalations plus 1 if the pod ended in `killed`. */
   userInterrupts: number;
   /** Distinct files with 3+ modify events — indicates thrashing. */
@@ -670,11 +673,14 @@ export interface QualitySignals {
  */
 export interface PodQualityScore {
   podId: string;
-  score: number;
-  readCount: number;
+  /** Null when inspection-dependent scoring cannot be supported honestly. */
+  score: number | null;
+  algorithmVersion: number;
+  inspectionAvailability: QualityInspectionAvailability;
+  readCount: number | null;
   editCount: number;
-  readEditRatio: number;
-  editsWithoutPriorRead: number;
+  readEditRatio: number | null;
+  editsWithoutPriorRead: number | null;
   userInterrupts: number;
   editChurnCount: number;
   tellsCount: number;

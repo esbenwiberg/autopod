@@ -41,7 +41,7 @@ struct QualityDrillView: View {
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var sortOrder: [KeyPathComparator<PodQualityScore>] = [
-        KeyPathComparator(\.score, order: .reverse)
+        KeyPathComparator(\.sortableScore, order: .reverse)
     ]
 
     // MARK: - Computed filtered state
@@ -49,7 +49,9 @@ struct QualityDrillView: View {
     private var filteredScores: [PodQualityScore] {
         guard let r = response else { return [] }
         guard selectedBand != .all else { return r.scores }
-        return r.scores.filter { selectedBand.matches(score: $0.score) }
+        return r.scores.filter { score in
+            score.score.map { selectedBand.matches(score: $0) } ?? false
+        }
     }
 
     var body: some View {
@@ -244,12 +246,12 @@ struct QualityDrillView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Table(rows, sortOrder: $sortOrder) {
-                TableColumn("Score", value: \.score) { s in
+                TableColumn("Score", value: \.sortableScore) { s in
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(analyticsScoreColor(s.score))
+                            .fill(s.score.map(analyticsScoreColor) ?? .secondary)
                             .frame(width: 8, height: 8)
-                        Text("\(s.score)")
+                        Text(s.score.map(String.init) ?? "—")
                             .font(.system(.body, design: .monospaced).weight(.semibold))
                             .monospacedDigit()
                     }
@@ -323,8 +325,12 @@ struct QualityDrillView: View {
         var lowReadEditRatio = 0, editsWithoutPriorRead = 0, userInterrupts = 0
         var validationFailed = 0, prFixAttempts = 0, editChurn = 0, tells = 0
         for s in scores {
-            if s.readEditRatio < 1 && s.editCount > 0 { lowReadEditRatio += 1 }
-            if s.editsWithoutPriorRead > 0 { editsWithoutPriorRead += 1 }
+            if let ratio = s.readEditRatio, ratio < 1 && s.editCount > 0 {
+                lowReadEditRatio += 1
+            }
+            if let blindEdits = s.editsWithoutPriorRead, blindEdits > 0 {
+                editsWithoutPriorRead += 1
+            }
             if s.userInterrupts > 0 { userInterrupts += 1 }
             if s.validationPassed == false { validationFailed += 1 }
             if s.prFixAttempts > 0 { prFixAttempts += 1 }

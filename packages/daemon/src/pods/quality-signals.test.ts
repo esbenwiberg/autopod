@@ -57,6 +57,26 @@ function readTool(path: string): AgentActivityEvent {
   };
 }
 
+function toolUse(
+  tool: string,
+  input: Record<string, unknown>,
+  output?: string,
+): AgentActivityEvent {
+  const event: AgentToolUseEvent = {
+    type: 'tool_use',
+    timestamp: new Date().toISOString(),
+    tool,
+    input,
+    ...(output !== undefined && { output }),
+  };
+  return {
+    type: 'pod.agent_activity',
+    timestamp: event.timestamp,
+    podId: POD_ID,
+    event,
+  };
+}
+
 function fileChange(path: string, action: 'create' | 'modify' | 'delete'): AgentActivityEvent {
   const event: AgentFileChangeEvent = {
     type: 'file_change',
@@ -213,8 +233,12 @@ describe('computeQualitySignals', () => {
     db.prepare(`
       INSERT INTO pod_quality_scores (
         pod_id, score, runtime, profile_name, model, final_status, completed_at,
-        input_tokens, output_tokens, cost_usd
-      ) VALUES (?, 90, 'claude', 'test-profile', 'stale-model', 'complete', ?, 999, 999, 99)
+        input_tokens, output_tokens, cost_usd, algorithm_version, inspection_availability,
+        score_v2
+      ) VALUES (
+        ?, 90, 'claude', 'test-profile', 'stale-model', 'complete', ?, 999, 999, 99,
+        2, 'available', 90
+      )
     `).run(POD_ID, new Date().toISOString());
 
     const signals = computeQualitySignals(POD_ID, {
@@ -252,10 +276,99 @@ describe('computeQualitySignals', () => {
     const signals = computeQualitySignals(POD_ID, deps);
 
     expect(signals.readCount).toBe(4);
+    expect(signals.inspectionAvailability).toBe('available');
     expect(signals.editCount).toBe(1);
     expect(signals.readEditRatio).toBe(4);
     expect(signals.editsWithoutPriorRead).toBe(0);
     expect(signals.grade).toBe('green');
+  });
+
+  it('uses canonical Codex inspection evidence before an edit', () => {
+    podRepo.insert(basePod({ runtime: 'codex' }));
+    eventRepo.insert(toolUse('Bash', { command: 'sed -n 1,80p ./src/a.ts' }));
+    eventRepo.insert(fileChange('/workspace/src/a.ts', 'modify'));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.inspectionAvailability).toBe('available');
+    expect(signals.readCount).toBe(1);
+    expect(signals.editCount).toBe(1);
+    expect(signals.editsWithoutPriorRead).toBe(0);
+  });
+
+  it('counts repeated modifications to one unread file as one blind edit', () => {
+    podRepo.insert(basePod({ runtime: 'codex' }));
+    eventRepo.insert(fileChange('src/a.ts', 'modify'));
+    eventRepo.insert(fileChange('./src/a.ts', 'modify'));
+    eventRepo.insert(fileChange('/workspace/src/a.ts', 'modify'));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.inspectionAvailability).toBe('available');
+    expect(signals.editCount).toBe(3);
+    expect(signals.editsWithoutPriorRead).toBe(1);
+  });
+
+  it('marks ambiguous native writes as unavailable instead of measured zero', () => {
+    podRepo.insert(basePod({ runtime: 'pi' }));
+    eventRepo.insert(toolUse('write', { path: 'src/a.ts' }));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.inspectionAvailability).toBe('unavailable');
+    expect(signals.editCount).toBe(1);
+    expect(signals.readCount).toBeNull();
+    expect(signals.readEditRatio).toBeNull();
+    expect(signals.editsWithoutPriorRead).toBeNull();
+    expect(signals.grade).toBe('green');
+  });
+
+  it('counts paired native and file-change mutations once', () => {
+    podRepo.insert(basePod({ runtime: 'pi' }));
+    eventRepo.insert(readTool('src/a.ts'));
+    eventRepo.insert(toolUse('edit', { path: 'src/a.ts', call_id: 'edit-1' }));
+    eventRepo.insert(fileChange('src/a.ts', 'modify'));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.inspectionAvailability).toBe('available');
+    expect(signals.editCount).toBe(1);
+    expect(signals.readEditRatio).toBe(1);
+    expect(signals.editsWithoutPriorRead).toBe(0);
+  });
+
+  it('does not collapse distinct native mutations to the same path', () => {
+    podRepo.insert(basePod({ runtime: 'pi' }));
+    eventRepo.insert(readTool('src/a.ts'));
+    eventRepo.insert(toolUse('edit', { path: 'src/a.ts', call_id: 'edit-1' }));
+    eventRepo.insert(toolUse('edit', { path: 'src/a.ts', call_id: 'edit-2' }));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.editCount).toBe(2);
+  });
+
+  it('does not pair a later native mutation with an earlier file change', () => {
+    podRepo.insert(basePod({ runtime: 'pi' }));
+    eventRepo.insert(readTool('src/a.ts'));
+    eventRepo.insert(fileChange('src/a.ts', 'modify'));
+    eventRepo.insert(toolUse('edit', { path: 'src/a.ts', call_id: 'edit-2' }));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.editCount).toBe(2);
+  });
+
+  it('uses a paired file-change action to resolve a native write', () => {
+    podRepo.insert(basePod({ runtime: 'pi' }));
+    eventRepo.insert(toolUse('write', { path: 'src/new.ts', call_id: 'write-1' }));
+    eventRepo.insert(fileChange('src/new.ts', 'create'));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.inspectionAvailability).toBe('available');
+    expect(signals.editCount).toBe(1);
+    expect(signals.editsWithoutPriorRead).toBe(0);
   });
 
   it('flags edits to files that were never read', () => {
@@ -371,6 +484,21 @@ describe('computeQualitySignals', () => {
     const signals = computeQualitySignals(POD_ID, deps);
 
     expect(signals.tellsCount).toBeGreaterThan(0);
+  });
+
+  it('does not detect tells in tool output', () => {
+    podRepo.insert(basePod());
+    eventRepo.insert(
+      toolUse(
+        'Bash',
+        { command: 'cat src/a.ts' },
+        'Unfortunately I was unable to complete this operation.',
+      ),
+    );
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.tellsCount).toBe(0);
   });
 
   it('detects tell patterns in complete event result text', () => {

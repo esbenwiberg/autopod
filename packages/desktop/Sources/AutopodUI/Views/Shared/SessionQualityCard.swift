@@ -22,7 +22,8 @@ public struct SessionQualityCard: View {
                     .font(.system(.headline).weight(.semibold))
                     .lineLimit(1)
                 Spacer()
-                if let score = signals.score {
+                if signals.inspectionAvailability == .available,
+                   let score = signals.score {
                     qualityScoreBadge(score)
                 }
                 Text(signals.grade.capitalized)

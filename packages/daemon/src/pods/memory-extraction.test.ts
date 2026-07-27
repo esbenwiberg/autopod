@@ -77,6 +77,7 @@ function makePod(overrides: Partial<Pod> = {}): Pod {
 function makeSignals(overrides: Partial<QualitySignals> = {}): QualitySignals {
   return {
     podId: 'pod-abc1',
+    inspectionAvailability: 'available',
     readCount: 10,
     editCount: 5,
     readEditRatio: 2,

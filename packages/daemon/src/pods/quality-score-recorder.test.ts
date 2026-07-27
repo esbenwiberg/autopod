@@ -5,8 +5,10 @@ import { createEscalationRepository } from './escalation-repository.js';
 import { createEventBus } from './event-bus.js';
 import { createEventRepository } from './event-repository.js';
 import { type NewPod, createPodRepository } from './pod-repository.js';
+import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 import { createQualityScoreRecorder } from './quality-score-recorder.js';
 import { createQualityScoreRepository } from './quality-score-repository.js';
+import { QUALITY_SCORE_ALGORITHM_VERSION } from './quality-score-repository.js';
 
 const POD_ID = 'pod-rec-01';
 
@@ -48,6 +50,16 @@ function editEvent(path: string): AgentActivityEvent {
   return { type: 'pod.agent_activity', timestamp: event.timestamp, podId: POD_ID, event };
 }
 
+function codexInspectionEvent(command: string): AgentActivityEvent {
+  const event: AgentToolUseEvent = {
+    type: 'tool_use',
+    timestamp: new Date().toISOString(),
+    tool: 'Bash',
+    input: { command },
+  };
+  return { type: 'pod.agent_activity', timestamp: event.timestamp, podId: POD_ID, event };
+}
+
 describe('QualityScoreRecorder', () => {
   function setup() {
     const db = createTestDb();
@@ -56,6 +68,7 @@ describe('QualityScoreRecorder', () => {
     const eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     const qualityScoreRepo = createQualityScoreRepository(db);
+    const providerAttemptRepo = createProviderAttemptRepository(db);
     const eventBus = createEventBus(eventRepo, logger);
     const recorder = createQualityScoreRecorder({
       eventBus,
@@ -63,9 +76,10 @@ describe('QualityScoreRecorder', () => {
       eventRepo,
       escalationRepo,
       qualityScoreRepo,
+      providerAttemptRepo,
       logger,
     });
-    return { db, podRepo, eventRepo, eventBus, qualityScoreRepo, recorder };
+    return { db, podRepo, eventRepo, eventBus, providerAttemptRepo, qualityScoreRepo, recorder };
   }
 
   let ctx: ReturnType<typeof setup>;
@@ -108,6 +122,8 @@ describe('QualityScoreRecorder', () => {
     expect(persisted?.inputTokens).toBe(1200);
     expect(persisted?.outputTokens).toBe(300);
     expect(persisted?.costUsd).toBe(0.05);
+    expect(persisted?.algorithmVersion).toBe(QUALITY_SCORE_ALGORITHM_VERSION);
+    expect(persisted?.inspectionAvailability).toBe('available');
     // 3 reads / 1 edit = 3.0 ratio, no blind edits, no interrupts, completed
     // reading 30*clamp(3/5)=18, blind 20, tells 20, interrupts 15, complete 10, churn 10 = 93
     expect(persisted?.score).toBe(93);
@@ -141,6 +157,295 @@ describe('QualityScoreRecorder', () => {
     // zero edits → reading 30 (short-circuit); 1 kill → userInterrupts=1 → interruptScore=15*(1-1/3)=10
     // 30 + 20 (blind) + 20 (tells) + 10 (interrupts) + 0 (killed) + 10 (churn) = 90
     expect(persisted?.score).toBe(90);
+  });
+
+  it('records unavailable inspection telemetry without exposing invented counters', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'pi' }));
+
+    ctx.recorder.start();
+    ctx.eventBus.emit({
+      type: 'pod.completed',
+      timestamp: new Date().toISOString(),
+      podId: POD_ID,
+      finalStatus: 'complete',
+      summary: {
+        id: POD_ID,
+        profileName: 'test-profile',
+        task: 'do the thing',
+        status: 'complete',
+        model: 'claude-opus-4-7',
+        runtime: 'pi',
+        duration: 0,
+        filesChanged: 0,
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+    const persisted = ctx.qualityScoreRepo.get(POD_ID);
+    expect(persisted).not.toBeNull();
+    expect(persisted?.score).toBeNull();
+    expect(persisted?.algorithmVersion).toBe(QUALITY_SCORE_ALGORITHM_VERSION);
+    expect(persisted?.inspectionAvailability).toBe('unavailable');
+    expect(persisted?.readCount).toBeNull();
+    expect(persisted?.readEditRatio).toBeNull();
+    expect(persisted?.editsWithoutPriorRead).toBeNull();
+  });
+
+  it('records a live mixed Pi to Codex outcome unavailable when Pi activity is missing', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5' }));
+    ctx.eventRepo.insert(codexInspectionEvent('cat src/a.ts'));
+    ctx.eventRepo.insert(editEvent('src/a.ts'));
+    ctx.eventRepo.insert({
+      type: 'pod.agent_activity',
+      timestamp: new Date().toISOString(),
+      podId: POD_ID,
+      event: {
+        type: 'tool_use',
+        timestamp: new Date().toISOString(),
+        tool: 'validate_in_browser',
+        input: {},
+      },
+    });
+    ctx.providerAttemptRepo.open({
+      podId: POD_ID,
+      provider: 'openrouter',
+      providerAccountId: null,
+      runtime: 'pi',
+      model: 'pi-model',
+      profileReference: `pod:${POD_ID}@profile-snapshot#abcdef1`,
+      profileSnapshot: {},
+    });
+    ctx.providerAttemptRepo.close(POD_ID, {
+      outcome: 'quota_exhausted',
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsd: 0,
+    });
+
+    ctx.recorder.start();
+    ctx.eventBus.emit({
+      type: 'pod.completed',
+      timestamp: '2026-04-23T12:00:00.000Z',
+      podId: POD_ID,
+      finalStatus: 'complete',
+      summary: {
+        id: POD_ID,
+        profileName: 'test-profile',
+        task: 'do the thing',
+        status: 'complete',
+        model: 'gpt-5',
+        runtime: 'codex',
+        duration: 1000,
+        filesChanged: 1,
+        createdAt: '2026-04-23T11:50:00.000Z',
+      },
+    });
+
+    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
+      expect.objectContaining({
+        inspectionAvailability: 'unavailable',
+        score: null,
+        readCount: null,
+      }),
+    );
+  });
+
+  it('records a pure Pi outcome when normalized evidence is retained', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'pi', model: 'pi-model' }));
+    ctx.eventRepo.insert({
+      type: 'pod.agent_activity',
+      timestamp: new Date().toISOString(),
+      podId: POD_ID,
+      event: {
+        type: 'tool_use',
+        timestamp: new Date().toISOString(),
+        tool: 'read',
+        input: { path: 'src/a.ts' },
+      },
+    });
+    ctx.eventRepo.insert(editEvent('src/a.ts'));
+
+    ctx.recorder.start();
+    ctx.eventBus.emit({
+      type: 'pod.completed',
+      timestamp: '2026-04-23T12:00:00.000Z',
+      podId: POD_ID,
+      finalStatus: 'complete',
+      summary: {
+        id: POD_ID,
+        profileName: 'test-profile',
+        task: 'do the thing',
+        status: 'complete',
+        model: 'pi-model',
+        runtime: 'pi',
+        duration: 1000,
+        filesChanged: 1,
+        createdAt: '2026-04-23T11:50:00.000Z',
+      },
+    });
+
+    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
+      expect.objectContaining({
+        inspectionAvailability: 'available',
+        readCount: 1,
+        editsWithoutPriorRead: 0,
+      }),
+    );
+  });
+
+  it('rebuilds retained Codex history once with normalized inspection evidence', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5' }));
+    ctx.eventRepo.insert(codexInspectionEvent('cat src/a.ts'));
+    ctx.eventRepo.insert(editEvent('src/a.ts'));
+    ctx.db
+      .prepare(`
+      INSERT INTO pod_quality_scores (
+        pod_id, score, runtime, profile_name, model, final_status, completed_at
+      ) VALUES (?, 40, 'codex', 'test-profile', 'gpt-5', 'complete', ?)
+    `)
+      .run(POD_ID, '2026-04-23T12:00:00.000Z');
+
+    expect(ctx.recorder.upgradeHistory()).toEqual({
+      selected: 1,
+      upgraded: 1,
+      lastPodId: POD_ID,
+    });
+    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
+      expect.objectContaining({
+        algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+        inspectionAvailability: 'available',
+        readCount: 1,
+        editCount: 1,
+        readEditRatio: 1,
+        editsWithoutPriorRead: 0,
+      }),
+    );
+    expect(
+      (
+        ctx.db.prepare('SELECT score FROM pod_quality_scores WHERE pod_id = ?').get(POD_ID) as {
+          score: number;
+        }
+      ).score,
+    ).toBe(40);
+    expect(ctx.recorder.upgradeHistory()).toEqual({
+      selected: 0,
+      upgraded: 0,
+      lastPodId: null,
+    });
+  });
+
+  it('marks discarded historical Pi activity unavailable and upgrades in bounded batches', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'pi', model: 'pi-model' }));
+    ctx.db
+      .prepare(`
+      INSERT INTO pod_quality_scores (
+        pod_id, score, runtime, profile_name, model, final_status, completed_at
+      ) VALUES (?, 10, 'pi', 'test-profile', 'pi-model', 'complete', ?)
+    `)
+      .run(POD_ID, '2026-04-23T12:00:00.000Z');
+
+    expect(ctx.recorder.upgradeHistory(1)).toEqual({
+      selected: 1,
+      upgraded: 1,
+      lastPodId: POD_ID,
+    });
+    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
+      expect.objectContaining({
+        algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+        inspectionAvailability: 'unavailable',
+        score: null,
+        readCount: null,
+        readEditRatio: null,
+        editsWithoutPriorRead: null,
+      }),
+    );
+    expect(ctx.recorder.upgradeHistory(1)).toEqual({
+      selected: 0,
+      upgraded: 0,
+      lastPodId: null,
+    });
+  });
+
+  it('keeps historical Pi unavailable when only partial normalized activity survives', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'pi', model: 'pi-model' }));
+    ctx.eventRepo.insert({
+      type: 'pod.agent_activity',
+      timestamp: new Date().toISOString(),
+      podId: POD_ID,
+      event: {
+        type: 'tool_use',
+        timestamp: new Date().toISOString(),
+        tool: 'read',
+        input: { path: 'src/a.ts' },
+      },
+    });
+    ctx.eventRepo.insert(editEvent('src/a.ts'));
+    ctx.db
+      .prepare(`
+        INSERT INTO pod_quality_scores (
+          pod_id, score, runtime, profile_name, model, final_status, completed_at
+        ) VALUES (?, 75, 'pi', 'test-profile', 'pi-model', 'complete', ?)
+      `)
+      .run(POD_ID, '2026-04-23T12:00:00.000Z');
+
+    expect(ctx.recorder.upgradeHistory().upgraded).toBe(1);
+    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
+      expect.objectContaining({
+        algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+        inspectionAvailability: 'unavailable',
+        score: null,
+        readCount: null,
+        readEditRatio: null,
+        editsWithoutPriorRead: null,
+      }),
+    );
+  });
+
+  it('keeps mixed historical Pi to Codex attempts unavailable', () => {
+    ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5' }));
+    ctx.eventRepo.insert(codexInspectionEvent('cat src/a.ts'));
+    ctx.eventRepo.insert(editEvent('src/a.ts'));
+    ctx.providerAttemptRepo.open({
+      podId: POD_ID,
+      provider: 'openrouter',
+      providerAccountId: null,
+      runtime: 'pi',
+      model: 'pi-model',
+      profileReference: `pod:${POD_ID}@profile-snapshot#abcdef1`,
+      profileSnapshot: {},
+    });
+    ctx.providerAttemptRepo.close(POD_ID, {
+      outcome: 'quota_exhausted',
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsd: 0,
+    });
+    ctx.providerAttemptRepo.open({
+      podId: POD_ID,
+      provider: 'openai',
+      providerAccountId: null,
+      runtime: 'codex',
+      model: 'gpt-5',
+      profileReference: `pod:${POD_ID}@profile-snapshot#abcdef1`,
+      profileSnapshot: {},
+    });
+    ctx.db
+      .prepare(`
+        INSERT INTO pod_quality_scores (
+          pod_id, score, runtime, profile_name, model, final_status, completed_at
+        ) VALUES (?, 40, 'codex', 'test-profile', 'gpt-5', 'complete', ?)
+      `)
+      .run(POD_ID, '2026-04-23T12:00:00.000Z');
+
+    expect(ctx.recorder.upgradeHistory().upgraded).toBe(1);
+    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
+      expect.objectContaining({
+        algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+        inspectionAvailability: 'unavailable',
+        score: null,
+        readCount: null,
+      }),
+    );
   });
 
   it('unsubscribes on stop()', () => {

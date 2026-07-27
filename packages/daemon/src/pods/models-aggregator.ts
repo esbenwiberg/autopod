@@ -426,7 +426,7 @@ export function computeModelsAnalytics(
   // Uses subquery to avoid SQLITE_MAX_VARIABLE_NUMBER on large cohorts.
   const qualityRows = db
     .prepare(
-      `SELECT q.pod_id AS podId, q.score,
+      `SELECT q.pod_id AS podId, q.score_v2 AS score,
               COALESCE((
                 SELECT a.model FROM provider_attempts a
                 WHERE a.pod_id = p.id ORDER BY a.ordinal DESC LIMIT 1
@@ -437,7 +437,9 @@ export function computeModelsAnalytics(
               ), p.runtime) AS runtime
        FROM pod_quality_scores q
        JOIN pods p ON p.id = q.pod_id
-       WHERE q.pod_id IN (SELECT id FROM pods WHERE ${terminalCohortWhere()})`,
+       WHERE q.algorithm_version = 2
+         AND q.inspection_availability = 'available'
+         AND q.pod_id IN (SELECT id FROM pods WHERE ${terminalCohortWhere()})`,
     )
     .all({ days }) as QualityRow[];
 

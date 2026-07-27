@@ -4,11 +4,13 @@ import Foundation
 /// Written by the daemon's `QualityScoreRecorder` on `pod.completed`.
 public struct PodQualityScore: Codable, Equatable, Sendable, Identifiable {
   public let podId: String
-  public let score: Int
-  public let readCount: Int
+  public let score: Int?
+  public let algorithmVersion: Int
+  public let inspectionAvailability: QualityInspectionAvailability
+  public let readCount: Int?
   public let editCount: Int
-  public let readEditRatio: Double
-  public let editsWithoutPriorRead: Int
+  public let readEditRatio: Double?
+  public let editsWithoutPriorRead: Int?
   public let userInterrupts: Int
   public let editChurnCount: Int
   public let tellsCount: Int
@@ -25,4 +27,5 @@ public struct PodQualityScore: Codable, Equatable, Sendable, Identifiable {
   public let computedAt: String
 
   public var id: String { podId }
+  public var sortableScore: Int { score ?? -1 }
 }

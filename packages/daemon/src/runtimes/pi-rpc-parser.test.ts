@@ -31,6 +31,205 @@ async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
 }
 
 describe('PiRpcParser', () => {
+  it('normalizes native tool execution once across start and end records', async () => {
+    const records = [
+      {
+        type: 'tool_execution_start',
+        toolCallId: 'read-1',
+        toolName: 'read',
+        args: { path: '/workspace/src/read.ts', line_start: 5, call_id: 'spoofed' },
+      },
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'read-1',
+        toolName: 'read',
+        result: { content: 'source' },
+        isError: false,
+      },
+      {
+        type: 'tool_execution_start',
+        toolCallId: 'edit-1',
+        toolName: 'edit',
+        args: { path: 'src/edit.ts', oldText: 'a', newText: 'b' },
+      },
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'edit-1',
+        toolName: 'edit',
+        result: 'done',
+        isError: false,
+      },
+      {
+        type: 'tool_execution_start',
+        toolCallId: 'write-1',
+        toolName: 'write',
+        args: { path: 'src/write.ts', content: 'new' },
+      },
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'write-1',
+        toolName: 'write',
+        result: 'done',
+        isError: false,
+      },
+    ];
+
+    const { events, stats } = await parseLines(records.map((record) => JSON.stringify(record)));
+
+    expect(events).toEqual([
+      {
+        type: 'tool_use',
+        timestamp: expect.any(String),
+        tool: 'read',
+        input: {
+          call_id: 'read-1',
+          path: '/workspace/src/read.ts',
+          line_start: 5,
+        },
+        output: '{"content":"source"}',
+      },
+      {
+        type: 'tool_use',
+        timestamp: expect.any(String),
+        tool: 'edit',
+        input: {
+          call_id: 'edit-1',
+          path: 'src/edit.ts',
+          oldText: 'a',
+          newText: 'b',
+        },
+        output: 'done',
+      },
+      {
+        type: 'tool_use',
+        timestamp: expect.any(String),
+        tool: 'write',
+        input: {
+          call_id: 'write-1',
+          path: 'src/write.ts',
+          content: 'new',
+        },
+        output: 'done',
+      },
+    ]);
+    expect(stats).toMatchObject({ events: 3, nonStatusEvents: 3 });
+  });
+
+  it('normalizes a native end-only record when it retains arguments', async () => {
+    const { events } = await parseLines([
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'read-end-only',
+        toolName: 'read',
+        args: { path: 'src/end-only.ts' },
+        result: 'content',
+        isError: false,
+      }),
+    ]);
+
+    expect(events).toEqual([
+      {
+        type: 'tool_use',
+        timestamp: expect.any(String),
+        tool: 'read',
+        input: { call_id: 'read-end-only', path: 'src/end-only.ts' },
+        output: 'content',
+      },
+    ]);
+  });
+
+  it('does not emit activity for failed or outcome-less native tool calls', async () => {
+    const { events } = await parseLines([
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'failed-read',
+        toolName: 'read',
+        args: { path: 'src/unread.ts' },
+      }),
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'failed-read',
+        toolName: 'read',
+        result: 'not found',
+        isError: true,
+      }),
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'unknown-write',
+        toolName: 'write',
+        args: { path: 'src/not-written.ts', content: 'nope' },
+      }),
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'unknown-write',
+        toolName: 'write',
+        result: 'ambiguous legacy result',
+      }),
+    ]);
+
+    expect(events).toEqual([]);
+  });
+
+  it('rejects a correlated end record whose tool name changed', async () => {
+    const { events } = await parseLines([
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'changed-tool',
+        toolName: 'read',
+        args: { path: 'src/a.ts' },
+      }),
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'changed-tool',
+        toolName: 'write',
+        result: 'done',
+        isError: false,
+      }),
+    ]);
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        fatal: false,
+        message: 'Pi RPC emitted malformed tool_execution_end record',
+      }),
+    ]);
+  });
+
+  it('ignores unsupported native tool lifecycles whose end omits arguments', async () => {
+    const { events } = await parseLines([
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'custom-1',
+        toolName: 'custom_tool',
+        args: { value: 1 },
+      }),
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'custom-1',
+        toolName: 'custom_tool',
+        result: 'done',
+      }),
+    ]);
+
+    expect(events).toEqual([]);
+  });
+
+  it.each([
+    { type: 'tool_execution_start', toolName: 'read', args: { path: 'src/a.ts' } },
+    { type: 'tool_execution_start', toolCallId: 'missing-tool', args: { path: 'src/a.ts' } },
+    { type: 'tool_execution_end', toolCallId: 'missing-args', toolName: 'write' },
+  ])('rejects malformed native tool execution record %#', async (record) => {
+    const { events } = await parseLines([JSON.stringify(record)]);
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        fatal: false,
+        message: expect.stringContaining('malformed tool_execution_'),
+      }),
+    ]);
+  });
+
   it('normalizes correlated responses plus text, tool, error, and completion events', async () => {
     const separatorText = 'hello\u2028world';
     const { events, stats } = await parseLines([

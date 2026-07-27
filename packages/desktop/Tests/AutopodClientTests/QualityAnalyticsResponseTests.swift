@@ -145,6 +145,8 @@ import Testing
       {
         "podId": "abc12345",
         "score": 78,
+        "algorithmVersion": 2,
+        "inspectionAvailability": "available",
         "readCount": 10,
         "editCount": 5,
         "readEditRatio": 2.0,
@@ -171,6 +173,25 @@ import Testing
     #expect(scores[0].podId == "abc12345")
     #expect(scores[0].score == 78)
     #expect(scores[0].validationPassed == true)
+}
+
+@Test func unavailablePodQualityScoreDecodesNullInspectionMetrics() throws {
+    let json = """
+    [{
+      "podId": "legacy123", "score": null, "algorithmVersion": 1,
+      "inspectionAvailability": "unavailable", "readCount": null,
+      "editCount": 2, "readEditRatio": null, "editsWithoutPriorRead": null,
+      "userInterrupts": 0, "editChurnCount": 0, "tellsCount": 0,
+      "prFixAttempts": 0, "validationPassed": null, "inputTokens": 0,
+      "outputTokens": 0, "costUsd": 0, "runtime": "pi",
+      "profileName": "legacy", "model": null, "finalStatus": "complete",
+      "completedAt": "2026-04-30T12:00:00Z", "computedAt": "2026-04-30T12:00:01Z"
+    }]
+    """.data(using: .utf8)!
+    let scores = try JSONDecoder().decode([PodQualityScore].self, from: json)
+    #expect(scores[0].inspectionAvailability == .unavailable)
+    #expect(scores[0].score == nil)
+    #expect(scores[0].readEditRatio == nil)
 }
 
 // MARK: - Helpers
@@ -203,6 +224,7 @@ private func makeFullFixtureJSON(days: Int) -> String {
     {
       "podId": "pod-aabbccdd",
       "score": 85,
+      "algorithmVersion": 2, "inspectionAvailability": "available",
       "readCount": 15, "editCount": 8, "readEditRatio": 1.875,
       "editsWithoutPriorRead": 0, "userInterrupts": 0, "editChurnCount": 1,
       "tellsCount": 0, "prFixAttempts": 0, "validationPassed": true,
@@ -216,6 +238,7 @@ private func makeFullFixtureJSON(days: Int) -> String {
     {
       "podId": "pod-11223344",
       "score": 42,
+      "algorithmVersion": 2, "inspectionAvailability": "available",
       "readCount": 2, "editCount": 9, "readEditRatio": 0.222,
       "editsWithoutPriorRead": 3, "userInterrupts": 2, "editChurnCount": 4,
       "tellsCount": 1, "prFixAttempts": 1, "validationPassed": false,

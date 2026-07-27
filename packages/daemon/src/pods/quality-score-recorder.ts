@@ -6,11 +6,16 @@ import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
+import { QUALITY_SCORE_ALGORITHM_VERSION } from './quality-score-repository.js';
 import { computeScore } from './quality-score.js';
 import { computeQualitySignals } from './quality-signals.js';
 import type { ValidationRepository } from './validation-repository.js';
 
 export interface QualityScoreRecorder {
+  upgradeHistory(
+    limit?: number,
+    afterPodId?: string,
+  ): { selected: number; upgraded: number; lastPodId: string | null };
   start(): void;
   stop(): void;
 }
@@ -45,55 +50,84 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
   } = deps;
   const unsubscribers: Array<() => void> = [];
 
+  function persistScore(
+    podId: string,
+    finalStatus: 'complete' | 'killed',
+    completedAt: string,
+    options: { historical?: boolean } = {},
+  ): void {
+    const pod = podRepo.getOrThrow(podId);
+    const signals = computeQualitySignals(podId, {
+      podRepo,
+      eventRepo,
+      escalationRepo,
+      validationRepo,
+      providerAttemptRepo,
+    });
+    const computedScore = computeScore({ signals, finalStatus });
+    const attempts = providerAttemptRepo?.list(podId) ?? [];
+    const hasPiAttempt =
+      pod.runtime === 'pi' || attempts.some((attempt) => attempt.runtime === 'pi');
+    const hasNonPiAttempt =
+      pod.runtime !== 'pi' || attempts.some((attempt) => attempt.runtime !== 'pi');
+    // Retained events do not carry provider-attempt attribution. A mixed Pi
+    // outcome therefore cannot prove that the Pi portion is complete, even
+    // when unrelated normalized evidence survives from another attempt.
+    const mixedPiEvidenceIncomplete = hasPiAttempt && hasNonPiAttempt;
+    // Pi activity was not durably retained before the normalized parser
+    // contract. Surviving historical events can therefore be only a subset;
+    // without a completeness marker, no stale Pi row is safe to recompute.
+    const historicalPiEvidenceIncomplete = options.historical === true && hasPiAttempt;
+    const available =
+      signals.inspectionAvailability === 'available' &&
+      !mixedPiEvidenceIncomplete &&
+      !historicalPiEvidenceIncomplete;
+    const inspectionAvailability = available ? 'available' : 'unavailable';
+
+    qualityScoreRepo.insert({
+      podId,
+      score: available ? computedScore : null,
+      algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+      inspectionAvailability,
+      readCount: available ? signals.readCount : null,
+      editCount: signals.editCount,
+      readEditRatio: available ? signals.readEditRatio : null,
+      editsWithoutPriorRead: available ? signals.editsWithoutPriorRead : null,
+      userInterrupts: signals.userInterrupts,
+      editChurnCount: signals.editChurnCount,
+      tellsCount: signals.tellsCount,
+      prFixAttempts: signals.prFixAttempts,
+      validationPassed: signals.validationPassed,
+      inputTokens: signals.tokens.input,
+      outputTokens: signals.tokens.output,
+      costUsd: signals.tokens.costUsd,
+      runtime: pod.runtime,
+      profileName: pod.profileName,
+      model: pod.model,
+      finalStatus,
+      completedAt,
+      computedAt: new Date().toISOString(),
+    });
+
+    logger.debug(
+      {
+        podId,
+        score: available ? computedScore : null,
+        algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+        inspectionAvailability,
+        grade: signals.grade,
+        runtime: pod.runtime,
+        model: pod.model,
+        tellsCount: signals.tellsCount,
+        editChurnCount: signals.editChurnCount,
+      },
+      'Recorded pod quality score',
+    );
+  }
+
   function recordFor(event: PodCompletedEvent): void {
     try {
-      const pod = podRepo.getOrThrow(event.podId);
-      const signals = computeQualitySignals(event.podId, {
-        podRepo,
-        eventRepo,
-        escalationRepo,
-        validationRepo,
-        providerAttemptRepo,
-      });
-      const score = computeScore({ signals, finalStatus: event.finalStatus });
-
-      qualityScoreRepo.insert({
-        podId: event.podId,
-        score,
-        readCount: signals.readCount,
-        editCount: signals.editCount,
-        readEditRatio: signals.readEditRatio,
-        editsWithoutPriorRead: signals.editsWithoutPriorRead,
-        userInterrupts: signals.userInterrupts,
-        editChurnCount: signals.editChurnCount,
-        tellsCount: signals.tellsCount,
-        prFixAttempts: signals.prFixAttempts,
-        validationPassed: signals.validationPassed,
-        inputTokens: signals.tokens.input,
-        outputTokens: signals.tokens.output,
-        costUsd: signals.tokens.costUsd,
-        runtime: pod.runtime,
-        profileName: pod.profileName,
-        // Record the exact model string at completion time — critical for 3d,
-        // since a silent server-side model swap is invisible without it.
-        model: pod.model,
-        finalStatus: event.finalStatus,
-        completedAt: event.timestamp,
-        computedAt: new Date().toISOString(),
-      });
-
-      logger.debug(
-        {
-          podId: event.podId,
-          score,
-          grade: signals.grade,
-          runtime: pod.runtime,
-          model: pod.model,
-          tellsCount: signals.tellsCount,
-          editChurnCount: signals.editChurnCount,
-        },
-        'Recorded pod quality score',
-      );
+      persistScore(event.podId, event.finalStatus, event.timestamp);
     } catch (err) {
       logger.warn({ err, podId: event.podId }, 'Failed to record pod quality score');
     }
@@ -105,6 +139,28 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
   }
 
   return {
+    upgradeHistory(limit = 100, afterPodId?: string) {
+      const stale = qualityScoreRepo.listStale(limit, afterPodId);
+      let upgraded = 0;
+      for (const score of stale) {
+        try {
+          persistScore(score.podId, score.finalStatus, score.completedAt, { historical: true });
+          upgraded += 1;
+        } catch (err) {
+          logger.warn({ err, podId: score.podId }, 'Failed to upgrade pod quality score');
+        }
+      }
+      logger.info(
+        { upgraded, selected: stale.length, limit },
+        'Quality score history upgrade completed',
+      );
+      return {
+        selected: stale.length,
+        upgraded,
+        lastPodId: stale.at(-1)?.podId ?? null,
+      };
+    },
+
     start(): void {
       const unsub = eventBus.subscribe(handleEvent);
       unsubscribers.push(unsub);

@@ -503,26 +503,33 @@ public struct SessionCardFinal: View {
     }
 
     private func qualityPill(_ score: PodQualityScore) -> some View {
-        HStack(spacing: 3) {
+        guard score.inspectionAvailability == .available,
+              let measuredScore = score.score else {
+            return AnyView(EmptyView())
+        }
+        let readEdit = score.readEditRatio.map { String(format: "%.1f", $0) } ?? "—"
+        let blindEdits = score.editsWithoutPriorRead.map(String.init) ?? "—"
+
+        return AnyView(HStack(spacing: 3) {
             Circle()
-                .fill(qualityColor(score.score))
+                .fill(qualityColor(measuredScore))
                 .frame(width: 6, height: 6)
-            Text("\(score.score)")
+            Text("\(measuredScore)")
                 .font(.system(.caption2).weight(.semibold))
                 .monospacedDigit()
         }
         .padding(.horizontal, 5)
         .padding(.vertical, 2)
-        .background(qualityColor(score.score).opacity(0.1))
-        .foregroundStyle(qualityColor(score.score).opacity(0.9))
+        .background(qualityColor(measuredScore).opacity(0.1))
+        .foregroundStyle(qualityColor(measuredScore).opacity(0.9))
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .help(
-            "Quality score \(score.score)/100 · "
+            "Quality score \(measuredScore)/100 · "
             + "\(score.runtime) · \(score.model ?? "?") · "
-            + "read/edit \(String(format: "%.1f", score.readEditRatio)) · "
-            + "blind edits \(score.editsWithoutPriorRead) · "
+            + "read/edit \(readEdit) · "
+            + "blind edits \(blindEdits) · "
             + "interrupts \(score.userInterrupts)"
-        )
+        ))
     }
 
     private func qualityColor(_ score: Int) -> Color {
