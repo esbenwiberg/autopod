@@ -157,6 +157,32 @@ describe('CodexStreamParser', () => {
       expect((e as any).input.command).toBe('ls -la');
     });
 
+    it('preserves quoted inspection command text without interpreting it', () => {
+      const command = `sed -n '1,40p' "src/file with spaces.ts"`;
+      const e = CodexStreamParser.mapEvent(
+        {
+          id: 's',
+          msg: {
+            type: 'exec_command_begin',
+            call_id: 'inspection-1',
+            command,
+            cwd: '/workspace/packages/daemon',
+          },
+        },
+        'pod-1',
+      );
+
+      expect(e).toMatchObject({
+        type: 'tool_use',
+        tool: 'Bash',
+        input: {
+          call_id: 'inspection-1',
+          command,
+          cwd: '/workspace/packages/daemon',
+        },
+      });
+    });
+
     it('maps exec_command_end with aggregated_output + exit_code', () => {
       const e = CodexStreamParser.mapEvent(
         {

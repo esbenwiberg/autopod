@@ -29,6 +29,9 @@ interface PiNativeRetryState {
   lastAttempt: number;
   finalAgentEndObserved: boolean;
 }
+interface PiToolExecutionState {
+  emittedCallIds: Set<string>;
+}
 
 const MAX_TEXT = 4_000;
 const MAX_OUTPUT = 2_000;
@@ -47,13 +50,14 @@ export async function* parsePiRpc(
     lastAttempt: 0,
     finalAgentEndObserved: false,
   };
+  const toolState: PiToolExecutionState = { emittedCallIds: new Set() };
   for await (const chunk of stream) {
     buffer += Buffer.isBuffer(chunk) ? chunk.toString('utf-8') : String(chunk);
     let lf = buffer.indexOf('\n');
     while (lf !== -1) {
       const line = buffer.slice(0, lf);
       buffer = buffer.slice(lf + 1);
-      yield* parseLine(line, options, retryState);
+      yield* parseLine(line, options, retryState, toolState);
       lf = buffer.indexOf('\n');
     }
   }
@@ -67,6 +71,7 @@ function* parseLine(
   line: string,
   options: PiRpcParseOptions,
   retryState: PiNativeRetryState,
+  toolState: PiToolExecutionState,
 ): Iterable<AgentEvent> {
   if (line.endsWith('\r')) {
     yield malformedEvent('Pi RPC record used CRLF framing; expected LF-only JSON records', options);
@@ -87,7 +92,7 @@ function* parseLine(
     return;
   }
 
-  const event = mapRecord(parsed, options, retryState);
+  const event = mapRecord(parsed, options, retryState, toolState);
   if (!event) return;
   recordStats(event, options.stats);
   yield event;
@@ -97,9 +102,18 @@ function mapRecord(
   record: PiRpcRecord,
   options: PiRpcParseOptions,
   retryState: PiNativeRetryState,
+  toolState: PiToolExecutionState,
 ): AgentEvent | null {
   const kind = stringField(record, 'type') ?? stringField(record, 'event');
   const ts = stringField(record, 'timestamp') ?? new Date().toISOString();
+
+  if (
+    kind === 'tool_execution_start' ||
+    kind === 'tool_execution_update' ||
+    kind === 'tool_execution_end'
+  ) {
+    return mapNativeToolExecution(kind, record, ts, options, toolState);
+  }
 
   if (kind === 'message_end') {
     const message = objectField(record, 'message');
@@ -361,6 +375,53 @@ function mapRecord(
     'Ignoring unknown Pi RPC record',
   );
   return null;
+}
+
+function mapNativeToolExecution(
+  kind: 'tool_execution_start' | 'tool_execution_update' | 'tool_execution_end',
+  record: PiRpcRecord,
+  timestamp: string,
+  options: PiRpcParseOptions,
+  state: PiToolExecutionState,
+): AgentEvent | null {
+  if (kind === 'tool_execution_update') return null;
+
+  const callId =
+    stringField(record, 'toolCallId') ??
+    stringField(record, 'tool_call_id') ??
+    stringField(record, 'callId') ??
+    stringField(record, 'call_id');
+  const tool = stringField(record, 'toolName') ?? stringField(record, 'tool_name');
+  const args = objectField(record, 'args') ?? objectField(record, 'arguments');
+
+  if (!callId || !tool || !args) {
+    return {
+      type: 'error',
+      timestamp: new Date().toISOString(),
+      message: `Pi RPC emitted malformed ${kind} record`,
+      fatal: false,
+    };
+  }
+  if (state.emittedCallIds.has(callId)) return null;
+
+  const normalizedTool = tool.toLowerCase();
+  if (!['read', 'edit', 'write'].includes(normalizedTool)) return null;
+  state.emittedCallIds.add(callId);
+
+  const output =
+    kind === 'tool_execution_end' && record.result !== undefined
+      ? truncate(
+          typeof record.result === 'string' ? record.result : JSON.stringify(record.result),
+          MAX_OUTPUT,
+        )
+      : undefined;
+  return {
+    type: 'tool_use',
+    timestamp,
+    tool: normalizedTool,
+    input: { call_id: callId, ...args },
+    ...(output !== undefined && { output }),
+  };
 }
 
 function malformedEvent(message: string, options: PiRpcParseOptions): AgentEvent {

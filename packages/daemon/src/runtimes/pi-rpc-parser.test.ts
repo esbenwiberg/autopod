@@ -31,6 +31,124 @@ async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
 }
 
 describe('PiRpcParser', () => {
+  it('normalizes native tool execution once across start and end records', async () => {
+    const records = [
+      {
+        type: 'tool_execution_start',
+        toolCallId: 'read-1',
+        toolName: 'read',
+        args: { path: '/workspace/src/read.ts', line_start: 5 },
+      },
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'read-1',
+        toolName: 'read',
+        args: { path: '/workspace/src/read.ts', line_start: 5 },
+        result: { content: 'source' },
+      },
+      {
+        type: 'tool_execution_start',
+        toolCallId: 'edit-1',
+        toolName: 'edit',
+        args: { path: 'src/edit.ts', oldText: 'a', newText: 'b' },
+      },
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'edit-1',
+        toolName: 'edit',
+        args: { path: 'src/edit.ts', oldText: 'a', newText: 'b' },
+        result: 'done',
+      },
+      {
+        type: 'tool_execution_start',
+        toolCallId: 'write-1',
+        toolName: 'write',
+        args: { path: 'src/write.ts', content: 'new' },
+      },
+      {
+        type: 'tool_execution_end',
+        toolCallId: 'write-1',
+        toolName: 'write',
+        args: { path: 'src/write.ts', content: 'new' },
+        result: 'done',
+      },
+    ];
+
+    const { events, stats } = await parseLines(records.map((record) => JSON.stringify(record)));
+
+    expect(events).toEqual([
+      {
+        type: 'tool_use',
+        timestamp: expect.any(String),
+        tool: 'read',
+        input: {
+          call_id: 'read-1',
+          path: '/workspace/src/read.ts',
+          line_start: 5,
+        },
+      },
+      {
+        type: 'tool_use',
+        timestamp: expect.any(String),
+        tool: 'edit',
+        input: {
+          call_id: 'edit-1',
+          path: 'src/edit.ts',
+          oldText: 'a',
+          newText: 'b',
+        },
+      },
+      {
+        type: 'tool_use',
+        timestamp: expect.any(String),
+        tool: 'write',
+        input: {
+          call_id: 'write-1',
+          path: 'src/write.ts',
+          content: 'new',
+        },
+      },
+    ]);
+    expect(stats).toMatchObject({ events: 3, nonStatusEvents: 3 });
+  });
+
+  it('normalizes a native end-only record when it retains arguments', async () => {
+    const { events } = await parseLines([
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'read-end-only',
+        toolName: 'READ',
+        args: { path: 'src/end-only.ts' },
+        result: 'content',
+      }),
+    ]);
+
+    expect(events).toEqual([
+      {
+        type: 'tool_use',
+        timestamp: expect.any(String),
+        tool: 'read',
+        input: { call_id: 'read-end-only', path: 'src/end-only.ts' },
+        output: 'content',
+      },
+    ]);
+  });
+
+  it.each([
+    { type: 'tool_execution_start', toolName: 'read', args: { path: 'src/a.ts' } },
+    { type: 'tool_execution_start', toolCallId: 'missing-tool', args: { path: 'src/a.ts' } },
+    { type: 'tool_execution_end', toolCallId: 'missing-args', toolName: 'write' },
+  ])('rejects malformed native tool execution record %#', async (record) => {
+    const { events } = await parseLines([JSON.stringify(record)]);
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        fatal: false,
+        message: expect.stringContaining('malformed tool_execution_'),
+      }),
+    ]);
+  });
+
   it('normalizes correlated responses plus text, tool, error, and completion events', async () => {
     const separatorText = 'hello\u2028world';
     const { events, stats } = await parseLines([
