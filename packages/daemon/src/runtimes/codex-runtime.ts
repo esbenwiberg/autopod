@@ -377,6 +377,15 @@ export class CodexRuntime implements Runtime {
     // NOTE: codexSessionIds is NOT deleted — session survives suspend for resume
   }
 
+  setCodexResumeConfig(
+    podId: string,
+    mcpServers: SpawnConfig['mcpServers'],
+    reasoningEffort: ReasoningEffort,
+  ): void {
+    this.mcpServersBySession.set(podId, mcpServers);
+    this.reasoningEffortBySession.set(podId, reasoningEffort);
+  }
+
   private buildSpawnArgs(config: SpawnConfig): string[] {
     const args = ['exec'];
     if (config.model !== 'auto') {

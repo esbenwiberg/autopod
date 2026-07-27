@@ -136,6 +136,7 @@ import {
   codexStateDirForPod,
   ensureCodexStateDir,
 } from '../runtimes/codex-state-store.js';
+import type { CodexRuntime } from '../runtimes/codex-runtime.js';
 import type { PiRuntime } from '../runtimes/pi-runtime.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
@@ -8583,6 +8584,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           if ('setClaudeSessionId' in runtime) {
             (runtime as ClaudeRuntime).setClaudeSessionId(podId, pod.claudeSessionId);
           }
+          if ('setClaudeResumeConfig' in runtime) {
+            (runtime as ClaudeRuntime).setClaudeResumeConfig(
+              podId,
+              mcpServers,
+              reasoningEffort,
+            );
+          }
 
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods (recovery requires a prior run with a worktree)
           const continuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
@@ -8634,6 +8642,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         } else if (isRecovery && pod.runtime === 'codex' && pod.codexSessionId) {
           // Codex crash recovery: continue the existing session
           emitStatus('Resuming Codex pod…');
+          if ('setCodexResumeConfig' in runtime) {
+            (runtime as CodexRuntime).setCodexResumeConfig(podId, mcpServers, reasoningEffort);
+          }
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
           const codexContinuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
           events = runtime.resume(podId, codexContinuationPrompt, containerId, secretEnv);

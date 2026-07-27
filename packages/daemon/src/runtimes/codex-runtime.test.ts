@@ -2537,6 +2537,33 @@ describe('CodexRuntime', () => {
         expect.stringContaining('model_reasoning_effort = "high"'),
       );
     });
+
+    it('rehydrates effort-only config for durable recovery in a fresh runtime', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+      runtime.codexSessionIds.set('sess-1', 'codex-session');
+      runtime.setCodexResumeConfig('sess-1', [], 'xhigh');
+
+      const resumeDone = (async () => {
+        for await (const _ of runtime.resume('sess-1', 'continue', 'c2', {})) {
+          // drain
+        }
+      })();
+      handle.finish(0);
+      await resumeDone;
+
+      expect(cm.writeFile).toHaveBeenCalledWith(
+        'c2',
+        '/home/autopod/.codex/config.toml',
+        'model_reasoning_effort = "xhigh"\n',
+      );
+      expect(cm.execInContainer).toHaveBeenCalledWith(
+        'c2',
+        expect.arrayContaining(['sh', '-c', expect.stringContaining('chmod 0600')]),
+        { timeout: 5_000, user: 'root' },
+      );
+    });
   });
 
   // ---------------------------------------------------------------------------

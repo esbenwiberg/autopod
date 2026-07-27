@@ -337,6 +337,15 @@ export class ClaudeRuntime implements Runtime {
     this.claudeSessionIds.set(podId, claudeSessionId);
   }
 
+  setClaudeResumeConfig(
+    podId: string,
+    mcpServers: SpawnConfig['mcpServers'],
+    reasoningEffort: ReasoningEffort,
+  ): void {
+    this.mcpServersBySession.set(podId, mcpServers);
+    this.reasoningEffortBySession.set(podId, reasoningEffort);
+  }
+
   /**
    * Write MCP server config to a JSON file inside the container.
    *

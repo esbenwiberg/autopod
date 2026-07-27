@@ -4838,6 +4838,7 @@ describe('PodManager', () => {
         const runtime = createMockRuntime();
         // Add setClaudeSessionId to make it duck-type as ClaudeRuntime
         (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
+        (runtime as Record<string, unknown>).setClaudeResumeConfig = vi.fn();
 
         const ctx = createTestContext(undefined, {});
         // Replace the runtime registry to use our custom runtime
@@ -4863,6 +4864,11 @@ describe('PodManager', () => {
           pod.id,
           'claude-ses-abc',
         );
+        expect((runtime as Record<string, unknown>).setClaudeResumeConfig).toHaveBeenCalledWith(
+          pod.id,
+          expect.any(Array),
+          'auto',
+        );
 
         // resume should have been called (not spawn)
         expect(runtime.resume).toHaveBeenCalled();
@@ -4870,6 +4876,41 @@ describe('PodManager', () => {
         expect(resumeCall?.[0]).toBe(pod.id);
         // The continuation prompt should mention pod interruption
         expect(resumeCall?.[1]).toContain('interrupted');
+      });
+
+      it('rehydrates Codex resume config during crash recovery', async () => {
+        const runtime = createMockRuntime();
+        runtime.type = 'codex';
+        (runtime as Record<string, unknown>).setCodexResumeConfig = vi.fn();
+
+        const ctx = createTestContext();
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+        setupExecFileMock();
+
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Continue feature',
+            runtime: 'codex',
+            skipValidation: true,
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          codexSessionId: 'codex-session-abc',
+        });
+
+        await manager.processPod(pod.id);
+
+        expect((runtime as Record<string, unknown>).setCodexResumeConfig).toHaveBeenCalledWith(
+          pod.id,
+          expect.any(Array),
+          'auto',
+        );
+        expect(runtime.resume).toHaveBeenCalled();
+        expect(runtime.spawn).not.toHaveBeenCalled();
       });
 
       it('uses runtime.spawn with recovery task for non-Claude runtime', async () => {

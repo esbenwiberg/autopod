@@ -800,6 +800,28 @@ describe('ClaudeRuntime', () => {
         expect.any(Object),
       );
     });
+
+    it('rehydrates reasoning effort for durable recovery in a fresh runtime', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new ClaudeRuntime(logger, cm);
+      runtime.setClaudeSessionId('recovered-pod', 'claude-session');
+      runtime.setClaudeResumeConfig('recovered-pod', [], 'xhigh');
+
+      const resumeDone = (async () => {
+        for await (const _ of runtime.resume('recovered-pod', 'continue', 'c2')) {
+          // drain
+        }
+      })();
+      handle.finish(0);
+      await resumeDone;
+
+      expect(cm.execStreaming).toHaveBeenCalledWith(
+        'c2',
+        expect.arrayContaining(['--effort', 'xhigh', '--resume', 'claude-session']),
+        expect.any(Object),
+      );
+    });
   });
 
   describe('resume', () => {
