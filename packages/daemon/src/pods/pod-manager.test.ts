@@ -5960,6 +5960,45 @@ describe('PodManager', () => {
       expect(autoApproving).toBeGreaterThan(stopping);
     });
 
+    it('surfaces shutdown and auto-approval after a recovered host push', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Recover validated push' },
+        'user-1',
+      );
+      const pendingEscalation = {
+        id: 'credential-escalation',
+        podId: pod.id,
+        type: 'request_credential' as const,
+        timestamp: new Date().toISOString(),
+        payload: {
+          service: 'github' as const,
+          reason: 'Host push authentication failed',
+          source: 'host_push' as const,
+        },
+        response: null,
+      };
+      ctx.escalationRepo.insert(pendingEscalation);
+      ctx.podRepo.update(pod.id, {
+        status: 'awaiting_input',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        autoApprove: true,
+        lastValidationResult: makeValidationResult(),
+        pendingEscalation,
+      });
+
+      await manager.sendMessage(pod.id, 'Credentials updated');
+
+      const messages = activityMessages(ctx, pod.id);
+      const stopping = messages.indexOf('Stopping post-validation container…');
+      const autoApproving = messages.indexOf('Auto-approving…');
+
+      expect(stopping).toBeGreaterThanOrEqual(0);
+      expect(autoApproving).toBeGreaterThan(stopping);
+    });
+
     it('recovers from live container when workspace sync fails before validation', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       (ctx.containerManager.execInContainer as ReturnType<typeof vi.fn>).mockImplementation(

@@ -9519,6 +9519,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // Stop the container post-validation (mirrors the original push path).
             if (validatedPod.containerId) {
               try {
+                emitActivityStatus(podId, 'Stopping post-validation container…');
                 await stopSandboxPreviewProxy(podId);
                 const cm = containerManagerFactory.get(validatedPod.executionTarget);
                 await cm.stop(validatedPod.containerId);
@@ -9531,6 +9532,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
 
             if (validatedPod.autoApprove) {
+              emitActivityStatus(podId, 'Auto-approving…');
               logger.info({ podId }, 'Auto-approving pod after host_push retry');
               setImmediate(() => {
                 this.approveSession(podId, { automation: true }).catch((err) =>
