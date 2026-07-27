@@ -1034,6 +1034,194 @@ describe('PodManager', () => {
     ).rejects.toMatchObject({ code: 'INVALID_PROVIDER_TARGET' });
   });
 
+  it('does not protect a missing historical handoff during later rework', async () => {
+    const ctx = createTestContext();
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      {
+        profileName: 'test-profile',
+        task: 'Rework after completed continuation',
+        skipValidation: true,
+      },
+      'user-1',
+    );
+    const profileReference = `pod:${pod.id}@profile-snapshot#abcdef1`;
+    attempts.open({
+      podId: pod.id,
+      provider: 'anthropic',
+      providerAccountId: null,
+      runtime: 'claude',
+      model: pod.model,
+      profileReference,
+      profileSnapshot: { name: 'test-profile' },
+    });
+    attempts.close(pod.id, {
+      nativeSessionId: 'source-session',
+      outcome: 'quota_exhausted',
+      inputTokens: 10,
+      outputTokens: 5,
+      costUsd: 0.1,
+      handoffReference: '.autopod/provider-failover.md',
+    });
+    attempts.open({
+      podId: pod.id,
+      provider: 'anthropic',
+      providerAccountId: null,
+      runtime: 'claude',
+      model: pod.model,
+      profileReference,
+      profileSnapshot: { name: 'test-profile' },
+    });
+    attempts.close(pod.id, {
+      nativeSessionId: 'continuation-session',
+      outcome: 'completed',
+      inputTokens: 20,
+      outputTokens: 10,
+      costUsd: 0.2,
+    });
+    vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+      async (_containerId, command) => {
+        const script = command.join(' ');
+        if (script.includes('# autopod: provider failover handoff')) {
+          return { stdout: '', stderr: '', exitCode: 1 };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    );
+    vi.mocked(ctx.runtime.spawn).mockImplementation(async function* () {
+      yield {
+        type: 'complete',
+        timestamp: '2026-07-24T10:01:00.000Z',
+        result: 'rework complete',
+      };
+    });
+
+    await manager.processPod(pod.id);
+
+    expect(ctx.runtime.spawn).toHaveBeenCalled();
+    expect(manager.getSession(pod.id).status).not.toBe('failed');
+    const handoffGuardCalls = vi
+      .mocked(ctx.containerManager.execInContainer)
+      .mock.calls.filter(([, command]) =>
+        command.join(' ').includes('# autopod: provider failover handoff'),
+      );
+    expect(handoffGuardCalls).toHaveLength(0);
+  });
+
+  it('runs both handoff protection checks for a pending provider continuation', async () => {
+    const ctx = createTestContext();
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Continue pending provider work' },
+      'user-1',
+    );
+    const profileReference = `pod:${pod.id}@profile-snapshot#abcdef1`;
+    attempts.open({
+      podId: pod.id,
+      provider: 'anthropic',
+      providerAccountId: null,
+      runtime: 'claude',
+      model: pod.model,
+      profileReference,
+      profileSnapshot: { name: 'test-profile' },
+    });
+    attempts.close(pod.id, {
+      nativeSessionId: 'source-session',
+      outcome: 'quota_exhausted',
+      inputTokens: 10,
+      outputTokens: 5,
+      costUsd: 0.1,
+      handoffReference: '.autopod/provider-failover.md',
+    });
+    attempts.open({
+      podId: pod.id,
+      provider: 'anthropic',
+      providerAccountId: null,
+      runtime: 'claude',
+      model: pod.model,
+      profileReference,
+      profileSnapshot: { name: 'test-profile' },
+    });
+
+    await manager.processPod(pod.id);
+
+    const handoffGuardScripts = vi
+      .mocked(ctx.containerManager.execInContainer)
+      .mock.calls.map(([, command]) => command.join(' '))
+      .filter((script) => script.includes('# autopod: provider failover handoff'));
+    expect(handoffGuardScripts).toHaveLength(2);
+    expect(handoffGuardScripts[0]).toContain(
+      'Missing pending provider failover handoff: /workspace/.autopod/provider-failover.md',
+    );
+    expect(handoffGuardScripts[1]).toContain(
+      'Missing pending provider failover handoff after workspace cleanup',
+    );
+  });
+
+  it('fails closed with the missing pending handoff path in the diagnostic', async () => {
+    const ctx = createTestContext();
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Continue with missing handoff' },
+      'user-1',
+    );
+    const profileReference = `pod:${pod.id}@profile-snapshot#abcdef1`;
+    attempts.open({
+      podId: pod.id,
+      provider: 'anthropic',
+      providerAccountId: null,
+      runtime: 'claude',
+      model: pod.model,
+      profileReference,
+      profileSnapshot: { name: 'test-profile' },
+    });
+    attempts.close(pod.id, {
+      nativeSessionId: 'source-session',
+      outcome: 'quota_exhausted',
+      inputTokens: 10,
+      outputTokens: 5,
+      costUsd: 0.1,
+      handoffReference: '.autopod/provider-failover.md',
+    });
+    attempts.open({
+      podId: pod.id,
+      provider: 'anthropic',
+      providerAccountId: null,
+      runtime: 'claude',
+      model: pod.model,
+      profileReference,
+      profileSnapshot: { name: 'test-profile' },
+    });
+    vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+      async (_containerId, command) => {
+        if (command.join(' ').includes('Missing pending provider failover handoff:')) {
+          return {
+            stdout: '',
+            stderr:
+              'Missing pending provider failover handoff: /workspace/.autopod/provider-failover.md',
+            exitCode: 1,
+          };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    );
+
+    await manager.processPod(pod.id);
+
+    const failed = manager.getSession(pod.id);
+    expect(failed.status).toBe('paused');
+    expect(failed.failureReason).toContain(
+      'Missing pending provider failover handoff: /workspace/.autopod/provider-failover.md',
+    );
+    expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+  });
+
   it('provider-failover-fails ambiguous errors and supports explicit quota continuation', async () => {
     const ctx = createTestContext();
     const attempts = createProviderAttemptRepository(ctx.db);

@@ -7,6 +7,7 @@ import type {
 } from '@autopod/shared';
 import { PROVIDER_FAILOVER_HANDOFF_CONTAINER_PATH } from '@autopod/shared';
 import type { RelevantMemory } from './memory-selector.js';
+import { hasPendingProviderContinuation } from './recovery-context.js';
 import type { ResolvedSection } from './section-resolver.js';
 
 export interface SystemInstructionsOptions {
@@ -104,7 +105,7 @@ export function generateSystemInstructions(
     lines.push('');
   }
 
-  if (pod.providerAttempts?.some((attempt) => attempt.handoffReference)) {
+  if (hasPendingProviderContinuation(pod.providerAttempts)) {
     lines.push('## Provider continuation');
     lines.push('');
     lines.push(
