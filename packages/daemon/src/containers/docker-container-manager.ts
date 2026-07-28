@@ -963,9 +963,18 @@ export class DockerContainerManager implements ContainerManager {
 
     const kill = async () => {
       try {
-        await this.execInContainer(containerId, ['sh', '-c', terminatePidFileScript(pidPath)], {
-          timeout: 5_000,
-        });
+        const termination = await this.execInContainer(
+          containerId,
+          ['sh', '-c', terminatePidFileScript(pidPath)],
+          {
+            timeout: 5_000,
+          },
+        );
+        if (termination.exitCode !== 0) {
+          throw new Error(
+            `Remote streaming exec termination was not verified (exit ${termination.exitCode})`,
+          );
+        }
       } finally {
         const destroyable = muxStream as NodeJS.ReadableStream & { destroy?: () => void };
         if (typeof destroyable.destroy === 'function') {
@@ -1115,12 +1124,16 @@ interface DemuxWriterContext {
 function terminatePidFileScript(pidPath: string): string {
   return [
     `pid_file=${pidPath}`,
-    '[ -s "$pid_file" ] || exit 0',
+    '[ -s "$pid_file" ] || exit 1',
     'pid=$(cat "$pid_file")',
-    'kill -TERM "$pid" 2>/dev/null || exit 0',
+    'case "$pid" in *[!0-9]*|"") exit 1;; esac',
+    'kill -TERM "$pid" 2>/dev/null || true',
     'i=0',
     'while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
     'kill -KILL "$pid" 2>/dev/null || true',
+    'i=0',
+    'while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
+    'kill -0 "$pid" 2>/dev/null && exit 1',
     'rm -f "$pid_file"',
   ].join('; ');
 }

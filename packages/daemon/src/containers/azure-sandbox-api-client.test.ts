@@ -510,6 +510,29 @@ describe('AzureSandboxApiClient', () => {
     expect(killBody).toMatch(/\.autopod-execstream-\d+-\d+\.sh\.pid/);
     expect(killBody).toContain('kill -TERM');
     expect(killBody).toContain('kill -KILL');
+    expect(killBody).toContain('kill -0');
+  });
+
+  it('rejects cancellation when remote process termination cannot be verified', async () => {
+    let cancel: (() => Promise<void>) | undefined;
+    const { client } = makeStreamingClient(
+      (socket) => {
+        socket.onopen?.({});
+      },
+      [...STREAM_SETUP_RESPONSES, { status: 200, body: { stdout: '', stderr: '', exitCode: 1 } }],
+    );
+    const iterator = client
+      .execStream('sbx-1', ['pi', 'rpc'], {
+        onCancelReady: (callback) => {
+          cancel = callback;
+        },
+      })
+      [Symbol.asyncIterator]();
+    const pending = iterator.next();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await expect(cancel?.()).rejects.toThrow(/termination was not verified/);
+    await expect(pending).rejects.toThrow(/closed before reporting an exit code/);
   });
 
   it('terminates the recorded process when a streaming exec times out', async () => {

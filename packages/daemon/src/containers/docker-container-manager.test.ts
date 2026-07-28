@@ -1009,6 +1009,26 @@ describe('DockerContainerManager', () => {
       expect(terminateCommand).toMatch(/\.autopod-stream-exec-\d+-\d+\.pid/);
       expect(terminateCommand).toContain('kill -TERM');
       expect(terminateCommand).toContain('kill -KILL');
+      expect(terminateCommand).toContain('kill -0 "$pid" 2>/dev/null && exit 1');
+      expect(muxStream.destroyed).toBe(true);
+    });
+
+    it('rejects kill when remote process termination cannot be verified', async () => {
+      const muxStream = new PassThrough();
+      const mockExec = {
+        start: vi.fn().mockResolvedValue(muxStream),
+        inspect: vi.fn().mockResolvedValue({ ExitCode: 1 }),
+      };
+      container.exec.mockResolvedValue(mockExec);
+      vi.spyOn(manager, 'execInContainer').mockResolvedValue({
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const result = await manager.execStreaming('abc123', ['cmd']);
+
+      await expect(result.kill()).rejects.toThrow(/termination was not verified/);
       expect(muxStream.destroyed).toBe(true);
     });
 

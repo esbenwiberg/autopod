@@ -344,7 +344,18 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     const cancelRemote = () => {
       cancellation ??= (async () => {
         try {
-          await this.exec(sandboxId, ['sh', '-c', terminatePidFileScript(pidPath)]);
+          const termination = await this.exec(sandboxId, [
+            'sh',
+            '-c',
+            terminatePidFileScript(pidPath),
+          ]);
+          if (termination.exitCode !== 0) {
+            throw new AutopodError(
+              `Remote sandbox exec termination was not verified (exit ${termination.exitCode})`,
+              'AZURE_SANDBOX_EXEC_STREAM',
+              500,
+            );
+          }
         } finally {
           socket.close();
         }
@@ -1369,12 +1380,17 @@ function sandboxRuntimeUserScript(scriptBody: string, prelude: string[] = []): s
 function terminatePidFileScript(pidPath: string): string {
   return [
     `pid_file=${shellQuote(pidPath)}`,
-    '[ -s "$pid_file" ] || exit 0',
+    '[ -s "$pid_file" ] || exit 1',
     'pid=$(cat "$pid_file")',
-    'kill -TERM "$pid" 2>/dev/null || exit 0',
+    'case "$pid" in *[!0-9]*|"") exit 1;; esac',
+    'kill -TERM "$pid" 2>/dev/null || true',
     'i=0',
     'while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
     'kill -KILL "$pid" 2>/dev/null || true',
+    'i=0',
+    'while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
+    'kill -0 "$pid" 2>/dev/null && exit 1',
+    'rm -f "$pid_file"',
   ].join('; ');
 }
 
