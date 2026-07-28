@@ -4119,7 +4119,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   }
 
   async function buildReviewerExecEnv(pod: Pod): Promise<Record<string, string> | undefined> {
-    const { profile: reviewerProfile, credentials: currentCredentials } =
+    let { profile: reviewerProfile, credentials: currentCredentials } =
       getEffectiveReviewerConfig(pod);
     const provider = reviewerProfile.modelProvider;
     if (
@@ -4129,6 +4129,40 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       provider !== 'pi'
     ) {
       return undefined;
+    }
+
+    if (pod.containerId && (provider === 'max' || provider === 'openai' || provider === 'pi')) {
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      const owner = pod.providerAccountIdSnapshot
+        ? ({ type: 'provider-account', id: pod.providerAccountIdSnapshot } as const)
+        : undefined;
+      if (provider === 'max') {
+        await persistRefreshedCredentials(
+          pod.containerId,
+          cm,
+          profileStore,
+          reviewerProfile.name,
+          logger,
+          maxCredentialLineageByPod.get(pod.id),
+          { providerAccountStore, owner },
+        );
+      } else if (provider === 'openai') {
+        await persistOpenAiAuthJson(
+          pod.containerId,
+          cm,
+          profileStore,
+          reviewerProfile.name,
+          logger,
+          { providerAccountStore, owner },
+        );
+      } else {
+        await persistPiAuthJson(pod.containerId, cm, profileStore, reviewerProfile.name, logger, {
+          providerAccountStore,
+          owner,
+        });
+      }
+      ({ profile: reviewerProfile, credentials: currentCredentials } =
+        getEffectiveReviewerConfig(pod));
     }
 
     const result = await buildProviderEnv(
