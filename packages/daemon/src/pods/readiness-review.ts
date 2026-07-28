@@ -126,11 +126,11 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
     const deniedEgress = summarizeDeniedEgressEvents(
       deps.eventRepo?.getForSession(podId, { type: 'pod.firewall_denied' }) ?? [],
     );
-    const persistedQualityScore = deps.qualityScoreRepo?.get(podId)?.score ?? null;
-    let qualityScore = persistedQualityScore;
+    const persistedQuality = deps.qualityScoreRepo?.get(podId) ?? null;
+    let qualityScore = persistedQuality?.score ?? null;
     let qualityScoreStage: ReadinessInputs['qualityScoreStage'] =
-      persistedQualityScore === null ? undefined : 'terminal';
-    if (qualityScore === null && deps.eventRepo && deps.escalationRepo) {
+      persistedQuality === null ? undefined : 'terminal';
+    if (persistedQuality === null && deps.eventRepo && deps.escalationRepo) {
       const signals = computeQualitySignals(podId, {
         podRepo: deps.podRepo,
         eventRepo: deps.eventRepo,
