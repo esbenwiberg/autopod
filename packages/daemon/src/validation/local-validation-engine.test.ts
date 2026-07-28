@@ -1879,6 +1879,66 @@ describe('validate() — facts + review gate', () => {
     expect(result.overall).toBe('pass');
   });
 
+  it('retries only Review after reviewer infrastructure failure', async () => {
+    const reviewPass = JSON.stringify({
+      status: 'pass',
+      reasoning: 'retry completed',
+      issues: [],
+    });
+    vi.mocked(runClaudeCli)
+      .mockRejectedValueOnce(
+        new CodexReviewError({
+          kind: 'timeout',
+          message: 'review deadline',
+          stderr: 'first attempt diagnostic',
+        }),
+      )
+      .mockResolvedValueOnce({
+        stdout: reviewPass,
+        tokenUsage: { inputTokens: 20, outputTokens: 5 },
+      });
+    const engine = createLocalValidationEngine(stubContainerManager());
+    const completedPhases: string[] = [];
+    const config = baseConfig({
+      diff: '+const changed = true;',
+      reviewerModel: 'claude-sonnet-4-6',
+    });
+
+    const recovered = await engine.validate(config, undefined, undefined, {
+      onPhaseCompleted: (phase) => completedPhases.push(phase),
+    });
+
+    expect(recovered.overall).toBe('pass');
+    expect(recovered.taskReview?.status).toBe('pass');
+    expect(runClaudeCli).toHaveBeenCalledTimes(2);
+    for (const phase of ['setup', 'lint', 'sast', 'build', 'test', 'health', 'pages', 'facts']) {
+      expect(completedPhases.filter((completed) => completed === phase)).toHaveLength(1);
+    }
+
+    vi.mocked(runClaudeCli).mockReset();
+    vi.mocked(runClaudeCli).mockRejectedValue(
+      new CodexReviewError({
+        kind: 'timeout',
+        message: 'review deadline',
+        stderr: 'bounded diagnostic',
+      }),
+    );
+    const blockedCompletedPhases: string[] = [];
+    const blocked = await engine.validate(config, undefined, undefined, {
+      onPhaseCompleted: (phase) => blockedCompletedPhases.push(phase),
+    });
+
+    expect(runClaudeCli).toHaveBeenCalledTimes(2);
+    expect(blocked).toMatchObject({
+      overall: 'fail',
+      taskReview: null,
+      reviewSkipKind: 'review-timeout',
+    });
+    for (const phase of ['setup', 'lint', 'sast', 'build', 'test', 'health', 'pages', 'facts']) {
+      expect(blockedCompletedPhases.filter((completed) => completed === phase)).toHaveLength(1);
+    }
+  });
+
   it('captures Tier 1 Claude review token usage', async () => {
     vi.mocked(runClaudeCli).mockResolvedValue({
       stdout: JSON.stringify({
@@ -2070,6 +2130,21 @@ describe('validate() — facts + review gate', () => {
       writeFile,
       getStatus,
       execInContainer,
+      supportsStreamingExec: true,
+      execStreaming: vi.fn(async (containerId, command, options) => {
+        const result = await execInContainer(containerId, command, options);
+        const { PassThrough } = await import('node:stream');
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        stdout.end(result.stdout);
+        stderr.end(result.stderr);
+        return {
+          stdout,
+          stderr,
+          exitCode: Promise.resolve(result.exitCode),
+          kill: vi.fn(async () => {}),
+        };
+      }),
     } as unknown as ContainerManager;
     const engine = createLocalValidationEngine(cm);
 

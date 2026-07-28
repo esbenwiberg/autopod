@@ -1,3 +1,4 @@
+import { PassThrough } from 'node:stream';
 import type { Profile } from '@autopod/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
@@ -30,9 +31,23 @@ function profile(overrides: Partial<Profile>): Profile {
 function containerManager(
   execResult = { stdout: 'review output\n', stderr: '', exitCode: 0 },
 ): ContainerManager {
+  const execStreaming = vi.fn().mockImplementation(async () => {
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    stdout.end(execResult.stdout);
+    stderr.end(execResult.stderr);
+    return {
+      stdout,
+      stderr,
+      exitCode: Promise.resolve(execResult.exitCode),
+      kill: vi.fn().mockResolvedValue(undefined),
+    };
+  });
   return {
     writeFile: vi.fn().mockResolvedValue(undefined),
     execInContainer: vi.fn().mockResolvedValue(execResult),
+    execStreaming,
+    supportsStreamingExec: true,
     getStatus: vi.fn().mockResolvedValue('running' as const),
   } as unknown as ContainerManager;
 }
@@ -124,7 +139,7 @@ describe('runContainerReviewer', () => {
       expect.stringContaining('/tmp/autopod-claude-review-sess-1-'),
       'Generate script',
     );
-    expect(cm.execInContainer).toHaveBeenCalledWith(
+    expect(cm.execStreaming).toHaveBeenCalledWith(
       'container-abc',
       ['sh', '-c', expect.stringContaining("sh '/run/autopod/agent-shim.sh' claude -p")],
       expect.objectContaining({
@@ -133,9 +148,10 @@ describe('runContainerReviewer', () => {
         timeout: 60_000,
       }),
     );
-    expect((cm.execInContainer as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
+    expect((cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
       '--output-format json',
     );
+    expect(cm.execInContainer).not.toHaveBeenCalled();
     expect(mockRunCodexReview).not.toHaveBeenCalled();
   });
 
@@ -198,5 +214,54 @@ describe('runContainerReviewer', () => {
       }),
     ).resolves.toEqual({ stdout: '{"selected":[]}' });
     expect(mockRunCodexReview).toHaveBeenCalledOnce();
+  });
+
+  it('terminates timed-out Claude container reviews', async () => {
+    vi.useFakeTimers();
+    try {
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const kill = vi.fn().mockImplementation(async () => {
+        stdout.end();
+        stderr.end();
+      });
+      const cm = containerManager();
+      vi.mocked(cm.execStreaming).mockResolvedValue({
+        stdout,
+        stderr,
+        exitCode: new Promise<number>(() => {}),
+        kill,
+      });
+
+      const review = runContainerReviewer({
+        podId: 'tame-dingo',
+        containerId: 'container-abc',
+        containerManager: cm,
+        profile: profile({ modelProvider: 'max' }),
+        model: 'sonnet',
+        prompt: 'Review without leaking this prompt into argv',
+        timeout: 90_000,
+      }).catch((error: unknown) => error);
+      stdout.write('x'.repeat(6_000));
+      stderr.write('bounded diagnostic');
+      await vi.advanceTimersByTimeAsync(90_000);
+
+      const error = await review;
+      expect(error).toMatchObject({
+        name: 'ContainerReviewerUnavailableError',
+        kind: 'timeout',
+        stderr: 'bounded diagnostic',
+      });
+      expect(error).toBeInstanceOf(ContainerReviewerUnavailableError);
+      expect((error as Error).message).toMatch(/timed out after 90000ms/);
+      expect((error as Error).message).not.toMatch(/x{4001}/);
+      expect(kill).toHaveBeenCalledOnce();
+      expect(cm.execInContainer).not.toHaveBeenCalled();
+      expect(vi.mocked(cm.execStreaming).mock.calls[0]?.[1]).not.toContain(
+        'Review without leaking this prompt into argv',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

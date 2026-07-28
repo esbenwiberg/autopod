@@ -27,7 +27,10 @@ import { wrapValidationExecCommand } from '../pods/registry-injector.js';
 import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import { ClaudeCliError, runClaudeCli } from '../runtimes/run-claude-cli.js';
 import { runAdvisoryBrowserQa } from './advisory-browser-qa-runner.js';
-import { runContainerReviewer } from './container-reviewer-runner.js';
+import {
+  ContainerReviewerUnavailableError,
+  runContainerReviewer,
+} from './container-reviewer-runner.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 import { runAgenticReview } from './review-agentic-runner.js';
@@ -422,7 +425,32 @@ export function createLocalValidationEngine(
             }
           }
 
-          const reviewRun = await runTaskReview(containerManager, config, log, reviewContext);
+          let reviewRun = await runTaskReview(containerManager, config, log, reviewContext);
+          if (isReviewInfrastructureFailure(reviewRun)) {
+            log?.warn(
+              {
+                podId: config.podId,
+                attempt: config.attempt,
+                reviewSkipReason: reviewRun.skipReason,
+              },
+              'Review infrastructure failure; retrying Review once',
+            );
+            onProgress?.('Review infrastructure failure — retrying Review once…');
+            const retryRun = await runTaskReview(
+              containerManager,
+              { ...config, preSubmitReview: null },
+              log,
+              reviewContext,
+            );
+            reviewRun = {
+              ...retryRun,
+              tokenUsage: combineReviewTokenUsage(
+                config.reviewerModel ?? 'auto',
+                reviewRun.tokenUsage,
+                retryRun.tokenUsage,
+              ),
+            };
+          }
           taskReview = reviewRun.result;
           reviewTokenUsage = reviewRun.tokenUsage;
           reviewSkipReason = reviewRun.skipReason;
@@ -2887,11 +2915,15 @@ async function runTaskReview(
       };
     }
   } catch (err) {
-    if (err instanceof ClaudeCliError || err instanceof CodexReviewError) {
+    if (
+      err instanceof ClaudeCliError ||
+      err instanceof CodexReviewError ||
+      err instanceof ContainerReviewerUnavailableError
+    ) {
       log?.warn(
         {
           kind: err.kind,
-          exitCode: err.exitCode,
+          exitCode: err instanceof ContainerReviewerUnavailableError ? null : err.exitCode,
           signal: err instanceof ClaudeCliError ? err.signal : null,
           durationMs: err instanceof ClaudeCliError ? err.durationMs : null,
           stderrPreview: err.stderr.slice(0, 500),
@@ -2907,6 +2939,19 @@ async function runTaskReview(
     log?.warn({ err }, 'task review failed, continuing without review');
     return { result: null, skipReason: `Review failed: ${message}` };
   }
+}
+
+function isReviewInfrastructureFailure(
+  reviewRun: Awaited<ReturnType<typeof runTaskReview>>,
+): boolean {
+  if (reviewRun.result !== null || !reviewRun.skipReason) return false;
+  return (
+    reviewRun.skipReason.startsWith('Review timed out:') ||
+    (reviewRun.skipReason.startsWith('Review failed:') &&
+      !/invalid_request_error|unsupported model|model .*not (?:found|available)/i.test(
+        reviewRun.skipReason,
+      ))
+  );
 }
 
 function combineReviewTokenUsage(
