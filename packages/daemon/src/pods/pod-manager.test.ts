@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -127,6 +128,11 @@ function createTestDb(): Database.Database {
     }
   }
   return db;
+}
+
+function testProfileReference(podId: string, snapshot: Record<string, unknown>): string {
+  const hash = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex').slice(0, 16);
+  return `pod:${podId}@profile-snapshot#${hash}`;
 }
 
 interface TestProfileOverrides {
@@ -5334,6 +5340,380 @@ describe('PodManager', () => {
         expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
       });
 
+      it('rotates a session-bound attempt before a fresh rework spawn', async () => {
+        const runtime = createMockRuntime();
+        runtime.spawn = vi.fn(async function* (): AsyncGenerator<AgentEvent> {
+          yield {
+            type: 'status',
+            timestamp: '2026-07-28T10:00:00.000Z',
+            message: 'ready',
+            sessionId: 'claude-session-b',
+          };
+          yield {
+            type: 'complete',
+            timestamp: '2026-07-28T10:01:00.000Z',
+            result: 'rework complete',
+            totalInputTokens: 7,
+            totalOutputTokens: 3,
+            costUsd: 0.2,
+          };
+        });
+        const ctx = createTestContext();
+        const attempts = createProviderAttemptRepository(ctx.db);
+        ctx.deps.providerAttemptRepo = attempts;
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fix the bug', skipValidation: true },
+          'user-1',
+        );
+        const snapshot = { name: 'test-profile' };
+        attempts.open({
+          podId: pod.id,
+          provider: 'anthropic',
+          providerAccountId: null,
+          runtime: 'claude',
+          model: pod.model,
+          profileReference: testProfileReference(pod.id, snapshot),
+          profileSnapshot: snapshot,
+        });
+        attempts.updateActive(pod.id, {
+          nativeSessionId: 'claude-session-a',
+          inputTokens: 11,
+          outputTokens: 5,
+          costUsd: 0.4,
+        });
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          reworkReason: 'Address validation feedback',
+          claudeSessionId: null,
+          inputTokens: 11,
+          outputTokens: 5,
+          costUsd: 0.4,
+        });
+
+        await manager.processPod(pod.id);
+
+        expect(manager.getSession(pod.id).status).toBe('validated');
+        expect(attempts.list(pod.id)).toMatchObject([
+          {
+            ordinal: 1,
+            nativeSessionId: 'claude-session-a',
+            outcome: 'aborted',
+            inputTokens: 11,
+            outputTokens: 5,
+            costUsd: 0.4,
+          },
+          {
+            ordinal: 2,
+            nativeSessionId: 'claude-session-b',
+            outcome: 'completed',
+            inputTokens: 7,
+            outputTokens: 3,
+            costUsd: 0.2,
+          },
+        ]);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          inputTokens: 18,
+          outputTokens: 8,
+        });
+        expect(manager.getSession(pod.id).costUsd).toBeCloseTo(0.6);
+      });
+
+      it('closes the rotated attempt when fresh rework spawn fails', async () => {
+        const runtime = createMockRuntime();
+        runtime.spawn = vi.fn(() => {
+          throw new Error('runtime spawn failed');
+        });
+        const ctx = createTestContext();
+        const attempts = createProviderAttemptRepository(ctx.db);
+        ctx.deps.providerAttemptRepo = attempts;
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fix the bug', skipValidation: true },
+          'user-1',
+        );
+        const snapshot = { name: 'test-profile' };
+        attempts.open({
+          podId: pod.id,
+          provider: 'anthropic',
+          providerAccountId: null,
+          runtime: 'claude',
+          model: pod.model,
+          profileReference: testProfileReference(pod.id, snapshot),
+          profileSnapshot: snapshot,
+        });
+        attempts.updateActive(pod.id, {
+          nativeSessionId: 'claude-session-a',
+          inputTokens: 11,
+          outputTokens: 5,
+          costUsd: 0.4,
+        });
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          reworkReason: 'Address validation feedback',
+          claudeSessionId: null,
+          inputTokens: 11,
+          outputTokens: 5,
+          costUsd: 0.4,
+        });
+
+        await manager.processPod(pod.id);
+
+        expect(runtime.spawn).toHaveBeenCalledTimes(1);
+        expect(manager.getSession(pod.id).status).toBe('failed');
+        expect(attempts.getActive(pod.id)).toBeNull();
+        expect(attempts.list(pod.id)).toMatchObject([
+          {
+            ordinal: 1,
+            nativeSessionId: 'claude-session-a',
+            outcome: 'aborted',
+            inputTokens: 11,
+            outputTokens: 5,
+            costUsd: 0.4,
+          },
+          {
+            ordinal: 2,
+            nativeSessionId: null,
+            outcome: 'failed',
+            inputTokens: 0,
+            outputTokens: 0,
+            costUsd: 0,
+          },
+        ]);
+      });
+
+      it('does not manufacture an empty attempt when fresh rework has no active attempt', async () => {
+        const ctx = createTestContext();
+        const attempts = createProviderAttemptRepository(ctx.db);
+        ctx.deps.providerAttemptRepo = attempts;
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fix the bug', skipValidation: true },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          reworkReason: 'Address validation feedback',
+        });
+
+        await manager.processPod(pod.id);
+
+        expect(attempts.list(pod.id)).toHaveLength(1);
+        expect(attempts.list(pod.id)[0]).toMatchObject({ ordinal: 1 });
+      });
+
+      it('rotates an accounted failover continuation without a native session', async () => {
+        const runtime = createMockRuntime();
+        runtime.spawn = vi.fn(async function* (): AsyncGenerator<AgentEvent> {
+          yield {
+            type: 'status',
+            timestamp: '2026-07-28T10:30:00.000Z',
+            message: 'ready',
+            sessionId: 'recovery-session',
+          };
+          yield {
+            type: 'complete',
+            timestamp: '2026-07-28T10:31:00.000Z',
+            result: 'done',
+          };
+        });
+        const ctx = createTestContext();
+        const attempts = createProviderAttemptRepository(ctx.db);
+        ctx.deps.providerAttemptRepo = attempts;
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Recover continuation', skipValidation: true },
+          'user-1',
+        );
+        const snapshot = { name: 'test-profile' };
+        const profileReference = testProfileReference(pod.id, snapshot);
+        attempts.open({
+          podId: pod.id,
+          provider: 'anthropic',
+          providerAccountId: null,
+          runtime: 'claude',
+          model: pod.model,
+          profileReference,
+          profileSnapshot: snapshot,
+        });
+        attempts.close(pod.id, {
+          nativeSessionId: 'source-session',
+          outcome: 'quota_exhausted',
+          inputTokens: 8,
+          outputTokens: 3,
+          costUsd: 0.2,
+          handoffReference: '.autopod/provider-failover.md',
+        });
+        attempts.open({
+          podId: pod.id,
+          provider: 'anthropic',
+          providerAccountId: null,
+          runtime: 'claude',
+          model: pod.model,
+          profileReference,
+          profileSnapshot: snapshot,
+        });
+        attempts.updateActive(pod.id, {
+          nativeSessionId: null,
+          inputTokens: 2,
+          outputTokens: 1,
+          costUsd: 0.05,
+        });
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          claudeSessionId: null,
+        });
+
+        await manager.processPod(pod.id);
+
+        expect(attempts.list(pod.id)).toMatchObject([
+          { ordinal: 1, outcome: 'quota_exhausted' },
+          {
+            ordinal: 2,
+            outcome: 'aborted',
+            nativeSessionId: null,
+            inputTokens: 2,
+            outputTokens: 1,
+            costUsd: 0.05,
+          },
+          {
+            ordinal: 3,
+            outcome: 'completed',
+            nativeSessionId: 'recovery-session',
+          },
+        ]);
+      });
+
+      it('keeps a session-bound attempt for true same-session Claude recovery', async () => {
+        const runtime = createMockRuntime();
+        (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
+        runtime.resume = vi.fn(async function* (): AsyncGenerator<AgentEvent> {
+          yield {
+            type: 'status',
+            timestamp: '2026-07-28T11:00:00.000Z',
+            message: 'resumed',
+            sessionId: 'claude-session-a',
+          };
+          yield {
+            type: 'complete',
+            timestamp: '2026-07-28T11:01:00.000Z',
+            result: 'done',
+          };
+        });
+        const ctx = createTestContext();
+        const attempts = createProviderAttemptRepository(ctx.db);
+        ctx.deps.providerAttemptRepo = attempts;
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Resume the work', skipValidation: true },
+          'user-1',
+        );
+        const snapshot = { name: 'test-profile' };
+        attempts.open({
+          podId: pod.id,
+          provider: 'anthropic',
+          providerAccountId: null,
+          runtime: 'claude',
+          model: pod.model,
+          profileReference: testProfileReference(pod.id, snapshot),
+          profileSnapshot: snapshot,
+        });
+        attempts.updateActive(pod.id, {
+          nativeSessionId: 'claude-session-a',
+          inputTokens: 11,
+          outputTokens: 5,
+          costUsd: 0.4,
+        });
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          claudeSessionId: 'claude-session-a',
+        });
+
+        await manager.processPod(pod.id);
+
+        expect(runtime.resume).toHaveBeenCalled();
+        expect(runtime.spawn).not.toHaveBeenCalled();
+        expect(attempts.list(pod.id)).toHaveLength(1);
+        expect(attempts.list(pod.id)[0]).toMatchObject({
+          ordinal: 1,
+          nativeSessionId: 'claude-session-a',
+          outcome: 'completed',
+          inputTokens: 11,
+          outputTokens: 5,
+          costUsd: 0.4,
+        });
+      });
+
+      it('rotates before Claude resumes a different persisted session', async () => {
+        const runtime = createMockRuntime();
+        (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
+        runtime.resume = vi.fn(async function* (): AsyncGenerator<AgentEvent> {
+          yield {
+            type: 'status',
+            timestamp: '2026-07-28T11:30:00.000Z',
+            message: 'resumed',
+            sessionId: 'claude-session-b',
+          };
+          yield {
+            type: 'complete',
+            timestamp: '2026-07-28T11:31:00.000Z',
+            result: 'done',
+          };
+        });
+        const ctx = createTestContext();
+        const attempts = createProviderAttemptRepository(ctx.db);
+        ctx.deps.providerAttemptRepo = attempts;
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Resume newer session', skipValidation: true },
+          'user-1',
+        );
+        const snapshot = { name: 'test-profile' };
+        attempts.open({
+          podId: pod.id,
+          provider: 'anthropic',
+          providerAccountId: null,
+          runtime: 'claude',
+          model: pod.model,
+          profileReference: testProfileReference(pod.id, snapshot),
+          profileSnapshot: snapshot,
+        });
+        attempts.updateActive(pod.id, {
+          nativeSessionId: 'claude-session-a',
+          inputTokens: 9,
+          outputTokens: 4,
+          costUsd: 0.3,
+        });
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          claudeSessionId: 'claude-session-b',
+        });
+
+        await manager.processPod(pod.id);
+
+        expect(runtime.resume).toHaveBeenCalled();
+        expect(attempts.list(pod.id)).toMatchObject([
+          {
+            ordinal: 1,
+            nativeSessionId: 'claude-session-a',
+            outcome: 'aborted',
+            inputTokens: 9,
+            outputTokens: 4,
+            costUsd: 0.3,
+          },
+          {
+            ordinal: 2,
+            nativeSessionId: 'claude-session-b',
+            outcome: 'completed',
+          },
+        ]);
+      });
+
       it('falls back to fresh spawn when Claude resume reports session-not-found mid-stream', async () => {
         const runtime = createMockRuntime();
         (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
@@ -5347,8 +5727,26 @@ describe('PodManager', () => {
           // biome-ignore lint/correctness/noUnreachable: required for AsyncGenerator return type
           yield {} as AgentEvent;
         });
+        runtime.spawn = vi.fn(async function* (): AsyncGenerator<AgentEvent> {
+          yield {
+            type: 'status',
+            timestamp: '2026-07-28T12:00:00.000Z',
+            message: 'ready',
+            sessionId: 'claude-ses-recovered',
+          };
+          yield {
+            type: 'complete',
+            timestamp: '2026-07-28T12:01:00.000Z',
+            result: 'done',
+            totalInputTokens: 4,
+            totalOutputTokens: 2,
+            costUsd: 0.1,
+          };
+        });
 
         const ctx = createTestContext();
+        const attempts = createProviderAttemptRepository(ctx.db);
+        ctx.deps.providerAttemptRepo = attempts;
         ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
 
         setupExecFileMock();
@@ -5358,6 +5756,22 @@ describe('PodManager', () => {
           { profileName: 'test-profile', task: 'Fix the bug', skipValidation: true },
           'user-1',
         );
+        const snapshot = { name: 'test-profile' };
+        attempts.open({
+          podId: pod.id,
+          provider: 'anthropic',
+          providerAccountId: null,
+          runtime: 'claude',
+          model: pod.model,
+          profileReference: testProfileReference(pod.id, snapshot),
+          profileSnapshot: snapshot,
+        });
+        attempts.updateActive(pod.id, {
+          nativeSessionId: 'claude-ses-expired',
+          inputTokens: 13,
+          outputTokens: 6,
+          costUsd: 0.5,
+        });
 
         ctx.podRepo.update(pod.id, {
           recoveryWorktreePath: '/tmp/worktree/existing',
@@ -5377,10 +5791,28 @@ describe('PodManager', () => {
         // Stale claudeSessionId should be cleared so future recoveries don't
         // loop trying to resume the same nonexistent conversation.
         const updated = manager.getSession(pod.id);
-        expect(updated.claudeSessionId).toBeNull();
+        expect(updated.claudeSessionId).toBe('claude-ses-recovered');
 
         // Pod should still complete (not crash)
         expect(updated.status).toBe('validated');
+        expect(attempts.list(pod.id)).toMatchObject([
+          {
+            ordinal: 1,
+            nativeSessionId: 'claude-ses-expired',
+            outcome: 'aborted',
+            inputTokens: 13,
+            outputTokens: 6,
+            costUsd: 0.5,
+          },
+          {
+            ordinal: 2,
+            nativeSessionId: 'claude-ses-recovered',
+            outcome: 'completed',
+            inputTokens: 4,
+            outputTokens: 2,
+            costUsd: 0.1,
+          },
+        ]);
       });
 
       it('does NOT fall back when resume fails with a non-session-not-found error', async () => {

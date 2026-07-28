@@ -1919,6 +1919,36 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     });
   }
 
+  function rotateProviderAttemptForFreshSegment(
+    pod: Pod,
+    profile: Profile,
+    hadActiveAttempt: boolean,
+  ): boolean {
+    const repository = deps.providerAttemptRepo;
+    const active = repository?.getActive(pod.id);
+    if (!repository || !active || !hadActiveAttempt) return false;
+    const preceding = repository
+      .list(pod.id)
+      .find((attempt) => attempt.ordinal === active.ordinal - 1);
+    const isUnstartedProviderContinuation =
+      active.nativeSessionId === null &&
+      active.inputTokens === 0 &&
+      active.outputTokens === 0 &&
+      active.costUsd === 0 &&
+      preceding?.handoffReference === PROVIDER_FAILOVER_HANDOFF_PATH;
+    if (isUnstartedProviderContinuation) return false;
+
+    repository.close(pod.id, {
+      nativeSessionId: active.nativeSessionId,
+      outcome: 'aborted',
+      inputTokens: active.inputTokens,
+      outputTokens: active.outputTokens,
+      costUsd: active.costUsd,
+    });
+    ensureProviderAttempt(pod, profile);
+    return true;
+  }
+
   function closeProviderAttempt(
     podId: string,
     outcome: 'completed' | 'failed' | 'aborted' | 'quota_exhausted',
@@ -8548,6 +8578,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitStatus('Spawning agent…');
         const runtime = runtimeRegistry.get(pod.runtime);
         let events: AsyncIterable<AgentEvent>;
+        const activeProviderAttemptBeforeStart = deps.providerAttemptRepo?.getActive(podId);
+        const hadActiveProviderAttempt = !!activeProviderAttemptBeforeStart;
+        let providerAttemptRotated = false;
         ensureProviderAttempt(pod, profile);
 
         // Codex and Copilot need the generated Autopod instructions passed through the
@@ -8580,6 +8613,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Rework: always a fresh spawn with rework-specific framing.
           // claudeSessionId was already cleared by triggerValidation so we never
           // resume a stale/broken pod context.
+          providerAttemptRotated = rotateProviderAttemptForFreshSegment(
+            pod,
+            profile,
+            hadActiveProviderAttempt,
+          );
           emitStatus('Reworking pod…');
           // biome-ignore lint/style/noNonNullAssertion: reworkReason is always set when isRework=true; worktreePath is non-null when isRework=true (rework requires a prior run with a worktree)
           const reworkTask = await buildReworkTask(pod, worktreePath!, pod.reworkReason!);
@@ -8603,6 +8641,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           });
         } else if (isRecovery && pod.runtime === 'claude' && pod.claudeSessionId) {
           // Crash recovery: attempt Claude --resume with persisted pod ID
+          if (
+            activeProviderAttemptBeforeStart?.nativeSessionId &&
+            activeProviderAttemptBeforeStart.nativeSessionId !== pod.claudeSessionId
+          ) {
+            providerAttemptRotated = rotateProviderAttemptForFreshSegment(
+              pod,
+              profile,
+              hadActiveProviderAttempt,
+            );
+          }
           emitStatus('Resuming Claude pod…');
 
           // Rehydrate the in-memory pod ID map so resume() can find it
@@ -8637,6 +8685,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const customInstructionsRef = runtimeInstructions;
           const secretEnvRef = secretEnv;
           const loggerRef = logger;
+          const profileRef = profile;
           events = (async function* resumeWithFallback() {
             try {
               yield* runtimeRef.resume(podId, continuationPrompt, containerIdRef, secretEnvRef);
@@ -8649,6 +8698,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               // Clear the stale ID so any future recovery on this pod doesn't
               // loop trying to resume the same nonexistent conversation.
               podRepoRef.update(podId, { claudeSessionId: null });
+              if (!providerAttemptRotated) {
+                rotateProviderAttemptForFreshSegment(
+                  podRef,
+                  profileRef,
+                  hadActiveProviderAttempt,
+                );
+              }
               const recoveryTask = await buildRecoveryTask(podRef, safeWorktreePath);
               yield* runtimeRef.spawn({
                 podId,
@@ -8666,6 +8722,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           })();
         } else if (isRecovery && pod.runtime === 'codex' && pod.codexSessionId) {
           // Codex crash recovery: continue the existing session
+          if (
+            activeProviderAttemptBeforeStart?.nativeSessionId &&
+            activeProviderAttemptBeforeStart.nativeSessionId !== pod.codexSessionId
+          ) {
+            rotateProviderAttemptForFreshSegment(pod, profile, hadActiveProviderAttempt);
+          }
           emitStatus('Resuming Codex pod…');
           if ('setCodexResumeConfig' in runtime) {
             (runtime as CodexRuntime).setCodexResumeConfig(podId, mcpServers, reasoningEffort);
@@ -8674,6 +8736,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const codexContinuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
           events = runtime.resume(podId, codexContinuationPrompt, containerId, secretEnv);
         } else if (isRecovery && pod.runtime === 'pi' && pod.piSessionId) {
+          if (
+            activeProviderAttemptBeforeStart?.nativeSessionId &&
+            activeProviderAttemptBeforeStart.nativeSessionId !== pod.piSessionId
+          ) {
+            rotateProviderAttemptForFreshSegment(pod, profile, hadActiveProviderAttempt);
+          }
           emitStatus('Resuming Pi pod…');
           primePiRuntimeForResume(pod, runtime, containerId, secretEnv);
           // biome-ignore lint/style/noNonNullAssertion: recovery pods have a worktree
@@ -8681,6 +8749,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           events = runtime.resume(podId, piContinuationPrompt, containerId, secretEnv);
         } else if (isRecovery) {
           // Non-Claude/Codex runtime or no session ID — fresh spawn with recovery context
+          rotateProviderAttemptForFreshSegment(pod, profile, hadActiveProviderAttempt);
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
           let recoveryTask = await buildRecoveryTask(pod, worktreePath!);
           // For non-Claude runtimes recovering after host wake, append a postscript so the
