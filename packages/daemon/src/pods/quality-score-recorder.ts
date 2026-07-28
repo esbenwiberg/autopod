@@ -31,7 +31,7 @@ export interface QualityScoreRecorderDeps {
   validationRepo?: ValidationRepository;
   providerAttemptRepo?: ProviderAttemptRepository;
   /** Recompute dependent snapshots after the score row is durably persisted. */
-  onScorePersisted?: (podId: string) => void;
+  onScorePersisted?: (podId: string) => boolean | void;
 }
 
 /**
@@ -55,8 +55,7 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
 
   function refreshAfterPersistence(podId: string): boolean {
     try {
-      onScorePersisted?.(podId);
-      return true;
+      return onScorePersisted?.(podId) !== false;
     } catch (err) {
       logger.warn({ err, podId }, 'Failed to refresh readiness after quality score persistence');
       return false;

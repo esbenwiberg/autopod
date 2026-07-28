@@ -5907,6 +5907,13 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).readinessReview?.computedAt).not.toBe(
         '2026-06-07T12:00:00.000Z',
       );
+
+      const originalUpdate = ctx.podRepo.update;
+      ctx.podRepo.update = () => {
+        throw new Error('readiness write failed');
+      };
+      expect(manager.refreshReadinessAfterQualityScore(pod.id)).toBe(false);
+      ctx.podRepo.update = originalUpdate;
     });
 
     it('approval waits for advisory QA before applying readiness rules', async () => {

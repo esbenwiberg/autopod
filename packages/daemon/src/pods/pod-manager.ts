@@ -1434,7 +1434,7 @@ export interface PodManager {
   }>;
   getSession(podId: string): Pod;
   /** Refresh terminal readiness after dependent quality telemetry is persisted. */
-  refreshReadinessAfterQualityScore(podId: string): void;
+  refreshReadinessAfterQualityScore(podId: string): boolean;
   listSessions(filters?: {
     profileName?: string;
     status?: PodStatus | PodStatus[];
@@ -2373,7 +2373,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     qualityScoreRepo,
   });
 
-  function refreshReadiness(podId: string, options: { advisoryQaInFlight?: boolean } = {}): void {
+  function refreshReadiness(
+    podId: string,
+    options: { advisoryQaInFlight?: boolean } = {},
+  ): boolean {
     try {
       const pod = podRepo.getOrThrow(podId);
       const allowPostDecision = options.advisoryQaInFlight === false;
@@ -2390,11 +2393,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ]
         : ['validated', 'review_required', 'failed'];
       if (!refreshableStatuses.includes(pod.status)) {
-        return;
+        return true;
       }
       readinessService.refreshPodReadiness(podId, options);
+      return true;
     } catch (err) {
       logger.warn({ err, podId }, 'Failed to refresh Readiness Review');
+      return false;
     }
   }
 
@@ -12821,8 +12826,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return podRepo.getOrThrow(podId);
     },
 
-    refreshReadinessAfterQualityScore(podId: string): void {
-      refreshReadiness(podId, { advisoryQaInFlight: false });
+    refreshReadinessAfterQualityScore(podId: string): boolean {
+      return refreshReadiness(podId, { advisoryQaInFlight: false });
     },
 
     getInjectedMcpServers(podId: string): InjectedMcpServer[] {
