@@ -5887,6 +5887,28 @@ describe('PodManager', () => {
       ).toBe(true);
     });
 
+    it('refreshes readiness for killed pods after terminal quality persistence', () => {
+      const ctx = createTestContext();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Stop this pod' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, { status: 'provisioning' });
+      ctx.podRepo.update(pod.id, { status: 'running' });
+      ctx.podRepo.update(pod.id, { status: 'killing' });
+      ctx.podRepo.update(pod.id, {
+        status: 'killed',
+        readinessReview: makeReadinessReview('needs_review'),
+      });
+
+      manager.refreshReadinessAfterQualityScore(pod.id);
+
+      expect(manager.getSession(pod.id).readinessReview?.computedAt).not.toBe(
+        '2026-06-07T12:00:00.000Z',
+      );
+    });
+
     it('approval waits for advisory QA before applying readiness rules', async () => {
       const ctx = createTestContext({ overall: 'pass' });
       const manager = createPodManager(ctx.deps);

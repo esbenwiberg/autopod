@@ -2386,6 +2386,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             'merging',
             'merge_pending',
             'complete',
+            'killed',
           ]
         : ['validated', 'review_required', 'failed'];
       if (!refreshableStatuses.includes(pod.status)) {
