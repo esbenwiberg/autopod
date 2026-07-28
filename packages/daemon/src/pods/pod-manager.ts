@@ -29,6 +29,7 @@ import type {
   PrivateRegistry,
   Profile,
   ProviderAccountProvider,
+  ProviderCredentials,
   ProviderFailoverTarget,
   ProviderFailureClassification,
   PublicProviderCatalog,
@@ -131,12 +132,12 @@ import {
   cleanupClaudeState,
   ensureClaudeStateDir,
 } from '../runtimes/claude-state-store.js';
+import type { CodexRuntime } from '../runtimes/codex-runtime.js';
 import {
   cleanupCodexState,
   codexStateDirForPod,
   ensureCodexStateDir,
 } from '../runtimes/codex-state-store.js';
-import type { CodexRuntime } from '../runtimes/codex-runtime.js';
 import type { PiRuntime } from '../runtimes/pi-runtime.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
@@ -192,6 +193,7 @@ import {
 } from './registry-injector.js';
 import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
 import {
+  resolveEffectiveReviewerProfile,
   resolvePodModel,
   resolvePodRuntime,
   resolveReviewerModel,
@@ -1349,6 +1351,7 @@ export interface PodManager {
   sendMessage(podId: string, message: string): Promise<void>;
   notifyEscalation(podId: string, escalation: EscalationRequest): void;
   touchHeartbeat(podId: string): void;
+  getReviewerConfig?(pod: Pod): { profile: Profile; credentials: ProviderCredentials | null };
   getReviewerExecEnv(pod: Pod): Promise<Record<string, string> | undefined>;
   approveSession(podId: string, options?: ApproveSessionOptions): Promise<void>;
   rejectSession(podId: string, reason?: string): Promise<void>;
@@ -4113,6 +4116,67 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     }
     return { POD_ID: pod.id, ...result.env };
+  }
+
+  async function buildReviewerExecEnv(pod: Pod): Promise<Record<string, string> | undefined> {
+    const { profile: reviewerProfile, credentials: currentCredentials } =
+      getEffectiveReviewerConfig(pod);
+    const provider = reviewerProfile.modelProvider;
+    if (
+      provider !== 'max' &&
+      provider !== 'foundry' &&
+      provider !== 'openai' &&
+      provider !== 'pi'
+    ) {
+      return undefined;
+    }
+
+    const result = await buildProviderEnv(
+      {
+        ...reviewerProfile,
+        providerCredentials: currentCredentials ?? null,
+      },
+      pod.id,
+      logger,
+      {
+        profileStore,
+        providerAccountStore,
+        providerCatalog,
+        runtime: pod.runtime,
+        ...(pod.providerIdSnapshot
+          ? {
+              providerBinding: {
+                accountId: pod.providerAccountIdSnapshot,
+                providerId: pod.providerIdSnapshot,
+              },
+            }
+          : {}),
+      },
+    );
+    if (pod.containerId) {
+      const cm = containerManagerFactory.get(pod.executionTarget);
+      for (const file of result.containerFiles) {
+        await cm.writeFile(pod.containerId, file.path, file.content);
+      }
+      for (const file of result.secretFiles) {
+        await cm.writeFile(pod.containerId, file.path, file.content);
+        await cm.execInContainer(pod.containerId, ['chmod', '0400', file.path], {
+          timeout: 5_000,
+        });
+      }
+    }
+    return { POD_ID: pod.id, ...result.env };
+  }
+
+  function getEffectiveReviewerConfig(pod: Pod): {
+    profile: Profile;
+    credentials: ProviderCredentials | null;
+  } {
+    const profile = resolveEffectiveReviewerProfile(pod, profileStore.get(pod.profileName));
+    const credentials = pod.providerAccountIdSnapshot
+      ? (providerAccountStore?.get(pod.providerAccountIdSnapshot).credentials ?? null)
+      : profileStore.get(profile.name).providerCredentials;
+    return { profile, credentials };
   }
 
   async function persistRuntimeCredentialsForPod(podId: string, logMessage: string): Promise<void> {
@@ -8658,11 +8722,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             (runtime as ClaudeRuntime).setClaudeSessionId(podId, pod.claudeSessionId);
           }
           if ('setClaudeResumeConfig' in runtime) {
-            (runtime as ClaudeRuntime).setClaudeResumeConfig(
-              podId,
-              mcpServers,
-              reasoningEffort,
-            );
+            (runtime as ClaudeRuntime).setClaudeResumeConfig(podId, mcpServers, reasoningEffort);
           }
 
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods (recovery requires a prior run with a worktree)
@@ -8699,11 +8759,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               // loop trying to resume the same nonexistent conversation.
               podRepoRef.update(podId, { claudeSessionId: null });
               if (!providerAttemptRotated) {
-                rotateProviderAttemptForFreshSegment(
-                  podRef,
-                  profileRef,
-                  hadActiveProviderAttempt,
-                );
+                rotateProviderAttemptForFreshSegment(podRef, profileRef, hadActiveProviderAttempt);
               }
               const recoveryTask = await buildRecoveryTask(podRef, safeWorktreePath);
               yield* runtimeRef.spawn({
@@ -11275,7 +11331,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ? await loadCodeReviewSkill(pod.worktreePath, logger)
           : undefined;
 
-        const reviewerExecEnv = await getResumeEnv(pod);
+        const { profile: reviewerProfile, credentials: reviewerProviderCredentials } =
+          getEffectiveReviewerConfig(pod);
+        const reviewerExecEnv = await buildReviewerExecEnv(pod);
 
         // Flush any pending overrides enqueued via API and merge into pod overrides
         const pendingOverrides = deps.pendingOverrideRepo?.flush(podId) ?? [];
@@ -11310,9 +11368,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           lintTimeout: (profile.lintTimeout ?? 120) * 1_000,
           sastCommand: profile.sastCommand ?? undefined,
           sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
-          reviewerModel: resolveReviewerModel(profile, logger),
-          reviewerProvider: resolveReviewerProvider(profile),
-          reviewerProviderCredentials: profile.providerCredentials,
+          reviewerModel: resolveReviewerModel(reviewerProfile, logger),
+          reviewerProvider: resolveReviewerProvider(reviewerProfile),
+          reviewerProviderCredentials,
           ...(reviewerExecEnv ? { reviewerExecEnv } : {}),
           contract: pod.contract ?? undefined,
           codeReviewSkill,
@@ -12252,7 +12310,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ? await loadCodeReviewSkill(pod.worktreePath, logger)
           : undefined;
 
-        const reviewerExecEnv = await getResumeEnv(pod);
+        const { profile: reviewerProfile, credentials: reviewerProviderCredentials } =
+          getEffectiveReviewerConfig(pod);
+        const reviewerExecEnv = await buildReviewerExecEnv(pod);
         const validationConfig = {
           podId,
           containerId: pod.containerId,
@@ -12278,9 +12338,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           lintTimeout: (profile.lintTimeout ?? 120) * 1_000,
           sastCommand: profile.sastCommand ?? undefined,
           sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
-          reviewerModel: resolveReviewerModel(profile, logger),
-          reviewerProvider: resolveReviewerProvider(profile),
-          reviewerProviderCredentials: profile.providerCredentials,
+          reviewerModel: resolveReviewerModel(reviewerProfile, logger),
+          reviewerProvider: resolveReviewerProvider(reviewerProfile),
+          reviewerProviderCredentials,
           ...(reviewerExecEnv ? { reviewerExecEnv } : {}),
           contract: pod.contract ?? undefined,
           codeReviewSkill,
@@ -12612,8 +12672,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     touchHeartbeat,
+    getReviewerConfig(pod: Pod): { profile: Profile; credentials: ProviderCredentials | null } {
+      return getEffectiveReviewerConfig(pod);
+    },
     getReviewerExecEnv(pod: Pod): Promise<Record<string, string> | undefined> {
-      return getResumeEnv(pod);
+      return buildReviewerExecEnv(pod);
     },
 
     async deleteSession(podId: string): Promise<void> {

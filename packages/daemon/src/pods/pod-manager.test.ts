@@ -69,6 +69,7 @@ import {
 import { createPodRepository } from './pod-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
+import { resolveReviewerModel } from './runtime-resolver.js';
 import { createValidationRepository } from './validation-repository.js';
 
 const logger = pino({ level: 'silent' });
@@ -814,6 +815,75 @@ function createTestContext(
 describe('PodManager', () => {
   beforeEach(() => {
     mockExecFileSuccess();
+  });
+
+  it('uses fallback provider for post-failover validation review', async () => {
+    const ctx = createTestContext(undefined, {
+      modelProvider: 'max',
+      defaultRuntime: 'claude',
+      defaultModel: 'claude-sonnet-5',
+      reviewerModel: 'claude-sonnet-5',
+    });
+    ctx.deps.providerAccountStore = createMutableProviderAccountStore('fallback-openai', 'openai', {
+      provider: 'openai',
+      authMode: 'chatgpt',
+      authJson: '{"token":"current"}',
+    });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Review after failover' },
+      'user-1',
+    );
+    const sourceProfile = ctx.profileStore.get('test-profile');
+    ctx.podRepo.update(pod.id, {
+      containerId: 'fallback-container',
+      runtime: 'codex',
+      model: 'gpt-5.6-sol',
+      profileSnapshot: {
+        ...sourceProfile,
+        modelProvider: 'openai',
+        providerAccountId: 'fallback-openai',
+        defaultRuntime: 'codex',
+        defaultModel: 'gpt-5.6-sol',
+        reviewerModel: 'claude-sonnet-5',
+        providerCredentials: {
+          provider: 'openai',
+          authMode: 'chatgpt',
+          authJson: '{"token":"stale"}',
+        },
+      },
+    });
+    ctx.db
+      .prepare(
+        `UPDATE pods
+         SET provider_account_id_snapshot = 'fallback-openai', provider_id_snapshot = 'openai'
+         WHERE id = ?`,
+      )
+      .run(pod.id);
+
+    const fallbackConfig = manager.getReviewerConfig?.(ctx.podRepo.getOrThrow(pod.id));
+    expect(fallbackConfig).toMatchObject({
+      profile: { modelProvider: 'openai', defaultRuntime: 'codex' },
+      credentials: { provider: 'openai', authJson: '{"token":"current"}' },
+    });
+    expect(resolveReviewerModel(fallbackConfig?.profile ?? sourceProfile, logger)).toBe('auto');
+    await manager.getReviewerExecEnv(ctx.podRepo.getOrThrow(pod.id));
+    expect(ctx.containerManager.writeFile).toHaveBeenCalledWith(
+      'fallback-container',
+      '/home/autopod/.codex/auth.json',
+      '{"token":"current"}',
+    );
+    expect(ctx.containerManager.writeFile).not.toHaveBeenCalledWith(
+      'fallback-container',
+      '/home/autopod/.codex/auth.json',
+      '{"token":"stale"}',
+    );
+
+    const legacyPod = manager.createSession(
+      { profileName: 'test-profile', task: 'Legacy review' },
+      'user-1',
+    );
+    expect(manager.getReviewerConfig?.(legacyPod)?.profile).toEqual(sourceProfile);
   });
 
   it('passes auto reasoning effort to a fresh runtime spawn', async () => {

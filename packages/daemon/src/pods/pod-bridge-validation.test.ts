@@ -720,6 +720,10 @@ describe('PodBridge.runPreSubmitReview', () => {
     /** Container id on the pod. Set null to force the host worktree fallback. */
     containerId?: string | null;
     reviewerExecEnv?: Record<string, string>;
+    reviewerConfig?: {
+      profile: Parameters<typeof insertTestProfile>[1];
+      credentials: Parameters<typeof insertTestProfile>[1]['providerCredentials'];
+    };
     runResult: Awaited<ReturnType<typeof runPreSubmitReview>>;
   }
 
@@ -755,6 +759,9 @@ describe('PodBridge.runPreSubmitReview', () => {
         preSubmitReview: opts.cachedVerdict ?? null,
       })),
       touchHeartbeat: vi.fn(),
+      getReviewerConfig: opts.reviewerConfig
+        ? vi.fn().mockReturnValue(opts.reviewerConfig)
+        : undefined,
       getReviewerExecEnv: vi.fn().mockResolvedValue(opts.reviewerExecEnv),
     } as unknown as Deps['podManager'];
 
@@ -831,6 +838,51 @@ describe('PodBridge.runPreSubmitReview', () => {
       worktreeGetDiffMock,
     };
   }
+
+  it('uses fallback provider for post-failover pre-submit review', async () => {
+    const fallbackCredentials = {
+      provider: 'openai' as const,
+      authMode: 'api-key' as const,
+      apiKey: 'current-bound-key',
+    };
+    const runResult = {
+      status: 'pass' as const,
+      reasoning: 'ok',
+      issues: [],
+      model: 'auto',
+      durationMs: 1,
+      filesReviewed: 1,
+      linesAdded: 1,
+      linesRemoved: 0,
+    };
+    const { bridge, podId } = buildBridgeWithWorktree({
+      containerDiff: SAMPLE_DIFF,
+      reviewerExecEnv: { OPENAI_API_KEY_FILE: '/run/autopod/openai-api-key' },
+      reviewerConfig: {
+        profile: {
+          name: 'proj',
+          modelProvider: 'openai',
+          defaultRuntime: 'codex',
+          defaultModel: 'gpt-5.6-sol',
+          reviewerModel: 'claude-sonnet-5',
+          defaultBranch: 'main',
+        },
+        credentials: fallbackCredentials,
+      },
+      runResult,
+    });
+
+    await bridge.runPreSubmitReview(podId, {});
+
+    expect(mockRunPreSubmitReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewerProvider: 'openai',
+        reviewerModel: 'auto',
+        reviewerProviderCredentials: fallbackCredentials,
+      }),
+      logger,
+    );
+  });
 
   it('reads the diff from inside the container when one is running', async () => {
     const { bridge, podId, containerExecMock, worktreeGetDiffMock } = buildBridgeWithWorktree({
