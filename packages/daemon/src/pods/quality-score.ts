@@ -2,8 +2,21 @@ import type { QualitySignals } from '@autopod/shared';
 
 export interface ScoreInputs {
   signals: QualitySignals;
-  /** Terminal status from `PodCompletedEvent`. */
-  finalStatus: 'complete' | 'killed';
+  stage: { kind: 'provisional' } | { kind: 'terminal'; finalStatus: 'complete' | 'killed' };
+}
+
+export interface QualityEligibilityInputs {
+  signals: QualitySignals;
+  hasPiAttempt: boolean;
+  hasNonPiAttempt: boolean;
+  historical?: boolean;
+}
+
+export function isQualityScoreEligible(inputs: QualityEligibilityInputs): boolean {
+  if (inputs.signals.inspectionAvailability !== 'available') return false;
+  if (inputs.hasPiAttempt && inputs.hasNonPiAttempt) return false;
+  if (inputs.historical === true && inputs.hasPiAttempt) return false;
+  return true;
 }
 
 /**
@@ -22,7 +35,7 @@ export interface ScoreInputs {
  *  −20  PR fix attempt cap    −5 per fix cycle, max −20
  */
 export function computeScore(inputs: ScoreInputs): number {
-  const { signals, finalStatus } = inputs;
+  const { signals, stage } = inputs;
 
   // A research/no-edit pod can't really be scored on read:edit — give it the
   // full reading weight so those runs don't land at 0.
@@ -37,7 +50,7 @@ export function computeScore(inputs: ScoreInputs): number {
       : 20 * (1 - Math.min((signals.editsWithoutPriorRead ?? 0) / 5, 1));
   const tellsScore = 20 * (1 - Math.min(signals.tellsCount / 5, 1));
   const interruptScore = 15 * (1 - Math.min(signals.userInterrupts / 3, 1));
-  const completeBonus = finalStatus === 'complete' ? 10 : 0;
+  const completeBonus = stage.kind === 'terminal' && stage.finalStatus === 'complete' ? 10 : 0;
 
   // Edit churn: 0 churned files → 10pts; 1 → 5pts; 2+ → 0pts.
   const churnScore = signals.editChurnCount === 0 ? 10 : signals.editChurnCount === 1 ? 5 : 0;

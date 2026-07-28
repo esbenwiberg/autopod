@@ -12,9 +12,13 @@ import type {
 } from '@autopod/shared';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
 import type { ScanRepository, StoredScan } from '../security/scan-repository.js';
+import type { EscalationRepository } from './escalation-repository.js';
 import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
+import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
+import { computeScore, isQualityScoreEligible } from './quality-score.js';
+import { computeQualitySignals } from './quality-signals.js';
 import type { StoredValidation, ValidationRepository } from './validation-repository.js';
 
 const READINESS_STATUSES: ReadinessStatus[] = ['ready', 'needs_review', 'waived', 'risky'];
@@ -72,6 +76,7 @@ export interface ReadinessInputs {
   nonBlockingDeniedEgressCount?: number;
   preflightOverlapCount?: number;
   qualityScore?: number | null;
+  qualityScoreStage?: 'provisional' | 'terminal';
   advisoryQaInFlight?: boolean;
   computedAt?: string;
 }
@@ -103,6 +108,8 @@ export interface ReadinessServiceDeps {
   scanRepo?: ScanRepository;
   actionAuditRepo?: ActionAuditRepository;
   eventRepo?: EventRepository;
+  escalationRepo?: EscalationRepository;
+  providerAttemptRepo?: ProviderAttemptRepository;
   qualityScoreRepo?: QualityScoreRepository;
 }
 
@@ -119,6 +126,28 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
     const deniedEgress = summarizeDeniedEgressEvents(
       deps.eventRepo?.getForSession(podId, { type: 'pod.firewall_denied' }) ?? [],
     );
+    const persistedQualityScore = deps.qualityScoreRepo?.get(podId)?.score ?? null;
+    let qualityScore = persistedQualityScore;
+    let qualityScoreStage: ReadinessInputs['qualityScoreStage'] =
+      persistedQualityScore === null ? undefined : 'terminal';
+    if (qualityScore === null && deps.eventRepo && deps.escalationRepo) {
+      const signals = computeQualitySignals(podId, {
+        podRepo: deps.podRepo,
+        eventRepo: deps.eventRepo,
+        escalationRepo: deps.escalationRepo,
+        validationRepo: deps.validationRepo,
+        providerAttemptRepo: deps.providerAttemptRepo,
+      });
+      const attempts = deps.providerAttemptRepo?.list(podId) ?? [];
+      const hasPiAttempt =
+        pod.runtime === 'pi' || attempts.some((attempt) => attempt.runtime === 'pi');
+      const hasNonPiAttempt =
+        pod.runtime !== 'pi' || attempts.some((attempt) => attempt.runtime !== 'pi');
+      if (isQualityScoreEligible({ signals, hasPiAttempt, hasNonPiAttempt })) {
+        qualityScore = computeScore({ signals, stage: { kind: 'provisional' } });
+        qualityScoreStage = 'provisional';
+      }
+    }
     return deriveReadinessReview({
       pod,
       latestValidation,
@@ -137,7 +166,8 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
       deniedEgressCount: deniedEgress.total,
       nonBlockingDeniedEgressCount: deniedEgress.nonBlocking,
       preflightOverlapCount: deps.eventRepo?.countForSession(podId, 'pod.preflight_overlap') ?? 0,
-      qualityScore: deps.qualityScoreRepo?.get(podId)?.score ?? null,
+      qualityScore,
+      qualityScoreStage,
       advisoryQaInFlight: options.advisoryQaInFlight,
     });
   };
@@ -161,14 +191,7 @@ function selectLatestValidation(
   pod: Pod,
   validations: StoredValidation[],
 ): ValidationResult | null {
-  const repoLatest = validations[validations.length - 1]?.result ?? null;
-  const podLatest = pod.lastValidationResult;
-  if (!repoLatest) return podLatest;
-  if (!podLatest) return repoLatest;
-  if (podLatest.attempt > repoLatest.attempt) return podLatest;
-  if (repoLatest.attempt > podLatest.attempt) return repoLatest;
-  if (podLatest.advisoryBrowserQa && !repoLatest.advisoryBrowserQa) return podLatest;
-  return repoLatest;
+  return pod.lastValidationResult ?? validations[validations.length - 1]?.result ?? null;
 }
 
 export function deriveReadinessReview(inputs: ReadinessInputs): ReadinessReview {
@@ -500,21 +523,23 @@ function qualityArea(inputs: ReadinessInputs): {
 } {
   const score = inputs.qualityScore;
   if (score === null || score === undefined) {
-    return area('quality', 'not_available', 'No persisted quality score is available yet.', []);
+    return area('quality', 'not_available', 'No eligible quality score is available yet.', []);
   }
+  const provisional = inputs.qualityScoreStage === 'provisional';
+  const label = provisional ? 'Provisional quality score' : 'Quality score';
   if (score < 60) {
-    return area('quality', 'needs_review', `Quality score is low (${score}).`, [
+    return area('quality', 'needs_review', `${label} is low (${score}).`, [
       finding({
         id: 'quality-low-score',
         area: 'quality',
         severity: 'warning',
         title: 'Low quality score',
-        detail: `The persisted pod quality score is ${score}.`,
+        detail: `The ${provisional ? 'provisional' : 'persisted'} pod quality score is ${score}.`,
         sourceRefs: SOURCE_REFS.quality,
       }),
     ]);
   }
-  return area('quality', 'ready', `Quality score is ${score}.`, []);
+  return area('quality', 'ready', `${label} is ${score}.`, []);
 }
 
 function advisoryQaArea(inputs: ReadinessInputs): {

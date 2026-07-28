@@ -2411,6 +2411,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     scanRepo,
     actionAuditRepo: deps.actionAuditRepo,
     eventRepo: deps.eventRepo,
+    escalationRepo,
+    providerAttemptRepo: deps.providerAttemptRepo,
     qualityScoreRepo,
   });
 

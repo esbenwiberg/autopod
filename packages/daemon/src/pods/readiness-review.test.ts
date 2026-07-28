@@ -1,8 +1,17 @@
-import type { Pod, ReadinessReview, ValidationResult } from '@autopod/shared';
-import { describe, expect, it } from 'vitest';
+import type {
+  AgentActivityEvent,
+  AgentFileChangeEvent,
+  AgentToolUseEvent,
+  Pod,
+  ReadinessReview,
+  ValidationResult,
+} from '@autopod/shared';
+import { describe, expect, it, vi } from 'vitest';
 import type { StoredScan } from '../security/scan-repository.js';
+import type { EscalationRepository } from './escalation-repository.js';
 import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
+import type { QualityScoreRepository } from './quality-score-repository.js';
 import {
   type ReadinessInputs,
   createReadinessService,
@@ -499,6 +508,38 @@ describe('deriveSeriesReadiness', () => {
 });
 
 describe('createReadinessService', () => {
+  it('uses canonical reset-cycle validation instead of an older higher attempt', () => {
+    const canonicalPass = validation({ attempt: 1, overall: 'pass' });
+    const currentPod = pod({ lastValidationResult: canonicalPass });
+    const podRepo = {
+      getOrThrow: () => currentPod,
+      update: () => undefined,
+      getPodsBySeries: () => [],
+    } as unknown as PodRepository;
+    const validationRepo = {
+      getForSession: () => [
+        {
+          id: 'validation-2',
+          podId: currentPod.id,
+          attempt: 2,
+          result: validation({ attempt: 2, overall: 'fail' }),
+          createdAt: NOW,
+        },
+      ],
+    } as unknown as ValidationRepository;
+
+    const result = createReadinessService({ podRepo, validationRepo }).computePodReadiness(
+      currentPod.id,
+    );
+
+    expect(result.areas).toEqual(
+      expect.arrayContaining([expect.objectContaining({ area: 'validation', status: 'ready' })]),
+    );
+    expect(result.findings).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'validation-blocking-failed' })]),
+    );
+  });
+
   it('uses pod-row advisory QA when validation history lacks the deferred merge', () => {
     const podWithAdvisory = pod({
       lastValidationResult: validation({
@@ -536,6 +577,91 @@ describe('createReadinessService', () => {
         expect.objectContaining({ area: 'advisory_qa', status: 'needs_review' }),
       ]),
     );
+  });
+
+  it('uses provisional quality before approval without persisting a terminal row', () => {
+    const currentPod = pod({ lastValidationResult: validation() });
+    const podRepo = {
+      getOrThrow: () => currentPod,
+      update: () => undefined,
+      getPodsBySeries: () => [],
+    } as unknown as PodRepository;
+    const activities: AgentActivityEvent[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      const read: AgentToolUseEvent = {
+        type: 'tool_use',
+        timestamp: NOW,
+        tool: 'Read',
+        input: { file_path: `src/read-${index}.ts` },
+      };
+      activities.push({
+        type: 'pod.agent_activity',
+        timestamp: NOW,
+        podId: currentPod.id,
+        event: read,
+      });
+    }
+    for (let index = 0; index < 5; index += 1) {
+      const edit: AgentFileChangeEvent = {
+        type: 'file_change',
+        timestamp: NOW,
+        path: `src/blind-${index}.ts`,
+        action: 'modify',
+      };
+      activities.push({
+        type: 'pod.agent_activity',
+        timestamp: NOW,
+        podId: currentPod.id,
+        event: edit,
+      });
+    }
+    const eventRepo = {
+      countForSession: () => 0,
+      getForSession: (_podId: string, options?: { type?: string }) =>
+        options?.type
+          ? []
+          : activities.map((payload, index) => ({
+              id: index,
+              podId: currentPod.id,
+              type: payload.type,
+              payload,
+              createdAt: NOW,
+            })),
+    } as unknown as EventRepository;
+    const escalationRepo = {
+      countBySessionAndTypes: () => 3,
+    } as unknown as EscalationRepository;
+    const insert = vi.fn();
+    const qualityScoreRepo = {
+      get: () => null,
+      insert,
+    } as unknown as QualityScoreRepository;
+
+    const result = createReadinessService({
+      podRepo,
+      eventRepo,
+      escalationRepo,
+      qualityScoreRepo,
+    }).computePodReadiness(currentPod.id);
+
+    expect(result.areas).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          area: 'quality',
+          status: 'needs_review',
+          summary: expect.stringMatching(/Provisional quality score is low \(\d+\)/),
+        }),
+      ]),
+    );
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'quality-low-score',
+          detail: expect.stringContaining('provisional pod quality score'),
+        }),
+      ]),
+    );
+    expect(insert).not.toHaveBeenCalled();
   });
 
   it('classifies known denied-egress hosts from stored firewall events as non-blocking', () => {
