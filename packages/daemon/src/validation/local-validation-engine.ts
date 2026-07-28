@@ -2948,7 +2948,7 @@ function isReviewInfrastructureFailure(
   return (
     reviewRun.skipReason.startsWith('Review timed out:') ||
     (reviewRun.skipReason.startsWith('Review failed:') &&
-      !/invalid_request_error|unsupported model|model .*not (?:found|available)/i.test(
+      !/invalid_request_error|unsupported model|model .*not (?:found|available)|remote termination could not be confirmed/i.test(
         reviewRun.skipReason,
       ))
   );

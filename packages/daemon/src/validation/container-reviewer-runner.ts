@@ -6,14 +6,14 @@ import { parseClaudeCliStdout } from '../runtimes/run-claude-cli.js';
 import { type CodexReviewTokenUsage, runCodexReview } from './review-codex-runner.js';
 
 export class ContainerReviewerUnavailableError extends Error {
-  readonly kind: 'timeout' | 'non-zero-exit' | 'exec-error';
+  readonly kind: 'timeout' | 'termination-failed' | 'non-zero-exit' | 'exec-error';
   readonly stderr: string;
 
   constructor(
     message: string,
     options?: {
       cause?: unknown;
-      kind?: 'timeout' | 'non-zero-exit' | 'exec-error';
+      kind?: 'timeout' | 'termination-failed' | 'non-zero-exit' | 'exec-error';
       stderr?: string;
     },
   ) {
@@ -38,6 +38,7 @@ export interface ContainerReviewerRunnerConfig {
 
 const SHIM_PATH = '/run/autopod/agent-shim.sh';
 const MAX_DIAGNOSTIC_BYTES = 4_000;
+const MAX_REVIEW_OUTPUT_BYTES = 1_000_000;
 
 export async function runContainerReviewer(
   config: ContainerReviewerRunnerConfig,
@@ -230,7 +231,20 @@ async function collectCancellableReview(
       void (async () => {
         try {
           await handle.kill();
-        } finally {
+        } catch (cause) {
+          reject(
+            new ContainerReviewerUnavailableError(
+              'Container reviewer timed out, but remote termination could not be confirmed',
+              {
+                cause,
+                kind: 'termination-failed',
+                stderr: stderr.diagnostic(),
+              },
+            ),
+          );
+          return;
+        }
+        {
           const diagnostics = [stdout.diagnostic(), stderr.diagnostic()].filter(Boolean).join('\n');
           reject(
             new ContainerReviewerUnavailableError(
@@ -263,18 +277,20 @@ function collectBoundedStream(stream: Readable): {
   const done = (async () => {
     for await (const chunk of stream) {
       const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
-      output += text;
+      output = appendBounded(output, text, MAX_REVIEW_OUTPUT_BYTES);
       diagnostic = appendBounded(diagnostic, text);
     }
   })();
   return { done, value: () => output, diagnostic: () => diagnostic };
 }
 
-function appendBounded(current: string, chunk: string): string {
+function appendBounded(
+  current: string,
+  chunk: string,
+  limit = MAX_DIAGNOSTIC_BYTES,
+): string {
   const combined = current + chunk;
-  return combined.length <= MAX_DIAGNOSTIC_BYTES
-    ? combined
-    : combined.slice(combined.length - MAX_DIAGNOSTIC_BYTES);
+  return combined.length <= limit ? combined : combined.slice(combined.length - limit);
 }
 
 function usesOpenAiSurface(

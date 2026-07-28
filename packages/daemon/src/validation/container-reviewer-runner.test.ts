@@ -277,6 +277,30 @@ describe('runContainerReviewer', () => {
       expect(vi.mocked(cm.execStreaming).mock.calls[0]?.[1]).not.toContain(
         'Review without leaking this prompt into argv',
       );
+
+      const unconfirmed = containerManager();
+      const unconfirmedStdout = new PassThrough();
+      const unconfirmedStderr = new PassThrough();
+      vi.mocked(unconfirmed.execStreaming).mockResolvedValue({
+        stdout: unconfirmedStdout,
+        stderr: unconfirmedStderr,
+        exitCode: new Promise<number>(() => {}),
+        kill: vi.fn().mockRejectedValue(new Error('termination transport failed')),
+      });
+      const failedCancellation = runContainerReviewer({
+        podId: 'tame-dingo',
+        containerId: 'container-abc',
+        containerManager: unconfirmed,
+        profile: profile({ modelProvider: 'max' }),
+        model: 'sonnet',
+        prompt: 'Review',
+        timeout: 90_000,
+      }).catch((failure: unknown) => failure);
+      await vi.advanceTimersByTimeAsync(90_000);
+      await expect(failedCancellation).resolves.toMatchObject({
+        kind: 'termination-failed',
+        message: expect.stringContaining('remote termination could not be confirmed'),
+      });
     } finally {
       vi.useRealTimers();
     }
