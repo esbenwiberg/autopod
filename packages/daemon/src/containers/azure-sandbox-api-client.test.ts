@@ -412,6 +412,9 @@ describe('AzureSandboxApiClient', () => {
     expect(String(writeReq.init?.body)).toBe(
       [
         '#!/bin/sh',
+        'if [ "${AUTOPOD_STREAM_SESSION:-}" != "1" ]; then',
+        '  exec env AUTOPOD_STREAM_SESSION=1 setsid -w "$0"',
+        'fi',
         'umask 077',
         'echo $$ > "$0.pid"',
         'if [ "$(id -u)" = "0" ]; then',
@@ -508,12 +511,13 @@ describe('AzureSandboxApiClient', () => {
     const killRequest = requests[2] ?? failRequest();
     const killBody = JSON.stringify(jsonBody(killRequest));
     expect(killBody).toMatch(/\.autopod-execstream-\d+-\d+\.sh\.pid/);
-    expect(killBody).toContain('kill -TERM');
-    expect(killBody).toContain('kill -KILL');
-    expect(killBody).toContain('kill -0');
+    expect(killBody).toContain('kill -TERM -');
+    expect(killBody).toContain('kill -KILL -');
+    expect(killBody).toContain('group_alive');
+    expect(String((requests[0] ?? failRequest()).init?.body)).toContain('setsid -w "$0"');
   });
 
-  it('rejects cancellation when remote process termination cannot be verified', async () => {
+  it('rejects cancellation when a child survives process-group termination', async () => {
     let cancel: (() => Promise<void>) | undefined;
     const { client } = makeStreamingClient(
       (socket) => {

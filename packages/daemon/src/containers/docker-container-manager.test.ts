@@ -1,3 +1,4 @@
+import { execFileSync, spawn } from 'node:child_process';
 import {
   existsSync,
   lstatSync,
@@ -15,7 +16,10 @@ import { PassThrough } from 'node:stream';
 import type Dockerode from 'dockerode';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DockerContainerManager } from './docker-container-manager.js';
+import {
+  DockerContainerManager,
+  terminateStreamingProcessGroupScript,
+} from './docker-container-manager.js';
 
 // ─── Mock helpers ────────────────────────────────────────────
 
@@ -915,6 +919,9 @@ describe('DockerContainerManager', () => {
       expect(result.stderr).toBeDefined();
       expect(result.exitCode).toBeInstanceOf(Promise);
       expect(typeof result.kill).toBe('function');
+      expect(container.exec).toHaveBeenCalledWith(
+        expect.objectContaining({ Cmd: expect.arrayContaining(['setsid', '-w']) }),
+      );
 
       // Drain the readable side so 'end' fires when we close the stream
       muxStream.resume();
@@ -1007,13 +1014,13 @@ describe('DockerContainerManager', () => {
 
       const terminateCommand = vi.mocked(terminate).mock.calls[0]?.[1][2] ?? '';
       expect(terminateCommand).toMatch(/\.autopod-stream-exec-\d+-\d+\.pid/);
-      expect(terminateCommand).toContain('kill -TERM');
-      expect(terminateCommand).toContain('kill -KILL');
-      expect(terminateCommand).toContain('kill -0 "$pid" 2>/dev/null && exit 1');
+      expect(terminateCommand).toContain('kill -TERM -"$pid"');
+      expect(terminateCommand).toContain('kill -KILL -"$pid"');
+      expect(terminateCommand).toContain('group_alive && exit 1');
       expect(muxStream.destroyed).toBe(true);
     });
 
-    it('rejects kill when remote process termination cannot be verified', async () => {
+    it('rejects kill when a child survives process-group termination', async () => {
       const muxStream = new PassThrough();
       const mockExec = {
         start: vi.fn().mockResolvedValue(muxStream),
@@ -1030,6 +1037,50 @@ describe('DockerContainerManager', () => {
 
       await expect(result.kill()).rejects.toThrow(/termination was not verified/);
       expect(muxStream.destroyed).toBe(true);
+    });
+
+    it('terminates a surviving child in the dedicated streaming process group', async () => {
+      const testDir = mkdtempSync(join(tmpdir(), 'autopod-stream-kill-'));
+      const pidPath = join(testDir, 'group.pid');
+      const childPath = join(testDir, 'child.pid');
+      const group = spawn(
+        'setsid',
+        [
+          '-w',
+          'sh',
+          '-c',
+          `echo $$ > ${pidPath}; sh -c 'trap "" TERM; while :; do sleep 1; done' & echo $! > ${childPath}; wait`,
+        ],
+        { stdio: 'ignore' },
+      );
+
+      try {
+        for (let i = 0; i < 50 && !existsSync(childPath); i++) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        const childPid = Number(readFileSync(childPath, 'utf8'));
+        expect(childPid).toBeGreaterThan(0);
+
+        execFileSync('sh', ['-c', terminateStreamingProcessGroupScript(pidPath)], {
+          timeout: 6_000,
+        });
+
+        let childRunnable = true;
+        for (let i = 0; i < 50 && childRunnable; i++) {
+          try {
+            const stat = readFileSync(`/proc/${childPid}/stat`, 'utf8');
+            const state = stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[0];
+            childRunnable = state !== 'Z';
+            if (childRunnable) await new Promise((resolve) => setTimeout(resolve, 10));
+          } catch {
+            childRunnable = false;
+          }
+        }
+        expect(childRunnable).toBe(false);
+      } finally {
+        group.kill('SIGKILL');
+        rmSync(testDir, { recursive: true, force: true });
+      }
     });
 
     it('drops late demux output after runtime force-closes output streams', async () => {
