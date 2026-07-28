@@ -1433,6 +1433,8 @@ export interface PodManager {
     previewUrl: string | null;
   }>;
   getSession(podId: string): Pod;
+  /** Refresh terminal readiness after dependent quality telemetry is persisted. */
+  refreshReadinessAfterQualityScore(podId: string): void;
   listSessions(filters?: {
     profileName?: string;
     status?: PodStatus | PodStatus[];
@@ -12816,6 +12818,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     getSession(podId: string): Pod {
       return podRepo.getOrThrow(podId);
+    },
+
+    refreshReadinessAfterQualityScore(podId: string): void {
+      refreshReadiness(podId, { advisoryQaInFlight: false });
     },
 
     getInjectedMcpServers(podId: string): InjectedMcpServer[] {

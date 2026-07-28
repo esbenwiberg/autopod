@@ -799,6 +799,7 @@ const qualityScoreRecorder = createQualityScoreRecorder({
   qualityScoreRepo,
   validationRepo,
   providerAttemptRepo,
+  onScorePersisted: (podId) => podManager.refreshReadinessAfterQualityScore(podId),
   logger,
 });
 function upgradeQualityHistory(

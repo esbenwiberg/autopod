@@ -30,6 +30,8 @@ export interface QualityScoreRecorderDeps {
   /** Optional — when wired, validation outcome is included in the score. */
   validationRepo?: ValidationRepository;
   providerAttemptRepo?: ProviderAttemptRepository;
+  /** Recompute dependent snapshots after the score row is durably persisted. */
+  onScorePersisted?: (podId: string) => void;
 }
 
 /**
@@ -46,6 +48,7 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
     qualityScoreRepo,
     validationRepo,
     providerAttemptRepo,
+    onScorePersisted,
     logger,
   } = deps;
   const unsubscribers: Array<() => void> = [];
@@ -108,6 +111,12 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
       completedAt,
       computedAt: new Date().toISOString(),
     });
+
+    try {
+      onScorePersisted?.(podId);
+    } catch (err) {
+      logger.warn({ err, podId }, 'Failed to refresh readiness after quality score persistence');
+    }
 
     logger.debug(
       {

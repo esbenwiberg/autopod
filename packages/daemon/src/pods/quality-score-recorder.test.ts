@@ -1,5 +1,5 @@
 import type { AgentActivityEvent, AgentFileChangeEvent, AgentToolUseEvent } from '@autopod/shared';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createEscalationRepository } from './escalation-repository.js';
 import { createEventBus } from './event-bus.js';
@@ -61,7 +61,7 @@ function codexInspectionEvent(command: string): AgentActivityEvent {
 }
 
 describe('QualityScoreRecorder', () => {
-  function setup() {
+  function setup(onScorePersisted?: (podId: string) => void) {
     const db = createTestDb();
     insertTestProfile(db);
     const podRepo = createPodRepository(db);
@@ -77,6 +77,7 @@ describe('QualityScoreRecorder', () => {
       escalationRepo,
       qualityScoreRepo,
       providerAttemptRepo,
+      onScorePersisted,
       logger,
     });
     return { db, podRepo, eventRepo, eventBus, providerAttemptRepo, qualityScoreRepo, recorder };
@@ -127,6 +128,36 @@ describe('QualityScoreRecorder', () => {
     // 3 reads / 1 edit = 3.0 ratio, no blind edits, no interrupts, completed
     // reading 30*clamp(3/5)=18, blind 20, tells 20, interrupts 15, complete 10, churn 10 = 93
     expect(persisted?.score).toBe(93);
+  });
+
+  it('refreshes readiness after the pod.completed score row is persisted', () => {
+    const observedScores: Array<number | null | undefined> = [];
+    ctx = setup((podId) => {
+      observedScores.push(ctx.qualityScoreRepo.get(podId)?.score);
+    });
+    ctx.podRepo.insert(basePod());
+    ctx.eventRepo.insert(readEvent('src/a.ts'));
+
+    ctx.recorder.start();
+    ctx.eventBus.emit({
+      type: 'pod.completed',
+      timestamp: '2026-04-23T12:00:00.000Z',
+      podId: POD_ID,
+      finalStatus: 'complete',
+      summary: {
+        id: POD_ID,
+        profileName: 'test-profile',
+        task: 'do the thing',
+        status: 'complete',
+        model: 'claude-opus-4-7',
+        runtime: 'claude',
+        duration: 1000,
+        filesChanged: 0,
+        createdAt: '2026-04-23T11:50:00.000Z',
+      },
+    });
+
+    expect(observedScores).toEqual([100]);
   });
 
   it('records killed pods with the completion bonus missing', () => {
@@ -334,6 +365,24 @@ describe('QualityScoreRecorder', () => {
     });
   });
 
+  it('refreshes readiness after upgrading a stale history row', () => {
+    const refresh = vi.fn<(podId: string) => void>();
+    ctx = setup(refresh);
+    ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5' }));
+    ctx.eventRepo.insert(codexInspectionEvent('cat src/a.ts'));
+    ctx.db
+      .prepare(`
+        INSERT INTO pod_quality_scores (
+          pod_id, score, runtime, profile_name, model, final_status, completed_at
+        ) VALUES (?, 40, 'codex', 'test-profile', 'gpt-5', 'complete', ?)
+      `)
+      .run(POD_ID, '2026-04-23T12:00:00.000Z');
+
+    expect(ctx.recorder.upgradeHistory().upgraded).toBe(1);
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledWith(POD_ID);
+  });
+
   it('marks discarded historical Pi activity unavailable and upgrades in bounded batches', () => {
     ctx.podRepo.insert(basePod({ runtime: 'pi', model: 'pi-model' }));
     ctx.db
@@ -506,5 +555,36 @@ describe('QualityScoreRecorder', () => {
     ).not.toThrow();
 
     ctx.qualityScoreRepo.insert = originalInsert;
+  });
+
+  it('keeps the persisted score when readiness refresh fails', () => {
+    ctx = setup(() => {
+      throw new Error('readiness unavailable');
+    });
+    ctx.podRepo.insert(basePod());
+    ctx.eventRepo.insert(readEvent('src/a.ts'));
+
+    ctx.recorder.start();
+    expect(() =>
+      ctx.eventBus.emit({
+        type: 'pod.completed',
+        timestamp: '2026-04-23T12:00:00.000Z',
+        podId: POD_ID,
+        finalStatus: 'complete',
+        summary: {
+          id: POD_ID,
+          profileName: 'test-profile',
+          task: 'do the thing',
+          status: 'complete',
+          model: 'claude-opus-4-7',
+          runtime: 'claude',
+          duration: 1000,
+          filesChanged: 0,
+          createdAt: '2026-04-23T11:50:00.000Z',
+        },
+      }),
+    ).not.toThrow();
+
+    expect(ctx.qualityScoreRepo.get(POD_ID)?.score).toBe(100);
   });
 });
