@@ -11,6 +11,10 @@ import { memoryList } from './tools/memory-list.js';
 import { memoryRead } from './tools/memory-read.js';
 import { memorySearch } from './tools/memory-search.js';
 import { memorySuggest } from './tools/memory-suggest.js';
+import {
+  consumeOperatorMessages,
+  stringifyOperatorInterruption,
+} from './tools/operator-message-interlock.js';
 import { preSubmitReview } from './tools/pre-submit-review.js';
 import { reportBlocker } from './tools/report-blocker.js';
 import { reportPlan } from './tools/report-plan.js';
@@ -67,6 +71,12 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       domain: z.string().optional().describe('Domain area (e.g., "security", "performance")'),
     },
     async (input) => {
+      const interruption = consumeOperatorMessages(podId, 'ask_ai', bridge);
+      if (interruption) {
+        return {
+          content: [{ type: 'text' as const, text: stringifyOperatorInterruption(interruption) }],
+        };
+      }
       const response = await askAi(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
@@ -243,6 +253,12 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         ),
     },
     async (input) => {
+      const interruption = consumeOperatorMessages(podId, 'report_task_summary', bridge);
+      if (interruption) {
+        return {
+          content: [{ type: 'text' as const, text: stringifyOperatorInterruption(interruption) }],
+        };
+      }
       const response = await reportTaskSummary(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
@@ -298,6 +314,12 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         .describe('Preview of the `deviations` array you intend to disclose. Optional.'),
     },
     async (input) => {
+      const interruption = consumeOperatorMessages(podId, 'pre_submit_review', bridge);
+      if (interruption) {
+        return {
+          content: [{ type: 'text' as const, text: stringifyOperatorInterruption(interruption) }],
+        };
+      }
       const response = await preSubmitReview(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
@@ -337,6 +359,12 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         ),
     },
     async (input) => {
+      const interruption = consumeOperatorMessages(podId, 'validate_in_browser', bridge);
+      if (interruption) {
+        return {
+          content: [{ type: 'text' as const, text: stringifyOperatorInterruption(interruption) }],
+        };
+      }
       const response = await validateInBrowser(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },

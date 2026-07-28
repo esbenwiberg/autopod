@@ -461,6 +461,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       return nudgeRepo.consumeNext(podId);
     },
 
+    consumeMessageBatch(podId: string): string[] {
+      podManager.touchHeartbeat(podId);
+      return nudgeRepo.consumePending(podId);
+    },
+
     actionRequiresApproval(podId: string, actionName: string): boolean {
       const pod = podManager.getSession(podId);
       const profile = profileStore.get(pod.profileName);
