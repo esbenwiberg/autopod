@@ -9059,26 +9059,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       events: AsyncIterable<AgentEvent>,
       attempt = 0,
     ): Promise<AgentRunOutcome> {
-      const attemptPod = podRepo.getOrThrow(podId);
-      let attemptProfile = profileStore.get(attemptPod.profileName);
-      const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
-      if (
-        activeAttempt?.providerAccountId &&
-        activeAttempt.providerAccountId !== attemptProfile.providerAccountId
-      ) {
-        attemptProfile = profileForProviderTarget(attemptProfile, {
-          providerAccountId: activeAttempt.providerAccountId,
-          runtime: activeAttempt.runtime,
-          model: activeAttempt.model,
-        });
-      }
-      ensureProviderAttempt(attemptPod, attemptProfile);
-      // Legacy/injected managers without the ledger retain the historical empty-stream
-      // completion behavior. Production always injects the ledger and fails closed.
-      let outcome: AgentRunOutcome = deps.providerAttemptRepo ? 'failed' : 'completed';
-      let terminalClassification: ProviderFailureClassification | null = null;
-      const seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
-      startCommitPolling(podId);
       const runToken = Symbol(podId);
       let resolveRunSettled: () => void = () => {};
       const runSettled = new Promise<void>((resolve) => {
@@ -9086,6 +9066,41 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       });
       activeAgentRuns.set(podId, { token: runToken, settled: runSettled });
       activeAgentRunResolvers.set(podId, { token: runToken, resolve: resolveRunSettled });
+      const settleActiveRun = (): void => {
+        const activeResolver = activeAgentRunResolvers.get(podId);
+        if (activeResolver?.token !== runToken) return;
+        activeResolver.resolve();
+        activeAgentRunResolvers.delete(podId);
+        activeAgentRuns.delete(podId);
+      };
+      let attemptPod: Pod;
+      let attemptProfile: Profile;
+      let seenCompleteEvents: Set<string>;
+      try {
+        attemptPod = podRepo.getOrThrow(podId);
+        attemptProfile = profileStore.get(attemptPod.profileName);
+        const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
+        if (
+          activeAttempt?.providerAccountId &&
+          activeAttempt.providerAccountId !== attemptProfile.providerAccountId
+        ) {
+          attemptProfile = profileForProviderTarget(attemptProfile, {
+            providerAccountId: activeAttempt.providerAccountId,
+            runtime: activeAttempt.runtime,
+            model: activeAttempt.model,
+          });
+        }
+        ensureProviderAttempt(attemptPod, attemptProfile);
+        seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
+        startCommitPolling(podId);
+      } catch (err) {
+        settleActiveRun();
+        throw err;
+      }
+      // Legacy/injected managers without the ledger retain the historical empty-stream
+      // completion behavior. Production always injects the ledger and fails closed.
+      let outcome: AgentRunOutcome = deps.providerAttemptRepo ? 'failed' : 'completed';
+      let terminalClassification: ProviderFailureClassification | null = null;
       try {
         for await (const event of events) {
           if (pauseIntents.has(podId)) {
@@ -9391,12 +9406,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           } finally {
             stopCommitPolling(podId);
             lastEventWriteAt.delete(podId);
-            const activeResolver = activeAgentRunResolvers.get(podId);
-            if (activeResolver?.token === runToken) {
-              activeResolver.resolve();
-              activeAgentRunResolvers.delete(podId);
-              activeAgentRuns.delete(podId);
-            }
+            settleActiveRun();
           }
         }
       }
