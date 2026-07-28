@@ -25,6 +25,27 @@ public enum ProviderFailoverTargetEligibility {
     }
 }
 
+enum ProviderFailoverModelSelection {
+    static func options(runtime: String, currentValue: String) -> [RuntimeModelOption] {
+        guard let runtime = RuntimeType(rawValue: runtime) else { return [] }
+        return RuntimeModelOptions.options(
+            for: runtime,
+            role: .defaultModel,
+            currentValue: currentValue
+        )
+    }
+
+    static func normalized(_ model: String, changingTo runtime: String) -> String {
+        guard let runtime = RuntimeType(rawValue: runtime) else { return model }
+        return RuntimeModelOptions.normalized(model, for: runtime, role: .defaultModel)
+    }
+
+    static func defaultModel(for runtime: String) -> String {
+        guard let runtime = RuntimeType(rawValue: runtime) else { return "" }
+        return RuntimeModelOptions.fallback(for: runtime, role: .defaultModel)
+    }
+}
+
 public func validateProviderFailoverPolicy(
     _ policy: ProviderFailoverPolicyResponse,
     accounts: [PublicProviderAccountResponse],
@@ -179,6 +200,10 @@ public struct ProviderFailoverEditor: View {
                 guard let account = accounts.first(where: { $0.id == accountId }),
                       let runtime = compatibleRuntimes(for: account).first else { return }
                 policy.targets[index].runtime = runtime
+                policy.targets[index].model = ProviderFailoverModelSelection.normalized(
+                    policy.targets[index].model,
+                    changingTo: runtime
+                )
             }
 
             Picker("Runtime", selection: targetBinding(index, \.runtime)) {
@@ -192,10 +217,21 @@ public struct ProviderFailoverEditor: View {
             .labelsHidden()
             .frame(width: 90)
             .disabled(runtimeOptions(for: target).count < 2)
+            .onChange(of: policy.targets[index].runtime) { _, runtime in
+                policy.targets[index].model = ProviderFailoverModelSelection.normalized(
+                    policy.targets[index].model,
+                    changingTo: runtime
+                )
+            }
 
-            TextField("Model", text: targetBinding(index, \.model))
-                .textFieldStyle(.roundedBorder)
-                .frame(minWidth: 130)
+            Picker("Model", selection: targetBinding(index, \.model)) {
+                ForEach(modelOptions(for: target), id: \.value) { option in
+                    Text(option.label).tag(option.value)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(minWidth: 130)
 
             Button { move(index, by: -1) } label: {
                 Image(systemName: "arrow.up")
@@ -250,7 +286,7 @@ public struct ProviderFailoverEditor: View {
             ProviderFailoverTargetResponse(
                 providerAccountId: account.id,
                 runtime: runtime,
-                model: defaultModel(for: account.provider)
+                model: ProviderFailoverModelSelection.defaultModel(for: runtime)
             )
         )
     }
@@ -298,11 +334,13 @@ public struct ProviderFailoverEditor: View {
         return options.contains(target.runtime) ? options : [target.runtime] + options
     }
 
-    private func defaultModel(for provider: String) -> String {
-        switch provider {
-        case "copilot": return "auto"
-        default: return ""
-        }
+    private func modelOptions(
+        for target: ProviderFailoverTargetResponse
+    ) -> [RuntimeModelOption] {
+        ProviderFailoverModelSelection.options(
+            runtime: target.runtime,
+            currentValue: target.model
+        )
     }
 
     private func providerLabel(_ provider: String) -> String {

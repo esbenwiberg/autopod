@@ -79,6 +79,44 @@ private func failoverAccount(
     #expect(ProviderFailoverTargetEligibility.compatibleRuntimes(for: foundry).isEmpty)
 }
 
+@Test func failoverModelOptionsUseRuntimeCatalogAndPreserveCompatibleCurrentValue() {
+    let codexOptions = ProviderFailoverModelSelection.options(
+        runtime: "codex",
+        currentValue: "gpt-5.6-sol"
+    )
+    #expect(
+        codexOptions.contains {
+            $0.value == "gpt-5.6-sol" && $0.label == "GPT-5.6 Sol"
+        }
+    )
+
+    let compatibleUnknown = ProviderFailoverModelSelection.options(
+        runtime: "codex",
+        currentValue: "future-codex-model"
+    )
+    #expect(
+        compatibleUnknown.contains {
+            $0.value == "future-codex-model" && $0.label == "future-codex-model"
+        }
+    )
+}
+
+@Test func failoverModelSelectionDefaultsAndNormalizesWhenRuntimeChanges() {
+    #expect(ProviderFailoverModelSelection.defaultModel(for: "codex") == "auto")
+    #expect(
+        ProviderFailoverModelSelection.normalized(
+            "claude-opus-5",
+            changingTo: "codex"
+        ) == "auto"
+    )
+    #expect(
+        ProviderFailoverModelSelection.normalized(
+            "gpt-5.6-sol",
+            changingTo: "codex"
+        ) == "gpt-5.6-sol"
+    )
+}
+
 @Test func failoverValidationAcceptsCompleteOrderedTargets() throws {
     let accounts = [
         try failoverAccount(id: "openai", provider: "openai"),
