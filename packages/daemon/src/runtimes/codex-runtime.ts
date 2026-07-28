@@ -99,7 +99,7 @@ export class CodexRuntime implements Runtime {
   readonly type = 'codex' as const;
 
   private handles = new Map<string, StreamingExecResult>();
-  private intentionalSuspensions = new Set<string>();
+  private intentionalSuspensions = new WeakSet<StreamingExecResult>();
   private suspensionSignals = new Map<string, () => void>();
   /** Maps autopod podId → Codex session ID for in-memory resume shortcut. */
   readonly codexSessionIds = new Map<string, string>();
@@ -367,7 +367,7 @@ export class CodexRuntime implements Runtime {
       });
       return;
     }
-    this.intentionalSuspensions.add(podId);
+    this.intentionalSuspensions.add(handle);
     this.suspensionSignals.get(podId)?.();
 
     this.logger.info({
@@ -732,7 +732,7 @@ export class CodexRuntime implements Runtime {
     handle: StreamingExecResult,
     outputState: OutputState,
   ): Promise<AgentEvent | null> {
-    if (this.intentionalSuspensions.delete(podId)) {
+    if (this.intentionalSuspensions.delete(handle)) {
       this.logger.info(
         { component: 'codex-runtime', podId },
         'Suppressing terminal exit classification after intentional suspension',
