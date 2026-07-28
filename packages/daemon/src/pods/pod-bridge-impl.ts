@@ -929,6 +929,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         );
       }
 
+      const reviewerExecEnv = containerManager
+        ? await podManager.getReviewerExecEnv(pod)
+        : undefined;
+      const reviewerContainerManager = containerManager
+        ? withReviewerExecEnv(containerManager, reviewerExecEnv)
+        : undefined;
+
       if (
         diff.trim() &&
         providerAttemptRepo &&
@@ -949,13 +956,6 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           linesRemoved: scope.linesRemoved,
         };
       }
-
-      const reviewerExecEnv = containerManager
-        ? await podManager.getReviewerExecEnv(pod)
-        : undefined;
-      const reviewerContainerManager = containerManager
-        ? withReviewerExecEnv(containerManager, reviewerExecEnv)
-        : undefined;
 
       const result = await runPreSubmitReview(
         {
