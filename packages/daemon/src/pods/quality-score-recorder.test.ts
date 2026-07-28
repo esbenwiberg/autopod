@@ -407,9 +407,10 @@ describe('QualityScoreRecorder', () => {
       },
     });
     const originalComputedAt = ctx.qualityScoreRepo.get(POD_ID)?.computedAt;
+    expect(originalComputedAt).toBeDefined();
     ctx.db
       .prepare('UPDATE pods SET readiness_review = ? WHERE id = ?')
-      .run(JSON.stringify({ computedAt: '2026-04-23T11:59:00.000Z' }), POD_ID);
+      .run(JSON.stringify({ computedAt: originalComputedAt }), POD_ID);
     refresh.mockClear();
 
     expect(ctx.recorder.upgradeHistory()).toEqual({

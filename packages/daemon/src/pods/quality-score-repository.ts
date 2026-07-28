@@ -270,7 +270,7 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
              projected.algorithm_version <> @algorithmVersion
              OR (
                p.readiness_review IS NOT NULL
-               AND projected.computed_at > json_extract(p.readiness_review, '$.computedAt')
+               AND projected.computed_at >= json_extract(p.readiness_review, '$.computedAt')
              )
            )
              AND (@afterPodId IS NULL OR projected.pod_id > @afterPodId)
