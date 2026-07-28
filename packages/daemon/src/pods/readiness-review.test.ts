@@ -410,6 +410,21 @@ describe('deriveReadinessReview', () => {
       ]),
     );
   });
+
+  it('preserves approval metadata when recomputing a stored snapshot', () => {
+    const approval = {
+      approvedAt: '2026-06-07T00:01:00.000Z',
+      statusAtApproval: 'ready' as const,
+      scope: 'pod' as const,
+      reason: 'Reviewed before completion',
+    };
+    const result = review({
+      pod: pod({ readinessReview: { ...review(), approval } }),
+      qualityScore: 95,
+    });
+
+    expect(result.approval).toEqual(approval);
+  });
 });
 
 describe('deriveSeriesReadiness', () => {

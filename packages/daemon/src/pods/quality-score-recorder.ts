@@ -30,6 +30,8 @@ export interface QualityScoreRecorderDeps {
   /** Optional — when wired, validation outcome is included in the score. */
   validationRepo?: ValidationRepository;
   providerAttemptRepo?: ProviderAttemptRepository;
+  /** Recompute dependent snapshots after the score row is durably persisted. */
+  onScorePersisted?: (podId: string) => boolean | void;
 }
 
 /**
@@ -46,16 +48,26 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
     qualityScoreRepo,
     validationRepo,
     providerAttemptRepo,
+    onScorePersisted,
     logger,
   } = deps;
   const unsubscribers: Array<() => void> = [];
+
+  function refreshAfterPersistence(podId: string): boolean {
+    try {
+      return onScorePersisted?.(podId) !== false;
+    } catch (err) {
+      logger.warn({ err, podId }, 'Failed to refresh readiness after quality score persistence');
+      return false;
+    }
+  }
 
   function persistScore(
     podId: string,
     finalStatus: 'complete' | 'killed',
     completedAt: string,
     options: { historical?: boolean } = {},
-  ): void {
+  ): boolean {
     const pod = podRepo.getOrThrow(podId);
     const signals = computeQualitySignals(podId, {
       podRepo,
@@ -109,6 +121,8 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
       computedAt: new Date().toISOString(),
     });
 
+    const readinessRefreshed = refreshAfterPersistence(podId);
+
     logger.debug(
       {
         podId,
@@ -123,6 +137,7 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
       },
       'Recorded pod quality score',
     );
+    return readinessRefreshed;
   }
 
   function recordFor(event: PodCompletedEvent): void {
@@ -140,12 +155,17 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
 
   return {
     upgradeHistory(limit = 100, afterPodId?: string) {
-      const stale = qualityScoreRepo.listStale(limit, afterPodId);
+      const stale = qualityScoreRepo.listUpgradeCandidates(limit, afterPodId);
       let upgraded = 0;
       for (const score of stale) {
         try {
-          persistScore(score.podId, score.finalStatus, score.completedAt, { historical: true });
-          upgraded += 1;
+          const readinessRefreshed =
+            score.algorithmVersion === QUALITY_SCORE_ALGORITHM_VERSION
+              ? refreshAfterPersistence(score.podId)
+              : persistScore(score.podId, score.finalStatus, score.completedAt, {
+                  historical: true,
+                });
+          if (readinessRefreshed) upgraded += 1;
         } catch (err) {
           logger.warn({ err, podId: score.podId }, 'Failed to upgrade pod quality score');
         }
