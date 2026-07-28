@@ -878,6 +878,21 @@ describe('PodManager', () => {
       '/home/autopod/.codex/auth.json',
       '{"token":"stale"}',
     );
+    ctx.podRepo.update(pod.id, { status: 'running' });
+    await manager.triggerValidation(pod.id);
+    expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewerProvider: 'openai',
+        reviewerModel: 'auto',
+        reviewerProviderCredentials: expect.objectContaining({
+          provider: 'openai',
+          authJson: '{"token":"current"}',
+        }),
+      }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+      expect.any(Object),
+    );
 
     const legacyPod = manager.createSession(
       { profileName: 'test-profile', task: 'Legacy review' },

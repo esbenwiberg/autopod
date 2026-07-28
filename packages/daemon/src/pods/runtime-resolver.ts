@@ -107,7 +107,16 @@ export function resolveEffectiveReviewerProfile(
   pod: Pick<Pod, 'profileSnapshot'>,
   storedProfile: Profile,
 ): Profile {
-  return pod.profileSnapshot ?? storedProfile;
+  const snapshot = pod.profileSnapshot;
+  if (!snapshot) return storedProfile;
+  return {
+    ...storedProfile,
+    modelProvider: snapshot.modelProvider,
+    providerAccountId: snapshot.providerAccountId,
+    defaultRuntime: snapshot.defaultRuntime,
+    defaultModel: snapshot.defaultModel,
+    reviewerModel: snapshot.reviewerModel,
+  };
 }
 
 export function resolveReviewerModel(profile: Profile, logger?: Logger): string {

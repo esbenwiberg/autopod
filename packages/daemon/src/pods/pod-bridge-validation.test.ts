@@ -19,6 +19,7 @@ vi.mock('../providers/llm-client.js', () => ({
 import { createProfileAnthropicClient } from '../providers/llm-client.js';
 import { runPreSubmitReview } from '../validation/pre-submit-review.js';
 import { runCodexReview } from '../validation/review-codex-runner.js';
+import { resolveEffectiveReviewerProfile } from './runtime-resolver.js';
 
 const mockRunPreSubmitReview = vi.mocked(runPreSubmitReview);
 const mockRunCodexReview = vi.mocked(runCodexReview);
@@ -868,18 +869,32 @@ describe('PodBridge.runPreSubmitReview', () => {
       linesAdded: 1,
       linesRemoved: 0,
     };
+    const sourceProfile = {
+      name: 'proj',
+      modelProvider: 'max' as const,
+      defaultRuntime: 'claude' as const,
+      defaultModel: 'claude-sonnet-5',
+      reviewerModel: 'claude-sonnet-5',
+      defaultBranch: 'changed-after-provisioning',
+    };
+    const effectiveProfile = resolveEffectiveReviewerProfile(
+      {
+        profileSnapshot: {
+          ...sourceProfile,
+          modelProvider: 'openai',
+          providerAccountId: 'fallback-openai',
+          defaultRuntime: 'codex',
+          defaultModel: 'gpt-5.6-sol',
+          defaultBranch: 'main',
+        },
+      },
+      sourceProfile,
+    );
     const { bridge, podId } = buildBridgeWithWorktree({
       containerDiff: SAMPLE_DIFF,
       reviewerExecEnv: { OPENAI_API_KEY_FILE: '/run/autopod/openai-api-key' },
       reviewerConfig: {
-        profile: {
-          name: 'proj',
-          modelProvider: 'openai',
-          defaultRuntime: 'codex',
-          defaultModel: 'gpt-5.6-sol',
-          reviewerModel: 'claude-sonnet-5',
-          defaultBranch: 'main',
-        },
+        profile: effectiveProfile,
         credentials: fallbackCredentials,
       },
       runResult,
@@ -894,6 +909,10 @@ describe('PodBridge.runPreSubmitReview', () => {
         reviewerProviderCredentials: fallbackCredentials,
       }),
       logger,
+    );
+    expect(effectiveProfile.defaultBranch).toBe('changed-after-provisioning');
+    expect(resolveEffectiveReviewerProfile({ profileSnapshot: null }, sourceProfile)).toEqual(
+      sourceProfile,
     );
   });
 
