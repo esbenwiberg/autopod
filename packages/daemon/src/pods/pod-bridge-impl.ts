@@ -812,13 +812,8 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     ): Promise<PreSubmitReviewToolResult> {
       podManager.touchHeartbeat(podId);
       const pod = podManager.getSession(podId);
-      const { profile, credentials: reviewerProviderCredentials } = podManager.getReviewerConfig?.(
-        pod,
-      ) ?? {
-        profile: resolveEffectiveReviewerProfile(pod, profileStore.get(pod.profileName)),
-        credentials: profileStore.get(pod.profileSnapshot?.name ?? pod.profileName)
-          .providerCredentials,
-      };
+      const { profile, credentials: reviewerProviderCredentials } =
+        podManager.getReviewerConfig(pod);
       const reviewerModel = resolveReviewerModel(profile, logger);
       const reviewerProvider = resolveReviewerProvider(profile);
       const defaultBranch = profile.defaultBranch ?? 'main';

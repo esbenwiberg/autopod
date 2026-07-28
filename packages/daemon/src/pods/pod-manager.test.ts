@@ -861,7 +861,7 @@ describe('PodManager', () => {
       )
       .run(pod.id);
 
-    const fallbackConfig = manager.getReviewerConfig?.(ctx.podRepo.getOrThrow(pod.id));
+    const fallbackConfig = manager.getReviewerConfig(ctx.podRepo.getOrThrow(pod.id));
     expect(fallbackConfig).toMatchObject({
       profile: { modelProvider: 'openai', defaultRuntime: 'codex' },
       credentials: { provider: 'openai', authJson: '{"token":"current"}' },
@@ -883,7 +883,7 @@ describe('PodManager', () => {
       { profileName: 'test-profile', task: 'Legacy review' },
       'user-1',
     );
-    expect(manager.getReviewerConfig?.(legacyPod)?.profile).toEqual(sourceProfile);
+    expect(manager.getReviewerConfig(legacyPod).profile).toEqual(sourceProfile);
   });
 
   it('passes auto reasoning effort to a fresh runtime spawn', async () => {

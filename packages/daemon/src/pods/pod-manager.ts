@@ -1351,7 +1351,7 @@ export interface PodManager {
   sendMessage(podId: string, message: string): Promise<void>;
   notifyEscalation(podId: string, escalation: EscalationRequest): void;
   touchHeartbeat(podId: string): void;
-  getReviewerConfig?(pod: Pod): { profile: Profile; credentials: ProviderCredentials | null };
+  getReviewerConfig(pod: Pod): { profile: Profile; credentials: ProviderCredentials | null };
   getReviewerExecEnv(pod: Pod): Promise<Record<string, string> | undefined>;
   approveSession(podId: string, options?: ApproveSessionOptions): Promise<void>;
   rejectSession(podId: string, reason?: string): Promise<void>;

@@ -77,6 +77,7 @@ function buildBridge(opts: BuildOpts = {}): {
       ...(opts.profileOverrides ?? {}),
     }),
   } as unknown as Deps['profileStore'];
+  const reviewerProfile = profileStore.get('proj');
 
   const touchHeartbeat = vi.fn();
   const podManager = {
@@ -87,6 +88,10 @@ function buildBridge(opts: BuildOpts = {}): {
       executionTarget: opts.executionTarget ?? 'local',
     })),
     touchHeartbeat,
+    getReviewerConfig: vi.fn().mockReturnValue({
+      profile: reviewerProfile,
+      credentials: reviewerProfile.providerCredentials ?? null,
+    }),
     getReviewerExecEnv: vi.fn().mockResolvedValue(opts.reviewerExecEnv),
   } as unknown as Deps['podManager'];
 
@@ -759,9 +764,17 @@ describe('PodBridge.runPreSubmitReview', () => {
         preSubmitReview: opts.cachedVerdict ?? null,
       })),
       touchHeartbeat: vi.fn(),
-      getReviewerConfig: opts.reviewerConfig
-        ? vi.fn().mockReturnValue(opts.reviewerConfig)
-        : undefined,
+      getReviewerConfig: vi.fn().mockReturnValue(
+        opts.reviewerConfig ?? {
+          profile: {
+            name: 'proj',
+            reviewerModel: 'sonnet',
+            defaultModel: 'opus',
+            defaultBranch: 'main',
+          },
+          credentials: null,
+        },
+      ),
       getReviewerExecEnv: vi.fn().mockResolvedValue(opts.reviewerExecEnv),
     } as unknown as Deps['podManager'];
 
