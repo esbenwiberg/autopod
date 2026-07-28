@@ -1932,6 +1932,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       .find((attempt) => attempt.ordinal === active.ordinal - 1);
     const isUnstartedProviderContinuation =
       active.nativeSessionId === null &&
+      active.inputTokens === 0 &&
+      active.outputTokens === 0 &&
+      active.costUsd === 0 &&
       preceding?.handoffReference === PROVIDER_FAILOVER_HANDOFF_PATH;
     if (isUnstartedProviderContinuation) return false;
 
