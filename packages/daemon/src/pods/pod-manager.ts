@@ -296,9 +296,12 @@ const REWORK_IN_PROGRESS_PREFIX = '[REWORK IN PROGRESS]';
 function sanitizeSecurityReworkValue(value: string | undefined, fallback: string): string {
   const normalized = value?.replace(/\s+/g, ' ').trim().slice(0, 400);
   if (!normalized) return fallback;
-  const sanitized = processContent(normalized, {
+  const processed = processContent(normalized, {
+    quarantine: { enabled: true },
     sanitization: { preset: 'standard' },
-  }).text.trim();
+  });
+  if (processed.quarantined) return fallback;
+  const sanitized = processed.text.trim();
   return sanitized || fallback;
 }
 
