@@ -99,6 +99,17 @@ private func failoverAccount(
             $0.value == "future-codex-model" && $0.label == "future-codex-model"
         }
     )
+
+    let legacyClaude = ProviderFailoverModelSelection.options(
+        runtime: "claude",
+        currentValue: "opus"
+    )
+    #expect(
+        legacyClaude.contains {
+            $0.value == "opus" && $0.label == "Opus 4.8"
+        }
+    )
+    #expect(!legacyClaude.contains { $0.value == "claude-opus-4-8" })
 }
 
 @Test func failoverModelSelectionDefaultsAndNormalizesWhenRuntimeChanges() {

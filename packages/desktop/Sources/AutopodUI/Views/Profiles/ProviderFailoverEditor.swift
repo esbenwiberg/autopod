@@ -28,11 +28,24 @@ public enum ProviderFailoverTargetEligibility {
 enum ProviderFailoverModelSelection {
     static func options(runtime: String, currentValue: String) -> [RuntimeModelOption] {
         guard let runtime = RuntimeType(rawValue: runtime) else { return [] }
-        return RuntimeModelOptions.options(
+        var options = RuntimeModelOptions.options(
             for: runtime,
             role: .defaultModel,
             currentValue: currentValue
         )
+        guard !currentValue.isEmpty,
+              RuntimeModelOptions.isCompatible(currentValue, with: runtime),
+              !options.contains(where: { $0.value == currentValue })
+        else {
+            return options
+        }
+
+        let canonicalValue = ClaudeModelCanonicalizer.normalizedLegacyAlias(currentValue)
+        guard let index = options.firstIndex(where: { $0.value == canonicalValue }) else {
+            return options
+        }
+        options[index] = RuntimeModelOption(value: currentValue, label: options[index].label)
+        return options
     }
 
     static func normalized(_ model: String, changingTo runtime: String) -> String {
