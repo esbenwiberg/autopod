@@ -163,12 +163,50 @@ async function runClaudeContainerReview(
 
     return parseClaudeCliStdout(result.stdout, 'json');
   } catch (err) {
+    if (err instanceof ContainerReviewerUnavailableError && err.kind === 'timeout') {
+      const stagedDiagnostic = await readBoundedDiagnostic(
+        config.containerManager,
+        config.containerId,
+        logPath,
+      );
+      if (!stagedDiagnostic) throw err;
+      throw new ContainerReviewerUnavailableError(
+        `Container reviewer timed out after ${config.timeout}ms: ${stagedDiagnostic}`,
+        {
+          cause: err,
+          kind: 'timeout',
+          stderr: stagedDiagnostic,
+        },
+      );
+    }
     if (err instanceof ContainerReviewerUnavailableError) throw err;
     const message = err instanceof Error ? err.message : String(err);
     throw new ContainerReviewerUnavailableError(
       `Container reviewer unavailable: claude CLI failed in pod container: ${message}`,
       { cause: err },
     );
+  } finally {
+    try {
+      await config.containerManager.execInContainer(
+        config.containerId,
+        ['rm', '-f', promptPath, outputPath, logPath],
+        { timeout: 5_000 },
+      );
+    } catch {
+      // Best-effort cleanup after the review process has exited or been killed.
+    }
+  }
+}
+
+async function readBoundedDiagnostic(
+  containerManager: ContainerManager,
+  containerId: string,
+  logPath: string,
+): Promise<string> {
+  try {
+    return appendBounded('', await containerManager.readFile(containerId, logPath));
+  } catch {
+    return '';
   }
 }
 

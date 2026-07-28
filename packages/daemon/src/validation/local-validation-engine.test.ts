@@ -2185,7 +2185,7 @@ describe('validate() — facts + review gate', () => {
       expect.stringContaining('/tmp/autopod-claude-review-pod-test-'),
       expect.stringContaining('performing an independent code review'),
     );
-    expect(execInContainer).toHaveBeenCalledTimes(2);
+    expect(execInContainer).toHaveBeenCalledTimes(3);
     expect(execInContainer.mock.calls[1]?.[0]).toBe('container-test');
     expect(execInContainer.mock.calls[1]?.[1].join(' ')).toContain('/run/autopod/agent-shim.sh');
     expect(execInContainer.mock.calls[1]?.[2]).toMatchObject({

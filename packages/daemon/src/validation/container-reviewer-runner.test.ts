@@ -45,6 +45,7 @@ function containerManager(
   });
   return {
     writeFile: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn().mockResolvedValue(''),
     execInContainer: vi.fn().mockResolvedValue(execResult),
     execStreaming,
     supportsStreamingExec: true,
@@ -151,7 +152,11 @@ describe('runContainerReviewer', () => {
     expect((cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
       '--output-format json',
     );
-    expect(cm.execInContainer).not.toHaveBeenCalled();
+    expect(cm.execInContainer).not.toHaveBeenCalledWith(
+      'container-abc',
+      ['sh', '-c', expect.any(String)],
+      expect.any(Object),
+    );
     expect(mockRunCodexReview).not.toHaveBeenCalled();
   });
 
@@ -226,6 +231,9 @@ describe('runContainerReviewer', () => {
         stderr.end();
       });
       const cm = containerManager();
+      vi.mocked(cm.readFile).mockResolvedValue(
+        `${'staged-'.repeat(1_000)}bounded staged diagnostic`,
+      );
       vi.mocked(cm.execStreaming).mockResolvedValue({
         stdout,
         stderr,
@@ -250,13 +258,22 @@ describe('runContainerReviewer', () => {
       expect(error).toMatchObject({
         name: 'ContainerReviewerUnavailableError',
         kind: 'timeout',
-        stderr: 'bounded diagnostic',
+        stderr: expect.stringContaining('bounded staged diagnostic'),
       });
       expect(error).toBeInstanceOf(ContainerReviewerUnavailableError);
       expect((error as Error).message).toMatch(/timed out after 90000ms/);
       expect((error as Error).message).not.toMatch(/x{4001}/);
+      expect((error as Error).message.length).toBeLessThan(4_100);
       expect(kill).toHaveBeenCalledOnce();
-      expect(cm.execInContainer).not.toHaveBeenCalled();
+      expect(cm.execInContainer).not.toHaveBeenCalledWith(
+        'container-abc',
+        ['sh', '-c', expect.any(String)],
+        expect.any(Object),
+      );
+      expect(cm.readFile).toHaveBeenCalledWith(
+        'container-abc',
+        expect.stringContaining('/tmp/autopod-claude-review-tame-dingo-'),
+      );
       expect(vi.mocked(cm.execStreaming).mock.calls[0]?.[1]).not.toContain(
         'Review without leaking this prompt into argv',
       );
