@@ -8051,6 +8051,53 @@ describe('PodManager', () => {
       );
     });
 
+    it('fails closed when a forced rework binding has no matching provider attempt', async () => {
+      const ctx = createTestContext(undefined, {
+        modelProvider: 'max',
+        defaultRuntime: 'claude',
+        defaultModel: 'claude-sonnet-5',
+      });
+      ctx.deps.providerAttemptRepo = createProviderAttemptRepository(ctx.db);
+      insertProviderAccount(ctx.db, 'anth-pro', 'max', {
+        provider: 'max',
+        authMode: 'setup-token',
+        oauthToken: 'primary-max-token',
+      });
+      insertProviderAccount(ctx.db, 'openai-private', 'openai', {
+        provider: 'openai',
+        authMode: 'chatgpt',
+        authJson: '{"token":"target-openai-token"}',
+      });
+      linkProfileToProviderAccount(ctx.db, 'test-profile', 'anth-pro');
+      ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Reject an unproven failover binding' },
+        'user-1',
+      );
+      ctx.enqueuedSessions.length = 0;
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'target-container',
+        worktreePath: '/tmp/worktrees/unproven-failover-rework',
+        runtime: 'codex',
+        model: 'gpt-5.6-sol',
+      });
+      ctx.db
+        .prepare(
+          `UPDATE pods
+           SET provider_account_id_snapshot = 'openai-private', provider_id_snapshot = 'openai'
+           WHERE id = ?`,
+        )
+        .run(pod.id);
+
+      await expect(manager.triggerValidation(pod.id, { force: true })).rejects.toMatchObject({
+        code: 'INVALID_PROVIDER_TARGET',
+      });
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.enqueuedSessions).not.toContain(pod.id);
+    });
+
     it('allows re-validation from killed state and resets attempt counter', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);

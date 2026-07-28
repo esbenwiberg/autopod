@@ -2116,7 +2116,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             attempt.model === pod.model &&
             (pod.providerIdSnapshot === null || attempt.provider === pod.providerIdSnapshot),
         );
-    if (!boundAttempt?.providerAccountId) return profile;
+    if (!boundAttempt?.providerAccountId) {
+      const hasUnreconciledBinding =
+        (pod.providerAccountIdSnapshot !== null &&
+          pod.providerAccountIdSnapshot !== profile.providerAccountId) ||
+        (pod.providerIdSnapshot !== null &&
+          profile.modelProvider !== undefined &&
+          pod.providerIdSnapshot !== profile.modelProvider);
+      if (hasUnreconciledBinding) {
+        throw new AutopodError(
+          'Selected provider binding cannot be reconciled with provider attempt history',
+          'INVALID_PROVIDER_TARGET',
+          409,
+        );
+      }
+      return profile;
+    }
 
     const account = providerAccountStore?.get(boundAttempt.providerAccountId);
     if (!account || account.provider !== boundAttempt.provider) {
