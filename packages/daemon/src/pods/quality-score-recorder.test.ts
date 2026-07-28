@@ -383,6 +383,44 @@ describe('QualityScoreRecorder', () => {
     expect(refresh).toHaveBeenCalledWith(POD_ID);
   });
 
+  it('refreshes a stale readiness snapshot for a current quality row without recomputing it', () => {
+    const refresh = vi.fn<(podId: string) => void>();
+    ctx = setup(refresh);
+    ctx.podRepo.insert(basePod());
+    ctx.eventRepo.insert(readEvent('src/a.ts'));
+    ctx.recorder.start();
+    ctx.eventBus.emit({
+      type: 'pod.completed',
+      timestamp: '2026-04-23T12:00:00.000Z',
+      podId: POD_ID,
+      finalStatus: 'complete',
+      summary: {
+        id: POD_ID,
+        profileName: 'test-profile',
+        task: 'do the thing',
+        status: 'complete',
+        model: 'claude-opus-4-7',
+        runtime: 'claude',
+        duration: 1000,
+        filesChanged: 0,
+        createdAt: '2026-04-23T11:50:00.000Z',
+      },
+    });
+    const originalComputedAt = ctx.qualityScoreRepo.get(POD_ID)?.computedAt;
+    ctx.db
+      .prepare('UPDATE pods SET readiness_review = ? WHERE id = ?')
+      .run(JSON.stringify({ computedAt: '2026-04-23T11:59:00.000Z' }), POD_ID);
+    refresh.mockClear();
+
+    expect(ctx.recorder.upgradeHistory()).toEqual({
+      selected: 1,
+      upgraded: 1,
+      lastPodId: POD_ID,
+    });
+    expect(refresh).toHaveBeenCalledWith(POD_ID);
+    expect(ctx.qualityScoreRepo.get(POD_ID)?.computedAt).toBe(originalComputedAt);
+  });
+
   it('marks discarded historical Pi activity unavailable and upgrades in bounded batches', () => {
     ctx.podRepo.insert(basePod({ runtime: 'pi', model: 'pi-model' }));
     ctx.db

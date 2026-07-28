@@ -21,6 +21,7 @@ export interface QualityScoreRepository {
   get(podId: string): PodQualityScore | null;
   list(filters?: QualityScoreFilters): PodQualityScore[];
   listStale(limit: number, afterPodId?: string): PodQualityScore[];
+  listUpgradeCandidates(limit: number, afterPodId?: string): PodQualityScore[];
   getTrends(days?: number): QualityTrend[];
   getQualityAnalytics(days: number): QualityAnalyticsResponse;
 }
@@ -248,6 +249,30 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
         .prepare(
           `SELECT * FROM (${ATTEMPT_COMPATIBILITY_PROJECTION}) projected
            WHERE projected.algorithm_version <> @algorithmVersion
+             AND (@afterPodId IS NULL OR projected.pod_id > @afterPodId)
+           ORDER BY projected.pod_id ASC
+           LIMIT @limit`,
+        )
+        .all({
+          algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
+          afterPodId: afterPodId ?? null,
+          limit,
+        }) as Record<string, unknown>[];
+      return rows.map(rowToScore);
+    },
+
+    listUpgradeCandidates(limit: number, afterPodId?: string): PodQualityScore[] {
+      const rows = db
+        .prepare(
+          `SELECT projected.* FROM (${ATTEMPT_COMPATIBILITY_PROJECTION}) projected
+           JOIN pods p ON p.id = projected.pod_id
+           WHERE (
+             projected.algorithm_version <> @algorithmVersion
+             OR (
+               p.readiness_review IS NOT NULL
+               AND projected.computed_at > json_extract(p.readiness_review, '$.computedAt')
+             )
+           )
              AND (@afterPodId IS NULL OR projected.pod_id > @afterPodId)
            ORDER BY projected.pod_id ASC
            LIMIT @limit`,
