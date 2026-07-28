@@ -39,6 +39,7 @@ export interface ContainerReviewerRunnerConfig {
 const SHIM_PATH = '/run/autopod/agent-shim.sh';
 const MAX_DIAGNOSTIC_BYTES = 4_000;
 const MAX_REVIEW_OUTPUT_BYTES = 1_000_000;
+const TERMINATION_CONFIRM_TIMEOUT_MS = 5_000;
 
 export async function runContainerReviewer(
   config: ContainerReviewerRunnerConfig,
@@ -231,6 +232,7 @@ async function collectCancellableReview(
       void (async () => {
         try {
           await handle.kill();
+          await confirmTermination(handle.exitCode);
         } catch (cause) {
           reject(
             new ContainerReviewerUnavailableError(
@@ -262,6 +264,21 @@ async function collectCancellableReview(
 
   try {
     return await Promise.race([completed, timedOut]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function confirmTermination(exitCode: Promise<number>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const unconfirmed = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('remote reviewer exit was not observed after kill')),
+      TERMINATION_CONFIRM_TIMEOUT_MS,
+    );
+  });
+  try {
+    await Promise.race([exitCode, unconfirmed]);
   } finally {
     if (timer) clearTimeout(timer);
   }

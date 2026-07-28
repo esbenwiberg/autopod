@@ -226,9 +226,14 @@ describe('runContainerReviewer', () => {
     try {
       const stdout = new PassThrough();
       const stderr = new PassThrough();
+      let confirmExit: ((code: number) => void) | undefined;
+      const exitCode = new Promise<number>((resolve) => {
+        confirmExit = resolve;
+      });
       const kill = vi.fn().mockImplementation(async () => {
         stdout.end();
         stderr.end();
+        confirmExit?.(143);
       });
       const cm = containerManager();
       vi.mocked(cm.readFile).mockResolvedValue(
@@ -237,7 +242,7 @@ describe('runContainerReviewer', () => {
       vi.mocked(cm.execStreaming).mockResolvedValue({
         stdout,
         stderr,
-        exitCode: new Promise<number>(() => {}),
+        exitCode,
         kill,
       });
 
@@ -298,6 +303,30 @@ describe('runContainerReviewer', () => {
       }).catch((failure: unknown) => failure);
       await vi.advanceTimersByTimeAsync(90_000);
       await expect(failedCancellation).resolves.toMatchObject({
+        kind: 'termination-failed',
+        message: expect.stringContaining('remote termination could not be confirmed'),
+      });
+
+      const missingExit = containerManager();
+      const missingExitStdout = new PassThrough();
+      const missingExitStderr = new PassThrough();
+      vi.mocked(missingExit.execStreaming).mockResolvedValue({
+        stdout: missingExitStdout,
+        stderr: missingExitStderr,
+        exitCode: new Promise<number>(() => {}),
+        kill: vi.fn().mockResolvedValue(undefined),
+      });
+      const missingConfirmation = runContainerReviewer({
+        podId: 'tame-dingo',
+        containerId: 'container-abc',
+        containerManager: missingExit,
+        profile: profile({ modelProvider: 'max' }),
+        model: 'sonnet',
+        prompt: 'Review',
+        timeout: 90_000,
+      }).catch((failure: unknown) => failure);
+      await vi.advanceTimersByTimeAsync(95_000);
+      await expect(missingConfirmation).resolves.toMatchObject({
         kind: 'termination-failed',
         message: expect.stringContaining('remote termination could not be confirmed'),
       });
