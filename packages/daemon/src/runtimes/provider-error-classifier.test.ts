@@ -100,6 +100,22 @@ describe('classifyProviderError', () => {
   });
 
   it.each([
+    { code: 'authentication_error', category: 'auth' },
+    { code: 'service_unavailable', category: 'provider_unavailable' },
+    { code: 'rate_limit_exceeded', category: 'transient' },
+  ])(
+    'does not let code-free Claude quota text override $category evidence',
+    ({ code, category }) => {
+      expect(
+        classifyProviderError('claude', {
+          code,
+          message: "You've hit your session limit · resets 12:30pm (UTC)",
+        }),
+      ).toMatchObject({ category, definitive: false });
+    },
+  );
+
+  it.each([
     {
       runtime: 'claude' as const,
       code: 'billing_error',

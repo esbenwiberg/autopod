@@ -83,7 +83,9 @@ function classify(
   const quotaSignature =
     runtime === 'copilot'
       ? COPILOT_QUOTA_MESSAGES.some((pattern) => pattern.test(rawMessage.trim()))
-      : (runtime === 'claude' && CLAUDE_TERMINAL_SESSION_LIMIT.test(rawMessage.trim())) ||
+      : (runtime === 'claude' &&
+          code === null &&
+          CLAUDE_TERMINAL_SESSION_LIMIT.test(rawMessage.trim())) ||
         (code !== null &&
           STRUCTURED_QUOTA_SIGNATURES[runtime].some(
             (signature) => signature.code === code && signature.message.test(rawMessage.trim()),
