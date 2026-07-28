@@ -15,6 +15,12 @@ const quotaFixtures = [
     },
   },
   {
+    runtime: 'claude' as const,
+    evidence: {
+      message: "You've hit your session limit · resets 12:30pm (UTC)",
+    },
+  },
+  {
     runtime: 'codex' as const,
     evidence: {
       code: 'usage_limit_reached',
@@ -76,6 +82,36 @@ describe('classifyProviderError', () => {
           message: 'A newly formatted upstream failure',
         }),
       ).toMatchObject({ category: 'unknown', definitive: false });
+    },
+  );
+
+  it.each([
+    "You've hit your session limit · resets soon (UTC)",
+    "You've hit your session limit - resets 12:30pm (UTC)",
+    "You've hit your session limit · resets 12:30pm UTC",
+    "You've hit your session limit · resets 13:30pm (UTC)",
+    "You've hit your session limit · resets 12:60pm (UTC)",
+    "You've hit your session limit · resets 12:30pm (UTC).",
+  ])('fails closed for drifted Claude session-limit text: %s', (message) => {
+    expect(classifyProviderError('claude', { message })).toMatchObject({
+      category: 'unknown',
+      definitive: false,
+    });
+  });
+
+  it.each([
+    { code: 'authentication_error', category: 'auth' },
+    { code: 'service_unavailable', category: 'provider_unavailable' },
+    { code: 'rate_limit_exceeded', category: 'transient' },
+  ])(
+    'does not let code-free Claude quota text override $category evidence',
+    ({ code, category }) => {
+      expect(
+        classifyProviderError('claude', {
+          code,
+          message: "You've hit your session limit · resets 12:30pm (UTC)",
+        }),
+      ).toMatchObject({ category, definitive: false });
     },
   );
 
