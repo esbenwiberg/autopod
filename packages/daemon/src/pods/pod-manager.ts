@@ -293,7 +293,19 @@ function failedFactIds(result: ValidationResult | null): string[] {
 
 const REWORK_IN_PROGRESS_PREFIX = '[REWORK IN PROGRESS]';
 
-function buildManualReworkReason(pod: Pod): string {
+function sanitizeSecurityReworkValue(value: string | undefined, fallback: string): string {
+  const normalized = value?.replace(/\s+/g, ' ').trim().slice(0, 400);
+  if (!normalized) return fallback;
+  const sanitized = processContent(normalized, {
+    sanitization: { preset: 'standard' },
+  }).text.trim();
+  return sanitized || fallback;
+}
+
+function buildManualReworkReason(
+  pod: Pod,
+  blockedPushScan?: import('../security/index.js').StoredScan,
+): string {
   const fallback =
     pod.status === 'failed'
       ? 'Your previous attempt failed. Review what went wrong and try again.'
@@ -303,24 +315,43 @@ function buildManualReworkReason(pod: Pod): string {
           ? 'Your previous pod was killed. Start the task fresh.'
           : 'Your previous work needs revision. Review and improve it.';
 
-  if (!pod.lastValidationResult || pod.lastValidationResult.overall !== 'fail') {
-    return fallback;
+  if (pod.lastValidationResult?.overall === 'fail') {
+    const feedback = formatFeedback({
+      type: 'validation_failure',
+      result: pod.lastValidationResult,
+      task: pod.task,
+      attempt: pod.lastValidationResult.attempt ?? pod.validationAttempts,
+      maxAttempts: pod.maxValidationAttempts,
+    });
+
+    return [
+      pod.status === 'review_required'
+        ? 'Manual rework after validation attempts were exhausted. Fix the failed validation and review items below.'
+        : 'Manual rework after validation failure. Fix the failed validation and review items below.',
+      '',
+      feedback,
+    ].join('\n');
   }
 
-  const feedback = formatFeedback({
-    type: 'validation_failure',
-    result: pod.lastValidationResult,
-    task: pod.task,
-    attempt: pod.lastValidationResult.attempt ?? pod.validationAttempts,
-    maxAttempts: pod.maxValidationAttempts,
-  });
+  if (blockedPushScan?.decision !== 'block') return fallback;
 
   return [
-    pod.status === 'review_required'
-      ? 'Manual rework after validation attempts were exhausted. Fix the failed validation and review items below.'
-      : 'Manual rework after validation failure. Fix the failed validation and review items below.',
+    'Manual rework after the pre-push security scan blocked this pod.',
     '',
-    feedback,
+    'Inspect and fix the underlying code or fixture while preserving its intended behavior. Then let the normal pre-push security scan verify the remediation.',
+    'Do not bypass, disable, or suppress the scanner, and do not weaken security policy or tests merely to pass.',
+    '',
+    'Blocked findings (structured metadata only; no matched content):',
+    ...blockedPushScan.findings.map((finding, index) => {
+      const detector = sanitizeSecurityReworkValue(finding.detector, 'unknown detector');
+      const severity = sanitizeSecurityReworkValue(finding.severity, 'unknown severity');
+      const rule = finding.ruleId
+        ? `; rule=${sanitizeSecurityReworkValue(finding.ruleId, 'unknown rule')}`
+        : '';
+      const file = sanitizeSecurityReworkValue(finding.file, 'unknown file');
+      const line = finding.line === undefined ? '' : `:${finding.line}`;
+      return `${index + 1}. detector=${detector}; severity=${severity}${rule}; location=${file}${line}`;
+    }),
   ].join('\n');
 }
 
@@ -11093,7 +11124,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // a stale/broken pod context. Set reworkReason so processPod builds
         // a rework-specific prompt instead of the generic "you were interrupted" recovery prompt.
         // Interactive pods don't need a rework prompt — they get a fresh container.
-        const reworkReason = isInteractive ? null : buildManualReworkReason(pod);
+        let blockedPushScan: import('../security/index.js').StoredScan | undefined;
+        if (
+          !isInteractive &&
+          pod.status === 'failed' &&
+          pod.failureReason?.includes('Pre-push security scan blocked') &&
+          scanRepo
+        ) {
+          try {
+            const latestPushScan = scanRepo.getLatestForPod(pod.id, 'push');
+            if (latestPushScan?.decision === 'block') blockedPushScan = latestPushScan;
+          } catch (err) {
+            logger.warn(
+              { err, podId },
+              'Failed to load blocked push scan for manual rework context',
+            );
+          }
+        }
+        const reworkReason = isInteractive ? null : buildManualReworkReason(pod, blockedPushScan);
         const runtime = resolvePodRuntime(profile, pod.runtime, logger);
         const model = resolvePodModel(profile, pod.model, runtime, logger);
         podRepo.update(podId, {
