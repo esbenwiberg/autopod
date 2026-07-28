@@ -10604,7 +10604,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       emitActivityStatus(podId, 'Pausing pod…');
       const pauseToken = Symbol(podId);
       pauseIntents.set(podId, pauseToken);
-      const activeRun = activeAgentRuns.get(podId);
+      let activeRun = activeAgentRuns.get(podId);
       const releaseIntentAfterSettling = (message: string): void => {
         if (!activeRun) {
           if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
@@ -10622,17 +10622,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       try {
         await runtime.suspend(podId);
       } catch (err) {
+        activeRun = activeAgentRuns.get(podId) ?? activeRun;
         releaseIntentAfterSettling(
           'Failed pause attempt has settled — pause may be retried safely',
         );
         throw err;
       }
-      if (activeRun) {
+      activeRun = activeAgentRuns.get(podId) ?? activeRun;
+      const quiescenceDeadline = Date.now() + PAUSE_QUIESCENCE_TIMEOUT_MS;
+      while (activeRun) {
         let timeout: ReturnType<typeof setTimeout> | undefined;
+        const remainingMs = Math.max(0, quiescenceDeadline - Date.now());
         const settled = await Promise.race([
           activeRun.settled.then(() => true),
           new Promise<false>((resolve) => {
-            timeout = setTimeout(() => resolve(false), PAUSE_QUIESCENCE_TIMEOUT_MS);
+            timeout = setTimeout(() => resolve(false), remainingMs);
           }),
         ]);
         if (timeout) clearTimeout(timeout);
@@ -10645,6 +10649,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           );
           throw new AutopodError(message, 'PAUSE_QUIESCENCE_TIMEOUT', 409);
         }
+        const nextRun = activeAgentRuns.get(podId);
+        activeRun = nextRun?.token === activeRun.token ? undefined : nextRun;
       }
 
       transition(pod, 'paused', { pauseReason: 'manual' });
