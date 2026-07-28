@@ -1287,7 +1287,6 @@ public struct ProfileEditorView: View {
             }
             return
         }
-        let provider = profile.modelProvider == .pi ? nil : profile.modelProvider.rawValue
         await MainActor.run {
             isLoadingProviderAccounts = true
             providerAccountsError = nil
@@ -1822,6 +1821,7 @@ public struct ProfileEditorView: View {
             return "Using the linked provider account default (\(count) target\(count == 1 ? "" : "s"))."
         default:
             return "No inherited or provider-account failover policy is configured."
+        }
     }
 
     // MARK: - Container (was Infrastructure)

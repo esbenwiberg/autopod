@@ -1,0 +1,29 @@
+contract_version: 1
+title: "Render unavailable quality telemetry honestly"
+depends_on:
+  - 03-version-and-rebuild-scores
+scenarios:
+  - id: desktop-shows-unavailable-neutrally
+    given:
+      - "the quality API reports inspection-dependent telemetry as unavailable"
+    when:
+      - "the native Session Quality card renders"
+    then:
+      - "Read / Edit and Blind Edits show an unavailable marker with neutral health"
+      - "the card does not present unavailable telemetry as measured zero"
+      - "an unavailable persisted score does not render a numeric badge"
+  - id: desktop-preserves-measured-values
+    given:
+      - "the quality API reports available measured telemetry"
+    when:
+      - "the native Session Quality card renders"
+    then:
+      - "existing numeric formatting and health presentation remain intact"
+required_facts: []
+human_review:
+  - id: review-native-quality-availability
+    covers:
+      - desktop-shows-unavailable-neutrally
+      - desktop-preserves-measured-values
+    criterion: "In the native macOS app, unavailable inspection telemetry uses the existing dash/neutral convention with explanatory help, while available telemetry retains its measured presentation."
+    reason: "convention-001 requires Autopod-self facts to execute in the Linux pod; SwiftUI/AppKit rendering requires a Mac runner."

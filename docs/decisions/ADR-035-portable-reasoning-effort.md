@@ -43,6 +43,9 @@ Runtime configuration stays inside the pod boundary. In particular, Codex integr
 write or mutate user-global configuration and must preserve existing pod-local MCP configuration,
 timeouts, and secure file permissions.
 
+This first contract applies only to the main agent runtime. Reviewer/helper calls and per-pod
+overrides are separate future decisions.
+
 ## Consequences
 
 Easier:
@@ -64,3 +67,17 @@ Committed to:
 - Omission, rather than guessed translation, for `auto`.
 - One resolved value per provider attempt, preserved across continuation and failover.
 - Pod-local runtime configuration with no mutation of user-global settings.
+- No silent clamping or nearest-level translation.
+- No coupling main-agent effort to reviewer/helper calls.
+- No per-pod override in the initial contract.
+
+## Alternatives rejected
+
+- **Independent fields per runtime.** Precise but cumbersome in the profile editor and ambiguous
+  under cross-runtime failover.
+- **Widest-union enum.** Exposes all provider values but forces launch-time failure or silent
+  downgrade on unsupported runtimes.
+- **Map generic low/medium/high to provider-specific budgets.** Hides semantics and would drift as
+  providers change their models and defaults.
+- **Set one explicit default such as high.** Changes current Codex behavior and removes the
+  provider/account default escape hatch.

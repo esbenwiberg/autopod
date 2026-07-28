@@ -177,6 +177,7 @@ import {
   buildContinuationPrompt,
   buildRecoveryTask,
   buildReworkTask,
+  hasPendingProviderContinuation,
   writeProviderFailoverHandoff,
 } from './recovery-context.js';
 import { deriveReferenceRepos, resolveRefRepoPat } from './reference-repos.js';
@@ -5227,6 +5228,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     bumpActivityTimestamp(podId);
   }
 
+  function formatElapsedDuration(durationMs: number): string {
+    return `${(durationMs / 1_000).toFixed(1)}s`;
+  }
+
   function emitActivityError(podId: string, message: string, fatal = true): void {
     const timestamp = new Date().toISOString();
     eventBus.emit({
@@ -6038,6 +6043,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     if (pod.containerId) {
       try {
+        emitActivityStatus(pod.id, 'Stopping post-validation container…');
         await stopSandboxPreviewProxy(pod.id);
         const cm = containerManagerFactory.get(pod.executionTarget);
         await cm.stop(pod.containerId);
@@ -7462,8 +7468,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           }
 
-          const hasProviderHandoff = (deps.providerAttemptRepo?.list(podId).length ?? 0) > 1;
-          if (hasProviderHandoff) {
+          const hasPendingHandoff = hasPendingProviderContinuation(
+            deps.providerAttemptRepo?.list(podId),
+          );
+          if (hasPendingHandoff) {
             const marker = '# autopod: provider failover handoff';
             const guard = await containerManager.execInContainer(
               containerId,
@@ -7472,6 +7480,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 '-c',
                 [
                   'set -e',
+                  `if [ ! -f ${shellQuote(`/workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} ]; then`,
+                  `  printf '%s\\n' ${shellQuote(`Missing pending provider failover handoff: /workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} >&2`,
+                  '  exit 1',
+                  'fi',
                   'mkdir -p /workspace/.git/info',
                   'touch /workspace/.git/info/exclude',
                   `if ! grep -qFx ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} /workspace/.git/info/exclude; then`,
@@ -7619,7 +7631,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
           }
 
-          if (hasProviderHandoff) {
+          if (hasPendingHandoff) {
             const marker = '# autopod: provider failover handoff';
             const guard = await containerManager.execInContainer(
               containerId,
@@ -7628,7 +7640,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 '-c',
                 [
                   'set -e',
-                  'test -f /workspace/.autopod/provider-failover.md',
+                  `if [ ! -f ${shellQuote(`/workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} ]; then`,
+                  `  printf '%s\\n' ${shellQuote(`Missing pending provider failover handoff after workspace cleanup: /workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} >&2`,
+                  '  exit 1',
+                  'fi',
                   'mkdir -p /workspace/.git/info',
                   'touch /workspace/.git/info/exclude',
                   `if ! grep -qFx ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} /workspace/.git/info/exclude; then`,
@@ -9583,6 +9598,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             // Stop the container post-validation (mirrors the original push path).
             if (validatedPod.containerId) {
               try {
+                emitActivityStatus(podId, 'Stopping post-validation container…');
                 await stopSandboxPreviewProxy(podId);
                 const cm = containerManagerFactory.get(validatedPod.executionTarget);
                 await cm.stop(validatedPod.containerId);
@@ -9595,6 +9611,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
 
             if (validatedPod.autoApprove) {
+              emitActivityStatus(podId, 'Auto-approving…');
               logger.info({ podId }, 'Auto-approving pod after host_push retry');
               setImmediate(() => {
                 this.approveSession(podId, { automation: true }).catch((err) =>
@@ -11250,9 +11267,32 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           validationAbortControllers.delete(podId);
         }
 
+        emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
+
+        const hasFactScreenshotEvidence = result.factValidation?.results.some((fact) =>
+          fact.attachments?.some(
+            (attachment) =>
+              attachment.kind === 'screenshot' &&
+              !path.isAbsolute(attachment.path) &&
+              attachment.path.toLowerCase().endsWith('.png'),
+          ),
+        );
+        const hasHostFactScreenshotEvidence = result.factValidation?.results.some(
+          (fact) =>
+            fact.kind === 'browser-test' &&
+            fact.attachments?.some(
+              (attachment) =>
+                attachment.kind === 'screenshot' &&
+                !path.isAbsolute(attachment.path) &&
+                attachment.path.toLowerCase().endsWith('.png'),
+            ),
+        );
+        const hasValidationScreenshots = result.smoke.pages.some((page) => page.screenshotPath);
+
         // Host browser facts write evidence directly to the host worktree. Collect
         // those screenshots before syncWorkspaceBack mirrors /workspace over it.
-        if (pod.worktreePath && result.factValidation?.results.length && screenshotStore) {
+        if (pod.worktreePath && hasHostFactScreenshotEvidence && screenshotStore) {
+          emitActivityStatus(podId, 'Collecting host fact evidence…');
           try {
             const screenshots = await collectFactScreenshots(
               pod.worktreePath,
@@ -11268,6 +11308,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Sync workspace after validation — screenshots and build artifacts are now in /workspace
         if (pod.containerId && pod.worktreePath) {
+          emitActivityStatus(podId, 'Syncing post-validation workspace…');
+          const syncStartedAt = Date.now();
           try {
             const cm = containerManagerFactory.get(pod.executionTarget);
             await syncWorkspaceBack(
@@ -11277,14 +11319,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               podId,
               pod.executionTarget,
             );
+            emitActivityStatus(
+              podId,
+              `Workspace sync complete (${formatElapsedDuration(Date.now() - syncStartedAt)})`,
+            );
           } catch (err) {
             validationSyncOk = false;
             logger.warn({ err, podId }, 'Failed to sync workspace after validation');
+            emitActivityStatus(
+              podId,
+              `Workspace sync failed after ${formatElapsedDuration(Date.now() - syncStartedAt)} — continuing with degraded safeguards`,
+            );
           }
         }
 
         // Collect screenshots from the host worktree and write to the on-disk store
-        if (pod.worktreePath && result.smoke.pages.length > 0 && screenshotStore) {
+        if (pod.worktreePath && hasValidationScreenshots && screenshotStore) {
+          emitActivityStatus(podId, 'Collecting validation screenshots…');
           try {
             const screenshots = await collectScreenshots(
               pod.worktreePath,
@@ -11314,7 +11365,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
-        if (pod.worktreePath && result.factValidation?.results.length && screenshotStore) {
+        if (pod.worktreePath && hasFactScreenshotEvidence && screenshotStore) {
+          emitActivityStatus(
+            podId,
+            validationSyncOk
+              ? 'Collecting synced fact evidence…'
+              : 'Collecting available fact evidence after degraded sync…',
+          );
           try {
             const screenshots = await collectFactScreenshots(
               pod.worktreePath,
@@ -11540,6 +11597,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           if (s2.containerId) {
             try {
+              emitActivityStatus(podId, 'Stopping post-validation container…');
               await stopSandboxPreviewProxy(podId);
               const cm = containerManagerFactory.get(s2.executionTarget);
               await cm.stop(s2.containerId);
@@ -11560,6 +11618,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           if (s2.containerId) {
             try {
+              emitActivityStatus(podId, 'Stopping post-validation container…');
               await stopSandboxPreviewProxy(podId);
               const cm = containerManagerFactory.get(s2.executionTarget);
               await cm.stop(s2.containerId);
@@ -11776,6 +11835,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Stop the container (not remove) so it can be restarted for preview
           if (postAdvisoryPod.containerId) {
             try {
+              emitActivityStatus(podId, 'Stopping post-validation container…');
               await stopSandboxPreviewProxy(podId);
               const cm = containerManagerFactory.get(postAdvisoryPod.executionTarget);
               await cm.stop(postAdvisoryPod.containerId);
@@ -11786,6 +11846,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
 
           if (postAdvisoryPod.autoApprove) {
+            emitActivityStatus(podId, 'Auto-approving…');
             logger.info({ podId }, 'Auto-approving pod after validation');
             setImmediate(() => {
               this.approveSession(podId, { automation: true }).catch((err) =>
@@ -11868,6 +11929,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Stop the container (not remove) so it can be restarted for preview
           if (s2.containerId) {
             try {
+              emitActivityStatus(podId, 'Stopping post-validation container…');
               await stopSandboxPreviewProxy(podId);
               const cm = containerManagerFactory.get(s2.executionTarget);
               await cm.stop(s2.containerId);
@@ -11898,6 +11960,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Stop the container (not remove) so it can be restarted for preview
         if (s2.containerId) {
           try {
+            emitActivityStatus(podId, 'Stopping post-validation container…');
             await stopSandboxPreviewProxy(podId);
             const cm = containerManagerFactory.get(s2.executionTarget);
             await cm.stop(s2.containerId);
@@ -12167,6 +12230,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           validationAbortControllers.delete(podId);
         }
 
+        emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
+
         podRepo.update(podId, { lastValidationResult: result });
 
         // Accumulate phase-level token usage for harness cost attribution
@@ -12347,6 +12412,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Stop the container
           if (postAdvisoryPod.containerId) {
             try {
+              emitActivityStatus(podId, 'Stopping post-validation container…');
               const cm2 = containerManagerFactory.get(postAdvisoryPod.executionTarget);
               await cm2.stop(postAdvisoryPod.containerId);
             } catch (err) {
@@ -12355,6 +12421,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
 
           if (postAdvisoryPod.autoApprove) {
+            emitActivityStatus(podId, 'Auto-approving…');
             logger.info({ podId }, 'Auto-approving pod after revalidation');
             setImmediate(() => {
               this.approveSession(podId, { automation: true }).catch((err) =>
@@ -12375,6 +12442,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           if (s2.containerId) {
             try {
+              emitActivityStatus(podId, 'Stopping post-validation container…');
               const cm2 = containerManagerFactory.get(s2.executionTarget);
               await cm2.stop(s2.containerId);
             } catch (err) {
@@ -12400,6 +12468,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         if (s2.containerId) {
           try {
+            emitActivityStatus(podId, 'Stopping post-validation container…');
             const cm2 = containerManagerFactory.get(s2.executionTarget);
             await cm2.stop(s2.containerId);
           } catch (err) {
@@ -13676,6 +13745,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, `Resume succeeded — PR ready: ${newPrUrl}`);
         logger.info({ podId, prUrl: newPrUrl }, 'Pod resumed via push + PR');
         if (validated.autoApprove) {
+          emitActivityStatus(podId, 'Auto-approving…');
           setImmediate(() => {
             this.approveSession(podId, { automation: true }).catch((err) =>
               logger.warn({ err, podId }, 'Auto-approve failed after resume'),

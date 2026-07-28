@@ -1,0 +1,43 @@
+name: Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "packages/desktop/**"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/desktop/**"
+      - ".github/workflows/desktop.yml"
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Report toolchain versions
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Test Swift package
+        run: swift test --package-path packages/desktop --no-parallel
+
+      - name: Build macOS app
+        run: >-
+          xcodebuild
+          -project packages/desktop/Autopod.xcodeproj
+          -scheme Autopod
+          -configuration Debug
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_REQUIRED=NO

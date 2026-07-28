@@ -733,14 +733,14 @@ struct ProviderAccountsSettingsView: View {
       return label
     }
     switch provider {
-    case "anthropic": "Anthropic"
-    case "max": "Claude Max"
-    case "openai": "OpenAI"
-    case "foundry": "Foundry"
-    case "copilot": "Copilot"
-    case "openrouter": "OpenRouter"
-    case "pi": "Pi"
-    default: provider
+    case "anthropic": return "Anthropic"
+    case "max": return "Claude Max"
+    case "openai": return "OpenAI"
+    case "foundry": return "Foundry"
+    case "copilot": return "Copilot"
+    case "openrouter": return "OpenRouter"
+    case "pi": return "Pi"
+    default: return provider
     }
   }
 
@@ -749,12 +749,12 @@ struct ProviderAccountsSettingsView: View {
       return icon
     }
     switch provider {
-    case "anthropic", "max": "sparkles"
-    case "openai", "openrouter": "cpu"
-    case "foundry": "building.2"
-    case "copilot": "keyboard"
-    case "pi": "sparkle.magnifyingglass"
-    default: "person.badge.key"
+    case "anthropic", "max": return "sparkles"
+    case "openai", "openrouter": return "cpu"
+    case "foundry": return "building.2"
+    case "copilot": return "keyboard"
+    case "pi": return "sparkle.magnifyingglass"
+    default: return "person.badge.key"
     }
   }
 

@@ -1,0 +1,82 @@
+contract_version: 1
+title: "Baseline pre-existing secrets in push diff scans"
+depends_on: []
+scenarios:
+  - id: unchanged-secret-does-not-block
+    given:
+      - "a base revision contains a Secretlint finding in a tracked file"
+      - "the feature revision changes formatting or surrounding content without changing the matched value"
+    when:
+      - "the daemon runs a push-checkpoint scan with diff scope against that base revision"
+    then:
+      - "the pre-existing occurrence is omitted from the current findings"
+      - "the unchanged occurrence does not make the push decision block"
+  - id: introduced-secret-blocks
+    given:
+      - "a push diff adds or rotates a Secretlint-matched value"
+    when:
+      - "the daemon compares current findings with the same file at the resolved base revision"
+    then:
+      - "the introduced occurrence remains in the findings"
+      - "the default push policy returns a blocking decision"
+  - id: duplicate-secret-blocks
+    given:
+      - "the base file contains one occurrence of a Secretlint-matched value"
+      - "the feature revision contains two occurrences of that same value in the same file"
+    when:
+      - "the daemon applies the base comparison"
+    then:
+      - "only one current occurrence is treated as pre-existing"
+      - "the additional occurrence remains blocking"
+  - id: copied-or-moved-secret-blocks
+    given:
+      - "a Secretlint-matched value exists in one path at the base revision"
+    when:
+      - "the feature revision adds that value at a different path"
+    then:
+      - "the different path receives no baseline exemption"
+      - "the copied or moved occurrence remains blocking"
+  - id: unavailable-baseline-fails-closed
+    given:
+      - "the configured base ref or same-path base blob cannot be resolved"
+    when:
+      - "the daemon runs the push security scan"
+    then:
+      - "no current Secretlint finding is suppressed because of the unavailable baseline"
+  - id: non-diff-scans-unchanged
+    given:
+      - "a provisioning scan or full-scope push scan encounters a Secretlint finding"
+    when:
+      - "the daemon applies security scan policy"
+    then:
+      - "the finding is reported without base subtraction"
+  - id: secret-identities-remain-private
+    given:
+      - "the detector derives an identity from an exact Secretlint match for base comparison"
+    when:
+      - "scan results are returned, serialized, persisted, logged, or rendered into a warning"
+    then:
+      - "neither the raw matched value nor its internal identity is present in the public finding"
+required_facts:
+  - id: fact-base-comparison-behavior
+    proves:
+      - unchanged-secret-does-not-block
+      - introduced-secret-blocks
+      - duplicate-secret-blocks
+      - copied-or-moved-secret-blocks
+      - unavailable-baseline-fails-closed
+      - non-diff-scans-unchanged
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/security/scan-engine.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- scan-engine.test.ts
+  - id: fact-secret-identity-opacity
+    proves:
+      - secret-identities-remain-private
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/security/detectors/secretlint-detector.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- secretlint-detector.test.ts
+human_review: []

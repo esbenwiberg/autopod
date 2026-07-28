@@ -143,8 +143,8 @@ public final class PodStore {
       let responses = try await api.listAllCompactPods()
       let fresh = PodMapper.map(responses, baseURL: api.baseURL)
       let currentById = Dictionary(uniqueKeysWithValues: pods.map { ($0.id, $0) })
-      let staleHydratedIds = Set(
-        fresh.compactMap { pod in
+      let staleHydratedIds: Set<String> = Set(
+        fresh.compactMap { pod -> String? in
           guard hydratedPodIds.contains(pod.id),
                 let current = currentById[pod.id],
                 pod.updatedAt > current.updatedAt else { return nil }
