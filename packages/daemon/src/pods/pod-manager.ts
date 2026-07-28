@@ -3047,7 +3047,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   /** Active AbortControllers for in-progress validation runs, keyed by podId. */
   const validationAbortControllers = new Map<string, AbortController>();
-  const pauseIntents = new Set<string>();
+  const pauseIntents = new Map<string, symbol>();
   const activeAgentRuns = new Map<string, { token: symbol; settled: Promise<void> }>();
   const activeAgentRunResolvers = new Map<string, { token: symbol; resolve: () => void }>();
   const PAUSE_QUIESCENCE_TIMEOUT_MS = 10_000;
@@ -10599,11 +10599,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       emitActivityStatus(podId, 'Pausing pod…');
-      pauseIntents.add(podId);
+      const pauseToken = Symbol(podId);
+      pauseIntents.set(podId, pauseToken);
       const activeRun = activeAgentRuns.get(podId);
+      const releaseIntentAfterSettling = (message: string): void => {
+        if (!activeRun) {
+          if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
+          return;
+        }
+        void activeRun.settled.then(() => {
+          if (pauseIntents.get(podId) !== pauseToken) return;
+          pauseIntents.delete(podId);
+          emitActivityStatus(podId, message);
+          logger.info({ podId }, message);
+        });
+      };
       // Suspend the runtime (kills stream but preserves pod ID)
       const runtime = runtimeRegistry.get(pod.runtime);
-      await runtime.suspend(podId);
+      try {
+        await runtime.suspend(podId);
+      } catch (err) {
+        releaseIntentAfterSettling(
+          'Failed pause attempt has settled — pause may be retried safely',
+        );
+        throw err;
+      }
       if (activeRun) {
         let timeout: ReturnType<typeof setTimeout> | undefined;
         const settled = await Promise.race([
@@ -10617,12 +10637,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const message = `Pause quiescence failed: active Codex run did not settle within ${PAUSE_QUIESCENCE_TIMEOUT_MS}ms`;
           emitActivityStatus(podId, message);
           logger.error({ podId }, message);
+          releaseIntentAfterSettling(
+            'Timed-out pause has now quiesced — pause may be retried safely',
+          );
           throw new AutopodError(message, 'PAUSE_QUIESCENCE_TIMEOUT', 409);
         }
       }
 
       transition(pod, 'paused', { pauseReason: 'manual' });
-      pauseIntents.delete(podId);
+      if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
       emitActivityStatus(podId, 'Pod paused — use [t] tell or [u] nudge to resume');
       logger.info({ podId }, 'Pod paused');
     },

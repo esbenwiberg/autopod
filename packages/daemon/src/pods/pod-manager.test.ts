@@ -858,6 +858,85 @@ describe('PodManager', () => {
     expect(runtime.resume).toHaveBeenCalledTimes(1);
     expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('running');
   });
+
+  it('quiesces a paused Codex run before allowing resume after a timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
+      ctx.deps.providerAttemptRepo = createProviderAttemptRepository(ctx.db);
+      const runtime = ctx.runtime as Runtime & { suspend: ReturnType<typeof vi.fn> };
+      Object.defineProperty(runtime, 'type', { value: 'codex' });
+      runtime.suspend = vi.fn(async () => {});
+      const releaseStream = deferred<void>();
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'recover timed-out pause', skipValidation: true },
+        'user-1',
+      );
+      ctx.db
+        .prepare("UPDATE pods SET status = 'running', container_id = 'container-123' WHERE id = ?")
+        .run(pod.id);
+
+      const consuming = manager.consumeAgentEvents(
+        pod.id,
+        (async function* () {
+          await releaseStream.promise;
+          yield {
+            type: 'status',
+            timestamp: new Date().toISOString(),
+            message: 'late event',
+          } as const;
+        })(),
+      );
+      const pausing = manager.pauseSession(pod.id);
+      const pauseFailure = expect(pausing).rejects.toMatchObject({
+        code: 'PAUSE_QUIESCENCE_TIMEOUT',
+        statusCode: 409,
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await pauseFailure;
+      expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('running');
+      await expect(manager.sendMessage(pod.id, 'still too early')).rejects.toMatchObject({
+        code: 'PAUSE_SETTLING',
+      });
+
+      releaseStream.resolve();
+      await expect(consuming).resolves.toBe('paused');
+      await Promise.resolve();
+
+      await manager.pauseSession(pod.id);
+      expect(runtime.suspend).toHaveBeenCalledTimes(2);
+      expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('paused');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('allows pause retry after runtime suspension rejects before a run is active', async () => {
+    const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
+    const runtime = ctx.runtime as Runtime & { suspend: ReturnType<typeof vi.fn> };
+    Object.defineProperty(runtime, 'type', { value: 'codex' });
+    runtime.suspend = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('runtime suspension failed'))
+      .mockResolvedValueOnce(undefined);
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'retry failed suspension', skipValidation: true },
+      'user-1',
+    );
+    ctx.db
+      .prepare("UPDATE pods SET status = 'running', container_id = 'container-123' WHERE id = ?")
+      .run(pod.id);
+
+    await expect(manager.pauseSession(pod.id)).rejects.toThrow('runtime suspension failed');
+    expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('running');
+
+    await manager.pauseSession(pod.id);
+    expect(runtime.suspend).toHaveBeenCalledTimes(2);
+    expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('paused');
+  });
   beforeEach(() => {
     mockExecFileSuccess();
   });
