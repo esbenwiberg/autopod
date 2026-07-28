@@ -1,4 +1,5 @@
 import type { PodBridge } from '@autopod/escalation-mcp';
+import { PassThrough } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { type SessionBridgeDependencies, createSessionBridge } from './pod-bridge-impl.js';
@@ -100,6 +101,20 @@ function buildBridge(opts: BuildOpts = {}): {
   const eventBus = { emit: eventEmit, subscribe: vi.fn() } as unknown as Deps['eventBus'];
   const cm = {
     execInContainer: execMock,
+    supportsStreamingExec: true,
+    execStreaming: vi.fn(async (id, command, options) => {
+      const result = await execMock(id, command, options);
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      stdout.end(result.stdout);
+      stderr.end(result.stderr);
+      return {
+        stdout,
+        stderr,
+        exitCode: Promise.resolve(result.exitCode),
+        kill: vi.fn(async () => {}),
+      };
+    }),
     getStatus: vi.fn().mockResolvedValue(opts.containerStatus ?? 'running'),
     writeFile: vi.fn().mockResolvedValue(undefined),
   };
