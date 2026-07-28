@@ -1919,6 +1919,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     });
   }
 
+  function rotateProviderAttemptForFreshSegment(pod: Pod, profile: Profile): void {
+    const repository = deps.providerAttemptRepo;
+    const active = repository?.getActive(pod.id);
+    if (!repository || !active) return;
+    const preceding = repository
+      .list(pod.id)
+      .find((attempt) => attempt.ordinal === active.ordinal - 1);
+    const isUnstartedProviderContinuation =
+      active.nativeSessionId === null &&
+      preceding?.handoffReference === PROVIDER_FAILOVER_HANDOFF_PATH;
+    if (isUnstartedProviderContinuation) return;
+
+    repository.close(pod.id, {
+      nativeSessionId: active.nativeSessionId,
+      outcome: 'aborted',
+      inputTokens: active.inputTokens,
+      outputTokens: active.outputTokens,
+      costUsd: active.costUsd,
+    });
+    ensureProviderAttempt(pod, profile);
+  }
+
   function closeProviderAttempt(
     podId: string,
     outcome: 'completed' | 'failed' | 'aborted' | 'quota_exhausted',
@@ -8580,6 +8602,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Rework: always a fresh spawn with rework-specific framing.
           // claudeSessionId was already cleared by triggerValidation so we never
           // resume a stale/broken pod context.
+          rotateProviderAttemptForFreshSegment(pod, profile);
           emitStatus('Reworking pod…');
           // biome-ignore lint/style/noNonNullAssertion: reworkReason is always set when isRework=true; worktreePath is non-null when isRework=true (rework requires a prior run with a worktree)
           const reworkTask = await buildReworkTask(pod, worktreePath!, pod.reworkReason!);
@@ -8637,6 +8660,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const customInstructionsRef = runtimeInstructions;
           const secretEnvRef = secretEnv;
           const loggerRef = logger;
+          const profileRef = profile;
           events = (async function* resumeWithFallback() {
             try {
               yield* runtimeRef.resume(podId, continuationPrompt, containerIdRef, secretEnvRef);
@@ -8649,6 +8673,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               // Clear the stale ID so any future recovery on this pod doesn't
               // loop trying to resume the same nonexistent conversation.
               podRepoRef.update(podId, { claudeSessionId: null });
+              rotateProviderAttemptForFreshSegment(podRef, profileRef);
               const recoveryTask = await buildRecoveryTask(podRef, safeWorktreePath);
               yield* runtimeRef.spawn({
                 podId,
@@ -8681,6 +8706,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           events = runtime.resume(podId, piContinuationPrompt, containerId, secretEnv);
         } else if (isRecovery) {
           // Non-Claude/Codex runtime or no session ID — fresh spawn with recovery context
+          rotateProviderAttemptForFreshSegment(pod, profile);
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
           let recoveryTask = await buildRecoveryTask(pod, worktreePath!);
           // For non-Claude runtimes recovering after host wake, append a postscript so the
