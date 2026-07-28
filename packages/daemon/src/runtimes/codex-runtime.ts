@@ -3,7 +3,13 @@ import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/shared';
-import type { AgentEvent, ExecutionTarget, Runtime, SpawnConfig } from '@autopod/shared';
+import type {
+  AgentEvent,
+  ExecutionTarget,
+  ReasoningEffort,
+  Runtime,
+  SpawnConfig,
+} from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import type { EventBus } from '../pods/event-bus.js';
@@ -97,6 +103,8 @@ export class CodexRuntime implements Runtime {
   readonly codexSessionIds = new Map<string, string>();
   /** Maps autopod podId → MCP servers so resume() can re-write the config into the new container. */
   private mcpServersBySession = new Map<string, SpawnConfig['mcpServers']>();
+  /** Maps autopod podId → portable effort so resumed invocations retain the same config. */
+  private reasoningEffortBySession = new Map<string, ReasoningEffort>();
   /** Maps autopod podId → generated Autopod instructions for no-session resume fallback. */
   private customInstructionsBySession = new Map<string, string>();
   private logger: Logger;
@@ -124,8 +132,14 @@ export class CodexRuntime implements Runtime {
 
     // Write Codex's config.toml so the CLI picks up escalation + profile MCP servers
     // from disk. Codex reads `~/.codex/config.toml` automatically — no flag required.
-    await this.writeMcpConfig(config.containerId, config.mcpServers, config.executionTarget);
+    await this.writeMcpConfig(
+      config.containerId,
+      config.mcpServers,
+      config.executionTarget,
+      config.reasoningEffort,
+    );
     this.mcpServersBySession.set(config.podId, config.mcpServers);
+    this.reasoningEffortBySession.set(config.podId, config.reasoningEffort);
     if (config.customInstructions?.trim()) {
       this.customInstructionsBySession.set(config.podId, config.customInstructions);
     } else {
@@ -211,6 +225,7 @@ export class CodexRuntime implements Runtime {
       containerId,
       this.mcpServersBySession.get(podId),
       pod.executionTarget,
+      this.reasoningEffortBySession.get(podId),
     );
 
     const sessionId = this.codexSessionIds.get(podId) ?? pod.codexSessionId;
@@ -336,6 +351,7 @@ export class CodexRuntime implements Runtime {
     await handle.kill();
     this.handles.delete(podId);
     this.mcpServersBySession.delete(podId);
+    this.reasoningEffortBySession.delete(podId);
     this.customInstructionsBySession.delete(podId);
   }
 
@@ -359,6 +375,15 @@ export class CodexRuntime implements Runtime {
     await handle.kill();
     this.handles.delete(podId);
     // NOTE: codexSessionIds is NOT deleted — session survives suspend for resume
+  }
+
+  setCodexResumeConfig(
+    podId: string,
+    mcpServers: SpawnConfig['mcpServers'],
+    reasoningEffort: ReasoningEffort,
+  ): void {
+    this.mcpServersBySession.set(podId, mcpServers);
+    this.reasoningEffortBySession.set(podId, reasoningEffort);
   }
 
   private buildSpawnArgs(config: SpawnConfig): string[] {
@@ -909,7 +934,7 @@ export class CodexRuntime implements Runtime {
   }
 
   /**
-   * Write Codex's config.toml inside the container with the requested MCP servers.
+   * Write Codex's config.toml inside the container with effort and requested MCP servers.
    *
    * Codex reads `~/.codex/config.toml` automatically on every invocation, so no CLI
    * flag is needed. The bind-mount in pod-manager.ts attaches `~/.codex/sessions`
@@ -924,11 +949,16 @@ export class CodexRuntime implements Runtime {
     containerId: string,
     mcpServers: SpawnConfig['mcpServers'],
     executionTarget?: ExecutionTarget,
+    reasoningEffort?: ReasoningEffort,
   ): Promise<void> {
-    if (!mcpServers || mcpServers.length === 0) return;
+    const hasEffort = reasoningEffort !== undefined && reasoningEffort !== 'auto';
+    if ((!mcpServers || mcpServers.length === 0) && !hasEffort) return;
 
     const sections: string[] = [];
-    for (const server of mcpServers) {
+    if (hasEffort) {
+      sections.push(`model_reasoning_effort = ${tomlStringVal(reasoningEffort)}`);
+    }
+    for (const server of mcpServers ?? []) {
       const lines: string[] = [`[mcp_servers.${tomlKey(server.name)}]`];
       if (server.type === 'stdio') {
         lines.push(`command = ${tomlStringVal(server.command)}`);

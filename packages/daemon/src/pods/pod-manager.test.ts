@@ -148,6 +148,7 @@ interface TestProfileOverrides {
   warmImageTag?: string | null;
   modelProvider?: Profile['modelProvider'];
   validationSetupCommand?: string | null;
+  reasoningEffort?: Profile['reasoningEffort'];
 }
 
 function insertTestProfile(db: Database.Database, overrides: TestProfileOverrides | string = {}) {
@@ -164,6 +165,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       private_registries, registry_pat, registry_pat_expires_at, branch_prefix,
       pr_provider, github_pat, github_pat_expires_at, ado_pat, ado_pat_expires_at,
       model_provider
+      , reasoning_effort
     ) VALUES (
       @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand,
       @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
@@ -172,6 +174,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
       @privateRegistries, @registryPat, @registryPatExpiresAt, @branchPrefix,
       @prProvider, @githubPat, @githubPatExpiresAt, @adoPat, @adoPatExpiresAt,
       @modelProvider
+      , @reasoningEffort
     )
   `).run({
     name,
@@ -204,6 +207,7 @@ function insertTestProfile(db: Database.Database, overrides: TestProfileOverride
     adoPat: opts.adoPat ?? null,
     adoPatExpiresAt: opts.adoPatExpiresAt ?? null,
     modelProvider: opts.modelProvider ?? 'anthropic',
+    reasoningEffort: opts.reasoningEffort ?? 'auto',
   });
 }
 
@@ -630,6 +634,7 @@ function createTestContext(
         maxValidationAttempts: row.max_validation_attempts as number,
         defaultModel: row.default_model as string,
         defaultRuntime: row.default_runtime as RuntimeType,
+        reasoningEffort: row.reasoning_effort as Profile['reasoningEffort'],
         customInstructions: (row.custom_instructions as string) ?? null,
         escalation: JSON.parse(row.escalation_config as string),
         executionTarget: profileOverrides?.executionTarget ?? 'local',
@@ -803,6 +808,90 @@ function createTestContext(
 describe('PodManager', () => {
   beforeEach(() => {
     mockExecFileSuccess();
+  });
+
+  it('passes auto reasoning effort to a fresh runtime spawn', async () => {
+    const ctx = createTestContext(undefined, { reasoningEffort: 'auto' });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Use runtime default', skipValidation: true },
+      'user-1',
+    );
+
+    await manager.processPod(pod.id);
+
+    expect(ctx.runtime.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ reasoningEffort: 'auto' }),
+    );
+  });
+
+  it('preserves reasoning effort for a provider failover attempt', async () => {
+    const ctx = createTestContext(undefined, { reasoningEffort: 'xhigh' });
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    insertProviderAccount(ctx.db, 'source', 'anthropic', {
+      provider: 'anthropic',
+      apiKey: 'source-key',
+    });
+    insertProviderAccount(ctx.db, 'target', 'openai', {
+      provider: 'openai',
+      apiKey: 'target-key',
+    });
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'source');
+    ctx.db.prepare('UPDATE profiles SET provider_failover = ? WHERE name = ?').run(
+      JSON.stringify({
+        targets: [{ providerAccountId: 'target', runtime: 'codex', model: 'gpt-next' }],
+        maxHops: 1,
+      }),
+      'test-profile',
+    );
+    ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+    ctx.deps.requeueSessionAfterCurrent = vi.fn();
+    vi.mocked(ctx.runtime.spawn).mockImplementationOnce(async function* () {
+      ctx.db
+        .prepare('UPDATE profiles SET reasoning_effort = ? WHERE name = ?')
+        .run('low', 'test-profile');
+      yield {
+        type: 'error',
+        timestamp: '2026-07-27T10:00:00.000Z',
+        message: 'quota exhausted',
+        fatal: true,
+        classification: {
+          category: 'quota_exhausted',
+          definitive: true,
+          sanitizedMessage: 'Provider quota exhausted',
+        },
+      } as const;
+    });
+    vi.mocked(ctx.runtime.spawn).mockImplementationOnce(async function* () {
+      yield {
+        type: 'complete',
+        timestamp: '2026-07-27T10:01:00.000Z',
+        result: 'done',
+      } as const;
+    });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Keep effort across failover', skipValidation: true },
+      'user-1',
+    );
+
+    await manager.processPod(pod.id);
+    expect(attempts.getActive(pod.id)).toMatchObject({ providerAccountId: 'target' });
+    const targetSnapshot = ctx.db
+      .prepare('SELECT profile_snapshot FROM provider_attempts WHERE pod_id = ? AND ordinal = 2')
+      .pluck()
+      .get(pod.id) as string;
+    expect(JSON.parse(targetSnapshot)).toMatchObject({ reasoningEffort: 'xhigh' });
+    await manager.processPod(pod.id);
+
+    expect(ctx.runtime.spawn).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        model: 'gpt-next',
+        reasoningEffort: 'xhigh',
+      }),
+    );
+    expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('validated');
   });
 
   it('ledgers successful, resumed, failed, paused, and killed runtime segments', async () => {
@@ -4937,6 +5026,7 @@ describe('PodManager', () => {
         const runtime = createMockRuntime();
         // Add setClaudeSessionId to make it duck-type as ClaudeRuntime
         (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
+        (runtime as Record<string, unknown>).setClaudeResumeConfig = vi.fn();
 
         const ctx = createTestContext(undefined, {});
         // Replace the runtime registry to use our custom runtime
@@ -4962,6 +5052,11 @@ describe('PodManager', () => {
           pod.id,
           'claude-ses-abc',
         );
+        expect((runtime as Record<string, unknown>).setClaudeResumeConfig).toHaveBeenCalledWith(
+          pod.id,
+          expect.any(Array),
+          'auto',
+        );
 
         // resume should have been called (not spawn)
         expect(runtime.resume).toHaveBeenCalled();
@@ -4969,6 +5064,41 @@ describe('PodManager', () => {
         expect(resumeCall?.[0]).toBe(pod.id);
         // The continuation prompt should mention pod interruption
         expect(resumeCall?.[1]).toContain('interrupted');
+      });
+
+      it('rehydrates Codex resume config during crash recovery', async () => {
+        const runtime = createMockRuntime();
+        runtime.type = 'codex';
+        (runtime as Record<string, unknown>).setCodexResumeConfig = vi.fn();
+
+        const ctx = createTestContext();
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+        setupExecFileMock();
+
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          {
+            profileName: 'test-profile',
+            task: 'Continue feature',
+            runtime: 'codex',
+            skipValidation: true,
+          },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          codexSessionId: 'codex-session-abc',
+        });
+
+        await manager.processPod(pod.id);
+
+        expect((runtime as Record<string, unknown>).setCodexResumeConfig).toHaveBeenCalledWith(
+          pod.id,
+          expect.any(Array),
+          'auto',
+        );
+        expect(runtime.resume).toHaveBeenCalled();
+        expect(runtime.spawn).not.toHaveBeenCalled();
       });
 
       it('uses runtime.spawn with recovery task for non-Claude runtime', async () => {
@@ -7458,7 +7588,7 @@ describe('PodManager', () => {
       await expect(manager.sendMessage(pod.id, 'hello')).rejects.toThrow(AutopodError);
     });
 
-    it('primes durable Pi session and config before reply resume after restart', async () => {
+    it('preserves snapshotted reasoning effort in durable Pi resume config', async () => {
       const ctx = createTestContext(undefined, { defaultRuntime: 'pi' });
       const piRuntime = {
         ...createMockRuntime(),
@@ -7477,6 +7607,10 @@ describe('PodManager', () => {
         status: 'awaiting_input',
         containerId: 'ctr-1',
         piSessionId: 'pi-session-1',
+        profileSnapshot: {
+          ...ctx.profileStore.get('test-profile'),
+          reasoningEffort: 'xhigh',
+        },
         pendingEscalation: null,
       });
 
@@ -7488,6 +7622,7 @@ describe('PodManager', () => {
           podId: pod.id,
           containerId: 'ctr-1',
           customInstructions: 'resume',
+          reasoningEffort: 'xhigh',
           mcpServers: expect.arrayContaining([
             expect.objectContaining({
               type: 'http',

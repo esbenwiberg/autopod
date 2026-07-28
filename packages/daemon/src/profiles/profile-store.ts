@@ -180,6 +180,7 @@ export function rowToProfile(
     defaultModel: canonicalizeLegacyProfileModel(nullableStr(row.default_model)),
     reviewerModel: canonicalizeLegacyProfileModel(nullableStr(row.reviewer_model)),
     defaultRuntime: nullableStr(row.default_runtime) as Profile['defaultRuntime'],
+    reasoningEffort: nullableStr(row.reasoning_effort) as Profile['reasoningEffort'],
     executionTarget: nullableStr(row.execution_target) as Profile['executionTarget'],
     customInstructions: nullableStr(row.custom_instructions),
     agentDonePrompt: nullableStr(row.agent_done_prompt),
@@ -371,7 +372,7 @@ export function createProfileStore(
         INSERT INTO profiles (
           name, repo_url, default_branch, template, build_command, start_command, build_work_dir,
           health_path, health_timeout, validation_pages, max_validation_attempts,
-          default_model, reviewer_model, default_runtime, execution_target, custom_instructions, agent_done_prompt, escalation_config,
+          default_model, reviewer_model, default_runtime, reasoning_effort, execution_target, custom_instructions, agent_done_prompt, escalation_config,
           extends, worker_profile, mcp_servers, claude_md_sections, skills, network_policy, action_policy, output_mode,
           agent_mode, output_target, validate, validation_suite, advisory_browser_qa_enabled, promotable,
           model_provider, provider_account_id, provider_failover, provider_credentials, test_command, validation_setup_command, pr_provider,
@@ -393,7 +394,7 @@ export function createProfileStore(
         ) VALUES (
           @name, @repoUrl, @defaultBranch, @template, @buildCommand, @startCommand, @buildWorkDir,
           @healthPath, @healthTimeout, @validationPages, @maxValidationAttempts,
-          @defaultModel, @reviewerModel, @defaultRuntime, @executionTarget, @customInstructions, @agentDonePrompt, @escalationConfig,
+          @defaultModel, @reviewerModel, @defaultRuntime, @reasoningEffort, @executionTarget, @customInstructions, @agentDonePrompt, @escalationConfig,
           @extends, @workerProfile, @mcpServers, @claudeMdSections, @skills, @networkPolicy, @actionPolicy, @outputMode,
           @agentMode, @outputTarget, @validate, @validationSuite, @advisoryBrowserQaEnabled, @promotable,
           @modelProvider, @providerAccountId, @providerFailover, @providerCredentials, @testCommand, @validationSetupCommand, @prProvider,
@@ -428,6 +429,7 @@ export function createProfileStore(
         defaultModel: parsed.defaultModel,
         reviewerModel: parsed.reviewerModel ?? null,
         defaultRuntime: parsed.defaultRuntime,
+        reasoningEffort: parsed.reasoningEffort,
         executionTarget: parsed.executionTarget,
         customInstructions: parsed.customInstructions,
         agentDonePrompt: parsed.agentDonePrompt,
@@ -631,6 +633,10 @@ export function createProfileStore(
       if (parsed.defaultRuntime !== undefined) {
         setClauses.push('default_runtime = @defaultRuntime');
         fieldMap.defaultRuntime = parsed.defaultRuntime;
+      }
+      if (parsed.reasoningEffort !== undefined) {
+        setClauses.push('reasoning_effort = @reasoningEffort');
+        fieldMap.reasoningEffort = parsed.reasoningEffort;
       }
       if (parsed.executionTarget !== undefined) {
         setClauses.push('execution_target = @executionTarget');

@@ -2,6 +2,14 @@ import Foundation
 
 // MARK: - Profile response (mirrors packages/shared/src/types/profile.ts)
 
+public enum ReasoningEffort: String, Codable, CaseIterable, Sendable {
+  case auto
+  case low
+  case medium
+  case high
+  case xhigh
+}
+
 public struct ProfileResponse: Codable, Sendable {
   public var name: String
   /// Nullable on the `raw` shape from /editor — null means "inherit from parent".
@@ -18,6 +26,8 @@ public struct ProfileResponse: Codable, Sendable {
   public var maxValidationAttempts: Int?
   public var defaultModel: String?
   public var reviewerModel: String?
+  /// Nil on a raw derived profile means inherit. Missing legacy fields default to `auto`.
+  public var reasoningEffort: ReasoningEffort?
   public var defaultRuntime: String?
   public var executionTarget: String?
   public var customInstructions: String?
@@ -113,6 +123,7 @@ public struct ProfileResponse: Codable, Sendable {
     case maxValidationAttempts
     case defaultModel
     case reviewerModel
+    case reasoningEffort
     case defaultRuntime
     case executionTarget
     case customInstructions
@@ -196,6 +207,9 @@ public struct ProfileResponse: Codable, Sendable {
     maxValidationAttempts = try c.decodeIfPresent(Int.self, forKey: .maxValidationAttempts)
     defaultModel = try c.decodeIfPresent(String.self, forKey: .defaultModel)
     reviewerModel = try c.decodeIfPresent(String.self, forKey: .reviewerModel)
+    reasoningEffort = c.contains(.reasoningEffort)
+      ? try c.decodeIfPresent(ReasoningEffort.self, forKey: .reasoningEffort)
+      : .auto
     defaultRuntime = try c.decodeIfPresent(String.self, forKey: .defaultRuntime)
     executionTarget = try c.decodeIfPresent(String.self, forKey: .executionTarget)
     customInstructions = try c.decodeIfPresent(String.self, forKey: .customInstructions)
@@ -268,8 +282,8 @@ public struct ProfileResponse: Codable, Sendable {
   public init() {
     name = ""; repoUrl = ""; defaultBranch = "main"; template = "node22"
     buildCommand = nil; startCommand = nil; healthPath = "/"; healthTimeout = 120
-    smokePages = []; maxValidationAttempts = 3; defaultModel = "claude-opus-4-8"
-    reviewerModel = "claude-sonnet-4-6"
+    smokePages = []; maxValidationAttempts = 3; defaultModel = "claude-opus-5"
+    reviewerModel = "claude-sonnet-5"; reasoningEffort = .auto
     defaultRuntime = "claude"; executionTarget = "local"
     agentDonePrompt = nil
     escalation = .init(); mcpServers = []; claudeMdSections = []; skills = []

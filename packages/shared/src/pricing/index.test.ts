@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CLAUDE_DEFAULT_MODEL,
+  CLAUDE_REVIEWER_MODEL,
+  MODEL_CANONICAL,
   MODEL_PRICING,
   canonicalModelKey,
   computeCost,
@@ -8,6 +11,35 @@ import {
 } from './index.js';
 
 describe('MODEL_PRICING', () => {
+  it('has Claude 5 standard pricing, defaults, and stable historical aliases', () => {
+    expect(MODEL_PRICING['claude-fable-5']).toEqual({
+      inputPer1M: 10,
+      cachedInputPer1M: 1,
+      outputPer1M: 50,
+    });
+    expect(MODEL_PRICING['claude-opus-5']).toEqual({
+      inputPer1M: 5,
+      cachedInputPer1M: 0.5,
+      outputPer1M: 25,
+    });
+    expect(MODEL_PRICING['claude-sonnet-5']).toEqual({
+      inputPer1M: 3,
+      cachedInputPer1M: 0.3,
+      outputPer1M: 15,
+    });
+    expect(CLAUDE_DEFAULT_MODEL).toBe('claude-opus-5');
+    expect(CLAUDE_REVIEWER_MODEL).toBe('claude-sonnet-5');
+    expect(CLAUDE_DEFAULT_MODEL).not.toBe('claude-fable-5');
+    expect(MODEL_CANONICAL).toEqual({
+      opus: 'claude-opus-4-7',
+      sonnet: 'claude-sonnet-4-6',
+      haiku: 'claude-haiku-4-5',
+    });
+    expect(canonicalModelKey('claude-fable-5')).toBe('claude-fable-5');
+    expect(canonicalModelKey('claude-opus-5')).toBe('claude-opus-5');
+    expect(canonicalModelKey('claude-sonnet-5')).toBe('claude-sonnet-5');
+  });
+
   it('contains full claude model IDs', () => {
     expect(MODEL_PRICING['claude-opus-4-8']).toBeDefined();
     expect(MODEL_PRICING['claude-opus-4-7']).toBeDefined();
@@ -31,6 +63,7 @@ describe('MODEL_PRICING', () => {
   });
 
   it('keeps legacy short aliases out of the canonical price table', () => {
+    expect(MODEL_PRICING.fable).toBeUndefined();
     expect(MODEL_PRICING.opus).toBeUndefined();
     expect(MODEL_PRICING.sonnet).toBeUndefined();
     expect(MODEL_PRICING.haiku).toBeUndefined();

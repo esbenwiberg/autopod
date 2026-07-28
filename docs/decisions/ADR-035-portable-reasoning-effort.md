@@ -6,58 +6,78 @@ Accepted
 
 ## Context
 
-Autopod supervises Claude Code, Codex, GitHub Copilot CLI, and Pi through one runtime interface. Each runtime now exposes a reasoning or effort control, but their full ranges differ:
+Claude Code, Codex, GitHub Copilot CLI, and Pi each expose a control for how much reasoning or
+work an agent requests, but their names, accepted values, and defaults differ. Leaving this choice
+implicit makes profile behavior vary when operators switch runtimes or provider failover starts a
+new attempt. Exposing each provider's full vocabulary would make profiles runtime-specific and
+would create values that cannot be preserved across all supported workers.
 
-- Claude Code: `low`, `medium`, `high`, `xhigh`, `max`
-- Codex: `minimal`, `low`, `medium`, `high`, and model-dependent `xhigh`
-- GitHub Copilot CLI: `low`, `medium`, `high`, `xhigh`
-- Pi: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`
-
-Profiles can fail over between provider accounts and runtimes under ADR-034. A provider-specific setting or a widest-union enum would therefore require silent clamping, failure during a later attempt, or provider-dependent semantic translation. Omitting an override also matters because provider defaults differ: Claude 5 defaults to high while Codex commonly defaults to medium.
+Reasoning effort is a behavioral request, not a strict token budget. Runtime and model defaults
+also evolve, so Autopod needs an explicit way to retain those native defaults without guessing what
+they currently mean.
 
 ## Decision
 
-Add one profile-level `reasoningEffort` contract with:
+Add one provider-neutral profile reasoning-effort setting with the values `auto`, `low`, `medium`,
+`high`, and `xhigh`. The four non-auto values are the common subset supported by Claude Code,
+Codex, GitHub Copilot CLI, and Pi. Do not expose provider-specific values such as `off`, `minimal`,
+`max`, or product modes such as OpenAI Pro and Claude fast mode through this contract.
 
-```text
-auto | low | medium | high | xhigh
-```
+`auto` means Autopod omits the runtime-specific effort or thinking control so the selected
+runtime, model, and account retain their native default. Autopod does not translate `auto` into a
+concrete level.
 
-`auto` means Autopod emits no runtime-specific effort/thinking option. It does not resolve to a guessed value.
+Profiles inherit reasoning effort like other replace-or-inherit fields. New base profiles resolve
+to `auto`; a raw derived profile may store `null` to inherit; an explicit child value replaces its
+parent. The resolved value is fixed for a provider attempt and is carried unchanged into runtime
+continuations, respawns, and the next attempt during provider failover.
 
-Every non-auto value is passed through unchanged:
+Runtime adapters map a non-auto value at invocation scope:
 
 - Claude Code: `--effort <value>`
-- Codex: `model_reasoning_effort = "<value>"` for the invocation
+- Codex: `model_reasoning_effort = "<value>"` in the pod-local invocation configuration
 - GitHub Copilot CLI: `--effort <value>`
 - Pi: `--thinking <value>`
 
-The value is inherited with the rest of the profile, carried in `SpawnConfig`, and preserved across continuation, suspension/resume, and provider attempts. This first contract applies only to the main agent runtime. Reviewer/helper calls and per-pod overrides are separate future decisions.
+Runtime configuration stays inside the pod boundary. In particular, Codex integration must not
+write or mutate user-global configuration and must preserve existing pod-local MCP configuration,
+timeouts, and secure file permissions.
+
+This first contract applies only to the main agent runtime. Reviewer/helper calls and per-pod
+overrides are separate future decisions.
 
 ## Consequences
 
 Easier:
 
-- One profile has stable semantics across every supported runtime and failover target.
-- `auto` honestly preserves provider/model/account defaults instead of pretending they are uniform.
-- Runtime adapters remain responsible only for syntax, not policy or translation.
+- Operators get one predictable quality, latency, and token-use control across all agent runtimes.
+- Runtime continuation and provider failover preserve the operator's selected intent.
+- `auto` follows future runtime and model defaults without Autopod hard-coding an approximation.
+- Profiles remain portable instead of accumulating provider-specific effort values.
 
 Harder:
 
-- Provider-only `off`, `minimal`, and `max` capabilities are not configurable through this field.
-- Model-specific support changes may require validation or a future capability catalog if the common subset stops being universal.
-- Operators wanting maximum provider-specific control need a later, explicitly non-portable override design.
+- Every runtime adapter and continuation path must preserve the resolved setting consistently.
+- The shared contract is intentionally narrower than some providers' native controls.
+- Runtime CLI and configuration changes require adapter tests to keep invocation syntax current.
 
 Committed to:
 
+- The portable `auto`, `low`, `medium`, `high`, and `xhigh` vocabulary.
+- Omission, rather than guessed translation, for `auto`.
+- One resolved value per provider attempt, preserved across continuation and failover.
+- Pod-local runtime configuration with no mutation of user-global settings.
 - No silent clamping or nearest-level translation.
-- No guessed default for `auto`.
 - No coupling main-agent effort to reviewer/helper calls.
 - No per-pod override in the initial contract.
 
 ## Alternatives rejected
 
-- **Independent fields per runtime.** Precise but cumbersome in the profile editor and ambiguous under cross-runtime failover.
-- **Widest-union enum.** Exposes all provider values but forces launch-time failure or silent downgrade on unsupported runtimes.
-- **Map generic low/medium/high to provider-specific budgets.** Hides semantics and would drift as providers change their models and defaults.
-- **Set one explicit default such as high.** Changes current Codex behavior and removes the provider/account default escape hatch.
+- **Independent fields per runtime.** Precise but cumbersome in the profile editor and ambiguous
+  under cross-runtime failover.
+- **Widest-union enum.** Exposes all provider values but forces launch-time failure or silent
+  downgrade on unsupported runtimes.
+- **Map generic low/medium/high to provider-specific budgets.** Hides semantics and would drift as
+  providers change their models and defaults.
+- **Set one explicit default such as high.** Changes current Codex behavior and removes the
+  provider/account default escape hatch.

@@ -119,6 +119,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         );
         console.log(`${chalk.bold('Model:')}      ${data.defaultModel}`);
         console.log(`${chalk.bold('Runtime:')}    ${data.defaultRuntime}`);
+        console.log(`${chalk.bold('Effort:')}     ${data.reasoningEffort}`);
         console.log(`${chalk.bold('Provider:')}   ${data.modelProvider ?? 'none'}`);
         if (data.prProvider !== 'ado' && githubAuth) {
           console.log(
@@ -330,9 +331,10 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         healthTimeout: 120,
         smokePages: [{ path: '/' }],
         maxValidationAttempts: 3,
-        defaultModel: 'claude-opus-4-8',
-        reviewerModel: 'claude-sonnet-4-6',
+        defaultModel: 'claude-opus-5',
+        reviewerModel: 'claude-sonnet-5',
         defaultRuntime: 'claude',
+        reasoningEffort: 'auto',
         customInstructions: null,
         agentDonePrompt: null,
         escalation: {
@@ -340,7 +342,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
           askAi: {
             enabled: false,
             // Legacy wire compatibility; ask_ai and AI review use reviewerModel.
-            model: 'claude-sonnet-4-6',
+            model: 'claude-sonnet-5',
             maxCalls: 5,
           },
           advisor: { enabled: false },

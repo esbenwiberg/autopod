@@ -49,6 +49,8 @@ public struct Profile: Identifiable, Sendable {
     public var maxValidationAttempts: Int
     public var defaultModel: String
     public var reviewerModel: String
+    /// Nil on a raw derived profile means inherit.
+    public var reasoningEffort: ReasoningEffort?
     public var defaultRuntime: RuntimeType
     public var executionTarget: ExecutionTarget
     public var modelProvider: ModelProvider
@@ -210,7 +212,8 @@ public struct Profile: Identifiable, Sendable {
         healthPath: String = "/", healthTimeout: Int = 120,
         buildTimeout: Int = 300, testTimeout: Int = 600,
         maxValidationAttempts: Int = 3,
-        defaultModel: String = "claude-opus-4-8", reviewerModel: String = "claude-sonnet-4-6",
+        defaultModel: String = "claude-opus-5", reviewerModel: String = "claude-sonnet-5",
+        reasoningEffort: ReasoningEffort? = .auto,
         defaultRuntime: RuntimeType = .claude,
         executionTarget: ExecutionTarget = .local,
         modelProvider: ModelProvider = .anthropic,
@@ -280,6 +283,7 @@ public struct Profile: Identifiable, Sendable {
         self.buildTimeout = buildTimeout; self.testTimeout = testTimeout
         self.maxValidationAttempts = maxValidationAttempts
         self.defaultModel = defaultModel; self.reviewerModel = reviewerModel
+        self.reasoningEffort = reasoningEffort
         self.defaultRuntime = defaultRuntime
         self.executionTarget = executionTarget; self.modelProvider = modelProvider
         self.providerAccountId = providerAccountId

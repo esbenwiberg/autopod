@@ -214,6 +214,18 @@ describe('ProfileValidator', () => {
     expect(result.valid).toBe(true);
   });
 
+  it('should accept portable reasoning effort values and null inheritance', () => {
+    for (const reasoningEffort of ['auto', 'low', 'medium', 'high', 'xhigh', null]) {
+      expect(validateProfile({ ...validInput, reasoningEffort }).valid).toBe(true);
+    }
+  });
+
+  it('should reject invalid reasoning effort values', () => {
+    const result = validateProfile({ ...validInput, reasoningEffort: 'max' });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('reasoningEffort');
+  });
+
   it('should reject maxValidationAttempts out of range', () => {
     const result = validateProfile({ ...validInput, maxValidationAttempts: 0 });
     expect(result.valid).toBe(false);

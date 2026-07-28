@@ -35,6 +35,7 @@ import type {
   ReadinessApproval,
   ReadinessReview,
   ReadinessStatus,
+  ReasoningEffort,
   RequestCredentialPayload,
   ReviewFeedbackResponseItem,
   Runtime,
@@ -135,6 +136,7 @@ import {
   codexStateDirForPod,
   ensureCodexStateDir,
 } from '../runtimes/codex-state-store.js';
+import type { CodexRuntime } from '../runtimes/codex-runtime.js';
 import type { PiRuntime } from '../runtimes/pi-runtime.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
@@ -1837,13 +1839,38 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return null;
   }
 
+  function reasoningEffortFromSnapshot(
+    snapshot: Record<string, unknown> | null | undefined,
+  ): ReasoningEffort | null {
+    const value = snapshot?.reasoningEffort;
+    return value === 'auto' ||
+      value === 'low' ||
+      value === 'medium' ||
+      value === 'high' ||
+      value === 'xhigh'
+      ? value
+      : null;
+  }
+
+  function resolvedReasoningEffort(
+    profile: Profile,
+    snapshot?: Record<string, unknown> | null,
+  ): ReasoningEffort {
+    return reasoningEffortFromSnapshot(snapshot) ?? profile.reasoningEffort ?? 'auto';
+  }
+
   function ensureProviderAttempt(pod: Pod, profile: Profile): void {
     const repository = deps.providerAttemptRepo;
     if (!repository) return;
-    const provider = providerForAttempt(pod, profile);
-    const profileSnapshot = redactedProfileSnapshot(pod, profile);
-    const profileReference = profileReferenceForAttempt(pod, profileSnapshot);
     const active = repository.getActive(pod.id);
+    const profileSnapshot =
+      (active && repository.getActiveProfileSnapshot(pod.id)) ??
+      redactedProfileSnapshot({ ...pod, profileSnapshot: profile }, profile);
+    const profileReference = profileReferenceForAttempt(pod, profileSnapshot);
+    const provider = providerForAttempt(
+      active ? { ...pod, providerIdSnapshot: active.provider } : pod,
+      profile,
+    );
     if (active) {
       const identityMatches =
         active.provider === provider &&
@@ -1999,7 +2026,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   function openProviderTargetAttempt(pod: Pod, target: ProviderFailoverTarget): void {
     const repository = deps.providerAttemptRepo;
     if (!repository) throw new Error('Provider attempt repository is unavailable');
-    const profile = profileForProviderTarget(profileStore.get(pod.profileName), target);
+    const currentProfile = profileStore.get(pod.profileName);
+    const profile = profileForProviderTarget(
+      {
+        ...currentProfile,
+        reasoningEffort: resolvedReasoningEffort(
+          currentProfile,
+          pod.profileSnapshot as unknown as Record<string, unknown> | null,
+        ),
+      },
+      target,
+    );
     const targetProvider = providerAccountStore?.get(target.providerAccountId).provider ?? null;
     const projectedPod = {
       ...pod,
@@ -2265,6 +2302,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podId: pod.id,
       task: '',
       model: pod.model,
+      reasoningEffort: resolvedReasoningEffort(
+        profile,
+        pod.profileSnapshot as unknown as Record<string, unknown> | null,
+      ),
       workDir: '/workspace',
       containerId,
       customInstructions: 'resume',
@@ -6600,6 +6641,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             model: queuedProviderAttempt.model,
           });
         }
+        const reasoningEffort = resolvedReasoningEffort(
+          profile,
+          pod.profileSnapshot as unknown as Record<string, unknown> | null,
+        );
+        profile = { ...profile, reasoningEffort };
 
         // For handoff pods the interactive container is still running. Persist
         // the human's work before stopping that container; if we cannot prove the
@@ -6782,11 +6828,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           profileStore,
           providerAccountStore,
           manifest: providerCatalog,
-          ...(pod.providerIdSnapshot
+          ...(queuedProviderAttempt?.providerAccountId || pod.providerIdSnapshot
             ? {
                 expectedBinding: {
-                  accountId: pod.providerAccountIdSnapshot,
-                  providerId: pod.providerIdSnapshot,
+                  accountId:
+                    queuedProviderAttempt?.providerAccountId ?? pod.providerAccountIdSnapshot,
+                  providerId: queuedProviderAttempt?.providerAccountId
+                    ? (providerAccountStore?.get(queuedProviderAttempt.providerAccountId)
+                        .provider ?? pod.providerIdSnapshot)
+                    : pod.providerIdSnapshot,
                 },
               }
             : {}),
@@ -8193,11 +8243,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           providerAccountStore,
           providerCatalog,
           runtime: pod.runtime,
-          ...(pod.providerIdSnapshot
+          ...(queuedProviderAttempt?.providerAccountId || pod.providerIdSnapshot
             ? {
                 providerBinding: {
-                  accountId: pod.providerAccountIdSnapshot,
-                  providerId: pod.providerIdSnapshot,
+                  accountId:
+                    queuedProviderAttempt?.providerAccountId ?? pod.providerAccountIdSnapshot,
+                  providerId: queuedProviderAttempt?.providerAccountId
+                    ? (providerAccountStore?.get(queuedProviderAttempt.providerAccountId)
+                        .provider ?? pod.providerIdSnapshot)
+                    : pod.providerIdSnapshot,
                 },
               }
             : {}),
@@ -8523,6 +8577,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId,
             task: reworkTask,
             model: pod.model,
+            reasoningEffort,
             workDir: '/workspace',
             containerId,
             customInstructions: runtimeInstructions,
@@ -8543,6 +8598,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Rehydrate the in-memory pod ID map so resume() can find it
           if ('setClaudeSessionId' in runtime) {
             (runtime as ClaudeRuntime).setClaudeSessionId(podId, pod.claudeSessionId);
+          }
+          if ('setClaudeResumeConfig' in runtime) {
+            (runtime as ClaudeRuntime).setClaudeResumeConfig(
+              podId,
+              mcpServers,
+              reasoningEffort,
+            );
           }
 
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods (recovery requires a prior run with a worktree)
@@ -8582,6 +8644,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 podId,
                 task: recoveryTask,
                 model: podModel,
+                reasoningEffort,
                 workDir: '/workspace',
                 containerId: containerIdRef,
                 customInstructions: customInstructionsRef,
@@ -8594,6 +8657,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         } else if (isRecovery && pod.runtime === 'codex' && pod.codexSessionId) {
           // Codex crash recovery: continue the existing session
           emitStatus('Resuming Codex pod…');
+          if ('setCodexResumeConfig' in runtime) {
+            (runtime as CodexRuntime).setCodexResumeConfig(podId, mcpServers, reasoningEffort);
+          }
           // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
           const codexContinuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
           events = runtime.resume(podId, codexContinuationPrompt, containerId, secretEnv);
@@ -8619,6 +8685,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId,
             task: recoveryTask,
             model: pod.model,
+            reasoningEffort,
             workDir: '/workspace',
             containerId,
             customInstructions: runtimeInstructions,
@@ -8632,6 +8699,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             podId,
             task: pod.task,
             model: pod.model,
+            reasoningEffort,
             workDir: '/workspace',
             containerId,
             customInstructions: runtimeInstructions,

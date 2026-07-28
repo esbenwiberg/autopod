@@ -7,6 +7,34 @@ import {
 
 const canonicalModelMessage = 'canonical Claude model ID';
 
+describe('profile reasoning effort', () => {
+  it('accepts exactly the portable reasoning effort values', () => {
+    for (const reasoningEffort of ['auto', 'low', 'medium', 'high', 'xhigh'] as const) {
+      expect(
+        createProfileSchema.parse({ name: `effort-${reasoningEffort}`, reasoningEffort }),
+      ).toMatchObject({ reasoningEffort });
+      expect(updateProfileSchema.parse({ reasoningEffort })).toEqual({ reasoningEffort });
+    }
+
+    for (const reasoningEffort of ['off', 'minimal', 'max', 'HIGH', '']) {
+      expect(
+        createProfileSchema.safeParse({ name: 'invalid-effort', reasoningEffort }).success,
+      ).toBe(false);
+      expect(updateProfileSchema.safeParse({ reasoningEffort }).success).toBe(false);
+    }
+  });
+
+  it('defaults base reasoning effort to auto and derived reasoning effort to null', () => {
+    expect(createProfileSchema.parse({ name: 'base-effort' }).reasoningEffort).toBe('auto');
+    expect(
+      createProfileSchema.parse({ name: 'derived-effort', extends: 'base-effort' }).reasoningEffort,
+    ).toBeNull();
+    expect(updateProfileSchema.parse({ reasoningEffort: null })).toEqual({
+      reasoningEffort: null,
+    });
+  });
+});
+
 describe('createProfileSchema model validation', () => {
   it('accepts validationSetupCommand and setup as a skippable phase', () => {
     const parsed = createProfileSchema.parse({
@@ -107,7 +135,7 @@ describe('createProfileSchema model validation', () => {
   });
 
   it('rejects short Claude aliases in defaultModel, reviewerModel, and escalation.askAi.model', () => {
-    for (const model of ['opus', 'sonnet', 'haiku']) {
+    for (const model of ['fable', 'opus', 'sonnet', 'haiku']) {
       const defaultModel = createProfileSchema.safeParse({ name: 'primary', defaultModel: model });
       expect(defaultModel.success).toBe(false);
       if (!defaultModel.success) {
@@ -147,8 +175,9 @@ describe('createProfileSchema model validation', () => {
     expect(parsed.escalation?.askAi.model).toBe('claude-sonnet-4-6');
 
     const defaulted = createProfileSchema.parse({ name: 'defaulted' });
-    expect(defaulted.defaultModel).toBe('claude-opus-4-8');
-    expect(defaulted.escalation?.askAi.model).toBe('claude-sonnet-4-6');
+    expect(defaulted.defaultModel).toBe('claude-opus-5');
+    expect(defaulted.reviewerModel).toBe('claude-sonnet-5');
+    expect(defaulted.escalation?.askAi.model).toBe('claude-sonnet-5');
   });
 
   it('accepts OpenRouter profile credentials and API key field', () => {
@@ -404,7 +433,7 @@ describe('provider account schemas', () => {
 
 describe('updateProfileSchema model validation', () => {
   it('rejects short Claude aliases in defaultModel, reviewerModel, and escalation.askAi.model', () => {
-    for (const model of ['opus', 'sonnet', 'haiku']) {
+    for (const model of ['fable', 'opus', 'sonnet', 'haiku']) {
       const defaultModel = updateProfileSchema.safeParse({ defaultModel: model });
       expect(defaultModel.success).toBe(false);
       if (!defaultModel.success) {

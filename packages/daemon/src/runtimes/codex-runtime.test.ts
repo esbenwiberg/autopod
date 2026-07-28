@@ -159,6 +159,7 @@ describe('CodexRuntime', () => {
         podId: 'abc123',
         task: 'Fix the bug',
         model: 'o3-mini',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -182,6 +183,7 @@ describe('CodexRuntime', () => {
         podId: 'abc123',
         task: 'Fix the bug',
         model: 'auto',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -203,6 +205,7 @@ describe('CodexRuntime', () => {
         podId: 'abc123',
         task: 'Fix the bug',
         model: 'auto',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         customInstructions: '# Autopod Pod\n\nCall report_plan first.',
@@ -236,6 +239,7 @@ describe('CodexRuntime', () => {
         podId: 'test-sess',
         task: 'Do the thing',
         model: 'o3-mini',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -282,6 +286,7 @@ describe('CodexRuntime', () => {
         podId: 'turn-only',
         task: 'Do the thing',
         model: 'o3-mini',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -319,6 +324,7 @@ describe('CodexRuntime', () => {
         podId: 'redact-spawn',
         task: bigStr,
         model: 'o3-mini',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -359,6 +365,7 @@ describe('CodexRuntime', () => {
         podId: 'test-sess',
         task: 'Fail',
         model: 'o3-mini',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -409,6 +416,7 @@ describe('CodexRuntime', () => {
         podId: 'completed-exit-one',
         task: 'Complete, then exit one',
         model: 'o3-mini',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -446,6 +454,7 @@ describe('CodexRuntime', () => {
         podId: 'missing-codex',
         task: 'Fail',
         model: 'o3-mini',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -523,6 +532,7 @@ describe('CodexRuntime', () => {
           podId,
           task: 'Start a fresh turn.',
           model: 'gpt-5.6-sol',
+          reasoningEffort: 'auto',
           workDir: '/workspace',
           containerId: 'container-123',
           env: {},
@@ -577,6 +587,7 @@ describe('CodexRuntime', () => {
           podId: 'wedged-codex',
           task: 'Task',
           model: 'o3-mini',
+          reasoningEffort: 'auto',
           workDir: '/workspace',
           containerId: 'container-123',
           env: {},
@@ -657,6 +668,7 @@ describe('CodexRuntime', () => {
             podId,
             task: 'Finish after the summary.',
             model: 'gpt-5.5',
+            reasoningEffort: 'auto',
             workDir: '/workspace',
             containerId: 'container-123',
             executionTarget: 'sandbox',
@@ -756,6 +768,7 @@ describe('CodexRuntime', () => {
             podId,
             task: 'Finish without terminal proof.',
             model: 'gpt-5.5',
+            reasoningEffort: 'auto',
             workDir: '/workspace',
             containerId: 'container-123',
             executionTarget: 'sandbox',
@@ -857,6 +870,7 @@ describe('CodexRuntime', () => {
             podId,
             task: 'Finish once despite a delayed stream event.',
             model: 'gpt-5.5',
+            reasoningEffort: 'auto',
             workDir: '/workspace',
             containerId: 'container-123',
             executionTarget: 'sandbox',
@@ -941,6 +955,7 @@ describe('CodexRuntime', () => {
             podId,
             task: 'Recover the active rollout only.',
             model: 'gpt-5.5',
+            reasoningEffort: 'auto',
             workDir: '/workspace',
             containerId: 'container-123',
             executionTarget: 'sandbox',
@@ -987,6 +1002,7 @@ describe('CodexRuntime', () => {
         podId: 'track-test',
         task: 'test',
         model: 'o3-mini',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -1022,6 +1038,7 @@ describe('CodexRuntime', () => {
         podId: 'map-test',
         task: 'test',
         model: 'gpt-4o',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -1117,6 +1134,7 @@ describe('CodexRuntime', () => {
           podId,
           task: 'Probe event streaming',
           model: 'gpt-5.5',
+          reasoningEffort: 'auto',
           workDir: '/workspace',
           containerId: 'container-123',
           env: {},
@@ -1201,6 +1219,7 @@ describe('CodexRuntime', () => {
             podId,
             task: 'Finish once',
             model: 'gpt-5.5',
+            reasoningEffort: 'auto',
             workDir: '/workspace',
             containerId: 'container-123',
             env: {},
@@ -1293,6 +1312,7 @@ describe('CodexRuntime', () => {
             podId,
             task: 'Deploy',
             model: 'gpt-5.5',
+            reasoningEffort: 'auto',
             workDir: '/workspace',
             containerId: 'container-123',
             env: {},
@@ -1418,6 +1438,7 @@ describe('CodexRuntime', () => {
             podId,
             task: 'Tail a growing rollout once',
             model: 'gpt-5.5',
+            reasoningEffort: 'auto',
             workDir: '/workspace',
             containerId: 'container-123',
             env: {},
@@ -2186,6 +2207,7 @@ describe('CodexRuntime', () => {
       containerId: string,
       mcpServers: SpawnConfig['mcpServers'],
       executionTarget?: SpawnConfig['executionTarget'],
+      reasoningEffort?: SpawnConfig['reasoningEffort'],
     ) => Promise<void>;
 
     function callWriteMcpConfig(runtime: CodexRuntime): WriteMcp {
@@ -2400,6 +2422,150 @@ describe('CodexRuntime', () => {
     });
   });
 
+  describe('reasoning effort', () => {
+    const efforts = ['low', 'medium', 'high', 'xhigh'] as const;
+    type WriteConfig = (
+      containerId: string,
+      mcpServers: SpawnConfig['mcpServers'],
+      executionTarget?: SpawnConfig['executionTarget'],
+      reasoningEffort?: SpawnConfig['reasoningEffort'],
+    ) => Promise<void>;
+
+    function writer(runtime: CodexRuntime): WriteConfig {
+      return (runtime as unknown as { writeMcpConfig: WriteConfig }).writeMcpConfig.bind(runtime);
+    }
+
+    it.each(efforts)('writes exact %s effort without MCP servers and secures the file', async (effort) => {
+      const cm = createMockContainerManager(createMockHandle());
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await writer(runtime)('c1', [], undefined, effort);
+
+      expect(cm.writeFile).toHaveBeenCalledWith(
+        'c1',
+        '/home/autopod/.codex/config.toml',
+        `model_reasoning_effort = "${effort}"\n`,
+      );
+      expect(cm.execInContainer).toHaveBeenCalledWith(
+        'c1',
+        expect.arrayContaining(['sh', '-c', expect.stringContaining('chmod 0600')]),
+        { timeout: 5_000, user: 'root' },
+      );
+    });
+
+    it('omits auto and does not create an empty config', async () => {
+      const cm = createMockContainerManager(createMockHandle());
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await writer(runtime)('c1', [], undefined, 'auto');
+
+      expect(cm.writeFile).not.toHaveBeenCalled();
+      expect(cm.execInContainer).not.toHaveBeenCalled();
+    });
+
+    it('preserves mixed HTTP/stdio MCP sections and timeouts beside effort', async () => {
+      const cm = createMockContainerManager(createMockHandle());
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await writer(runtime)(
+        'c1',
+        [
+          { name: 'escalation', url: 'http://h/mcp', headers: { Authorization: 'Bearer token' } },
+          {
+            type: 'stdio',
+            name: 'serena',
+            command: 'serena',
+            args: ['--project', '/workspace'],
+            env: { LOG_LEVEL: 'info' },
+          },
+        ],
+        'sandbox',
+        'xhigh',
+      );
+
+      const content = vi.mocked(cm.writeFile).mock.calls[0]?.[2] as string;
+      expect(content).toContain('model_reasoning_effort = "xhigh"');
+      expect(content).toContain('[mcp_servers.escalation]');
+      expect(content).toContain('http_headers = { Authorization = "Bearer token" }');
+      expect(content).toContain('[mcp_servers.serena]');
+      expect(content).toContain('args = ["--project", "/workspace"]');
+      expect(content).toContain('env = { LOG_LEVEL = "info" }');
+      expect(content.match(/tool_timeout_sec = 3900\.0/g)).toHaveLength(2);
+      expect(cm.execInContainer).toHaveBeenCalledWith(
+        'c1',
+        expect.arrayContaining(['sh', '-c', expect.stringContaining('chmod 0644')]),
+        { timeout: 5_000, user: 'root' },
+      );
+    });
+
+    it('reuses the stored effort when resuming into a new container', async () => {
+      const first = createMockHandle();
+      const second = createMockHandle();
+      const cm = createMockContainerManager(first);
+      vi.mocked(cm.execStreaming).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      const spawnDone = (async () => {
+        for await (const _ of runtime.spawn({
+          podId: 'sess-1',
+          task: 'work',
+          model: 'gpt-5-codex',
+          reasoningEffort: 'high',
+          workDir: '/workspace',
+          containerId: 'c1',
+          env: {},
+          mcpServers: [],
+        })) {
+          // drain
+        }
+      })();
+      first.finish(0);
+      await spawnDone;
+      vi.mocked(cm.writeFile).mockClear();
+
+      const resumeDone = (async () => {
+        for await (const _ of runtime.resume('sess-1', 'continue', 'c2', {})) {
+          // drain
+        }
+      })();
+      second.finish(0);
+      await resumeDone;
+
+      expect(cm.writeFile).toHaveBeenCalledWith(
+        'c2',
+        '/home/autopod/.codex/config.toml',
+        expect.stringContaining('model_reasoning_effort = "high"'),
+      );
+    });
+
+    it('rehydrates effort-only config for durable recovery in a fresh runtime', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+      runtime.codexSessionIds.set('sess-1', 'codex-session');
+      runtime.setCodexResumeConfig('sess-1', [], 'xhigh');
+
+      const resumeDone = (async () => {
+        for await (const _ of runtime.resume('sess-1', 'continue', 'c2', {})) {
+          // drain
+        }
+      })();
+      handle.finish(0);
+      await resumeDone;
+
+      expect(cm.writeFile).toHaveBeenCalledWith(
+        'c2',
+        '/home/autopod/.codex/config.toml',
+        'model_reasoning_effort = "xhigh"\n',
+      );
+      expect(cm.execInContainer).toHaveBeenCalledWith(
+        'c2',
+        expect.arrayContaining(['sh', '-c', expect.stringContaining('chmod 0600')]),
+        { timeout: 5_000, user: 'root' },
+      );
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // spawn / resume MCP wiring
   // ---------------------------------------------------------------------------
@@ -2414,6 +2580,7 @@ describe('CodexRuntime', () => {
         podId: 'sess-1',
         task: 'do thing',
         model: 'gpt-5-codex',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'c1',
         env: {},

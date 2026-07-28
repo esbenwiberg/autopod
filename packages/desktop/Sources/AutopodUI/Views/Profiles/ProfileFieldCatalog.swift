@@ -1,4 +1,43 @@
+import AutopodClient
 import Foundation
+import SwiftUI
+
+public enum ReasoningEffortField {
+    public static let help =
+        "Higher effort can improve difficult work while increasing latency and token use."
+
+    public static let options: [(value: ReasoningEffort, label: String)] = [
+        (.auto, "Auto (runtime default)"),
+        (.low, "Low"),
+        (.medium, "Medium"),
+        (.high, "High"),
+        (.xhigh, "Extra high"),
+    ]
+
+    public static func explicitValue(
+        current: ReasoningEffort?,
+        parent: ReasoningEffort?
+    ) -> ReasoningEffort {
+        current ?? parent ?? .auto
+    }
+
+    public static func binding(
+        value: Binding<ReasoningEffort?>,
+        fallback: ReasoningEffort = .auto
+    ) -> Binding<ReasoningEffort> {
+        Binding(
+            get: { value.wrappedValue ?? fallback },
+            set: { value.wrappedValue = $0 }
+        )
+    }
+
+    public static func activateOverride(
+        value: Binding<ReasoningEffort?>,
+        parent: ReasoningEffort?
+    ) {
+        value.wrappedValue = parent ?? .auto
+    }
+}
 
 /// Declarative catalog of every Profile property that can be overridden on
 /// a derived profile. Drives the "Add override…" menu and the section-grouped
@@ -174,6 +213,12 @@ public enum ProfileOverrideCatalog {
             label: "Reviewer Model",
             section: .agent,
             help: "Model used for required-facts review, task review, and ask_ai consultation. Options follow the runtime."
+        ),
+        .init(
+            key: "reasoningEffort",
+            label: "Reasoning effort",
+            section: .agent,
+            help: ReasoningEffortField.help
         ),
         .init(
             key: "defaultRuntime",

@@ -242,6 +242,7 @@ public struct ProfileEditorView: View {
                 )? = nil,
                 onDelete: ((String) async throws -> Void)? = nil) {
         self._profile = State(initialValue: profile)
+        self._selectedSection = State(initialValue: .general)
         self.isNew = isNew
         self.actionCatalog = actionCatalog
         self.builtinSkills = builtinSkills
@@ -261,8 +262,13 @@ public struct ProfileEditorView: View {
         self.onDelete = onDelete
     }
 
+    init(profile: Profile, isNew: Bool, testingInitialSection: ProfileSection) {
+        self.init(profile: profile, isNew: isNew)
+        self._selectedSection = State(initialValue: testingInitialSection)
+    }
+
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedSection: ProfileSection = .general
+    @State private var selectedSection: ProfileSection
     @State private var authStatus: AuthStatus?
     @State private var searchText: String = ""
     @State private var searchLastSection: ProfileSection = .general
@@ -1089,6 +1095,18 @@ public struct ProfileEditorView: View {
                 .labelsHidden()
                 .frame(width: 130)
             }
+        }
+        fieldRow("Reasoning effort", help: ReasoningEffortField.help) {
+            Picker(
+                "",
+                selection: ReasoningEffortField.binding(value: $profile.reasoningEffort)
+            ) {
+                ForEach(ReasoningEffortField.options, id: \.value) { option in
+                    Text(option.label).tag(option.value)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 180)
         }
         fieldRow("Custom Instructions", help: "Appended to the agent's system prompt. Use for project conventions, constraints, or domain context.") {
             TextEditor(text: Binding(
@@ -3054,6 +3072,11 @@ public struct ProfileEditorView: View {
                                     inheritedFields.remove(field.key)
                                     if field.key == "providerFailover" {
                                         profile.providerFailover = ProviderFailoverPolicyResponse(targets: [])
+                                    } else if field.key == "reasoningEffort" {
+                                        ReasoningEffortField.activateOverride(
+                                            value: $profile.reasoningEffort,
+                                            parent: editorPayload?.parent?.reasoningEffort
+                                        )
                                     }
                                 }
                             }
@@ -3202,6 +3225,8 @@ public struct ProfileEditorView: View {
                       role: .reviewerModel,
                       parent: editorPayload?.parent?.reviewerModel ?? "",
                       parentRuntime: parentRuntime)
+        case "reasoningEffort":
+            reasoningEffortCard(field)
         case "defaultRuntime":
             enumCard(field, selection: $profile.defaultRuntime,
                      options: RuntimeType.allCases.map { ($0, $0.rawValue.capitalized) },
@@ -3409,6 +3434,29 @@ public struct ProfileEditorView: View {
         overrideCardShell(field: field) {
             providerAccountPicker
             parentLine(parent.isEmpty ? "(none)" : parent)
+        }
+    }
+
+    private func reasoningEffortCard(_ field: ProfileOverrideField) -> some View {
+        let parent = editorPayload?.parent?.reasoningEffort ?? .auto
+        return overrideCardShell(field: field) {
+            Picker(
+                "",
+                selection: ReasoningEffortField.binding(
+                    value: $profile.reasoningEffort,
+                    fallback: parent
+                )
+            ) {
+                ForEach(ReasoningEffortField.options, id: \.value) { option in
+                    Text(option.label).tag(option.value)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 180)
+            parentLine(
+                ReasoningEffortField.options.first { $0.value == parent }?.label
+                    ?? parent.rawValue
+            )
         }
     }
 

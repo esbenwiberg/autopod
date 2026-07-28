@@ -23,3 +23,27 @@ import Testing
     }
     #expect(overflowingSubviews.isEmpty)
 }
+
+@MainActor @Test func profileEditorAgentControlsDoNotWidenTheSheet() {
+    var profile = MockProfiles.myApp
+    profile.reasoningEffort = .xhigh
+    let editor = ProfileEditorView(
+        profile: profile,
+        isNew: false,
+        testingInitialSection: .agent
+    )
+    let hostingView = NSHostingView(rootView: editor)
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 880, height: 720),
+        styleMask: [.titled],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = hostingView
+    hostingView.appearance = NSAppearance(named: .darkAqua)
+    window.layoutIfNeeded()
+
+    hostingView.layoutSubtreeIfNeeded()
+
+    #expect(hostingView.fittingSize.width <= hostingView.bounds.width)
+}

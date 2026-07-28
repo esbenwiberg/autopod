@@ -77,6 +77,7 @@ describe('ClaudeRuntime', () => {
         podId: 'abc',
         task: 'Add a test',
         model: 'claude-opus-4-5',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'c1',
         env: {},
@@ -94,7 +95,7 @@ describe('ClaudeRuntime', () => {
       expect(args).toContain('/home/autopod/.autopod/system-instructions.md');
     });
 
-    it('resolves short model aliases to full model IDs', () => {
+    it('keeps Claude 5 canonical IDs and resolves defensive aliases to current defaults', () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
       const runtime = new ClaudeRuntime(logger, cm);
@@ -112,11 +113,14 @@ describe('ClaudeRuntime', () => {
         });
 
       // Short aliases → full model IDs
-      expect(buildArgs('sonnet')).toContain('claude-sonnet-4-6');
-      expect(buildArgs('opus')).toContain('claude-opus-4-8');
+      expect(buildArgs('sonnet')).toContain('claude-sonnet-5');
+      expect(buildArgs('opus')).toContain('claude-opus-5');
       expect(buildArgs('haiku')).toContain('claude-haiku-4-5');
 
       // Full model IDs pass through unchanged
+      expect(buildArgs('claude-fable-5')).toContain('claude-fable-5');
+      expect(buildArgs('claude-opus-5')).toContain('claude-opus-5');
+      expect(buildArgs('claude-sonnet-5')).toContain('claude-sonnet-5');
       expect(buildArgs('claude-sonnet-4-5')).toContain('claude-sonnet-4-5');
       expect(buildArgs('claude-opus-4-7')).toContain('claude-opus-4-7');
     });
@@ -132,6 +136,7 @@ describe('ClaudeRuntime', () => {
         podId: 'abc',
         task: 'task',
         model: 'opus',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'c1',
         env: {},
@@ -152,6 +157,7 @@ describe('ClaudeRuntime', () => {
         podId: 'abc',
         task: 'task',
         model: 'opus',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'c1',
         env: {},
@@ -171,6 +177,7 @@ describe('ClaudeRuntime', () => {
         podId: 'abc',
         task: 'task',
         model: 'opus',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'c1',
         env: {},
@@ -190,6 +197,7 @@ describe('ClaudeRuntime', () => {
         podId: 'abc',
         task: 'task',
         model: 'opus',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'c1',
         env: {},
@@ -212,6 +220,7 @@ describe('ClaudeRuntime', () => {
         podId: 'abc',
         task: 'task',
         model: 'opus',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'c1',
         env: {},
@@ -340,6 +349,7 @@ describe('ClaudeRuntime', () => {
         podId: 'abc',
         task: 'task',
         model: 'opus',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'c1',
         env: {},
@@ -411,6 +421,7 @@ describe('ClaudeRuntime', () => {
         podId: 'sess-1',
         task: 'Do the thing',
         model: 'opus',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -440,6 +451,7 @@ describe('ClaudeRuntime', () => {
         podId: 'sess-fail',
         task: 'Fail',
         model: 'opus',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -467,6 +479,7 @@ describe('ClaudeRuntime', () => {
         podId: 'sess-ok',
         task: 'Success',
         model: 'opus',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -501,6 +514,7 @@ describe('ClaudeRuntime', () => {
         podId: 'sess-stderr',
         task: 'Task',
         model: 'opus',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -538,6 +552,7 @@ describe('ClaudeRuntime', () => {
         podId: 'sess-id-track',
         task: 'Task',
         model: 'opus',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -561,6 +576,7 @@ describe('ClaudeRuntime', () => {
         podId: 'track-sess',
         task: 'Task',
         model: 'opus',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -591,6 +607,7 @@ describe('ClaudeRuntime', () => {
         podId: 'redact-spawn',
         task: bigStr,
         model: 'opus',
+        reasoningEffort: 'auto',
         workDir: '/workspace',
         containerId: 'container-123',
         env: {},
@@ -646,6 +663,7 @@ describe('ClaudeRuntime', () => {
           podId: 'wedged-sess',
           task: 'Task',
           model: 'opus',
+          reasoningEffort: 'auto',
           workDir: '/workspace',
           containerId: 'container-123',
           env: {},
@@ -685,6 +703,126 @@ describe('ClaudeRuntime', () => {
   // ---------------------------------------------------------------------------
   // resume
   // ---------------------------------------------------------------------------
+
+  describe('reasoning effort', () => {
+    const efforts = ['low', 'medium', 'high', 'xhigh'] as const;
+
+    it.each(efforts)('passes %s exactly on spawn and continuation', (reasoningEffort) => {
+      const runtime = new ClaudeRuntime(logger, createMockContainerManager(createMockHandle()));
+      const privateRuntime = runtime as unknown as {
+        buildSpawnArgs: (config: SpawnConfig) => string[];
+        buildResumeArgs: (
+          message: string,
+          sessionId: string,
+          mcpServers: SpawnConfig['mcpServers'],
+          effort: SpawnConfig['reasoningEffort'],
+        ) => string[];
+      };
+      const config: SpawnConfig = {
+        podId: 'effort-pod',
+        task: 'work',
+        model: 'claude-opus-5',
+        reasoningEffort,
+        workDir: '/workspace',
+        containerId: 'c1',
+        env: {},
+      };
+
+      expect(privateRuntime.buildSpawnArgs(config)).toEqual(
+        expect.arrayContaining(['--effort', reasoningEffort]),
+      );
+      expect(privateRuntime.buildResumeArgs('continue', 'session-1', [], reasoningEffort)).toEqual(
+        expect.arrayContaining(['--effort', reasoningEffort]),
+      );
+    });
+
+    it('omits the native control for auto on spawn and continuation', () => {
+      const runtime = new ClaudeRuntime(logger, createMockContainerManager(createMockHandle()));
+      const privateRuntime = runtime as unknown as {
+        buildSpawnArgs: (config: SpawnConfig) => string[];
+        buildResumeArgs: (
+          message: string,
+          sessionId: string,
+          mcpServers: SpawnConfig['mcpServers'],
+          effort: SpawnConfig['reasoningEffort'],
+        ) => string[];
+      };
+      const config: SpawnConfig = {
+        podId: 'effort-pod',
+        task: 'work',
+        model: 'claude-opus-5',
+        reasoningEffort: 'auto',
+        workDir: '/workspace',
+        containerId: 'c1',
+        env: {},
+      };
+
+      expect(privateRuntime.buildSpawnArgs(config)).not.toContain('--effort');
+      expect(privateRuntime.buildResumeArgs('continue', 'session-1', [], 'auto')).not.toContain(
+        '--effort',
+      );
+    });
+
+    it('retains the configured effort through the public spawn and resume path', async () => {
+      const first = createMockHandle();
+      const second = createMockHandle();
+      const cm = createMockContainerManager(first);
+      vi.mocked(cm.execStreaming).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+      const runtime = new ClaudeRuntime(logger, cm);
+
+      const spawnDone = (async () => {
+        for await (const _ of runtime.spawn({
+          podId: 'effort-pod',
+          task: 'work',
+          model: 'claude-opus-5',
+          reasoningEffort: 'high',
+          workDir: '/workspace',
+          containerId: 'c1',
+          env: {},
+        })) {
+          // drain
+        }
+      })();
+      first.finish(0);
+      await spawnDone;
+
+      const resumeDone = (async () => {
+        for await (const _ of runtime.resume('effort-pod', 'continue', 'c2')) {
+          // drain
+        }
+      })();
+      second.finish(0);
+      await resumeDone;
+
+      expect(cm.execStreaming).toHaveBeenLastCalledWith(
+        'c2',
+        expect.arrayContaining(['--effort', 'high']),
+        expect.any(Object),
+      );
+    });
+
+    it('rehydrates reasoning effort for durable recovery in a fresh runtime', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new ClaudeRuntime(logger, cm);
+      runtime.setClaudeSessionId('recovered-pod', 'claude-session');
+      runtime.setClaudeResumeConfig('recovered-pod', [], 'xhigh');
+
+      const resumeDone = (async () => {
+        for await (const _ of runtime.resume('recovered-pod', 'continue', 'c2')) {
+          // drain
+        }
+      })();
+      handle.finish(0);
+      await resumeDone;
+
+      expect(cm.execStreaming).toHaveBeenCalledWith(
+        'c2',
+        expect.arrayContaining(['--effort', 'xhigh', '--resume', 'claude-session']),
+        expect.any(Object),
+      );
+    });
+  });
 
   describe('resume', () => {
     it('resume log has no args field (defensive snapshot)', async () => {
