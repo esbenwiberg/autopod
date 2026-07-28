@@ -5501,6 +5501,72 @@ describe('PodManager', () => {
         });
       });
 
+      it('rotates before Claude resumes a different persisted session', async () => {
+        const runtime = createMockRuntime();
+        (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
+        runtime.resume = vi.fn(async function* (): AsyncGenerator<AgentEvent> {
+          yield {
+            type: 'status',
+            timestamp: '2026-07-28T11:30:00.000Z',
+            message: 'resumed',
+            sessionId: 'claude-session-b',
+          };
+          yield {
+            type: 'complete',
+            timestamp: '2026-07-28T11:31:00.000Z',
+            result: 'done',
+          };
+        });
+        const ctx = createTestContext();
+        const attempts = createProviderAttemptRepository(ctx.db);
+        ctx.deps.providerAttemptRepo = attempts;
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Resume newer session', skipValidation: true },
+          'user-1',
+        );
+        const snapshot = { name: 'test-profile' };
+        attempts.open({
+          podId: pod.id,
+          provider: 'anthropic',
+          providerAccountId: null,
+          runtime: 'claude',
+          model: pod.model,
+          profileReference: testProfileReference(pod.id, snapshot),
+          profileSnapshot: snapshot,
+        });
+        attempts.updateActive(pod.id, {
+          nativeSessionId: 'claude-session-a',
+          inputTokens: 9,
+          outputTokens: 4,
+          costUsd: 0.3,
+        });
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          claudeSessionId: 'claude-session-b',
+        });
+
+        await manager.processPod(pod.id);
+
+        expect(runtime.resume).toHaveBeenCalled();
+        expect(attempts.list(pod.id)).toMatchObject([
+          {
+            ordinal: 1,
+            nativeSessionId: 'claude-session-a',
+            outcome: 'aborted',
+            inputTokens: 9,
+            outputTokens: 4,
+            costUsd: 0.3,
+          },
+          {
+            ordinal: 2,
+            nativeSessionId: 'claude-session-b',
+            outcome: 'completed',
+          },
+        ]);
+      });
+
       it('falls back to fresh spawn when Claude resume reports session-not-found mid-stream', async () => {
         const runtime = createMockRuntime();
         (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
