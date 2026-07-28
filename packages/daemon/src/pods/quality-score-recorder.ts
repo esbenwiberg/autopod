@@ -7,7 +7,7 @@ import type { PodRepository } from './pod-repository.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import { QUALITY_SCORE_ALGORITHM_VERSION } from './quality-score-repository.js';
-import { computeScore } from './quality-score.js';
+import { computeScore, isQualityScoreEligible } from './quality-score.js';
 import { computeQualitySignals } from './quality-signals.js';
 import type { ValidationRepository } from './validation-repository.js';
 
@@ -76,7 +76,10 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
       validationRepo,
       providerAttemptRepo,
     });
-    const computedScore = computeScore({ signals, finalStatus });
+    const computedScore = computeScore({
+      signals,
+      stage: { kind: 'terminal', finalStatus },
+    });
     const attempts = providerAttemptRepo?.list(podId) ?? [];
     const hasPiAttempt =
       pod.runtime === 'pi' || attempts.some((attempt) => attempt.runtime === 'pi');
@@ -85,15 +88,12 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
     // Retained events do not carry provider-attempt attribution. A mixed Pi
     // outcome therefore cannot prove that the Pi portion is complete, even
     // when unrelated normalized evidence survives from another attempt.
-    const mixedPiEvidenceIncomplete = hasPiAttempt && hasNonPiAttempt;
-    // Pi activity was not durably retained before the normalized parser
-    // contract. Surviving historical events can therefore be only a subset;
-    // without a completeness marker, no stale Pi row is safe to recompute.
-    const historicalPiEvidenceIncomplete = options.historical === true && hasPiAttempt;
-    const available =
-      signals.inspectionAvailability === 'available' &&
-      !mixedPiEvidenceIncomplete &&
-      !historicalPiEvidenceIncomplete;
+    const available = isQualityScoreEligible({
+      signals,
+      hasPiAttempt,
+      hasNonPiAttempt,
+      historical: options.historical,
+    });
     const inspectionAvailability = available ? 'available' : 'unavailable';
 
     qualityScoreRepo.insert({

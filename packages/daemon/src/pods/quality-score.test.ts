@@ -1,6 +1,6 @@
 import type { QualitySignals } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import { computeScore } from './quality-score.js';
+import { computeScore, isQualityScoreEligible } from './quality-score.js';
 
 function signals(overrides: Partial<QualitySignals> = {}): QualitySignals {
   return {
@@ -25,6 +25,65 @@ function signals(overrides: Partial<QualitySignals> = {}): QualitySignals {
 }
 
 describe('computeScore', () => {
+  it('separates provisional scoring from the terminal completion bonus', () => {
+    const qualitySignals = signals({
+      readEditRatio: 1,
+      editsWithoutPriorRead: 2,
+      userInterrupts: 1,
+      editChurnCount: 1,
+    });
+
+    const provisional = computeScore({
+      signals: qualitySignals,
+      stage: { kind: 'provisional' },
+    });
+    const completed = computeScore({
+      signals: qualitySignals,
+      stage: { kind: 'terminal', finalStatus: 'complete' },
+    });
+    const killed = computeScore({
+      signals: qualitySignals,
+      stage: { kind: 'terminal', finalStatus: 'killed' },
+    });
+
+    expect(completed - provisional).toBe(10);
+    expect(killed).toBe(provisional);
+  });
+
+  it('conservatively gates unavailable, mixed Pi, and historical Pi evidence', () => {
+    const availableSignals = signals();
+
+    expect(
+      isQualityScoreEligible({
+        signals: availableSignals,
+        hasPiAttempt: false,
+        hasNonPiAttempt: true,
+      }),
+    ).toBe(true);
+    expect(
+      isQualityScoreEligible({
+        signals: signals({ inspectionAvailability: 'unavailable' }),
+        hasPiAttempt: false,
+        hasNonPiAttempt: true,
+      }),
+    ).toBe(false);
+    expect(
+      isQualityScoreEligible({
+        signals: availableSignals,
+        hasPiAttempt: true,
+        hasNonPiAttempt: true,
+      }),
+    ).toBe(false);
+    expect(
+      isQualityScoreEligible({
+        signals: availableSignals,
+        hasPiAttempt: true,
+        hasNonPiAttempt: false,
+        historical: true,
+      }),
+    ).toBe(false);
+  });
+
   it('keeps unavailable inspection telemetry neutral', () => {
     const score = computeScore({
       signals: signals({
@@ -33,7 +92,7 @@ describe('computeScore', () => {
         readEditRatio: null,
         editsWithoutPriorRead: null,
       }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
 
     expect(score).toBe(100);
@@ -42,7 +101,7 @@ describe('computeScore', () => {
   it('awards a high score to a disciplined completed pod', () => {
     const score = computeScore({
       signals: signals({ readCount: 10, editCount: 2, readEditRatio: 5 }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     // 30 (reading) + 20 (no blind) + 20 (no tells) + 15 (no interrupts) + 10 (complete) + 10 (no churn) = 105 → 100
     expect(score).toBe(100);
@@ -51,7 +110,7 @@ describe('computeScore', () => {
   it('subtracts the completion bonus when killed', () => {
     const score = computeScore({
       signals: signals({ readCount: 10, editCount: 2, readEditRatio: 5 }),
-      finalStatus: 'killed',
+      stage: { kind: 'terminal', finalStatus: 'killed' },
     });
     // 30 + 20 + 20 + 15 + 0 (killed) + 10 = 95
     expect(score).toBe(95);
@@ -60,7 +119,7 @@ describe('computeScore', () => {
   it('penalises blind edits linearly up to five', () => {
     const score = computeScore({
       signals: signals({ editsWithoutPriorRead: 5 }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     // 30 + 0 (blind) + 20 + 15 + 10 + 10 = 85
     expect(score).toBe(85);
@@ -69,11 +128,11 @@ describe('computeScore', () => {
   it('saturates the reading score at ratio 5', () => {
     const tight = computeScore({
       signals: signals({ readCount: 25, editCount: 5, readEditRatio: 5 }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     const absurd = computeScore({
       signals: signals({ readCount: 1000, editCount: 5, readEditRatio: 200 }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     expect(tight).toBe(absurd);
   });
@@ -81,7 +140,7 @@ describe('computeScore', () => {
   it('penalises interrupts', () => {
     const score = computeScore({
       signals: signals({ userInterrupts: 3 }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     // 30 + 20 + 20 + 0 (interrupts) + 10 + 10 = 90
     expect(score).toBe(90);
@@ -90,7 +149,7 @@ describe('computeScore', () => {
   it('does not crash a research pod with zero edits', () => {
     const score = computeScore({
       signals: signals({ readCount: 20, editCount: 0, readEditRatio: 0 }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     // reading short-circuits to full 30; 30+20+20+15+10+10 = 105 → 100
     expect(score).toBe(100);
@@ -99,7 +158,7 @@ describe('computeScore', () => {
   it('penalises edit churn', () => {
     const score = computeScore({
       signals: signals({ editChurnCount: 2 }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     // 30 + 20 + 20 + 15 + 10 + 0 (churn) = 95
     expect(score).toBe(95);
@@ -108,16 +167,16 @@ describe('computeScore', () => {
   it('penalises PR fix attempts up to -20', () => {
     const oneFixScore = computeScore({
       signals: signals({ prFixAttempts: 1 }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     const fourFixScore = computeScore({
       signals: signals({ prFixAttempts: 4 }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     // 4+ fix attempts cap at -20, same as exactly 4
     const fiveFixScore = computeScore({
       signals: signals({ prFixAttempts: 5 }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     // 1 fix: 105 - 5 = 100; 4 fix: 105 - 20 = 85; 5 fix: 105 - 20 = 85 (capped)
     expect(oneFixScore).toBe(100);
@@ -130,15 +189,15 @@ describe('computeScore', () => {
     // blindEditScore = 20*(1-3/5) = 8; base = 30+8+20+15+10+10 = 93
     const passed = computeScore({
       signals: signals({ editsWithoutPriorRead: 3, validationPassed: true }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     const failed = computeScore({
       signals: signals({ editsWithoutPriorRead: 3, validationPassed: false }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     const none = computeScore({
       signals: signals({ editsWithoutPriorRead: 3, validationPassed: null }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     expect(passed).toBe(98); // 93 + 5
     expect(failed).toBe(88); // 93 - 5
@@ -148,7 +207,7 @@ describe('computeScore', () => {
   it('applies tell penalties per distinct pattern', () => {
     const score = computeScore({
       signals: signals({ tellsCount: 5 }),
-      finalStatus: 'complete',
+      stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     // tells 20 * (1 - 5/5) = 0; 30+0+0+15+10+10 = 65... wait:
     // 30 + 20 (blind) + 0 (tells) + 15 + 10 + 10 = 85
