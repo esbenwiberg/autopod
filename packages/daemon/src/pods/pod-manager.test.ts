@@ -5387,6 +5387,9 @@ describe('PodManager', () => {
           recoveryWorktreePath: '/tmp/worktree/existing',
           reworkReason: 'Address validation feedback',
           claudeSessionId: null,
+          inputTokens: 11,
+          outputTokens: 5,
+          costUsd: 0.4,
         });
 
         await manager.processPod(pod.id);
@@ -5411,10 +5414,10 @@ describe('PodManager', () => {
           },
         ]);
         expect(manager.getSession(pod.id)).toMatchObject({
-          inputTokens: 7,
-          outputTokens: 3,
-          costUsd: 0.2,
+          inputTokens: 18,
+          outputTokens: 8,
         });
+        expect(manager.getSession(pod.id).costUsd).toBeCloseTo(0.6);
       });
 
       it('keeps a session-bound attempt for true same-session Claude recovery', async () => {
