@@ -5420,6 +5420,70 @@ describe('PodManager', () => {
         expect(manager.getSession(pod.id).costUsd).toBeCloseTo(0.6);
       });
 
+      it('closes the rotated attempt when fresh rework spawn fails', async () => {
+        const runtime = createMockRuntime();
+        runtime.spawn = vi.fn(() => {
+          throw new Error('runtime spawn failed');
+        });
+        const ctx = createTestContext();
+        const attempts = createProviderAttemptRepository(ctx.db);
+        ctx.deps.providerAttemptRepo = attempts;
+        ctx.deps.runtimeRegistry = createMockRuntimeRegistry(runtime);
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fix the bug', skipValidation: true },
+          'user-1',
+        );
+        const snapshot = { name: 'test-profile' };
+        attempts.open({
+          podId: pod.id,
+          provider: 'anthropic',
+          providerAccountId: null,
+          runtime: 'claude',
+          model: pod.model,
+          profileReference: testProfileReference(pod.id, snapshot),
+          profileSnapshot: snapshot,
+        });
+        attempts.updateActive(pod.id, {
+          nativeSessionId: 'claude-session-a',
+          inputTokens: 11,
+          outputTokens: 5,
+          costUsd: 0.4,
+        });
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          reworkReason: 'Address validation feedback',
+          claudeSessionId: null,
+          inputTokens: 11,
+          outputTokens: 5,
+          costUsd: 0.4,
+        });
+
+        await manager.processPod(pod.id);
+
+        expect(runtime.spawn).toHaveBeenCalledTimes(1);
+        expect(manager.getSession(pod.id).status).toBe('failed');
+        expect(attempts.getActive(pod.id)).toBeNull();
+        expect(attempts.list(pod.id)).toMatchObject([
+          {
+            ordinal: 1,
+            nativeSessionId: 'claude-session-a',
+            outcome: 'aborted',
+            inputTokens: 11,
+            outputTokens: 5,
+            costUsd: 0.4,
+          },
+          {
+            ordinal: 2,
+            nativeSessionId: null,
+            outcome: 'failed',
+            inputTokens: 0,
+            outputTokens: 0,
+            costUsd: 0,
+          },
+        ]);
+      });
+
       it('does not manufacture an empty attempt when fresh rework has no active attempt', async () => {
         const ctx = createTestContext();
         const attempts = createProviderAttemptRepository(ctx.db);
