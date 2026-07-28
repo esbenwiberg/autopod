@@ -699,7 +699,8 @@ export function generateSystemInstructions(
       '- **Run `pre_submit_review` before `report_task_summary`** — once your pre-completion checks pass and your self-review is clean, call this tool for a fast critic pass. ' +
         'It reviews your **cumulative diff** (every change since the pod started, not just your latest commit) — the same bytes the daemon will review after you finish, so a clean verdict here means the daemon can skip its Tier 1 review entirely. ' +
         'The response echoes `filesReviewed` / `linesAdded` / `linesRemoved` — sanity-check those numbers match your expectation before acting on the verdict. ' +
-        'If `status` comes back `fail`, address the issues and call again. Re-calling with an unchanged diff just returns the cached verdict — only a real code change re-runs the reviewer.',
+        'At most two fresh critic executions are allowed per provider attempt; unchanged-diff cache hits and no-diff skips do not spend that budget. ' +
+        'If `status` comes back `fail`, address the issues and use the one available fresh re-review. When the limit is reached, disclose remaining uncertainty and finish for independent daemon validation.',
     );
 
     lines.push('- Use ask_human when uncertain rather than guessing');

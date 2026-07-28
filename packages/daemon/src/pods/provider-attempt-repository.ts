@@ -51,7 +51,10 @@ export interface ProviderAttemptRepository {
   getActive(podId: string): ProviderAttempt | null;
   getActiveProfileSnapshot(podId: string): Record<string, unknown> | null;
   totals(podId: string): ProviderAttemptTotals;
+  reservePreSubmitReview(podId: string): boolean;
 }
+
+export const MAX_PRE_SUBMIT_REVIEWS_PER_ATTEMPT = 2;
 
 interface AttemptRow {
   pod_id: string;
@@ -73,6 +76,7 @@ interface AttemptRow {
   input_tokens: number;
   output_tokens: number;
   cost_usd: number;
+  pre_submit_review_runs: number;
   handoff_reference: string | null;
 }
 
@@ -138,6 +142,7 @@ function hydrate(row: AttemptRow): ProviderAttempt {
     inputTokens: row.input_tokens,
     outputTokens: row.output_tokens,
     costUsd: row.cost_usd,
+    preSubmitReviewRuns: row.pre_submit_review_runs,
     handoffReference: row.handoff_reference,
   };
 }
@@ -180,6 +185,12 @@ export function createProviderAttemptRepository(db: Database.Database): Provider
       output_tokens = @outputTokens,
       cost_usd = @costUsd
     WHERE pod_id = @podId AND ended_at IS NULL
+  `);
+  const reservePreSubmitReview = db.prepare(`
+    UPDATE provider_attempts
+    SET pre_submit_review_runs = pre_submit_review_runs + 1
+    WHERE pod_id = ? AND ended_at IS NULL
+      AND pre_submit_review_runs < ${MAX_PRE_SUBMIT_REVIEWS_PER_ATTEMPT}
   `);
 
   const repository: ProviderAttemptRepository = {
@@ -279,6 +290,10 @@ export function createProviderAttemptRepository(db: Database.Database): Provider
         `)
         .get(podId) as ProviderAttemptTotals;
       return row;
+    },
+
+    reservePreSubmitReview(podId) {
+      return reservePreSubmitReview.run(podId).changes === 1;
     },
   };
 

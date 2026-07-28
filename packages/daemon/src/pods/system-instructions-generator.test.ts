@@ -622,6 +622,18 @@ human_review: []
     expect(md).toContain('pre_submit_review');
   });
 
+  it('describes the bounded pre-submit review loop', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+
+    expect(md).toContain('At most two fresh critic executions');
+    expect(md).toContain('unchanged-diff cache hits and no-diff skips do not spend');
+    expect(md).toContain('finish for independent daemon validation');
+  });
+
   it('includes advisor section when advisor is enabled', () => {
     const profile = makeProfile({
       escalation: {

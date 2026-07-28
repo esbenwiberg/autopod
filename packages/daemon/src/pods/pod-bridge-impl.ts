@@ -47,6 +47,7 @@ import { computePodDiff, summarizeDiff } from './pod-diff-fetcher.js';
 import type { ContainerManagerFactory, PodManager } from './pod-manager.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
+import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import { buildValidationExecEnv, wrapValidationExecCommand } from './registry-injector.js';
 import {
   resolveEffectiveReviewerProfile,
@@ -59,6 +60,7 @@ export interface SessionBridgeDependencies {
   podRepo: PodRepository;
   eventBus: EventBus;
   progressEventRepo?: ProgressEventRepository;
+  providerAttemptRepo?: ProviderAttemptRepository;
   escalationRepo: EscalationRepository;
   nudgeRepo: NudgeRepository;
   profileStore: ProfileStore;
@@ -81,6 +83,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     podRepo,
     eventBus,
     progressEventRepo,
+    providerAttemptRepo,
     escalationRepo,
     nudgeRepo,
     profileStore,
@@ -924,6 +927,23 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           },
           'pre-submit review: ignoring cached verdict',
         );
+      }
+
+      if (diff.trim() && providerAttemptRepo && !providerAttemptRepo.reservePreSubmitReview(podId)) {
+        const reasoning =
+          'The two fresh pre-submit reviews for this provider attempt are exhausted. Fix known findings, disclose remaining uncertainty, and finish so independent daemon validation can perform final review.';
+        emitValidationActivity(podId, `Pre-submit review limit reached — ${reasoning}`);
+        return {
+          status: 'skipped',
+          skipReason: 'review_limit_reached',
+          reasoning,
+          issues: [],
+          model: reviewerModel,
+          durationMs: Date.now() - startedAt,
+          filesReviewed: scope.filesReviewed,
+          linesAdded: scope.linesAdded,
+          linesRemoved: scope.linesRemoved,
+        };
       }
 
       const reviewerExecEnv = containerManager

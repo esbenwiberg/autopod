@@ -293,7 +293,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'pre_submit_review',
-    "Run a fast critic pass on your **cumulative diff** — every change you've made since the pod started, NOT just your latest commit. The reviewer sees the same bytes the daemon's full reviewer will see after `report_task_summary`, so a clean verdict here lets the daemon skip its Tier 1 review. Call AFTER `validate_locally` succeeds and BEFORE `report_task_summary`. Findings are scoped to medium-and-above issues (logic bugs, security, broken contracts, undisclosed scope creep) — style/format is out of scope. The response echoes `filesReviewed` / `linesAdded` / `linesRemoved` so you can verify what was reviewed; if those numbers look wrong, your worktree state is the issue, not the verdict. Re-calling with an unchanged diff returns a cached verdict (`reusedCache: true`) — fixing issues changes the diff and triggers a fresh review.",
+    "Run a fast critic pass on your **cumulative diff** — every change you've made since the pod started, NOT just your latest commit. The reviewer sees the same bytes the daemon's full reviewer will see after `report_task_summary`, so a clean verdict here lets the daemon skip its Tier 1 review. Call AFTER `validate_locally` succeeds and BEFORE `report_task_summary`. At most two fresh critic executions are allowed per provider attempt; unchanged-diff cache hits and no-diff skips do not spend the budget. Findings are scoped to medium-and-above issues (logic bugs, security, broken contracts, undisclosed scope creep) — style/format is out of scope. The response echoes `filesReviewed` / `linesAdded` / `linesRemoved` so you can verify what was reviewed.",
     {
       plannedSummary: z
         .string()
