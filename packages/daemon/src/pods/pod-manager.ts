@@ -4136,30 +4136,37 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const owner = pod.providerAccountIdSnapshot
         ? ({ type: 'provider-account', id: pod.providerAccountIdSnapshot } as const)
         : undefined;
-      if (provider === 'max') {
-        await persistRefreshedCredentials(
-          pod.containerId,
-          cm,
-          profileStore,
-          reviewerProfile.name,
-          logger,
-          maxCredentialLineageByPod.get(pod.id),
-          { providerAccountStore, owner },
+      try {
+        if (provider === 'max') {
+          await persistRefreshedCredentials(
+            pod.containerId,
+            cm,
+            profileStore,
+            reviewerProfile.name,
+            logger,
+            maxCredentialLineageByPod.get(pod.id),
+            { providerAccountStore, owner },
+          );
+        } else if (provider === 'openai') {
+          await persistOpenAiAuthJson(
+            pod.containerId,
+            cm,
+            profileStore,
+            reviewerProfile.name,
+            logger,
+            { providerAccountStore, owner },
+          );
+        } else {
+          await persistPiAuthJson(pod.containerId, cm, profileStore, reviewerProfile.name, logger, {
+            providerAccountStore,
+            owner,
+          });
+        }
+      } catch (err) {
+        logger.warn(
+          { err, podId: pod.id, provider },
+          'Could not recover credentials from container before reviewer call',
         );
-      } else if (provider === 'openai') {
-        await persistOpenAiAuthJson(
-          pod.containerId,
-          cm,
-          profileStore,
-          reviewerProfile.name,
-          logger,
-          { providerAccountStore, owner },
-        );
-      } else {
-        await persistPiAuthJson(pod.containerId, cm, profileStore, reviewerProfile.name, logger, {
-          providerAccountStore,
-          owner,
-        });
       }
       ({ profile: reviewerProfile, credentials: currentCredentials } =
         getEffectiveReviewerConfig(pod));
