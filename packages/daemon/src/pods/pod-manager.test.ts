@@ -813,6 +813,51 @@ function createTestContext(
 }
 
 describe('PodManager', () => {
+  it('quiesces a paused Codex run before allowing resume', async () => {
+    const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    const runtime = ctx.runtime as Runtime & { suspend: ReturnType<typeof vi.fn> };
+    Object.defineProperty(runtime, 'type', { value: 'codex' });
+    const releaseStream = deferred<void>();
+    runtime.suspend = vi.fn(async () => releaseStream.resolve());
+    runtime.resume = vi.fn(async function* () {});
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'pause safely', skipValidation: true },
+      'user-1',
+    );
+    ctx.db
+      .prepare("UPDATE pods SET status = 'running', container_id = 'container-123' WHERE id = ?")
+      .run(pod.id);
+
+    const consuming = manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        await releaseStream.promise;
+        yield {
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          message: 'stale terminal error',
+          fatal: true,
+        } as const;
+      })(),
+    );
+    const pausing = manager.pauseSession(pod.id);
+    await expect(manager.sendMessage(pod.id, 'too early')).rejects.toMatchObject({
+      code: 'PAUSE_SETTLING',
+      statusCode: 409,
+    });
+
+    await pausing;
+    await expect(consuming).resolves.toBe('paused');
+    expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('paused');
+    expect(attempts.list(pod.id).at(-1)?.outcome).toBe('aborted');
+
+    await manager.sendMessage(pod.id, 'continue now');
+    expect(runtime.resume).toHaveBeenCalledTimes(1);
+    expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('running');
+  });
   beforeEach(() => {
     mockExecFileSuccess();
   });

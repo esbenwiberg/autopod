@@ -2669,5 +2669,24 @@ describe('CodexRuntime', () => {
       // biome-ignore lint/suspicious/noExplicitAny: accessing private field in test
       expect((runtime as any).mcpServersBySession.has('sess-1')).toBe(true);
     });
+
+    it('suppresses terminal errors for intentional suspension', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+      // biome-ignore lint/suspicious/noExplicitAny: exercising intentional exit classification
+      (runtime as any).handles.set('sess-1', handle);
+      await runtime.suspend('sess-1');
+      // biome-ignore lint/suspicious/noExplicitAny: exercising intentional exit classification
+      const event = await (runtime as any).codexExitError('sess-1', handle, {
+        events: 0,
+        nonStatusEvents: 0,
+        sawComplete: false,
+        sawFatal: false,
+      });
+
+      expect(handle.kill).toHaveBeenCalledTimes(1);
+      expect(event).toBeNull();
+    });
   });
 });
