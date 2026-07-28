@@ -937,6 +937,32 @@ describe('PodManager', () => {
     expect(runtime.suspend).toHaveBeenCalledTimes(2);
     expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('paused');
   });
+
+  it('does not retain an active run when event-consumer initialization fails', async () => {
+    const ctx = createTestContext(undefined, { defaultRuntime: 'codex' });
+    const runtime = ctx.runtime as Runtime & { suspend: ReturnType<typeof vi.fn> };
+    Object.defineProperty(runtime, 'type', { value: 'codex' });
+    runtime.suspend = vi.fn(async () => {});
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'fail consumer initialization', skipValidation: true },
+      'user-1',
+    );
+    ctx.db
+      .prepare("UPDATE pods SET status = 'running', container_id = 'container-123' WHERE id = ?")
+      .run(pod.id);
+    vi.mocked(ctx.profileStore.get).mockImplementationOnce(() => {
+      throw new Error('profile initialization failed');
+    });
+
+    await expect(manager.consumeAgentEvents(pod.id, (async function* () {})())).rejects.toThrow(
+      'profile initialization failed',
+    );
+
+    await manager.pauseSession(pod.id);
+    expect(runtime.suspend).toHaveBeenCalledTimes(1);
+    expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('paused');
+  });
   beforeEach(() => {
     mockExecFileSuccess();
   });

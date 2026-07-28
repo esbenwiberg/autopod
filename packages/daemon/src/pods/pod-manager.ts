@@ -9059,13 +9059,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       events: AsyncIterable<AgentEvent>,
       attempt = 0,
     ): Promise<AgentRunOutcome> {
-      const runToken = Symbol(podId);
-      let resolveRunSettled: () => void = () => {};
-      const runSettled = new Promise<void>((resolve) => {
-        resolveRunSettled = resolve;
-      });
-      activeAgentRuns.set(podId, { token: runToken, settled: runSettled });
-      activeAgentRunResolvers.set(podId, { token: runToken, resolve: resolveRunSettled });
       const attemptPod = podRepo.getOrThrow(podId);
       let attemptProfile = profileStore.get(attemptPod.profileName);
       const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
@@ -9086,6 +9079,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let terminalClassification: ProviderFailureClassification | null = null;
       const seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
       startCommitPolling(podId);
+      const runToken = Symbol(podId);
+      let resolveRunSettled: () => void = () => {};
+      const runSettled = new Promise<void>((resolve) => {
+        resolveRunSettled = resolve;
+      });
+      activeAgentRuns.set(podId, { token: runToken, settled: runSettled });
+      activeAgentRunResolvers.set(podId, { token: runToken, resolve: resolveRunSettled });
       try {
         for await (const event of events) {
           if (pauseIntents.has(podId)) {
@@ -9354,46 +9354,49 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         try {
           await syncSandboxRuntimeSessionState(podId);
         } finally {
-          const current = podRepo.getOrThrow(podId);
-          const providerLimit =
-            current.pauseReason === 'provider_limit' &&
-            terminalClassification?.category === 'quota_exhausted' &&
-            terminalClassification.definitive;
-          if (providerLimit) {
-            closeProviderAttempt(
-              podId,
-              'quota_exhausted',
-              terminalClassification,
-              PROVIDER_FAILOVER_HANDOFF_PATH,
-            );
-            await handleProviderLimit(podId, terminalClassification);
-          } else if (
-            current.pauseReason === 'provider_limit' &&
-            outcome === 'failed' &&
-            terminalClassification
-          ) {
-            closeProviderAttempt(podId, 'failed', terminalClassification);
-          } else if (outcome === 'paused' || current.status === 'paused') {
-            closeProviderAttempt(podId, 'aborted');
-          } else if (outcome === 'completed' || outcome === 'failed') {
-            const classification =
-              outcome === 'failed'
-                ? (terminalClassification ?? {
-                    category: 'unknown',
-                    definitive: false,
-                    sanitizedMessage: 'Provider attempt ended without classified evidence',
-                    retryAfter: null,
-                  })
-                : null;
-            closeProviderAttempt(podId, outcome, classification);
-          }
-          stopCommitPolling(podId);
-          lastEventWriteAt.delete(podId);
-          const activeResolver = activeAgentRunResolvers.get(podId);
-          if (activeResolver?.token === runToken) {
-            activeResolver.resolve();
-            activeAgentRunResolvers.delete(podId);
-            activeAgentRuns.delete(podId);
+          try {
+            const current = podRepo.getOrThrow(podId);
+            const providerLimit =
+              current.pauseReason === 'provider_limit' &&
+              terminalClassification?.category === 'quota_exhausted' &&
+              terminalClassification.definitive;
+            if (providerLimit) {
+              closeProviderAttempt(
+                podId,
+                'quota_exhausted',
+                terminalClassification,
+                PROVIDER_FAILOVER_HANDOFF_PATH,
+              );
+              await handleProviderLimit(podId, terminalClassification);
+            } else if (
+              current.pauseReason === 'provider_limit' &&
+              outcome === 'failed' &&
+              terminalClassification
+            ) {
+              closeProviderAttempt(podId, 'failed', terminalClassification);
+            } else if (outcome === 'paused' || current.status === 'paused') {
+              closeProviderAttempt(podId, 'aborted');
+            } else if (outcome === 'completed' || outcome === 'failed') {
+              const classification =
+                outcome === 'failed'
+                  ? (terminalClassification ?? {
+                      category: 'unknown',
+                      definitive: false,
+                      sanitizedMessage: 'Provider attempt ended without classified evidence',
+                      retryAfter: null,
+                    })
+                  : null;
+              closeProviderAttempt(podId, outcome, classification);
+            }
+          } finally {
+            stopCommitPolling(podId);
+            lastEventWriteAt.delete(podId);
+            const activeResolver = activeAgentRunResolvers.get(podId);
+            if (activeResolver?.token === runToken) {
+              activeResolver.resolve();
+              activeAgentRunResolvers.delete(podId);
+              activeAgentRuns.delete(podId);
+            }
           }
         }
       }
