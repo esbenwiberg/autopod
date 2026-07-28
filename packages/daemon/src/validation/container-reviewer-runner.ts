@@ -193,13 +193,13 @@ async function collectCancellableReview(
         try {
           await handle.kill();
         } finally {
-          const diagnostics = [stdout.value(), stderr.value()].filter(Boolean).join('\n');
+          const diagnostics = [stdout.diagnostic(), stderr.diagnostic()].filter(Boolean).join('\n');
           reject(
             new ContainerReviewerUnavailableError(
               `Container reviewer timed out after ${timeout}ms${diagnostics ? `: ${diagnostics}` : ''}`,
               {
                 kind: 'timeout',
-                stderr: stderr.value(),
+                stderr: stderr.diagnostic(),
               },
             ),
           );
@@ -215,17 +215,21 @@ async function collectCancellableReview(
   }
 }
 
-function collectBoundedStream(stream: Readable): { done: Promise<void>; value: () => string } {
+function collectBoundedStream(stream: Readable): {
+  done: Promise<void>;
+  value: () => string;
+  diagnostic: () => string;
+} {
   let output = '';
+  let diagnostic = '';
   const done = (async () => {
     for await (const chunk of stream) {
-      output = appendBounded(
-        output,
-        Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk),
-      );
+      const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+      output += text;
+      diagnostic = appendBounded(diagnostic, text);
     }
   })();
-  return { done, value: () => output };
+  return { done, value: () => output, diagnostic: () => diagnostic };
 }
 
 function appendBounded(current: string, chunk: string): string {
