@@ -2104,18 +2104,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     }
 
-    const boundAttempt =
-      activeAttempt ??
-      repository
-        .list(pod.id)
-        .findLast(
-          (attempt) =>
-            attempt.providerAccountId !== null &&
-            attempt.providerAccountId === pod.providerAccountIdSnapshot &&
-            attempt.runtime === pod.runtime &&
-            attempt.model === pod.model &&
-            (pod.providerIdSnapshot === null || attempt.provider === pod.providerIdSnapshot),
-        );
+    const latestAttempt = repository.list(pod.id).at(-1);
+    if (
+      !activeAttempt &&
+      latestAttempt &&
+      (latestAttempt.providerAccountId !== pod.providerAccountIdSnapshot ||
+        latestAttempt.provider !== pod.providerIdSnapshot ||
+        latestAttempt.runtime !== pod.runtime ||
+        latestAttempt.model !== pod.model)
+    ) {
+      throw new AutopodError(
+        'Selected provider binding does not match the latest provider attempt',
+        'INVALID_PROVIDER_TARGET',
+        409,
+      );
+    }
+    const boundAttempt = activeAttempt ?? latestAttempt;
     if (!boundAttempt?.providerAccountId) {
       const hasUnreconciledBinding =
         (pod.providerAccountIdSnapshot !== null &&

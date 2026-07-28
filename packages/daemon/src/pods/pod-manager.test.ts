@@ -8051,13 +8051,14 @@ describe('PodManager', () => {
       );
     });
 
-    it('fails closed when a forced rework binding has no matching provider attempt', async () => {
+    it('fails closed when forced rework contradicts the latest provider attempt', async () => {
       const ctx = createTestContext(undefined, {
         modelProvider: 'max',
         defaultRuntime: 'claude',
         defaultModel: 'claude-sonnet-5',
       });
-      ctx.deps.providerAttemptRepo = createProviderAttemptRepository(ctx.db);
+      const attempts = createProviderAttemptRepository(ctx.db);
+      ctx.deps.providerAttemptRepo = attempts;
       insertProviderAccount(ctx.db, 'anth-pro', 'max', {
         provider: 'max',
         authMode: 'setup-token',
@@ -8076,6 +8077,39 @@ describe('PodManager', () => {
         'user-1',
       );
       ctx.enqueuedSessions.length = 0;
+      const profileReference = `pod:${pod.id}@profile-snapshot#abcdef1`;
+      attempts.open({
+        podId: pod.id,
+        provider: 'openai',
+        providerAccountId: 'openai-private',
+        runtime: 'codex',
+        model: 'gpt-5.6-sol',
+        profileReference,
+        profileSnapshot: { name: 'test-profile', modelProvider: 'openai' },
+      });
+      attempts.close(pod.id, {
+        nativeSessionId: 'older-target-session',
+        outcome: 'completed',
+        inputTokens: 20,
+        outputTokens: 10,
+        costUsd: 0.2,
+      });
+      attempts.open({
+        podId: pod.id,
+        provider: 'max',
+        providerAccountId: 'anth-pro',
+        runtime: 'claude',
+        model: 'claude-sonnet-5',
+        profileReference,
+        profileSnapshot: { name: 'test-profile', modelProvider: 'max' },
+      });
+      attempts.close(pod.id, {
+        nativeSessionId: 'latest-primary-session',
+        outcome: 'completed',
+        inputTokens: 5,
+        outputTokens: 2,
+        costUsd: 0.05,
+      });
       ctx.podRepo.update(pod.id, {
         status: 'failed',
         containerId: 'target-container',
