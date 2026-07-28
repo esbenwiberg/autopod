@@ -5420,6 +5420,26 @@ describe('PodManager', () => {
         expect(manager.getSession(pod.id).costUsd).toBeCloseTo(0.6);
       });
 
+      it('does not manufacture an empty attempt when fresh rework has no active attempt', async () => {
+        const ctx = createTestContext();
+        const attempts = createProviderAttemptRepository(ctx.db);
+        ctx.deps.providerAttemptRepo = attempts;
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Fix the bug', skipValidation: true },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, {
+          recoveryWorktreePath: '/tmp/worktree/existing',
+          reworkReason: 'Address validation feedback',
+        });
+
+        await manager.processPod(pod.id);
+
+        expect(attempts.list(pod.id)).toHaveLength(1);
+        expect(attempts.list(pod.id)[0]).toMatchObject({ ordinal: 1 });
+      });
+
       it('keeps a session-bound attempt for true same-session Claude recovery', async () => {
         const runtime = createMockRuntime();
         (runtime as Record<string, unknown>).setClaudeSessionId = vi.fn();
