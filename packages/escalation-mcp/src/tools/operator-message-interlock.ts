@@ -23,8 +23,6 @@ export function consumeOperatorMessages(
   };
 }
 
-export function stringifyOperatorInterruption(
-  interruption: OperatorMessageInterruption,
-): string {
+export function stringifyOperatorInterruption(interruption: OperatorMessageInterruption): string {
   return JSON.stringify(interruption, null, 2);
 }

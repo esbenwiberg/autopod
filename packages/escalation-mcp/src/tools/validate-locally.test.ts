@@ -38,11 +38,10 @@ describe('validateLocally', () => {
       .mockReturnValueOnce([])
       .mockReturnValueOnce(['change course'])
       .mockReturnValue([]);
-    const raw = await validateLocally(
-      'pod-1',
-      { phases: ['lint', 'build'] },
-      { runValidationPhase, consumeMessageBatch } as never,
-    );
+    const raw = await validateLocally('pod-1', { phases: ['lint', 'build'] }, {
+      runValidationPhase,
+      consumeMessageBatch,
+    } as never);
 
     expect(JSON.parse(raw)).toMatchObject({
       passed: false,

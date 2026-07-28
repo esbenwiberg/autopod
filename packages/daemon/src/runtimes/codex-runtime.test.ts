@@ -2435,23 +2435,26 @@ describe('CodexRuntime', () => {
       return (runtime as unknown as { writeMcpConfig: WriteConfig }).writeMcpConfig.bind(runtime);
     }
 
-    it.each(efforts)('writes exact %s effort without MCP servers and secures the file', async (effort) => {
-      const cm = createMockContainerManager(createMockHandle());
-      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+    it.each(efforts)(
+      'writes exact %s effort without MCP servers and secures the file',
+      async (effort) => {
+        const cm = createMockContainerManager(createMockHandle());
+        const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
 
-      await writer(runtime)('c1', [], undefined, effort);
+        await writer(runtime)('c1', [], undefined, effort);
 
-      expect(cm.writeFile).toHaveBeenCalledWith(
-        'c1',
-        '/home/autopod/.codex/config.toml',
-        `model_reasoning_effort = "${effort}"\n`,
-      );
-      expect(cm.execInContainer).toHaveBeenCalledWith(
-        'c1',
-        expect.arrayContaining(['sh', '-c', expect.stringContaining('chmod 0600')]),
-        { timeout: 5_000, user: 'root' },
-      );
-    });
+        expect(cm.writeFile).toHaveBeenCalledWith(
+          'c1',
+          '/home/autopod/.codex/config.toml',
+          `model_reasoning_effort = "${effort}"\n`,
+        );
+        expect(cm.execInContainer).toHaveBeenCalledWith(
+          'c1',
+          expect.arrayContaining(['sh', '-c', expect.stringContaining('chmod 0600')]),
+          { timeout: 5_000, user: 'root' },
+        );
+      },
+    );
 
     it('omits auto and does not create an empty config', async () => {
       const cm = createMockContainerManager(createMockHandle());

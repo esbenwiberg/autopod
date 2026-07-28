@@ -1184,7 +1184,11 @@ describe('PodBridge.runPreSubmitReview', () => {
   });
 
   it('caps fresh pre-submit reviews without consuming cache hits', async () => {
-    const reserve = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(true).mockReturnValue(false);
+    const reserve = vi
+      .fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false);
     const first = buildBridgeWithWorktree({
       containerDiff: SAMPLE_DIFF,
       reservePreSubmitReview: reserve,

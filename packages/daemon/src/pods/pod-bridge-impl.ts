@@ -929,7 +929,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         );
       }
 
-      if (diff.trim() && providerAttemptRepo && !providerAttemptRepo.reservePreSubmitReview(podId)) {
+      if (
+        diff.trim() &&
+        providerAttemptRepo &&
+        !providerAttemptRepo.reservePreSubmitReview(podId)
+      ) {
         const reasoning =
           'The two fresh pre-submit reviews for this provider attempt are exhausted. Fix known findings, disclose remaining uncertainty, and finish so independent daemon validation can perform final review.';
         emitValidationActivity(podId, `Pre-submit review limit reached — ${reasoning}`);
