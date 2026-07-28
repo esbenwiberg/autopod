@@ -35,6 +35,8 @@ const STRUCTURED_QUOTA_SIGNATURES: Readonly<
     { code: 'quota_exceeded', message: /^Provider quota exhausted$/i },
   ],
 };
+const CLAUDE_TERMINAL_SESSION_LIMIT =
+  /^You've hit your session limit · resets (?:[1-9]|1[0-2]):[0-5]\d(?:am|pm) \(UTC\)$/;
 const COPILOT_QUOTA_MESSAGES = [
   /^You have exhausted your premium requests\.$/i,
   /^Copilot premium request limit reached$/i,
@@ -81,10 +83,11 @@ function classify(
   const quotaSignature =
     runtime === 'copilot'
       ? COPILOT_QUOTA_MESSAGES.some((pattern) => pattern.test(rawMessage.trim()))
-      : code !== null &&
-        STRUCTURED_QUOTA_SIGNATURES[runtime].some(
-          (signature) => signature.code === code && signature.message.test(rawMessage.trim()),
-        );
+      : (runtime === 'claude' && CLAUDE_TERMINAL_SESSION_LIMIT.test(rawMessage.trim())) ||
+        (code !== null &&
+          STRUCTURED_QUOTA_SIGNATURES[runtime].some(
+            (signature) => signature.code === code && signature.message.test(rawMessage.trim()),
+          ));
   const terminalQuota = quotaSignature && (runtime !== 'pi' || piAgentSettled);
   if (terminalQuota) {
     return classification('quota_exhausted', true, sanitizedMessage, retryAfter);

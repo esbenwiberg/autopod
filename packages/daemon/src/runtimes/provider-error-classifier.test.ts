@@ -15,6 +15,12 @@ const quotaFixtures = [
     },
   },
   {
+    runtime: 'claude' as const,
+    evidence: {
+      message: "You've hit your session limit · resets 12:30pm (UTC)",
+    },
+  },
+  {
     runtime: 'codex' as const,
     evidence: {
       code: 'usage_limit_reached',
@@ -78,6 +84,20 @@ describe('classifyProviderError', () => {
       ).toMatchObject({ category: 'unknown', definitive: false });
     },
   );
+
+  it.each([
+    "You've hit your session limit · resets soon (UTC)",
+    "You've hit your session limit - resets 12:30pm (UTC)",
+    "You've hit your session limit · resets 12:30pm UTC",
+    "You've hit your session limit · resets 13:30pm (UTC)",
+    "You've hit your session limit · resets 12:60pm (UTC)",
+    "You've hit your session limit · resets 12:30pm (UTC).",
+  ])('fails closed for drifted Claude session-limit text: %s', (message) => {
+    expect(classifyProviderError('claude', { message })).toMatchObject({
+      category: 'unknown',
+      definitive: false,
+    });
+  });
 
   it.each([
     {
