@@ -2092,6 +2092,47 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     };
   }
 
+  function resolveEffectiveBoundProfile(pod: Pod): Profile {
+    const profile = profileStore.get(pod.profileName);
+    const repository = deps.providerAttemptRepo;
+    if (!repository) return profile;
+
+    const activeAttempt = repository.getActive(pod.id);
+    if (activeAttempt) {
+      if (activeAttempt.runtime !== pod.runtime || activeAttempt.model !== pod.model) {
+        throw new Error(`Active provider attempt identity mismatch for pod ${pod.id}`);
+      }
+    }
+
+    const boundAttempt =
+      activeAttempt ??
+      repository
+        .list(pod.id)
+        .findLast(
+          (attempt) =>
+            attempt.providerAccountId !== null &&
+            attempt.providerAccountId === pod.providerAccountIdSnapshot &&
+            attempt.runtime === pod.runtime &&
+            attempt.model === pod.model &&
+            (pod.providerIdSnapshot === null || attempt.provider === pod.providerIdSnapshot),
+        );
+    if (!boundAttempt?.providerAccountId) return profile;
+
+    const account = providerAccountStore?.get(boundAttempt.providerAccountId);
+    if (!account || account.provider !== boundAttempt.provider) {
+      throw new AutopodError(
+        'Selected provider target identity no longer matches its provider account',
+        'INVALID_PROVIDER_TARGET',
+        409,
+      );
+    }
+    return profileForProviderTarget(profile, {
+      providerAccountId: boundAttempt.providerAccountId,
+      runtime: boundAttempt.runtime,
+      model: boundAttempt.model,
+    });
+  }
+
   function openProviderTargetAttempt(pod: Pod, target: ProviderFailoverTarget): void {
     const repository = deps.providerAttemptRepo;
     if (!repository) throw new Error('Provider attempt repository is unavailable');
@@ -6806,20 +6847,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // and transitions the pod to 'failed' instead of orphaning it as 'queued' forever —
         // the queue's finally block frees activeIds, and without a status update nothing
         // ever re-enqueues the pod.
-        let profile = profileStore.get(pod.profileName);
+        let profile = resolveEffectiveBoundProfile(pod);
         const queuedProviderAttempt = deps.providerAttemptRepo?.getActive(podId);
-        if (
-          queuedProviderAttempt?.providerAccountId &&
-          queuedProviderAttempt.runtime === pod.runtime &&
-          queuedProviderAttempt.model === pod.model &&
-          queuedProviderAttempt.providerAccountId !== profile.providerAccountId
-        ) {
-          profile = profileForProviderTarget(profile, {
-            providerAccountId: queuedProviderAttempt.providerAccountId,
-            runtime: queuedProviderAttempt.runtime,
-            model: queuedProviderAttempt.model,
-          });
-        }
         const reasoningEffort = resolvedReasoningEffort(
           profile,
           pod.profileSnapshot as unknown as Record<string, unknown> | null,
@@ -11179,7 +11208,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
-      const profile = profileStore.get(pod.profileName);
+      const profile = resolveEffectiveBoundProfile(pod);
 
       // When force-reworking from a terminal state, re-provision the pod from scratch
       // instead of trying to restart a potentially stale container. Docker Desktop's VirtioFS

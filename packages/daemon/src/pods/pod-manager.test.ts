@@ -7929,6 +7929,128 @@ describe('PodManager', () => {
   });
 
   describe('re-validation from terminal states', () => {
+    it('keeps the completed failover binding during forced rework', async () => {
+      const primaryToken = 'primary-max-token';
+      const targetAuthJson = JSON.stringify({ token: 'target-openai-token' });
+      const ctx = createTestContext(undefined, {
+        modelProvider: 'max',
+        defaultRuntime: 'claude',
+        defaultModel: 'claude-sonnet-5',
+      });
+      const attempts = createProviderAttemptRepository(ctx.db);
+      ctx.deps.providerAttemptRepo = attempts;
+      insertProviderAccount(ctx.db, 'anth-pro', 'max', {
+        provider: 'max',
+        authMode: 'setup-token',
+        oauthToken: primaryToken,
+      });
+      insertProviderAccount(ctx.db, 'openai-private', 'openai', {
+        provider: 'openai',
+        authMode: 'chatgpt',
+        authJson: targetAuthJson,
+      });
+      linkProfileToProviderAccount(ctx.db, 'test-profile', 'anth-pro');
+      ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+      vi.mocked(ctx.runtime.spawn).mockImplementation(async function* () {
+        yield {
+          type: 'complete',
+          timestamp: '2026-07-28T10:02:00.000Z',
+          result: 'rework complete',
+        };
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        {
+          profileName: 'test-profile',
+          task: 'Rework after completed failover',
+          skipValidation: true,
+        },
+        'user-1',
+      );
+      const profileReference = `pod:${pod.id}@profile-snapshot#abcdef1`;
+      attempts.open({
+        podId: pod.id,
+        provider: 'max',
+        providerAccountId: 'anth-pro',
+        runtime: 'claude',
+        model: 'claude-sonnet-5',
+        profileReference,
+        profileSnapshot: { name: 'test-profile', modelProvider: 'max' },
+      });
+      attempts.close(pod.id, {
+        nativeSessionId: 'source-session',
+        outcome: 'quota_exhausted',
+        inputTokens: 10,
+        outputTokens: 5,
+        costUsd: 0.1,
+      });
+      attempts.open({
+        podId: pod.id,
+        provider: 'openai',
+        providerAccountId: 'openai-private',
+        runtime: 'codex',
+        model: 'gpt-5.6-sol',
+        profileReference,
+        profileSnapshot: { name: 'test-profile', modelProvider: 'openai' },
+      });
+      attempts.close(pod.id, {
+        nativeSessionId: 'target-session',
+        outcome: 'completed',
+        inputTokens: 20,
+        outputTokens: 10,
+        costUsd: 0.2,
+      });
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'target-container',
+        worktreePath: '/tmp/worktrees/completed-failover-rework',
+        runtime: 'codex',
+        model: 'gpt-5.6-sol',
+        validationAttempts: 3,
+      });
+      ctx.db
+        .prepare(
+          `UPDATE pods
+           SET provider_account_id_snapshot = 'openai-private', provider_id_snapshot = 'openai'
+           WHERE id = ?`,
+        )
+        .run(pod.id);
+
+      await manager.triggerValidation(pod.id, { force: true });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'queued',
+        runtime: 'codex',
+        model: 'gpt-5.6-sol',
+        providerAccountIdSnapshot: 'openai-private',
+        providerIdSnapshot: 'openai',
+      });
+
+      await manager.processPod(pod.id);
+
+      expect(ctx.runtime.spawn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'gpt-5.6-sol',
+          env: expect.not.objectContaining({ CLAUDE_CODE_OAUTH_TOKEN: primaryToken }),
+        }),
+      );
+      expect(attempts.list(pod.id).at(-1)).toMatchObject({
+        provider: 'openai',
+        providerAccountId: 'openai-private',
+        runtime: 'codex',
+        model: 'gpt-5.6-sol',
+      });
+      expect(ctx.containerManager.writeFile).toHaveBeenCalledWith(
+        'container-123',
+        '/home/autopod/.codex/auth.json',
+        targetAuthJson,
+      );
+      expect(ctx.containerManager.writeFile).not.toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        primaryToken,
+      );
+    });
+
     it('allows re-validation from killed state and resets attempt counter', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
