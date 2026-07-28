@@ -19,6 +19,7 @@ vi.mock('../providers/llm-client.js', () => ({
 import { createProfileAnthropicClient } from '../providers/llm-client.js';
 import { runPreSubmitReview } from '../validation/pre-submit-review.js';
 import { runCodexReview } from '../validation/review-codex-runner.js';
+import { resolveEffectiveReviewerProfile } from './runtime-resolver.js';
 
 const mockRunPreSubmitReview = vi.mocked(runPreSubmitReview);
 const mockRunCodexReview = vi.mocked(runCodexReview);
@@ -77,6 +78,7 @@ function buildBridge(opts: BuildOpts = {}): {
       ...(opts.profileOverrides ?? {}),
     }),
   } as unknown as Deps['profileStore'];
+  const reviewerProfile = profileStore.get('proj');
 
   const touchHeartbeat = vi.fn();
   const podManager = {
@@ -87,6 +89,10 @@ function buildBridge(opts: BuildOpts = {}): {
       executionTarget: opts.executionTarget ?? 'local',
     })),
     touchHeartbeat,
+    getReviewerConfig: vi.fn().mockReturnValue({
+      profile: reviewerProfile,
+      credentials: reviewerProfile.providerCredentials ?? null,
+    }),
     getReviewerExecEnv: vi.fn().mockResolvedValue(opts.reviewerExecEnv),
   } as unknown as Deps['podManager'];
 
@@ -720,6 +726,10 @@ describe('PodBridge.runPreSubmitReview', () => {
     /** Container id on the pod. Set null to force the host worktree fallback. */
     containerId?: string | null;
     reviewerExecEnv?: Record<string, string>;
+    reviewerConfig?: {
+      profile: Parameters<typeof insertTestProfile>[1];
+      credentials: Parameters<typeof insertTestProfile>[1]['providerCredentials'];
+    };
     runResult: Awaited<ReturnType<typeof runPreSubmitReview>>;
   }
 
@@ -755,6 +765,17 @@ describe('PodBridge.runPreSubmitReview', () => {
         preSubmitReview: opts.cachedVerdict ?? null,
       })),
       touchHeartbeat: vi.fn(),
+      getReviewerConfig: vi.fn().mockReturnValue(
+        opts.reviewerConfig ?? {
+          profile: {
+            name: 'proj',
+            reviewerModel: 'sonnet',
+            defaultModel: 'opus',
+            defaultBranch: 'main',
+          },
+          credentials: null,
+        },
+      ),
       getReviewerExecEnv: vi.fn().mockResolvedValue(opts.reviewerExecEnv),
     } as unknown as Deps['podManager'];
 
@@ -831,6 +852,69 @@ describe('PodBridge.runPreSubmitReview', () => {
       worktreeGetDiffMock,
     };
   }
+
+  it('uses fallback provider for post-failover pre-submit review', async () => {
+    const fallbackCredentials = {
+      provider: 'openai' as const,
+      authMode: 'api-key' as const,
+      apiKey: 'current-bound-key',
+    };
+    const runResult = {
+      status: 'pass' as const,
+      reasoning: 'ok',
+      issues: [],
+      model: 'auto',
+      durationMs: 1,
+      filesReviewed: 1,
+      linesAdded: 1,
+      linesRemoved: 0,
+    };
+    const sourceProfile = {
+      name: 'proj',
+      modelProvider: 'max' as const,
+      defaultRuntime: 'claude' as const,
+      defaultModel: 'claude-sonnet-5',
+      reviewerModel: 'claude-sonnet-5',
+      defaultBranch: 'changed-after-provisioning',
+    };
+    const effectiveProfile = resolveEffectiveReviewerProfile(
+      {
+        profileSnapshot: {
+          ...sourceProfile,
+          modelProvider: 'openai',
+          providerAccountId: 'fallback-openai',
+          defaultRuntime: 'codex',
+          defaultModel: 'gpt-5.6-sol',
+          defaultBranch: 'main',
+        },
+      },
+      sourceProfile,
+    );
+    const { bridge, podId } = buildBridgeWithWorktree({
+      containerDiff: SAMPLE_DIFF,
+      reviewerExecEnv: { OPENAI_API_KEY_FILE: '/run/autopod/openai-api-key' },
+      reviewerConfig: {
+        profile: effectiveProfile,
+        credentials: fallbackCredentials,
+      },
+      runResult,
+    });
+
+    await bridge.runPreSubmitReview(podId, {});
+
+    expect(mockRunPreSubmitReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewerProvider: 'openai',
+        reviewerModel: 'auto',
+        reviewerProviderCredentials: fallbackCredentials,
+      }),
+      logger,
+    );
+    expect(effectiveProfile.defaultBranch).toBe('changed-after-provisioning');
+    expect(resolveEffectiveReviewerProfile({ profileSnapshot: null }, sourceProfile)).toEqual(
+      sourceProfile,
+    );
+  });
 
   it('reads the diff from inside the container when one is running', async () => {
     const { bridge, podId, containerExecMock, worktreeGetDiffMock } = buildBridgeWithWorktree({

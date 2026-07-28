@@ -1,5 +1,6 @@
 import {
   type ModelProvider,
+  type Pod,
   type Profile,
   type RuntimeType,
   CLAUDE_DEFAULT_MODEL as SHARED_CLAUDE_DEFAULT_MODEL,
@@ -100,6 +101,22 @@ export function resolvePodModel(
 
 export function resolveReviewerProvider(profile: Profile): ModelProvider {
   return profile.modelProvider ?? 'anthropic';
+}
+
+export function resolveEffectiveReviewerProfile(
+  pod: Pick<Pod, 'profileSnapshot'>,
+  storedProfile: Profile,
+): Profile {
+  const snapshot = pod.profileSnapshot;
+  if (!snapshot) return storedProfile;
+  return {
+    ...storedProfile,
+    modelProvider: snapshot.modelProvider,
+    providerAccountId: snapshot.providerAccountId,
+    defaultRuntime: snapshot.defaultRuntime,
+    defaultModel: snapshot.defaultModel,
+    reviewerModel: snapshot.reviewerModel,
+  };
 }
 
 export function resolveReviewerModel(profile: Profile, logger?: Logger): string {

@@ -48,7 +48,11 @@ import type { ContainerManagerFactory, PodManager } from './pod-manager.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
 import { buildValidationExecEnv, wrapValidationExecCommand } from './registry-injector.js';
-import { resolveReviewerModel, resolveReviewerProvider } from './runtime-resolver.js';
+import {
+  resolveEffectiveReviewerProfile,
+  resolveReviewerModel,
+  resolveReviewerProvider,
+} from './runtime-resolver.js';
 
 export interface SessionBridgeDependencies {
   podManager: PodManager;
@@ -172,13 +176,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
     getReviewerModel(podId: string): string {
       const pod = podManager.getSession(podId);
-      const profile = profileStore.get(pod.profileName);
+      const profile = resolveEffectiveReviewerProfile(pod, profileStore.get(pod.profileName));
       return resolveReviewerModel(profile, logger);
     },
 
     async callReviewerModel(podId: string, question: string, context?: string): Promise<string> {
       const pod = podManager.getSession(podId);
-      const profile = profileStore.get(pod.profileName);
+      const profile = resolveEffectiveReviewerProfile(pod, profileStore.get(pod.profileName));
       const model = resolveReviewerModel(profile, logger);
 
       // Enrich the prompt with pod state so the reviewer has full context
@@ -253,7 +257,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
     async generateBrowserValidationScript(podId: string, prompt: string): Promise<string> {
       const pod = podManager.getSession(podId);
-      const profile = profileStore.get(pod.profileName);
+      const profile = resolveEffectiveReviewerProfile(pod, profileStore.get(pod.profileName));
       const model = resolveReviewerModel(profile, logger);
       const cm = containerManagerFactory.get(pod.executionTarget);
 
@@ -808,7 +812,8 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     ): Promise<PreSubmitReviewToolResult> {
       podManager.touchHeartbeat(podId);
       const pod = podManager.getSession(podId);
-      const profile = profileStore.get(pod.profileName);
+      const { profile, credentials: reviewerProviderCredentials } =
+        podManager.getReviewerConfig(pod);
       const reviewerModel = resolveReviewerModel(profile, logger);
       const reviewerProvider = resolveReviewerProvider(profile);
       const defaultBranch = profile.defaultBranch ?? 'main';
@@ -929,7 +934,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           diff,
           reviewerModel,
           reviewerProvider,
-          reviewerProviderCredentials: profile.providerCredentials,
+          reviewerProviderCredentials,
           podId,
           containerId: pod.containerId,
           containerManager: reviewerContainerManager,
