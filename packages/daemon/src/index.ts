@@ -948,6 +948,7 @@ if (sandboxContainerManager) {
     podRepo,
     eventBus,
     sandboxContainerManager,
+    preserveWorkspace: (id) => podManager.preserveWorkspace(id, 'daemon restart'),
     logger,
   }).catch((err) => {
     logger.error({ err }, 'Sandbox pod reconciliation failed');
@@ -968,6 +969,7 @@ try {
     containerManager,
     enqueueSession: (id) => podQueue.enqueue(id),
     validationRepo,
+    cleanupPodResources: (id) => podManager.cleanupPodResourcesForRecovery(id),
     logger,
   });
   if (result.recovered.length > 0) {

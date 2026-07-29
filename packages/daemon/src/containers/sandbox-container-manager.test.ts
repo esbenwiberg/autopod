@@ -319,6 +319,26 @@ class CancellableStreamingFakeClient extends FakeSandboxApiClient {
   }
 }
 
+class RejectingCancellationStreamingFakeClient extends FakeSandboxApiClient {
+  async *execStream(
+    _sandboxId: string,
+    _command: string[],
+    options?: SandboxExecOptions,
+  ): AsyncIterable<SandboxExecChunk> {
+    let releaseStream: (() => void) | undefined;
+    const cancelled = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+    options?.onCancelReady?.(async () => {
+      releaseStream?.();
+      throw new Error('remote termination was not verified');
+    });
+    yield { stdout: 'started' };
+    await cancelled;
+    throw new Error('sandbox stream closed during rejected cancellation');
+  }
+}
+
 /** A client variant exposing an interactive TTY session. */
 class TerminalFakeClient extends FakeSandboxApiClient {
   readonly attachCalls: Array<{ id: string; options: SandboxTerminalOptions }> = [];
@@ -733,6 +753,31 @@ describe('SandboxContainerManager', () => {
       await expect(output).resolves.toBe('');
       await expect(stream.exitCode).resolves.toBe(0);
       expect(client.cancelCalls).toBe(1);
+    });
+
+    it('does not write after EOF when native cancellation rejects', async () => {
+      const client = new RejectingCancellationStreamingFakeClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      const stream = await mgr.execStreaming(id, ['codex', 'exec']);
+      const stdoutErrors: Error[] = [];
+      const stderrErrors: Error[] = [];
+      stream.stdout.on('error', (err) => stdoutErrors.push(err));
+      stream.stderr.on('error', (err) => stderrErrors.push(err));
+      const started = new Promise<void>((resolve) => {
+        stream.stdout.once('data', () => resolve());
+      });
+      const stdout = readStream(stream.stdout);
+      const stderr = readStream(stream.stderr);
+      await started;
+
+      await expect(stream.kill()).rejects.toThrow('remote termination was not verified');
+
+      await expect(stream.exitCode).resolves.toBe(1);
+      await expect(stdout).resolves.toBe('started');
+      await expect(stderr).resolves.toBe('');
+      expect(stdoutErrors).toEqual([]);
+      expect(stderrErrors).toEqual([]);
     });
   });
 

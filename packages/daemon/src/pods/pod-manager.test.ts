@@ -9177,6 +9177,10 @@ describe('PodManager', () => {
           settled = true;
         });
 
+        // Workspace preservation now completes before destructive cleanup starts.
+        await waitForAssertion(() => {
+          expect(ctx.containerManager.kill).toHaveBeenCalledWith('sandbox-1');
+        });
         await vi.advanceTimersByTimeAsync(15_001);
         await Promise.resolve();
 
@@ -9249,6 +9253,70 @@ describe('PodManager', () => {
       expect(result.status).toBe('queued');
       expect(result.recoveryWorktreePath).toBe('/tmp/worktrees/test-branch');
       expect(ctx.enqueuedSessions).toContain(pod.id);
+    });
+
+    it('preserves sandbox workspace before forced rework cleanup', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/autopod/test-profile:latest',
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve my work' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'sandbox-preserve',
+        worktreePath: '/tmp/worktrees/preserve',
+        codexSessionId: 'codex-preserve',
+      });
+
+      await manager.triggerValidation(pod.id, { force: true });
+
+      expect(ctx.containerManager.getStatus).toHaveBeenCalledWith('sandbox-preserve');
+      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalled();
+      expect(
+        ctx.containerManager.extractDirectoryFromContainer.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        ctx.containerManager.kill.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      );
+      expect(ctx.containerManager.kill).toHaveBeenCalledWith('sandbox-preserve');
+      expect(manager.getSession(pod.id).recoveryWorktreePath).toBe('/tmp/worktrees/preserve');
+    });
+
+    it('retains old sandbox when forced rework preservation fails', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/autopod/test-profile:latest',
+      });
+      vi.mocked(ctx.containerManager.getStatus).mockRejectedValueOnce(
+        new Error('sandbox status unavailable'),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do not lose my work' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'sandbox-retained',
+        worktreePath: '/tmp/worktrees/retained',
+        codexSessionId: 'codex-retained',
+      });
+      ctx.enqueuedSessions.length = 0;
+
+      await expect(manager.triggerValidation(pod.id, { force: true })).rejects.toMatchObject({
+        code: 'WORKSPACE_SYNC_FAILED',
+      });
+
+      expect(ctx.containerManager.kill).not.toHaveBeenCalledWith('sandbox-retained');
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'failed',
+        containerId: 'sandbox-retained',
+        worktreeCompromised: false,
+      });
+      expect(ctx.enqueuedSessions).not.toContain(pod.id);
     });
   });
 
@@ -13118,6 +13186,34 @@ describe('worker startup diagnostics', () => {
     expect(failed.failureReason).toContain('Agent failed: Codex turn aborted');
     expect(failed.failureReason).toContain('[API_KEY_REDACTED]');
     expect(failed.failureReason).not.toContain('ghp_1234567890');
+  });
+
+  it('preserves a failed sandbox workspace on recovery request', async () => {
+    mockExecFileSuccess();
+    const ctx = createTestContext(undefined, {
+      executionTarget: 'sandbox',
+      warmImageTag: 'registry.azurecr.io/autopod/test-profile:latest',
+    });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget', skipValidation: true },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'failed',
+      containerId: 'sandbox-failed',
+      worktreePath: '/tmp/worktrees/sandbox-failed',
+    });
+
+    await manager.preserveWorkspace(pod.id, 'fatal agent exit');
+
+    expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledWith(
+      'sandbox-failed',
+      '/workspace',
+      '/tmp/worktrees/sandbox-failed',
+      expect.any(Array),
+    );
+    expect(ctx.containerManager.kill).not.toHaveBeenCalledWith('sandbox-failed');
   });
 
   it('pre-agent setup failure emits a visible fatal activity', async () => {

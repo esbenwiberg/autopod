@@ -1367,6 +1367,8 @@ export interface PodManager {
     attempt?: number,
   ): Promise<AgentRunOutcome>;
   handleCompletion(podId: string): Promise<void>;
+  preserveWorkspace(podId: string, reason?: string): Promise<void>;
+  cleanupPodResourcesForRecovery(podId: string): Promise<void>;
   sendMessage(podId: string, message: string): Promise<void>;
   notifyEscalation(podId: string, escalation: EscalationRequest): void;
   touchHeartbeat(podId: string): void;
@@ -2800,13 +2802,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   /** Destroy the per-pod Docker bridge. Must be called AFTER the pod + all
    *  sidecars are killed, otherwise Docker refuses with "has active endpoints".
    *  No-ops when the network manager doesn't support teardown (tests / older
-   *  implementations) or isn't wired. Never throws. */
-  async function destroyPodNetwork(podId: string): Promise<void> {
+   *  implementations) or isn't wired. Best-effort unless `strict` is requested. */
+  async function destroyPodNetwork(podId: string, strict = false): Promise<void> {
     if (!networkManager?.destroyNetworkForPod) return;
     try {
       await networkManager.destroyNetworkForPod(podId);
     } catch (err) {
       logger.warn({ err, podId }, 'Failed to destroy pod network');
+      if (strict) throw err;
     }
   }
 
@@ -3090,8 +3093,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   /** Tear down all sidecars attached to a pod. Re-reads the pod so it sees
    *  the most recent `sidecarContainerIds` even if the caller's snapshot is
    *  stale. No-ops if the pod never spawned any, or if no SidecarManager is
-   *  configured (older deployments). Never throws — failures are logged. */
-  async function killSidecarsForPod(podId: string): Promise<void> {
+   *  configured (older deployments). Best-effort unless `strict` is requested. */
+  async function killSidecarsForPod(podId: string, strict = false): Promise<void> {
     if (!sidecarManager) return;
     let current: Pod;
     try {
@@ -3101,15 +3104,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
     const ids = current.sidecarContainerIds;
     if (!ids) return;
-    await Promise.allSettled(
-      Object.entries(ids).map(async ([name, containerId]) => {
-        try {
-          await sidecarManager.kill(containerId);
-        } catch (err) {
-          logger.warn({ err, podId, sidecarName: name, containerId }, 'Failed to kill sidecar');
-        }
-      }),
+    const entries = Object.entries(ids);
+    const results = await Promise.allSettled(
+      entries.map(([, containerId]) => sidecarManager.kill(containerId)),
     );
+    const failures: unknown[] = [];
+    for (const [index, result] of results.entries()) {
+      if (result.status === 'fulfilled') continue;
+      const [name, containerId] = entries[index] ?? ['unknown', 'unknown'];
+      failures.push(result.reason);
+      logger.warn(
+        { err: result.reason, podId, sidecarName: name, containerId },
+        'Failed to kill sidecar',
+      );
+    }
+    if (failures.length > 0 && strict) {
+      throw new AggregateError(failures, `Failed to clean up sidecars for pod ${podId}`);
+    }
     podRepo.update(podId, { sidecarContainerIds: null });
   }
 
@@ -4606,6 +4617,55 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       () => syncWorkspaceBackOnce(containerId, worktreePath, cm, podId, executionTarget),
       'syncWorkspaceBack',
     );
+  }
+
+  async function preservePodWorkspace(pod: Pod, reason: string): Promise<void> {
+    if (!pod.containerId || !pod.worktreePath) return;
+    const cm = containerManagerFactory.get(pod.executionTarget);
+    if (pod.executionTarget === 'sandbox') {
+      const status = await cm.getStatus(pod.containerId);
+      if (status === 'unknown') {
+        throw new Error(`Sandbox ${pod.containerId} is unavailable for workspace preservation`);
+      }
+      if (status === 'stopped') {
+        await cm.start(pod.containerId);
+      }
+    }
+    const result = await syncWorkspaceBack(
+      pod.containerId,
+      pod.worktreePath,
+      cm,
+      pod.id,
+      pod.executionTarget,
+    );
+    logger.info(
+      {
+        podId: pod.id,
+        containerId: pod.containerId,
+        executionTarget: pod.executionTarget,
+        reason,
+        commitsPushed: result.pushed,
+      },
+      'Workspace preserved before recovery boundary',
+    );
+    emitActivityStatus(pod.id, `Workspace preserved before ${reason}.`);
+  }
+
+  async function preserveSandboxAfterAgentFailure(podId: string, reason: string): Promise<void> {
+    const pod = podRepo.getOrThrow(podId);
+    if (pod.executionTarget !== 'sandbox' || !pod.containerId || !pod.worktreePath) return;
+    try {
+      await preservePodWorkspace(pod, reason);
+    } catch (preserveErr) {
+      emitActivityStatus(
+        podId,
+        'Workspace preservation failed after the agent exit — retaining the sandbox and blocking destructive Rework.',
+      );
+      logger.error(
+        { err: preserveErr, podId, containerId: pod.containerId },
+        'Failed to preserve workspace after agent failure',
+      );
+    }
   }
 
   async function readHostWorktreeHead(worktreePath: string): Promise<string | null> {
@@ -9019,6 +9079,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (outcome === 'completed') {
           visibleFailurePhase = 'completion';
           await this.handleCompletion(podId);
+        } else if (outcome === 'failed') {
+          await preserveSandboxAfterAgentFailure(podId, 'fatal agent exit');
         }
       } catch (err) {
         logger.error({ err, podId }, 'Pod processing error');
@@ -9038,6 +9100,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             { err: persistErr, podId },
             'Failed to persist rotated credentials after pod error — proceeding',
           );
+        }
+        if (visibleFailurePhase === 'agent') {
+          await preserveSandboxAfterAgentFailure(podId, 'agent processing error');
         }
         const attemptHistory = deps.providerAttemptRepo?.list(podId) ?? [];
         const activeContinuityAttempt = deps.providerAttemptRepo?.getActive(podId);
@@ -11310,6 +11375,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     },
 
+    async preserveWorkspace(podId: string, reason = 'operator recovery'): Promise<void> {
+      await preservePodWorkspace(podRepo.getOrThrow(podId), reason);
+    },
+
+    async cleanupPodResourcesForRecovery(podId: string): Promise<void> {
+      await killSidecarsForPod(podId, true);
+      await destroyPodNetwork(podId, true);
+    },
+
     async triggerValidation(podId: string, options?: { force?: boolean }): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
       const force = options?.force ?? false;
@@ -11357,6 +11431,27 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const isInteractive = pod.options.agentMode === 'interactive';
       if (force && fromTerminal && (pod.worktreePath || isInteractive || !pod.containerId)) {
         emitActivityStatus(podId, 'Re-provisioning pod with fresh container…');
+
+        if (
+          !isInteractive &&
+          pod.executionTarget === 'sandbox' &&
+          pod.containerId &&
+          pod.worktreePath
+        ) {
+          try {
+            await preservePodWorkspace(pod, 'forced Rework');
+          } catch (preserveErr) {
+            emitActivityStatus(
+              podId,
+              'Rework blocked — the old workspace could not be preserved. The container was retained for recovery.',
+            );
+            throw new AutopodError(
+              `Pod ${podId} workspace could not be preserved before Rework: ${preserveErr instanceof Error ? preserveErr.message : String(preserveErr)}`,
+              'WORKSPACE_SYNC_FAILED',
+              409,
+            );
+          }
+        }
 
         // Kill the old container with the same hard ceiling used by terminal cleanup.
         // Azure sandbox deletion can stall while polling the data plane; rework must
@@ -14601,6 +14696,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               containerManager: containerManagerFactory.get('local'),
               enqueueSession,
               validationRepo,
+              cleanupPodResources: (id) => this.cleanupPodResourcesForRecovery(id),
               logger,
               trigger: 'wake',
             });
