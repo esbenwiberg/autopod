@@ -76,7 +76,7 @@ RUN cd /opt/autopod \
 # produces code that targets an API the engine doesn't implement yet. Bumping
 # this ARG requires also updating profile.sidecars.dagger.engineImageDigest
 # to the matching engine digest.
-ARG DAGGER_GO_SDK_VERSION=v0.18.6
+ARG DAGGER_GO_SDK_VERSION=v0.20.8
 
 # Dagger CLI — pre-installed (pinned to the same version as the SDK below) so
 # pods with restricted/deny-all network policies can still use Dagger modules

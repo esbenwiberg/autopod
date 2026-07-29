@@ -529,7 +529,7 @@ describe('generateDockerfile', () => {
 
   it('installs the Dagger CLI via pinned download when version config is provided', () => {
     const daggerCliVersion = {
-      version: '0.15.3',
+      version: '0.20.8',
       linuxAmd64Digest: `sha256:${'a'.repeat(64)}`,
     };
     const df = generateDockerfile({
@@ -538,14 +538,14 @@ describe('generateDockerfile', () => {
           dagger: {
             enabled: true,
             engineImageDigest: `registry.dagger.io/engine@sha256:${'b'.repeat(64)}`,
-            engineVersion: 'v0.15.3',
+            engineVersion: 'v0.20.8',
           },
         },
       }),
       gitCredentials: 'none',
       daggerCliVersion,
     });
-    expect(df).toContain('github.com/dagger/dagger/releases/download/v0.15.3');
+    expect(df).toContain('github.com/dagger/dagger/releases/download/v0.20.8');
     expect(df).toContain(`sha256:${'a'.repeat(64)}  /tmp/dagger.tar.gz`);
     expect(df).toContain('sha256sum -c');
     expect(df).toContain('tar -xz -C /usr/local/bin');
@@ -556,7 +556,7 @@ describe('generateDockerfile', () => {
     expect(df).not.toContain('docker-ce-cli');
   });
 
-  it('falls back to install.sh when dagger version config is absent', () => {
+  it('uses the checked-in pinned Dagger CLI download by default', () => {
     const df = generateDockerfile({
       profile: mockProfile({
         sidecars: {
@@ -568,10 +568,13 @@ describe('generateDockerfile', () => {
         },
       }),
       gitCredentials: 'none',
-      daggerCliVersion: undefined,
     });
-    expect(df).toContain('dl.dagger.io');
-    expect(df).toContain('install.sh');
+    expect(df).toContain('github.com/dagger/dagger/releases/download/v0.20.8');
+    expect(df).toContain(
+      'sha256:c0a46536fde641f6a4b45529382e1176220d22552c2f9ab0136deaf005e646db  /tmp/dagger.tar.gz',
+    );
+    expect(df).toContain('sha256sum -c');
+    expect(df).not.toContain('install.sh');
   });
 
   it('does not install the Dagger CLI when the dagger sidecar is disabled', () => {

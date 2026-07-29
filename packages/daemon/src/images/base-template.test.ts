@@ -14,6 +14,14 @@ const playwrightBaseTemplates = [
   'Dockerfile.dotnet10-go',
 ];
 
+const daggerBaseTemplates = [
+  ['Dockerfile.dotnet9', 'DAGGER_VERSION'],
+  ['Dockerfile.dotnet10', 'DAGGER_VERSION'],
+  ['Dockerfile.dotnet10-go', 'DAGGER_GO_SDK_VERSION'],
+  ['Dockerfile.go124', 'DAGGER_GO_SDK_VERSION'],
+  ['Dockerfile.go124-pw', 'DAGGER_GO_SDK_VERSION'],
+] as const;
+
 async function readBaseTemplate(filename: string): Promise<string> {
   return readFile(path.join(repoRoot, 'templates/base', filename), 'utf8');
 }
@@ -31,4 +39,27 @@ describe('Playwright base image templates', () => {
       expect(dockerfile).toContain('cannot launch as the runtime user');
     },
   );
+});
+
+describe('Dagger base image templates', () => {
+  it.each(daggerBaseTemplates)(
+    '%s pins and verifies the Dagger CLI at v0.20.8',
+    async (filename, versionArgument) => {
+      const dockerfile = await readBaseTemplate(filename);
+
+      expect(dockerfile).toContain(`ARG ${versionArgument}=v0.20.8`);
+      expect(dockerfile).toContain(`DAGGER_VERSION=\${${versionArgument}#v}`);
+      expect(dockerfile).toContain(`dagger version | grep -q "\${${versionArgument}}"`);
+    },
+  );
+
+  it.each(
+    daggerBaseTemplates.filter(
+      ([, versionArgument]) => versionArgument === 'DAGGER_GO_SDK_VERSION',
+    ),
+  )('%s keeps the cached Go SDK aligned with the CLI', async (filename, versionArgument) => {
+    const dockerfile = await readBaseTemplate(filename);
+
+    expect(dockerfile).toContain(`go get dagger.io/dagger@\${${versionArgument}}`);
+  });
 });
