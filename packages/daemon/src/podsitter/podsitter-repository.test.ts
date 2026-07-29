@@ -431,6 +431,19 @@ describe('PodsitterRepository', () => {
       remainingRisk: 'The next attempt may still fail.',
       stopCondition: 'Stop after sending one message.',
     };
+    expect(() =>
+      repository.completeDecision('decision-lifecycle', {
+        decision: {
+          ...decision,
+          attentionSignature: 'signature-from-unrelated-evidence',
+        },
+        outcome: 'completed',
+      }),
+    ).toThrow('attention signature does not match');
+    expect(repository.getDecisionForAttention(attention.id)).toMatchObject({
+      outcome: 'pending',
+      decision: null,
+    });
     expect(
       repository.completeDecision('decision-lifecycle', {
         decision,
@@ -472,6 +485,18 @@ describe('PodsitterRepository', () => {
         policyResult: 'allowed',
       }),
     ).toBe(true);
+    expect(
+      repository.reserveAction({
+        id: 'audit-mismatched-arguments',
+        idempotencyKey: 'action:lifecycle:mismatched-arguments',
+        podId: 'pod-1',
+        decisionId: 'decision-lifecycle',
+        actor,
+        action: 'tell',
+        arguments: { message: 'A materially different instruction.' },
+        policyResult: 'allowed',
+      }),
+    ).toBe(false);
     expect(repository.completeAction('action:lifecycle', 'sent')).toBe(true);
     expect(repository.completeAction('action:lifecycle', 'sent again')).toBe(false);
 

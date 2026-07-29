@@ -568,7 +568,8 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               WHERE id = ?
                 AND pod_id = ?
                 AND outcome = 'completed'
-                AND json_extract(decision, '$.action') = ?`,
+                AND json_extract(decision, '$.action') = ?
+                AND json_extract(decision, '$.arguments') = json(?)`,
             )
             .run(
               input.id,
@@ -584,6 +585,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               input.decisionId,
               input.podId,
               input.action,
+              json(actionArguments),
             ),
         )();
         return result.changes === 1;
@@ -724,13 +726,15 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
         update.executedAt === undefined || update.executedAt === null
           ? null
           : normalizeIso(update.executedAt, 'executedAt');
-      db.transaction(() =>
-        db
+      db.transaction(() => {
+        const result = db
           .prepare(
             `UPDATE podsitter_decisions SET
               decision = ?, outcome = ?, failure_code = ?, input_tokens = ?,
               output_tokens = ?, cost_usd = ?, completed_at = ?, executed_at = ?
-             WHERE id = ? AND completed_at IS NULL`,
+             WHERE id = ?
+               AND completed_at IS NULL
+               AND (? IS NULL OR attention_signature = ?)`,
           )
           .run(
             decision === null ? null : json(decision),
@@ -742,8 +746,20 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
             normalizedNow,
             executedAt,
             id,
-          ),
-      )();
+            decision === null ? null : decision.attentionSignature,
+            decision === null ? null : decision.attentionSignature,
+          );
+        if (result.changes === 0 && decision !== null) {
+          const pending = db
+            .prepare(
+              'SELECT attention_signature FROM podsitter_decisions WHERE id = ? AND completed_at IS NULL',
+            )
+            .get(id) as { attention_signature: string } | undefined;
+          if (pending && pending.attention_signature !== decision.attentionSignature) {
+            throw new Error('Podsitter decision attention signature does not match its evidence');
+          }
+        }
+      })();
       return getDecision(id);
     },
     createSandboxRun(input) {
