@@ -1212,15 +1212,17 @@ export class LocalWorktreeManager implements WorktreeManager {
       const { stdout: localHead } = await git(['rev-parse', 'HEAD'], {
         cwd: worktreePath,
       });
-      const { stdout: remoteHead } = await git(
-        ['ls-remote', '--heads', remote.url, expectedBranch],
-        {
-          cwd: worktreePath,
-          credential: remote.credential,
-          credentialUrl: remote.url,
-        },
-      );
-      const observedRemoteOid = remoteHead.trim().split(/\s+/, 1)[0];
+      const remoteRef = `refs/heads/${expectedBranch}`;
+      const { stdout: remoteHead } = await git(['ls-remote', '--heads', remote.url, remoteRef], {
+        cwd: worktreePath,
+        credential: remote.credential,
+        credentialUrl: remote.url,
+      });
+      const observedRemoteOid = remoteHead
+        .trim()
+        .split('\n')
+        .map((line) => line.trim().split(/\s+/, 2))
+        .find(([, ref]) => ref === remoteRef)?.[0];
       if (observedRemoteOid && observedRemoteOid === localHead.trim()) {
         this.logger.info(
           { worktreePath, expectedBranch, localHead: localHead.trim() },
