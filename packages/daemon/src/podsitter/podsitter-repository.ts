@@ -636,7 +636,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
             `UPDATE podsitter_decisions SET
               decision = ?, outcome = ?, failure_code = ?, input_tokens = ?,
               output_tokens = ?, cost_usd = ?, completed_at = ?, executed_at = ?
-             WHERE id = ?`,
+             WHERE id = ? AND completed_at IS NULL`,
           )
           .run(
             decision === null ? null : json(decision),

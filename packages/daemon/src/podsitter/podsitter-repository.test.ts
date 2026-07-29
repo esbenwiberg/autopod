@@ -318,6 +318,16 @@ describe('PodsitterRepository', () => {
       outcome: 'completed',
       executedAt: '2026-07-29T00:30:00.000Z',
     });
+    expect(
+      repository.completeDecision('decision-lifecycle', {
+        decision: {
+          ...decision,
+          action: 'no_action',
+          reason: 'A late duplicate completion must not replace the durable result.',
+        },
+        outcome: 'not_executed',
+      }),
+    ).toMatchObject({ decision, outcome: 'completed' });
     expect(() =>
       repository.completeDecision('decision-lifecycle', {
         decision: { ...decision, arguments: { accessToken: 'do-not-store' } },
