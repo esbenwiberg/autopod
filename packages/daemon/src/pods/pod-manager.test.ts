@@ -1581,7 +1581,7 @@ describe('PodManager', () => {
         stored.payload.type === 'pod.agent_activity' && stored.payload.event.type === 'status'
           ? [stored.payload.event.message]
           : [],
-    );
+      );
     expect(messages).toContain(
       'Provider limit reached — automatic failover exhausted account=target runtime=codex model=gpt-next; 1/1 hops used',
     );
@@ -1703,9 +1703,9 @@ describe('PodManager', () => {
     expect(messages).toContain(
       'Provider limit reached — configured automatic targets are ineligible: account=ineligible-target runtime=codex model=gpt-unused',
     );
-    expect(messages.some((message) => message.includes('ineligible: account=exhausted-target'))).toBe(
-      false,
-    );
+    expect(
+      messages.some((message) => message.includes('ineligible: account=exhausted-target')),
+    ).toBe(false);
     expect(attempts.list(pod.id)).toHaveLength(3);
     expect(ctx.enqueuedSessions).not.toContain(pod.id);
   });
