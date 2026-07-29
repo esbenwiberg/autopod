@@ -364,6 +364,17 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
         return getAttention(existing.id as string);
       }
       db.prepare(
+        `UPDATE podsitter_decisions
+         SET outcome = 'superseded', completed_at = ?
+         WHERE completed_at IS NULL
+           AND attention_id IN (
+             SELECT id FROM podsitter_attention
+             WHERE pod_id = ?
+               AND signature <> ?
+               AND state IN ('pending', 'deferred', 'deciding')
+           )`,
+      ).run(input.now, input.podId, input.signature);
+      db.prepare(
         `UPDATE podsitter_attention
          SET state = 'superseded', superseded_at = @now,
              lease_owner = NULL, lease_expires_at = NULL, last_seen_at = @now
@@ -545,13 +556,19 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       assertRedacted(input.policyResult, 'policyResult');
       const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
       try {
-        db.transaction(() =>
+        const result = db.transaction(() =>
           db
             .prepare(
               `INSERT INTO podsitter_action_audit (
                 id, idempotency_key, pod_id, decision_id, failure_signature,
                 actor, action, arguments, policy_result, daemon_result, reserved_at, completed_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)`,
+              )
+              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL
+              FROM podsitter_decisions
+              WHERE id = ?
+                AND pod_id = ?
+                AND outcome = 'completed'
+                AND json_extract(decision, '$.action') = ?`,
             )
             .run(
               input.id,
@@ -564,9 +581,12 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               json(actionArguments),
               input.policyResult,
               now,
+              input.decisionId,
+              input.podId,
+              input.action,
             ),
         )();
-        return true;
+        return result.changes === 1;
       } catch (error) {
         if (
           error instanceof Error &&

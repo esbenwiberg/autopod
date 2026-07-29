@@ -159,6 +159,24 @@ describe('PodsitterRepository', () => {
       },
       now: '2026-07-29T00:01:00Z',
     });
+    repository.completeDecision(
+      'decision-1',
+      {
+        decision: {
+          contractVersion: 1,
+          attentionSignature: attention.signature,
+          action: 'approve',
+          arguments: {},
+          reason: 'All deterministic gates passed.',
+          evidenceRefs: ['readiness:1'],
+          confidence: 'high',
+          remainingRisk: 'Normal merge risk remains.',
+          stopCondition: 'Stop after one approval.',
+        },
+        outcome: 'completed',
+      },
+      '2026-07-29T00:02:00Z',
+    );
     const reservation = {
       id: 'audit-1',
       idempotencyKey: 'pod-1:signature-1:approve',
@@ -171,6 +189,23 @@ describe('PodsitterRepository', () => {
     };
     expect(repository.reserveAction(reservation)).toBe(true);
     expect(repository.reserveAction({ ...reservation, id: 'audit-2' })).toBe(false);
+    expect(
+      repository.reserveAction({
+        ...reservation,
+        id: 'audit-wrong-pod',
+        idempotencyKey: 'wrong-pod:signature-1:approve',
+        podId: 'wrong-pod',
+      }),
+    ).toBe(false);
+    expect(
+      repository.reserveAction({
+        ...reservation,
+        id: 'audit-wrong-action',
+        idempotencyKey: 'pod-1:signature-1:reject',
+        action: 'reject',
+        arguments: { message: 'Contradicts the completed decision.' },
+      }),
+    ).toBe(false);
     expect(() =>
       repository.reserveAction({
         ...reservation,
@@ -229,11 +264,29 @@ describe('PodsitterRepository', () => {
 
   it('does not let a stale signature replay supersede newer attention', () => {
     const { repository } = setup();
-    repository.recordAttention({
+    const stale = repository.recordAttention({
       id: 'attention-stale',
       podId: 'pod-1',
       signature: 'signature-stale',
       now: '2026-07-29T00:00:00Z',
+    });
+    repository.acquireAttentionLease(
+      stale.id,
+      'stale-worker',
+      '2026-07-29T00:10:00Z',
+      '2026-07-29T00:00:30Z',
+    );
+    repository.createDecision({
+      id: 'decision-stale',
+      attentionId: stale.id,
+      leaseOwner: 'stale-worker',
+      podId: 'pod-1',
+      attentionSignature: stale.signature,
+      configurationGeneration: 1,
+      evidenceHash: 'sha256:stale',
+      evidenceVersion: 1,
+      target: { providerAccountId: 'sitter-account', runtime: 'codex', model: 'gpt-5' },
+      now: '2026-07-29T00:00:45Z',
     });
     repository.recordAttention({
       id: 'attention-new',
@@ -253,6 +306,11 @@ describe('PodsitterRepository', () => {
     expect(repository.listPendingAttention()).toEqual([
       expect.objectContaining({ id: 'attention-new', state: 'pending' }),
     ]);
+    expect(repository.getDecisionForAttention(stale.id)).toMatchObject({
+      id: 'decision-stale',
+      outcome: 'superseded',
+      completedAt: '2026-07-29T00:01:00.000Z',
+    });
   });
 
   it('enforces lease ownership and preserves provider leases across state updates', () => {
