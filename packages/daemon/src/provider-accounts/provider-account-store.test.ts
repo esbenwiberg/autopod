@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CredentialsCipher } from '../crypto/credentials-cipher.js';
+import { createPodsitterRepository } from '../podsitter/podsitter-repository.js';
 import { createProfileStore } from '../profiles/profile-store.js';
 import { createTestDb } from '../test-utils/mock-helpers.js';
 import { createProviderAccountStore } from './provider-account-store.js';
@@ -15,6 +16,43 @@ const reversibleCipher: CredentialsCipher = {
 };
 
 describe('ProviderAccountStore', () => {
+  it('blocks a Podsitter-referenced account until the reference is removed', () => {
+    const db = createTestDb();
+    const store = createProviderAccountStore(db);
+    store.create({ id: 'podsitter-dedicated', name: 'Podsitter Dedicated', provider: 'openai' });
+    const podsitter = createPodsitterRepository(db);
+    const actor = { type: 'human' as const, userId: 'operator-1' };
+    podsitter.replaceConfiguration({
+      enabled: false,
+      activation: { mode: 'always' },
+      authorizedUntil: null,
+      profileScope: null,
+      decisionTarget: {
+        providerAccountId: 'podsitter-dedicated',
+        runtime: 'codex',
+        model: 'gpt-5',
+      },
+      updatedBy: actor,
+    });
+
+    expect(() => store.delete('podsitter-dedicated')).toThrowError(
+      expect.objectContaining({
+        code: 'PROVIDER_ACCOUNT_PODSITTER_TARGET_IN_USE',
+        statusCode: 409,
+      }),
+    );
+
+    podsitter.replaceConfiguration({
+      enabled: false,
+      activation: { mode: 'always' },
+      authorizedUntil: null,
+      profileScope: null,
+      decisionTarget: null,
+      updatedBy: actor,
+    });
+    expect(() => store.delete('podsitter-dedicated')).not.toThrow();
+  });
+
   it('round-trips ordered failover defaults and preserves null for legacy rows', () => {
     const db = createTestDb();
     const store = createProviderAccountStore(db);

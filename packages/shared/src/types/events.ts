@@ -1,6 +1,12 @@
 import type { EscalationRequest, EscalationResponse } from './escalation.js';
 import type { MemoryCandidate, MemoryEntry } from './memory.js';
 import type { PodStatus, PodSummary } from './pod.js';
+import type {
+  OperatorActor,
+  PodsitterAction,
+  PodsitterDecisionOutcome,
+  PodsitterProviderCircuitStatus,
+} from './podsitter.js';
 import type { ReadinessApproval, ReadinessStatus } from './readiness.js';
 import type { AgentEvent } from './runtime.js';
 import type {
@@ -55,7 +61,101 @@ export type SystemEvent =
   | PodPreflightOverlapEvent
   | PodReadinessApprovedEvent
   | HostResumedEvent
-  | FirewallDeniedEvent;
+  | FirewallDeniedEvent
+  | PodsitterAttentionQueuedEvent
+  | PodsitterDecisionStartedEvent
+  | PodsitterDecisionCompletedEvent
+  | PodsitterDecisionFailedEvent
+  | PodsitterActionExecutedEvent
+  | PodsitterActionRejectedEvent
+  | PodsitterProviderLimitedEvent
+  | PodsitterProviderRecoveredEvent
+  | PodsitterActivationChangedEvent
+  | PodsitterSandboxCleanupFailedEvent;
+
+export interface PodsitterAttentionQueuedEvent {
+  type: 'podsitter.attention_queued';
+  timestamp: string;
+  podId: string;
+  attentionId: string;
+  attentionSignature: string;
+}
+
+export interface PodsitterDecisionStartedEvent {
+  type: 'podsitter.decision_started';
+  timestamp: string;
+  podId: string;
+  decisionId: string;
+  attentionSignature: string;
+  providerAccountId: string;
+  model: string;
+}
+
+export interface PodsitterDecisionCompletedEvent {
+  type: 'podsitter.decision_completed';
+  timestamp: string;
+  podId: string;
+  decisionId: string;
+  action: PodsitterAction;
+  outcome: PodsitterDecisionOutcome;
+  evidenceRefs: string[];
+}
+
+export interface PodsitterDecisionFailedEvent {
+  type: 'podsitter.decision_failed';
+  timestamp: string;
+  podId: string;
+  decisionId: string;
+  failureCode: string;
+}
+
+export interface PodsitterActionExecutedEvent {
+  type: 'podsitter.action_executed';
+  timestamp: string;
+  podId: string;
+  decisionId: string;
+  action: PodsitterAction;
+  actor: OperatorActor;
+}
+
+export interface PodsitterActionRejectedEvent {
+  type: 'podsitter.action_rejected';
+  timestamp: string;
+  podId: string;
+  decisionId: string;
+  action: PodsitterAction;
+  policyResult: string;
+}
+
+export interface PodsitterProviderLimitedEvent {
+  type: 'podsitter.provider_limited';
+  timestamp: string;
+  providerAccountId: string;
+  status: Exclude<PodsitterProviderCircuitStatus, 'available'>;
+  retryAt: string | null;
+}
+
+export interface PodsitterProviderRecoveredEvent {
+  type: 'podsitter.provider_recovered';
+  timestamp: string;
+  providerAccountId: string;
+}
+
+export interface PodsitterActivationChangedEvent {
+  type: 'podsitter.activation_changed';
+  timestamp: string;
+  enabled: boolean;
+  generation: number;
+  actor: OperatorActor;
+}
+
+export interface PodsitterSandboxCleanupFailedEvent {
+  type: 'podsitter.system_sandbox_cleanup_failed';
+  timestamp: string;
+  runId: string;
+  decisionId: string | null;
+  failureCode: string;
+}
 
 export interface PodCreatedEvent {
   type: 'pod.created';
