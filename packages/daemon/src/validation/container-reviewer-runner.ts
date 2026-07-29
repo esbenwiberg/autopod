@@ -300,11 +300,7 @@ function collectBoundedStream(stream: Readable): {
   return { done, value: () => output, diagnostic: () => diagnostic };
 }
 
-function appendBounded(
-  current: string,
-  chunk: string,
-  limit = MAX_DIAGNOSTIC_BYTES,
-): string {
+function appendBounded(current: string, chunk: string, limit = MAX_DIAGNOSTIC_BYTES): string {
   const combined = current + chunk;
   return combined.length <= limit ? combined : combined.slice(combined.length - limit);
 }

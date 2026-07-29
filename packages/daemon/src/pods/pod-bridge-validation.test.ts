@@ -1,5 +1,5 @@
-import type { PodBridge } from '@autopod/escalation-mcp';
 import { PassThrough } from 'node:stream';
+import type { PodBridge } from '@autopod/escalation-mcp';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { type SessionBridgeDependencies, createSessionBridge } from './pod-bridge-impl.js';

@@ -1016,6 +1016,7 @@ describe('DockerContainerManager', () => {
       expect(terminateCommand).toMatch(/\.autopod-stream-exec-\d+-\d+\.pid/);
       expect(terminateCommand).toContain('kill -TERM -"$pid"');
       expect(terminateCommand).toContain('kill -KILL -"$pid"');
+      expect(terminateCommand).toContain('IFS= read -r stat');
       expect(terminateCommand).toContain('group_alive && exit 1');
       expect(muxStream.destroyed).toBe(true);
     });
@@ -1039,49 +1040,52 @@ describe('DockerContainerManager', () => {
       expect(muxStream.destroyed).toBe(true);
     });
 
-    it('terminates a surviving child in the dedicated streaming process group', async () => {
-      const testDir = mkdtempSync(join(tmpdir(), 'autopod-stream-kill-'));
-      const pidPath = join(testDir, 'group.pid');
-      const childPath = join(testDir, 'child.pid');
-      const group = spawn(
-        'setsid',
-        [
-          '-w',
-          'sh',
-          '-c',
-          `echo $$ > ${pidPath}; sh -c 'trap "" TERM; while :; do sleep 1; done' & echo $! > ${childPath}; wait`,
-        ],
-        { stdio: 'ignore' },
-      );
+    it.skipIf(process.platform !== 'linux')(
+      'terminates a surviving child in the dedicated streaming process group',
+      async () => {
+        const testDir = mkdtempSync(join(tmpdir(), 'autopod-stream-kill-'));
+        const pidPath = join(testDir, 'group.pid');
+        const childPath = join(testDir, 'child.pid');
+        const group = spawn(
+          'setsid',
+          [
+            '-w',
+            'sh',
+            '-c',
+            `echo $$ > ${pidPath}; sh -c 'trap "" TERM; while :; do sleep 1; done' & echo $! > ${childPath}; wait`,
+          ],
+          { stdio: 'ignore' },
+        );
 
-      try {
-        for (let i = 0; i < 50 && !existsSync(childPath); i++) {
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        }
-        const childPid = Number(readFileSync(childPath, 'utf8'));
-        expect(childPid).toBeGreaterThan(0);
-
-        execFileSync('sh', ['-c', terminateStreamingProcessGroupScript(pidPath)], {
-          timeout: 6_000,
-        });
-
-        let childRunnable = true;
-        for (let i = 0; i < 50 && childRunnable; i++) {
-          try {
-            const stat = readFileSync(`/proc/${childPid}/stat`, 'utf8');
-            const state = stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[0];
-            childRunnable = state !== 'Z';
-            if (childRunnable) await new Promise((resolve) => setTimeout(resolve, 10));
-          } catch {
-            childRunnable = false;
+        try {
+          for (let i = 0; i < 50 && !existsSync(childPath); i++) {
+            await new Promise((resolve) => setTimeout(resolve, 10));
           }
+          const childPid = Number(readFileSync(childPath, 'utf8'));
+          expect(childPid).toBeGreaterThan(0);
+
+          execFileSync('sh', ['-c', terminateStreamingProcessGroupScript(pidPath)], {
+            timeout: 6_000,
+          });
+
+          let childRunnable = true;
+          for (let i = 0; i < 50 && childRunnable; i++) {
+            try {
+              const stat = readFileSync(`/proc/${childPid}/stat`, 'utf8');
+              const state = stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[0];
+              childRunnable = state !== 'Z';
+              if (childRunnable) await new Promise((resolve) => setTimeout(resolve, 10));
+            } catch {
+              childRunnable = false;
+            }
+          }
+          expect(childRunnable).toBe(false);
+        } finally {
+          group.kill('SIGKILL');
+          rmSync(testDir, { recursive: true, force: true });
         }
-        expect(childRunnable).toBe(false);
-      } finally {
-        group.kill('SIGKILL');
-        rmSync(testDir, { recursive: true, force: true });
-      }
-    });
+      },
+    );
 
     it('drops late demux output after runtime force-closes output streams', async () => {
       const muxStream = new PassThrough();

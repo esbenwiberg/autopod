@@ -8,6 +8,7 @@ const repoRoot = path.resolve(imageDir, '../../../..');
 
 const playwrightBaseTemplates = [
   'Dockerfile.node22-pw',
+  'Dockerfile.node22-pw-pg',
   'Dockerfile.go124-pw',
   'Dockerfile.python-node-pg',
   'Dockerfile.dotnet10',
@@ -39,6 +40,19 @@ describe('Playwright base image templates', () => {
       expect(dockerfile).toContain('cannot launch as the runtime user');
     },
   );
+});
+
+describe('PostgreSQL base image templates', () => {
+  it('keeps node22-pw-pg on the Node base while adding a non-root transient server', async () => {
+    const dockerfile = await readBaseTemplate('Dockerfile.node22-pw-pg');
+
+    expect(dockerfile).toContain('FROM node:22-slim');
+    expect(dockerfile).toContain('postgresql');
+    expect(dockerfile).toContain('postgresql-contrib');
+    expect(dockerfile).toContain('ENV PGDATA=/tmp/pgdata');
+    expect(dockerfile).toContain('for binary in initdb pg_ctl postgres');
+    expect(dockerfile).not.toContain('pip install');
+  });
 });
 
 describe('Dagger base image templates', () => {
