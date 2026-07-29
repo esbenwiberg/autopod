@@ -2304,6 +2304,9 @@ describe('PodManager', () => {
       await expect(manager.continueProvider(pod.id)).rejects.toMatchObject({
         code: 'PROVIDER_LIMIT_NOT_DEFINITIVE',
       });
+      await expect(manager.continueProvider(pod.id, 'profile-primary')).rejects.toMatchObject({
+        code: 'INVALID_STATE',
+      });
       expect(manager.getSession(pod.id)).toEqual(podBefore);
       expect(attempts.list(pod.id)).toEqual(attemptsBefore);
       expect(attempts.getActive(pod.id)).not.toBeNull();

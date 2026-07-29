@@ -14176,6 +14176,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const pod = podRepo.getOrThrow(podId);
       const primaryRecovery = requestedTarget === 'profile-primary';
       const pausedProviderLimit = pod.status === 'paused' && pod.pauseReason === 'provider_limit';
+      if (primaryRecovery && pod.status !== 'failed') {
+        throw new AutopodError(
+          'Profile-primary recovery is only available for failed pods',
+          'INVALID_STATE',
+          409,
+        );
+      }
       if (pod.status === 'failed' && !primaryRecovery) {
         throw new AutopodError(
           'Failed pods may only be continued on the profile primary provider',
@@ -14183,7 +14190,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           409,
         );
       }
-      if (!pausedProviderLimit && !(pod.status === 'failed' && primaryRecovery)) {
+      if (!pausedProviderLimit && !primaryRecovery) {
         throw new AutopodError(
           `Cannot continue provider for pod ${podId} outside a provider-limit pause`,
           'INVALID_STATE',
