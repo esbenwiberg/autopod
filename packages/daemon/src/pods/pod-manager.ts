@@ -2017,11 +2017,31 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return false;
   }
 
-  function selectProviderFailoverTarget(pod: Pod): ProviderFailoverTarget | null {
-    if (!providerAccountStore || !deps.providerAttemptRepo) return null;
+  type ProviderFailoverSelection =
+    | { target: ProviderFailoverTarget; reason: null }
+    | {
+        target: null;
+        reason:
+          | { type: 'unavailable' }
+          | { type: 'no_policy' }
+          | { type: 'disabled' }
+          | {
+              type: 'exhausted';
+              attemptedTargets: ProviderFailoverTarget[];
+              hopsUsed: number;
+              maxHops: number;
+            }
+          | { type: 'ineligible'; targets: ProviderFailoverTarget[] };
+      };
+
+  function selectProviderFailoverTarget(pod: Pod): ProviderFailoverSelection {
+    if (!providerAccountStore || !deps.providerAttemptRepo) {
+      return { target: null, reason: { type: 'unavailable' } };
+    }
     const resolved = profileStore.resolveProviderFailover(pod.profileName);
     const policy = resolved.policy;
-    if (!policy || policy.targets.length === 0) return null;
+    if (!policy) return { target: null, reason: { type: 'no_policy' } };
+    if (policy.targets.length === 0) return { target: null, reason: { type: 'disabled' } };
     const attempts = deps.providerAttemptRepo.list(pod.id);
     const used = new Set(
       attempts.map(
@@ -2037,18 +2057,75 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           attempt.model === target.model,
       ),
     );
-    if (attemptedTargets.length >= maxHops) return null;
+    if (attemptedTargets.length >= maxHops) {
+      return {
+        target: null,
+        reason: {
+          type: 'exhausted',
+          attemptedTargets,
+          hopsUsed: attemptedTargets.length,
+          maxHops,
+        },
+      };
+    }
+    const ineligibleTargets: ProviderFailoverTarget[] = [];
     for (const target of policy.targets) {
       const key = `${target.providerAccountId}\0${target.runtime}\0${target.model}`;
       if (used.has(key)) continue;
       try {
         const account = providerAccountStore.get(target.providerAccountId);
-        if (isCompatibleTarget(target, account)) return target;
+        if (isCompatibleTarget(target, account)) return { target, reason: null };
+        ineligibleTargets.push(target);
       } catch {
         // Deleted, unauthenticated, or otherwise ineligible targets fail closed.
+        ineligibleTargets.push(target);
       }
     }
-    return null;
+    return { target: null, reason: { type: 'ineligible', targets: ineligibleTargets } };
+  }
+
+  function escapeProviderTargetDiagnosticValue(value: string, fallback: string): string {
+    const normalized = value.trim().slice(0, 256);
+    if (!normalized) return fallback;
+    return normalized.replace(
+      /[^A-Za-z0-9._:/@+-]/gu,
+      (character) => `\\u{${character.codePointAt(0)?.toString(16) ?? 'fffd'}}`,
+    );
+  }
+
+  function describeProviderFailoverTarget(target: ProviderFailoverTarget): string {
+    const account = escapeProviderTargetDiagnosticValue(
+      target.providerAccountId,
+      'unknown-account',
+    );
+    const runtime = escapeProviderTargetDiagnosticValue(target.runtime, 'unknown-runtime');
+    const model = escapeProviderTargetDiagnosticValue(target.model, 'unknown-model');
+    return `account=${account} runtime=${runtime} model=${model}`;
+  }
+
+  function providerFailoverUnavailableActivity(selection: ProviderFailoverSelection): string {
+    if (selection.target) throw new Error('Selected provider target does not need a diagnostic');
+    switch (selection.reason.type) {
+      case 'no_policy':
+        return 'Provider limit reached — automatic failover has no configured policy';
+      case 'disabled':
+        return 'Provider limit reached — automatic failover is explicitly disabled';
+      case 'exhausted': {
+        const targets = selection.reason.attemptedTargets
+          .map(describeProviderFailoverTarget)
+          .join(', ');
+        return (
+          `Provider limit reached — automatic failover exhausted ${targets}; ` +
+          `${selection.reason.hopsUsed}/${selection.reason.maxHops} hops used`
+        );
+      }
+      case 'ineligible': {
+        const targets = selection.reason.targets.map(describeProviderFailoverTarget).join(', ');
+        return `Provider limit reached — configured automatic targets are ineligible: ${targets}`;
+      }
+      case 'unavailable':
+        return 'Provider limit reached — automatic failover infrastructure is unavailable';
+    }
   }
 
   function profileForProviderTarget(profile: Profile, target: ProviderFailoverTarget): Profile {
@@ -2314,13 +2391,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       forgetMaxCredentialLineage(source.id);
     }
     podRepo.update(podId, { containerId: null });
-    const target = selectProviderFailoverTarget(podRepo.getOrThrow(podId));
-    if (!target) {
-      emitActivityStatus(podId, 'Provider limit reached — no eligible automatic target');
+    const selection = selectProviderFailoverTarget(podRepo.getOrThrow(podId));
+    if (!selection.target) {
+      emitActivityStatus(podId, providerFailoverUnavailableActivity(selection));
       return;
     }
     try {
-      await queueProviderContinuation(podRepo.getOrThrow(podId), target, classification, true);
+      await queueProviderContinuation(
+        podRepo.getOrThrow(podId),
+        selection.target,
+        classification,
+        true,
+      );
     } catch (err) {
       logger.warn({ err, podId }, 'Automatic provider continuation failed closed');
       emitActivityStatus(podId, 'Provider limit reached — automatic continuation is unsafe');
@@ -4112,8 +4194,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    *    Only kicks in when the profile has no static apiKey configured.
    */
   async function getResumeEnv(pod: Pod): Promise<Record<string, string> | undefined> {
-    const profile = profileStore.get(pod.profileName);
+    const profile = resolveEffectiveBoundProfile(pod);
     const provider = profile.modelProvider;
+    const owner = profile.providerAccountId
+      ? ({ type: 'provider-account', id: profile.providerAccountId } as const)
+      : undefined;
     if (
       provider !== 'max' &&
       provider !== 'foundry' &&
@@ -4145,7 +4230,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           pod.profileName,
           logger,
           maxCredentialLineageByPod.get(pod.id),
-          { providerAccountStore },
+          { providerAccountStore, owner },
         );
       } catch (err) {
         logger.warn(
@@ -4163,7 +4248,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           profileStore,
           pod.profileName,
           logger,
-          { providerAccountStore },
+          { providerAccountStore, owner },
         );
       } catch (err) {
         logger.warn(
@@ -4181,7 +4266,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           profileStore,
           pod.profileName,
           logger,
-          { providerAccountStore },
+          { providerAccountStore, owner },
         );
       } catch (err) {
         logger.warn(
@@ -9072,18 +9157,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       let seenCompleteEvents: Set<string>;
       try {
         attemptPod = podRepo.getOrThrow(podId);
-        attemptProfile = profileStore.get(attemptPod.profileName);
-        const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
-        if (
-          activeAttempt?.providerAccountId &&
-          activeAttempt.providerAccountId !== attemptProfile.providerAccountId
-        ) {
-          attemptProfile = profileForProviderTarget(attemptProfile, {
-            providerAccountId: activeAttempt.providerAccountId,
-            runtime: activeAttempt.runtime,
-            model: activeAttempt.model,
-          });
-        }
+        attemptProfile = resolveEffectiveBoundProfile(attemptPod);
         ensureProviderAttempt(attemptPod, attemptProfile);
         seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
         startCommitPolling(podId);
