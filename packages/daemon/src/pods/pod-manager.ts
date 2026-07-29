@@ -3629,8 +3629,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const worktreePath = fixPod.worktreePath;
     let branchPushed = false;
     const parentIsTerminal =
-      fixPod.linkedPodId !== null &&
-      isTerminalState(podRepo.getOrThrow(fixPod.linkedPodId).status);
+      fixPod.linkedPodId !== null && isTerminalState(podRepo.getOrThrow(fixPod.linkedPodId).status);
 
     if (parentIsTerminal) {
       logger.info(

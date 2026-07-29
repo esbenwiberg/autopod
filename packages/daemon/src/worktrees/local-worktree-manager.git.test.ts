@@ -106,10 +106,7 @@ describe('LocalWorktreeManager real Git regressions', () => {
 
   it('succeeds when remote already matches HEAD despite a stale tracked OID', async () => {
     const worktree = await createRebasedFeature('lease-idempotent');
-    const staleTrackedOid = await git(worktree, [
-      'rev-parse',
-      'refs/remotes/origin/feature',
-    ]);
+    const staleTrackedOid = await git(worktree, ['rev-parse', 'refs/remotes/origin/feature']);
     const localOid = await git(worktree, ['rev-parse', 'HEAD']);
     expect(staleTrackedOid).not.toBe(localOid);
 
