@@ -1130,7 +1130,7 @@ export function terminateStreamingProcessGroupScript(pidPath: string): string {
     'pid=$(cat "$pid_file")',
     'case "$pid" in *[!0-9]*|"") exit 1;; esac',
     '[ -d /proc/1 ] || exit 1',
-    'group_alive() { for stat_file in /proc/[0-9]*/stat; do [ -r "$stat_file" ] || continue; stat=$(cat "$stat_file") || return 0; rest=${stat##*) }; set -- $rest; [ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0; done; return 1; }',
+    'group_alive() { for stat_file in /proc/[0-9]*/stat; do [ -r "$stat_file" ] || continue; IFS= read -r stat < "$stat_file" || return 0; rest=${stat##*) }; set -- $rest; [ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0; done; return 1; }',
     'kill -TERM -"$pid" 2>/dev/null || true',
     'i=0',
     'while group_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
