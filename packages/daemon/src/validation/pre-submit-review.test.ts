@@ -214,9 +214,9 @@ describe('runPreSubmitReview', () => {
       ['sh', '-c', expect.stringContaining("sh '/run/autopod/agent-shim.sh' claude -p")],
       expect.objectContaining({
         cwd: '/workspace',
-        timeout: 90_000,
       }),
     );
+    expect(containerManager.execStreaming.mock.calls[0]?.[2]).not.toHaveProperty('timeout');
     expect(mockRunClaudeCli).not.toHaveBeenCalled();
   });
 

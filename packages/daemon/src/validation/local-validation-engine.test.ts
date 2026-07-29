@@ -2191,8 +2191,8 @@ describe('validate() — facts + review gate', () => {
     expect(execInContainer.mock.calls[1]?.[2]).toMatchObject({
       cwd: '/workspace',
       env: reviewerExecEnv,
-      timeout: 300_000,
     });
+    expect(execInContainer.mock.calls[1]?.[2]).not.toHaveProperty('timeout');
   });
 
   it('fails Max Review clearly when no live container is available', async () => {

@@ -146,9 +146,9 @@ describe('runContainerReviewer', () => {
       expect.objectContaining({
         cwd: '/workspace',
         env: { ANTHROPIC_API_KEY_FILE: '/run/autopod/anthropic-api-key' },
-        timeout: 60_000,
       }),
     );
+    expect(vi.mocked(cm.execStreaming).mock.calls[0]?.[2]).not.toHaveProperty('timeout');
     expect((cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
       '--output-format json',
     );
