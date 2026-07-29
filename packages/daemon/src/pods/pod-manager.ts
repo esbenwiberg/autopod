@@ -2068,17 +2068,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         },
       };
     }
+    const ineligibleTargets: ProviderFailoverTarget[] = [];
     for (const target of policy.targets) {
       const key = `${target.providerAccountId}\0${target.runtime}\0${target.model}`;
       if (used.has(key)) continue;
       try {
         const account = providerAccountStore.get(target.providerAccountId);
         if (isCompatibleTarget(target, account)) return { target, reason: null };
+        ineligibleTargets.push(target);
       } catch {
         // Deleted, unauthenticated, or otherwise ineligible targets fail closed.
+        ineligibleTargets.push(target);
       }
     }
-    return { target: null, reason: { type: 'ineligible', targets: policy.targets } };
+    return { target: null, reason: { type: 'ineligible', targets: ineligibleTargets } };
   }
 
   function escapeProviderTargetDiagnosticValue(value: string, fallback: string): string {

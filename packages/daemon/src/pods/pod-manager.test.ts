@@ -1590,6 +1590,126 @@ describe('PodManager', () => {
     expect(ctx.enqueuedSessions).not.toContain(pod.id);
   });
 
+  it('reports only unattempted ineligible targets in a mixed failover chain', async () => {
+    const ctx = createTestContext();
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    insertProviderAccount(ctx.db, 'source', 'anthropic', {
+      provider: 'anthropic',
+      apiKey: 'source-key',
+    });
+    insertProviderAccount(ctx.db, 'exhausted-target', 'openai', {
+      provider: 'openai',
+      apiKey: 'target-key',
+    });
+    insertProviderAccount(ctx.db, 'ineligible-target', 'openai', null);
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'source');
+    ctx.db.prepare('UPDATE profiles SET provider_failover = ? WHERE name = ?').run(
+      JSON.stringify({
+        targets: [
+          {
+            providerAccountId: 'exhausted-target',
+            runtime: 'codex',
+            model: 'gpt-used',
+          },
+          {
+            providerAccountId: 'ineligible-target',
+            runtime: 'codex',
+            model: 'gpt-unused',
+          },
+        ],
+        maxHops: 2,
+      }),
+      'test-profile',
+    );
+    ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Distinguish exhausted and ineligible targets' },
+      'user-1',
+    );
+    ctx.enqueuedSessions.length = 0;
+    const profileReference = `pod:${pod.id}@profile-snapshot#abcdef1`;
+    attempts.open({
+      podId: pod.id,
+      provider: 'anthropic',
+      providerAccountId: 'source',
+      runtime: 'claude',
+      model: pod.model,
+      profileReference,
+      profileSnapshot: { name: 'test-profile', modelProvider: 'anthropic' },
+    });
+    attempts.close(pod.id, {
+      nativeSessionId: 'source-session',
+      outcome: 'quota_exhausted',
+      inputTokens: 10,
+      outputTokens: 5,
+      costUsd: 0.1,
+    });
+    attempts.open({
+      podId: pod.id,
+      provider: 'openai',
+      providerAccountId: 'exhausted-target',
+      runtime: 'codex',
+      model: 'gpt-used',
+      profileReference,
+      profileSnapshot: { name: 'test-profile', modelProvider: 'openai' },
+    });
+    attempts.close(pod.id, {
+      nativeSessionId: 'target-session',
+      outcome: 'completed',
+      inputTokens: 20,
+      outputTokens: 10,
+      costUsd: 0.2,
+    });
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      runtime: 'codex',
+      model: 'gpt-used',
+      worktreePath: `/tmp/worktree/${pod.id}`,
+    });
+    ctx.db
+      .prepare(
+        `UPDATE pods
+         SET provider_account_id_snapshot = 'exhausted-target', provider_id_snapshot = 'openai'
+         WHERE id = ?`,
+      )
+      .run(pod.id);
+
+    await manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        yield {
+          type: 'error',
+          timestamp: '2026-07-29T12:00:00.000Z',
+          message: 'quota exhausted',
+          fatal: true,
+          classification: {
+            category: 'quota_exhausted',
+            definitive: true,
+            sanitizedMessage: 'Provider quota exhausted',
+          },
+        } as const;
+      })(),
+    );
+
+    const messages = ctx.eventRepo
+      .getForSession(pod.id, { type: 'pod.agent_activity' })
+      .flatMap((stored) =>
+        stored.payload.type === 'pod.agent_activity' && stored.payload.event.type === 'status'
+          ? [stored.payload.event.message]
+          : [],
+      );
+    expect(messages).toContain(
+      'Provider limit reached — configured automatic targets are ineligible: account=ineligible-target runtime=codex model=gpt-unused',
+    );
+    expect(messages.some((message) => message.includes('ineligible: account=exhausted-target'))).toBe(
+      false,
+    );
+    expect(attempts.list(pod.id)).toHaveLength(3);
+    expect(ctx.enqueuedSessions).not.toContain(pod.id);
+  });
+
   it('does not protect a missing historical handoff during later rework', async () => {
     const ctx = createTestContext();
     const attempts = createProviderAttemptRepository(ctx.db);
