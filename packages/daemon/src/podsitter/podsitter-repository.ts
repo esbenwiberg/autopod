@@ -433,9 +433,9 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
              SET lease_owner = ?, lease_expires_at = ?, state = 'deciding'
              WHERE id = ?
                AND state IN ('pending', 'deferred', 'deciding')
-               AND (lease_expires_at IS NULL OR lease_expires_at <= ? OR lease_owner = ?)`,
+               AND (lease_expires_at IS NULL OR lease_expires_at <= ?)`,
           )
-          .run(owner, normalizedExpiresAt, id, normalizedNow, owner),
+          .run(owner, normalizedExpiresAt, id, normalizedNow),
       )();
       return acquired.changes === 1 ? getAttention(id) : null;
     },
@@ -522,16 +522,9 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               `UPDATE podsitter_provider_state
                SET probe_lease_owner = ?, probe_lease_expires_at = ?, updated_at = ?
                WHERE provider_account_id = ?
-                 AND (probe_lease_expires_at IS NULL OR probe_lease_expires_at <= ? OR probe_lease_owner = ?)`,
+                 AND (probe_lease_expires_at IS NULL OR probe_lease_expires_at <= ?)`,
             )
-            .run(
-              owner,
-              normalizedExpiresAt,
-              normalizedNow,
-              providerAccountId,
-              normalizedNow,
-              owner,
-            ),
+            .run(owner, normalizedExpiresAt, normalizedNow, providerAccountId, normalizedNow),
         )().changes === 1
       );
     },

@@ -85,11 +85,27 @@ describe('PodsitterRepository', () => {
     expect(
       restored.acquireAttentionLease(
         current.id,
+        'worker-a',
+        '2026-07-29T00:06:00.000Z',
+        '2026-07-29T00:03:00.000Z',
+      ),
+    ).toBeNull();
+    expect(
+      restored.acquireAttentionLease(
+        current.id,
         'worker-b',
         '2026-07-29T00:06:00.000Z',
         '2026-07-29T00:03:00.000Z',
       ),
     ).toBeNull();
+    expect(
+      restored.acquireProviderProbeLease(
+        'sitter-account',
+        'worker-a',
+        '2026-07-29T00:06:00.000Z',
+        '2026-07-29T00:03:00.000Z',
+      ),
+    ).toBe(false);
     expect(
       restored.acquireProviderProbeLease(
         'sitter-account',
