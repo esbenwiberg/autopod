@@ -1097,6 +1097,55 @@ describe('PodManager', () => {
     expect(manager.getReviewerConfig(legacyPod).profile).toEqual(sourceProfile);
   });
 
+  it('keeps a legacy pod reviewer bound to its snapshot when the profile account changes', () => {
+    const ctx = createTestContext(undefined, {
+      modelProvider: 'max',
+      defaultRuntime: 'claude',
+      defaultModel: 'claude-sonnet-5',
+      reviewerModel: 'claude-sonnet-5',
+    });
+    ctx.deps.providerAttemptRepo = createProviderAttemptRepository(ctx.db);
+    insertProviderAccount(ctx.db, 'legacy-source', 'max', {
+      provider: 'max',
+      authMode: 'setup-token',
+      oauthToken: 'legacy-source-token',
+    });
+    insertProviderAccount(ctx.db, 'current-account', 'openai', {
+      provider: 'openai',
+      authMode: 'chatgpt',
+      authJson: '{"token":"current-account-token"}',
+    });
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'legacy-source');
+    ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Review a legacy pod' },
+      'user-1',
+    );
+    const legacySnapshot = {
+      ...ctx.profileStore.get('test-profile'),
+      modelProvider: 'max' as const,
+      providerAccountId: 'legacy-source',
+    };
+    ctx.podRepo.update(pod.id, { profileSnapshot: legacySnapshot });
+
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'current-account');
+
+    expect(ctx.deps.providerAttemptRepo.list(pod.id)).toEqual([]);
+    expect(manager.getReviewerConfig(ctx.podRepo.getOrThrow(pod.id))).toMatchObject({
+      profile: {
+        modelProvider: 'max',
+        providerAccountId: 'legacy-source',
+        defaultRuntime: 'claude',
+        defaultModel: 'claude-sonnet-5',
+      },
+      credentials: {
+        provider: 'max',
+        oauthToken: 'legacy-source-token',
+      },
+    });
+  });
+
   it('passes auto reasoning effort to a fresh runtime spawn', async () => {
     const ctx = createTestContext(undefined, { reasoningEffort: 'auto' });
     const manager = createPodManager(ctx.deps);

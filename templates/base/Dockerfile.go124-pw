@@ -56,7 +56,7 @@ RUN cd /opt/autopod \
 # users pin on their profile. Leaving any of the three on rolling-latest causes
 # silent drift: e.g. a newer CLI scaffolding against a pinned older engine
 # produces code that targets an API the engine doesn't implement yet.
-ARG DAGGER_GO_SDK_VERSION=v0.18.6
+ARG DAGGER_GO_SDK_VERSION=v0.20.8
 
 # Dagger CLI — pre-installed (pinned to match DAGGER_GO_SDK_VERSION) so pods
 # with restricted/deny-all network policies can still use Dagger modules
@@ -66,7 +66,7 @@ RUN curl -fsSL https://dl.dagger.io/dagger/install.sh \
     | DAGGER_VERSION=${DAGGER_GO_SDK_VERSION#v} BIN_DIR=/usr/local/bin sh \
     && test -x /usr/local/bin/dagger \
     && dagger version \
-    && dagger version | grep -q "${DAGGER_GO_SDK_VERSION}" \
+    && dagger version | grep -Eq "(^|[[:space:]])${DAGGER_GO_SDK_VERSION}([[:space:]]|$)" \
     || (echo "ERROR: Dagger CLI install failed or version didn't pin to ${DAGGER_GO_SDK_VERSION}" && exit 1)
 
 # Pre-install Playwright + Chromium with all system dependencies.

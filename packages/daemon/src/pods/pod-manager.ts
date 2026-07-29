@@ -4317,7 +4317,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     profile: Profile;
     credentials: ProviderCredentials | null;
   } {
-    const profile = deps.providerAttemptRepo
+    const hasProviderAttemptHistory = (deps.providerAttemptRepo?.list(pod.id).length ?? 0) > 0;
+    const profile = hasProviderAttemptHistory
       ? resolveEffectiveBoundProfile(pod)
       : resolveEffectiveReviewerProfile(pod, profileStore.get(pod.profileName));
     const credentials = profile.providerAccountId

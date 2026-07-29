@@ -2153,14 +2153,14 @@ public struct ProfileEditorView: View {
                                 // Paste a pinned digest before saving. Enforced
                                 // server-side by /@sha256:[0-9a-f]{64}$/.
                                 engineImageDigest: "",
-                                engineVersion: "v0.18.6"
+                                engineVersion: "v0.20.8"
                             )
                         )
                     } else if profile.sidecars?.dagger == nil {
                         profile.sidecars?.dagger = DaggerSidecarSnapshot(
                             enabled: true,
                             engineImageDigest: "",
-                            engineVersion: "v0.18.6"
+                            engineVersion: "v0.20.8"
                         )
                     } else {
                         profile.sidecars?.dagger?.enabled = true
@@ -2215,8 +2215,8 @@ public struct ProfileEditorView: View {
                 .font(.system(.caption, design: .monospaced))
             }
 
-            fieldRow("Engine version", help: "Human-readable version label for audit logs. Should match the SDK version baked into the stack image (v0.18.6 for dotnet10-go / go124 / go124-pw).") {
-                TextField("v0.18.6", text: versionBinding)
+            fieldRow("Engine version", help: "Human-readable version label for audit logs. Should match the SDK version baked into the stack image (v0.20.8 for dotnet10-go / go124 / go124-pw).") {
+                TextField("v0.20.8", text: versionBinding)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.caption, design: .monospaced))
                     .frame(width: 140)
