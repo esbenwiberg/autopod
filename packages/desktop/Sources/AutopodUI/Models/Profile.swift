@@ -532,7 +532,7 @@ public enum StackTemplate: String, CaseIterable, Sendable {
         switch self {
         case .node22:       "Node 22"
         case .node22Pw:     "Node 22 + Playwright"
-        case .node22PwPg:   "Node 22 + Playwright + Postgres"
+        case .node22PwPg:   "Node 22 + Playwright + PostgreSQL 17"
         case .dotnet9:      ".NET 9"
         case .dotnet10:     ".NET 10"
         case .dotnet10Go:   ".NET 10 + Go"

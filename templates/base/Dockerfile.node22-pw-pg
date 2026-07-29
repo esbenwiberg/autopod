@@ -13,21 +13,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ripgrep \
     tmux \
     python3 build-essential \
-    postgresql \
-    postgresql-contrib \
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
     && locale-gen \
     && rm -rf /var/lib/apt/lists/*
 
-# PostgreSQL server binaries are versioned under /usr/lib/postgresql/<version>/bin
-# on Debian. Expose the commands needed to initialize and run a transient database
-# without coupling this template to Debian's current PostgreSQL major version.
-RUN set -eux; \
-    PG_BINDIR="$(find /usr/lib/postgresql -mindepth 3 -maxdepth 3 -type f -name postgres -printf '%h\n' -quit)"; \
-    test -n "$PG_BINDIR"; \
-    for binary in initdb pg_ctl postgres; do \
-      test -x "$PG_BINDIR/$binary"; \
-      ln -s "$PG_BINDIR/$binary" "/usr/local/bin/$binary"; \
+# Pin PostgreSQL 17 through the official PGDG repository rather than inheriting
+# the Debian release's default server major version.
+RUN install -d /usr/share/postgresql-common/pgdg \
+    && curl --fail --silent --show-error \
+      -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+      https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && . /etc/os-release \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-17 \
+    && test -f /usr/share/postgresql/17/extension/pgcrypto.control \
+    && rm -rf /var/lib/apt/lists/*
+
+# Expose the commands needed to initialize and run a transient database.
+RUN for binary in initdb pg_ctl postgres; do \
+      test -x "/usr/lib/postgresql/17/bin/$binary"; \
+      ln -s "/usr/lib/postgresql/17/bin/$binary" "/usr/local/bin/$binary"; \
     done
 
 # Glow — terminal markdown viewer from Charm
@@ -42,7 +49,8 @@ ENV LANG=en_US.UTF-8
 # Create non-root user — remove the default node user (uid 1000) first
 RUN userdel --remove node 2>/dev/null; groupdel node 2>/dev/null; \
     groupadd --gid 1000 autopod && \
-    useradd --uid 1000 --gid autopod --shell /bin/bash --create-home autopod
+    useradd --uid 1000 --gid autopod --shell /bin/bash --create-home autopod && \
+    install -d -o autopod -g autopod -m 0755 /var/run/postgresql
 
 # Global tools
 RUN npm install -g pnpm@9
@@ -79,8 +87,10 @@ RUN chown autopod:autopod /workspace
 
 USER autopod
 
-# Transient validation databases must be writable by the non-root runtime user.
+# Transient validation databases run as the non-root user on the project port.
 ENV PGDATA=/tmp/pgdata
+ENV PGHOST=127.0.0.1
+ENV PGPORT=5433
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 # Allow bare imports of globally installed packages (e.g. playwright in validation scripts).
 # This image is FROM node:22-slim, whose npm global prefix is /usr/local — globals live in

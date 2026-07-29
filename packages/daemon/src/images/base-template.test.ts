@@ -47,9 +47,12 @@ describe('PostgreSQL base image templates', () => {
     const dockerfile = await readBaseTemplate('Dockerfile.node22-pw-pg');
 
     expect(dockerfile).toContain('FROM node:22-slim');
-    expect(dockerfile).toContain('postgresql');
-    expect(dockerfile).toContain('postgresql-contrib');
+    expect(dockerfile).toContain('postgresql-17');
+    expect(dockerfile).toContain('/usr/share/postgresql/17/extension/pgcrypto.control');
+    expect(dockerfile).toContain('install -d -o autopod -g autopod -m 0755 /var/run/postgresql');
     expect(dockerfile).toContain('ENV PGDATA=/tmp/pgdata');
+    expect(dockerfile).toContain('ENV PGHOST=127.0.0.1');
+    expect(dockerfile).toContain('ENV PGPORT=5433');
     expect(dockerfile).toContain('for binary in initdb pg_ctl postgres');
     expect(dockerfile).not.toContain('pip install');
   });
