@@ -106,6 +106,7 @@ export interface ProviderAttempt {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  preSubmitReviewRuns: number;
   handoffReference: string | null;
 }
 

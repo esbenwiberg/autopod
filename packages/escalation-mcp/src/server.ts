@@ -11,6 +11,10 @@ import { memoryList } from './tools/memory-list.js';
 import { memoryRead } from './tools/memory-read.js';
 import { memorySearch } from './tools/memory-search.js';
 import { memorySuggest } from './tools/memory-suggest.js';
+import {
+  consumeOperatorMessages,
+  stringifyOperatorInterruption,
+} from './tools/operator-message-interlock.js';
 import { preSubmitReview } from './tools/pre-submit-review.js';
 import { reportBlocker } from './tools/report-blocker.js';
 import { reportPlan } from './tools/report-plan.js';
@@ -67,6 +71,12 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       domain: z.string().optional().describe('Domain area (e.g., "security", "performance")'),
     },
     async (input) => {
+      const interruption = consumeOperatorMessages(podId, 'ask_ai', bridge);
+      if (interruption) {
+        return {
+          content: [{ type: 'text' as const, text: stringifyOperatorInterruption(interruption) }],
+        };
+      }
       const response = await askAi(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
@@ -243,6 +253,12 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         ),
     },
     async (input) => {
+      const interruption = consumeOperatorMessages(podId, 'report_task_summary', bridge);
+      if (interruption) {
+        return {
+          content: [{ type: 'text' as const, text: stringifyOperatorInterruption(interruption) }],
+        };
+      }
       const response = await reportTaskSummary(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
@@ -277,7 +293,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'pre_submit_review',
-    "Run a fast critic pass on your **cumulative diff** — every change you've made since the pod started, NOT just your latest commit. The reviewer sees the same bytes the daemon's full reviewer will see after `report_task_summary`, so a clean verdict here lets the daemon skip its Tier 1 review. Call AFTER `validate_locally` succeeds and BEFORE `report_task_summary`. Findings are scoped to medium-and-above issues (logic bugs, security, broken contracts, undisclosed scope creep) — style/format is out of scope. The response echoes `filesReviewed` / `linesAdded` / `linesRemoved` so you can verify what was reviewed; if those numbers look wrong, your worktree state is the issue, not the verdict. Re-calling with an unchanged diff returns a cached verdict (`reusedCache: true`) — fixing issues changes the diff and triggers a fresh review.",
+    "Run a fast critic pass on your **cumulative diff** — every change you've made since the pod started, NOT just your latest commit. The reviewer sees the same bytes the daemon's full reviewer will see after `report_task_summary`, so a clean verdict here lets the daemon skip its Tier 1 review. Call AFTER `validate_locally` succeeds and BEFORE `report_task_summary`. At most two fresh critic executions are allowed per provider attempt; unchanged-diff cache hits and no-diff skips do not spend the budget. Findings are scoped to medium-and-above issues (logic bugs, security, broken contracts, undisclosed scope creep) — style/format is out of scope. The response echoes `filesReviewed` / `linesAdded` / `linesRemoved` so you can verify what was reviewed.",
     {
       plannedSummary: z
         .string()
@@ -298,6 +314,12 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         .describe('Preview of the `deviations` array you intend to disclose. Optional.'),
     },
     async (input) => {
+      const interruption = consumeOperatorMessages(podId, 'pre_submit_review', bridge);
+      if (interruption) {
+        return {
+          content: [{ type: 'text' as const, text: stringifyOperatorInterruption(interruption) }],
+        };
+      }
       const response = await preSubmitReview(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },
@@ -337,6 +359,12 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         ),
     },
     async (input) => {
+      const interruption = consumeOperatorMessages(podId, 'validate_in_browser', bridge);
+      if (interruption) {
+        return {
+          content: [{ type: 'text' as const, text: stringifyOperatorInterruption(interruption) }],
+        };
+      }
       const response = await validateInBrowser(podId, input, bridge);
       return { content: [{ type: 'text' as const, text: response }] };
     },

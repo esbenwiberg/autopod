@@ -3107,6 +3107,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   /** Active AbortControllers for in-progress validation runs, keyed by podId. */
   const validationAbortControllers = new Map<string, AbortController>();
+  const pauseIntents = new Map<string, symbol>();
+  const activeAgentRuns = new Map<string, { token: symbol; settled: Promise<void> }>();
+  const activeAgentRunResolvers = new Map<string, { token: symbol; resolve: () => void }>();
+  const PAUSE_QUIESCENCE_TIMEOUT_MS = 10_000;
 
   /** Active post-validation advisory QA runs, keyed by podId.
    *  These are nonblocking for validation outcome, but approval must not cut
@@ -9103,28 +9107,54 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       events: AsyncIterable<AgentEvent>,
       attempt = 0,
     ): Promise<AgentRunOutcome> {
-      const attemptPod = podRepo.getOrThrow(podId);
-      let attemptProfile = profileStore.get(attemptPod.profileName);
-      const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
-      if (
-        activeAttempt?.providerAccountId &&
-        activeAttempt.providerAccountId !== attemptProfile.providerAccountId
-      ) {
-        attemptProfile = profileForProviderTarget(attemptProfile, {
-          providerAccountId: activeAttempt.providerAccountId,
-          runtime: activeAttempt.runtime,
-          model: activeAttempt.model,
-        });
+      const runToken = Symbol(podId);
+      let resolveRunSettled: () => void = () => {};
+      const runSettled = new Promise<void>((resolve) => {
+        resolveRunSettled = resolve;
+      });
+      activeAgentRuns.set(podId, { token: runToken, settled: runSettled });
+      activeAgentRunResolvers.set(podId, { token: runToken, resolve: resolveRunSettled });
+      const settleActiveRun = (): void => {
+        const activeResolver = activeAgentRunResolvers.get(podId);
+        if (activeResolver?.token !== runToken) return;
+        activeResolver.resolve();
+        activeAgentRunResolvers.delete(podId);
+        activeAgentRuns.delete(podId);
+      };
+      let attemptPod: Pod;
+      let attemptProfile: Profile;
+      let seenCompleteEvents: Set<string>;
+      try {
+        attemptPod = podRepo.getOrThrow(podId);
+        attemptProfile = profileStore.get(attemptPod.profileName);
+        const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
+        if (
+          activeAttempt?.providerAccountId &&
+          activeAttempt.providerAccountId !== attemptProfile.providerAccountId
+        ) {
+          attemptProfile = profileForProviderTarget(attemptProfile, {
+            providerAccountId: activeAttempt.providerAccountId,
+            runtime: activeAttempt.runtime,
+            model: activeAttempt.model,
+          });
+        }
+        ensureProviderAttempt(attemptPod, attemptProfile);
+        seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
+        startCommitPolling(podId);
+      } catch (err) {
+        settleActiveRun();
+        throw err;
       }
-      ensureProviderAttempt(attemptPod, attemptProfile);
       // Legacy/injected managers without the ledger retain the historical empty-stream
       // completion behavior. Production always injects the ledger and fails closed.
       let outcome: AgentRunOutcome = deps.providerAttemptRepo ? 'failed' : 'completed';
       let terminalClassification: ProviderFailureClassification | null = null;
-      const seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
-      startCommitPolling(podId);
       try {
         for await (const event of events) {
+          if (pauseIntents.has(podId)) {
+            outcome = 'paused';
+            continue;
+          }
           if (event.type === 'complete') {
             const completeKey = agentCompleteEventKey(event);
             if (
@@ -9383,44 +9413,49 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         };
         throw err;
       } finally {
+        if (pauseIntents.has(podId)) outcome = 'paused';
         try {
           await syncSandboxRuntimeSessionState(podId);
         } finally {
-          const current = podRepo.getOrThrow(podId);
-          const providerLimit =
-            current.pauseReason === 'provider_limit' &&
-            terminalClassification?.category === 'quota_exhausted' &&
-            terminalClassification.definitive;
-          if (providerLimit) {
-            closeProviderAttempt(
-              podId,
-              'quota_exhausted',
-              terminalClassification,
-              PROVIDER_FAILOVER_HANDOFF_PATH,
-            );
-            await handleProviderLimit(podId, terminalClassification);
-          } else if (
-            current.pauseReason === 'provider_limit' &&
-            outcome === 'failed' &&
-            terminalClassification
-          ) {
-            closeProviderAttempt(podId, 'failed', terminalClassification);
-          } else if (outcome === 'paused' || current.status === 'paused') {
-            closeProviderAttempt(podId, 'aborted');
-          } else if (outcome === 'completed' || outcome === 'failed') {
-            const classification =
-              outcome === 'failed'
-                ? (terminalClassification ?? {
-                    category: 'unknown',
-                    definitive: false,
-                    sanitizedMessage: 'Provider attempt ended without classified evidence',
-                    retryAfter: null,
-                  })
-                : null;
-            closeProviderAttempt(podId, outcome, classification);
+          try {
+            const current = podRepo.getOrThrow(podId);
+            const providerLimit =
+              current.pauseReason === 'provider_limit' &&
+              terminalClassification?.category === 'quota_exhausted' &&
+              terminalClassification.definitive;
+            if (providerLimit) {
+              closeProviderAttempt(
+                podId,
+                'quota_exhausted',
+                terminalClassification,
+                PROVIDER_FAILOVER_HANDOFF_PATH,
+              );
+              await handleProviderLimit(podId, terminalClassification);
+            } else if (
+              current.pauseReason === 'provider_limit' &&
+              outcome === 'failed' &&
+              terminalClassification
+            ) {
+              closeProviderAttempt(podId, 'failed', terminalClassification);
+            } else if (outcome === 'paused' || current.status === 'paused') {
+              closeProviderAttempt(podId, 'aborted');
+            } else if (outcome === 'completed' || outcome === 'failed') {
+              const classification =
+                outcome === 'failed'
+                  ? (terminalClassification ?? {
+                      category: 'unknown',
+                      definitive: false,
+                      sanitizedMessage: 'Provider attempt ended without classified evidence',
+                      retryAfter: null,
+                    })
+                  : null;
+              closeProviderAttempt(podId, outcome, classification);
+            }
+          } finally {
+            stopCommitPolling(podId);
+            lastEventWriteAt.delete(podId);
+            settleActiveRun();
           }
-          stopCommitPolling(podId);
-          lastEventWriteAt.delete(podId);
         }
       }
       return outcome;
@@ -9693,6 +9728,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     async sendMessage(podId: string, message: string): Promise<void> {
+      if (pauseIntents.has(podId)) {
+        throw new AutopodError(
+          `Pod ${podId} pause is still settling; resume is not yet allowed`,
+          'PAUSE_SETTLING',
+          409,
+        );
+      }
       const pod = podRepo.getOrThrow(podId);
       if (!canReceiveMessage(pod.status)) {
         throw new AutopodError(
@@ -10605,6 +10647,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     async pauseSession(podId: string): Promise<void> {
+      if (pauseIntents.has(podId)) {
+        throw new AutopodError(`Pod ${podId} pause is already settling`, 'PAUSE_SETTLING', 409);
+      }
       const pod = podRepo.getOrThrow(podId);
       if (!canPause(pod.status)) {
         throw new AutopodError(
@@ -10615,11 +10660,59 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       emitActivityStatus(podId, 'Pausing pod…');
+      const pauseToken = Symbol(podId);
+      pauseIntents.set(podId, pauseToken);
+      let activeRun = activeAgentRuns.get(podId);
+      const releaseIntentAfterSettling = (message: string): void => {
+        if (!activeRun) {
+          if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
+          return;
+        }
+        void activeRun.settled.then(() => {
+          if (pauseIntents.get(podId) !== pauseToken) return;
+          pauseIntents.delete(podId);
+          emitActivityStatus(podId, message);
+          logger.info({ podId }, message);
+        });
+      };
       // Suspend the runtime (kills stream but preserves pod ID)
       const runtime = runtimeRegistry.get(pod.runtime);
-      await runtime.suspend(podId);
+      try {
+        await runtime.suspend(podId);
+      } catch (err) {
+        activeRun = activeAgentRuns.get(podId) ?? activeRun;
+        releaseIntentAfterSettling(
+          'Failed pause attempt has settled — pause may be retried safely',
+        );
+        throw err;
+      }
+      activeRun = activeAgentRuns.get(podId) ?? activeRun;
+      const quiescenceDeadline = Date.now() + PAUSE_QUIESCENCE_TIMEOUT_MS;
+      while (activeRun) {
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        const remainingMs = Math.max(0, quiescenceDeadline - Date.now());
+        const settled = await Promise.race([
+          activeRun.settled.then(() => true),
+          new Promise<false>((resolve) => {
+            timeout = setTimeout(() => resolve(false), remainingMs);
+          }),
+        ]);
+        if (timeout) clearTimeout(timeout);
+        if (!settled) {
+          const message = `Pause quiescence failed: active Codex run did not settle within ${PAUSE_QUIESCENCE_TIMEOUT_MS}ms`;
+          emitActivityStatus(podId, message);
+          logger.error({ podId }, message);
+          releaseIntentAfterSettling(
+            'Timed-out pause has now quiesced — pause may be retried safely',
+          );
+          throw new AutopodError(message, 'PAUSE_QUIESCENCE_TIMEOUT', 409);
+        }
+        const nextRun = activeAgentRuns.get(podId);
+        activeRun = nextRun?.token === activeRun.token ? undefined : nextRun;
+      }
 
       transition(pod, 'paused', { pauseReason: 'manual' });
+      if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
       emitActivityStatus(podId, 'Pod paused — use [t] tell or [u] nudge to resume');
       logger.info({ podId }, 'Pod paused');
     },

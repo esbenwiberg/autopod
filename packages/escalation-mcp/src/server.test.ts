@@ -45,6 +45,7 @@ function makeBridge(overrides: Partial<PodBridge> = {}): PodBridge {
     reportProgress: vi.fn(),
     reportTaskSummary: vi.fn(),
     consumeMessages: vi.fn().mockReturnValue({ hasMessage: false }),
+    consumeMessageBatch: vi.fn().mockReturnValue([]),
     actionRequiresApproval: vi.fn().mockReturnValue(false),
     executeAction: vi.fn(),
     getAvailableActions: vi.fn().mockReturnValue([]),
@@ -256,5 +257,43 @@ describe('createEscalationMcpServer memory reporting schema', () => {
     expect(bridge.runValidationPhase).toHaveBeenCalledWith('sess-1', 'setup');
     expect(bridge.runValidationPhase).toHaveBeenCalledWith('sess-1', 'lint');
     expect(result.content[0]?.text).toContain('"passed": true');
+  });
+});
+
+describe('operator-message interlock', () => {
+  beforeEach(() => {
+    toolRegistrations.length = 0;
+  });
+
+  it('intercepts pending operator messages before expensive and terminal tools', async () => {
+    const { createEscalationMcpServer } = await import('./server.js');
+    for (const toolName of [
+      'pre_submit_review',
+      'validate_in_browser',
+      'ask_ai',
+      'report_task_summary',
+    ]) {
+      toolRegistrations.length = 0;
+      const bridge = makeBridge({
+        consumeMessageBatch: vi.fn().mockReturnValue(['first', 'second']),
+      });
+      createEscalationMcpServer({ podId: 'sess-1', bridge });
+      const inputs: Record<string, unknown> = {
+        pre_submit_review: {},
+        validate_in_browser: { url: 'http://localhost:3000', checks: ['works'] },
+        ask_ai: { question: 'help' },
+        report_task_summary: { actualSummary: 'done', deviations: [] },
+      };
+      const result = await getTool(toolName).handler(inputs[toolName]);
+      expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+        interrupted: true,
+        interruptedTool: toolName,
+        operatorMessages: ['first', 'second'],
+      });
+      expect(bridge.runPreSubmitReview).not.toHaveBeenCalled();
+      expect(bridge.validateBrowserUrl).not.toHaveBeenCalled();
+      expect(bridge.callReviewerModel).not.toHaveBeenCalled();
+      expect(bridge.reportTaskSummary).not.toHaveBeenCalled();
+    }
   });
 });

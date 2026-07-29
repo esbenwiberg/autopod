@@ -12,6 +12,7 @@ export interface NudgeMessage {
 export interface NudgeRepository {
   queue(podId: string, message: string): void;
   consumeNext(podId: string): { hasMessage: boolean; message?: string };
+  consumePending(podId: string): string[];
   listPending(podId: string): NudgeMessage[];
 }
 
@@ -40,6 +41,23 @@ export function createNudgeRepository(db: Database.Database): NudgeRepository {
       );
 
       return { hasMessage: true, message: row.message };
+    },
+
+    consumePending(podId: string): string[] {
+      return db.transaction(() => {
+        const rows = db
+          .prepare(
+            'SELECT id, message FROM nudge_messages WHERE pod_id = ? AND consumed = 0 ORDER BY id ASC',
+          )
+          .all(podId) as Array<{ id: number; message: string }>;
+        if (rows.length === 0) return [];
+        const ids = rows.map((row) => row.id);
+        const placeholders = ids.map(() => '?').join(', ');
+        db.prepare(
+          `UPDATE nudge_messages SET consumed = 1, consumed_at = ? WHERE consumed = 0 AND id IN (${placeholders})`,
+        ).run(new Date().toISOString(), ...ids);
+        return rows.map((row) => row.message);
+      })();
     },
 
     listPending(podId: string): NudgeMessage[] {

@@ -1,4 +1,8 @@
 import type { PodBridge, ValidationPhaseName, ValidationPhaseResult } from '../pod-bridge.js';
+import {
+  type OperatorMessageInterruption,
+  consumeOperatorMessages,
+} from './operator-message-interlock.js';
 
 export interface ValidateLocallyInput {
   /**
@@ -24,6 +28,7 @@ export interface ValidateLocallyResult {
    */
   passed: boolean;
   results: ValidateLocallyPhaseResult[];
+  operatorInterruption?: OperatorMessageInterruption;
 }
 
 const DEFAULT_PHASE_ORDER: ValidationPhaseName[] = ['setup', 'lint', 'build', 'tests'];
@@ -51,6 +56,11 @@ export async function validateLocally(
   let setupFailedThisRun = false;
   let buildFailedThisRun = false;
 
+  const preflight = consumeOperatorMessages(podId, 'validate_locally', bridge);
+  if (preflight) {
+    return JSON.stringify({ passed: false, results, operatorInterruption: preflight }, null, 2);
+  }
+
   for (const phase of ordered) {
     if (phase !== 'setup' && setupFailedThisRun) {
       results.push(
@@ -71,6 +81,15 @@ export async function validateLocally(
 
     const result = await bridge.runValidationPhase(podId, phase);
     results.push(result);
+
+    const interruption = consumeOperatorMessages(podId, 'validate_locally', bridge);
+    if (interruption) {
+      return JSON.stringify(
+        { passed: false, results, operatorInterruption: interruption },
+        null,
+        2,
+      );
+    }
 
     if (phase === 'setup' && result.configured && !result.passed) {
       setupFailedThisRun = true;

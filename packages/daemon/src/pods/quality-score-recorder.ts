@@ -31,7 +31,7 @@ export interface QualityScoreRecorderDeps {
   validationRepo?: ValidationRepository;
   providerAttemptRepo?: ProviderAttemptRepository;
   /** Recompute dependent snapshots after the score row is durably persisted. */
-  onScorePersisted?: (podId: string) => boolean | void;
+  onScorePersisted?: (podId: string) => boolean | undefined;
 }
 
 /**

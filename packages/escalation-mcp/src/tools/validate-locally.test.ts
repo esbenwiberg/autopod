@@ -23,6 +23,37 @@ function makeBridge(stubs: Partial<Record<ValidationPhaseName, PhaseStub>>) {
 }
 
 describe('validateLocally', () => {
+  it('delivers operator messages between validation phases', async () => {
+    const runValidationPhase = vi.fn(async (_podId: string, phase: ValidationPhaseName) => ({
+      phase,
+      configured: true,
+      passed: true,
+      exitCode: 0,
+      command: phase,
+      durationMs: 1,
+      output: `${phase} passed`,
+    }));
+    const consumeMessageBatch = vi
+      .fn()
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce(['change course'])
+      .mockReturnValue([]);
+    const raw = await validateLocally('pod-1', { phases: ['lint', 'build'] }, {
+      runValidationPhase,
+      consumeMessageBatch,
+    } as never);
+
+    expect(JSON.parse(raw)).toMatchObject({
+      passed: false,
+      results: [{ phase: 'setup' }],
+      operatorInterruption: {
+        interruptedTool: 'validate_locally',
+        operatorMessages: ['change course'],
+      },
+    });
+    expect(runValidationPhase).toHaveBeenCalledTimes(1);
+    expect(runValidationPhase).not.toHaveBeenCalledWith('pod-1', 'lint');
+  });
   it('runs every configured phase by default and reports passed=true when all pass', async () => {
     const bridge = makeBridge({
       setup: { configured: true, passed: true, exitCode: 0, command: 'npm install' },

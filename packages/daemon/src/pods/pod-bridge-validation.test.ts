@@ -730,6 +730,7 @@ describe('PodBridge.runPreSubmitReview', () => {
       profile: Parameters<typeof insertTestProfile>[1];
       credentials: Parameters<typeof insertTestProfile>[1]['providerCredentials'];
     };
+    reservePreSubmitReview?: ReturnType<typeof vi.fn>;
     runResult: Awaited<ReturnType<typeof runPreSubmitReview>>;
   }
 
@@ -841,6 +842,11 @@ describe('PodBridge.runPreSubmitReview', () => {
       pendingRequestsByPod: new Map(),
       logger,
       worktreeManager,
+      providerAttemptRepo: opts.reservePreSubmitReview
+        ? ({
+            reservePreSubmitReview: opts.reservePreSubmitReview,
+          } as unknown as Deps['providerAttemptRepo'])
+        : undefined,
     });
 
     return {
@@ -1175,6 +1181,82 @@ describe('PodBridge.runPreSubmitReview', () => {
         }),
       }),
     );
+  });
+
+  it('caps fresh pre-submit reviews without consuming cache hits', async () => {
+    const reserve = vi
+      .fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false);
+    const first = buildBridgeWithWorktree({
+      containerDiff: SAMPLE_DIFF,
+      reservePreSubmitReview: reserve,
+      runResult: {
+        status: 'pass',
+        reasoning: 'reviewed',
+        issues: [],
+        model: 'sonnet',
+        diffHash: 'first',
+        durationMs: 1,
+      },
+    });
+    await first.bridge.runPreSubmitReview(first.podId, {});
+    await first.bridge.runPreSubmitReview(first.podId, {});
+
+    const capped = await first.bridge.runPreSubmitReview(first.podId, {});
+    expect(capped).toMatchObject({
+      status: 'skipped',
+      skipReason: 'review_limit_reached',
+    });
+    expect(mockRunPreSubmitReview).toHaveBeenCalledTimes(2);
+    const update = (first.podRepo as unknown as { update: ReturnType<typeof vi.fn> }).update;
+    expect(update).toHaveBeenCalledTimes(2);
+
+    const cached = buildBridgeWithWorktree({
+      containerDiff: SAMPLE_DIFF,
+      cachedVerdict: {
+        status: 'pass',
+        diffHash: (await import('../validation/pre-submit-review.js')).hashDiff(SAMPLE_DIFF),
+        diffSource: 'container',
+        filesReviewed: 1,
+        linesAdded: 1,
+        linesRemoved: 0,
+        containerId: 'container-abc',
+        worktreePath: '/tmp/worktree',
+        startCommitSha: 'start-sha',
+        reasoning: 'cached',
+        issues: [],
+        model: 'sonnet',
+        checkedAt: new Date().toISOString(),
+      },
+      reservePreSubmitReview: reserve,
+      runResult: {
+        status: 'fail',
+        reasoning: 'must not run',
+        issues: [],
+        model: 'sonnet',
+        diffHash: 'unused',
+        durationMs: 1,
+      },
+    });
+    expect((await cached.bridge.runPreSubmitReview(cached.podId, {})).reusedCache).toBe(true);
+
+    const noDiff = buildBridgeWithWorktree({
+      containerDiff: '',
+      reservePreSubmitReview: reserve,
+      runResult: {
+        status: 'skipped',
+        skipReason: 'no-diff',
+        reasoning: 'No diff to review.',
+        issues: [],
+        model: 'sonnet',
+        diffHash: '',
+        durationMs: 0,
+      },
+    });
+    await noDiff.bridge.runPreSubmitReview(noDiff.podId, {});
+    expect(reserve).toHaveBeenCalledTimes(3);
   });
 
   it('attributes a fresh metered review once while preserving agent usage', async () => {

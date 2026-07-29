@@ -99,6 +99,8 @@ export class CodexRuntime implements Runtime {
   readonly type = 'codex' as const;
 
   private handles = new Map<string, StreamingExecResult>();
+  private intentionalSuspensions = new WeakSet<StreamingExecResult>();
+  private suspensionSignals = new Map<string, () => void>();
   /** Maps autopod podId → Codex session ID for in-memory resume shortcut. */
   readonly codexSessionIds = new Map<string, string>();
   /** Maps autopod podId → MCP servers so resume() can re-write the config into the new container. */
@@ -365,6 +367,8 @@ export class CodexRuntime implements Runtime {
       });
       return;
     }
+    this.intentionalSuspensions.add(handle);
+    this.suspensionSignals.get(podId)?.();
 
     this.logger.info({
       component: 'codex-runtime',
@@ -410,6 +414,10 @@ export class CodexRuntime implements Runtime {
     const seen = new Set<string>();
     const abortLiveRollout = new AbortController();
     const abortSummaryGrace = new AbortController();
+    this.suspensionSignals.set(podId, () => {
+      abortLiveRollout.abort();
+      abortSummaryGrace.abort();
+    });
     let taskSummaryObserved = false;
     let resolveTaskSummary: (() => void) | null = null;
     const taskSummarySignal = new Promise<void>((resolve) => {
@@ -572,6 +580,7 @@ export class CodexRuntime implements Runtime {
         }
       }
     } finally {
+      this.suspensionSignals.delete(podId);
       abortLiveRollout.abort();
       abortSummaryGrace.abort();
       unsubscribeTaskSummary?.();
@@ -723,6 +732,13 @@ export class CodexRuntime implements Runtime {
     handle: StreamingExecResult,
     outputState: OutputState,
   ): Promise<AgentEvent | null> {
+    if (this.intentionalSuspensions.delete(handle)) {
+      this.logger.info(
+        { component: 'codex-runtime', podId },
+        'Suppressing terminal exit classification after intentional suspension',
+      );
+      return null;
+    }
     if (outputState.sawFatal) return null;
 
     // Bounded exit-code wait — wedged dockerd would otherwise hang us here

@@ -61,7 +61,7 @@ function codexInspectionEvent(command: string): AgentActivityEvent {
 }
 
 describe('QualityScoreRecorder', () => {
-  function setup(onScorePersisted?: (podId: string) => void) {
+  function setup(onScorePersisted?: (podId: string) => boolean | undefined) {
     const db = createTestDb();
     insertTestProfile(db);
     const podRepo = createPodRepository(db);

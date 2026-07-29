@@ -273,4 +273,47 @@ describe('provider attempt repository', () => {
       costUsd: 0,
     });
   });
+
+  it('reserves at most two pre-submit reviews per active attempt', () => {
+    const db = createTestDb();
+    seedPod(db);
+    let repository = createProviderAttemptRepository(db);
+    const open = () =>
+      repository.open({
+        podId: 'attempt-pod',
+        provider: 'openai',
+        providerAccountId: null,
+        runtime: 'codex',
+        model: 'gpt-5',
+        profileReference: 'pod:attempt-pod@profile-snapshot#abcdef1',
+        profileSnapshot: { name: 'test-profile' },
+      });
+
+    open();
+    expect(repository.reservePreSubmitReview('attempt-pod')).toBe(true);
+    repository = createProviderAttemptRepository(db);
+    expect(repository.getActive('attempt-pod')?.preSubmitReviewRuns).toBe(1);
+    expect(repository.reservePreSubmitReview('attempt-pod')).toBe(true);
+    expect(repository.reservePreSubmitReview('attempt-pod')).toBe(false);
+    expect(repository.getActive('attempt-pod')?.preSubmitReviewRuns).toBe(2);
+
+    expect(() =>
+      db
+        .prepare(
+          'UPDATE provider_attempts SET pre_submit_review_runs = 1 WHERE pod_id = ? AND ended_at IS NULL',
+        )
+        .run('attempt-pod'),
+    ).toThrow(/append\/close-only/);
+
+    repository.close('attempt-pod', {
+      nativeSessionId: 'session-1',
+      outcome: 'completed',
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    });
+    open();
+    expect(repository.getActive('attempt-pod')?.preSubmitReviewRuns).toBe(0);
+    expect(repository.reservePreSubmitReview('attempt-pod')).toBe(true);
+  });
 });

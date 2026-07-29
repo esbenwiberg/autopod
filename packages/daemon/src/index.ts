@@ -755,6 +755,7 @@ const podBridge = createSessionBridge({
   podRepo,
   eventBus,
   progressEventRepo,
+  providerAttemptRepo,
   escalationRepo,
   nudgeRepo,
   profileStore,

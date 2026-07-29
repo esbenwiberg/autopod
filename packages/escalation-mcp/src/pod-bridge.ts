@@ -78,6 +78,8 @@ export interface PodBridge {
     reviewFeedbackResponses?: ReviewFeedbackResponseItem[],
   ): void;
   consumeMessages(podId: string): { hasMessage: boolean; message?: string };
+  /** Atomically consume every pending operator message in queue order. */
+  consumeMessageBatch(podId: string): string[];
   /** Check if an action requires human approval before execution */
   actionRequiresApproval(podId: string, actionName: string): boolean;
   /**
