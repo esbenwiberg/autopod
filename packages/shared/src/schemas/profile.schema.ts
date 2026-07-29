@@ -317,6 +317,7 @@ const createProfileBaseSchema = z.object({
     .enum([
       'node22',
       'node22-pw',
+      'node22-pw-pg',
       'dotnet9',
       'dotnet10',
       'dotnet10-go',

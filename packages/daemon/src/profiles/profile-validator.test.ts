@@ -232,6 +232,10 @@ describe('ProfileValidator', () => {
     expect(result.errors[0]).toContain('1');
   });
 
+  it('should accept the Node, Playwright, and PostgreSQL template', () => {
+    expect(validateProfile({ ...validInput, template: 'node22-pw-pg' }).valid).toBe(true);
+  });
+
   it('should reject invalid template', () => {
     const result = validateProfile({ ...validInput, template: 'ruby' });
     expect(result.valid).toBe(false);

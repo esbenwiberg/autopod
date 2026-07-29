@@ -18,6 +18,7 @@ export interface DaggerCliVersion {
 const BASE_IMAGE_NAMES: Record<StackTemplate, string> = {
   node22: 'autopod-node22',
   'node22-pw': 'autopod-node22-pw',
+  'node22-pw-pg': 'autopod-node22-pw-pg',
   dotnet9: 'autopod-dotnet9',
   dotnet10: 'autopod-dotnet10',
   'dotnet10-go': 'autopod-dotnet10-go',
@@ -389,6 +390,7 @@ function serenaWarmupLanguage(template: StackTemplate | null): 'csharp' | 'types
   if (
     template === 'node22' ||
     template === 'node22-pw' ||
+    template === 'node22-pw-pg' ||
     template === 'python-node' ||
     template === 'python-node-pg'
   ) {

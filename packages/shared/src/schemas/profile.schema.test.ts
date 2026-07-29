@@ -36,6 +36,15 @@ describe('profile reasoning effort', () => {
 });
 
 describe('createProfileSchema model validation', () => {
+  it('accepts the Node, Playwright, and PostgreSQL stack template', () => {
+    expect(
+      createProfileSchema.parse({ name: 'node-pw-pg', template: 'node22-pw-pg' }),
+    ).toMatchObject({ template: 'node22-pw-pg' });
+    expect(updateProfileSchema.parse({ template: 'node22-pw-pg' })).toEqual({
+      template: 'node22-pw-pg',
+    });
+  });
+
   it('accepts validationSetupCommand and setup as a skippable phase', () => {
     const parsed = createProfileSchema.parse({
       name: 'primary',

@@ -344,6 +344,7 @@ Available templates:
 |----------|-------|----------|
 | `node22` | Node.js 22 | npm/pnpm/yarn |
 | `node22-pw` | Node.js 22 + Playwright | Chromium for browser validation |
+| `node22-pw-pg` | Node.js 22 + Playwright + PostgreSQL | Browser validation with a transient local database |
 | `dotnet9` | .NET 9 SDK | dotnet CLI |
 | `dotnet10` | .NET 10 + Node.js 22 | Mixed stacks (dotnet + npm/pnpm/yarn) |
 | `dotnet10-go` | .NET 10 + Node.js 22 + Go 1.24 | Dagger-in-Go pipelines against .NET projects (Dagger CLI + SDK pre-cached) |

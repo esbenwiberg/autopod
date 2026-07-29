@@ -645,7 +645,7 @@ struct ProfileCard: View {
 
     private var templateSystemImage: String {
         switch profile.template {
-        case .node22, .node22Pw:             "n.circle"
+        case .node22, .node22Pw, .node22PwPg: "n.circle"
         case .dotnet9, .dotnet10, .dotnet10Go: "d.circle"
         case .python312, .pythonNode, .pythonNodePg: "p.circle"
         case .go124, .go124Pw:               "g.circle"

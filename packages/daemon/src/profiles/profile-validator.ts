@@ -15,6 +15,7 @@ const KNOWN_RUNTIMES = ['claude', 'codex', 'copilot', 'pi'];
 const VALID_TEMPLATES: StackTemplate[] = [
   'node22',
   'node22-pw',
+  'node22-pw-pg',
   'dotnet9',
   'dotnet10',
   'dotnet10-go',

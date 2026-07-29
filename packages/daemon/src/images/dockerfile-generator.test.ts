@@ -61,6 +61,7 @@ describe('getBaseImage', () => {
   it.each([
     ['node22', 'autopod-node22:latest'],
     ['node22-pw', 'autopod-node22-pw:latest'],
+    ['node22-pw-pg', 'autopod-node22-pw-pg:latest'],
     ['dotnet9', 'autopod-dotnet9:latest'],
     ['dotnet10', 'autopod-dotnet10:latest'],
     ['dotnet10-go', 'autopod-dotnet10-go:latest'],
@@ -265,6 +266,16 @@ describe('generateDockerfile', () => {
     expect(df).toContain('npm ci');
     expect(df).toContain('npm run build || true');
     expect(df).toContain('USER autopod');
+  });
+
+  it('generates Dockerfile for node22-pw-pg template', () => {
+    const df = generateDockerfile({
+      profile: mockProfile({ template: 'node22-pw-pg' }),
+      gitCredentials: 'none',
+    });
+    expect(df).toContain('FROM autopod-node22-pw-pg:latest');
+    expect(df).toContain('npm ci');
+    expect(df).not.toContain('pip install -r requirements.txt');
   });
 
   it('does not reinstall agent CLIs in warm images', () => {
