@@ -17,7 +17,7 @@ import {
   podsitterDecisionSchema,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
-import { validatePodsitterActivation } from './activation.js';
+import { evaluatePodsitterActivation, validatePodsitterActivation } from './activation.js';
 
 const DEFAULT_BUDGETS = { maxDecisionsPerWindow: 20, maxActionsPerWindow: 10 };
 const SENSITIVE_KEY = /(credential|password|secret|token|api.?key|authorization)/i;
@@ -280,6 +280,19 @@ function hydrateDecision(row: Record<string, unknown>): PodsitterDecisionRecord 
     completedAt: row.completed_at as string | null,
     executedAt: row.executed_at as string | null,
   };
+}
+
+function decisionTargetsMatch(
+  left: PodsitterDecisionTarget | null,
+  right: PodsitterDecisionTarget,
+): boolean {
+  return (
+    left !== null &&
+    left.providerAccountId === right.providerAccountId &&
+    left.runtime === right.runtime &&
+    left.model === right.model &&
+    (left.reasoningEffort ?? null) === (right.reasoningEffort ?? null)
+  );
 }
 
 export function createPodsitterRepository(db: Database.Database): PodsitterRepository {
@@ -632,6 +645,19 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
     createDecision(input) {
       const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
       const createOrRecover = db.transaction((): PodsitterDecisionRecord => {
+        const configurationRow = db
+          .prepare('SELECT * FROM podsitter_config WHERE singleton_id = 1')
+          .get() as Record<string, unknown> | undefined;
+        const configuration = configurationRow ? hydrateConfiguration(configurationRow) : null;
+        if (
+          configuration === null ||
+          configuration.generation !== input.configurationGeneration ||
+          !decisionTargetsMatch(configuration.decisionTarget, input.target) ||
+          !evaluatePodsitterActivation(configuration, new Date(now)).active
+        ) {
+          throw new Error('Podsitter decision requires the current active configuration authority');
+        }
+
         const attention = db
           .prepare(
             `SELECT pod_id, signature, lease_owner, lease_expires_at, state, decision_id

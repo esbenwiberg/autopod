@@ -647,6 +647,81 @@ describe('PodsitterRepository', () => {
     ).toThrow('matching current unexpired attention lease');
   });
 
+  it('rejects decisions after configuration replacement or disablement', () => {
+    const { repository, actor } = setup();
+    const attention = repository.recordAttention({
+      id: 'attention-config-race',
+      podId: 'pod-1',
+      signature: 'signature-config-race',
+    });
+    repository.acquireAttentionLease(
+      attention.id,
+      'config-race-worker',
+      '2026-07-29T01:00:00Z',
+      '2026-07-29T00:00:00Z',
+    );
+    const replaced = repository.replaceConfiguration(
+      {
+        enabled: true,
+        activation: { mode: 'always' },
+        authorizedUntil: null,
+        profileScope: null,
+        decisionTarget: {
+          providerAccountId: 'sitter-account',
+          runtime: 'codex',
+          model: 'gpt-5.1',
+        },
+        updatedBy: actor,
+      },
+      '2026-07-29T00:01:00Z',
+    );
+    const input = {
+      id: 'decision-config-race',
+      attentionId: attention.id,
+      leaseOwner: 'config-race-worker',
+      podId: 'pod-1',
+      attentionSignature: attention.signature,
+      configurationGeneration: 1,
+      evidenceHash: 'sha256:config-race',
+      evidenceVersion: 1,
+      target: { providerAccountId: 'sitter-account', runtime: 'codex' as const, model: 'gpt-5' },
+      now: '2026-07-29T00:02:00Z',
+    };
+
+    expect(() => repository.createDecision(input)).toThrow('active configuration authority');
+    expect(() =>
+      repository.createDecision({
+        ...input,
+        configurationGeneration: replaced.generation,
+        target: { ...input.target, model: 'arbitrary-model' },
+      }),
+    ).toThrow('active configuration authority');
+
+    const disabled = repository.replaceConfiguration(
+      {
+        enabled: false,
+        activation: replaced.activation,
+        authorizedUntil: null,
+        profileScope: null,
+        decisionTarget: replaced.decisionTarget,
+        updatedBy: actor,
+      },
+      '2026-07-29T00:03:00Z',
+    );
+    expect(() =>
+      repository.createDecision({
+        ...input,
+        configurationGeneration: disabled.generation,
+        target: {
+          providerAccountId: 'sitter-account',
+          runtime: 'codex',
+          model: 'gpt-5.1',
+        },
+        now: '2026-07-29T00:04:00Z',
+      }),
+    ).toThrow('active configuration authority');
+  });
+
   it('increments generation for every configuration replacement', () => {
     const { repository, actor } = setup();
     expect(repository.getConfiguration()?.generation).toBe(1);
