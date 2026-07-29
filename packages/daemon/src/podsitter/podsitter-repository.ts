@@ -92,6 +92,7 @@ export interface PodsitterRepository {
   createDecision(input: {
     id: string;
     attentionId: string;
+    leaseOwner: string;
     podId: string;
     attentionSignature: string;
     configurationGeneration: number;
@@ -440,9 +441,9 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               `UPDATE podsitter_attention
                SET lease_owner = NULL, lease_expires_at = NULL, state = ?,
                    decision_id = COALESCE(?, decision_id), last_seen_at = ?
-               WHERE id = ? AND lease_owner = ?`,
+               WHERE id = ? AND lease_owner = ? AND lease_expires_at > ?`,
             )
-            .run(state, decisionId, normalizedNow, id, owner),
+            .run(state, decisionId, normalizedNow, id, owner, normalizedNow),
         )().changes === 1
       );
     },
@@ -590,15 +591,23 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
     },
     createDecision(input) {
       const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
-      db.transaction(() =>
-        db
+      const created = db.transaction(() => {
+        const result = db
           .prepare(
             `INSERT INTO podsitter_decisions (
               id, attention_id, pod_id, attention_signature, configuration_generation,
               evidence_hash, evidence_version, provider_account_id, runtime, model,
               reasoning_effort, decision, outcome, failure_code, input_tokens, output_tokens,
               cost_usd, created_at, completed_at, executed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', NULL, NULL, NULL, NULL, ?, NULL, NULL)`,
+            )
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', NULL, NULL, NULL, NULL, ?, NULL, NULL
+            WHERE EXISTS (
+              SELECT 1 FROM podsitter_attention
+              WHERE id = ?
+                AND lease_owner = ?
+                AND lease_expires_at > ?
+                AND state = 'deciding'
+            )`,
           )
           .run(
             input.id,
@@ -613,8 +622,15 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
             input.target.model,
             input.target.reasoningEffort ?? null,
             now,
-          ),
-      )();
+            input.attentionId,
+            input.leaseOwner,
+            now,
+          );
+        if (result.changes !== 1) {
+          throw new Error('Podsitter decision requires the current unexpired attention lease');
+        }
+      });
+      created();
       return getDecision(input.id);
     },
     completeDecision(id, update, now = new Date().toISOString()) {

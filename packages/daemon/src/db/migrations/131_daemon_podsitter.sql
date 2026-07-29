@@ -38,7 +38,7 @@ CREATE INDEX idx_podsitter_attention_current
 
 CREATE TABLE podsitter_decisions (
   id TEXT PRIMARY KEY,
-  attention_id TEXT NOT NULL REFERENCES podsitter_attention(id) ON DELETE RESTRICT,
+  attention_id TEXT NOT NULL UNIQUE REFERENCES podsitter_attention(id) ON DELETE RESTRICT,
   pod_id TEXT NOT NULL REFERENCES pods(id) ON DELETE CASCADE,
   attention_signature TEXT NOT NULL,
   configuration_generation INTEGER NOT NULL,

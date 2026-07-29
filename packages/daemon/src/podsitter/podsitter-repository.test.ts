@@ -99,6 +99,15 @@ describe('PodsitterRepository', () => {
       ),
     ).toBe(false);
     expect(
+      restored.releaseAttentionLease(
+        current.id,
+        'worker-a',
+        'acted',
+        null,
+        '2026-07-29T00:06:00.000Z',
+      ),
+    ).toBe(false);
+    expect(
       restored.acquireAttentionLease(
         current.id,
         'worker-b',
@@ -128,9 +137,16 @@ describe('PodsitterRepository', () => {
       podId: 'pod-1',
       signature: 'signature-1',
     });
+    repository.acquireAttentionLease(
+      attention.id,
+      'decision-worker',
+      '2026-07-29T01:00:00Z',
+      '2026-07-29T00:00:00Z',
+    );
     repository.createDecision({
       id: 'decision-1',
       attentionId: attention.id,
+      leaseOwner: 'decision-worker',
       podId: 'pod-1',
       attentionSignature: attention.signature,
       configurationGeneration: 1,
@@ -141,6 +157,7 @@ describe('PodsitterRepository', () => {
         runtime: 'codex',
         model: 'gpt-5',
       },
+      now: '2026-07-29T00:01:00Z',
     });
     const reservation = {
       id: 'audit-1',
@@ -243,8 +260,24 @@ describe('PodsitterRepository', () => {
       '2026-07-29T01:00:00Z',
       '2026-07-29T00:00:00Z',
     );
-    expect(repository.releaseAttentionLease(attention.id, 'worker-b')).toBe(false);
-    expect(repository.releaseAttentionLease(attention.id, 'worker-a', 'deferred')).toBe(true);
+    expect(
+      repository.releaseAttentionLease(
+        attention.id,
+        'worker-b',
+        'pending',
+        null,
+        '2026-07-29T00:30:00Z',
+      ),
+    ).toBe(false);
+    expect(
+      repository.releaseAttentionLease(
+        attention.id,
+        'worker-a',
+        'deferred',
+        null,
+        '2026-07-29T00:30:00Z',
+      ),
+    ).toBe(true);
     expect(repository.listPendingAttention()).toEqual([
       expect.objectContaining({ id: attention.id, state: 'deferred', leaseOwner: null }),
     ]);
@@ -286,16 +319,38 @@ describe('PodsitterRepository', () => {
       podId: 'pod-1',
       signature: 'signature-lifecycle',
     });
+    repository.acquireAttentionLease(
+      attention.id,
+      'decision-worker',
+      '2026-07-29T01:00:00Z',
+      '2026-07-29T00:00:00Z',
+    );
     repository.createDecision({
       id: 'decision-lifecycle',
       attentionId: attention.id,
+      leaseOwner: 'decision-worker',
       podId: 'pod-1',
       attentionSignature: attention.signature,
       configurationGeneration: 1,
       evidenceHash: 'sha256:evidence',
       evidenceVersion: 1,
       target: { providerAccountId: 'sitter-account', runtime: 'codex', model: 'gpt-5' },
+      now: '2026-07-29T00:01:00Z',
     });
+    expect(() =>
+      repository.createDecision({
+        id: 'decision-duplicate',
+        attentionId: attention.id,
+        leaseOwner: 'decision-worker',
+        podId: 'pod-1',
+        attentionSignature: attention.signature,
+        configurationGeneration: 1,
+        evidenceHash: 'sha256:duplicate',
+        evidenceVersion: 1,
+        target: { providerAccountId: 'sitter-account', runtime: 'codex', model: 'gpt-5' },
+        now: '2026-07-29T00:02:00Z',
+      }),
+    ).toThrow('UNIQUE constraint failed');
     const decision = {
       contractVersion: 1 as const,
       attentionSignature: attention.signature,
