@@ -2081,11 +2081,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return { target: null, reason: { type: 'ineligible', targets: policy.targets } };
   }
 
+  function escapeProviderTargetDiagnosticValue(value: string, fallback: string): string {
+    const normalized = value.trim().slice(0, 256);
+    if (!normalized) return fallback;
+    return normalized.replace(
+      /[^A-Za-z0-9._:/@+-]/gu,
+      (character) => `\\u{${character.codePointAt(0)?.toString(16) ?? 'fffd'}}`,
+    );
+  }
+
   function describeProviderFailoverTarget(target: ProviderFailoverTarget): string {
-    const account = sanitizeSecurityScanLogValue(target.providerAccountId, 'unknown-account');
-    const runtime = sanitizeSecurityScanLogValue(target.runtime, 'unknown-runtime');
-    const model = sanitizeSecurityScanLogValue(target.model, 'unknown-model');
-    return `${account} (${runtime}/${model})`;
+    const account = escapeProviderTargetDiagnosticValue(
+      target.providerAccountId,
+      'unknown-account',
+    );
+    const runtime = escapeProviderTargetDiagnosticValue(target.runtime, 'unknown-runtime');
+    const model = escapeProviderTargetDiagnosticValue(target.model, 'unknown-model');
+    return `account=${account} runtime=${runtime} model=${model}`;
   }
 
   function providerFailoverUnavailableActivity(selection: ProviderFailoverSelection): string {

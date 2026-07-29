@@ -1581,9 +1581,9 @@ describe('PodManager', () => {
         stored.payload.type === 'pod.agent_activity' && stored.payload.event.type === 'status'
           ? [stored.payload.event.message]
           : [],
-      );
+    );
     expect(messages).toContain(
-      'Provider limit reached — automatic failover exhausted target (codex/gpt-next); 1/1 hops used',
+      'Provider limit reached — automatic failover exhausted account=target runtime=codex model=gpt-next; 1/1 hops used',
     );
     expect(messages).not.toContain('Provider limit reached — no eligible automatic target');
     expect(attempts.list(pod.id)).toHaveLength(3);
