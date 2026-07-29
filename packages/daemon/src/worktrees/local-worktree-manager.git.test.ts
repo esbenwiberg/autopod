@@ -104,6 +104,22 @@ describe('LocalWorktreeManager real Git regressions', () => {
     expect(await git(remote, ['rev-parse', 'refs/heads/feature'])).toBe(concurrentOid);
   });
 
+  it('succeeds when remote already matches HEAD despite a stale tracked OID', async () => {
+    const worktree = await createRebasedFeature('lease-idempotent');
+    const staleTrackedOid = await git(worktree, ['rev-parse', 'refs/remotes/origin/feature']);
+    const localOid = await git(worktree, ['rev-parse', 'HEAD']);
+    expect(staleTrackedOid).not.toBe(localOid);
+
+    // Publish through the explicit URL without refreshing origin/feature, matching
+    // the validation-time push followed by a second delivery attempt.
+    await git(worktree, ['push', remote, 'HEAD:refs/heads/feature']);
+
+    await manager.pushBranch(worktree, 'feature', { force: true });
+
+    expect(await git(remote, ['rev-parse', 'refs/heads/feature'])).toBe(localOid);
+    expect(await git(worktree, ['rev-parse', 'refs/remotes/origin/feature'])).toBe(staleTrackedOid);
+  });
+
   it('starts from fresh origin/main while stale local main is linked elsewhere', async () => {
     await manager.create({
       repoUrl: 'https://github.com/org/repo.git',

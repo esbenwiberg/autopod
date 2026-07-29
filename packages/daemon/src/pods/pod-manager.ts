@@ -3628,10 +3628,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const branch = fixPod.branch ?? '';
     const worktreePath = fixPod.worktreePath;
     let branchPushed = false;
+    const linkedParentIsTerminal = () =>
+      fixPod.linkedPodId !== null && isTerminalState(podRepo.getOrThrow(fixPod.linkedPodId).status);
 
-    if (worktreePath && branch) {
+    if (linkedParentIsTerminal()) {
+      logger.info(
+        { podId, parentId: fixPod.linkedPodId },
+        'Skipping fix-pod delivery because linked parent is already terminal',
+      );
+      emitActivityStatus(podId, 'Linked parent is already complete; skipping branch delivery');
+    } else if (worktreePath && branch) {
       try {
         await mergeQueue.enqueueMerge(profile.repoUrl ?? null, baseBranch, async () => {
+          if (linkedParentIsTerminal()) {
+            logger.info(
+              { podId, parentId: fixPod.linkedPodId },
+              'Skipping queued fix-pod delivery because linked parent became terminal',
+            );
+            return;
+          }
+
           emitActivityStatus(podId, `Rebasing onto origin/${baseBranch}…`);
           const rebaseResult = await worktreeManager.rebaseOntoBase({
             worktreePath,
@@ -3650,6 +3666,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             emitActivityStatus(
               podId,
               formatRebaseConflictReason(baseBranch, rebaseResult.conflicts),
+            );
+            return;
+          }
+
+          if (linkedParentIsTerminal()) {
+            logger.info(
+              { podId, parentId: fixPod.linkedPodId },
+              'Skipping fix-pod push because linked parent became terminal during rebase',
             );
             return;
           }
