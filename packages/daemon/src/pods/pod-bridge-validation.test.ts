@@ -511,10 +511,10 @@ describe('PodBridge.callReviewerModel', () => {
       ],
       expect.objectContaining({
         cwd: '/workspace',
-        timeout: 60_000,
         env: { POD_ID: 'sess-1', CLAUDE_CONFIG_DIR: '/tmp/fresh-claude' },
       }),
     );
+    expect(execMock.mock.calls[0]?.[2]).not.toHaveProperty('timeout');
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
     expect(mockRunCodexReview).not.toHaveBeenCalled();
   });
@@ -614,8 +614,9 @@ describe('PodBridge.generateBrowserValidationScript', () => {
           "sh '/run/autopod/agent-shim.sh' claude -p --model 'sonnet' --output-format json",
         ),
       ],
-      expect.objectContaining({ cwd: '/workspace', timeout: 60_000 }),
+      expect.objectContaining({ cwd: '/workspace' }),
     );
+    expect(execMock.mock.calls[0]?.[2]).not.toHaveProperty('timeout');
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
     expect(mockRunCodexReview).not.toHaveBeenCalled();
   });
@@ -648,10 +649,10 @@ describe('PodBridge.generateBrowserValidationScript', () => {
       expect.any(Array),
       expect.objectContaining({
         cwd: '/workspace',
-        timeout: 60_000,
         env: reviewerExecEnv,
       }),
     );
+    expect(execMock.mock.calls[0]?.[2]).not.toHaveProperty('timeout');
   });
 
   it('runs OpenAI browser script generation through the container Codex CLI path', async () => {
