@@ -1200,6 +1200,40 @@ describe('LocalWorktreeManager', () => {
         'HEAD:refs/heads/feat/security',
       ]);
     });
+
+    it('skips a force push when the authenticated remote branch already matches HEAD', async () => {
+      const calls: string[][] = [];
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          calls.push(args);
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          if (cmd.includes('rev-parse --abbrev-ref HEAD')) {
+            cb(null, { stdout: 'feat/security\n', stderr: '' });
+          } else if (cmd.includes('rev-parse --git-common-dir')) {
+            cb(null, { stdout: '.git\n', stderr: '' });
+          } else if (cmd.includes('remote get-url origin')) {
+            cb(null, { stdout: 'https://github.com/org/repo.git\n', stderr: '' });
+          } else if (cmd.includes('rev-parse HEAD')) {
+            cb(null, { stdout: 'abc123\n', stderr: '' });
+          } else if (cmd.includes('ls-remote --heads')) {
+            cb(null, { stdout: 'abc123\trefs/heads/feat/security\n', stderr: '' });
+          } else {
+            cb(null, { stdout: '', stderr: '' });
+          }
+          return {} as ChildProcess;
+        },
+      );
+
+      await manager.pushBranch('/tmp/worktree/sess', 'feat/security', { force: true });
+
+      expect(calls.some((args) => args.includes('push'))).toBe(false);
+      expect(calls).not.toContainEqual([
+        'rev-parse',
+        '--verify',
+        'refs/remotes/origin/feat/security',
+      ]);
+    });
   });
 
   describe('ensureRemoteBranch', () => {

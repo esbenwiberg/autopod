@@ -3628,8 +3628,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const branch = fixPod.branch ?? '';
     const worktreePath = fixPod.worktreePath;
     let branchPushed = false;
+    const parentIsTerminal =
+      fixPod.linkedPodId !== null &&
+      isTerminalState(podRepo.getOrThrow(fixPod.linkedPodId).status);
 
-    if (worktreePath && branch) {
+    if (parentIsTerminal) {
+      logger.info(
+        { podId, parentId: fixPod.linkedPodId },
+        'Skipping fix-pod delivery because linked parent is already terminal',
+      );
+      emitActivityStatus(podId, 'Linked parent is already complete; skipping branch delivery');
+    } else if (worktreePath && branch) {
       try {
         await mergeQueue.enqueueMerge(profile.repoUrl ?? null, baseBranch, async () => {
           emitActivityStatus(podId, `Rebasing onto origin/${baseBranch}…`);

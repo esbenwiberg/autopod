@@ -1209,6 +1209,26 @@ export class LocalWorktreeManager implements WorktreeManager {
     const refspec = `HEAD:refs/heads/${expectedBranch}`;
     let pushArgs = ['push', '--no-verify', remote.url, refspec];
     if (force) {
+      const { stdout: localHead } = await git(['rev-parse', 'HEAD'], {
+        cwd: worktreePath,
+      });
+      const { stdout: remoteHead } = await git(
+        ['ls-remote', '--heads', remote.url, expectedBranch],
+        {
+          cwd: worktreePath,
+          credential: remote.credential,
+          credentialUrl: remote.url,
+        },
+      );
+      const observedRemoteOid = remoteHead.trim().split(/\s+/, 1)[0];
+      if (observedRemoteOid && observedRemoteOid === localHead.trim()) {
+        this.logger.info(
+          { worktreePath, expectedBranch, localHead: localHead.trim() },
+          'Remote branch already matches local HEAD; skipping force push',
+        );
+        return;
+      }
+
       // URL pushes do not reliably associate an implicit lease with origin/<branch>.
       // Pin the lease to the remote-tracking OID captured by the rebase fetch so a
       // concurrent remote advance is rejected without relying on remote config.
