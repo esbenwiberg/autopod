@@ -8412,6 +8412,7 @@ describe('PodManager', () => {
     it('keeps completed fallback binding for in-place validation-feedback resume', async () => {
       const primaryToken = 'primary-max-token';
       const targetAuthJson = JSON.stringify({ token: 'target-openai-token' });
+      const rotatedTargetAuthJson = JSON.stringify({ token: 'rotated-target-openai-token' });
       const ctx = createTestContext(makeBuildFailure(), {
         modelProvider: 'max',
         defaultRuntime: 'claude',
@@ -8441,6 +8442,7 @@ describe('PodManager', () => {
           result: 'validation fixes complete',
         };
       });
+      vi.mocked(ctx.containerManager.readFile).mockResolvedValue(rotatedTargetAuthJson);
       const manager = createPodManager(ctx.deps);
       const pod = manager.createSession(
         { profileName: 'test-profile', task: 'Fix validation on fallback' },
@@ -8511,8 +8513,16 @@ describe('PodManager', () => {
       expect(ctx.containerManager.writeFile).toHaveBeenCalledWith(
         'target-container',
         '/home/autopod/.codex/auth.json',
-        targetAuthJson,
+        rotatedTargetAuthJson,
       );
+      expect(ctx.deps.providerAccountStore.get('openai-private').credentials).toMatchObject({
+        provider: 'openai',
+        authJson: rotatedTargetAuthJson,
+      });
+      expect(ctx.deps.providerAccountStore.get('anth-pro').credentials).toMatchObject({
+        provider: 'max',
+        oauthToken: primaryToken,
+      });
       expect(ctx.containerManager.writeFile).not.toHaveBeenCalledWith(
         expect.any(String),
         expect.any(String),

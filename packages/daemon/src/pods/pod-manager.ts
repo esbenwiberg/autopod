@@ -4196,6 +4196,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   async function getResumeEnv(pod: Pod): Promise<Record<string, string> | undefined> {
     const profile = resolveEffectiveBoundProfile(pod);
     const provider = profile.modelProvider;
+    const owner = profile.providerAccountId
+      ? ({ type: 'provider-account', id: profile.providerAccountId } as const)
+      : undefined;
     if (
       provider !== 'max' &&
       provider !== 'foundry' &&
@@ -4227,7 +4230,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           pod.profileName,
           logger,
           maxCredentialLineageByPod.get(pod.id),
-          { providerAccountStore },
+          { providerAccountStore, owner },
         );
       } catch (err) {
         logger.warn(
@@ -4245,7 +4248,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           profileStore,
           pod.profileName,
           logger,
-          { providerAccountStore },
+          { providerAccountStore, owner },
         );
       } catch (err) {
         logger.warn(
@@ -4263,7 +4266,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           profileStore,
           pod.profileName,
           logger,
-          { providerAccountStore },
+          { providerAccountStore, owner },
         );
       } catch (err) {
         logger.warn(
