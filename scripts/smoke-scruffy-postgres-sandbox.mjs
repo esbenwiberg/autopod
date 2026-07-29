@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { createRequire } from 'node:module';
 import { readdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -109,11 +109,7 @@ try {
 }
 
 async function run(label, commands) {
-  const result = await manager.execInContainer(sandboxId, [
-    'sh',
-    '-euc',
-    commands.join('\n'),
-  ]);
+  const result = await manager.execInContainer(sandboxId, ['sh', '-euc', commands.join('\n')]);
   console.log(`${label}=${JSON.stringify(result)}`);
   if (result.exitCode !== 0) {
     throw new Error(`${label} failed`);
