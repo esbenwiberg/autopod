@@ -28,6 +28,7 @@ const ACR_DOCKER_USERNAME = '00000000-0000-0000-0000-000000000000';
 const ACR_EXCHANGE_TIMEOUT_MS = 30_000;
 const AZURE_TOKEN_TIMEOUT_MS = 30_000;
 const CREATE_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+const DISK_IMAGE_CREATE_REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
 /** Max polls for a freshly-added port's public URL to surface on the sandbox. */
 const PORT_URL_POLL_ATTEMPTS = 20;
 
@@ -926,7 +927,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           ...(registryCredentials ? { registryCredentials } : {}),
           labels: key.labels,
         },
-        timeoutMs: CREATE_REQUEST_TIMEOUT_MS,
+        timeoutMs: DISK_IMAGE_CREATE_REQUEST_TIMEOUT_MS,
       },
     );
     const id = requiredId(initial, 'disk image');

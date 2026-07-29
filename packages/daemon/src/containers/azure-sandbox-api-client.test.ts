@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import pino from 'pino';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AzureSandboxApiClient, type WebSocketLike } from './azure-sandbox-api-client.js';
 import type { SandboxExecChunk } from './sandbox-api-client.js';
 
@@ -183,6 +183,64 @@ describe('AzureSandboxApiClient', () => {
         hostRules: [{ pattern: 'api.github.com', action: 'Allow' }],
       },
     });
+  });
+
+  it('allows disk image creation requests up to 15 minutes', async () => {
+    vi.useFakeTimers();
+    try {
+      let requestCount = 0;
+      const fetch = async (_input: string | URL, init?: RequestInit): Promise<Response> => {
+        requestCount++;
+        if (requestCount === 1) {
+          return new Response(JSON.stringify({ value: [] }), { status: 200 });
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          );
+        });
+      };
+      const client = new AzureSandboxApiClient(
+        {
+          subscriptionId: 'sub-1',
+          resourceGroup: 'rg-1',
+          location: 'swedencentral',
+          sandboxGroup: 'autopod-spike',
+          credential,
+          fetch,
+          assumeGroupExists: true,
+        },
+        logger,
+      );
+
+      let settled = false;
+      const creation = client.createSandbox({
+        image: 'mcr.microsoft.com/cbl-mariner/base/core:2.0',
+        tier: 'L',
+        env: {},
+        egressPolicy: { defaultAction: 'Allow', hostRules: [] },
+      });
+      creation.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      const rejection = expect(creation).rejects.toThrow('timed out after 900000ms');
+
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      expect(requestCount).toBe(2);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('attaches and uses a managed identity for private image pulls', async () => {
