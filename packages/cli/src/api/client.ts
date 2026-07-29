@@ -207,6 +207,19 @@ export class AutopodClient {
     );
   }
 
+  async continueProvider(
+    id: string,
+    options?: { primary?: boolean },
+  ): Promise<{
+    ok: boolean;
+    action: 'same-provider' | 'alternate-provider' | 'primary-provider';
+  }> {
+    return this.request<{
+      ok: boolean;
+      action: 'same-provider' | 'alternate-provider' | 'primary-provider';
+    }>('POST', `/pods/${id}/continue-provider`, options?.primary ? { primary: true } : undefined);
+  }
+
   async updateFromBase(id: string): Promise<UpdateFromBaseResponse> {
     const path = `/pods/${id}/update-from-base`;
     const url = `${this.baseUrl}${path}`;

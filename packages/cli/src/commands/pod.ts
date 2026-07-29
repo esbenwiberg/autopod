@@ -706,6 +706,27 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       }
     });
 
+  // ap continue-provider
+  program
+    .command('continue-provider <id>')
+    .description('Continue a provider-limit pause, or recover a failed pod on its profile primary')
+    .option(
+      '--primary',
+      "Explicitly recover a failed pod on the profile's current primary provider",
+    )
+    .action(async (id: string, opts: { primary?: boolean }) => {
+      const client = getClient();
+      const resolvedId = await resolvePodId(client, id);
+      const result = await withSpinner('Continuing pod provider...', () =>
+        client.continueProvider(resolvedId, { primary: opts.primary }),
+      );
+      if (result.action === 'primary-provider') {
+        console.log(chalk.green(`Pod ${resolvedId} queued on its profile primary provider.`));
+      } else {
+        console.log(chalk.green(`Pod ${resolvedId} provider continuation queued.`));
+      }
+    });
+
   // ap tell
   program
     .command('tell <id> <message>')

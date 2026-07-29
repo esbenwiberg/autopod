@@ -1533,11 +1533,14 @@ export interface PodManager {
   resumePod(podId: string): Promise<{
     action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery';
   }>;
-  /** Continue a provider-limit pause through normal provisioning on the same pod ID. */
+  /**
+   * Continue a provider-limit pause, or explicitly recover a failed pod on the
+   * profile's current primary provider, through normal provisioning.
+   */
   continueProvider(
     podId: string,
-    target?: ProviderFailoverTarget,
-  ): Promise<{ action: 'same-provider' | 'alternate-provider' }>;
+    target?: ProviderFailoverTarget | 'profile-primary',
+  ): Promise<{ action: 'same-provider' | 'alternate-provider' | 'primary-provider' }>;
   /**
    * Operator admin override: force-transition a `failed` pod to `complete`,
    * skipping push, PR creation, and validation. Persists `forceCompletedAt`
@@ -14168,10 +14171,26 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async continueProvider(
       podId: string,
-      requestedTarget?: ProviderFailoverTarget,
-    ): Promise<{ action: 'same-provider' | 'alternate-provider' }> {
+      requestedTarget?: ProviderFailoverTarget | 'profile-primary',
+    ): Promise<{ action: 'same-provider' | 'alternate-provider' | 'primary-provider' }> {
       const pod = podRepo.getOrThrow(podId);
-      if (pod.status !== 'paused' || pod.pauseReason !== 'provider_limit') {
+      const primaryRecovery = requestedTarget === 'profile-primary';
+      const pausedProviderLimit = pod.status === 'paused' && pod.pauseReason === 'provider_limit';
+      if (primaryRecovery && pod.status !== 'failed') {
+        throw new AutopodError(
+          'Profile-primary recovery is only available for failed pods',
+          'INVALID_STATE',
+          409,
+        );
+      }
+      if (pod.status === 'failed' && !primaryRecovery) {
+        throw new AutopodError(
+          'Failed pods may only be continued on the profile primary provider',
+          'INVALID_PROVIDER_TARGET',
+          409,
+        );
+      }
+      if (!pausedProviderLimit && !primaryRecovery) {
         throw new AutopodError(
           `Cannot continue provider for pod ${podId} outside a provider-limit pause`,
           'INVALID_STATE',
@@ -14194,33 +14213,41 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           attempt.classification?.category === 'quota_exhausted' &&
           attempt.classification.definitive,
       );
-      if (!source) {
+      if (!source && !primaryRecovery) {
         throw new AutopodError(
           `Pod ${podId} has no definitive provider-limit evidence`,
           'PROVIDER_LIMIT_NOT_DEFINITIVE',
           409,
         );
       }
-      const target =
-        requestedTarget ??
-        ({
-          providerAccountId: source.providerAccountId,
-          runtime: source.runtime,
-          model: source.model,
-        } as ProviderFailoverTarget);
+      const profile = profileStore.get(pod.profileName);
+      const target = primaryRecovery
+        ? {
+            providerAccountId: profile.providerAccountId ?? '',
+            runtime: profile.defaultRuntime,
+            model: profile.defaultModel ?? '',
+          }
+        : (requestedTarget ?? {
+            providerAccountId: source?.providerAccountId,
+            runtime: source?.runtime,
+            model: source?.model,
+          });
       if (!target.providerAccountId) {
         throw new AutopodError(
-          'Same-provider continuation requires a provider account',
+          primaryRecovery
+            ? 'Profile primary recovery requires a configured provider account'
+            : 'Same-provider continuation requires a provider account',
           'INVALID_PROVIDER_TARGET',
           409,
         );
       }
-      profileForProviderTarget(profileStore.get(pod.profileName), target);
+      profileForProviderTarget(profile, target);
       const sameProvider =
+        source !== undefined &&
         target.providerAccountId === source.providerAccountId &&
         target.runtime === source.runtime &&
         target.model === source.model;
-      if (sameProvider) {
+      if (sameProvider && !primaryRecovery) {
         const sameProviderAttempts = settledAttempts.filter(
           (attempt) =>
             attempt.outcome !== 'aborted' &&
@@ -14235,7 +14262,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             409,
           );
         }
-      } else {
+      } else if (!primaryRecovery) {
         const resolved = profileStore.resolveProviderFailover(pod.profileName);
         const policy = resolved.policy;
         const isConfigured = policy?.targets.some(
@@ -14315,7 +14342,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         }
       }
       try {
-        await prepareProviderContinuationHandoff(podRepo.getOrThrow(podId), source.classification);
+        await prepareProviderContinuationHandoff(
+          podRepo.getOrThrow(podId),
+          source?.classification ?? {
+            category: 'unknown',
+            definitive: false,
+            sanitizedMessage: 'Operator requested recovery on the profile primary provider',
+          },
+        );
       } catch (err) {
         throw new AutopodError(
           `Provider continuation could not safely prepare its handoff: ${operatorErrorMessage(err, 'agent')}`,
@@ -14325,20 +14359,32 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
       if (strandedActive) {
         closeProviderAttempt(podId, 'aborted');
-        podRepo.update(podId, {
-          runtime: source.runtime,
-          model: source.model,
-          pauseReason: 'provider_limit',
-        });
+        if (!primaryRecovery && source) {
+          podRepo.update(podId, {
+            runtime: source.runtime,
+            model: source.model,
+            pauseReason: 'provider_limit',
+          });
+        }
       }
       await queueProviderContinuation(
         podRepo.getOrThrow(podId),
         target,
-        source.classification,
+        source?.classification ?? {
+          category: 'unknown',
+          definitive: false,
+          sanitizedMessage: 'Operator requested recovery on the profile primary provider',
+        },
         false,
         true,
       );
-      return { action: sameProvider ? 'same-provider' : 'alternate-provider' };
+      return {
+        action: primaryRecovery
+          ? 'primary-provider'
+          : sameProvider
+            ? 'same-provider'
+            : 'alternate-provider',
+      };
     },
 
     async forceComplete(podId: string, reason?: string): Promise<void> {

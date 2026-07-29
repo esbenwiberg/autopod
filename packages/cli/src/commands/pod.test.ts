@@ -53,8 +53,48 @@ function createMockClient() {
     getFirewallDenials: vi.fn().mockResolvedValue([]),
     getSessionLogs: vi.fn().mockResolvedValue('build log output'),
     updateFromBase: vi.fn().mockResolvedValue({ ok: true, action: 'queued_after_abort' }),
+    continueProvider: vi.fn().mockResolvedValue({ ok: true, action: 'same-provider' }),
   } as unknown as AutopodClient;
 }
+
+describe('continue-provider command', () => {
+  let program: Command;
+  let mockClient: AutopodClient;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    program = new Command();
+    program.exitOverride();
+    mockClient = createMockClient();
+    registerPodCommands(program, () => mockClient);
+  });
+
+  it('requests explicit profile-primary recovery', async () => {
+    (mockClient.continueProvider as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      action: 'primary-provider',
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await program.parseAsync(['node', 'ap', 'continue-provider', 'positive-urial', '--primary']);
+
+    expect(mockClient.continueProvider).toHaveBeenCalledWith('positive-urial', {
+      primary: true,
+    });
+    expect(logSpy).toHaveBeenCalledWith(
+      'Pod positive-urial queued on its profile primary provider.',
+    );
+    logSpy.mockRestore();
+  });
+
+  it('preserves paused provider-limit continuation', async () => {
+    await program.parseAsync(['node', 'ap', 'continue-provider', 'positive-urial']);
+
+    expect(mockClient.continueProvider).toHaveBeenCalledWith('positive-urial', {
+      primary: undefined,
+    });
+  });
+});
 
 describe('update-from-base command', () => {
   let program: Command;

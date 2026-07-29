@@ -914,11 +914,13 @@ export function podRoutes(
     }
   });
 
-  // POST /pods/:podId/continue-provider — provider-limit continuation only.
-  // Kept separate from downstream-only Resume semantics.
+  // POST /pods/:podId/continue-provider — provider-limit continuation or an
+  // explicit failed-pod recovery on the profile's current primary provider.
+  // Kept separate from downstream-only Resume and generic Rework semantics.
   app.post('/pods/:podId/continue-provider', async (request, reply) => {
     const { podId } = request.params as { podId: string };
     const body = (request.body ?? {}) as {
+      primary?: boolean;
       target?: {
         providerAccountId: string;
         runtime: 'claude' | 'codex' | 'copilot' | 'pi';
@@ -926,7 +928,17 @@ export function podRoutes(
       };
     };
     try {
-      const result = await podManager.continueProvider(podId, body.target);
+      if (body.primary && body.target) {
+        throw new AutopodError(
+          'Specify either profile-primary recovery or an explicit target, not both',
+          'INVALID_PROVIDER_TARGET',
+          400,
+        );
+      }
+      const result = await podManager.continueProvider(
+        podId,
+        body.primary ? 'profile-primary' : body.target,
+      );
       return { ok: true, action: result.action };
     } catch (err) {
       if (err instanceof AutopodError) {
