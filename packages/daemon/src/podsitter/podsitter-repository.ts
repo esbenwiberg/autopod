@@ -89,6 +89,7 @@ export interface PodsitterRepository {
     now?: string;
   }): boolean;
   completeAction(idempotencyKey: string, daemonResult: string, now?: string): boolean;
+  getDecisionForAttention(attentionId: string): PodsitterDecisionRecord | null;
   createDecision(input: {
     id: string;
     attentionId: string;
@@ -589,9 +590,49 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
         )().changes === 1
       );
     },
+    getDecisionForAttention(attentionId) {
+      const row = db
+        .prepare('SELECT * FROM podsitter_decisions WHERE attention_id = ?')
+        .get(attentionId) as Record<string, unknown> | undefined;
+      return row ? hydrateDecision(row) : null;
+    },
     createDecision(input) {
       const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
-      const created = db.transaction(() => {
+      const createOrRecover = db.transaction((): PodsitterDecisionRecord => {
+        const attention = db
+          .prepare(
+            `SELECT pod_id, signature, lease_owner, lease_expires_at, state, decision_id
+             FROM podsitter_attention
+             WHERE id = ?`,
+          )
+          .get(input.attentionId) as
+          | {
+              pod_id: string;
+              signature: string;
+              lease_owner: string | null;
+              lease_expires_at: string | null;
+              state: PodsitterAttentionState;
+              decision_id: string | null;
+            }
+          | undefined;
+        if (
+          !attention ||
+          attention.pod_id !== input.podId ||
+          attention.signature !== input.attentionSignature ||
+          attention.lease_owner !== input.leaseOwner ||
+          attention.lease_expires_at === null ||
+          attention.lease_expires_at <= now ||
+          attention.state !== 'deciding'
+        ) {
+          throw new Error(
+            'Podsitter decision requires the matching current unexpired attention lease',
+          );
+        }
+
+        if (attention.decision_id !== null) {
+          return getDecision(attention.decision_id);
+        }
+
         const result = db
           .prepare(
             `INSERT INTO podsitter_decisions (
@@ -604,9 +645,12 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
             WHERE EXISTS (
               SELECT 1 FROM podsitter_attention
               WHERE id = ?
+                AND pod_id = ?
+                AND signature = ?
                 AND lease_owner = ?
                 AND lease_expires_at > ?
                 AND state = 'deciding'
+                AND decision_id IS NULL
             )`,
           )
           .run(
@@ -623,15 +667,27 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
             input.target.reasoningEffort ?? null,
             now,
             input.attentionId,
+            input.podId,
+            input.attentionSignature,
             input.leaseOwner,
             now,
           );
         if (result.changes !== 1) {
           throw new Error('Podsitter decision requires the current unexpired attention lease');
         }
+        const linked = db
+          .prepare(
+            `UPDATE podsitter_attention
+             SET decision_id = ?, last_seen_at = ?
+             WHERE id = ? AND decision_id IS NULL`,
+          )
+          .run(input.id, now, input.attentionId);
+        if (linked.changes !== 1) {
+          throw new Error('Podsitter decision could not be linked to its attention');
+        }
+        return getDecision(input.id);
       });
-      created();
-      return getDecision(input.id);
+      return createOrRecover();
     },
     completeDecision(id, update, now = new Date().toISOString()) {
       const decision =
@@ -696,9 +752,9 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
           db
             .prepare(
               `UPDATE system_sandbox_runs SET
-                outcome = ?, cleanup_state = ?, failure_code = ?,
+               outcome = ?, cleanup_state = ?, failure_code = ?,
                 completed_at = ?, updated_at = ?
-               WHERE id = ?`,
+               WHERE id = ? AND completed_at IS NULL`,
             )
             .run(
               update.outcome,

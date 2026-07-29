@@ -337,7 +337,7 @@ describe('PodsitterRepository', () => {
       target: { providerAccountId: 'sitter-account', runtime: 'codex', model: 'gpt-5' },
       now: '2026-07-29T00:01:00Z',
     });
-    expect(() =>
+    expect(
       repository.createDecision({
         id: 'decision-duplicate',
         attentionId: attention.id,
@@ -350,7 +350,10 @@ describe('PodsitterRepository', () => {
         target: { providerAccountId: 'sitter-account', runtime: 'codex', model: 'gpt-5' },
         now: '2026-07-29T00:02:00Z',
       }),
-    ).toThrow('UNIQUE constraint failed');
+    ).toMatchObject({ id: 'decision-lifecycle' });
+    expect(repository.getDecisionForAttention(attention.id)).toMatchObject({
+      id: 'decision-lifecycle',
+    });
     const decision = {
       contractVersion: 1 as const,
       attentionSignature: attention.signature,
@@ -418,6 +421,13 @@ describe('PodsitterRepository', () => {
       }),
     ).toBe(true);
     expect(
+      repository.closeSandboxRun('sandbox-lifecycle', {
+        outcome: 'failed',
+        cleanupState: 'leaked',
+        failureCode: 'late-overwrite',
+      }),
+    ).toBe(false);
+    expect(
       db
         .prepare(
           'SELECT outcome, cleanup_state, completed_at FROM system_sandbox_runs WHERE id = ?',
@@ -428,6 +438,73 @@ describe('PodsitterRepository', () => {
       cleanup_state: 'cleaned',
       completed_at: expect.any(String),
     });
+  });
+
+  it('recovers a linked decision after a crash and rejects mismatched attention identity', () => {
+    const { db, repository } = setup();
+    const attention = repository.recordAttention({
+      id: 'attention-crash',
+      podId: 'pod-1',
+      signature: 'signature-crash',
+    });
+    repository.acquireAttentionLease(
+      attention.id,
+      'worker-before-crash',
+      '2026-07-29T00:05:00Z',
+      '2026-07-29T00:00:00Z',
+    );
+
+    const input = {
+      id: 'decision-before-crash',
+      attentionId: attention.id,
+      leaseOwner: 'worker-before-crash',
+      podId: 'pod-1',
+      attentionSignature: attention.signature,
+      configurationGeneration: 1,
+      evidenceHash: 'sha256:crash-evidence',
+      evidenceVersion: 1,
+      target: { providerAccountId: 'sitter-account', runtime: 'codex' as const, model: 'gpt-5' },
+      now: '2026-07-29T00:01:00Z',
+    };
+    repository.createDecision(input);
+    expect(
+      db.prepare('SELECT decision_id FROM podsitter_attention WHERE id = ?').get(attention.id),
+    ).toEqual({ decision_id: 'decision-before-crash' });
+
+    const restored = createPodsitterRepository(db);
+    restored.acquireAttentionLease(
+      attention.id,
+      'worker-after-crash',
+      '2026-07-29T00:15:00Z',
+      '2026-07-29T00:06:00Z',
+    );
+    expect(
+      restored.createDecision({
+        ...input,
+        id: 'decision-after-crash',
+        leaseOwner: 'worker-after-crash',
+        now: '2026-07-29T00:07:00Z',
+      }),
+    ).toMatchObject({ id: 'decision-before-crash' });
+
+    expect(() =>
+      restored.createDecision({
+        ...input,
+        id: 'decision-wrong-signature',
+        leaseOwner: 'worker-after-crash',
+        attentionSignature: 'wrong-signature',
+        now: '2026-07-29T00:08:00Z',
+      }),
+    ).toThrow('matching current unexpired attention lease');
+    expect(() =>
+      restored.createDecision({
+        ...input,
+        id: 'decision-wrong-pod',
+        leaseOwner: 'worker-after-crash',
+        podId: 'wrong-pod',
+        now: '2026-07-29T00:08:00Z',
+      }),
+    ).toThrow('matching current unexpired attention lease');
   });
 
   it('increments generation for every configuration replacement', () => {
