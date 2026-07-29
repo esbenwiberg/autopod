@@ -156,6 +156,215 @@ describe('PodsitterRepository', () => {
     expect(repository.reserveAction({ ...reservation, id: 'audit-2' })).toBe(false);
   });
 
+  it('normalizes lease timestamps and rejects expired leases', () => {
+    const { repository } = setup();
+    const attention = repository.recordAttention({
+      id: 'attention-offset',
+      podId: 'pod-1',
+      signature: 'signature-offset',
+    });
+    repository.setProviderState('sitter-account', {
+      status: 'available',
+      consecutiveFailures: 0,
+    });
+
+    expect(
+      repository.acquireAttentionLease(
+        attention.id,
+        'worker-a',
+        '2026-07-29T02:30:00+02:00',
+        '2026-07-29T00:00:00Z',
+      ),
+    ).toMatchObject({ leaseExpiresAt: '2026-07-29T00:30:00.000Z' });
+    expect(
+      repository.acquireAttentionLease(
+        attention.id,
+        'worker-b',
+        '2026-07-29T00:45:00Z',
+        '2026-07-29T00:20:00-00:00',
+      ),
+    ).toBeNull();
+    expect(() =>
+      repository.acquireAttentionLease(
+        attention.id,
+        'worker-b',
+        '2026-07-29T00:20:00Z',
+        '2026-07-29T00:20:00Z',
+      ),
+    ).toThrow('expiresAt must be later than now');
+    expect(() =>
+      repository.acquireProviderProbeLease(
+        'sitter-account',
+        'worker-a',
+        '2026-07-29T00:19:59Z',
+        '2026-07-29T00:20:00Z',
+      ),
+    ).toThrow('expiresAt must be later than now');
+  });
+
+  it('does not let a stale signature replay supersede newer attention', () => {
+    const { repository } = setup();
+    repository.recordAttention({
+      id: 'attention-stale',
+      podId: 'pod-1',
+      signature: 'signature-stale',
+      now: '2026-07-29T00:00:00Z',
+    });
+    repository.recordAttention({
+      id: 'attention-new',
+      podId: 'pod-1',
+      signature: 'signature-new',
+      now: '2026-07-29T00:01:00Z',
+    });
+
+    const replay = repository.recordAttention({
+      id: 'ignored-replay-id',
+      podId: 'pod-1',
+      signature: 'signature-stale',
+      now: '2026-07-29T00:02:00Z',
+    });
+
+    expect(replay).toMatchObject({ id: 'attention-stale', state: 'superseded' });
+    expect(repository.listPendingAttention()).toEqual([
+      expect.objectContaining({ id: 'attention-new', state: 'pending' }),
+    ]);
+  });
+
+  it('enforces lease ownership and preserves provider leases across state updates', () => {
+    const { repository } = setup();
+    const attention = repository.recordAttention({
+      id: 'attention-owned',
+      podId: 'pod-1',
+      signature: 'signature-owned',
+    });
+    repository.acquireAttentionLease(
+      attention.id,
+      'worker-a',
+      '2026-07-29T01:00:00Z',
+      '2026-07-29T00:00:00Z',
+    );
+    expect(repository.releaseAttentionLease(attention.id, 'worker-b')).toBe(false);
+    expect(repository.releaseAttentionLease(attention.id, 'worker-a', 'deferred')).toBe(true);
+    expect(repository.listPendingAttention()).toEqual([
+      expect.objectContaining({ id: attention.id, state: 'deferred', leaseOwner: null }),
+    ]);
+
+    repository.setProviderState('sitter-account', {
+      status: 'available',
+      consecutiveFailures: 0,
+    });
+    expect(
+      repository.acquireProviderProbeLease(
+        'sitter-account',
+        'worker-a',
+        '2026-07-29T01:00:00Z',
+        '2026-07-29T00:00:00Z',
+      ),
+    ).toBe(true);
+    repository.setProviderState(
+      'sitter-account',
+      {
+        status: 'rate_limited',
+        consecutiveFailures: 1,
+        retryAt: '2026-07-29T02:30:00+02:00',
+      },
+      '2026-07-29T00:01:00Z',
+    );
+    expect(repository.getProviderState('sitter-account')).toMatchObject({
+      status: 'rate_limited',
+      retryAt: '2026-07-29T00:30:00.000Z',
+      probeLeaseOwner: 'worker-a',
+    });
+    expect(repository.releaseProviderProbeLease('sitter-account', 'worker-b')).toBe(false);
+    expect(repository.releaseProviderProbeLease('sitter-account', 'worker-a')).toBe(true);
+  });
+
+  it('validates decision payloads and persists action and sandbox completion', () => {
+    const { db, repository, actor } = setup();
+    const attention = repository.recordAttention({
+      id: 'attention-lifecycle',
+      podId: 'pod-1',
+      signature: 'signature-lifecycle',
+    });
+    repository.createDecision({
+      id: 'decision-lifecycle',
+      attentionId: attention.id,
+      podId: 'pod-1',
+      attentionSignature: attention.signature,
+      configurationGeneration: 1,
+      evidenceHash: 'sha256:evidence',
+      evidenceVersion: 1,
+      target: { providerAccountId: 'sitter-account', runtime: 'codex', model: 'gpt-5' },
+    });
+    const decision = {
+      contractVersion: 1 as const,
+      attentionSignature: attention.signature,
+      action: 'tell' as const,
+      arguments: { message: 'bounded guidance' },
+      reason: 'The pod needs targeted guidance.',
+      evidenceRefs: ['event:1'],
+      confidence: 'high' as const,
+      remainingRisk: 'The next attempt may still fail.',
+      stopCondition: 'Stop after sending one message.',
+    };
+    expect(
+      repository.completeDecision('decision-lifecycle', {
+        decision,
+        outcome: 'completed',
+        executedAt: '2026-07-29T02:30:00+02:00',
+      }),
+    ).toMatchObject({
+      decision,
+      outcome: 'completed',
+      executedAt: '2026-07-29T00:30:00.000Z',
+    });
+    expect(() =>
+      repository.completeDecision('decision-lifecycle', {
+        decision: { ...decision, arguments: { accessToken: 'do-not-store' } },
+        outcome: 'completed',
+      }),
+    ).toThrow('sensitive field');
+
+    expect(
+      repository.reserveAction({
+        id: 'audit-lifecycle',
+        idempotencyKey: 'action:lifecycle',
+        podId: 'pod-1',
+        decisionId: 'decision-lifecycle',
+        actor,
+        action: 'tell',
+        arguments: decision.arguments,
+        policyResult: 'allowed',
+      }),
+    ).toBe(true);
+    expect(repository.completeAction('action:lifecycle', 'sent')).toBe(true);
+    expect(repository.completeAction('action:lifecycle', 'sent again')).toBe(false);
+
+    repository.createSandboxRun({
+      id: 'sandbox-lifecycle',
+      decisionId: 'decision-lifecycle',
+      backend: 'docker',
+      containerId: 'container-1',
+    });
+    expect(
+      repository.closeSandboxRun('sandbox-lifecycle', {
+        outcome: 'completed',
+        cleanupState: 'cleaned',
+      }),
+    ).toBe(true);
+    expect(
+      db
+        .prepare(
+          'SELECT outcome, cleanup_state, completed_at FROM system_sandbox_runs WHERE id = ?',
+        )
+        .get('sandbox-lifecycle'),
+    ).toMatchObject({
+      outcome: 'completed',
+      cleanup_state: 'cleaned',
+      completed_at: expect.any(String),
+    });
+  });
+
   it('increments generation for every configuration replacement', () => {
     const { repository, actor } = setup();
     expect(repository.getConfiguration()?.generation).toBe(1);

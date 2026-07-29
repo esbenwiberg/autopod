@@ -139,8 +139,18 @@ function parse<T>(value: unknown): T {
   return JSON.parse(value as string) as T;
 }
 
-function assertIso(value: string, field: string): void {
-  if (!Number.isFinite(Date.parse(value))) throw new Error(`${field} must be an ISO timestamp`);
+function normalizeIso(value: string, field: string): string {
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds)) throw new Error(`${field} must be an ISO timestamp`);
+  return new Date(milliseconds).toISOString();
+}
+
+function normalizeFutureLease(expiresAt: string, now: string): string {
+  const normalizedExpiresAt = normalizeIso(expiresAt, 'expiresAt');
+  if (normalizedExpiresAt <= now) {
+    throw new Error('expiresAt must be later than now');
+  }
+  return normalizedExpiresAt;
 }
 
 function assertRedacted(value: unknown, key = 'arguments'): void {
@@ -277,6 +287,10 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
         ...input,
         budgets: input.budgets ?? DEFAULT_BUDGETS,
       });
+      const authorizedUntil =
+        normalized.authorizedUntil === null
+          ? null
+          : normalizeIso(normalized.authorizedUntil, 'authorizedUntil');
       validatePodsitterActivation(normalized.activation);
       const current = db
         .prepare('SELECT generation, created_at FROM podsitter_config WHERE singleton_id = 1')
@@ -308,7 +322,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       ).run({
         enabled: normalized.enabled ? 1 : 0,
         activation: json(normalized.activation),
-        authorizedUntil: normalized.authorizedUntil,
+        authorizedUntil,
         profileScope: normalized.profileScope === null ? null : json(normalized.profileScope),
         providerAccountId: normalized.decisionTarget?.providerAccountId ?? null,
         runtime: normalized.decisionTarget?.runtime ?? null,
@@ -335,6 +349,17 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       failureSignature?: string | null;
       now: string;
     }): PodsitterAttention => {
+      const existing = db
+        .prepare('SELECT * FROM podsitter_attention WHERE pod_id = ? AND signature = ?')
+        .get(input.podId, input.signature) as Record<string, unknown> | undefined;
+      if (existing) {
+        db.prepare(
+          `UPDATE podsitter_attention
+           SET last_seen_at = @now
+           WHERE pod_id = @podId AND signature = @signature`,
+        ).run(input);
+        return getAttention(existing.id as string);
+      }
       db.prepare(
         `UPDATE podsitter_attention
          SET state = 'superseded', superseded_at = @now,
@@ -351,7 +376,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
           @id, @podId, @signature, 'pending', @failureSignature, NULL,
           NULL, NULL, @now, @now, NULL
         )
-        ON CONFLICT(pod_id, signature) DO UPDATE SET last_seen_at = excluded.last_seen_at`,
+        ON CONFLICT(pod_id, signature) DO NOTHING`,
       ).run({ ...input, failureSignature: input.failureSignature ?? null });
       const row = db
         .prepare('SELECT * FROM podsitter_attention WHERE pod_id = ? AND signature = ?')
@@ -368,12 +393,11 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       return row ? hydrateConfiguration(row) : null;
     },
     replaceConfiguration(input, now = new Date().toISOString()) {
-      assertIso(now, 'now');
-      return replaceConfiguration(input, now);
+      const normalizedNow = normalizeIso(now, 'now');
+      return replaceConfiguration(input, normalizedNow);
     },
     recordAttention(input) {
-      const now = input.now ?? new Date().toISOString();
-      assertIso(now, 'now');
+      const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
       return recordAttention({ ...input, now });
     },
     listPendingAttention() {
@@ -386,7 +410,8 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       ).map(hydrateAttention);
     },
     acquireAttentionLease(id, owner, expiresAt, now = new Date().toISOString()) {
-      assertIso(expiresAt, 'expiresAt');
+      const normalizedNow = normalizeIso(now, 'now');
+      const normalizedExpiresAt = normalizeFutureLease(expiresAt, normalizedNow);
       const acquired = db.transaction(() =>
         db
           .prepare(
@@ -396,7 +421,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
                AND state IN ('pending', 'deferred', 'deciding')
                AND (lease_expires_at IS NULL OR lease_expires_at <= ? OR lease_owner = ?)`,
           )
-          .run(owner, expiresAt, id, now, owner),
+          .run(owner, normalizedExpiresAt, id, normalizedNow, owner),
       )();
       return acquired.changes === 1 ? getAttention(id) : null;
     },
@@ -407,6 +432,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       decisionId = null,
       now = new Date().toISOString(),
     ) {
+      const normalizedNow = normalizeIso(now, 'now');
       return (
         db.transaction(() =>
           db
@@ -416,7 +442,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
                    decision_id = COALESCE(?, decision_id), last_seen_at = ?
                WHERE id = ? AND lease_owner = ?`,
             )
-            .run(state, decisionId, now, id, owner),
+            .run(state, decisionId, normalizedNow, id, owner),
         )().changes === 1
       );
     },
@@ -428,6 +454,19 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
     },
     setProviderState(providerAccountId, update, now = new Date().toISOString()) {
       assertRedacted(update.sanitizedReason, 'sanitizedReason');
+      const normalizedNow = normalizeIso(now, 'now');
+      const retryAt =
+        update.retryAt === undefined || update.retryAt === null
+          ? null
+          : normalizeIso(update.retryAt, 'retryAt');
+      const resetAt =
+        update.resetAt === undefined || update.resetAt === null
+          ? null
+          : normalizeIso(update.resetAt, 'resetAt');
+      const recoveredAt =
+        update.recoveredAt === undefined || update.recoveredAt === null
+          ? null
+          : normalizeIso(update.recoveredAt, 'recoveredAt');
       db.transaction(() =>
         db
           .prepare(
@@ -448,11 +487,11 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
             providerAccountId,
             update.status,
             update.consecutiveFailures,
-            update.retryAt ?? null,
-            update.resetAt ?? null,
+            retryAt,
+            resetAt,
             update.sanitizedReason ?? null,
-            update.recoveredAt ?? null,
-            now,
+            recoveredAt,
+            normalizedNow,
           ),
       )();
       const state = this.getProviderState(providerAccountId);
@@ -460,7 +499,8 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       return state;
     },
     acquireProviderProbeLease(providerAccountId, owner, expiresAt, now = new Date().toISOString()) {
-      assertIso(expiresAt, 'expiresAt');
+      const normalizedNow = normalizeIso(now, 'now');
+      const normalizedExpiresAt = normalizeFutureLease(expiresAt, normalizedNow);
       return (
         db.transaction(() =>
           db
@@ -470,11 +510,19 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
                WHERE provider_account_id = ?
                  AND (probe_lease_expires_at IS NULL OR probe_lease_expires_at <= ? OR probe_lease_owner = ?)`,
             )
-            .run(owner, expiresAt, now, providerAccountId, now, owner),
+            .run(
+              owner,
+              normalizedExpiresAt,
+              normalizedNow,
+              providerAccountId,
+              normalizedNow,
+              owner,
+            ),
         )().changes === 1
       );
     },
     releaseProviderProbeLease(providerAccountId, owner, now = new Date().toISOString()) {
+      const normalizedNow = normalizeIso(now, 'now');
       return (
         db.transaction(() =>
           db
@@ -483,7 +531,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
                SET probe_lease_owner = NULL, probe_lease_expires_at = NULL, updated_at = ?
                WHERE provider_account_id = ? AND probe_lease_owner = ?`,
             )
-            .run(now, providerAccountId, owner),
+            .run(normalizedNow, providerAccountId, owner),
         )().changes === 1
       );
     },
@@ -491,6 +539,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       const actor = operatorActorSchema.parse(input.actor);
       assertBoundedRedactedPayload(input.arguments, 'arguments');
       assertRedacted(input.policyResult, 'policyResult');
+      const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
       try {
         db.transaction(() =>
           db
@@ -510,7 +559,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               input.action,
               json(input.arguments),
               input.policyResult,
-              input.now ?? new Date().toISOString(),
+              now,
             ),
         )();
         return true;
@@ -526,6 +575,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
     },
     completeAction(idempotencyKey, daemonResult, now = new Date().toISOString()) {
       assertRedacted(daemonResult, 'daemonResult');
+      const normalizedNow = normalizeIso(now, 'now');
       return (
         db.transaction(() =>
           db
@@ -534,12 +584,12 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
                SET daemon_result = ?, completed_at = ?
                WHERE idempotency_key = ? AND completed_at IS NULL`,
             )
-            .run(daemonResult, now, idempotencyKey),
+            .run(daemonResult, normalizedNow, idempotencyKey),
         )().changes === 1
       );
     },
     createDecision(input) {
-      const now = input.now ?? new Date().toISOString();
+      const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
       db.transaction(() =>
         db
           .prepare(
@@ -572,6 +622,14 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
         update.decision === undefined || update.decision === null
           ? (update.decision ?? null)
           : podsitterDecisionSchema.parse(update.decision);
+      if (decision !== null) {
+        assertBoundedRedactedPayload(decision.arguments, 'decision arguments');
+      }
+      const normalizedNow = normalizeIso(now, 'now');
+      const executedAt =
+        update.executedAt === undefined || update.executedAt === null
+          ? null
+          : normalizeIso(update.executedAt, 'executedAt');
       db.transaction(() =>
         db
           .prepare(
@@ -587,15 +645,15 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
             update.inputTokens ?? null,
             update.outputTokens ?? null,
             update.costUsd ?? null,
-            now,
-            update.executedAt ?? null,
+            normalizedNow,
+            executedAt,
             id,
           ),
       )();
       return getDecision(id);
     },
     createSandboxRun(input) {
-      const now = input.now ?? new Date().toISOString();
+      const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
       db.transaction(() =>
         db
           .prepare(
@@ -616,6 +674,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       )();
     },
     closeSandboxRun(id, update, now = new Date().toISOString()) {
+      const normalizedNow = normalizeIso(now, 'now');
       return (
         db.transaction(() =>
           db
@@ -625,7 +684,14 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
                 completed_at = ?, updated_at = ?
                WHERE id = ?`,
             )
-            .run(update.outcome, update.cleanupState, update.failureCode ?? null, now, now, id),
+            .run(
+              update.outcome,
+              update.cleanupState,
+              update.failureCode ?? null,
+              normalizedNow,
+              normalizedNow,
+              id,
+            ),
         )().changes === 1
       );
     },
