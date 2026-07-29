@@ -2479,6 +2479,110 @@ describe('PodManager', () => {
       ]);
       expect(ctx.enqueuedSessions).toEqual([pod.id]);
     }
+
+    {
+      const { ctx, attempts, manager } = makeContext();
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Recover malformed failed fallback' },
+        'user-1',
+      );
+      ctx.enqueuedSessions.length = 0;
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        failureReason: 'Fallback provider returned 401',
+        worktreePath: `/tmp/worktree/${pod.id}`,
+        runtime: 'codex',
+        model: 'gpt-next',
+        providerAccountIdSnapshot: 'target',
+        providerIdSnapshot: 'max',
+      });
+      attempts.open({
+        podId: pod.id,
+        provider: 'max',
+        providerAccountId: 'target',
+        runtime: 'codex',
+        model: 'gpt-next',
+        profileReference: `pod:${pod.id}@profile-snapshot#abcdef3`,
+        profileSnapshot: { name: 'test-profile' },
+      });
+
+      await expect(manager.continueProvider(pod.id, 'profile-primary')).resolves.toEqual({
+        action: 'primary-provider',
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'queued',
+        runtime: 'claude',
+        model: 'opus',
+        providerAccountIdSnapshot: 'source',
+        providerIdSnapshot: 'anthropic',
+        failureReason: null,
+        recoveryWorktreePath: `/tmp/worktree/${pod.id}`,
+      });
+      expect(attempts.list(pod.id)).toMatchObject([
+        {
+          ordinal: 1,
+          providerAccountId: 'target',
+          runtime: 'codex',
+          model: 'gpt-next',
+          outcome: 'aborted',
+        },
+        {
+          ordinal: 2,
+          providerAccountId: 'source',
+          runtime: 'claude',
+          model: 'opus',
+          outcome: null,
+        },
+      ]);
+      expect(ctx.enqueuedSessions).toEqual([pod.id]);
+    }
+
+    {
+      const { ctx, manager } = makeContext();
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Reject unsafe failed recovery' },
+        'user-1',
+      );
+      ctx.enqueuedSessions.length = 0;
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        worktreePath: `/tmp/worktree/${pod.id}`,
+        containerId: 'failed-container',
+      });
+      vi.mocked(ctx.containerManager.kill).mockRejectedValueOnce(new Error('teardown failed'));
+
+      await expect(manager.continueProvider(pod.id, 'profile-primary')).rejects.toMatchObject({
+        code: 'PROVIDER_CONTINUATION_UNSAFE',
+      });
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'failed',
+        containerId: 'failed-container',
+      });
+      expect(ctx.enqueuedSessions).toEqual([]);
+    }
+
+    {
+      const { ctx, manager } = makeContext();
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Reject arbitrary failed target' },
+        'user-1',
+      );
+      ctx.enqueuedSessions.length = 0;
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        worktreePath: `/tmp/worktree/${pod.id}`,
+      });
+
+      await expect(
+        manager.continueProvider(pod.id, {
+          providerAccountId: 'rogue',
+          runtime: 'codex',
+          model: 'gpt-rogue',
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_PROVIDER_TARGET' });
+      expect(manager.getSession(pod.id)).toMatchObject({ status: 'failed' });
+      expect(ctx.enqueuedSessions).toEqual([]);
+    }
   });
 
   describe('sandbox warm image preflight', () => {

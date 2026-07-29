@@ -326,6 +326,34 @@ describe('AutopodClient', () => {
     });
   });
 
+  describe('continueProvider', () => {
+    it('requests explicit profile-primary recovery', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true, action: 'primary-provider' }));
+
+      const result = await client.continueProvider('failed-pod', { primary: true });
+
+      expect(result).toEqual({ ok: true, action: 'primary-provider' });
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/pods/failed-pod/continue-provider',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ primary: true }),
+        }),
+      );
+    });
+
+    it('preserves provider-limit continuation without a target', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true, action: 'same-provider' }));
+
+      await client.continueProvider('paused-pod');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/pods/paused-pod/continue-provider',
+        expect.objectContaining({ method: 'POST', body: undefined }),
+      );
+    });
+  });
+
   describe('error mapping', () => {
     it('maps 401 to AuthError', async () => {
       mockFetch.mockResolvedValue(errorResponse(401, { message: 'unauthorized' }));

@@ -3106,3 +3106,78 @@ describe('POST /pods approve routes', () => {
     });
   });
 });
+
+describe('POST /pods/:podId/continue-provider', () => {
+  let db: Database.Database;
+  let app: FastifyInstance;
+  const continueProvider = vi.fn();
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    db = createTestDb();
+    app = Fastify({ logger: false });
+    const podRepo = createPodRepository(db);
+    const eventRepo = createEventRepository(db);
+    const escalationRepo = createEscalationRepository(db);
+    podRoutes(
+      app,
+      { continueProvider } as unknown as ReturnType<typeof createPodManager>,
+      eventRepo,
+      undefined,
+      podRepo,
+      escalationRepo,
+      undefined,
+      undefined,
+      db,
+    );
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    db.close();
+  });
+
+  it('forwards explicit profile-primary recovery', async () => {
+    continueProvider.mockResolvedValueOnce({ action: 'primary-provider' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/pods/failed-pod/continue-provider',
+      payload: { primary: true },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, action: 'primary-provider' });
+    expect(continueProvider).toHaveBeenCalledWith('failed-pod', 'profile-primary');
+  });
+
+  it('preserves explicit-target paused continuation', async () => {
+    const target = { providerAccountId: 'fallback', runtime: 'codex', model: 'gpt-5' };
+    continueProvider.mockResolvedValueOnce({ action: 'alternate-provider' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/pods/paused-pod/continue-provider',
+      payload: { target },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(continueProvider).toHaveBeenCalledWith('paused-pod', target);
+  });
+
+  it('rejects ambiguous primary and explicit target requests', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/pods/failed-pod/continue-provider',
+      payload: {
+        primary: true,
+        target: { providerAccountId: 'fallback', runtime: 'codex', model: 'gpt-5' },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ code: 'INVALID_PROVIDER_TARGET' });
+    expect(continueProvider).not.toHaveBeenCalled();
+  });
+});
