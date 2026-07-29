@@ -68,7 +68,7 @@ RUN curl -fsSL https://dl.dagger.io/dagger/install.sh \
     | DAGGER_VERSION=${DAGGER_VERSION#v} BIN_DIR=/usr/local/bin sh \
     && test -x /usr/local/bin/dagger \
     && dagger version \
-    && dagger version | grep -q "${DAGGER_VERSION}" \
+    && dagger version | grep -Eq "(^|[[:space:]])${DAGGER_VERSION}([[:space:]]|$)" \
     || (echo "ERROR: Dagger CLI install failed or version didn't pin to ${DAGGER_VERSION}" && exit 1)
 
 # Pre-warm NuGet cache with common restore patterns

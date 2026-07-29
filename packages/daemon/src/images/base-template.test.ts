@@ -49,7 +49,9 @@ describe('Dagger base image templates', () => {
 
       expect(dockerfile).toContain(`ARG ${versionArgument}=v0.20.8`);
       expect(dockerfile).toContain(`DAGGER_VERSION=\${${versionArgument}#v}`);
-      expect(dockerfile).toContain(`dagger version | grep -q "\${${versionArgument}}"`);
+      expect(dockerfile).toContain(
+        `dagger version | grep -Eq "(^|[[:space:]])\${${versionArgument}}([[:space:]]|$)"`,
+      );
     },
   );
 
