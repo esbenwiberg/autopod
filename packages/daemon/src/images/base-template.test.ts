@@ -43,13 +43,15 @@ describe('Playwright base image templates', () => {
 });
 
 describe('PostgreSQL base image templates', () => {
-  it('keeps node22-pw-pg on the Node base while adding a non-root transient server', async () => {
+  it('configures node22-pw-pg without a volatile runtime socket directory', async () => {
     const dockerfile = await readBaseTemplate('Dockerfile.node22-pw-pg');
 
     expect(dockerfile).toContain('FROM node:22-slim');
     expect(dockerfile).toContain('postgresql-17');
     expect(dockerfile).toContain('/usr/share/postgresql/17/extension/pgcrypto.control');
-    expect(dockerfile).toContain('install -d -o autopod -g autopod -m 0755 /var/run/postgresql');
+    expect(dockerfile).toContain("unix_socket_directories = ''");
+    expect(dockerfile).toContain('/usr/share/postgresql/17/postgresql.conf.sample');
+    expect(dockerfile).not.toContain('/var/run/postgresql');
     expect(dockerfile).toContain('ENV PGDATA=/tmp/pgdata');
     expect(dockerfile).toContain('ENV PGHOST=127.0.0.1');
     expect(dockerfile).toContain('ENV PGPORT=5433');
