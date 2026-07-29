@@ -1484,6 +1484,112 @@ describe('PodManager', () => {
     ).rejects.toMatchObject({ code: 'INVALID_PROVIDER_TARGET' });
   });
 
+  it('reports an exhausted one-target failover with its target and hop count', async () => {
+    const ctx = createTestContext();
+    const attempts = createProviderAttemptRepository(ctx.db);
+    ctx.deps.providerAttemptRepo = attempts;
+    insertProviderAccount(ctx.db, 'source', 'anthropic', {
+      provider: 'anthropic',
+      apiKey: 'source-key',
+    });
+    insertProviderAccount(ctx.db, 'target', 'openai', {
+      provider: 'openai',
+      apiKey: 'target-key',
+    });
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'source');
+    ctx.db.prepare('UPDATE profiles SET provider_failover = ? WHERE name = ?').run(
+      JSON.stringify({
+        targets: [{ providerAccountId: 'target', runtime: 'codex', model: 'gpt-next' }],
+        maxHops: 1,
+      }),
+      'test-profile',
+    );
+    ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Exhaust the configured fallback' },
+      'user-1',
+    );
+    ctx.enqueuedSessions.length = 0;
+    const profileReference = `pod:${pod.id}@profile-snapshot#abcdef1`;
+    attempts.open({
+      podId: pod.id,
+      provider: 'anthropic',
+      providerAccountId: 'source',
+      runtime: 'claude',
+      model: pod.model,
+      profileReference,
+      profileSnapshot: { name: 'test-profile', modelProvider: 'anthropic' },
+    });
+    attempts.close(pod.id, {
+      nativeSessionId: 'source-session',
+      outcome: 'quota_exhausted',
+      inputTokens: 10,
+      outputTokens: 5,
+      costUsd: 0.1,
+    });
+    attempts.open({
+      podId: pod.id,
+      provider: 'openai',
+      providerAccountId: 'target',
+      runtime: 'codex',
+      model: 'gpt-next',
+      profileReference,
+      profileSnapshot: { name: 'test-profile', modelProvider: 'openai' },
+    });
+    attempts.close(pod.id, {
+      nativeSessionId: 'target-session',
+      outcome: 'completed',
+      inputTokens: 20,
+      outputTokens: 10,
+      costUsd: 0.2,
+    });
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      runtime: 'codex',
+      model: 'gpt-next',
+      worktreePath: `/tmp/worktree/${pod.id}`,
+    });
+    ctx.db
+      .prepare(
+        `UPDATE pods
+         SET provider_account_id_snapshot = 'target', provider_id_snapshot = 'openai'
+         WHERE id = ?`,
+      )
+      .run(pod.id);
+
+    await manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        yield {
+          type: 'error',
+          timestamp: '2026-07-29T10:00:00.000Z',
+          message: 'quota exhausted',
+          fatal: true,
+          classification: {
+            category: 'quota_exhausted',
+            definitive: true,
+            sanitizedMessage: 'Provider quota exhausted',
+          },
+        } as const;
+      })(),
+    );
+
+    const messages = ctx.eventRepo
+      .getForSession(pod.id, { type: 'pod.agent_activity' })
+      .flatMap((stored) =>
+        stored.payload.type === 'pod.agent_activity' && stored.payload.event.type === 'status'
+          ? [stored.payload.event.message]
+          : [],
+      );
+    expect(messages).toContain(
+      'Provider limit reached — automatic failover exhausted target (codex/gpt-next); 1/1 hops used',
+    );
+    expect(messages).not.toContain('Provider limit reached — no eligible automatic target');
+    expect(attempts.list(pod.id)).toHaveLength(3);
+    expect(ctx.enqueuedSessions).not.toContain(pod.id);
+  });
+
   it('does not protect a missing historical handoff during later rework', async () => {
     const ctx = createTestContext();
     const attempts = createProviderAttemptRepository(ctx.db);
@@ -8183,6 +8289,117 @@ describe('PodManager', () => {
   });
 
   describe('re-validation from terminal states', () => {
+    it('keeps completed fallback binding for in-place validation-feedback resume', async () => {
+      const primaryToken = 'primary-max-token';
+      const targetAuthJson = JSON.stringify({ token: 'target-openai-token' });
+      const ctx = createTestContext(makeBuildFailure(), {
+        modelProvider: 'max',
+        defaultRuntime: 'claude',
+        defaultModel: 'claude-sonnet-5',
+      });
+      const attempts = createProviderAttemptRepository(ctx.db);
+      ctx.deps.providerAttemptRepo = attempts;
+      insertProviderAccount(ctx.db, 'anth-pro', 'max', {
+        provider: 'max',
+        authMode: 'setup-token',
+        oauthToken: primaryToken,
+      });
+      insertProviderAccount(ctx.db, 'openai-private', 'openai', {
+        provider: 'openai',
+        authMode: 'chatgpt',
+        authJson: targetAuthJson,
+      });
+      linkProfileToProviderAccount(ctx.db, 'test-profile', 'anth-pro');
+      ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+      vi.mocked(ctx.validationEngine.validate)
+        .mockResolvedValueOnce(makeBuildFailure())
+        .mockResolvedValueOnce(makeValidationResult());
+      vi.mocked(ctx.runtime.resume).mockImplementation(async function* () {
+        yield {
+          type: 'complete',
+          timestamp: '2026-07-29T11:00:00.000Z',
+          result: 'validation fixes complete',
+        };
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Fix validation on fallback' },
+        'user-1',
+      );
+      const profileReference = `pod:${pod.id}@profile-snapshot#abcdef1`;
+      attempts.open({
+        podId: pod.id,
+        provider: 'max',
+        providerAccountId: 'anth-pro',
+        runtime: 'claude',
+        model: 'claude-sonnet-5',
+        profileReference,
+        profileSnapshot: { name: 'test-profile', modelProvider: 'max' },
+      });
+      attempts.close(pod.id, {
+        nativeSessionId: 'source-session',
+        outcome: 'quota_exhausted',
+        inputTokens: 10,
+        outputTokens: 5,
+        costUsd: 0.1,
+      });
+      attempts.open({
+        podId: pod.id,
+        provider: 'openai',
+        providerAccountId: 'openai-private',
+        runtime: 'codex',
+        model: 'gpt-5.6-sol',
+        profileReference,
+        profileSnapshot: { name: 'test-profile', modelProvider: 'openai' },
+      });
+      attempts.close(pod.id, {
+        nativeSessionId: 'target-session',
+        outcome: 'completed',
+        inputTokens: 20,
+        outputTokens: 10,
+        costUsd: 0.2,
+      });
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'target-container',
+        runtime: 'codex',
+        model: 'gpt-5.6-sol',
+      });
+      ctx.db
+        .prepare(
+          `UPDATE pods
+           SET provider_account_id_snapshot = 'openai-private', provider_id_snapshot = 'openai'
+           WHERE id = ?`,
+        )
+        .run(pod.id);
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.runtime.resume).toHaveBeenCalledWith(
+        pod.id,
+        expect.stringContaining('TypeScript compile error'),
+        'target-container',
+        expect.not.objectContaining({ CLAUDE_CODE_OAUTH_TOKEN: primaryToken }),
+      );
+      expect(attempts.list(pod.id).at(-1)).toMatchObject({
+        provider: 'openai',
+        providerAccountId: 'openai-private',
+        runtime: 'codex',
+        model: 'gpt-5.6-sol',
+        outcome: 'completed',
+      });
+      expect(ctx.containerManager.writeFile).toHaveBeenCalledWith(
+        'target-container',
+        '/home/autopod/.codex/auth.json',
+        targetAuthJson,
+      );
+      expect(ctx.containerManager.writeFile).not.toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        primaryToken,
+      );
+    });
+
     it('keeps a seeded completed failover binding during forced rework', async () => {
       const primaryToken = 'primary-max-token';
       const targetAuthJson = JSON.stringify({ token: 'target-openai-token' });
