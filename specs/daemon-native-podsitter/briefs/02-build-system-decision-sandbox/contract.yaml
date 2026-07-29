@@ -1,0 +1,84 @@
+contract_version: 1
+title: "Build the dedicated-account system decision sandbox"
+depends_on: [01-add-podsitter-contracts-storage]
+scenarios:
+  - id: system-sandbox-isolation
+    given:
+      - "Podsitter requests a decision using an authenticated dedicated provider account"
+    when:
+      - "the system decision runner spawns Docker or Azure sandbox inference"
+    then:
+      - "the sandbox uses the pinned repo-free system image and only provider-required egress"
+      - "it receives no volumes, repository, ports, daemon gateway, MCP configuration, pod token, or git credentials"
+      - "the model can return structured output but cannot invoke an Autopod action"
+  - id: dedicated-account-oauth-lifecycle
+    given:
+      - "the dedicated provider account uses rotating MAX, Codex ChatGPT, or Pi OAuth credentials"
+    when:
+      - "a compatible CLI decision run refreshes or rotates authentication"
+    then:
+      - "only that provider-account owner is updated under the existing owner lock and lineage rules"
+      - "no target pod or profile credential is read or changed"
+  - id: strict-runtime-decision
+    given:
+      - "a compatible Claude, Codex, Copilot, or Pi decision runtime returns valid, malformed, or unknown-action output"
+    when:
+      - "the runner parses the provider envelope and validates the decision contract"
+    then:
+      - "valid versioned JSON is returned as a typed decision"
+      - "malformed output receives at most one bounded schema-repair attempt"
+      - "unknown or still-invalid output fails without producing an action"
+  - id: sandbox-cleanup-and-reaping
+    given:
+      - "a system sandbox succeeds, fails, times out, or remains active across a daemon crash"
+    when:
+      - "the run unwinds or startup reconciliation executes"
+    then:
+      - "normal runs are killed in a finally path"
+      - "leaked durable runs are reaped without creating or changing normal pods"
+      - "cleanup outcome remains visible even when inference succeeded"
+  - id: provider-failure-classification
+    given:
+      - "the provider CLI reports a transient 429, definitive quota limit, authentication error, or outage"
+    when:
+      - "the decision runner returns a sanitized failure"
+    then:
+      - "the failure retains the correct category and bounded retry or reset evidence"
+      - "credential material is absent from the failure and persisted run"
+required_facts:
+  - id: fact-system-sandbox-isolation
+    proves: [system-sandbox-isolation]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/system-sandbox/system-decision-runner.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- system-decision-runner.test.ts -t "spawns a repo-free provider-only sandbox"
+  - id: fact-dedicated-account-oauth-lifecycle
+    proves: [dedicated-account-oauth-lifecycle]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/system-sandbox/system-provider-auth.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- system-provider-auth.test.ts
+  - id: fact-strict-decision-output
+    proves: [strict-runtime-decision]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/system-sandbox/decision-output.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- decision-output.test.ts
+  - id: fact-system-sandbox-cleanup
+    proves: [sandbox-cleanup-and-reaping]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/system-sandbox/system-decision-runner.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- system-decision-runner.test.ts -t "cleans and reaps system sandboxes"
+  - id: fact-system-provider-failure-classification
+    proves: [provider-failure-classification]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/system-sandbox/system-decision-runner.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- system-decision-runner.test.ts -t "classifies provider limits without leaking secrets"
+human_review: []

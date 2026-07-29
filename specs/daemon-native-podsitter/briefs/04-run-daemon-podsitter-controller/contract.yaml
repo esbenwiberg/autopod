@@ -1,0 +1,131 @@
+contract_version: 1
+title: "Run the daemon Podsitter controller and API"
+depends_on:
+  - 02-build-system-decision-sandbox
+  - 03-add-actor-aware-action-executor
+scenarios:
+  - id: active-attention-to-one-action
+    given:
+      - "Podsitter is inside a valid always-on or recurring authorization window"
+      - "a scoped pod develops a new attention signature"
+      - "the dedicated provider account and system sandbox are available"
+    when:
+      - "event or periodic reconciliation processes the pod"
+    then:
+      - "one bounded redacted evidence packet is evaluated in one system sandbox"
+      - "one structured decision and its evidence references are persisted"
+      - "current activation, signature, pod state, idempotency, and budgets are rechecked before at most one typed action executes"
+  - id: restart-safe-controller
+    given:
+      - "the daemon stops with pending attention, an expired decision lease, or a due provider probe"
+    when:
+      - "a new Podsitter service starts on the same database"
+    then:
+      - "current work is reconciled from durable state"
+      - "expired work can continue without repeating a completed action"
+      - "normal pod lifecycle remains available if Podsitter reconciliation fails"
+  - id: provider-limit-defers-without-burning-attempts
+    given:
+      - "the dedicated decision provider returns a transient rate limit or definitive quota/session limit"
+      - "one or more pods still need model judgment"
+    when:
+      - "Podsitter updates the provider circuit and later reaches the retry or reset time"
+    then:
+      - "pending attention remains durable and deduplicated"
+      - "no pod attempt, action budget, or blind-retry allowance is consumed by unavailable inference"
+      - "only one bounded probe runs at a time with Retry-After or capped backoff"
+  - id: provider-recovery-uses-fresh-evidence
+    given:
+      - "attention was deferred while the dedicated provider circuit was limited"
+      - "the provider later accepts a probe"
+    when:
+      - "Podsitter resumes pending work"
+    then:
+      - "provider recovery is recorded and pending work drains serially"
+      - "each pod is re-read and its evidence/signature rebuilt"
+      - "stale queued decisions are never executed and resolved attention is dropped"
+  - id: deterministic-ready-approval-during-limit
+    given:
+      - "the decision provider is unavailable"
+      - "a pod is validated with readiness exactly ready, validation pass, sound worktree, and no escalation or blocker"
+    when:
+      - "Podsitter reconciles the pod inside authorization"
+    then:
+      - "the existing strict deterministic approval may proceed without model inference"
+      - "needs-review, waived, risky, ambiguous, and force actions remain deferred"
+  - id: kill-switch-and-expiry-win-races
+    given:
+      - "a decision sandbox is in flight"
+    when:
+      - "an operator disables Podsitter, configuration generation changes, or authorization expires before action execution"
+    then:
+      - "the result may be retained for audit but no action executes"
+      - "queued work is cancelled or remains inactive until newly authorized"
+  - id: untrusted-evidence-cannot-authorize
+    given:
+      - "bounded logs, diff, or agent output contain instructions to ignore policy or invoke an unknown operation"
+    when:
+      - "the evidence builder, decision parser, and action policy process them"
+    then:
+      - "the content remains delimited redacted evidence"
+      - "it cannot add tools, alter the schema, bypass activation, or create an open-ended action"
+  - id: authenticated-operator-api
+    given:
+      - "viewer, operator, and admin callers use Podsitter configuration, status, check, probe, and history routes"
+    when:
+      - "requests are authenticated and validated"
+    then:
+      - "only authorized roles can mutate configuration or activation"
+      - "manual check while inactive is read-only"
+      - "responses expose no provider credentials, raw prompts, or unbounded evidence"
+required_facts:
+  - id: fact-active-decision-action-flow
+    proves: [active-attention-to-one-action, untrusted-evidence-cannot-authorize]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/podsitter/podsitter-service.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- podsitter-service.test.ts -t "executes one current authorized decision"
+  - id: fact-restart-safe-controller
+    proves: [restart-safe-controller]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/podsitter/podsitter-service.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- podsitter-service.test.ts -t "recovers durable work without duplicate actions"
+  - id: fact-provider-limit-recovery
+    proves: [provider-limit-defers-without-burning-attempts, deterministic-ready-approval-during-limit]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/podsitter/podsitter-service.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- podsitter-service.test.ts -t "backs off provider limits without consuming action attempts"
+  - id: fact-fresh-evidence-after-recovery
+    proves: [provider-recovery-uses-fresh-evidence]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/podsitter/podsitter-service.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- podsitter-service.test.ts -t "rebuilds evidence after provider recovery"
+  - id: fact-kill-switch-race
+    proves: [kill-switch-and-expiry-win-races]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/podsitter/podsitter-service.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- podsitter-service.test.ts -t "does not execute after disable expiry or generation change"
+  - id: fact-untrusted-evidence-boundary
+    proves: [untrusted-evidence-cannot-authorize]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/podsitter/evidence-builder.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- evidence-builder.test.ts
+  - id: fact-podsitter-api-contract
+    proves: [authenticated-operator-api, kill-switch-and-expiry-win-races]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/api/routes/podsitter.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- podsitter.test.ts
+human_review: []

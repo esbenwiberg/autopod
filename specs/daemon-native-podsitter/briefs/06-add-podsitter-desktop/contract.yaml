@@ -1,0 +1,68 @@
+contract_version: 1
+title: "Add daemon Podsitter desktop settings and audit"
+depends_on: [04-run-daemon-podsitter-controller]
+scenarios:
+  - id: desktop-configures-full-authority
+    given:
+      - "authenticated compatible provider accounts are available"
+    when:
+      - "the operator selects a dedicated account/runtime/model and enables always-on or recurring Podsitter"
+    then:
+      - "invalid or incomplete targets and activation windows cannot be enabled"
+      - "the UI clearly names the full-parity approval, waiver, retry, recovery, force, skip, and completion authority"
+      - "the saved configuration is sent to the daemon and contains no credentials"
+  - id: desktop-distinguishes-operational-states
+    given:
+      - "Podsitter may be configured, enabled, currently inactive, expired, provider-limited, probing, recovered, or draining pending attention"
+    when:
+      - "the settings view loads status and receives updates"
+    then:
+      - "enabled, active-window, expiry, provider circuit, next probe, pending count, and last action are distinguishable"
+      - "an API refresh failure preserves the last known state and shows the error"
+  - id: desktop-kill-switch-invalidates-daemon-authority
+    given:
+      - "Podsitter is enabled and a decision may be in flight"
+    when:
+      - "the operator confirms DISABLE NOW"
+    then:
+      - "the desktop calls the daemon disable endpoint"
+      - "the UI explains normal pods are not killed and in-flight Podsitter action authority is invalidated"
+      - "the refreshed state is disabled even if the decision later appears as not executed"
+  - id: desktop-shows-redacted-decisions
+    given:
+      - "Podsitter has decisions with evidence references, actions, outcomes, reasons, and remaining risks"
+    when:
+      - "the operator opens recent decision history"
+    then:
+      - "the rows render those redacted audit fields and provider recovery state"
+      - "raw prompts, credentials, complete logs, and complete diffs are not represented by client types"
+required_facts:
+  - id: fact-desktop-authorization-editor
+    proves: [desktop-configures-full-authority]
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodDesktopTests/PodsitterStoreTests.swift
+      change: create
+    command: cd packages/desktop && swift test --filter PodsitterStoreTests/testActivationAndFullAuthorityValidation
+  - id: fact-desktop-state-distinction
+    proves: [desktop-distinguishes-operational-states]
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodDesktopTests/PodsitterStoreTests.swift
+      change: create
+    command: cd packages/desktop && swift test --filter PodsitterStoreTests/testOperationalStatesRemainDistinct
+  - id: fact-desktop-daemon-kill-switch
+    proves: [desktop-kill-switch-invalidates-daemon-authority]
+    kind: unit-test
+    artifact:
+      path: packages/desktop/Tests/AutopodDesktopTests/PodsitterStoreTests.swift
+      change: create
+    command: cd packages/desktop && swift test --filter PodsitterStoreTests/testDisableNowCallsDaemon
+  - id: fact-desktop-redacted-history
+    proves: [desktop-shows-redacted-decisions]
+    kind: contract-test
+    artifact:
+      path: packages/desktop/Tests/AutopodClientTests/PodsitterAPITests.swift
+      change: create
+    command: cd packages/desktop && swift test --filter PodsitterAPITests
+human_review: []

@@ -1,0 +1,69 @@
+contract_version: 1
+title: "Add daemon Podsitter contracts and durable state"
+depends_on: []
+scenarios:
+  - id: durable-attention-ledger
+    given:
+      - "Podsitter has persisted pending attention, a provider circuit state, and prior action reservations"
+      - "the daemon process stops after those rows are committed"
+    when:
+      - "new repository instances open the same database and reconcile expired leases"
+    then:
+      - "pending attention and provider state are restored"
+      - "expired leases can be reacquired while active leases cannot"
+      - "an already-reserved action idempotency key cannot be reserved again"
+  - id: activation-window-evaluation
+    given:
+      - "Podsitter authorization is disabled, always-on, expired, or configured as a recurring cron start plus duration and IANA timezone"
+    when:
+      - "the daemon evaluates authorization at times inside and outside the current window, including a cross-midnight or DST boundary"
+    then:
+      - "only enabled unexpired times inside the selected activation are active"
+      - "the active recurring window has a stable occurrence identity for per-window budgets"
+      - "missed inactive windows do not become catch-up authorization"
+  - id: attention-signature-supersession
+    given:
+      - "one pod has a pending attention signature and then receives materially new durable evidence"
+    when:
+      - "the new signature is recorded"
+    then:
+      - "the old pending signature is marked superseded"
+      - "the current signature can be leased exactly once"
+  - id: dedicated-account-reference
+    given:
+      - "Podsitter configuration references a dedicated provider account"
+    when:
+      - "an operator tries to delete that account and later removes the Podsitter reference"
+    then:
+      - "deletion is rejected while referenced"
+      - "deletion is allowed after the reference is removed"
+required_facts:
+  - id: fact-durable-attention-ledger
+    proves: [durable-attention-ledger, attention-signature-supersession]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/podsitter/podsitter-repository.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- podsitter-repository.test.ts -t "restores pending attention and enforces durable leases"
+  - id: fact-action-idempotency
+    proves: [durable-attention-ledger]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/podsitter/podsitter-repository.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- podsitter-repository.test.ts -t "reserves each action key once"
+  - id: fact-activation-window-evaluation
+    proves: [activation-window-evaluation]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/podsitter/activation.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- activation.test.ts
+  - id: fact-dedicated-account-reference
+    proves: [dedicated-account-reference]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/provider-accounts/provider-account-store.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- provider-account-store.test.ts -t "blocks a Podsitter-referenced account"
+human_review: []
