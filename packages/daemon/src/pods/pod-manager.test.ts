@@ -7696,31 +7696,31 @@ describe('PodManager', () => {
       try {
         const ctx = createTestContext();
         vi.mocked(ctx.validationEngine.validate).mockResolvedValueOnce({
-            podId: 'test',
-            attempt: 1,
-            timestamp: new Date().toISOString(),
-            smoke: {
+          podId: 'test',
+          attempt: 1,
+          timestamp: new Date().toISOString(),
+          smoke: {
+            status: 'pass',
+            build: { status: 'pass', output: '', duration: 100 },
+            health: {
               status: 'pass',
-              build: { status: 'pass', output: '', duration: 100 },
-              health: {
-                status: 'pass',
-                url: 'http://localhost:3000',
-                responseCode: 200,
-                duration: 50,
-              },
-              pages: [],
+              url: 'http://localhost:3000',
+              responseCode: 200,
+              duration: 50,
             },
-            taskReview: {
-              status: 'pass',
-              reasoning: 'Looks good',
-              issues: [],
-              model: 'gpt-5',
-              screenshots: [],
-              diff: '+done',
-            },
-            overall: 'pass',
-            duration: 5000,
-          });
+            pages: [],
+          },
+          taskReview: {
+            status: 'pass',
+            reasoning: 'Looks good',
+            issues: [],
+            model: 'gpt-5',
+            screenshots: [],
+            diff: '+done',
+          },
+          overall: 'pass',
+          duration: 5000,
+        });
         const manager = createPodManager(ctx.deps);
 
         const pod = manager.createSession(

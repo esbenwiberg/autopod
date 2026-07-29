@@ -1043,14 +1043,14 @@ struct OverviewTab: View {
 
     private func validationChip(_ label: String, status: Bool?, icon: String) -> some View {
         let color: Color = switch status {
-        case true: .green
-        case false: .red
-        case nil: Color.secondary
+        case .some(true): .green
+        case .some(false): .red
+        case .none: Color.secondary
         }
         let iconName: String = switch status {
-        case true: "checkmark.circle.fill"
-        case false: "xmark.circle.fill"
-        case nil: "minus.circle"
+        case .some(true): "checkmark.circle.fill"
+        case .some(false): "xmark.circle.fill"
+        case .none: "minus.circle"
         }
         return HStack(spacing: 5) {
             Image(systemName: iconName)
