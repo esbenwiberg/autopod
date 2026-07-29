@@ -10539,6 +10539,27 @@ describe('PodManager', () => {
       expect(manager.getSession(fix.id).status).toBe('complete');
     });
 
+    it('does not push when the linked parent becomes terminal during retry rebase', async () => {
+      const ctx = createTestContext();
+      const { manager, parent, fix } = setupParkedFixDeliveryFailure(ctx);
+      (ctx.worktreeManager.rebaseOntoBase as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async () => {
+          ctx.podRepo.update(parent.id, {
+            status: 'complete',
+            completedAt: new Date().toISOString(),
+          });
+          return { rebased: true, alreadyUpToDate: false, conflicts: [] };
+        },
+      );
+
+      const result = await manager.resumePod(fix.id);
+
+      expect(result).toEqual({ action: 'retry-fix-delivery' });
+      expect(ctx.worktreeManager.rebaseOntoBase).toHaveBeenCalled();
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(manager.getSession(fix.id).status).toBe('complete');
+    });
+
     it('retains force-with-lease when retry rebase is already up to date', async () => {
       const ctx = createTestContext();
       const { manager, fix } = setupParkedFixDeliveryFailure(ctx);
