@@ -64,7 +64,7 @@ CREATE TABLE podsitter_action_audit (
   id TEXT PRIMARY KEY,
   idempotency_key TEXT NOT NULL UNIQUE,
   pod_id TEXT NOT NULL REFERENCES pods(id) ON DELETE CASCADE,
-  decision_id TEXT NOT NULL REFERENCES podsitter_decisions(id) ON DELETE RESTRICT,
+  decision_id TEXT NOT NULL UNIQUE REFERENCES podsitter_decisions(id) ON DELETE RESTRICT,
   failure_signature TEXT,
   actor TEXT NOT NULL,
   action TEXT NOT NULL,

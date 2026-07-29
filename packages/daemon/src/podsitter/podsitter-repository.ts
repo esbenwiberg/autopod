@@ -585,7 +585,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       } catch (error) {
         if (
           error instanceof Error &&
-          /UNIQUE constraint failed.*idempotency_key/i.test(error.message)
+          /UNIQUE constraint failed.*(?:idempotency_key|decision_id)/i.test(error.message)
         ) {
           return false;
         }

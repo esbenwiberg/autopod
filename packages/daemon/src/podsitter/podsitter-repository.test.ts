@@ -208,6 +208,13 @@ describe('PodsitterRepository', () => {
     expect(
       repository.reserveAction({
         ...reservation,
+        id: 'audit-same-decision-new-key',
+        idempotencyKey: 'pod-1:signature-1:approve:alternate',
+      }),
+    ).toBe(false);
+    expect(
+      repository.reserveAction({
+        ...reservation,
         id: 'audit-wrong-pod',
         idempotencyKey: 'wrong-pod:signature-1:approve',
         podId: 'wrong-pod',
