@@ -80,17 +80,51 @@ export const PODSITTER_ACTIONS = [
 export type PodsitterAction = (typeof PODSITTER_ACTIONS)[number];
 export type PodsitterConfidence = 'low' | 'medium' | 'high';
 
-export interface PodsitterDecision {
+export interface PodsitterActionArguments {
+  no_action: Record<string, never>;
+  report: { message: string };
+  approve: Record<string, never>;
+  reject: { message: string };
+  tell: { message: string };
+  nudge: { message: string };
+  dismiss_validation_finding: { findingId: string; reason: string };
+  guide_validation_fix: { findingId: string; guidance: string };
+  extend_budget: Record<string, never>;
+  kick: Record<string, never>;
+  interrupt_validation: Record<string, never>;
+  revalidate: Record<string, never>;
+  extend_validation_attempts: Record<string, never>;
+  approve_fact_waiver: { factId: string; justification: string };
+  extend_pr_attempts: Record<string, never>;
+  spawn_fix: Record<string, never>;
+  retry_pr: Record<string, never>;
+  update_from_base: Record<string, never>;
+  inject_credential: { credentialId: string };
+  install_tool: { toolName: string };
+  recover_worktree: Record<string, never>;
+  force_approve: { failedPhases: string[]; manualEvidenceRefs: string[] };
+  skip_validation: { failedPhases: string[]; manualEvidenceRefs: string[] };
+  force_complete: { failedPhases: string[]; manualEvidenceRefs: string[] };
+  fix_manually: { instructions: string };
+}
+
+interface PodsitterDecisionCommon {
   contractVersion: 1;
   attentionSignature: string;
-  action: PodsitterAction;
-  arguments: Record<string, unknown>;
   reason: string;
   evidenceRefs: string[];
   confidence: PodsitterConfidence;
   remainingRisk: string;
   stopCondition: string;
 }
+
+export type PodsitterDecision = PodsitterDecisionCommon &
+  {
+    [Action in PodsitterAction]: {
+      action: Action;
+      arguments: PodsitterActionArguments[Action];
+    };
+  }[PodsitterAction];
 
 export type PodsitterAttentionState =
   | 'pending'

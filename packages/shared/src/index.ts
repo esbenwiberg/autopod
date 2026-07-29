@@ -310,6 +310,7 @@ export type {
 export type {
   OperatorActor,
   PodsitterAction,
+  PodsitterActionArguments,
   PodsitterActivation,
   PodsitterActivationEvaluation,
   PodsitterAttention,
@@ -331,6 +332,7 @@ export { PODSITTER_ACTIONS } from './types/podsitter.js';
 export {
   operatorActorSchema,
   podsitterActivationSchema,
+  podsitterActionArgumentsSchemas,
   podsitterBudgetsSchema,
   podsitterConfigurationInputSchema,
   podsitterDecisionSchema,

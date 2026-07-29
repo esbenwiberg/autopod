@@ -4,6 +4,57 @@ import { providerAccountIdSchema } from './provider-account.schema.js';
 
 const isoTimestampSchema = z.string().datetime({ offset: true });
 const boundedTextSchema = z.string().max(4_000);
+const boundedIdentifierSchema = z.string().trim().min(1).max(256);
+const emptyArgumentsSchema = z.object({}).strict();
+const forceArgumentsSchema = z
+  .object({
+    failedPhases: z.array(boundedIdentifierSchema).min(1).max(50),
+    manualEvidenceRefs: z.array(boundedIdentifierSchema).min(1).max(100),
+  })
+  .strict();
+
+export const podsitterActionArgumentsSchemas = {
+  no_action: emptyArgumentsSchema,
+  report: z.object({ message: boundedTextSchema.min(1) }).strict(),
+  approve: emptyArgumentsSchema,
+  reject: z.object({ message: boundedTextSchema.min(1) }).strict(),
+  tell: z.object({ message: boundedTextSchema.min(1) }).strict(),
+  nudge: z.object({ message: boundedTextSchema.min(1) }).strict(),
+  dismiss_validation_finding: z
+    .object({
+      findingId: boundedIdentifierSchema,
+      reason: boundedTextSchema.min(1),
+    })
+    .strict(),
+  guide_validation_fix: z
+    .object({
+      findingId: boundedIdentifierSchema,
+      guidance: boundedTextSchema.min(1),
+    })
+    .strict(),
+  extend_budget: emptyArgumentsSchema,
+  kick: emptyArgumentsSchema,
+  interrupt_validation: emptyArgumentsSchema,
+  revalidate: emptyArgumentsSchema,
+  extend_validation_attempts: emptyArgumentsSchema,
+  approve_fact_waiver: z
+    .object({
+      factId: boundedIdentifierSchema,
+      justification: boundedTextSchema.min(1),
+    })
+    .strict(),
+  extend_pr_attempts: emptyArgumentsSchema,
+  spawn_fix: emptyArgumentsSchema,
+  retry_pr: emptyArgumentsSchema,
+  update_from_base: emptyArgumentsSchema,
+  inject_credential: z.object({ credentialId: boundedIdentifierSchema }).strict(),
+  install_tool: z.object({ toolName: boundedIdentifierSchema }).strict(),
+  recover_worktree: emptyArgumentsSchema,
+  force_approve: forceArgumentsSchema,
+  skip_validation: forceArgumentsSchema,
+  force_complete: forceArgumentsSchema,
+  fix_manually: z.object({ instructions: boundedTextSchema.min(1) }).strict(),
+} satisfies Record<(typeof PODSITTER_ACTIONS)[number], z.ZodType>;
 
 export const operatorActorSchema = z.discriminatedUnion('type', [
   z
@@ -80,4 +131,15 @@ export const podsitterDecisionSchema = z
     remainingRisk: boundedTextSchema,
     stopCondition: boundedTextSchema.min(1),
   })
-  .strict();
+  .strict()
+  .superRefine((decision, context) => {
+    const result = podsitterActionArgumentsSchemas[decision.action].safeParse(decision.arguments);
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        context.addIssue({
+          ...issue,
+          path: ['arguments', ...issue.path],
+        });
+      }
+    }
+  });

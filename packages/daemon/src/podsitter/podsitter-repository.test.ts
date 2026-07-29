@@ -171,6 +171,14 @@ describe('PodsitterRepository', () => {
     };
     expect(repository.reserveAction(reservation)).toBe(true);
     expect(repository.reserveAction({ ...reservation, id: 'audit-2' })).toBe(false);
+    expect(() =>
+      repository.reserveAction({
+        ...reservation,
+        id: 'audit-arbitrary',
+        idempotencyKey: 'pod-1:signature-1:approve:arbitrary',
+        arguments: { command: 'rm -rf workspace' },
+      }),
+    ).toThrow();
   });
 
   it('normalizes lease timestamps and rejects expired leases', () => {
@@ -381,6 +389,7 @@ describe('PodsitterRepository', () => {
         decision: {
           ...decision,
           action: 'no_action',
+          arguments: {},
           reason: 'A late duplicate completion must not replace the durable result.',
         },
         outcome: 'not_executed',
@@ -391,7 +400,7 @@ describe('PodsitterRepository', () => {
         decision: { ...decision, arguments: { accessToken: 'do-not-store' } },
         outcome: 'completed',
       }),
-    ).toThrow('sensitive field');
+    ).toThrow();
 
     expect(
       repository.reserveAction({

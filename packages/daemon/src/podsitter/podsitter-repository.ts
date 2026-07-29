@@ -12,6 +12,7 @@ import {
   type PodsitterProviderState,
   type SystemSandboxRunOutcome,
   operatorActorSchema,
+  podsitterActionArgumentsSchemas,
   podsitterConfigurationInputSchema,
   podsitterDecisionSchema,
 } from '@autopod/shared';
@@ -539,7 +540,8 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
     },
     reserveAction(input) {
       const actor = operatorActorSchema.parse(input.actor);
-      assertBoundedRedactedPayload(input.arguments, 'arguments');
+      const actionArguments = podsitterActionArgumentsSchemas[input.action].parse(input.arguments);
+      assertBoundedRedactedPayload(actionArguments, 'arguments');
       assertRedacted(input.policyResult, 'policyResult');
       const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
       try {
@@ -559,7 +561,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               input.failureSignature ?? null,
               json(actor),
               input.action,
-              json(input.arguments),
+              json(actionArguments),
               input.policyResult,
               now,
             ),
