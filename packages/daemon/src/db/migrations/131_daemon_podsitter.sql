@@ -44,7 +44,8 @@ CREATE TABLE podsitter_decisions (
   configuration_generation INTEGER NOT NULL,
   evidence_hash TEXT NOT NULL,
   evidence_version INTEGER NOT NULL,
-  provider_account_id TEXT NOT NULL REFERENCES provider_accounts(id) ON DELETE RESTRICT,
+  -- Keep the account id as immutable audit provenance without retaining the account itself.
+  provider_account_id TEXT NOT NULL,
   runtime TEXT NOT NULL,
   model TEXT NOT NULL,
   reasoning_effort TEXT,

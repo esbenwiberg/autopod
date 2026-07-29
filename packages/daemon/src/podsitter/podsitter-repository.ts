@@ -11,6 +11,7 @@ import {
   type PodsitterProviderCircuitStatus,
   type PodsitterProviderState,
   type SystemSandboxRunOutcome,
+  operatorActorSchema,
   podsitterConfigurationInputSchema,
   podsitterDecisionSchema,
 } from '@autopod/shared';
@@ -19,6 +20,7 @@ import { validatePodsitterActivation } from './activation.js';
 
 const DEFAULT_BUDGETS = { maxDecisionsPerWindow: 20, maxActionsPerWindow: 10 };
 const SENSITIVE_KEY = /(credential|password|secret|token|api.?key|authorization)/i;
+const MAX_PERSISTED_PAYLOAD_BYTES = 32_000;
 
 export interface PodsitterConfigurationInput {
   enabled: boolean;
@@ -155,6 +157,13 @@ function assertRedacted(value: unknown, key = 'arguments'): void {
     }
   } else if (typeof value === 'string' && value.length > 4_000) {
     throw new Error(`Podsitter ${key} exceeds the bounded field limit`);
+  }
+}
+
+function assertBoundedRedactedPayload(value: unknown, field: string): void {
+  assertRedacted(value, field);
+  if (Buffer.byteLength(JSON.stringify(value), 'utf8') > MAX_PERSISTED_PAYLOAD_BYTES) {
+    throw new Error(`Podsitter ${field} exceeds the bounded payload limit`);
   }
 }
 
@@ -479,7 +488,8 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       );
     },
     reserveAction(input) {
-      assertRedacted(input.arguments);
+      const actor = operatorActorSchema.parse(input.actor);
+      assertBoundedRedactedPayload(input.arguments, 'arguments');
       assertRedacted(input.policyResult, 'policyResult');
       try {
         db.transaction(() =>
@@ -496,7 +506,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               input.podId,
               input.decisionId,
               input.failureSignature ?? null,
-              json(input.actor),
+              json(actor),
               input.action,
               json(input.arguments),
               input.policyResult,
