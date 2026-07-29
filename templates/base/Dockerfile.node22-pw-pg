@@ -29,6 +29,10 @@ RUN install -d /usr/share/postgresql-common/pgdg \
     && apt-get update \
     && apt-get install -y --no-install-recommends postgresql-17 \
     && test -f /usr/share/postgresql/17/extension/pgcrypto.control \
+    && sed -ri "s|^#?unix_socket_directories[[:space:]]*=.*|unix_socket_directories = ''|" \
+      /usr/share/postgresql/17/postgresql.conf.sample \
+    && grep -Fxq "unix_socket_directories = ''" \
+      /usr/share/postgresql/17/postgresql.conf.sample \
     && rm -rf /var/lib/apt/lists/*
 
 # Expose the commands needed to initialize and run a transient database.
@@ -49,8 +53,7 @@ ENV LANG=en_US.UTF-8
 # Create non-root user — remove the default node user (uid 1000) first
 RUN userdel --remove node 2>/dev/null; groupdel node 2>/dev/null; \
     groupadd --gid 1000 autopod && \
-    useradd --uid 1000 --gid autopod --shell /bin/bash --create-home autopod && \
-    install -d -o autopod -g autopod -m 0755 /var/run/postgresql
+    useradd --uid 1000 --gid autopod --shell /bin/bash --create-home autopod
 
 # Global tools
 RUN npm install -g pnpm@9

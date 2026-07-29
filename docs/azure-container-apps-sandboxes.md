@@ -325,6 +325,42 @@ exec (chunk arrival timing + non-zero exit code propagation — see the `exec_st
 file write/read, workspace upload into staging, copy into writable `/workspace`, workspace
 sync-back, restricted egress-policy refresh, and then destroys the sandbox plus its disk image.
 
+### Scruffy PostgreSQL smoke and validation setup
+
+The Scruffy warm image has a dedicated PostgreSQL smoke that exercises the real Azure Sandbox
+runtime. It initializes a clean TCP-only cluster, replaces an agent-like cluster whose
+administrator is `scruffy`, repeats the validation reset, and verifies the final role, database
+ownership, and application connection:
+
+```bash
+npx pnpm --filter @autopod/daemon build
+export SANDBOX_IMAGE=<registry>.azurecr.io/autopod/<scruffy-profile>:latest
+# Set the same AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, Sandbox group/location,
+# and image-pull identity or short-lived registry credentials used above.
+node scripts/smoke-scruffy-postgres-sandbox.mjs
+```
+
+This script calls `SandboxContainerManager.withAzureClient`; an ACR Task or local Docker run is not
+an acceptance substitute. It always destroys the sandbox in `finally`.
+
+After publishing the corrected `autopod-node22-pw-pg` base image and rebuilding the hosted Scruffy
+warm image, replace the hosted Scruffy `validationSetupCommand` with this exact command:
+
+```sh
+npm ci && if [ -s "$PGDATA/PG_VERSION" ] && pg_ctl -D "$PGDATA" status >/dev/null 2>&1; then pg_ctl -D "$PGDATA" -m fast -w stop; fi && rm -rf -- "$PGDATA" && initdb -D "$PGDATA" -U postgres --auth=trust && pg_ctl -D "$PGDATA" -o "-h 127.0.0.1 -p 5433" -w start && createuser -h 127.0.0.1 -p 5433 -U postgres --login scruffy && createdb -h 127.0.0.1 -p 5433 -U postgres -O scruffy scruffy
+```
+
+Keep `SCRUFFY_REQUIRE_DB=1` in the profile build environment. Review the stored command after the
+profile update to catch quoting damage. Then run the dedicated smoke against the published Scruffy
+warm image and start or revalidate a fresh Scruffy pod; setup and DB-backed tests must pass without
+a waiver. These are post-merge operator actions, in order:
+
+1. Build and publish the corrected `autopod-node22-pw-pg` base image.
+2. Rebuild the hosted Scruffy warm image.
+3. Apply and review the command above while retaining `SCRUFFY_REQUIRE_DB=1`.
+4. Run `scripts/smoke-scruffy-postgres-sandbox.mjs` through Azure Sandbox.
+5. Start or revalidate a fresh Scruffy pod and confirm DB-backed validation passes.
+
 > **Validated live on 2026-07-08** (`ewi-sandboxes` / `swedencentral` / group `autopod-spike`,
 > warm image `autopod/autopod-self:latest`). The full smoke passed: buffered exec, streaming
 > exec (`exec_stream={"exitCode":7,"chunks":4,"spreadMs":3006,…}` — three 1s-spaced echoes
