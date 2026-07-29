@@ -282,6 +282,7 @@ describe('runContainerReviewer', () => {
       expect(vi.mocked(cm.execStreaming).mock.calls[0]?.[1]).not.toContain(
         'Review without leaking this prompt into argv',
       );
+      expect(vi.mocked(cm.execStreaming).mock.calls[0]?.[2]).not.toHaveProperty('timeout');
 
       const unconfirmed = containerManager();
       const unconfirmedStdout = new PassThrough();

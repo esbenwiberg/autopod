@@ -148,7 +148,6 @@ async function runClaudeContainerReview(
       {
         cwd: '/workspace',
         ...(config.env ? { env: config.env } : {}),
-        timeout: config.timeout,
       },
     );
     const result = await collectCancellableReview(handle, config.timeout);
