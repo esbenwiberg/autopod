@@ -640,6 +640,7 @@ function createTestContext(
         smokePages: JSON.parse(row.validation_pages as string),
         maxValidationAttempts: row.max_validation_attempts as number,
         defaultModel: row.default_model as string,
+        reviewerModel: (row.reviewer_model as string | null) ?? null,
         defaultRuntime: row.default_runtime as RuntimeType,
         reasoningEffort: row.reasoning_effort as Profile['reasoningEffort'],
         customInstructions: (row.custom_instructions as string) ?? null,
@@ -1111,26 +1112,38 @@ describe('PodManager', () => {
     );
   });
 
-  it('preserves reasoning effort for a provider failover attempt', async () => {
-    const ctx = createTestContext(undefined, { reasoningEffort: 'xhigh' });
+  it('keeps fallback provider bound through review and rework', async () => {
+    const targetAuthJson = JSON.stringify({ token: 'target-openai-token' });
+    const ctx = createTestContext(undefined, {
+      modelProvider: 'max',
+      defaultRuntime: 'claude',
+      defaultModel: 'claude-sonnet-5',
+      reviewerModel: 'claude-sonnet-5',
+      reasoningEffort: 'xhigh',
+    });
     const attempts = createProviderAttemptRepository(ctx.db);
     ctx.deps.providerAttemptRepo = attempts;
-    insertProviderAccount(ctx.db, 'source', 'anthropic', {
-      provider: 'anthropic',
-      apiKey: 'source-key',
+    insertProviderAccount(ctx.db, 'source', 'max', {
+      provider: 'max',
+      authMode: 'setup-token',
+      oauthToken: 'source-token',
     });
     insertProviderAccount(ctx.db, 'target', 'openai', {
       provider: 'openai',
-      apiKey: 'target-key',
+      authMode: 'chatgpt',
+      authJson: targetAuthJson,
     });
     linkProfileToProviderAccount(ctx.db, 'test-profile', 'source');
     ctx.db.prepare('UPDATE profiles SET provider_failover = ? WHERE name = ?').run(
       JSON.stringify({
-        targets: [{ providerAccountId: 'target', runtime: 'codex', model: 'gpt-next' }],
+        targets: [{ providerAccountId: 'target', runtime: 'codex', model: 'gpt-5.6-sol' }],
         maxHops: 1,
       }),
       'test-profile',
     );
+    ctx.db
+      .prepare('UPDATE profiles SET reviewer_model = ? WHERE name = ?')
+      .run('claude-sonnet-5', 'test-profile');
     ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
     ctx.deps.requeueSessionAfterCurrent = vi.fn();
     vi.mocked(ctx.runtime.spawn).mockImplementationOnce(async function* () {
@@ -1156,9 +1169,16 @@ describe('PodManager', () => {
         result: 'done',
       } as const;
     });
+    vi.mocked(ctx.runtime.spawn).mockImplementationOnce(async function* () {
+      yield {
+        type: 'complete',
+        timestamp: '2026-07-27T10:02:00.000Z',
+        result: 'rework complete',
+      } as const;
+    });
     const manager = createPodManager(ctx.deps);
     const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Keep effort across failover', skipValidation: true },
+      { profileName: 'test-profile', task: 'Keep identity across failover' },
       'user-1',
     );
 
@@ -1173,11 +1193,66 @@ describe('PodManager', () => {
 
     expect(ctx.runtime.spawn).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        model: 'gpt-next',
+        model: 'gpt-5.6-sol',
         reasoningEffort: 'xhigh',
       }),
     );
-    expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('validated');
+    expect({
+      pod: {
+        providerAccountId: ctx.podRepo.getOrThrow(pod.id).providerAccountIdSnapshot,
+        provider: ctx.podRepo.getOrThrow(pod.id).providerIdSnapshot,
+        runtime: ctx.podRepo.getOrThrow(pod.id).runtime,
+        model: ctx.podRepo.getOrThrow(pod.id).model,
+      },
+      latest: attempts.list(pod.id).at(-1),
+    }).toMatchObject({
+      pod: {
+        providerAccountId: 'target',
+        provider: 'openai',
+        runtime: 'codex',
+        model: 'gpt-5.6-sol',
+      },
+      latest: {
+        providerAccountId: 'target',
+        provider: 'openai',
+        runtime: 'codex',
+        model: 'gpt-5.6-sol',
+      },
+    });
+    expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({ status: 'validated' });
+    expect(ctx.validationEngine.validate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewerProvider: 'openai',
+        reviewerModel: 'auto',
+        reviewerProviderCredentials: {
+          provider: 'openai',
+          authMode: 'chatgpt',
+          authJson: targetAuthJson,
+        },
+      }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+      expect.any(Object),
+    );
+
+    ctx.podRepo.update(pod.id, { status: 'failed', validationAttempts: 3 });
+    await manager.triggerValidation(pod.id, { force: true });
+    await manager.processPod(pod.id);
+    expect(ctx.runtime.spawn).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        model: 'gpt-5.6-sol',
+        env: expect.not.objectContaining({ CLAUDE_CODE_OAUTH_TOKEN: 'source-token' }),
+      }),
+    );
+    expect(attempts.list(pod.id).at(-1)).toMatchObject({
+      provider: 'openai',
+      providerAccountId: 'target',
+      runtime: 'codex',
+      model: 'gpt-5.6-sol',
+    });
+
+    ctx.db.prepare('DELETE FROM provider_accounts WHERE id = ?').run('target');
+    expect(() => manager.getReviewerConfig(ctx.podRepo.getOrThrow(pod.id))).toThrow();
   });
 
   it('ledgers successful, resumed, failed, paused, and killed runtime segments', async () => {
@@ -7345,15 +7420,7 @@ describe('PodManager', () => {
       vi.useFakeTimers();
       try {
         const ctx = createTestContext();
-        vi.mocked(ctx.validationEngine.validate)
-          .mockResolvedValueOnce({
-            podId: 'test',
-            attempt: 1,
-            timestamp: new Date().toISOString(),
-            duration: 5000,
-            ...reviewInfrastructureFailureResult('review-timeout'),
-          } as ValidationResult)
-          .mockResolvedValueOnce({
+        vi.mocked(ctx.validationEngine.validate).mockResolvedValueOnce({
             podId: 'test',
             attempt: 1,
             timestamp: new Date().toISOString(),
@@ -7394,10 +7461,9 @@ describe('PodManager', () => {
 
         const validationPromise = manager.triggerValidation(pod.id);
         await vi.waitFor(() => expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1));
-        await vi.advanceTimersByTimeAsync(10_000);
         await validationPromise;
 
-        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
         expect(ctx.runtime.resume).not.toHaveBeenCalled();
         const result = manager.getSession(pod.id);
         expect(result.status).toBe('validated');
@@ -7410,7 +7476,7 @@ describe('PodManager', () => {
             const payload = event.payload as { event?: { message?: unknown } };
             return payload.event?.message;
           });
-        expect(messages).toContain('Review infrastructure failure — retrying in 10s (1/3)');
+        expect(messages).not.toContain('Review infrastructure failure — retrying in 10s (1/3)');
         expect(
           messages.filter(
             (message) => message === 'Validation checks finished — finalizing result…',
@@ -7439,14 +7505,9 @@ describe('PodManager', () => {
 
         const validationPromise = manager.triggerValidation(pod.id);
         await vi.waitFor(() => expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1));
-        await vi.advanceTimersByTimeAsync(10_000);
-        await vi.waitFor(() => expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2));
-        await vi.advanceTimersByTimeAsync(30_000);
-        await vi.waitFor(() => expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(3));
-        await vi.advanceTimersByTimeAsync(90_000);
         await validationPromise;
 
-        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(4);
+        expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
         expect(ctx.runtime.resume).not.toHaveBeenCalled();
         const result = manager.getSession(pod.id);
         expect(result.status).toBe('review_required');
@@ -7463,7 +7524,7 @@ describe('PodManager', () => {
             return payload.event?.message;
           });
         expect(messages).toContain(
-          'Review infrastructure failed after 3 retries — needs human review',
+          'Review infrastructure failure after one Review retry — needs human review',
         );
         expect(messages).toContain('Stopping post-validation container…');
       } finally {
@@ -7585,9 +7646,7 @@ describe('PodManager', () => {
     it('retries review infrastructure failures without agent rework', async () => {
       const ctx = createTestContext();
       ctx.deps.reviewInfrastructureRetryBackoffMs = [0];
-      vi.mocked(ctx.validationEngine.validate)
-        .mockResolvedValueOnce(makeReviewInfraFailure())
-        .mockResolvedValueOnce(makeValidationResult());
+      vi.mocked(ctx.validationEngine.validate).mockResolvedValueOnce(makeValidationResult());
       const manager = createPodManager(ctx.deps);
 
       const pod = manager.createSession(
@@ -7603,7 +7662,7 @@ describe('PodManager', () => {
 
       await manager.triggerValidation(pod.id);
 
-      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('validated');
@@ -7629,7 +7688,7 @@ describe('PodManager', () => {
 
       await manager.triggerValidation(pod.id);
 
-      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(4);
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('review_required');
@@ -8124,13 +8183,14 @@ describe('PodManager', () => {
   });
 
   describe('re-validation from terminal states', () => {
-    it('keeps the completed failover binding during forced rework', async () => {
+    it('keeps a seeded completed failover binding during forced rework', async () => {
       const primaryToken = 'primary-max-token';
       const targetAuthJson = JSON.stringify({ token: 'target-openai-token' });
       const ctx = createTestContext(undefined, {
         modelProvider: 'max',
         defaultRuntime: 'claude',
         defaultModel: 'claude-sonnet-5',
+        reviewerModel: 'claude-sonnet-5',
       });
       const attempts = createProviderAttemptRepository(ctx.db);
       ctx.deps.providerAttemptRepo = attempts;
@@ -8211,6 +8271,16 @@ describe('PodManager', () => {
         )
         .run(pod.id);
 
+      const reviewerConfig = manager.getReviewerConfig(ctx.podRepo.getOrThrow(pod.id));
+      expect(reviewerConfig).toMatchObject({
+        profile: {
+          modelProvider: 'openai',
+          providerAccountId: 'openai-private',
+          defaultRuntime: 'codex',
+          defaultModel: 'gpt-5.6-sol',
+        },
+        credentials: { provider: 'openai', authJson: targetAuthJson },
+      });
       await manager.triggerValidation(pod.id, { force: true });
       expect(manager.getSession(pod.id)).toMatchObject({
         status: 'queued',
@@ -8244,6 +8314,9 @@ describe('PodManager', () => {
         expect.any(String),
         primaryToken,
       );
+
+      ctx.db.prepare('DELETE FROM provider_accounts WHERE id = ?').run('openai-private');
+      expect(() => manager.getReviewerConfig(ctx.podRepo.getOrThrow(pod.id))).toThrow();
     });
 
     it('fails closed when forced rework contradicts the latest provider attempt', async () => {
@@ -10759,9 +10832,7 @@ describe('PodManager', () => {
     it('Path 2: retries review infrastructure failures during forced revalidation', async () => {
       const ctx = createTestContext();
       ctx.deps.reviewInfrastructureRetryBackoffMs = [0];
-      vi.mocked(ctx.validationEngine.validate)
-        .mockResolvedValueOnce(makeReviewInfraFailure())
-        .mockResolvedValueOnce(makeValidationResult());
+      vi.mocked(ctx.validationEngine.validate).mockResolvedValueOnce(makeValidationResult());
       const { manager, pod } = setupFailedPod(ctx, {
         validationOverall: 'fail',
         prUrl: null,
@@ -10770,7 +10841,7 @@ describe('PodManager', () => {
       const result = await manager.revalidateSession(pod.id, { force: true });
 
       expect(result).toEqual({ newCommits: false, result: 'pass' });
-      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
       expect(ctx.runtime.spawn).not.toHaveBeenCalled();
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
       expect(manager.getSession(pod.id).status).toBe('validated');

@@ -344,7 +344,18 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     const cancelRemote = () => {
       cancellation ??= (async () => {
         try {
-          await this.exec(sandboxId, ['sh', '-c', terminatePidFileScript(pidPath)]);
+          const termination = await this.exec(sandboxId, [
+            'sh',
+            '-c',
+            terminatePidFileScript(pidPath),
+          ]);
+          if (termination.exitCode !== 0) {
+            throw new AutopodError(
+              `Remote sandbox exec termination was not verified (exit ${termination.exitCode})`,
+              'AZURE_SANDBOX_EXEC_STREAM',
+              500,
+            );
+          }
         } finally {
           socket.close();
         }
@@ -1343,7 +1354,13 @@ function streamExecScript(command: string[], cwd?: string): string {
   const lines: string[] = [];
   if (cwd) lines.push(`cd ${shellQuote(cwd)} || exit 1`);
   lines.push(`exec ${argv}`);
-  return sandboxRuntimeUserScript(lines.join('\n'), ['umask 077', 'echo $$ > "$0.pid"']);
+  return sandboxRuntimeUserScript(lines.join('\n'), [
+    'if [ "${AUTOPOD_STREAM_SESSION:-}" != "1" ]; then',
+    '  exec env AUTOPOD_STREAM_SESSION=1 setsid -w "$0"',
+    'fi',
+    'umask 077',
+    'echo $$ > "$0.pid"',
+  ]);
 }
 
 /**
@@ -1369,12 +1386,19 @@ function sandboxRuntimeUserScript(scriptBody: string, prelude: string[] = []): s
 function terminatePidFileScript(pidPath: string): string {
   return [
     `pid_file=${shellQuote(pidPath)}`,
-    '[ -s "$pid_file" ] || exit 0',
+    '[ -s "$pid_file" ] || exit 1',
     'pid=$(cat "$pid_file")',
-    'kill -TERM "$pid" 2>/dev/null || exit 0',
+    'case "$pid" in *[!0-9]*|"") exit 1;; esac',
+    '[ -d /proc/1 ] || exit 1',
+    'group_alive() { for stat_file in /proc/[0-9]*/stat; do [ -r "$stat_file" ] || continue; stat=$(cat "$stat_file") || return 0; rest=${stat##*) }; set -- $rest; [ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0; done; return 1; }',
+    'kill -TERM -"$pid" 2>/dev/null || true',
     'i=0',
-    'while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
-    'kill -KILL "$pid" 2>/dev/null || true',
+    'while group_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
+    'kill -KILL -"$pid" 2>/dev/null || true',
+    'i=0',
+    'while group_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
+    'group_alive && exit 1',
+    'rm -f "$pid_file"',
   ].join('; ');
 }
 

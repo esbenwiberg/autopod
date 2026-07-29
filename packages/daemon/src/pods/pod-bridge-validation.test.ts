@@ -1,4 +1,5 @@
 import type { PodBridge } from '@autopod/escalation-mcp';
+import { PassThrough } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { type SessionBridgeDependencies, createSessionBridge } from './pod-bridge-impl.js';
@@ -100,6 +101,20 @@ function buildBridge(opts: BuildOpts = {}): {
   const eventBus = { emit: eventEmit, subscribe: vi.fn() } as unknown as Deps['eventBus'];
   const cm = {
     execInContainer: execMock,
+    supportsStreamingExec: true,
+    execStreaming: vi.fn(async (id, command, options) => {
+      const result = await execMock(id, command, options);
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      stdout.end(result.stdout);
+      stderr.end(result.stderr);
+      return {
+        stdout,
+        stderr,
+        exitCode: Promise.resolve(result.exitCode),
+        kill: vi.fn(async () => {}),
+      };
+    }),
     getStatus: vi.fn().mockResolvedValue(opts.containerStatus ?? 'running'),
     writeFile: vi.fn().mockResolvedValue(undefined),
   };
@@ -496,10 +511,10 @@ describe('PodBridge.callReviewerModel', () => {
       ],
       expect.objectContaining({
         cwd: '/workspace',
-        timeout: 60_000,
         env: { POD_ID: 'sess-1', CLAUDE_CONFIG_DIR: '/tmp/fresh-claude' },
       }),
     );
+    expect(execMock.mock.calls[0]?.[2]).not.toHaveProperty('timeout');
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
     expect(mockRunCodexReview).not.toHaveBeenCalled();
   });
@@ -599,8 +614,9 @@ describe('PodBridge.generateBrowserValidationScript', () => {
           "sh '/run/autopod/agent-shim.sh' claude -p --model 'sonnet' --output-format json",
         ),
       ],
-      expect.objectContaining({ cwd: '/workspace', timeout: 60_000 }),
+      expect.objectContaining({ cwd: '/workspace' }),
     );
+    expect(execMock.mock.calls[0]?.[2]).not.toHaveProperty('timeout');
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
     expect(mockRunCodexReview).not.toHaveBeenCalled();
   });
@@ -633,10 +649,10 @@ describe('PodBridge.generateBrowserValidationScript', () => {
       expect.any(Array),
       expect.objectContaining({
         cwd: '/workspace',
-        timeout: 60_000,
         env: reviewerExecEnv,
       }),
     );
+    expect(execMock.mock.calls[0]?.[2]).not.toHaveProperty('timeout');
   });
 
   it('runs OpenAI browser script generation through the container Codex CLI path', async () => {

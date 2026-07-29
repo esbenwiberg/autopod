@@ -1,3 +1,4 @@
+import { PassThrough } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 
@@ -148,21 +149,35 @@ describe('runPreSubmitReview', () => {
   });
 
   it('runs Anthropic-compatible reviewers through the live pod container when available', async () => {
+    const reviewOutput = {
+      stdout: JSON.stringify({
+        result: JSON.stringify({
+          status: 'pass',
+          reasoning: 'Container Claude says clean.',
+          issues: [],
+        }),
+        usage: { input_tokens: 4321, cache_read_input_tokens: 3000, output_tokens: 123 },
+        total_cost_usd: 0.045,
+      }),
+      stderr: '',
+      exitCode: 0,
+    };
     const containerManager = {
       getStatus: vi.fn().mockResolvedValue('running' as const),
       writeFile: vi.fn().mockResolvedValue(undefined),
-      execInContainer: vi.fn().mockResolvedValue({
-        stdout: JSON.stringify({
-          result: JSON.stringify({
-            status: 'pass',
-            reasoning: 'Container Claude says clean.',
-            issues: [],
-          }),
-          usage: { input_tokens: 4321, cache_read_input_tokens: 3000, output_tokens: 123 },
-          total_cost_usd: 0.045,
-        }),
-        stderr: '',
-        exitCode: 0,
+      execInContainer: vi.fn().mockResolvedValue(reviewOutput),
+      supportsStreamingExec: true,
+      execStreaming: vi.fn().mockImplementation(async () => {
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        stdout.end(reviewOutput.stdout);
+        stderr.end(reviewOutput.stderr);
+        return {
+          stdout,
+          stderr,
+          exitCode: Promise.resolve(reviewOutput.exitCode),
+          kill: vi.fn(async () => {}),
+        };
       }),
     } as unknown as ContainerManager;
 
@@ -194,14 +209,14 @@ describe('runPreSubmitReview', () => {
       expect.stringContaining('/tmp/autopod-claude-review-pod-1-'),
       expect.stringContaining('## DIFF'),
     );
-    expect(containerManager.execInContainer).toHaveBeenCalledWith(
+    expect(containerManager.execStreaming).toHaveBeenCalledWith(
       'container-1',
       ['sh', '-c', expect.stringContaining("sh '/run/autopod/agent-shim.sh' claude -p")],
       expect.objectContaining({
         cwd: '/workspace',
-        timeout: 90_000,
       }),
     );
+    expect(containerManager.execStreaming.mock.calls[0]?.[2]).not.toHaveProperty('timeout');
     expect(mockRunClaudeCli).not.toHaveBeenCalled();
   });
 

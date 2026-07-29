@@ -252,10 +252,6 @@ function summarizeValidationPhases(result: ValidationResult): string {
   );
 }
 
-function formatRetryDelay(delayMs: number): string {
-  return delayMs % 1_000 === 0 ? `${delayMs / 1_000}s` : `${delayMs}ms`;
-}
-
 function buildDetachedMcpFallbackMessage(
   escalationType: string | undefined,
   response: string,
@@ -843,7 +839,6 @@ export function buildActionableFailureSummary(status: PrMergeStatus, profile: Pr
 }
 
 const REVIEW_FEEDBACK_REPLY_MAX_CHARS = 2000;
-const REVIEW_INFRA_RETRY_BACKOFF_MS = [10_000, 30_000, 90_000] as const;
 const SECURITY_SCAN_FINDING_LOG_LIMIT = 20;
 
 function formatReviewFeedbackReply(response: ReviewFeedbackResponseItem): string {
@@ -875,16 +870,6 @@ function isReviewInfrastructureOnlyFailure(result: ValidationResult): boolean {
     return false;
   }
   return result.overall === 'fail';
-}
-
-function isRetryableReviewInfrastructureFailure(result: ValidationResult): boolean {
-  if (!isReviewInfrastructureOnlyFailure(result)) return false;
-  if (result.reviewSkipKind === 'review-timeout') return true;
-
-  // Provider-declared invalid requests are deterministic. Re-running the same
-  // build/test/facts/review pipeline cannot repair an unsupported model or old
-  // client, so park for operator action after the first validation pass.
-  return !/invalid_request_error/i.test(result.reviewSkipReason ?? '');
 }
 
 function reviewInfrastructureFailureLabel(result: ValidationResult): string {
@@ -1797,9 +1782,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     safetyEventsRepo,
     qualityScoreRepo,
   } = deps;
-  const reviewInfrastructureRetryBackoffMs =
-    deps.reviewInfrastructureRetryBackoffMs ?? REVIEW_INFRA_RETRY_BACKOFF_MS;
-
   function providerForAttempt(pod: Pod, profile: Profile): ProviderAccountProvider {
     if (pod.providerIdSnapshot) return pod.providerIdSnapshot;
     if (pod.providerAccountIdSnapshot && providerAccountStore) {
@@ -4335,10 +4317,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     profile: Profile;
     credentials: ProviderCredentials | null;
   } {
-    const profile = resolveEffectiveReviewerProfile(pod, profileStore.get(pod.profileName));
-    const credentials = pod.providerAccountIdSnapshot
-      ? (providerAccountStore?.get(pod.providerAccountIdSnapshot).credentials ?? null)
-      : profileStore.get(profile.name).providerCredentials;
+    const profile = deps.providerAttemptRepo
+      ? resolveEffectiveBoundProfile(pod)
+      : resolveEffectiveReviewerProfile(pod, profileStore.get(pod.profileName));
+    const credentials = profile.providerAccountId
+      ? (providerAccountStore?.get(profile.providerAccountId).credentials ?? null)
+      : profile.providerCredentials;
     return { profile, credentials };
   }
 
@@ -6208,35 +6192,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     };
   }
 
-  async function waitForReviewInfraRetry(
-    podId: string,
-    delayMs: number,
-    signal: AbortSignal,
-  ): Promise<boolean> {
-    if (signal.aborted) return false;
-
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        signal.removeEventListener('abort', onAbort);
-        resolve();
-      }, delayMs);
-      const onAbort = () => {
-        clearTimeout(timer);
-        resolve();
-      };
-      signal.addEventListener('abort', onAbort, { once: true });
-    });
-
-    if (signal.aborted) return false;
-
-    try {
-      const current = podRepo.getOrThrow(podId);
-      return current.status !== 'killing' && !isTerminalState(current.status);
-    } catch {
-      return false;
-    }
-  }
-
   async function validateWithReviewInfraRetries(
     validationConfig: Parameters<ValidationEngine['validate']>[0],
     validationController: AbortController,
@@ -6259,46 +6214,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     };
 
-    let result = await runValidation();
-    let retryCount = 0;
-    for (let retryIndex = 0; retryIndex < reviewInfrastructureRetryBackoffMs.length; retryIndex++) {
-      if (!isRetryableReviewInfrastructureFailure(result)) break;
-
-      const delayMs = reviewInfrastructureRetryBackoffMs[retryIndex] ?? 0;
-      const retryNumber = retryIndex + 1;
-      retryCount = retryNumber;
-      emitActivityStatus(
-        podId,
-        `Review infrastructure failure — retrying in ${formatRetryDelay(delayMs)} (${retryNumber}/${reviewInfrastructureRetryBackoffMs.length})`,
-      );
-      logger.warn(
-        {
-          podId,
-          attempt,
-          retryNumber,
-          retryBudget: reviewInfrastructureRetryBackoffMs.length,
-          delayMs,
-          reviewSkipKind: result.reviewSkipKind,
-          reviewSkipReason: result.reviewSkipReason,
-        },
-        'Review infrastructure failure during validation; retrying without agent rework',
-      );
-
-      const shouldRetry = await waitForReviewInfraRetry(
-        podId,
-        delayMs,
-        validationController.signal,
-      );
-      if (!shouldRetry) return result;
-      result = await runValidation();
-    }
+    const result = await runValidation();
 
     if (isReviewInfrastructureOnlyFailure(result)) {
       emitActivityStatus(
         podId,
-        retryCount === 0
-          ? `${reviewInfrastructureFailureLabel(result)} — needs human review`
-          : `Review infrastructure failed after ${retryCount} retries — needs human review`,
+        `${reviewInfrastructureFailureLabel(result)} after one Review retry — needs human review`,
       );
     }
 

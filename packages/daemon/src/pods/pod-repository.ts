@@ -123,6 +123,8 @@ export interface PodUpdates {
   task?: string;
   model?: string;
   runtime?: string;
+  providerAccountIdSnapshot?: string | null;
+  providerIdSnapshot?: string | null;
   containerId?: string | null;
   worktreePath?: string | null;
   validationAttempts?: number;
@@ -558,6 +560,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.runtime !== undefined) {
         setClauses.push('runtime = @runtime');
         params.runtime = changes.runtime;
+      }
+      if (changes.providerAccountIdSnapshot !== undefined) {
+        setClauses.push('provider_account_id_snapshot = @providerAccountIdSnapshot');
+        params.providerAccountIdSnapshot = changes.providerAccountIdSnapshot;
+      }
+      if (changes.providerIdSnapshot !== undefined) {
+        setClauses.push('provider_id_snapshot = @providerIdSnapshot');
+        params.providerIdSnapshot = changes.providerIdSnapshot;
       }
       if (changes.containerId !== undefined) {
         setClauses.push('container_id = @containerId');

@@ -865,6 +865,8 @@ export class DockerContainerManager implements ContainerManager {
 
     const pidPath = `/tmp/.autopod-stream-exec-${process.pid}-${this.streamingExecSeq++}.pid`;
     const wrappedCommand = [
+      'setsid',
+      '-w',
       'sh',
       '-c',
       `umask 077; echo $$ > ${pidPath}; exec "$@"`,
@@ -963,9 +965,18 @@ export class DockerContainerManager implements ContainerManager {
 
     const kill = async () => {
       try {
-        await this.execInContainer(containerId, ['sh', '-c', terminatePidFileScript(pidPath)], {
-          timeout: 5_000,
-        });
+        const termination = await this.execInContainer(
+          containerId,
+          ['sh', '-c', terminateStreamingProcessGroupScript(pidPath)],
+          {
+            timeout: 5_000,
+          },
+        );
+        if (termination.exitCode !== 0) {
+          throw new Error(
+            `Remote streaming exec termination was not verified (exit ${termination.exitCode})`,
+          );
+        }
       } finally {
         const destroyable = muxStream as NodeJS.ReadableStream & { destroy?: () => void };
         if (typeof destroyable.destroy === 'function') {
@@ -1112,15 +1123,21 @@ interface DemuxWriterContext {
   logger: Logger;
 }
 
-function terminatePidFileScript(pidPath: string): string {
+export function terminateStreamingProcessGroupScript(pidPath: string): string {
   return [
     `pid_file=${pidPath}`,
-    '[ -s "$pid_file" ] || exit 0',
+    '[ -s "$pid_file" ] || exit 1',
     'pid=$(cat "$pid_file")',
-    'kill -TERM "$pid" 2>/dev/null || exit 0',
+    'case "$pid" in *[!0-9]*|"") exit 1;; esac',
+    '[ -d /proc/1 ] || exit 1',
+    'group_alive() { for stat_file in /proc/[0-9]*/stat; do [ -r "$stat_file" ] || continue; stat=$(cat "$stat_file") || return 0; rest=${stat##*) }; set -- $rest; [ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0; done; return 1; }',
+    'kill -TERM -"$pid" 2>/dev/null || true',
     'i=0',
-    'while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
-    'kill -KILL "$pid" 2>/dev/null || true',
+    'while group_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
+    'kill -KILL -"$pid" 2>/dev/null || true',
+    'i=0',
+    'while group_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
+    'group_alive && exit 1',
     'rm -f "$pid_file"',
   ].join('; ');
 }
