@@ -29,7 +29,7 @@ function buildDeps(status: 'running' | 'stopped' | 'unknown') {
   const pod = makePod();
   const updates: Array<Partial<Pod>> = [];
   const podRepo = {
-    list: vi.fn(() => [pod]),
+    list: vi.fn(({ status }: { status: Pod['status'] }) => (pod.status === status ? [pod] : [])),
     update: vi.fn((_podId: string, changes: Partial<Pod>) => {
       updates.push(changes);
       Object.assign(pod, changes);
@@ -40,37 +40,70 @@ function buildDeps(status: 'running' | 'stopped' | 'unknown') {
   } as unknown as EventBus;
   const sandboxContainerManager = {
     getStatus: vi.fn(async () => status),
+    start: vi.fn(async () => {}),
   } as unknown as SandboxContainerManager;
+  const preserveWorkspace = vi.fn(async () => {});
 
-  return { pod, updates, podRepo, eventBus, sandboxContainerManager };
+  return { pod, updates, podRepo, eventBus, sandboxContainerManager, preserveWorkspace };
 }
 
 describe('reconcileSandboxSessions', () => {
-  it('parks a still-running sandbox instead of treating it as complete', async () => {
+  it('preserves a still-running sandbox before parking it', async () => {
     const deps = buildDeps('running');
 
     await reconcileSandboxSessions({ ...deps, logger });
 
+    expect(deps.preserveWorkspace).toHaveBeenCalledWith('pod-1');
     expect(deps.updates).toContainEqual(
       expect.objectContaining({
         status: 'paused',
         pauseReason: 'manual',
-        lastCorrectionMessage: expect.stringContaining('cannot be reattached'),
+        lastCorrectionMessage: expect.stringContaining('workspace was preserved'),
       }),
     );
   });
 
-  it('fails a stopped sandbox when completion was not observed before restart', async () => {
+  it('preserves an already-paused sandbox left by an earlier restart', async () => {
+    const deps = buildDeps('running');
+    deps.pod.status = 'paused';
+
+    await reconcileSandboxSessions({ ...deps, logger });
+
+    expect(deps.preserveWorkspace).toHaveBeenCalledWith('pod-1');
+    expect(deps.updates).toContainEqual(
+      expect.objectContaining({ status: 'paused', pauseReason: 'manual' }),
+    );
+  });
+
+  it('resumes and preserves a suspended sandbox before parking it', async () => {
     const deps = buildDeps('stopped');
+
+    await reconcileSandboxSessions({ ...deps, logger });
+
+    expect(deps.sandboxContainerManager.start).toHaveBeenCalledWith('sandbox-1');
+    expect(deps.preserveWorkspace).toHaveBeenCalledWith('pod-1');
+    expect(deps.updates).toContainEqual(
+      expect.objectContaining({
+        status: 'paused',
+        pauseReason: 'manual',
+        lastCorrectionMessage: expect.stringContaining('resumed'),
+      }),
+    );
+  });
+
+  it('retains the sandbox and fails closed when preservation fails', async () => {
+    const deps = buildDeps('running');
+    deps.preserveWorkspace.mockRejectedValueOnce(new Error('sync unavailable'));
 
     await reconcileSandboxSessions({ ...deps, logger });
 
     expect(deps.updates).toContainEqual(
       expect.objectContaining({
         status: 'failed',
-        lastCorrectionMessage: expect.stringContaining('stopped while the daemon was offline'),
+        lastCorrectionMessage: expect.stringContaining('sandbox was retained'),
       }),
     );
+    expect(deps.updates).not.toContainEqual(expect.objectContaining({ status: 'killed' }));
   });
 
   it('marks an unknown sandbox as killed', async () => {

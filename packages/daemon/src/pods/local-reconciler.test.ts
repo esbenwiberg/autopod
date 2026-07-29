@@ -68,11 +68,13 @@ function createReconcilerDeps(overrides?: {
   eventBus: EventBus;
   containerManager: ContainerManager;
   enqueuedSessions: string[];
+  cleanupPodResources: ReturnType<typeof vi.fn>;
   validationRepo: ReturnType<typeof createValidationRepository>;
 } {
   const ctx = createTestContext();
   const containerManager = overrides?.containerManager ?? createMockContainerManager();
   const enqueuedSessions: string[] = [];
+  const cleanupPodResources = vi.fn(async (_podId: string) => {});
   const validationRepo = createValidationRepository(ctx.db);
 
   const deps: LocalReconcilerDependencies = {
@@ -81,6 +83,7 @@ function createReconcilerDeps(overrides?: {
     containerManager,
     enqueueSession: (id) => enqueuedSessions.push(id),
     validationRepo,
+    cleanupPodResources,
     logger,
   };
 
@@ -90,6 +93,7 @@ function createReconcilerDeps(overrides?: {
     eventBus: ctx.eventBus,
     containerManager,
     enqueuedSessions,
+    cleanupPodResources,
     validationRepo,
   };
 }
@@ -130,7 +134,8 @@ function makeFailingValidationResult(podId: string, attempt = 1): ValidationResu
 
 describe('reconcileLocalSessions', () => {
   it('recovers pod with surviving worktree', async () => {
-    const { deps, podRepo, enqueuedSessions, containerManager } = createReconcilerDeps();
+    const { deps, podRepo, enqueuedSessions, containerManager, cleanupPodResources } =
+      createReconcilerDeps();
 
     // Insert a running pod with a worktree path
     podRepo.insert({
@@ -171,8 +176,80 @@ describe('reconcileLocalSessions', () => {
     // Old container should have been killed (best-effort)
     expect(containerManager.kill).toHaveBeenCalledWith('ctr-old');
 
-    // Pod should have been enqueued
+    // Recorded sidecars/network are cleaned before replacement provisioning.
+    expect(cleanupPodResources).toHaveBeenCalledWith('ses-1');
     expect(enqueuedSessions).toContain('ses-1');
+  });
+
+  it('cleans recorded pod resources before enqueueing restart recovery', async () => {
+    const { deps, podRepo, enqueuedSessions, cleanupPodResources } = createReconcilerDeps();
+    const order: string[] = [];
+    cleanupPodResources.mockImplementationOnce(async () => {
+      order.push('cleanup');
+    });
+    deps.enqueueSession = (id) => {
+      order.push('enqueue');
+      enqueuedSessions.push(id);
+    };
+    podRepo.insert({
+      id: 'ses-cleanup-order',
+      profileName: 'test-profile',
+      task: 'Recover safely',
+      status: 'running',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/ses-cleanup-order',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      outputMode: 'pr',
+      baseBranch: null,
+    });
+    podRepo.update('ses-cleanup-order', {
+      containerId: 'ctr-cleanup-order',
+      worktreePath: '/tmp/worktree/ses-cleanup-order',
+    });
+    mockedAccess.mockResolvedValue(undefined);
+
+    await reconcileLocalSessions(deps);
+
+    expect(order[0]).toBe('cleanup');
+    expect(order.slice(1)).not.toContain('cleanup');
+    expect(order.slice(1).every((entry) => entry === 'enqueue')).toBe(true);
+  });
+
+  it('fails closed without enqueueing when recovered pod resource cleanup fails', async () => {
+    const { deps, podRepo, enqueuedSessions, cleanupPodResources } = createReconcilerDeps();
+    cleanupPodResources.mockRejectedValueOnce(new Error('sidecar removal still in progress'));
+    podRepo.insert({
+      id: 'ses-cleanup-failed',
+      profileName: 'test-profile',
+      task: 'Recover safely',
+      status: 'running',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'autopod/ses-cleanup-failed',
+      userId: 'user-1',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      outputMode: 'pr',
+      baseBranch: null,
+    });
+    podRepo.update('ses-cleanup-failed', {
+      containerId: 'ctr-cleanup-failed',
+      worktreePath: '/tmp/worktree/ses-cleanup-failed',
+    });
+    mockedAccess.mockResolvedValue(undefined);
+
+    await reconcileLocalSessions(deps);
+
+    expect(enqueuedSessions).not.toContain('ses-cleanup-failed');
+    expect(podRepo.getOrThrow('ses-cleanup-failed')).toMatchObject({
+      status: 'failed',
+      failureReason: expect.stringContaining('sidecar removal still in progress'),
+    });
   });
 
   it('resets validationAttempts to 0 when recovering a pod that had exhausted its attempts', async () => {
