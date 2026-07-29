@@ -38,7 +38,7 @@ CREATE INDEX idx_podsitter_attention_current
 
 CREATE TABLE podsitter_decisions (
   id TEXT PRIMARY KEY,
-  attention_id TEXT NOT NULL UNIQUE REFERENCES podsitter_attention(id) ON DELETE RESTRICT,
+  attention_id TEXT NOT NULL UNIQUE REFERENCES podsitter_attention(id) ON DELETE CASCADE,
   pod_id TEXT NOT NULL REFERENCES pods(id) ON DELETE CASCADE,
   attention_signature TEXT NOT NULL,
   configuration_generation INTEGER NOT NULL,
@@ -64,7 +64,7 @@ CREATE TABLE podsitter_action_audit (
   id TEXT PRIMARY KEY,
   idempotency_key TEXT NOT NULL UNIQUE,
   pod_id TEXT NOT NULL REFERENCES pods(id) ON DELETE CASCADE,
-  decision_id TEXT NOT NULL UNIQUE REFERENCES podsitter_decisions(id) ON DELETE RESTRICT,
+  decision_id TEXT NOT NULL UNIQUE REFERENCES podsitter_decisions(id) ON DELETE CASCADE,
   failure_signature TEXT,
   actor TEXT NOT NULL,
   action TEXT NOT NULL,

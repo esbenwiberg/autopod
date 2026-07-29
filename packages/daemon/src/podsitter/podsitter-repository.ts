@@ -138,6 +138,20 @@ function json<T>(value: T): string {
   return JSON.stringify(value);
 }
 
+function canonicalize<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => canonicalize(item)) as T;
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, canonicalize(child)]),
+    ) as T;
+  }
+  return value;
+}
+
 function parse<T>(value: unknown): T {
   return JSON.parse(value as string) as T;
 }
@@ -544,7 +558,9 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
     },
     reserveAction(input) {
       const actor = operatorActorSchema.parse(input.actor);
-      const actionArguments = podsitterActionArgumentsSchemas[input.action].parse(input.arguments);
+      const actionArguments = canonicalize(
+        podsitterActionArgumentsSchemas[input.action].parse(input.arguments),
+      );
       assertBoundedRedactedPayload(actionArguments, 'arguments');
       assertRedacted(input.policyResult, 'policyResult');
       const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
@@ -710,7 +726,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       const decision =
         update.decision === undefined || update.decision === null
           ? (update.decision ?? null)
-          : podsitterDecisionSchema.parse(update.decision);
+          : canonicalize(podsitterDecisionSchema.parse(update.decision));
       if (decision !== null) {
         assertBoundedRedactedPayload(decision.arguments, 'decision arguments');
       }

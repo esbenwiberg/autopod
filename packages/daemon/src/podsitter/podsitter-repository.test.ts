@@ -446,8 +446,11 @@ describe('PodsitterRepository', () => {
     const decision = {
       contractVersion: 1 as const,
       attentionSignature: attention.signature,
-      action: 'tell' as const,
-      arguments: { message: 'bounded guidance' },
+      action: 'dismiss_validation_finding' as const,
+      arguments: {
+        reason: 'The finding is deterministically stale.',
+        findingId: 'finding-1',
+      },
       reason: 'The pod needs targeted guidance.',
       evidenceRefs: ['event:1'],
       confidence: 'high' as const,
@@ -503,8 +506,11 @@ describe('PodsitterRepository', () => {
         podId: 'pod-1',
         decisionId: 'decision-lifecycle',
         actor,
-        action: 'tell',
-        arguments: decision.arguments,
+        action: 'dismiss_validation_finding',
+        arguments: {
+          findingId: 'finding-1',
+          reason: 'The finding is deterministically stale.',
+        },
         policyResult: 'allowed',
       }),
     ).toBe(true);
@@ -515,8 +521,11 @@ describe('PodsitterRepository', () => {
         podId: 'pod-1',
         decisionId: 'decision-lifecycle',
         actor,
-        action: 'tell',
-        arguments: { message: 'A materially different instruction.' },
+        action: 'dismiss_validation_finding',
+        arguments: {
+          findingId: 'finding-1',
+          reason: 'A materially different justification.',
+        },
         policyResult: 'allowed',
       }),
     ).toBe(false);
@@ -553,6 +562,22 @@ describe('PodsitterRepository', () => {
       cleanup_state: 'cleaned',
       completed_at: expect.any(String),
     });
+
+    expect(() => db.prepare("DELETE FROM pods WHERE id = 'pod-1'").run()).not.toThrow();
+    expect(db.prepare('SELECT COUNT(*) AS count FROM podsitter_attention').get()).toEqual({
+      count: 0,
+    });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM podsitter_decisions').get()).toEqual({
+      count: 0,
+    });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM podsitter_action_audit').get()).toEqual({
+      count: 0,
+    });
+    expect(
+      db
+        .prepare('SELECT decision_id FROM system_sandbox_runs WHERE id = ?')
+        .get('sandbox-lifecycle'),
+    ).toEqual({ decision_id: null });
   });
 
   it('recovers a linked decision after a crash and rejects mismatched attention identity', () => {
