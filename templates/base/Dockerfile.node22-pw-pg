@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 FROM node:22-slim
 
 # System deps + PostgreSQL server. Keep this aligned with Dockerfile.node22-pw;
@@ -29,17 +31,62 @@ RUN install -d /usr/share/postgresql-common/pgdg \
     && apt-get update \
     && apt-get install -y --no-install-recommends postgresql-17 \
     && test -f /usr/share/postgresql/17/extension/pgcrypto.control \
-    && sed -ri "s|^#?unix_socket_directories[[:space:]]*=.*|unix_socket_directories = ''|" \
-      /usr/share/postgresql/17/postgresql.conf.sample \
-    && grep -Fxq "unix_socket_directories = ''" \
-      /usr/share/postgresql/17/postgresql.conf.sample \
     && rm -rf /var/lib/apt/lists/*
 
-# Expose the commands needed to initialize and run a transient database.
-RUN for binary in initdb pg_ctl postgres; do \
+# Expose the server commands used by transient databases. PostgreSQL's initdb
+# rewrites unix_socket_directories from its compiled Debian default even when
+# postgresql.conf.sample is changed, so wrap initdb and correct the generated
+# cluster configuration after successful initialization. Azure Sandbox provides
+# no writable PostgreSQL runtime directory; validation clients use TCP on 127.0.0.1.
+RUN for binary in pg_ctl postgres; do \
       test -x "/usr/lib/postgresql/17/bin/$binary"; \
       ln -s "/usr/lib/postgresql/17/bin/$binary" "/usr/local/bin/$binary"; \
     done
+COPY <<'AUTOPOD_INITDB' /usr/local/bin/initdb
+#!/bin/sh
+set -eu
+
+real_initdb=/usr/lib/postgresql/17/bin/initdb
+pgdata=
+expect_pgdata=0
+
+for arg in "$@"; do
+  if [ "$expect_pgdata" -eq 1 ]; then
+    pgdata=$arg
+    expect_pgdata=0
+    continue
+  fi
+  case "$arg" in
+    -D|--pgdata) expect_pgdata=1 ;;
+    -D?*) pgdata=${arg#-D} ;;
+    --pgdata=*) pgdata=${arg#--pgdata=} ;;
+  esac
+done
+
+"$real_initdb" "$@"
+
+config=
+if [ -n "$pgdata" ] && [ -f "$pgdata/postgresql.conf" ]; then
+  config=$pgdata/postgresql.conf
+else
+  for arg in "$@"; do
+    if [ -f "$arg/postgresql.conf" ]; then
+      config=$arg/postgresql.conf
+    fi
+  done
+  if [ -z "$config" ] && [ -n "${PGDATA:-}" ] && [ -f "$PGDATA/postgresql.conf" ]; then
+    config=$PGDATA/postgresql.conf
+  fi
+fi
+
+# Preserve informational invocations such as --version, which create no cluster.
+[ -n "$config" ] || exit 0
+if ! grep -Fxq "unix_socket_directories = ''" "$config"; then
+  printf "\n# Autopod transient clusters are TCP-only.\nunix_socket_directories = ''\n" >> "$config"
+fi
+AUTOPOD_INITDB
+RUN chmod 0755 /usr/local/bin/initdb \
+    && /usr/local/bin/initdb --version
 
 # Glow — terminal markdown viewer from Charm
 RUN mkdir -p /etc/apt/keyrings \
