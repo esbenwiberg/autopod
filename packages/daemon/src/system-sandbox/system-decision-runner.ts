@@ -146,6 +146,7 @@ export class SystemDecisionRunner {
           allowedHosts: providerRequiredHosts(account, catalogProvider.requiredHosts),
           networkName: networkConfig?.networkName,
           firewallScript: networkConfig?.firewallScript,
+          enableCapabilityDrop: input.executionTarget === 'local',
           exposeHostGateway: false,
           onCreated: (createdContainerId) => {
             containerId = createdContainerId;
@@ -163,7 +164,11 @@ export class SystemDecisionRunner {
         'sandbox setup',
       );
 
-      let execResult = await manager.execInContainer(containerId, invocation.command, {
+      const inferenceCommand =
+        input.executionTarget === 'local'
+          ? withoutLinuxCapabilities(invocation.command)
+          : invocation.command;
+      let execResult = await manager.execInContainer(containerId, inferenceCommand, {
         cwd: '/tmp',
         timeout: remainingTimeout(deadline),
         env: providerEnv.env,
@@ -188,7 +193,7 @@ export class SystemDecisionRunner {
             deadline,
             'schema repair setup',
           );
-          execResult = await manager.execInContainer(containerId, invocation.command, {
+          execResult = await manager.execInContainer(containerId, inferenceCommand, {
             cwd: '/tmp',
             timeout: remainingTimeout(deadline),
             env: providerEnv.env,
@@ -354,7 +359,44 @@ export class SystemDecisionRunner {
         run.backend === 'azure-sandbox'
           ? this.options.sandboxContainerManager
           : this.options.localContainerManager;
-      if (!manager || !run.containerId) {
+      if (run.backend === 'docker' && !this.options.dockerNetworkManager) {
+        this.options.repository.closeSandboxRun(run.id, {
+          outcome: 'leaked',
+          cleanupState: 'retryable',
+          failureCode: 'CLEANUP_MANAGER_UNAVAILABLE',
+        });
+        continue;
+      }
+      if (run.backend === 'docker' && this.options.dockerNetworkManager) {
+        try {
+          await this.options.dockerNetworkManager.removeNetworkForPod(run.id);
+        } catch {
+          this.options.repository.closeSandboxRun(run.id, {
+            outcome: 'leaked',
+            cleanupState: 'retryable',
+            failureCode: 'CLEANUP_FAILED',
+          });
+          continue;
+        }
+      }
+      if (!run.containerId) {
+        if (run.backend === 'docker') {
+          this.options.repository.closeSandboxRun(run.id, {
+            outcome: 'cancelled',
+            cleanupState: 'clean',
+            failureCode: 'REAPED_NETWORK_AFTER_RESTART',
+          });
+          reaped += 1;
+          continue;
+        }
+        this.options.repository.closeSandboxRun(run.id, {
+          outcome: 'leaked',
+          cleanupState: 'retryable',
+          failureCode: 'CLEANUP_CONTAINER_ID_MISSING',
+        });
+        continue;
+      }
+      if (!manager) {
         this.options.repository.closeSandboxRun(run.id, {
           outcome: 'leaked',
           cleanupState: 'retryable',
@@ -364,9 +406,6 @@ export class SystemDecisionRunner {
       }
       try {
         await manager.kill(run.containerId);
-        if (run.backend === 'docker' && this.options.dockerNetworkManager) {
-          await this.options.dockerNetworkManager.removeNetworkForPod(run.id);
-        }
         this.options.repository.closeSandboxRun(run.id, {
           outcome: 'cancelled',
           cleanupState: 'clean',
@@ -514,6 +553,18 @@ export class SystemDecisionRunner {
       cleanup: 'clean',
     };
   }
+}
+
+function withoutLinuxCapabilities(command: string[]): string[] {
+  return [
+    'setpriv',
+    '--bounding-set=-all',
+    '--inh-caps=-all',
+    '--ambient-caps=-all',
+    '--no-new-privs',
+    '--',
+    ...command,
+  ];
 }
 
 function isCredentialFile(path: string): boolean {

@@ -13,6 +13,11 @@ export interface ContainerSpawnConfig {
   /** Firewall script to execute after container start (iptables rules) */
   firewallScript?: string;
   /**
+   * Grants the container's setup process CAP_SETPCAP so a subsequent trusted
+   * exec can irreversibly clear its capability bounding set before inference.
+   */
+  enableCapabilityDrop?: boolean;
+  /**
    * Network policy mode — controls fail-closed behaviour on firewall errors.
    * For `deny-all` and `restricted` pods, spawn aborts by default if the
    * firewall script fails (the container is force-removed). `allow-all` pods

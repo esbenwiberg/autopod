@@ -320,6 +320,17 @@ describe('DockerContainerManager', () => {
       expect(createCall.HostConfig.CapAdd).toEqual(['NET_ADMIN', 'SETGID', 'SETUID']);
     });
 
+    it('adds SETPCAP only when a trusted runtime will drop its capability set', async () => {
+      await manager.spawn({
+        ...baseConfig,
+        networkName: 'autopod-net',
+        enableCapabilityDrop: true,
+      });
+
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
+      expect(createCall.HostConfig.CapAdd).toEqual(['NET_ADMIN', 'SETGID', 'SETUID', 'SETPCAP']);
+    });
+
     it('does NOT set NetworkMode when networkName absent', async () => {
       await manager.spawn(baseConfig);
 

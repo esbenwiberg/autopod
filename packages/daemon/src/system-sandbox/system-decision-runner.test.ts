@@ -172,6 +172,7 @@ describe('SystemDecisionRunner', () => {
         allowedHosts: expect.any(Array),
         networkName: 'autopod-system-decision-1',
         firewallScript: expect.stringContaining('iptables'),
+        enableCapabilityDrop: true,
       }),
     ]);
     expect(JSON.stringify(spawns)).not.toContain('dedicated-secret');
@@ -188,6 +189,18 @@ describe('SystemDecisionRunner', () => {
         ],
       ]),
     );
+    const inferenceCommand = vi
+      .mocked(manager.execInContainer)
+      .mock.calls.find(([, command]) => command[0] === 'setpriv')?.[1];
+    expect(inferenceCommand?.slice(0, 6)).toEqual([
+      'setpriv',
+      '--bounding-set=-all',
+      '--inh-caps=-all',
+      '--ambient-caps=-all',
+      '--no-new-privs',
+      '--',
+    ]);
+    expect(inferenceCommand).toEqual(expect.arrayContaining([expect.stringContaining('copilot')]));
     expect(manager.execInContainer).toHaveBeenCalledWith(
       'system-container',
       ['chmod', '0400', '/run/autopod/copilot-token'],
@@ -278,6 +291,33 @@ describe('SystemDecisionRunner', () => {
     expect(leaked.repository.closeSandboxRun).toHaveBeenCalledWith(
       'system-decision-1',
       expect.objectContaining({ outcome: 'leaked', cleanupState: 'retryable' }),
+    );
+  });
+
+  it('reaps a local network when a crash happened before container allocation', async () => {
+    const crashed = harness();
+    vi.mocked(crashed.repository.listActiveSandboxRuns).mockReturnValue([
+      {
+        id: 'network-only-run',
+        decisionId: 'decision-old',
+        backend: 'docker',
+        containerId: null,
+      },
+    ]);
+
+    await expect(crashed.runner.reapLeakedRuns()).resolves.toBe(1);
+
+    expect(crashed.dockerNetworkManager.removeNetworkForPod).toHaveBeenCalledWith(
+      'network-only-run',
+    );
+    expect(crashed.manager.kill).not.toHaveBeenCalled();
+    expect(crashed.repository.closeSandboxRun).toHaveBeenCalledWith(
+      'network-only-run',
+      expect.objectContaining({
+        outcome: 'cancelled',
+        cleanupState: 'clean',
+        failureCode: 'REAPED_NETWORK_AFTER_RESTART',
+      }),
     );
   });
 

@@ -324,7 +324,12 @@ export class DockerContainerManager implements ContainerManager {
       // the firewall script fail (exit 5) and, with fail-closed mode, the pod
       // never spawns. The same caps are in Docker's default capability set;
       // we just have to add them back after CapDrop=ALL.
-      hostConfig.CapAdd = ['NET_ADMIN', 'SETGID', 'SETUID'];
+      hostConfig.CapAdd = [
+        'NET_ADMIN',
+        'SETGID',
+        'SETUID',
+        ...(config.enableCapabilityDrop ? ['SETPCAP'] : []),
+      ];
       // On Linux, host.docker.internal is not auto-added for custom bridge networks.
       // Inject it so containers can always reach the daemon's MCP endpoint.
       if (config.exposeHostGateway !== false) {
