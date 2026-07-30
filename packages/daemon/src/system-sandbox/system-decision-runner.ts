@@ -26,6 +26,7 @@ import {
 } from './runtime-adapters.js';
 
 const MAX_PROMPT_BYTES = 256_000;
+const MAX_COPILOT_PROMPT_BYTES = 120 * 1024;
 const MAX_DIAGNOSTIC_BYTES = 4_000;
 const MAX_TIMEOUT_MS = 60 * 60 * 1000;
 const LOCAL_IMAGE_DEFAULT = 'autopod-system-decision:local';
@@ -480,6 +481,12 @@ function assertInput(input: SystemDecisionRunInput): void {
       'Decision prompt too large',
       'DECISION_PROMPT_TOO_LARGE',
     );
+  if (input.runtime === 'copilot' && Buffer.byteLength(input.prompt) > MAX_COPILOT_PROMPT_BYTES) {
+    throw new SystemDecisionConfigurationError(
+      'Copilot decision prompt exceeds its safe argument transport limit',
+      'COPILOT_PROMPT_TOO_LARGE',
+    );
+  }
   if (
     !Number.isFinite(input.timeoutMs) ||
     input.timeoutMs <= 0 ||
@@ -548,17 +555,66 @@ function parseProviderEvidence(value: string): {
   status?: unknown;
   retryAfter?: unknown;
 } {
-  try {
-    const parsed = JSON.parse(value) as Record<string, unknown>;
-    return {
-      message: typeof parsed.message === 'string' ? parsed.message : value,
-      code: parsed.code,
-      status: parsed.status,
-      retryAfter: parsed.retryAfter ?? parsed.retry_after ?? parsed.reset_at,
-    };
-  } catch {
-    return { message: value };
+  const candidates: Array<ReturnType<typeof structuredProviderEvidence>> = [];
+  for (const record of [value, ...value.split(/\r?\n/).filter((line) => line.trim())]) {
+    try {
+      candidates.push(structuredProviderEvidence(JSON.parse(record)));
+    } catch {
+      // Runtime diagnostics may mix plain text with JSONL records.
+    }
   }
+  const best = candidates
+    .flat()
+    .sort((left, right) => providerEvidenceScore(right) - providerEvidenceScore(left))[0];
+  return best ?? { message: value };
+}
+
+function structuredProviderEvidence(
+  value: unknown,
+  depth = 0,
+): Array<{ message: string; code?: unknown; status?: unknown; retryAfter?: unknown }> {
+  if (!value || typeof value !== 'object' || depth > 5) return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => structuredProviderEvidence(item, depth + 1));
+  }
+  const record = value as Record<string, unknown>;
+  const message =
+    typeof record.message === 'string'
+      ? record.message
+      : typeof record.error === 'string'
+        ? record.error
+        : null;
+  const current = message
+    ? [
+        {
+          message,
+          code: record.code,
+          status: record.status ?? record.statusCode,
+          retryAfter:
+            record.retryAfter ??
+            record.retry_after ??
+            record.reset_at ??
+            record.resetAt ??
+            record.retryAfterSeconds,
+        },
+      ]
+    : [];
+  return [
+    ...current,
+    ...Object.values(record).flatMap((item) => structuredProviderEvidence(item, depth + 1)),
+  ];
+}
+
+function providerEvidenceScore(evidence: {
+  code?: unknown;
+  status?: unknown;
+  retryAfter?: unknown;
+}): number {
+  return (
+    (evidence.code !== undefined ? 4 : 0) +
+    (evidence.status !== undefined ? 2 : 0) +
+    (evidence.retryAfter !== undefined ? 1 : 0)
+  );
 }
 
 function parseTelemetry(stdout: string): {

@@ -550,6 +550,29 @@ describe('SandboxContainerManager', () => {
       expect(client.sandboxes.has(id)).toBe(false);
     });
 
+    it('treats an already-destroyed sandbox as successfully cleaned', async () => {
+      class NotFoundAfterDestroyClient extends FakeSandboxApiClient {
+        override async destroy(sandboxId: string): Promise<void> {
+          if (!this.sandboxes.has(sandboxId)) {
+            throw Object.assign(new Error('sandbox not found'), { statusCode: 404 });
+          }
+          await super.destroy(sandboxId);
+        }
+      }
+      const client = new NotFoundAfterDestroyClient();
+      const mgr = new SandboxContainerManager(client, logger);
+
+      await expect(
+        mgr.spawn({
+          ...baseConfig,
+          onCreated: () => {
+            throw new Error('durable identity rejected');
+          },
+        }),
+      ).rejects.toThrow('durable identity rejected');
+      await expect(mgr.kill('sbx-1')).resolves.toBeUndefined();
+    });
+
     it('stop/start map to suspend/resume', async () => {
       const client = new FakeSandboxApiClient();
       const mgr = new SandboxContainerManager(client, logger);

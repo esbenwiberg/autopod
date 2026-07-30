@@ -98,6 +98,7 @@ function harness(
   const providerAccountStore = {
     get: vi.fn(() => account),
     touchLastUsed: vi.fn(),
+    updateCredentials: vi.fn(),
   } as unknown as ProviderAccountStore;
   return {
     manager,
@@ -400,6 +401,16 @@ describe('SystemDecisionRunner', () => {
       kind: 'configuration',
       failure: { code: 'PROVIDER_ACCOUNT_CREDENTIALS_MISSING' },
     });
+
+    const oversizedCopilot = harness();
+    await expect(
+      oversizedCopilot.runner.run({ ...input, prompt: 'x'.repeat(120 * 1024 + 1) }),
+    ).resolves.toMatchObject({
+      ok: false,
+      kind: 'configuration',
+      failure: { code: 'COPILOT_PROMPT_TOO_LARGE' },
+    });
+    expect(oversizedCopilot.manager.spawn).not.toHaveBeenCalled();
   });
 
   it('bounds sandbox provisioning with the run timeout', async () => {
@@ -487,5 +498,91 @@ describe('SystemDecisionRunner', () => {
     });
     expect(JSON.stringify(result)).not.toContain('super-secret-token');
     expect(JSON.stringify(transient.runs)).not.toContain('super-secret-token');
+
+    const codexJsonl = harness();
+    vi.mocked(codexJsonl.manager.execInContainer).mockResolvedValue({
+      stdout: '',
+      stderr: [
+        JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }),
+        JSON.stringify({
+          type: 'error',
+          error: {
+            status: 429,
+            code: 'rate_limit_exceeded',
+            message: 'rate limit exceeded',
+            retry_after: '120',
+          },
+        }),
+      ].join('\n'),
+      exitCode: 1,
+    });
+    vi.mocked(codexJsonl.providerAccountStore.get).mockReturnValue({
+      id: 'openrouter-decision',
+      name: 'OpenRouter decision',
+      provider: 'openrouter',
+      credentials: {
+        provider: 'openrouter',
+        apiKey: 'account-key',
+      },
+      failoverPolicy: null,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      lastAuthenticatedAt: new Date(0).toISOString(),
+      lastUsedAt: null,
+    });
+    await expect(
+      codexJsonl.runner.run({
+        ...input,
+        decisionId: 'decision-codex-jsonl',
+        providerAccountId: 'openrouter-decision',
+        runtime: 'codex',
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      kind: 'provider',
+      failure: { category: 'transient', retryAfter: '120' },
+    });
+
+    const piJsonl = harness();
+    vi.mocked(piJsonl.providerAccountStore.get).mockReturnValue({
+      id: 'pi-decision',
+      name: 'Pi decision',
+      provider: 'pi',
+      credentials: {
+        provider: 'pi',
+        providerId: 'anthropic',
+        credential: { type: 'oauth', access: 'issued' },
+      },
+      failoverPolicy: null,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      lastAuthenticatedAt: new Date(0).toISOString(),
+      lastUsedAt: null,
+    });
+    vi.mocked(piJsonl.manager.readFile).mockResolvedValue(
+      JSON.stringify({ anthropic: { type: 'oauth', access: 'issued' } }, null, 2),
+    );
+    vi.mocked(piJsonl.manager.execInContainer).mockResolvedValue({
+      stdout: '',
+      stderr: [
+        JSON.stringify({ type: 'session_started' }),
+        JSON.stringify({
+          type: 'provider_error',
+          error: { code: 'authentication_error', message: 'authentication failed' },
+        }),
+      ].join('\n'),
+      exitCode: 1,
+    });
+    const piResult = await piJsonl.runner.run({
+      ...input,
+      decisionId: 'decision-pi-jsonl',
+      providerAccountId: 'pi-decision',
+      runtime: 'pi',
+    });
+    expect(piResult).toMatchObject({
+      ok: false,
+      kind: 'provider',
+      failure: { category: 'auth' },
+    });
   });
 });
