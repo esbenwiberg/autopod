@@ -135,6 +135,24 @@ describe('DockerContainerManager', () => {
       expect(container.start).toHaveBeenCalledTimes(1);
     });
 
+    it('supports a repo-free working directory without exposing the host gateway', async () => {
+      await manager.spawn({
+        ...baseConfig,
+        workingDir: '/tmp',
+        networkName: 'autopod-system-decision',
+        exposeHostGateway: false,
+      });
+
+      expect(docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          WorkingDir: '/tmp',
+          HostConfig: expect.not.objectContaining({
+            ExtraHosts: expect.anything(),
+          }),
+        }),
+      );
+    });
+
     it('does not pull when the image is already present locally', async () => {
       await manager.spawn(baseConfig);
 
