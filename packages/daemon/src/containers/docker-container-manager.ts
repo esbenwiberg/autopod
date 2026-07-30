@@ -346,6 +346,7 @@ export class DockerContainerManager implements ContainerManager {
     );
 
     try {
+      config.onCreated?.(container.id);
       await boundedDockerCall(container.start(), {
         label: 'container.start (spawn)',
         timeoutMs: DOCKER_CALL_TIMEOUTS.start,

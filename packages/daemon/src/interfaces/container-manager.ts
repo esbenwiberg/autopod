@@ -33,6 +33,11 @@ export interface ContainerSpawnConfig {
   nanoCpus?: number;
   /** Optional provisioning progress callback for backends with multi-stage startup. */
   onProgress?: (message: string) => void;
+  /**
+   * Called immediately after the backend allocates the container identity.
+   * System-owned callers use this to durably record the resource before startup continues.
+   */
+  onCreated?: (containerId: string) => void;
 }
 
 export interface ExecResult {

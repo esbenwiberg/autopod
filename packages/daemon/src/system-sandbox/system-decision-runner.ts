@@ -5,7 +5,7 @@ import type {
   ProviderFailureClassification,
   ReasoningEffort,
 } from '@autopod/shared';
-import { PROVIDER_CATALOG } from '@autopod/shared';
+import { AutopodError, PROVIDER_CATALOG } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { DockerNetworkManager } from '../containers/docker-network-manager.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
@@ -52,7 +52,7 @@ export type SystemDecisionRunResult =
   | {
       ok: false;
       kind: 'configuration' | 'provider' | 'model_output' | 'infrastructure' | 'timeout';
-      failure: ProviderFailureClassification;
+      failure: ProviderFailureClassification & { code?: string };
       cleanup: 'clean' | 'leaked';
     };
 
@@ -89,8 +89,12 @@ export class SystemDecisionRunner {
       const catalogProvider = PROVIDER_CATALOG.providers.find(
         (provider) => provider.id === account.provider,
       );
-      if (!catalogProvider)
-        throw new Error('Dedicated provider is absent from the provider catalog');
+      if (!catalogProvider) {
+        throw new SystemDecisionConfigurationError(
+          'Dedicated provider is absent from the provider catalog',
+          'PROVIDER_ACCOUNT_CATALOG_MISSING',
+        );
+      }
       providerEnv = await buildProviderAccountEnv(input.providerAccountId, this.options.logger, {
         providerAccountStore: this.options.providerAccountStore,
         runtime: input.runtime,
@@ -110,8 +114,13 @@ export class SystemDecisionRunner {
         allowedHosts: providerRequiredHosts(account, catalogProvider.requiredHosts),
         networkName: networkConfig?.networkName,
         firewallScript: networkConfig?.firewallScript,
+        onCreated: (createdContainerId) => {
+          containerId = createdContainerId;
+          if (!this.options.repository.setSandboxContainer(runId, createdContainerId)) {
+            throw new Error('Failed to durably record system sandbox identity');
+          }
+        },
       });
-      this.options.repository.setSandboxContainer(runId, containerId);
       await this.writeRunFiles(manager, containerId, input.prompt, invocation, providerEnv);
 
       let execResult = await manager.execInContainer(containerId, invocation.command, {
@@ -162,10 +171,22 @@ export class SystemDecisionRunner {
         }
       }
     } catch (error) {
+      const configurationCode = configurationFailureCode(error);
       const timedOut = isTimeout(error);
       const message = error instanceof Error ? error.message : 'System decision run failed';
-      result = failureResult(timedOut ? 'timeout' : 'infrastructure', message);
-      failureCode = timedOut ? 'TIMEOUT' : 'SYSTEM_SANDBOX_FAILED';
+      result = configurationCode
+        ? failureResult(
+            'configuration',
+            configurationMessage(configurationCode),
+            'clean',
+            configurationCode,
+          )
+        : failureResult(timedOut ? 'timeout' : 'infrastructure', message);
+      failureCode = configurationCode
+        ? configurationCode
+        : timedOut
+          ? 'TIMEOUT'
+          : 'SYSTEM_SANDBOX_FAILED';
     } finally {
       let cleanup: 'clean' | 'leaked' = 'clean';
       if (containerId && manager) {
@@ -186,10 +207,18 @@ export class SystemDecisionRunner {
                 : undefined,
             },
           ).catch((error) => {
-            this.options.logger.warn(
-              { runId, err: sanitizeProviderMessage(String(error)) },
+            const message = sanitizeProviderMessage(String(error));
+            this.options.logger.error(
+              { runId, err: message },
               'System sandbox credential readback failed',
             );
+            result = failureResult(
+              'infrastructure',
+              'Dedicated provider credential persistence failed',
+              'clean',
+              'CREDENTIAL_PERSISTENCE_FAILED',
+            );
+            failureCode = 'CREDENTIAL_PERSISTENCE_FAILED';
           });
         }
         try {
@@ -270,7 +299,10 @@ export class SystemDecisionRunner {
   private resolveManager(target: ExecutionTarget): ContainerManager {
     if (target === 'sandbox') {
       if (!this.options.sandboxContainerManager) {
-        throw new Error('Hosted system sandbox execution is not configured');
+        throw new SystemDecisionConfigurationError(
+          'Hosted system sandbox execution is not configured',
+          'SYSTEM_SANDBOX_BACKEND_MISSING',
+        );
       }
       return this.options.sandboxContainerManager;
     }
@@ -281,10 +313,17 @@ export class SystemDecisionRunner {
     if (target !== 'sandbox') return this.options.localImage ?? LOCAL_IMAGE_DEFAULT;
     const image = this.options.hostedImage;
     if (!image || !/^[a-z0-9.-]+\/.+(?::[^/]+|@sha256:[a-f0-9]{64})$/i.test(image)) {
-      throw new Error('Hosted system decision image must be an ACR-qualified pinned tag or digest');
+      throw new SystemDecisionConfigurationError(
+        'Hosted system decision image must be an ACR-qualified pinned tag or digest',
+        'SYSTEM_DECISION_IMAGE_MISSING',
+      );
     }
-    if (image.endsWith(':latest'))
-      throw new Error('Hosted system decision image cannot use latest');
+    if (image.endsWith(':latest')) {
+      throw new SystemDecisionConfigurationError(
+        'Hosted system decision image cannot use latest',
+        'SYSTEM_DECISION_IMAGE_UNPINNED',
+      );
+    }
     return image;
   }
 
@@ -375,15 +414,25 @@ function isCredentialFile(path: string): boolean {
 }
 
 function assertInput(input: SystemDecisionRunInput): void {
-  if (input.contractVersion !== 1) throw new Error('Unsupported decision contract version');
+  if (input.contractVersion !== 1)
+    throw new SystemDecisionConfigurationError(
+      'Unsupported decision contract version',
+      'DECISION_CONTRACT_UNSUPPORTED',
+    );
   if (Buffer.byteLength(input.prompt) > MAX_PROMPT_BYTES)
-    throw new Error('Decision prompt too large');
+    throw new SystemDecisionConfigurationError(
+      'Decision prompt too large',
+      'DECISION_PROMPT_TOO_LARGE',
+    );
   if (
     !Number.isFinite(input.timeoutMs) ||
     input.timeoutMs <= 0 ||
     input.timeoutMs > MAX_TIMEOUT_MS
   ) {
-    throw new Error('System decision timeout must be between 1 ms and 60 minutes');
+    throw new SystemDecisionConfigurationError(
+      'System decision timeout must be between 1 ms and 60 minutes',
+      'DECISION_TIMEOUT_INVALID',
+    );
   }
 }
 
@@ -391,6 +440,7 @@ function failureResult(
   kind: Extract<SystemDecisionRunResult, { ok: false }>['kind'],
   message: string,
   cleanup: 'clean' | 'leaked' = 'clean',
+  code?: string,
 ): Extract<SystemDecisionRunResult, { ok: false }> {
   return {
     ok: false,
@@ -400,9 +450,40 @@ function failureResult(
       definitive: false,
       sanitizedMessage: sanitizeProviderMessage(message),
       retryAfter: null,
+      ...(code ? { code } : {}),
     },
     cleanup,
   };
+}
+
+class SystemDecisionConfigurationError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+  ) {
+    super(message);
+    this.name = 'SystemDecisionConfigurationError';
+  }
+}
+
+function configurationFailureCode(error: unknown): string | null {
+  if (error instanceof SystemDecisionConfigurationError) return error.code;
+  if (
+    error instanceof AutopodError &&
+    [
+      'PROVIDER_ACCOUNT_NOT_FOUND',
+      'PROVIDER_ACCOUNT_NOT_RUNNABLE',
+      'PROVIDER_ACCOUNT_RUNTIME_MISMATCH',
+      'PROVIDER_ACCOUNT_CREDENTIALS_MISSING',
+    ].includes(error.code)
+  ) {
+    return error.code;
+  }
+  return null;
+}
+
+function configurationMessage(code: string): string {
+  return `System decision configuration rejected (${code})`;
 }
 
 function parseProviderEvidence(value: string): {

@@ -18,11 +18,20 @@ const decision: PodsitterDecision = {
   stopCondition: 'Evidence changes.',
 };
 
-function harness(options: { output?: string; exitCode?: number; killFails?: boolean } = {}) {
+function harness(
+  options: {
+    output?: string;
+    exitCode?: number;
+    killFails?: boolean;
+    spawnFailsAfterCreate?: boolean;
+  } = {},
+) {
   const spawns: ContainerSpawnConfig[] = [];
   const manager = {
     spawn: vi.fn(async (config: ContainerSpawnConfig) => {
       spawns.push(config);
+      config.onCreated?.('system-container');
+      if (options.spawnFailsAfterCreate) throw new Error('spawn interrupted after allocation');
       return 'system-container';
     }),
     writeFile: vi.fn(async () => undefined),
@@ -80,6 +89,7 @@ function harness(options: { output?: string; exitCode?: number; killFails?: bool
     spawns,
     runs,
     dockerNetworkManager,
+    providerAccountStore,
     runner: new SystemDecisionRunner({
       localContainerManager: manager,
       sandboxContainerManager: manager,
@@ -190,6 +200,111 @@ describe('SystemDecisionRunner', () => {
       'system-decision-1',
       expect.objectContaining({ outcome: 'leaked', cleanupState: 'retryable' }),
     );
+  });
+
+  it('records the allocated identity before spawn can finish', async () => {
+    const created = harness({ spawnFailsAfterCreate: true });
+
+    await expect(created.runner.run(input)).resolves.toMatchObject({
+      ok: false,
+      kind: 'infrastructure',
+    });
+    expect(created.repository.setSandboxContainer).toHaveBeenCalledWith(
+      'system-decision-1',
+      'system-container',
+    );
+    expect(created.manager.kill).toHaveBeenCalledWith('system-container');
+  });
+
+  it('fails durably when OAuth credential readback cannot be persisted', async () => {
+    const oauth = harness({
+      output: JSON.stringify({ item: { text: JSON.stringify(decision) } }),
+    });
+    vi.mocked(oauth.providerAccountStore.get).mockReturnValue({
+      id: 'openai-decision',
+      name: 'OpenAI decision',
+      provider: 'openai',
+      credentials: {
+        provider: 'openai',
+        authMode: 'chatgpt',
+        authJson: '{"tokens":{"access_token":"issued"}}',
+      },
+      failoverPolicy: null,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      lastAuthenticatedAt: new Date(0).toISOString(),
+      lastUsedAt: null,
+    });
+
+    const result = await oauth.runner.run({
+      ...input,
+      providerAccountId: 'openai-decision',
+      runtime: 'codex',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      kind: 'infrastructure',
+      failure: { code: 'CREDENTIAL_PERSISTENCE_FAILED' },
+    });
+    expect(oauth.repository.closeSandboxRun).toHaveBeenCalledWith(
+      'system-decision-1',
+      expect.objectContaining({
+        outcome: 'failed',
+        failureCode: 'CREDENTIAL_PERSISTENCE_FAILED',
+      }),
+    );
+  });
+
+  it('classifies invalid configuration with stable sanitized codes', async () => {
+    const invalid = harness();
+    await expect(invalid.runner.run({ ...input, timeoutMs: 0 })).resolves.toMatchObject({
+      ok: false,
+      kind: 'configuration',
+      failure: { code: 'DECISION_TIMEOUT_INVALID' },
+    });
+
+    const hosted = harness();
+    const missingImageRunner = new SystemDecisionRunner({
+      localContainerManager: hosted.manager,
+      sandboxContainerManager: hosted.manager,
+      providerAccountStore: hosted.providerAccountStore,
+      repository: hosted.repository,
+      dockerNetworkManager: hosted.dockerNetworkManager,
+      logger: pino({ level: 'silent' }),
+    });
+    await expect(
+      missingImageRunner.run({ ...input, executionTarget: 'sandbox' }),
+    ).resolves.toMatchObject({
+      ok: false,
+      kind: 'configuration',
+      failure: { code: 'SYSTEM_DECISION_IMAGE_MISSING' },
+    });
+
+    const mismatch = harness();
+    await expect(mismatch.runner.run({ ...input, runtime: 'codex' })).resolves.toMatchObject({
+      ok: false,
+      kind: 'configuration',
+      failure: { code: 'PROVIDER_ACCOUNT_RUNTIME_MISMATCH' },
+    });
+
+    const missingCredentials = harness();
+    vi.mocked(missingCredentials.providerAccountStore.get).mockReturnValue({
+      id: 'copilot-decision',
+      name: 'Copilot decision',
+      provider: 'copilot',
+      credentials: null,
+      failoverPolicy: null,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      lastAuthenticatedAt: null,
+      lastUsedAt: null,
+    });
+    await expect(missingCredentials.runner.run(input)).resolves.toMatchObject({
+      ok: false,
+      kind: 'configuration',
+      failure: { code: 'PROVIDER_ACCOUNT_CREDENTIALS_MISSING' },
+    });
   });
 
   it('classifies provider limits without leaking secrets', async () => {

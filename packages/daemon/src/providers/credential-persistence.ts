@@ -309,7 +309,7 @@ async function persistProviderAccountMaxReadback(
   try {
     raw = await containerManager.readFile(containerId, CREDENTIALS_PATH);
   } catch {
-    return;
+    throw new Error('MAX credential readback failed');
   }
   let parsed: {
     claudeAiOauth?: { accessToken?: string; refreshToken?: string; expiresAt?: number };
@@ -317,10 +317,12 @@ async function persistProviderAccountMaxReadback(
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return;
+    throw new Error('MAX credential readback was malformed');
   }
   const oauth = parsed.claudeAiOauth;
-  if (!oauth?.accessToken || !oauth.refreshToken || !oauth.expiresAt) return;
+  if (!oauth?.accessToken || !oauth.refreshToken || !oauth.expiresAt) {
+    throw new Error('MAX credential readback was incomplete');
+  }
   await withOwnerLock(credentialOwnerKey(owner), async () => {
     const current = store.get(owner.id).credentials;
     if (
@@ -353,7 +355,7 @@ async function persistProviderAccountOpenAiReadback(
     raw = await containerManager.readFile(containerId, CODEX_AUTH_PATH);
     JSON.parse(raw);
   } catch {
-    return;
+    throw new Error('Codex credential readback failed');
   }
   await withOwnerLock(credentialOwnerKey(owner), async () => {
     const current = store.get(owner.id).credentials;
@@ -375,7 +377,7 @@ async function persistProviderAccountPiReadback(
   try {
     raw = await containerManager.readFile(containerId, PI_AUTH_PATH);
   } catch {
-    return;
+    throw new Error('Pi credential readback failed');
   }
   await withOwnerLock(credentialOwnerKey(owner), async () => {
     const current = store.get(owner.id).credentials;
@@ -383,7 +385,8 @@ async function persistProviderAccountPiReadback(
     const currentAuthJson = JSON.stringify({ [current.providerId]: current.credential }, null, 2);
     if (currentAuthJson !== issuedAuthJson) return;
     const updated = parsePiCredential(raw, current.providerId, owner.id, logger);
-    if (updated) store.updateCredentials(owner.id, updated);
+    if (!updated) throw new Error('Pi credential readback was malformed');
+    store.updateCredentials(owner.id, updated);
   });
 }
 

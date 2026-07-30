@@ -177,16 +177,7 @@ export async function buildProviderAccountEnv(
   const provider = auth.provider;
   if (!provider || !auth.account) throw new Error('Dedicated provider account has no provider');
   assertAccountRuntimeCompatible(auth.account, provider, options.runtime);
-  if (
-    provider === 'openai' &&
-    (auth.credentials?.provider !== 'openai' || !auth.credentials.authJson)
-  ) {
-    throw new AutopodError(
-      `Provider account "${auth.account.name}" has no stored Codex authentication state`,
-      'PROVIDER_ACCOUNT_CREDENTIALS_MISSING',
-      400,
-    );
-  }
+  assertDedicatedCredentialsPresent(auth, provider);
   options.providerAccountStore.touchLastUsed(providerAccountId);
   const subject: ProviderEnvSubject = {
     name: `provider account ${providerAccountId}`,
@@ -230,6 +221,38 @@ export async function buildProviderAccountEnv(
       return buildPiEnv(subject, auth, catalog);
     default:
       throw new Error(`Unsupported dedicated provider: ${provider as string}`);
+  }
+}
+
+function assertDedicatedCredentialsPresent(
+  auth: ProviderAuthResolution,
+  provider: NonNullable<ProviderAuthResolution['provider']>,
+): void {
+  const credentials = auth.credentials;
+  const present =
+    (provider === 'anthropic' &&
+      credentials?.provider === 'anthropic' &&
+      Boolean(credentials.apiKey)) ||
+    (provider === 'max' && credentials?.provider === 'max') ||
+    (provider === 'openai' &&
+      credentials?.provider === 'openai' &&
+      Boolean(credentials.authJson)) ||
+    (provider === 'foundry' &&
+      credentials?.provider === 'foundry' &&
+      Boolean(credentials.apiKey)) ||
+    (provider === 'copilot' && credentials?.provider === 'copilot' && Boolean(credentials.token)) ||
+    (provider === 'openrouter' &&
+      credentials?.provider === 'openrouter' &&
+      Boolean(credentials.apiKey)) ||
+    (provider === 'pi' &&
+      ((credentials?.provider === 'pi' && Boolean(credentials.credential)) ||
+        (credentials?.provider === 'api-key' && Boolean(credentials.apiKey))));
+  if (!present) {
+    throw new AutopodError(
+      `Provider account "${auth.account?.name ?? 'unknown'}" has no compatible stored credentials`,
+      'PROVIDER_ACCOUNT_CREDENTIALS_MISSING',
+      400,
+    );
   }
 }
 

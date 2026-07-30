@@ -183,7 +183,7 @@ describe('system provider auth', () => {
         providerAccountStore,
         runtime: 'codex',
       }),
-    ).rejects.toThrow(/no stored Codex authentication state/);
+    ).rejects.toThrow(/no compatible stored credentials/);
   });
 
   it('rejects Foundry daemon identity fallback for a dedicated account', async () => {
@@ -200,6 +200,6 @@ describe('system provider auth', () => {
         providerAccountStore,
         runtime: 'claude',
       }),
-    ).rejects.toThrow(/requires a stored Foundry API key/);
+    ).rejects.toThrow(/no compatible stored credentials/);
   });
 });

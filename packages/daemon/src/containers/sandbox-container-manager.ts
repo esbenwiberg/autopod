@@ -156,6 +156,7 @@ export class SandboxContainerManager implements ContainerManager {
     this.egressPolicies.set(sandboxId, egressPolicy);
 
     try {
+      config.onCreated?.(sandboxId);
       if (config.volumes?.length) {
         config.onProgress?.('Uploading workspace to sandbox…');
         await this.uploadVolumes(sandboxId, config.volumes);
