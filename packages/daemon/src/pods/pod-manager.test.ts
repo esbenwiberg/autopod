@@ -3524,6 +3524,17 @@ describe('PodManager', () => {
           actor: testCase.actor,
         });
       }
+
+      const skipContext = createTestContext();
+      const skipManager = createPodManager(skipContext.deps);
+      const skipPod = skipManager.createSession(
+        { profileName: 'test-profile', task: 'Deferred skip actor' },
+        'user-1',
+      );
+      const skipActor = cases[2]?.actor;
+      expect(skipActor?.type).toBe('podsitter');
+      skipManager.setSkipValidation(skipPod.id, true, skipActor);
+      expect(skipManager.getSession(skipPod.id).skipValidationActor).toEqual(skipActor);
     });
 
     it('transitions validated -> approved -> merging -> complete', async () => {

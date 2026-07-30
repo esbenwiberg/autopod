@@ -12003,18 +12003,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         // Skip-validation may have been toggled while this run was in flight — bypass result.
         if (s2.skipValidation) {
+          const skipActor = s2.skipValidationActor ?? {
+            type: 'automation' as const,
+            id: 'legacy-skip-validation',
+          };
           const validationWaiver =
             result.overall === 'fail'
-              ? buildValidationWaiver(result, 'Validation skipped by operator', {
-                  type: 'automation',
-                  id: 'validation-skip-flag',
-                })
+              ? buildValidationWaiver(result, 'Validation skipped by operator', skipActor)
               : null;
           emitActivityStatus(
             podId,
             validationWaiver
-              ? `Validation waived by human toggle — failed phases: ${validationWaiver.failedPhases.join(', ') || 'unknown'}`
-              : 'Validation skipped by human toggle — marking as validated',
+              ? `Validation waived by ${actorLabel(skipActor)} — failed phases: ${validationWaiver.failedPhases.join(', ') || 'unknown'}`
+              : `Validation skipped by ${actorLabel(skipActor)} — marking as validated`,
           );
           logger.info(
             { podId, attempt, validationWaiver },
@@ -13819,7 +13820,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
     ): void {
       const pod = podRepo.getOrThrow(podId);
-      podRepo.update(podId, { skipValidation: skip });
+      podRepo.update(podId, {
+        skipValidation: skip,
+        skipValidationActor: skip ? actor : null,
+      });
       const msg = skip
         ? 'Skip-validation toggled on — next validation result will be bypassed'
         : 'Skip-validation toggled off — validation will run normally';

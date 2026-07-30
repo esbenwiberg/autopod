@@ -40,7 +40,7 @@ const argumentsByAction: PodsitterActionArguments = {
   install_tool: { toolName: 'gh' },
   recover_worktree: {},
   force_approve: { failedPhases: ['facts'], manualEvidenceRefs: ['validation:1'] },
-  skip_validation: { failedPhases: ['test'], manualEvidenceRefs: ['validation:1'] },
+  skip_validation: { failedPhases: ['tests'], manualEvidenceRefs: ['validation:1'] },
   force_complete: { failedPhases: ['push'], manualEvidenceRefs: ['event:1'] },
   fix_manually: { instructions: 'Repair the branch manually' },
 };
@@ -109,7 +109,7 @@ function decision<Action extends PodsitterAction>(
     action,
     arguments: argumentsByAction[action],
     reason: 'Evidence supports this intervention',
-    evidenceRefs: ['pod:state', 'validation:1'],
+    evidenceRefs: ['pod:state', 'validation:1', 'event:1'],
     confidence: 'high',
     remainingRisk: 'Operator should review the final result',
     stopCondition: 'Stop after this one action',
@@ -119,9 +119,28 @@ function decision<Action extends PodsitterAction>(
 
 function harness(reserved = true) {
   const calls: string[] = [];
+  const currentPod = {
+    id: 'pod-1',
+    status: 'failed',
+    worktreeCompromised: true,
+    failureReason: 'Push failed',
+    lastValidationResult: {
+      setup: { status: 'pass' },
+      lint: { status: 'pass' },
+      sast: { status: 'pass' },
+      smoke: {
+        build: { status: 'pass' },
+        health: { status: 'pass' },
+        pages: [],
+      },
+      test: { status: 'fail' },
+      factValidation: { status: 'fail' },
+      taskReview: { status: 'pass' },
+    },
+  } as Pod;
   const manager = new Proxy(
     {
-      getSession: vi.fn(() => ({ id: 'pod-1', status: 'failed' }) as Pod),
+      getSession: vi.fn(() => currentPod),
     } as unknown as PodManager,
     {
       get(target, property, receiver) {
@@ -159,7 +178,7 @@ describe('PodsitterActionExecutor', () => {
     for (const action of PODSITTER_ACTIONS) {
       const h = harness();
       vi.mocked(h.manager.getSession).mockReturnValue({
-        id: 'pod-1',
+        ...h.manager.getSession('pod-1'),
         status: statusByAction[action] ?? 'failed',
       } as Pod);
 

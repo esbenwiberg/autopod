@@ -97,6 +97,65 @@ function assertLastResortEvidence(decision: PodsitterDecision): void {
   }
 }
 
+function currentFailedPhases(pod: Pod): string[] {
+  const result = pod.lastValidationResult;
+  if (!result) return [];
+  const failed: string[] = [];
+  if (result.setup?.status === 'fail') failed.push('setup');
+  if (result.lint?.status === 'fail') failed.push('lint');
+  if (result.sast?.status === 'fail') failed.push('sast');
+  if (result.smoke.build.status === 'fail') failed.push('build');
+  if (result.test?.status === 'fail') failed.push('tests');
+  if (result.smoke.health.status === 'fail') failed.push('health');
+  if (result.smoke.pages.some((page) => page.status === 'fail')) failed.push('pages');
+  if (result.factValidation?.status === 'fail') failed.push('facts');
+  if (result.taskReview && result.taskReview.status !== 'pass') failed.push('review');
+  return failed;
+}
+
+function assertLastResortPreconditions(decision: PodsitterDecision, pod: Pod): void {
+  if (!LAST_RESORT_ACTIONS.has(decision.action)) return;
+  assertActionStatus(decision.action, pod);
+  if (decision.action === 'recover_worktree') {
+    if (!pod.worktreeCompromised) {
+      throw new AutopodError(
+        'Worktree recovery requires a compromised worktree',
+        'INVALID_STATE',
+        409,
+      );
+    }
+    return;
+  }
+
+  const manualRefs = decision.arguments.manualEvidenceRefs;
+  if (manualRefs.some((reference) => !decision.evidenceRefs.includes(reference))) {
+    throw new AutopodError(
+      `${decision.action} manual evidence must reference the decision evidence packet`,
+      'PODSITTER_EVIDENCE_MISMATCH',
+      400,
+    );
+  }
+  const failedPhases = currentFailedPhases(pod);
+  if (decision.action !== 'force_complete') {
+    if (
+      failedPhases.length === 0 ||
+      decision.arguments.failedPhases.some((phase) => !failedPhases.includes(phase))
+    ) {
+      throw new AutopodError(
+        `${decision.action} failed phases do not match current validation evidence`,
+        'PODSITTER_EVIDENCE_MISMATCH',
+        409,
+      );
+    }
+  } else if (failedPhases.length === 0 && !pod.failureReason?.trim()) {
+    throw new AutopodError(
+      'force_complete requires current failed validation or a durable failure reason',
+      'PODSITTER_EVIDENCE_MISMATCH',
+      409,
+    );
+  }
+}
+
 export class PodsitterActionExecutor {
   constructor(
     private readonly repository: PodsitterRepository,
@@ -117,7 +176,8 @@ export class PodsitterActionExecutor {
     assertLastResortEvidence(decision);
 
     // Re-read policy-relevant pod state before consuming the durable reservation.
-    this.podManager.getSession(input.podId);
+    const pod = this.podManager.getSession(input.podId);
+    assertLastResortPreconditions(decision, pod);
 
     const key = idempotencyKey({ ...input, actor, decision });
     const reserved = this.repository.reserveAction({

@@ -169,6 +169,8 @@ export interface Pod {
   pendingEscalation: EscalationRequest | null;
   escalationCount: number;
   skipValidation: boolean;
+  /** Actor that most recently enabled skip-validation, retained until consumed or disabled. */
+  skipValidationActor?: OperatorActor | null;
   createdAt: string;
   startedAt: string | null;
   runningAt: string | null;
