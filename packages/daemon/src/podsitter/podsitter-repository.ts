@@ -22,6 +22,24 @@ import { evaluatePodsitterActivation, validatePodsitterActivation } from './acti
 const DEFAULT_BUDGETS = { maxDecisionsPerWindow: 20, maxActionsPerWindow: 10 };
 const SENSITIVE_KEY = /(credential|password|secret|token|api.?key|authorization)/i;
 const MAX_PERSISTED_PAYLOAD_BYTES = 32_000;
+const ONCE_PER_WINDOW_ACTIONS = new Set<PodsitterAction>(['extend_budget']);
+const ONCE_PER_FAILURE_ACTIONS = new Set<PodsitterAction>([
+  'extend_validation_attempts',
+  'extend_pr_attempts',
+  'kick',
+  'revalidate',
+  'spawn_fix',
+  'retry_pr',
+  'update_from_base',
+  'recover_worktree',
+  'fix_manually',
+]);
+const ONCE_PER_ATTENTION_ACTIONS = new Set<PodsitterAction>(['approve']);
+const ONCE_PER_POD_ACTIONS = new Set<PodsitterAction>([
+  'force_approve',
+  'skip_validation',
+  'force_complete',
+]);
 
 export interface PodsitterConfigurationInput {
   enabled: boolean;
@@ -91,9 +109,9 @@ export interface PodsitterRepository {
     idempotencyKey: string;
     podId: string;
     decisionId: string;
-    attentionSignature?: string;
-    activationGeneration?: number;
-    activationWindowId?: string;
+    attentionSignature: string;
+    activationGeneration: number;
+    activationWindowId: string;
     failureSignature?: string | null;
     actor: OperatorActor;
     action: PodsitterAction;
@@ -688,6 +706,39 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
           ) {
             return false;
           }
+          if (
+            actor.type !== 'podsitter' ||
+            actor.decisionId !== decision.id ||
+            actor.providerAccountId !== decision.target.providerAccountId ||
+            actor.model !== decision.target.model
+          ) {
+            return false;
+          }
+          const attention = db
+            .prepare(
+              `SELECT signature, failure_signature, state, decision_id
+               FROM podsitter_attention
+               WHERE id = ? AND pod_id = ?`,
+            )
+            .get(decision.attentionId, input.podId) as
+            | {
+                signature: string;
+                failure_signature: string | null;
+                state: PodsitterAttentionState;
+                decision_id: string | null;
+              }
+            | undefined;
+          if (
+            !attention ||
+            attention.signature !== decision.attentionSignature ||
+            attention.signature !== input.attentionSignature ||
+            attention.state !== 'deciding' ||
+            attention.decision_id !== decision.id ||
+            (input.failureSignature !== undefined &&
+              input.failureSignature !== attention.failure_signature)
+          ) {
+            return false;
+          }
           const reservedActions = db
             .prepare(
               `SELECT COUNT(*) AS count
@@ -697,6 +748,47 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
             )
             .get(authority.windowId) as { count: number };
           if (reservedActions.count >= authority.configuration.budgets.maxActionsPerWindow) {
+            return false;
+          }
+          const repeat = (predicate: string, parameters: readonly unknown[]): boolean =>
+            (
+              db
+                .prepare(
+                  `SELECT COUNT(*) AS count
+                   FROM podsitter_action_audit audit
+                   JOIN podsitter_decisions prior ON prior.id = audit.decision_id
+                   WHERE audit.pod_id = ? AND ${predicate}`,
+                )
+                .get(input.podId, ...parameters) as { count: number }
+            ).count > 0;
+          const effectiveFailureSignature =
+            attention.failure_signature ?? decision.attentionSignature;
+          if (
+            (ONCE_PER_WINDOW_ACTIONS.has(input.action) &&
+              repeat('prior.activation_window_id = ? AND audit.action = ?', [
+                authority.windowId,
+                input.action,
+              ])) ||
+            (ONCE_PER_FAILURE_ACTIONS.has(input.action) &&
+              repeat(
+                `COALESCE(audit.failure_signature, prior.attention_signature) = ?
+                 AND audit.action = ?`,
+                [effectiveFailureSignature, input.action],
+              )) ||
+            (ONCE_PER_ATTENTION_ACTIONS.has(input.action) &&
+              repeat('prior.attention_signature = ? AND audit.action = ?', [
+                decision.attentionSignature,
+                input.action,
+              ])) ||
+            (input.action === 'approve_fact_waiver' &&
+              repeat(
+                `COALESCE(audit.failure_signature, prior.attention_signature) = ?
+                 AND audit.action = 'approve_fact_waiver'
+                 AND json_extract(audit.arguments, '$.factId') = ?`,
+                [effectiveFailureSignature, (actionArguments as { factId: string }).factId],
+              )) ||
+            (ONCE_PER_POD_ACTIONS.has(input.action) && repeat('audit.action = ?', [input.action]))
+          ) {
             return false;
           }
           return db
@@ -718,7 +810,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               input.idempotencyKey,
               input.podId,
               input.decisionId,
-              input.failureSignature ?? null,
+              attention.failure_signature,
               json(actor),
               input.action,
               json(actionArguments),

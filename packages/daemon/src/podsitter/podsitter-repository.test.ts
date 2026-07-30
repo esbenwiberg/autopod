@@ -32,6 +32,15 @@ function setup() {
   return { db, repository, actor };
 }
 
+function decisionActor(decisionId: string) {
+  return {
+    type: 'podsitter' as const,
+    decisionId,
+    providerAccountId: 'sitter-account',
+    model: 'gpt-5',
+  };
+}
+
 describe('PodsitterRepository', () => {
   it('restores pending attention and enforces durable leases', () => {
     const { db, repository } = setup();
@@ -330,7 +339,10 @@ describe('PodsitterRepository', () => {
       idempotencyKey: 'pod-1:signature-1:approve',
       podId: 'pod-1',
       decisionId: 'decision-1',
-      actor,
+      attentionSignature: attention.signature,
+      activationGeneration: 1,
+      activationWindowId: 'always:g1',
+      actor: decisionActor('decision-1'),
       action: 'approve' as const,
       arguments: {},
       policyResult: 'allowed',
@@ -676,7 +688,10 @@ describe('PodsitterRepository', () => {
         idempotencyKey: 'action:lifecycle',
         podId: 'pod-1',
         decisionId: 'decision-lifecycle',
-        actor,
+        attentionSignature: attention.signature,
+        activationGeneration: 1,
+        activationWindowId: 'always:g1',
+        actor: decisionActor('decision-lifecycle'),
         action: 'dismiss_validation_finding',
         arguments: {
           findingId: 'finding-1',
@@ -1304,7 +1319,10 @@ describe('PodsitterRepository', () => {
         idempotencyKey: `action:budget-${index}`,
         podId,
         decisionId: completedDecisionIds[index] ?? '',
-        actor,
+        attentionSignature: `signature-budget-${index === 0 ? 'one' : 'two'}`,
+        activationGeneration: configuration.generation,
+        activationWindowId: `always:g${configuration.generation}`,
+        actor: decisionActor(completedDecisionIds[index] ?? ''),
         action: 'no_action',
         arguments: {},
         policyResult: 'allowed',

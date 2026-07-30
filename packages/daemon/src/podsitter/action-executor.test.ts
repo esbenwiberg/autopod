@@ -7,8 +7,10 @@ import {
 } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { PodManager } from '../pods/pod-manager.js';
+import { createProviderAccountStore } from '../provider-accounts/provider-account-store.js';
+import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { PodsitterActionExecutor } from './action-executor.js';
-import type { PodsitterRepository } from './podsitter-repository.js';
+import { type PodsitterRepository, createPodsitterRepository } from './podsitter-repository.js';
 
 const actor = {
   type: 'podsitter' as const,
@@ -172,6 +174,111 @@ function harness(reserved = true) {
   };
 }
 
+function durableHarness() {
+  const db = createTestDb();
+  insertTestProfile(db);
+  db.prepare(
+    `INSERT INTO pods (
+      id, profile_name, task, model, runtime, branch, user_id, status, failure_reason
+    ) VALUES (
+      'pod-1', 'test-profile', 'task', 'gpt-5', 'codex', 'autopod/pod-1',
+      'operator-1', 'running', 'stuck'
+    )`,
+  ).run();
+  createProviderAccountStore(db).create({
+    id: 'sitter-account',
+    name: 'Sitter Account',
+    provider: 'openai',
+  });
+  const repository = createPodsitterRepository(db);
+  const configuration = repository.replaceConfiguration({
+    enabled: true,
+    activation: { mode: 'always' },
+    authorizedUntil: null,
+    profileScope: null,
+    decisionTarget: {
+      providerAccountId: 'sitter-account',
+      runtime: 'codex',
+      model: 'gpt-5',
+    },
+    updatedBy: { type: 'human', userId: 'operator-1' },
+  });
+  const sideEffect = vi.fn();
+  const manager = {
+    getSession: vi.fn(
+      () =>
+        ({
+          id: 'pod-1',
+          status: 'running',
+          failureReason: 'stuck',
+          worktreeCompromised: false,
+        }) as Pod,
+    ),
+    kickPod: sideEffect,
+  } as unknown as PodManager;
+  const executor = new PodsitterActionExecutor(repository, manager, {
+    dismissValidationFinding: vi.fn(),
+    report: vi.fn(),
+  });
+  return { db, repository, configuration, manager, executor, sideEffect };
+}
+
+function persistDecision(
+  repository: PodsitterRepository,
+  input: {
+    id: string;
+    attentionId: string;
+    signature: string;
+    failureSignature: string;
+    generation: number;
+    action?: PodsitterAction;
+  },
+) {
+  const now = new Date();
+  const leaseExpiry = new Date(now.getTime() + 60_000).toISOString();
+  const attention = repository.recordAttention({
+    id: input.attentionId,
+    podId: 'pod-1',
+    signature: input.signature,
+    failureSignature: input.failureSignature,
+    now: now.toISOString(),
+  });
+  const lease = repository.acquireAttentionLease(
+    attention.id,
+    `worker-${input.id}`,
+    leaseExpiry,
+    now.toISOString(),
+  );
+  if (!lease) throw new Error('Expected attention lease');
+  repository.createDecision({
+    id: input.id,
+    attentionId: attention.id,
+    leaseOwner: `worker-${input.id}`,
+    leaseVersion: lease.leaseVersion,
+    podId: 'pod-1',
+    attentionSignature: input.signature,
+    configurationGeneration: input.generation,
+    evidenceHash: `sha256:${input.id}`,
+    evidenceVersion: 1,
+    target: { providerAccountId: 'sitter-account', runtime: 'codex', model: 'gpt-5' },
+    now: now.toISOString(),
+  });
+  const persisted = decision(input.action ?? 'kick', {
+    attentionSignature: input.signature,
+  } as Partial<PodsitterDecision>);
+  repository.completeDecision(
+    input.id,
+    {
+      leaseOwner: `worker-${input.id}`,
+      leaseVersion: lease.leaseVersion,
+      decision: persisted,
+      outcome: 'completed',
+    },
+    now.toISOString(),
+  );
+  return persisted;
+}
+
 describe('PodsitterActionExecutor', () => {
   it('maps the full Podsitter action contract', async () => {
     const seen = new Set<PodsitterAction>();
@@ -233,18 +340,183 @@ describe('PodsitterActionExecutor', () => {
   });
 
   it('rejects stale and duplicate decisions before side effects', async () => {
-    for (const staleCase of ['generation', 'signature', 'state', 'duplicate']) {
-      const h = harness(false);
-      const result = await h.executor.execute({
+    const stale = durableHarness();
+    const staleDecision = persistDecision(stale.repository, {
+      id: 'decision-stale',
+      attentionId: 'attention-stale',
+      signature: 'signature-stale',
+      failureSignature: 'failure-stale',
+      generation: stale.configuration.generation,
+    });
+    stale.repository.recordAttention({
+      id: 'attention-current',
+      podId: 'pod-1',
+      signature: 'signature-current',
+      failureSignature: 'failure-current',
+    });
+    await expect(
+      stale.executor.execute({
         podId: 'pod-1',
-        decision: decision('force_complete'),
-        actor,
-        activationGeneration: staleCase === 'generation' ? 6 : 7,
-        windowId: 'always:7',
+        decision: staleDecision,
+        actor: {
+          ...actor,
+          decisionId: 'decision-stale',
+          providerAccountId: 'sitter-account',
+        },
+        activationGeneration: stale.configuration.generation,
+        windowId: `always:g${stale.configuration.generation}`,
+        failureSignature: 'failure-stale',
+      }),
+    ).resolves.toMatchObject({ outcome: 'superseded' });
+    expect(stale.sideEffect).not.toHaveBeenCalled();
+
+    const duplicate = durableHarness();
+    const first = persistDecision(duplicate.repository, {
+      id: 'decision-first',
+      attentionId: 'attention-first',
+      signature: 'signature-first',
+      failureSignature: 'failure-repeat',
+      generation: duplicate.configuration.generation,
+    });
+    await expect(
+      duplicate.executor.execute({
+        podId: 'pod-1',
+        decision: first,
+        actor: {
+          ...actor,
+          decisionId: 'decision-first',
+          providerAccountId: 'sitter-account',
+        },
+        activationGeneration: duplicate.configuration.generation,
+        windowId: `always:g${duplicate.configuration.generation}`,
+        failureSignature: 'failure-repeat',
+      }),
+    ).resolves.toMatchObject({ outcome: 'executed' });
+    const second = persistDecision(duplicate.repository, {
+      id: 'decision-second',
+      attentionId: 'attention-second',
+      signature: 'signature-second',
+      failureSignature: 'failure-repeat',
+      generation: duplicate.configuration.generation,
+    });
+    await expect(
+      duplicate.executor.execute({
+        podId: 'pod-1',
+        decision: second,
+        actor: {
+          ...actor,
+          decisionId: 'decision-second',
+          providerAccountId: 'sitter-account',
+        },
+        activationGeneration: duplicate.configuration.generation,
+        windowId: `always:g${duplicate.configuration.generation}`,
+        failureSignature: 'failure-repeat',
+      }),
+    ).resolves.toMatchObject({ outcome: 'superseded' });
+    expect(duplicate.sideEffect).toHaveBeenCalledTimes(1);
+
+    const mismatchedActor = durableHarness();
+    const actorDecision = persistDecision(mismatchedActor.repository, {
+      id: 'decision-actor',
+      attentionId: 'attention-actor',
+      signature: 'signature-actor',
+      failureSignature: 'failure-actor',
+      generation: mismatchedActor.configuration.generation,
+    });
+    await expect(
+      mismatchedActor.executor.execute({
+        podId: 'pod-1',
+        decision: actorDecision,
+        actor: {
+          ...actor,
+          decisionId: 'decision-actor',
+          providerAccountId: 'sitter-account',
+          model: 'different-model',
+        },
+        activationGeneration: mismatchedActor.configuration.generation,
+        windowId: `always:g${mismatchedActor.configuration.generation}`,
+        failureSignature: 'failure-actor',
+      }),
+    ).resolves.toMatchObject({ outcome: 'superseded' });
+    expect(mismatchedActor.sideEffect).not.toHaveBeenCalled();
+
+    for (const budgetAction of [
+      'extend_budget',
+      'extend_validation_attempts',
+      'extend_pr_attempts',
+      'kick',
+      'recover_worktree',
+      'force_approve',
+      'skip_validation',
+      'force_complete',
+    ] as const) {
+      const budget = durableHarness();
+      const firstBudgetDecision = persistDecision(budget.repository, {
+        id: `decision-${budgetAction}-first`,
+        attentionId: `attention-${budgetAction}-first`,
+        signature: `signature-${budgetAction}-first`,
+        failureSignature: `failure-${budgetAction}`,
+        generation: budget.configuration.generation,
+        action: budgetAction,
       });
-      expect(result.outcome, staleCase).toBe('superseded');
-      expect(h.calls, staleCase).toEqual([]);
-      expect(h.repository.completeAction, staleCase).not.toHaveBeenCalled();
+      const reserve = (
+        decisionId: string,
+        signature: string,
+        failureSignature: string,
+        actionDecision: PodsitterDecision,
+      ) =>
+        budget.repository.reserveAction({
+          id: `audit-${decisionId}`,
+          idempotencyKey: `action:${decisionId}`,
+          podId: 'pod-1',
+          decisionId,
+          attentionSignature: signature,
+          activationGeneration: budget.configuration.generation,
+          activationWindowId: `always:g${budget.configuration.generation}`,
+          failureSignature,
+          actor: {
+            type: 'podsitter',
+            decisionId,
+            providerAccountId: 'sitter-account',
+            model: 'gpt-5',
+          },
+          action: budgetAction,
+          arguments: actionDecision.arguments,
+          policyResult: 'allowed',
+        });
+      expect(
+        reserve(
+          `decision-${budgetAction}-first`,
+          `signature-${budgetAction}-first`,
+          `failure-${budgetAction}`,
+          firstBudgetDecision,
+        ),
+        budgetAction,
+      ).toBe(true);
+
+      const repeatedFailure =
+        budgetAction === 'force_approve' ||
+        budgetAction === 'skip_validation' ||
+        budgetAction === 'force_complete'
+          ? `new-failure-${budgetAction}`
+          : `failure-${budgetAction}`;
+      const secondBudgetDecision = persistDecision(budget.repository, {
+        id: `decision-${budgetAction}-second`,
+        attentionId: `attention-${budgetAction}-second`,
+        signature: `signature-${budgetAction}-second`,
+        failureSignature: repeatedFailure,
+        generation: budget.configuration.generation,
+        action: budgetAction,
+      });
+      expect(
+        reserve(
+          `decision-${budgetAction}-second`,
+          `signature-${budgetAction}-second`,
+          repeatedFailure,
+          secondBudgetDecision,
+        ),
+        budgetAction,
+      ).toBe(false);
     }
   });
 
