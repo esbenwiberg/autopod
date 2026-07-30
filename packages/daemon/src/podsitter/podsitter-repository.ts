@@ -11,10 +11,12 @@ import {
   type PodsitterProviderCircuitStatus,
   type PodsitterProviderState,
   type SystemSandboxRunOutcome,
+  getPresetConfig,
   operatorActorSchema,
   podsitterActionArgumentsSchemas,
   podsitterConfigurationInputSchema,
   podsitterDecisionSchema,
+  sanitizeDeep,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { evaluatePodsitterActivation, validatePodsitterActivation } from './activation.js';
@@ -238,6 +240,10 @@ function assertBoundedRedactedPayload(value: unknown, field: string): void {
   if (Buffer.byteLength(JSON.stringify(value), 'utf8') > MAX_PERSISTED_PAYLOAD_BYTES) {
     throw new Error(`Podsitter ${field} exceeds the bounded payload limit`);
   }
+}
+
+function sanitizeForAudit<T>(value: T): T {
+  return canonicalize(sanitizeDeep(value, getPresetConfig('relaxed')) as T);
 }
 
 function hydrateConfiguration(row: Record<string, unknown>): PodsitterConfiguration {
@@ -687,7 +693,8 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       const actionArguments = canonicalize(
         podsitterActionArgumentsSchemas[input.action].parse(input.arguments),
       );
-      assertBoundedRedactedPayload(actionArguments, 'arguments');
+      const persistedArguments = sanitizeForAudit(actionArguments);
+      assertBoundedRedactedPayload(persistedArguments, 'arguments');
       assertRedacted(input.policyResult, 'policyResult');
       const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
       try {
@@ -813,7 +820,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               attention.failure_signature,
               json(actor),
               input.action,
-              json(actionArguments),
+              json(persistedArguments),
               input.policyResult,
               now,
               input.decisionId,
@@ -834,7 +841,8 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       }
     },
     completeAction(idempotencyKey, daemonResult, now = new Date().toISOString()) {
-      assertRedacted(daemonResult, 'daemonResult');
+      const persistedResult = sanitizeForAudit(daemonResult);
+      assertRedacted(persistedResult, 'daemonResult');
       const normalizedNow = normalizeIso(now, 'now');
       return (
         db.transaction(() =>
@@ -844,7 +852,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
                SET daemon_result = ?, completed_at = ?
                WHERE idempotency_key = ? AND completed_at IS NULL`,
             )
-            .run(daemonResult, normalizedNow, idempotencyKey),
+            .run(persistedResult, normalizedNow, idempotencyKey),
         )().changes === 1
       );
     },

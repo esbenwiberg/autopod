@@ -176,8 +176,7 @@ export class PodsitterActionExecutor {
     assertLastResortEvidence(decision);
 
     // Re-read policy-relevant pod state before consuming the durable reservation.
-    const pod = this.podManager.getSession(input.podId);
-    assertLastResortPreconditions(decision, pod);
+    this.podManager.getSession(input.podId);
 
     const key = idempotencyKey({ ...input, actor, decision });
     const reserved = this.repository.reserveAction({

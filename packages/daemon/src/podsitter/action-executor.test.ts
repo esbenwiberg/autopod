@@ -232,6 +232,7 @@ function persistDecision(
     failureSignature: string;
     generation: number;
     action?: PodsitterAction;
+    overrides?: Partial<PodsitterDecision>;
   },
 ) {
   const now = new Date();
@@ -265,6 +266,7 @@ function persistDecision(
   });
   const persisted = decision(input.action ?? 'kick', {
     attentionSignature: input.signature,
+    ...input.overrides,
   } as Partial<PodsitterDecision>);
   repository.completeDecision(
     input.id,
@@ -540,5 +542,46 @@ describe('PodsitterActionExecutor', () => {
     }
     expect(h.repository.reserveAction).not.toHaveBeenCalled();
     expect(h.calls).toEqual([]);
+
+    const secretAudit = durableHarness();
+    const secretDecision = persistDecision(secretAudit.repository, {
+      id: 'decision-secret-audit',
+      attentionId: 'attention-secret-audit',
+      signature: 'signature-secret-audit',
+      failureSignature: 'failure-secret-audit',
+      generation: secretAudit.configuration.generation,
+      action: 'tell',
+      overrides: {
+        arguments: {
+          message: 'Use token sk-abcdefghijklmnopqrstuvwx for the next step',
+        },
+      } as Partial<PodsitterDecision>,
+    });
+    expect(
+      secretAudit.repository.reserveAction({
+        id: 'audit-secret',
+        idempotencyKey: 'action:secret',
+        podId: 'pod-1',
+        decisionId: 'decision-secret-audit',
+        attentionSignature: 'signature-secret-audit',
+        activationGeneration: secretAudit.configuration.generation,
+        activationWindowId: `always:g${secretAudit.configuration.generation}`,
+        failureSignature: 'failure-secret-audit',
+        actor: {
+          type: 'podsitter',
+          decisionId: 'decision-secret-audit',
+          providerAccountId: 'sitter-account',
+          model: 'gpt-5',
+        },
+        action: 'tell',
+        arguments: secretDecision.arguments,
+        policyResult: 'allowed',
+      }),
+    ).toBe(true);
+    const audit = secretAudit.db
+      .prepare("SELECT arguments FROM podsitter_action_audit WHERE id = 'audit-secret'")
+      .get() as { arguments: string };
+    expect(audit.arguments).not.toContain('sk-abcdefghijklmnopqrstuvwx');
+    expect(audit.arguments).toContain('[API_KEY_REDACTED]');
   });
 });
