@@ -260,6 +260,7 @@ function hydrateDecision(row: Record<string, unknown>): PodsitterDecisionRecord 
     podId: row.pod_id as string,
     attentionSignature: row.attention_signature as string,
     configurationGeneration: row.configuration_generation as number,
+    activationWindowId: row.activation_window_id as string,
     evidenceHash: row.evidence_hash as string,
     evidenceVersion: row.evidence_version as number,
     target: {
@@ -311,9 +312,10 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
     return hydrateDecision(row);
   };
   const hasCurrentAuthority = (
-    decision: Pick<PodsitterDecisionRecord, 'podId' | 'configurationGeneration' | 'target'>,
+    decision: Pick<PodsitterDecisionRecord, 'podId' | 'configurationGeneration' | 'target'> &
+      Partial<Pick<PodsitterDecisionRecord, 'activationWindowId'>>,
     now: string,
-  ): boolean => {
+  ): { configuration: PodsitterConfiguration; windowId: string } | null => {
     const row = db
       .prepare(
         `SELECT config.*, pods.profile_name
@@ -322,16 +324,20 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
          WHERE config.singleton_id = 1`,
       )
       .get(decision.podId) as Record<string, unknown> | undefined;
-    if (!row) return false;
+    if (!row) return null;
 
     const configuration = hydrateConfiguration(row);
-    return (
+    const activation = evaluatePodsitterActivation(configuration, new Date(now));
+    const authorized =
       configuration.generation === decision.configurationGeneration &&
       decisionTargetsMatch(configuration.decisionTarget, decision.target) &&
       (configuration.profileScope === null ||
         configuration.profileScope.includes(row.profile_name as string)) &&
-      evaluatePodsitterActivation(configuration, new Date(now)).active
-    );
+      activation.active &&
+      activation.windowId !== null &&
+      (decision.activationWindowId === undefined ||
+        decision.activationWindowId === activation.windowId);
+    return authorized ? { configuration, windowId: activation.windowId } : null;
   };
 
   const replaceConfiguration = db.transaction(
@@ -603,7 +609,19 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       try {
         const result = db.transaction(() => {
           const decision = getDecision(input.decisionId);
-          if (!hasCurrentAuthority(decision, now)) return false;
+          const authority = hasCurrentAuthority(decision, now);
+          if (!authority) return false;
+          const reservedActions = db
+            .prepare(
+              `SELECT COUNT(*) AS count
+               FROM podsitter_action_audit audit
+               JOIN podsitter_decisions decision ON decision.id = audit.decision_id
+               WHERE decision.activation_window_id = ?`,
+            )
+            .get(authority.windowId) as { count: number };
+          if (reservedActions.count >= authority.configuration.budgets.maxActionsPerWindow) {
+            return false;
+          }
           return db
             .prepare(
               `INSERT INTO podsitter_action_audit (
@@ -670,7 +688,8 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
     createDecision(input) {
       const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
       const createOrRecover = db.transaction((): PodsitterDecisionRecord => {
-        if (!hasCurrentAuthority(input, now)) {
+        const authority = hasCurrentAuthority(input, now);
+        if (!authority) {
           throw new Error('Podsitter decision requires the current active configuration authority');
         }
 
@@ -708,15 +727,25 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
           return getDecision(attention.decision_id);
         }
 
+        const decisionsInWindow = db
+          .prepare(
+            'SELECT COUNT(*) AS count FROM podsitter_decisions WHERE activation_window_id = ?',
+          )
+          .get(authority.windowId) as { count: number };
+        if (decisionsInWindow.count >= authority.configuration.budgets.maxDecisionsPerWindow) {
+          throw new Error('Podsitter decision budget is exhausted for the activation window');
+        }
+
         const result = db
           .prepare(
             `INSERT INTO podsitter_decisions (
               id, attention_id, pod_id, attention_signature, configuration_generation,
+              activation_window_id,
               evidence_hash, evidence_version, provider_account_id, runtime, model,
               reasoning_effort, decision, outcome, failure_code, input_tokens, output_tokens,
               cost_usd, created_at, completed_at, executed_at
             )
-            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', NULL, NULL, NULL, NULL, ?, NULL, NULL
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', NULL, NULL, NULL, NULL, ?, NULL, NULL
             WHERE EXISTS (
               SELECT 1 FROM podsitter_attention
               WHERE id = ?
@@ -734,6 +763,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
             input.podId,
             input.attentionSignature,
             input.configurationGeneration,
+            authority.windowId,
             input.evidenceHash,
             input.evidenceVersion,
             input.target.providerAccountId,
@@ -779,7 +809,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
           : normalizeIso(update.executedAt, 'executedAt');
       db.transaction(() => {
         const existing = getDecision(id);
-        const authorized = hasCurrentAuthority(existing, normalizedNow);
+        const authorized = hasCurrentAuthority(existing, normalizedNow) !== null;
         const outcome = authorized ? update.outcome : 'not_executed';
         const failureCode = authorized
           ? (update.failureCode ?? null)

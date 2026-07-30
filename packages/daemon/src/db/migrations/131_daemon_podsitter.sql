@@ -42,6 +42,7 @@ CREATE TABLE podsitter_decisions (
   pod_id TEXT NOT NULL REFERENCES pods(id) ON DELETE CASCADE,
   attention_signature TEXT NOT NULL,
   configuration_generation INTEGER NOT NULL,
+  activation_window_id TEXT NOT NULL,
   evidence_hash TEXT NOT NULL,
   evidence_version INTEGER NOT NULL,
   -- Keep the account id as immutable audit provenance without retaining the account itself.
@@ -59,6 +60,7 @@ CREATE TABLE podsitter_decisions (
   completed_at TEXT,
   executed_at TEXT
 );
+CREATE INDEX idx_podsitter_decisions_window ON podsitter_decisions(activation_window_id);
 
 CREATE TABLE podsitter_action_audit (
   id TEXT PRIMARY KEY,

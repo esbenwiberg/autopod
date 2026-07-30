@@ -930,6 +930,197 @@ describe('PodsitterRepository', () => {
     ).toBe(false);
   });
 
+  it('does not carry decision authority into a later recurring window', () => {
+    const { repository, actor } = setup();
+    const configuration = repository.replaceConfiguration(
+      {
+        enabled: true,
+        activation: {
+          mode: 'recurring',
+          cronExpression: '0 0 * * *',
+          durationMinutes: 60,
+          timeZone: 'UTC',
+        },
+        authorizedUntil: null,
+        profileScope: null,
+        decisionTarget: {
+          providerAccountId: 'sitter-account',
+          runtime: 'codex',
+          model: 'gpt-5',
+        },
+        updatedBy: actor,
+      },
+      '2026-07-29T00:00:00Z',
+    );
+    const attention = repository.recordAttention({
+      id: 'attention-recurring-window',
+      podId: 'pod-1',
+      signature: 'signature-recurring-window',
+      now: '2026-07-29T00:05:00Z',
+    });
+    repository.acquireAttentionLease(
+      attention.id,
+      'recurring-worker',
+      '2026-07-29T00:30:00Z',
+      '2026-07-29T00:05:00Z',
+    );
+    const created = repository.createDecision({
+      id: 'decision-recurring-window',
+      attentionId: attention.id,
+      leaseOwner: 'recurring-worker',
+      podId: attention.podId,
+      attentionSignature: attention.signature,
+      configurationGeneration: configuration.generation,
+      evidenceHash: 'sha256:recurring-window',
+      evidenceVersion: 1,
+      target: { providerAccountId: 'sitter-account', runtime: 'codex', model: 'gpt-5' },
+      now: '2026-07-29T00:10:00Z',
+    });
+    const decision = {
+      contractVersion: 1 as const,
+      attentionSignature: attention.signature,
+      action: 'no_action' as const,
+      arguments: {},
+      reason: 'No intervention is warranted.',
+      evidenceRefs: ['event:recurring-window'],
+      confidence: 'high' as const,
+      remainingRisk: 'None.',
+      stopCondition: 'Stop.',
+    };
+
+    expect(created.activationWindowId).toBe(
+      `recurring:g${configuration.generation}:2026-07-29T00:00:00.000Z`,
+    );
+    expect(
+      repository.completeDecision(
+        created.id,
+        { decision, outcome: 'completed' },
+        '2026-07-30T00:10:00Z',
+      ),
+    ).toMatchObject({
+      outcome: 'not_executed',
+      failureCode: 'authorization_revoked',
+    });
+  });
+
+  it('enforces decision and action ceilings transactionally per activation window', () => {
+    const { db, repository, actor } = setup();
+    db.prepare(
+      `INSERT INTO pods (
+        id, profile_name, task, model, runtime, branch, user_id
+      ) VALUES (
+        'pod-2', 'test-profile', 'task', 'gpt-5', 'codex', 'autopod/pod-2', 'operator-1'
+      )`,
+    ).run();
+    const configuration = repository.replaceConfiguration(
+      {
+        enabled: true,
+        activation: { mode: 'always' },
+        authorizedUntil: null,
+        profileScope: null,
+        decisionTarget: {
+          providerAccountId: 'sitter-account',
+          runtime: 'codex',
+          model: 'gpt-5',
+        },
+        budgets: { maxDecisionsPerWindow: 2, maxActionsPerWindow: 1 },
+        updatedBy: actor,
+      },
+      '2026-07-29T00:00:00Z',
+    );
+    const completedDecisionIds: string[] = [];
+    for (const [suffix, podId] of [
+      ['one', 'pod-1'],
+      ['two', 'pod-2'],
+    ] as const) {
+      const attention = repository.recordAttention({
+        id: `attention-budget-${suffix}`,
+        podId,
+        signature: `signature-budget-${suffix}`,
+        now: '2026-07-29T00:01:00Z',
+      });
+      repository.acquireAttentionLease(
+        attention.id,
+        `budget-worker-${suffix}`,
+        '2026-07-29T01:00:00Z',
+        '2026-07-29T00:02:00Z',
+      );
+      const created = repository.createDecision({
+        id: `decision-budget-${suffix}`,
+        attentionId: attention.id,
+        leaseOwner: `budget-worker-${suffix}`,
+        podId: attention.podId,
+        attentionSignature: attention.signature,
+        configurationGeneration: configuration.generation,
+        evidenceHash: `sha256:budget-${suffix}`,
+        evidenceVersion: 1,
+        target: { providerAccountId: 'sitter-account', runtime: 'codex', model: 'gpt-5' },
+        now: '2026-07-29T00:03:00Z',
+      });
+      repository.completeDecision(
+        created.id,
+        {
+          decision: {
+            contractVersion: 1,
+            attentionSignature: attention.signature,
+            action: 'no_action',
+            arguments: {},
+            reason: 'No intervention is warranted.',
+            evidenceRefs: [`event:budget-${suffix}`],
+            confidence: 'high',
+            remainingRisk: 'None.',
+            stopCondition: 'Stop.',
+          },
+          outcome: 'completed',
+        },
+        '2026-07-29T00:04:00Z',
+      );
+      completedDecisionIds.push(created.id);
+    }
+
+    const reserve = (index: number, podId: string) =>
+      repository.reserveAction({
+        id: `audit-budget-${index}`,
+        idempotencyKey: `action:budget-${index}`,
+        podId,
+        decisionId: completedDecisionIds[index] ?? '',
+        actor,
+        action: 'no_action',
+        arguments: {},
+        policyResult: 'allowed',
+        now: '2026-07-29T00:05:00Z',
+      });
+    expect(reserve(0, 'pod-1')).toBe(true);
+    expect(reserve(1, 'pod-2')).toBe(false);
+
+    const excessAttention = repository.recordAttention({
+      id: 'attention-budget-excess',
+      podId: 'pod-1',
+      signature: 'signature-budget-excess',
+      now: '2026-07-29T00:06:00Z',
+    });
+    repository.acquireAttentionLease(
+      excessAttention.id,
+      'budget-worker-excess',
+      '2026-07-29T01:00:00Z',
+      '2026-07-29T00:06:00Z',
+    );
+    expect(() =>
+      repository.createDecision({
+        id: 'decision-budget-excess',
+        attentionId: excessAttention.id,
+        leaseOwner: 'budget-worker-excess',
+        podId: excessAttention.podId,
+        attentionSignature: excessAttention.signature,
+        configurationGeneration: configuration.generation,
+        evidenceHash: 'sha256:budget-excess',
+        evidenceVersion: 1,
+        target: { providerAccountId: 'sitter-account', runtime: 'codex', model: 'gpt-5' },
+        now: '2026-07-29T00:07:00Z',
+      }),
+    ).toThrow('budget is exhausted');
+  });
+
   it('increments generation for every configuration replacement', () => {
     const { repository, actor } = setup();
     expect(repository.getConfiguration()?.generation).toBe(1);

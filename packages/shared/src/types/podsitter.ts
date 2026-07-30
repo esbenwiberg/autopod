@@ -162,6 +162,7 @@ export interface PodsitterDecisionRecord {
   podId: string;
   attentionSignature: string;
   configurationGeneration: number;
+  activationWindowId: string;
   evidenceHash: string;
   evidenceVersion: number;
   target: PodsitterDecisionTarget;
