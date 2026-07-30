@@ -27,6 +27,7 @@ CREATE TABLE podsitter_attention (
   failure_signature TEXT,
   decision_id TEXT,
   lease_owner TEXT,
+  lease_version INTEGER NOT NULL DEFAULT 0,
   lease_expires_at TEXT,
   first_seen_at TEXT NOT NULL,
   last_seen_at TEXT NOT NULL,
@@ -85,6 +86,7 @@ CREATE TABLE podsitter_provider_state (
   reset_at TEXT,
   sanitized_reason TEXT,
   probe_lease_owner TEXT,
+  probe_lease_version INTEGER NOT NULL DEFAULT 0,
   probe_lease_expires_at TEXT,
   recovered_at TEXT,
   updated_at TEXT NOT NULL

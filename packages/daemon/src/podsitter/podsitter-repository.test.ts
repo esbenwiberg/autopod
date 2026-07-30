@@ -47,15 +47,25 @@ describe('PodsitterRepository', () => {
       signature: 'signature-current',
       now: '2026-07-29T00:01:00.000Z',
     });
+    repository.initializeProviderState('sitter-account', '2026-07-29T00:00:00.000Z');
+    const initialProbeVersion = repository.acquireProviderProbeLease(
+      'sitter-account',
+      'state-worker',
+      '2026-07-29T00:00:30.000Z',
+      '2026-07-29T00:00:00.000Z',
+    );
+    if (initialProbeVersion === null) throw new Error('Expected initial provider probe lease');
     repository.setProviderState(
       'sitter-account',
+      'state-worker',
+      initialProbeVersion,
       {
         status: 'rate_limited',
         consecutiveFailures: 2,
         retryAt: '2026-07-29T00:10:00.000Z',
         sanitizedReason: 'provider asked the service to retry later',
       },
-      '2026-07-29T00:01:00.000Z',
+      '2026-07-29T00:00:15.000Z',
     );
     expect(
       repository.acquireAttentionLease(
@@ -72,7 +82,7 @@ describe('PodsitterRepository', () => {
         '2026-07-29T00:05:00.000Z',
         '2026-07-29T00:02:00.000Z',
       ),
-    ).toBe(true);
+    ).not.toBeNull();
 
     const restored = createPodsitterRepository(db);
     expect(restored.listPendingAttention()).toEqual([
@@ -105,7 +115,7 @@ describe('PodsitterRepository', () => {
         '2026-07-29T00:06:00.000Z',
         '2026-07-29T00:03:00.000Z',
       ),
-    ).toBe(false);
+    ).toBeNull();
     expect(
       restored.acquireProviderProbeLease(
         'sitter-account',
@@ -113,11 +123,12 @@ describe('PodsitterRepository', () => {
         '2026-07-29T00:06:00.000Z',
         '2026-07-29T00:03:00.000Z',
       ),
-    ).toBe(false);
+    ).toBeNull();
     expect(
       restored.releaseAttentionLease(
         current.id,
         'worker-a',
+        1,
         'acted',
         null,
         '2026-07-29T00:06:00.000Z',
@@ -138,12 +149,130 @@ describe('PodsitterRepository', () => {
         '2026-07-29T00:10:00.000Z',
         '2026-07-29T00:06:00.000Z',
       ),
-    ).toBe(true);
+    ).not.toBeNull();
 
     const old = db
       .prepare("SELECT state FROM podsitter_attention WHERE id = 'attention-old'")
       .get() as { state: string };
     expect(old.state).toBe('superseded');
+  });
+
+  it('fences stale decision and provider outcomes after lease recovery', () => {
+    const { repository } = setup();
+    const attention = repository.recordAttention({
+      id: 'attention-fenced-outcome',
+      podId: 'pod-1',
+      signature: 'signature-fenced-outcome',
+      now: '2026-07-29T00:00:00Z',
+    });
+    const firstLease = repository.acquireAttentionLease(
+      attention.id,
+      'decision-worker',
+      '2026-07-29T00:05:00Z',
+      '2026-07-29T00:01:00Z',
+    );
+    expect(firstLease?.leaseVersion).toBe(1);
+    repository.createDecision({
+      id: 'decision-fenced-outcome',
+      attentionId: attention.id,
+      leaseOwner: 'decision-worker',
+      leaseVersion: 1,
+      podId: attention.podId,
+      attentionSignature: attention.signature,
+      configurationGeneration: 1,
+      evidenceHash: 'sha256:fenced-outcome',
+      evidenceVersion: 1,
+      target: { providerAccountId: 'sitter-account', runtime: 'codex', model: 'gpt-5' },
+      now: '2026-07-29T00:02:00Z',
+    });
+    const recoveredLease = repository.acquireAttentionLease(
+      attention.id,
+      'decision-worker',
+      '2026-07-29T00:15:00Z',
+      '2026-07-29T00:06:00Z',
+    );
+    expect(recoveredLease?.leaseVersion).toBe(2);
+    const decision = {
+      contractVersion: 1 as const,
+      attentionSignature: attention.signature,
+      action: 'no_action' as const,
+      arguments: {},
+      reason: 'The recovered worker rebuilt current evidence.',
+      evidenceRefs: ['event:fenced-outcome'],
+      confidence: 'high' as const,
+      remainingRisk: 'None.',
+      stopCondition: 'Stop.',
+    };
+
+    expect(() =>
+      repository.completeDecision(
+        'decision-fenced-outcome',
+        {
+          leaseOwner: 'decision-worker',
+          leaseVersion: 1,
+          decision: { ...decision, reason: 'Stale evidence from the expired worker.' },
+          outcome: 'completed',
+        },
+        '2026-07-29T00:07:00Z',
+      ),
+    ).toThrow('current attention lease');
+    expect(
+      repository.completeDecision(
+        'decision-fenced-outcome',
+        {
+          leaseOwner: 'decision-worker',
+          leaseVersion: 2,
+          decision,
+          outcome: 'completed',
+        },
+        '2026-07-29T00:07:00Z',
+      ),
+    ).toMatchObject({ decision, outcome: 'completed' });
+
+    repository.initializeProviderState('sitter-account', '2026-07-29T00:00:00Z');
+    expect(
+      repository.acquireProviderProbeLease(
+        'sitter-account',
+        'probe-worker',
+        '2026-07-29T00:05:00Z',
+        '2026-07-29T00:01:00Z',
+      ),
+    ).toBe(1);
+    expect(
+      repository.acquireProviderProbeLease(
+        'sitter-account',
+        'probe-worker',
+        '2026-07-29T00:15:00Z',
+        '2026-07-29T00:06:00Z',
+      ),
+    ).toBe(2);
+    expect(() =>
+      repository.setProviderState(
+        'sitter-account',
+        'probe-worker',
+        1,
+        { status: 'available', consecutiveFailures: 0 },
+        '2026-07-29T00:07:00Z',
+      ),
+    ).toThrow('current unexpired probe lease');
+    expect(
+      repository.setProviderState(
+        'sitter-account',
+        'probe-worker',
+        2,
+        {
+          status: 'rate_limited',
+          consecutiveFailures: 1,
+          sanitizedReason: 'provider asked the service to retry later',
+        },
+        '2026-07-29T00:07:00Z',
+      ),
+    ).toMatchObject({
+      status: 'rate_limited',
+      consecutiveFailures: 1,
+      probeLeaseOwner: 'probe-worker',
+      probeLeaseVersion: 2,
+    });
   });
 
   it('reserves each action key once', () => {
@@ -163,6 +292,7 @@ describe('PodsitterRepository', () => {
       id: 'decision-1',
       attentionId: attention.id,
       leaseOwner: 'decision-worker',
+      leaseVersion: 1,
       podId: 'pod-1',
       attentionSignature: attention.signature,
       configurationGeneration: 1,
@@ -178,6 +308,8 @@ describe('PodsitterRepository', () => {
     repository.completeDecision(
       'decision-1',
       {
+        leaseOwner: 'decision-worker',
+        leaseVersion: 1,
         decision: {
           contractVersion: 1,
           attentionSignature: attention.signature,
@@ -246,10 +378,7 @@ describe('PodsitterRepository', () => {
       podId: 'pod-1',
       signature: 'signature-offset',
     });
-    repository.setProviderState('sitter-account', {
-      status: 'available',
-      consecutiveFailures: 0,
-    });
+    repository.initializeProviderState('sitter-account');
 
     expect(
       repository.acquireAttentionLease(
@@ -303,6 +432,7 @@ describe('PodsitterRepository', () => {
       id: 'decision-stale',
       attentionId: stale.id,
       leaseOwner: 'stale-worker',
+      leaseVersion: 1,
       podId: 'pod-1',
       attentionSignature: stale.signature,
       configurationGeneration: 1,
@@ -353,6 +483,7 @@ describe('PodsitterRepository', () => {
       repository.releaseAttentionLease(
         attention.id,
         'worker-b',
+        1,
         'pending',
         null,
         '2026-07-29T00:30:00Z',
@@ -362,6 +493,7 @@ describe('PodsitterRepository', () => {
       repository.releaseAttentionLease(
         attention.id,
         'worker-a',
+        1,
         'deferred',
         null,
         '2026-07-29T00:30:00Z',
@@ -371,20 +503,18 @@ describe('PodsitterRepository', () => {
       expect.objectContaining({ id: attention.id, state: 'deferred', leaseOwner: null }),
     ]);
 
-    repository.setProviderState('sitter-account', {
-      status: 'available',
-      consecutiveFailures: 0,
-    });
-    expect(
-      repository.acquireProviderProbeLease(
-        'sitter-account',
-        'worker-a',
-        '2026-07-29T01:00:00Z',
-        '2026-07-29T00:00:00Z',
-      ),
-    ).toBe(true);
+    repository.initializeProviderState('sitter-account');
+    const probeVersion = repository.acquireProviderProbeLease(
+      'sitter-account',
+      'worker-a',
+      '2026-07-29T01:00:00Z',
+      '2026-07-29T00:00:00Z',
+    );
+    expect(probeVersion).toBe(1);
     repository.setProviderState(
       'sitter-account',
+      'worker-a',
+      1,
       {
         status: 'rate_limited',
         consecutiveFailures: 1,
@@ -397,8 +527,12 @@ describe('PodsitterRepository', () => {
       retryAt: '2026-07-29T00:30:00.000Z',
       probeLeaseOwner: 'worker-a',
     });
-    expect(repository.releaseProviderProbeLease('sitter-account', 'worker-b')).toBe(false);
-    expect(repository.releaseProviderProbeLease('sitter-account', 'worker-a')).toBe(true);
+    expect(
+      repository.releaseProviderProbeLease('sitter-account', 'worker-b', 1, '2026-07-29T00:02:00Z'),
+    ).toBe(false);
+    expect(
+      repository.releaseProviderProbeLease('sitter-account', 'worker-a', 1, '2026-07-29T00:02:00Z'),
+    ).toBe(true);
   });
 
   it('validates decision payloads and persists action and sandbox completion', () => {
@@ -418,6 +552,7 @@ describe('PodsitterRepository', () => {
       id: 'decision-lifecycle',
       attentionId: attention.id,
       leaseOwner: 'decision-worker',
+      leaseVersion: 1,
       podId: 'pod-1',
       attentionSignature: attention.signature,
       configurationGeneration: 1,
@@ -431,6 +566,7 @@ describe('PodsitterRepository', () => {
         id: 'decision-duplicate',
         attentionId: attention.id,
         leaseOwner: 'decision-worker',
+        leaseVersion: 1,
         podId: 'pod-1',
         attentionSignature: attention.signature,
         configurationGeneration: 1,
@@ -458,50 +594,80 @@ describe('PodsitterRepository', () => {
       stopCondition: 'Stop after sending one message.',
     };
     expect(() =>
-      repository.completeDecision('decision-lifecycle', {
-        outcome: 'completed',
-      }),
+      repository.completeDecision(
+        'decision-lifecycle',
+        {
+          leaseOwner: 'decision-worker',
+          leaseVersion: 1,
+          outcome: 'completed',
+        },
+        '2026-07-29T00:10:00Z',
+      ),
     ).toThrow('requires a decision payload');
     expect(() =>
-      repository.completeDecision('decision-lifecycle', {
-        decision: {
-          ...decision,
-          attentionSignature: 'signature-from-unrelated-evidence',
+      repository.completeDecision(
+        'decision-lifecycle',
+        {
+          leaseOwner: 'decision-worker',
+          leaseVersion: 1,
+          decision: {
+            ...decision,
+            attentionSignature: 'signature-from-unrelated-evidence',
+          },
+          outcome: 'completed',
         },
-        outcome: 'completed',
-      }),
+        '2026-07-29T00:10:00Z',
+      ),
     ).toThrow('attention signature does not match');
     expect(repository.getDecisionForAttention(attention.id)).toMatchObject({
       outcome: 'pending',
       decision: null,
     });
     expect(
-      repository.completeDecision('decision-lifecycle', {
-        decision,
-        outcome: 'completed',
-        executedAt: '2026-07-29T02:30:00+02:00',
-      }),
+      repository.completeDecision(
+        'decision-lifecycle',
+        {
+          leaseOwner: 'decision-worker',
+          leaseVersion: 1,
+          decision,
+          outcome: 'completed',
+          executedAt: '2026-07-29T02:30:00+02:00',
+        },
+        '2026-07-29T00:30:00Z',
+      ),
     ).toMatchObject({
       decision,
       outcome: 'completed',
       executedAt: '2026-07-29T00:30:00.000Z',
     });
     expect(
-      repository.completeDecision('decision-lifecycle', {
-        decision: {
-          ...decision,
-          action: 'no_action',
-          arguments: {},
-          reason: 'A late duplicate completion must not replace the durable result.',
+      repository.completeDecision(
+        'decision-lifecycle',
+        {
+          leaseOwner: 'decision-worker',
+          leaseVersion: 1,
+          decision: {
+            ...decision,
+            action: 'no_action',
+            arguments: {},
+            reason: 'A late duplicate completion must not replace the durable result.',
+          },
+          outcome: 'not_executed',
         },
-        outcome: 'not_executed',
-      }),
+        '2026-07-29T00:31:00Z',
+      ),
     ).toMatchObject({ decision, outcome: 'completed' });
     expect(() =>
-      repository.completeDecision('decision-lifecycle', {
-        decision: { ...decision, arguments: { accessToken: 'do-not-store' } },
-        outcome: 'completed',
-      }),
+      repository.completeDecision(
+        'decision-lifecycle',
+        {
+          leaseOwner: 'decision-worker',
+          leaseVersion: 1,
+          decision: { ...decision, arguments: { accessToken: 'do-not-store' } },
+          outcome: 'completed',
+        },
+        '2026-07-29T00:32:00Z',
+      ),
     ).toThrow();
 
     expect(
@@ -603,6 +769,7 @@ describe('PodsitterRepository', () => {
       id: 'decision-before-crash',
       attentionId: attention.id,
       leaseOwner: 'worker-before-crash',
+      leaseVersion: 1,
       podId: 'pod-1',
       attentionSignature: attention.signature,
       configurationGeneration: 1,
@@ -628,6 +795,7 @@ describe('PodsitterRepository', () => {
         ...input,
         id: 'decision-after-crash',
         leaseOwner: 'worker-after-crash',
+        leaseVersion: 2,
         now: '2026-07-29T00:07:00Z',
       }),
     ).toMatchObject({ id: 'decision-before-crash' });
@@ -637,6 +805,7 @@ describe('PodsitterRepository', () => {
         ...input,
         id: 'decision-wrong-signature',
         leaseOwner: 'worker-after-crash',
+        leaseVersion: 2,
         attentionSignature: 'wrong-signature',
         now: '2026-07-29T00:08:00Z',
       }),
@@ -646,6 +815,7 @@ describe('PodsitterRepository', () => {
         ...input,
         id: 'decision-wrong-pod',
         leaseOwner: 'worker-after-crash',
+        leaseVersion: 2,
         podId: 'wrong-pod',
         now: '2026-07-29T00:08:00Z',
       }),
@@ -684,6 +854,7 @@ describe('PodsitterRepository', () => {
       id: 'decision-config-race',
       attentionId: attention.id,
       leaseOwner: 'config-race-worker',
+      leaseVersion: 1,
       podId: 'pod-1',
       attentionSignature: attention.signature,
       configurationGeneration: 1,
@@ -771,6 +942,7 @@ describe('PodsitterRepository', () => {
         id: 'decision-out-of-scope',
         attentionId: attention.id,
         leaseOwner: 'scope-worker',
+        leaseVersion: 1,
         podId: attention.podId,
         attentionSignature: attention.signature,
         configurationGeneration: configuration.generation,
@@ -800,6 +972,7 @@ describe('PodsitterRepository', () => {
       id: 'decision-revoked',
       attentionId: attention.id,
       leaseOwner: 'revoked-worker',
+      leaseVersion: 1,
       podId: attention.podId,
       attentionSignature: attention.signature,
       configurationGeneration: 1,
@@ -838,7 +1011,13 @@ describe('PodsitterRepository', () => {
     expect(
       repository.completeDecision(
         'decision-revoked',
-        { decision, outcome: 'completed', executedAt: '2026-07-29T00:04:00Z' },
+        {
+          leaseOwner: 'revoked-worker',
+          leaseVersion: 1,
+          decision,
+          outcome: 'completed',
+          executedAt: '2026-07-29T00:04:00Z',
+        },
         '2026-07-29T00:04:00Z',
       ),
     ).toMatchObject({
@@ -880,6 +1059,7 @@ describe('PodsitterRepository', () => {
       id: 'decision-stale-action',
       attentionId: attention.id,
       leaseOwner: 'stale-action-worker',
+      leaseVersion: 1,
       podId: attention.podId,
       attentionSignature: attention.signature,
       configurationGeneration: 1,
@@ -901,7 +1081,12 @@ describe('PodsitterRepository', () => {
     };
     repository.completeDecision(
       'decision-stale-action',
-      { decision, outcome: 'completed' },
+      {
+        leaseOwner: 'stale-action-worker',
+        leaseVersion: 1,
+        decision,
+        outcome: 'completed',
+      },
       '2026-07-29T00:03:00Z',
     );
     repository.replaceConfiguration(
@@ -973,6 +1158,7 @@ describe('PodsitterRepository', () => {
       id: 'decision-recurring-window',
       attentionId: attention.id,
       leaseOwner: 'recurring-worker',
+      leaseVersion: 1,
       podId: attention.podId,
       attentionSignature: attention.signature,
       configurationGeneration: configuration.generation,
@@ -996,16 +1182,18 @@ describe('PodsitterRepository', () => {
     expect(created.activationWindowId).toBe(
       `recurring:g${configuration.generation}:2026-07-29T00:00:00.000Z`,
     );
-    expect(
+    expect(() =>
       repository.completeDecision(
         created.id,
-        { decision, outcome: 'completed' },
+        {
+          leaseOwner: 'recurring-worker',
+          leaseVersion: 1,
+          decision,
+          outcome: 'completed',
+        },
         '2026-07-30T00:10:00Z',
       ),
-    ).toMatchObject({
-      outcome: 'not_executed',
-      failureCode: 'authorization_revoked',
-    });
+    ).toThrow('current attention lease');
   });
 
   it('enforces decision and action ceilings transactionally per activation window', () => {
@@ -1054,6 +1242,7 @@ describe('PodsitterRepository', () => {
         id: `decision-budget-${suffix}`,
         attentionId: attention.id,
         leaseOwner: `budget-worker-${suffix}`,
+        leaseVersion: 1,
         podId: attention.podId,
         attentionSignature: attention.signature,
         configurationGeneration: configuration.generation,
@@ -1065,6 +1254,8 @@ describe('PodsitterRepository', () => {
       repository.completeDecision(
         created.id,
         {
+          leaseOwner: `budget-worker-${suffix}`,
+          leaseVersion: 1,
           decision: {
             contractVersion: 1,
             attentionSignature: attention.signature,
@@ -1115,6 +1306,7 @@ describe('PodsitterRepository', () => {
         id: 'decision-budget-excess',
         attentionId: excessAttention.id,
         leaseOwner: 'budget-worker-excess',
+        leaseVersion: 1,
         podId: excessAttention.podId,
         attentionSignature: excessAttention.signature,
         configurationGeneration: configuration.generation,

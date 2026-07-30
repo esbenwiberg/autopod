@@ -143,6 +143,7 @@ export interface PodsitterAttention {
   failureSignature: string | null;
   decisionId: string | null;
   leaseOwner: string | null;
+  leaseVersion: number;
   leaseExpiresAt: string | null;
   firstSeenAt: string;
   lastSeenAt: string;
@@ -192,6 +193,7 @@ export interface PodsitterProviderState {
   resetAt: string | null;
   sanitizedReason: string | null;
   probeLeaseOwner: string | null;
+  probeLeaseVersion: number;
   probeLeaseExpiresAt: string | null;
   recoveredAt: string | null;
   updatedAt: string;

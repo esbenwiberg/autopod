@@ -53,13 +53,17 @@ export interface PodsitterRepository {
   releaseAttentionLease(
     id: string,
     owner: string,
+    leaseVersion: number,
     state?: PodsitterAttentionState,
     decisionId?: string | null,
     now?: string,
   ): boolean;
   getProviderState(providerAccountId: string): PodsitterProviderState | null;
+  initializeProviderState(providerAccountId: string, now?: string): PodsitterProviderState;
   setProviderState(
     providerAccountId: string,
+    leaseOwner: string,
+    leaseVersion: number,
     update: {
       status: PodsitterProviderCircuitStatus;
       consecutiveFailures: number;
@@ -75,8 +79,13 @@ export interface PodsitterRepository {
     owner: string,
     expiresAt: string,
     now?: string,
+  ): number | null;
+  releaseProviderProbeLease(
+    providerAccountId: string,
+    owner: string,
+    leaseVersion: number,
+    now?: string,
   ): boolean;
-  releaseProviderProbeLease(providerAccountId: string, owner: string, now?: string): boolean;
   reserveAction(input: {
     id: string;
     idempotencyKey: string;
@@ -95,6 +104,7 @@ export interface PodsitterRepository {
     id: string;
     attentionId: string;
     leaseOwner: string;
+    leaseVersion: number;
     podId: string;
     attentionSignature: string;
     configurationGeneration: number;
@@ -106,6 +116,8 @@ export interface PodsitterRepository {
   completeDecision(
     id: string,
     update: {
+      leaseOwner: string;
+      leaseVersion: number;
       decision?: PodsitterDecision | null;
       outcome: PodsitterDecisionOutcome;
       failureCode?: string | null;
@@ -231,6 +243,7 @@ function hydrateAttention(row: Record<string, unknown>): PodsitterAttention {
     failureSignature: row.failure_signature as string | null,
     decisionId: row.decision_id as string | null,
     leaseOwner: row.lease_owner as string | null,
+    leaseVersion: row.lease_version as number,
     leaseExpiresAt: row.lease_expires_at as string | null,
     firstSeenAt: row.first_seen_at as string,
     lastSeenAt: row.last_seen_at as string,
@@ -247,6 +260,7 @@ function hydrateProviderState(row: Record<string, unknown>): PodsitterProviderSt
     resetAt: row.reset_at as string | null,
     sanitizedReason: row.sanitized_reason as string | null,
     probeLeaseOwner: row.probe_lease_owner as string | null,
+    probeLeaseVersion: row.probe_lease_version as number,
     probeLeaseExpiresAt: row.probe_lease_expires_at as string | null,
     recoveredAt: row.recovered_at as string | null,
     updatedAt: row.updated_at as string,
@@ -486,7 +500,8 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
         db
           .prepare(
             `UPDATE podsitter_attention
-             SET lease_owner = ?, lease_expires_at = ?, state = 'deciding'
+             SET lease_owner = ?, lease_version = lease_version + 1,
+                 lease_expires_at = ?, state = 'deciding'
              WHERE id = ?
                AND state IN ('pending', 'deferred', 'deciding')
                AND (lease_expires_at IS NULL OR lease_expires_at <= ?)`,
@@ -498,6 +513,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
     releaseAttentionLease(
       id,
       owner,
+      leaseVersion,
       state = 'pending',
       decisionId = null,
       now = new Date().toISOString(),
@@ -510,9 +526,10 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               `UPDATE podsitter_attention
                SET lease_owner = NULL, lease_expires_at = NULL, state = ?,
                    decision_id = COALESCE(?, decision_id), last_seen_at = ?
-               WHERE id = ? AND lease_owner = ? AND lease_expires_at > ?`,
+               WHERE id = ? AND lease_owner = ? AND lease_version = ?
+                 AND lease_expires_at > ?`,
             )
-            .run(state, decisionId, normalizedNow, id, owner, normalizedNow),
+            .run(state, decisionId, normalizedNow, id, owner, leaseVersion, normalizedNow),
         )().changes === 1
       );
     },
@@ -522,7 +539,31 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
         .get(providerAccountId) as Record<string, unknown> | undefined;
       return row ? hydrateProviderState(row) : null;
     },
-    setProviderState(providerAccountId, update, now = new Date().toISOString()) {
+    initializeProviderState(providerAccountId, now = new Date().toISOString()) {
+      const normalizedNow = normalizeIso(now, 'now');
+      db.transaction(() =>
+        db
+          .prepare(
+            `INSERT INTO podsitter_provider_state (
+              provider_account_id, status, consecutive_failures, retry_at, reset_at,
+              sanitized_reason, probe_lease_owner, probe_lease_version,
+              probe_lease_expires_at, recovered_at, updated_at
+            ) VALUES (?, 'available', 0, NULL, NULL, NULL, NULL, 0, NULL, NULL, ?)
+            ON CONFLICT(provider_account_id) DO NOTHING`,
+          )
+          .run(providerAccountId, normalizedNow),
+      )();
+      const state = this.getProviderState(providerAccountId);
+      if (!state) throw new Error('Failed to initialize Podsitter provider state');
+      return state;
+    },
+    setProviderState(
+      providerAccountId,
+      leaseOwner,
+      leaseVersion,
+      update,
+      now = new Date().toISOString(),
+    ) {
       assertRedacted(update.sanitizedReason, 'sanitizedReason');
       const normalizedNow = normalizeIso(now, 'now');
       const retryAt =
@@ -537,24 +578,18 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
         update.recoveredAt === undefined || update.recoveredAt === null
           ? null
           : normalizeIso(update.recoveredAt, 'recoveredAt');
-      db.transaction(() =>
+      const result = db.transaction(() =>
         db
           .prepare(
-            `INSERT INTO podsitter_provider_state (
-              provider_account_id, status, consecutive_failures, retry_at, reset_at,
-              sanitized_reason, probe_lease_owner, probe_lease_expires_at, recovered_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
-            ON CONFLICT(provider_account_id) DO UPDATE SET
-              status = excluded.status,
-              consecutive_failures = excluded.consecutive_failures,
-              retry_at = excluded.retry_at,
-              reset_at = excluded.reset_at,
-              sanitized_reason = excluded.sanitized_reason,
-              recovered_at = excluded.recovered_at,
-              updated_at = excluded.updated_at`,
+            `UPDATE podsitter_provider_state SET
+              status = ?, consecutive_failures = ?, retry_at = ?, reset_at = ?,
+              sanitized_reason = ?, recovered_at = ?, updated_at = ?
+             WHERE provider_account_id = ?
+               AND probe_lease_owner = ?
+               AND probe_lease_version = ?
+               AND probe_lease_expires_at > ?`,
           )
           .run(
-            providerAccountId,
             update.status,
             update.consecutiveFailures,
             retryAt,
@@ -562,8 +597,15 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
             update.sanitizedReason ?? null,
             recoveredAt,
             normalizedNow,
+            providerAccountId,
+            leaseOwner,
+            leaseVersion,
+            normalizedNow,
           ),
       )();
+      if (result.changes !== 1) {
+        throw new Error('Podsitter provider state requires the current unexpired probe lease');
+      }
       const state = this.getProviderState(providerAccountId);
       if (!state) throw new Error('Failed to persist Podsitter provider state');
       return state;
@@ -571,20 +613,27 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
     acquireProviderProbeLease(providerAccountId, owner, expiresAt, now = new Date().toISOString()) {
       const normalizedNow = normalizeIso(now, 'now');
       const normalizedExpiresAt = normalizeFutureLease(expiresAt, normalizedNow);
-      return (
-        db.transaction(() =>
-          db
-            .prepare(
-              `UPDATE podsitter_provider_state
-               SET probe_lease_owner = ?, probe_lease_expires_at = ?, updated_at = ?
+      const result = db.transaction(() =>
+        db
+          .prepare(
+            `UPDATE podsitter_provider_state
+               SET probe_lease_owner = ?, probe_lease_version = probe_lease_version + 1,
+                   probe_lease_expires_at = ?, updated_at = ?
                WHERE provider_account_id = ?
                  AND (probe_lease_expires_at IS NULL OR probe_lease_expires_at <= ?)`,
-            )
-            .run(owner, normalizedExpiresAt, normalizedNow, providerAccountId, normalizedNow),
-        )().changes === 1
-      );
+          )
+          .run(owner, normalizedExpiresAt, normalizedNow, providerAccountId, normalizedNow),
+      )();
+      if (result.changes !== 1) return null;
+      const state = this.getProviderState(providerAccountId);
+      return state?.probeLeaseVersion ?? null;
     },
-    releaseProviderProbeLease(providerAccountId, owner, now = new Date().toISOString()) {
+    releaseProviderProbeLease(
+      providerAccountId,
+      owner,
+      leaseVersion,
+      now = new Date().toISOString(),
+    ) {
       const normalizedNow = normalizeIso(now, 'now');
       return (
         db.transaction(() =>
@@ -592,9 +641,10 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
             .prepare(
               `UPDATE podsitter_provider_state
                SET probe_lease_owner = NULL, probe_lease_expires_at = NULL, updated_at = ?
-               WHERE provider_account_id = ? AND probe_lease_owner = ?`,
+               WHERE provider_account_id = ? AND probe_lease_owner = ?
+                 AND probe_lease_version = ? AND probe_lease_expires_at > ?`,
             )
-            .run(normalizedNow, providerAccountId, owner),
+            .run(normalizedNow, providerAccountId, owner, leaseVersion, normalizedNow),
         )().changes === 1
       );
     },
@@ -695,7 +745,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
 
         const attention = db
           .prepare(
-            `SELECT pod_id, signature, lease_owner, lease_expires_at, state, decision_id
+            `SELECT pod_id, signature, lease_owner, lease_version, lease_expires_at, state, decision_id
              FROM podsitter_attention
              WHERE id = ?`,
           )
@@ -704,6 +754,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               pod_id: string;
               signature: string;
               lease_owner: string | null;
+              lease_version: number;
               lease_expires_at: string | null;
               state: PodsitterAttentionState;
               decision_id: string | null;
@@ -714,6 +765,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
           attention.pod_id !== input.podId ||
           attention.signature !== input.attentionSignature ||
           attention.lease_owner !== input.leaseOwner ||
+          attention.lease_version !== input.leaseVersion ||
           attention.lease_expires_at === null ||
           attention.lease_expires_at <= now ||
           attention.state !== 'deciding'
@@ -752,6 +804,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
                 AND pod_id = ?
                 AND signature = ?
                 AND lease_owner = ?
+                AND lease_version = ?
                 AND lease_expires_at > ?
                 AND state = 'deciding'
                 AND decision_id IS NULL
@@ -775,6 +828,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
             input.podId,
             input.attentionSignature,
             input.leaseOwner,
+            input.leaseVersion,
             now,
           );
         if (result.changes !== 1) {
@@ -812,6 +866,23 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
           : normalizeIso(update.executedAt, 'executedAt');
       db.transaction(() => {
         const existing = getDecision(id);
+        const attention = db
+          .prepare(
+            `SELECT lease_owner, lease_version, lease_expires_at
+             FROM podsitter_attention WHERE id = ?`,
+          )
+          .get(existing.attentionId) as
+          | { lease_owner: string | null; lease_version: number; lease_expires_at: string | null }
+          | undefined;
+        if (
+          !attention ||
+          attention.lease_owner !== update.leaseOwner ||
+          attention.lease_version !== update.leaseVersion ||
+          attention.lease_expires_at === null ||
+          attention.lease_expires_at <= normalizedNow
+        ) {
+          throw new Error('Podsitter decision completion requires the current attention lease');
+        }
         const authorized = hasCurrentAuthority(existing, normalizedNow) !== null;
         const outcome = authorized ? update.outcome : 'not_executed';
         const failureCode = authorized
@@ -824,7 +895,14 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               output_tokens = ?, cost_usd = ?, completed_at = ?, executed_at = ?
              WHERE id = ?
                AND completed_at IS NULL
-               AND (? IS NULL OR attention_signature = ?)`,
+               AND (? IS NULL OR attention_signature = ?)
+               AND EXISTS (
+                 SELECT 1 FROM podsitter_attention attention
+                 WHERE attention.id = podsitter_decisions.attention_id
+                   AND attention.lease_owner = ?
+                   AND attention.lease_version = ?
+                   AND attention.lease_expires_at > ?
+               )`,
           )
           .run(
             decision === null ? null : json(decision),
@@ -838,6 +916,9 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
             id,
             decision === null ? null : decision.attentionSignature,
             decision === null ? null : decision.attentionSignature,
+            update.leaseOwner,
+            update.leaseVersion,
+            normalizedNow,
           );
         if (result.changes === 0 && decision !== null) {
           const pending = db
