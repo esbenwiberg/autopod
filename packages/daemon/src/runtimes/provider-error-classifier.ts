@@ -35,8 +35,10 @@ const STRUCTURED_QUOTA_SIGNATURES: Readonly<
     { code: 'quota_exceeded', message: /^Provider quota exhausted$/i },
   ],
 };
-const CLAUDE_TERMINAL_SESSION_LIMIT =
-  /^You've hit your session limit · resets (?:[1-9]|1[0-2])(?::[0-5]\d)?(?:am|pm) \(UTC\)$/;
+const CLAUDE_TERMINAL_QUOTA_MESSAGES = [
+  /^You've hit your session limit · resets (?:[1-9]|1[0-2])(?::[0-5]\d)?(?:am|pm) \(UTC\)$/,
+  /^You've hit your org's monthly spend limit · ask your admin to raise it at claude\.ai\/settings\/usage$/,
+];
 const COPILOT_QUOTA_MESSAGES = [
   /^You have exhausted your premium requests\.$/i,
   /^Copilot premium request limit reached$/i,
@@ -85,7 +87,7 @@ function classify(
       ? COPILOT_QUOTA_MESSAGES.some((pattern) => pattern.test(rawMessage.trim()))
       : (runtime === 'claude' &&
           code === null &&
-          CLAUDE_TERMINAL_SESSION_LIMIT.test(rawMessage.trim())) ||
+          CLAUDE_TERMINAL_QUOTA_MESSAGES.some((pattern) => pattern.test(rawMessage.trim()))) ||
         (code !== null &&
           STRUCTURED_QUOTA_SIGNATURES[runtime].some(
             (signature) => signature.code === code && signature.message.test(rawMessage.trim()),

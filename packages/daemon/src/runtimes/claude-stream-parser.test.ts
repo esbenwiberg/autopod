@@ -159,6 +159,27 @@ describe('ClaudeStreamParser.mapEvent', () => {
     });
   });
 
+  it('classifies the org monthly spend limit without a structured code', () => {
+    const message =
+      "You've hit your org's monthly spend limit · ask your admin to raise it at claude.ai/settings/usage";
+    const result = ClaudeStreamParser.mapEvent(
+      {
+        type: 'result',
+        subtype: 'error_during_execution',
+        is_error: true,
+        result: message,
+      },
+      POD_ID,
+      fakeLogger(),
+    );
+    expect(result).toMatchObject({
+      type: 'error',
+      fatal: true,
+      message,
+      classification: { category: 'quota_exhausted', definitive: true },
+    });
+  });
+
   it('fails closed for malformed Claude error-result evidence', () => {
     const result = ClaudeStreamParser.mapEvent(
       {

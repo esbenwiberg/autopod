@@ -27,6 +27,13 @@ const quotaFixtures = [
     },
   },
   {
+    runtime: 'claude' as const,
+    evidence: {
+      message:
+        "You've hit your org's monthly spend limit · ask your admin to raise it at claude.ai/settings/usage",
+    },
+  },
+  {
     runtime: 'codex' as const,
     evidence: {
       code: 'usage_limit_reached',
@@ -99,6 +106,17 @@ describe('classifyProviderError', () => {
     "You've hit your session limit · resets 12:60pm (UTC)",
     "You've hit your session limit · resets 12:30pm (UTC).",
   ])('fails closed for drifted Claude session-limit text: %s', (message) => {
+    expect(classifyProviderError('claude', { message })).toMatchObject({
+      category: 'unknown',
+      definitive: false,
+    });
+  });
+
+  it.each([
+    "You've hit your org's monthly spend limit · ask your admin to raise it at claude.ai/settings/usage/",
+    "You've hit your org's monthly spend limit - ask your admin to raise it at claude.ai/settings/usage",
+    "You've hit your org's spend limit · ask your admin to raise it at claude.ai/settings/usage",
+  ])('fails closed for drifted Claude org-spend-limit text: %s', (message) => {
     expect(classifyProviderError('claude', { message })).toMatchObject({
       category: 'unknown',
       definitive: false,
