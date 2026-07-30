@@ -31,6 +31,7 @@ const MAX_DIAGNOSTIC_BYTES = 4_000;
 const MAX_TIMEOUT_MS = 60 * 60 * 1000;
 const LOCAL_IMAGE_DEFAULT = 'autopod-system-decision:local';
 const DEFAULT_CREDENTIAL_READBACK_TIMEOUT_MS = 10_000;
+const SYSTEM_RUNTIME_OWNER = '1000:1000';
 
 export interface SystemDecisionRunInput {
   decisionId: string;
@@ -78,7 +79,13 @@ export class SystemDecisionRunner {
     const runId = `system-${input.decisionId}`;
     const backend = input.executionTarget === 'sandbox' ? 'azure-sandbox' : 'docker';
     let runCreated = false;
-    let networkProvisioned = false;
+    let networkProvisioningAttempted = false;
+    let networkProvisioningSettled = false;
+    let networkProvisioning: Promise<{ networkName: string; firewallScript: string }> | null = null;
+    let finishRunFinalization: (() => void) | null = null;
+    const runFinalized = new Promise<void>((resolve) => {
+      finishRunFinalization = resolve;
+    });
     let containerId: string | null = null;
     let result: SystemDecisionRunResult | null = null;
     let failureCode: string | null = null;
@@ -86,7 +93,11 @@ export class SystemDecisionRunner {
     let providerEnv: ProviderEnvResult | null = null;
 
     try {
-      this.options.repository.createSandboxRun({ id: runId, decisionId: input.decisionId, backend });
+      this.options.repository.createSandboxRun({
+        id: runId,
+        decisionId: input.decisionId,
+        backend,
+      });
       runCreated = true;
       manager = this.resolveManager(input.executionTarget);
       assertInput(input);
@@ -110,15 +121,19 @@ export class SystemDecisionRunner {
         'provider authentication',
       );
       const invocation = buildSystemRuntimeInvocation(input);
-      const networkConfig =
-        input.executionTarget === 'local'
-          ? await withinDeadline(
-              this.buildLocalNetworkConfig(runId, catalogProvider.requiredHosts, account),
-              deadline,
-              'network provisioning',
-            )
-          : null;
-      networkProvisioned = networkConfig !== null;
+      if (input.executionTarget === 'local') {
+        networkProvisioningAttempted = true;
+        networkProvisioning = this.buildLocalNetworkConfig(
+          runId,
+          catalogProvider.requiredHosts,
+          account,
+        ).finally(() => {
+          networkProvisioningSettled = true;
+        });
+      }
+      const networkConfig = networkProvisioning
+        ? await withinDeadline(networkProvisioning, deadline, 'network provisioning')
+        : null;
       containerId = await withinDeadline(
         manager.spawn({
           image,
@@ -269,7 +284,7 @@ export class SystemDecisionRunner {
           );
         }
       }
-      if (networkProvisioned && this.options.dockerNetworkManager) {
+      if (networkProvisioningAttempted && this.options.dockerNetworkManager) {
         await this.options.dockerNetworkManager.removeNetworkForPod(runId).catch((error) => {
           cleanup = 'leaked';
           this.options.logger.error(
@@ -277,6 +292,25 @@ export class SystemDecisionRunner {
             'System decision sandbox network cleanup failed',
           );
         });
+        if (!networkProvisioningSettled && networkProvisioning) {
+          cleanup = 'leaked';
+          void networkProvisioning
+            .then(async () => {
+              await runFinalized;
+              await this.options.dockerNetworkManager?.removeNetworkForPod(runId);
+              this.options.repository.closeSandboxRun(runId, {
+                outcome: 'cancelled',
+                cleanupState: 'clean',
+                failureCode: 'REAPED_AFTER_LATE_NETWORK_PROVISIONING',
+              });
+            })
+            .catch((error) => {
+              this.options.logger.error(
+                { runId, err: sanitizeProviderMessage(String(error)) },
+                'Late system sandbox network cleanup failed',
+              );
+            });
+        }
       }
       if (!result) result = failureResult('infrastructure', 'System decision run did not complete');
       if (!result.ok && cleanup === 'leaked') result = { ...result, cleanup };
@@ -308,6 +342,7 @@ export class SystemDecisionRunner {
           );
         }
       }
+      finishRunFinalization?.();
     }
     return result;
   }
@@ -365,10 +400,7 @@ export class SystemDecisionRunner {
   private resolveImage(target: ExecutionTarget): string {
     if (target !== 'sandbox') return this.options.localImage ?? LOCAL_IMAGE_DEFAULT;
     const image = this.options.hostedImage;
-    if (
-      !image ||
-      !/^[a-z0-9-]+\.azurecr\.io\/.+(?::[^/]+|@sha256:[a-f0-9]{64})$/i.test(image)
-    ) {
+    if (!image || !/^[a-z0-9-]+\.azurecr\.io\/.+(?::[^/]+|@sha256:[a-f0-9]{64})$/i.test(image)) {
       throw new SystemDecisionConfigurationError(
         'Hosted system decision image must be an ACR-qualified pinned tag or digest',
         'SYSTEM_DECISION_IMAGE_MISSING',
@@ -405,6 +437,18 @@ export class SystemDecisionRunner {
         .filter((file) => isCredentialFile(file.path))
         .map((file) => file.path),
     ]);
+    const runtimeOwnedPaths = [SYSTEM_CREDENTIAL_SHIM_PATH, ...secretPaths];
+    const ownership = await manager.execInContainer(
+      containerId,
+      ['chown', SYSTEM_RUNTIME_OWNER, ...runtimeOwnedPaths],
+      {
+        user: 'root',
+        timeout: 5_000,
+      },
+    );
+    if (ownership.exitCode !== 0) {
+      throw new Error('Failed to assign system sandbox credential ownership');
+    }
     await manager.execInContainer(containerId, ['chmod', '0500', SYSTEM_CREDENTIAL_SHIM_PATH], {
       user: 'root',
       timeout: 5_000,

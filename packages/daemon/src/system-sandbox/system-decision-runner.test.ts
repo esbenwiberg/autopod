@@ -28,9 +28,12 @@ function harness(
     repairWriteHangs?: boolean;
     readFileHangs?: boolean;
     createRunFails?: boolean;
+    rootOwnedUploads?: boolean;
+    networkProvisioning?: Promise<{ networkName: string; firewallScript: string }>;
   } = {},
 ) {
   const spawns: ContainerSpawnConfig[] = [];
+  const fileOwners = new Map<string, string>();
   const manager = {
     spawn: vi.fn(async (config: ContainerSpawnConfig) => {
       spawns.push(config);
@@ -40,6 +43,7 @@ function harness(
       return 'system-container';
     }),
     writeFile: vi.fn(async (_id, _path, content: string | Buffer) => {
+      fileOwners.set(_path, options.rootOwnedUploads ? 'root:root' : '1000:1000');
       if (
         options.repairWriteHangs &&
         String(content).includes('previous response failed strict schema validation')
@@ -51,15 +55,25 @@ function harness(
       if (options.readFileHangs) return await new Promise<string>(() => undefined);
       throw new Error('absent');
     }),
-    execInContainer: vi.fn(async (_id, command: string[]) =>
-      command[0] === 'chmod'
-        ? { stdout: '', stderr: '', exitCode: 0 }
-        : {
-            stdout: options.output ?? JSON.stringify(decision),
-            stderr: '',
-            exitCode: options.exitCode ?? 0,
-          },
-    ),
+    execInContainer: vi.fn(async (_id, command: string[]) => {
+      if (command[0] === 'chown') {
+        for (const path of command.slice(2)) fileOwners.set(path, command[1] ?? '');
+        return { stdout: '', stderr: '', exitCode: 0 };
+      }
+      if (command[0] === 'chmod') return { stdout: '', stderr: '', exitCode: 0 };
+      if (
+        options.rootOwnedUploads &&
+        (fileOwners.get('/run/autopod/system-credential-shim.sh') !== '1000:1000' ||
+          fileOwners.get('/run/autopod/copilot-token') !== '1000:1000')
+      ) {
+        return { stdout: '', stderr: 'permission denied', exitCode: 126 };
+      }
+      return {
+        stdout: options.output ?? JSON.stringify(decision),
+        stderr: '',
+        exitCode: options.exitCode ?? 0,
+      };
+    }),
     kill: vi.fn(async () => {
       if (options.killFails) throw new Error('secret=cleanup-token');
     }),
@@ -78,10 +92,14 @@ function harness(
     listActiveSandboxRuns: vi.fn(() => []),
   } as unknown as PodsitterRepository;
   const dockerNetworkManager = {
-    buildNetworkConfig: vi.fn(async () => ({
-      networkName: 'autopod-system-decision-1',
-      firewallScript: '#!/bin/sh\niptables -A OUTPUT -j REJECT',
-    })),
+    buildNetworkConfig: vi.fn(
+      async () =>
+        await (options.networkProvisioning ??
+          Promise.resolve({
+            networkName: 'autopod-system-decision-1',
+            firewallScript: '#!/bin/sh\niptables -A OUTPUT -j REJECT',
+          })),
+    ),
     removeNetworkForPod: vi.fn(async () => undefined),
   };
   const account: ProviderAccount = {
@@ -187,13 +205,32 @@ describe('SystemDecisionRunner', () => {
     expect(dockerNetworkManager.removeNetworkForPod).toHaveBeenCalledWith('system-decision-1');
   });
 
+  it('makes root-owned hosted uploads readable only by the runtime user', async () => {
+    const hosted = harness({ rootOwnedUploads: true });
+
+    await expect(
+      hosted.runner.run({ ...input, executionTarget: 'sandbox' }),
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(hosted.manager.execInContainer).toHaveBeenCalledWith(
+      'system-container',
+      [
+        'chown',
+        '1000:1000',
+        '/run/autopod/system-credential-shim.sh',
+        '/run/autopod/copilot-token',
+      ],
+      expect.objectContaining({ user: 'root' }),
+    );
+  });
+
   it('cleans and reaps system sandboxes', async () => {
     const first = harness({ output: 'invalid' });
     await first.runner.run(input);
     expect(first.manager.kill).toHaveBeenCalledWith('system-container');
     const inferenceCalls = vi
       .mocked(first.manager.execInContainer)
-      .mock.calls.filter(([, command]) => command[0] !== 'chmod');
+      .mock.calls.filter(([, command]) => !['chmod', 'chown'].includes(command[0] ?? ''));
     expect(inferenceCalls).toHaveLength(2);
     expect((inferenceCalls[1]?.[2] as { timeout: number }).timeout).toBeLessThanOrEqual(
       (inferenceCalls[0]?.[2] as { timeout: number }).timeout,
@@ -427,6 +464,40 @@ describe('SystemDecisionRunner', () => {
     );
   });
 
+  it('cleans a local network that finishes provisioning after the run timeout', async () => {
+    let finishProvisioning:
+      | ((value: { networkName: string; firewallScript: string }) => void)
+      | undefined;
+    const networkProvisioning = new Promise<{ networkName: string; firewallScript: string }>(
+      (resolve) => {
+        finishProvisioning = resolve;
+      },
+    );
+    const late = harness({ networkProvisioning });
+
+    await expect(late.runner.run({ ...input, timeoutMs: 10 })).resolves.toMatchObject({
+      ok: false,
+      kind: 'timeout',
+      cleanup: 'leaked',
+    });
+    expect(late.repository.closeSandboxRun).toHaveBeenCalledWith(
+      'system-decision-1',
+      expect.objectContaining({ outcome: 'leaked', cleanupState: 'retryable' }),
+    );
+
+    finishProvisioning?.({
+      networkName: 'autopod-system-decision-1',
+      firewallScript: '#!/bin/sh\niptables -A OUTPUT -j REJECT',
+    });
+    await vi.waitFor(() => {
+      expect(late.dockerNetworkManager.removeNetworkForPod).toHaveBeenCalledTimes(2);
+      expect(late.repository.closeSandboxRun).toHaveBeenLastCalledWith(
+        'system-decision-1',
+        expect.objectContaining({ outcome: 'cancelled', cleanupState: 'clean' }),
+      );
+    });
+  });
+
   it('bounds schema repair setup with the run timeout', async () => {
     const hung = harness({ output: 'invalid', repairWriteHangs: true });
 
@@ -477,16 +548,20 @@ describe('SystemDecisionRunner', () => {
       output: '',
       exitCode: 1,
     });
-    vi.mocked(transient.manager.execInContainer).mockResolvedValue({
-      stdout: '',
-      stderr: JSON.stringify({
-        status: 429,
-        code: 'rate_limit_exceeded',
-        message: 'rate limit exceeded token=super-secret-token',
-        retryAfter: '2026-07-30T12:00:00.000Z',
-      }),
-      exitCode: 1,
-    });
+    vi.mocked(transient.manager.execInContainer).mockImplementation(async (_id, command) =>
+      ['chmod', 'chown'].includes(command[0] ?? '')
+        ? { stdout: '', stderr: '', exitCode: 0 }
+        : {
+            stdout: '',
+            stderr: JSON.stringify({
+              status: 429,
+              code: 'rate_limit_exceeded',
+              message: 'rate limit exceeded token=super-secret-token',
+              retryAfter: '2026-07-30T12:00:00.000Z',
+            }),
+            exitCode: 1,
+          },
+    );
     const result = await transient.runner.run(input);
     expect(result).toMatchObject({
       ok: false,
@@ -500,22 +575,26 @@ describe('SystemDecisionRunner', () => {
     expect(JSON.stringify(transient.runs)).not.toContain('super-secret-token');
 
     const codexJsonl = harness();
-    vi.mocked(codexJsonl.manager.execInContainer).mockResolvedValue({
-      stdout: '',
-      stderr: [
-        JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }),
-        JSON.stringify({
-          type: 'error',
-          error: {
-            status: 429,
-            code: 'rate_limit_exceeded',
-            message: 'rate limit exceeded',
-            retry_after: '120',
+    vi.mocked(codexJsonl.manager.execInContainer).mockImplementation(async (_id, command) =>
+      ['chmod', 'chown'].includes(command[0] ?? '')
+        ? { stdout: '', stderr: '', exitCode: 0 }
+        : {
+            stdout: '',
+            stderr: [
+              JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }),
+              JSON.stringify({
+                type: 'error',
+                error: {
+                  status: 429,
+                  code: 'rate_limit_exceeded',
+                  message: 'rate limit exceeded',
+                  retry_after: '120',
+                },
+              }),
+            ].join('\n'),
+            exitCode: 1,
           },
-        }),
-      ].join('\n'),
-      exitCode: 1,
-    });
+    );
     vi.mocked(codexJsonl.providerAccountStore.get).mockReturnValue({
       id: 'openrouter-decision',
       name: 'OpenRouter decision',
@@ -562,17 +641,21 @@ describe('SystemDecisionRunner', () => {
     vi.mocked(piJsonl.manager.readFile).mockResolvedValue(
       JSON.stringify({ anthropic: { type: 'oauth', access: 'issued' } }, null, 2),
     );
-    vi.mocked(piJsonl.manager.execInContainer).mockResolvedValue({
-      stdout: '',
-      stderr: [
-        JSON.stringify({ type: 'session_started' }),
-        JSON.stringify({
-          type: 'provider_error',
-          error: { code: 'authentication_error', message: 'authentication failed' },
-        }),
-      ].join('\n'),
-      exitCode: 1,
-    });
+    vi.mocked(piJsonl.manager.execInContainer).mockImplementation(async (_id, command) =>
+      ['chmod', 'chown'].includes(command[0] ?? '')
+        ? { stdout: '', stderr: '', exitCode: 0 }
+        : {
+            stdout: '',
+            stderr: [
+              JSON.stringify({ type: 'session_started' }),
+              JSON.stringify({
+                type: 'provider_error',
+                error: { code: 'authentication_error', message: 'authentication failed' },
+              }),
+            ].join('\n'),
+            exitCode: 1,
+          },
+    );
     const piResult = await piJsonl.runner.run({
       ...input,
       decisionId: 'decision-pi-jsonl',
