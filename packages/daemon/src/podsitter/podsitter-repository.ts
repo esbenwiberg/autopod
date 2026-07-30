@@ -799,6 +799,9 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
         update.decision === undefined || update.decision === null
           ? (update.decision ?? null)
           : canonicalize(podsitterDecisionSchema.parse(update.decision));
+      if (update.outcome === 'completed' && decision === null) {
+        throw new Error('A completed Podsitter decision requires a decision payload');
+      }
       if (decision !== null) {
         assertBoundedRedactedPayload(decision.arguments, 'decision arguments');
       }

@@ -459,6 +459,11 @@ describe('PodsitterRepository', () => {
     };
     expect(() =>
       repository.completeDecision('decision-lifecycle', {
+        outcome: 'completed',
+      }),
+    ).toThrow('requires a decision payload');
+    expect(() =>
+      repository.completeDecision('decision-lifecycle', {
         decision: {
           ...decision,
           attentionSignature: 'signature-from-unrelated-evidence',
