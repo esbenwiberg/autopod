@@ -3362,6 +3362,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   const FIX_DELIVERY_FAILED_PREFIX = 'Validated fix could not be pushed';
 
+  function providerBindingForFixPod(
+    source: Pod,
+  ): Pick<Pod, 'providerAccountIdSnapshot' | 'providerIdSnapshot'> {
+    const latestAttempt = deps.providerAttemptRepo?.list(source.id).at(-1);
+    const canReconcileMissingProvider =
+      source.providerIdSnapshot === null &&
+      latestAttempt !== undefined &&
+      latestAttempt.runtime === source.runtime &&
+      latestAttempt.model === source.model &&
+      (source.providerAccountIdSnapshot === null ||
+        source.providerAccountIdSnapshot === latestAttempt.providerAccountId);
+    if (canReconcileMissingProvider) {
+      return {
+        providerAccountIdSnapshot: latestAttempt.providerAccountId,
+        providerIdSnapshot: latestAttempt.provider,
+      };
+    }
+    return {
+      providerAccountIdSnapshot: source.providerAccountIdSnapshot,
+      providerIdSnapshot: source.providerIdSnapshot,
+    };
+  }
+
   function parkFixPodDeliveryFailure(fixPod: Pod, err: unknown): void {
     if (err instanceof GitCredentialError) {
       parkOnCredentialFailure(fixPod.id, err);
@@ -3520,6 +3543,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
 
       transition(recycleCandidate, 'queued', {
+        ...providerBindingForFixPod(recycleCandidate),
         containerId: null,
         worktreePath: null,
         validationAttempts: 0,
@@ -3564,6 +3588,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     // task is a placeholder; the real task is built from the drained queue
     // when the pod starts.
     const placeholderTask = '[PR FIX] Awaiting queued feedback.';
+    const inheritedProviderBinding = providerBindingForFixPod(parent);
     let fixId = '';
     for (let attempt = 0; attempt < 10; attempt++) {
       fixId = generatePodId();
@@ -3575,6 +3600,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           status: 'queued',
           model: parent.model,
           runtime: parent.runtime,
+          ...inheritedProviderBinding,
           executionTarget: parent.executionTarget,
           branch: branchSource.branch,
           userId: parent.userId,

@@ -10133,6 +10133,114 @@ describe('PodManager', () => {
       expect(reread.prFixAttempts).toBe(1);
     });
 
+    it('fresh canonical fix pod preserves provider binding through completion', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const attempts = createProviderAttemptRepository(ctx.db);
+      ctx.deps.providerAttemptRepo = attempts;
+      insertProviderAccount(ctx.db, 'anthropic-primary', 'anthropic', {
+        provider: 'anthropic',
+        apiKey: 'primary-key',
+      });
+      linkProfileToProviderAccount(ctx.db, 'test-profile', 'anthropic-primary');
+      ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
+
+      await manager.spawnFixSession(root.id, 'repair the PR');
+
+      const fixPod = ctx.podRepo.list({}).find((candidate) => candidate.linkedPodId === root.id);
+      if (!fixPod) throw new Error('fix pod missing');
+      expect(fixPod).toMatchObject({
+        providerAccountIdSnapshot: 'anthropic-primary',
+        providerIdSnapshot: 'anthropic',
+        runtime: root.runtime,
+        model: root.model,
+      });
+
+      ctx.fixFeedbackRepo.drain(root.id);
+      ctx.podRepo.update(fixPod.id, {
+        status: 'running',
+        containerId: 'fix-container',
+        worktreePath: '/tmp/worktree/abc',
+      });
+      const outcome = await manager.consumeAgentEvents(
+        fixPod.id,
+        (async function* () {
+          yield {
+            type: 'complete',
+            timestamp: '2026-07-30T18:30:00.000Z',
+            result: 'PR repair complete',
+          } as const;
+        })(),
+      );
+
+      expect(outcome).toBe('completed');
+      expect(attempts.list(fixPod.id).at(-1)).toMatchObject({
+        providerAccountId: 'anthropic-primary',
+        provider: 'anthropic',
+        runtime: root.runtime,
+        model: root.model,
+        outcome: 'completed',
+      });
+      await expect(manager.triggerValidation(fixPod.id)).resolves.toBeUndefined();
+      expect(manager.getSession(fixPod.id).status).not.toBe('failed');
+    });
+
+    it('recycled canonical fix pod repairs a null provider binding from its latest attempt', async () => {
+      const ctx = createTestContext();
+      const attempts = createProviderAttemptRepository(ctx.db);
+      ctx.deps.providerAttemptRepo = attempts;
+      insertProviderAccount(ctx.db, 'anthropic-primary', 'anthropic', {
+        provider: 'anthropic',
+        apiKey: 'primary-key',
+      });
+      linkProfileToProviderAccount(ctx.db, 'test-profile', 'anthropic-primary');
+      ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
+
+      await manager.spawnFixSession(root.id, 'round one');
+      const fixPod = ctx.podRepo.list({}).find((candidate) => candidate.linkedPodId === root.id);
+      if (!fixPod) throw new Error('fix pod missing');
+      ctx.fixFeedbackRepo.drain(root.id);
+      attempts.open({
+        podId: fixPod.id,
+        provider: 'anthropic',
+        providerAccountId: 'anthropic-primary',
+        runtime: fixPod.runtime,
+        model: fixPod.model,
+        profileReference: `pod:${fixPod.id}@profile-snapshot#abcdef1`,
+        profileSnapshot: { name: 'test-profile', modelProvider: 'anthropic' },
+      });
+      attempts.close(fixPod.id, {
+        nativeSessionId: 'completed-fix-session',
+        outcome: 'completed',
+        inputTokens: 10,
+        outputTokens: 5,
+        costUsd: 0.1,
+      });
+      ctx.podRepo.update(fixPod.id, { status: 'complete' });
+      ctx.db
+        .prepare(
+          `UPDATE pods
+           SET provider_account_id_snapshot = NULL, provider_id_snapshot = NULL
+           WHERE id = ?`,
+        )
+        .run(fixPod.id);
+
+      await manager.spawnFixSession(root.id, 'round two');
+
+      const recycled = manager.getSession(fixPod.id);
+      expect(recycled).toMatchObject({
+        status: 'queued',
+        providerAccountIdSnapshot: 'anthropic-primary',
+        providerIdSnapshot: 'anthropic',
+        runtime: fixPod.runtime,
+        model: fixPod.model,
+      });
+      expect(() => manager.getReviewerConfig(recycled)).not.toThrow();
+    });
+
     it('does not spawn a second fix pod while one is alive — just queues the message', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
