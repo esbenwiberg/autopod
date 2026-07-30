@@ -25,6 +25,7 @@ function harness(
     killFails?: boolean;
     spawnFailsAfterCreate?: boolean;
     spawnHangs?: boolean;
+    repairWriteHangs?: boolean;
   } = {},
 ) {
   const spawns: ContainerSpawnConfig[] = [];
@@ -36,7 +37,14 @@ function harness(
       if (options.spawnFailsAfterCreate) throw new Error('spawn interrupted after allocation');
       return 'system-container';
     }),
-    writeFile: vi.fn(async () => undefined),
+    writeFile: vi.fn(async (_id, _path, content: string | Buffer) => {
+      if (
+        options.repairWriteHangs &&
+        String(content).includes('previous response failed strict schema validation')
+      ) {
+        return await new Promise<void>(() => undefined);
+      }
+    }),
     readFile: vi.fn(async () => {
       throw new Error('absent');
     }),
@@ -340,6 +348,17 @@ describe('SystemDecisionRunner', () => {
       'system-decision-1',
       expect.objectContaining({ outcome: 'failed', failureCode: 'TIMEOUT' }),
     );
+  });
+
+  it('bounds schema repair setup with the run timeout', async () => {
+    const hung = harness({ output: 'invalid', repairWriteHangs: true });
+
+    await expect(hung.runner.run({ ...input, timeoutMs: 20 })).resolves.toMatchObject({
+      ok: false,
+      kind: 'timeout',
+      failure: { code: 'TIMEOUT' },
+    });
+    expect(hung.manager.kill).toHaveBeenCalledWith('system-container');
   });
 
   it('rejects Foundry endpoints outside public Azure provider domains', async () => {

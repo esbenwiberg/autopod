@@ -161,7 +161,11 @@ export class SystemDecisionRunner {
         } catch (error) {
           if (!(error instanceof DecisionOutputError)) throw error;
           const repairPrompt = `${input.prompt}\n\nYour previous response failed strict schema validation: ${error.message}. Return only one corrected JSON decision.`;
-          await manager.writeFile(containerId, invocation.promptPath, repairPrompt);
+          await withinDeadline(
+            manager.writeFile(containerId, invocation.promptPath, repairPrompt),
+            deadline,
+            'schema repair setup',
+          );
           execResult = await manager.execInContainer(containerId, invocation.command, {
             cwd: '/tmp',
             timeout: remainingTimeout(deadline),

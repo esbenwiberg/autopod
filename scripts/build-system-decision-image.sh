@@ -19,7 +19,8 @@ if [[ "${1:-}" == "--check" ]]; then
 fi
 
 if [[ "${PUSH_SYSTEM_DECISION_IMAGE:-0}" == "1" ]]; then
-  if [[ "$image_ref" != */* || "$image_ref" == *":latest" ]]; then
+  if [[ ! "$image_ref" =~ ^[a-zA-Z0-9-]+\.azurecr\.io/.+(:[^/]+|@sha256:[a-fA-F0-9]{64})$ ]] \
+    || [[ "$image_ref" == *":latest" ]]; then
     echo "hosted image must use an ACR-qualified pinned tag or digest" >&2
     exit 1
   fi
