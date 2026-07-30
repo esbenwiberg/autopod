@@ -1,0 +1,60 @@
+contract_version: 1
+title: "Add daemon Podsitter CLI operations"
+depends_on: [04-run-daemon-podsitter-controller]
+scenarios:
+  - id: cli-configures-dedicated-target
+    given:
+      - "an authenticated dedicated provider account exists"
+    when:
+      - "the operator configures its runtime and model through ap podsitter"
+    then:
+      - "the CLI sends the dedicated target to the daemon Podsitter API"
+      - "it does not link the account to a profile or store credentials locally"
+  - id: cli-controls-activation
+    given:
+      - "the operator wants always-on authorization, a recurring cron-plus-duration window, optional expiry, or immediate disable"
+    when:
+      - "the corresponding ap podsitter on or off command runs"
+    then:
+      - "mutually exclusive and required options are validated"
+      - "canonical activation and expiry values are sent to the daemon"
+      - "off invokes the daemon kill switch rather than stopping a local poller"
+  - id: cli-surfaces-health-and-history
+    given:
+      - "Podsitter is active, inactive, provider-limited, recovered, or has prior decisions"
+    when:
+      - "the operator requests status, check, probe, or decisions in text or JSON"
+    then:
+      - "activation, expiry, dedicated target, provider circuit, next probe, queue, action outcomes, and read-only check state are visible"
+      - "provider credentials and raw prompts are absent"
+  - id: cli-does-not-execute-actions
+    given:
+      - "the CLI receives Podsitter configuration or operational commands"
+    when:
+      - "it handles them"
+    then:
+      - "it calls only Podsitter daemon APIs"
+      - "it does not poll pods, invoke pod intervention routes, or run an LLM locally"
+required_facts:
+  - id: fact-cli-daemon-control
+    proves: [cli-configures-dedicated-target, cli-does-not-execute-actions]
+    kind: unit-test
+    artifact:
+      path: packages/cli/src/commands/podsitter.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/cli test -- podsitter.test.ts -t "controls only daemon Podsitter APIs"
+  - id: fact-cli-activation-validation
+    proves: [cli-controls-activation]
+    kind: unit-test
+    artifact:
+      path: packages/cli/src/commands/podsitter.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/cli test -- podsitter.test.ts -t "validates always recurring duration timezone and expiry"
+  - id: fact-cli-redacted-status
+    proves: [cli-surfaces-health-and-history]
+    kind: unit-test
+    artifact:
+      path: packages/cli/src/commands/podsitter.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/cli test -- podsitter.test.ts -t "renders redacted provider status and decisions"
+human_review: []

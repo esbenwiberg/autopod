@@ -1,0 +1,83 @@
+contract_version: 1
+title: "Add actor-aware typed Podsitter interventions"
+depends_on: [01-add-podsitter-contracts-storage]
+scenarios:
+  - id: actor-provenance-is-accurate
+    given:
+      - "the same supported intervention is initiated by an authenticated human, existing daemon automation, or a Podsitter decision"
+    when:
+      - "PodManager records approval, escalation response, waiver, force action, activity, readiness, or PR evidence"
+    then:
+      - "the durable actor matches human, automation, or Podsitter respectively"
+      - "Podsitter evidence includes the decision id and never claims a human performed it"
+      - "existing human and autoApprove behavior remains compatible"
+  - id: full-parity-action-map
+    given:
+      - "a valid current pod state and a reserved typed action from the full Podsitter action enum"
+    when:
+      - "the internal action executor handles each supported action"
+    then:
+      - "exactly one corresponding typed PodManager or daemon operation is invoked"
+      - "the result and redacted arguments are written to the action audit"
+      - "state-machine and action-specific preconditions remain enforced"
+  - id: stale-or-duplicate-action-fails-closed
+    given:
+      - "a decision has a stale activation generation, stale attention signature, changed pod state, or already-consumed reservation"
+    when:
+      - "the action executor revalidates immediately before execution"
+    then:
+      - "no side effect runs"
+      - "the action is recorded as superseded, duplicate, or not executed"
+  - id: open-ended-action-is-impossible
+    given:
+      - "model output contains an unknown action, arbitrary command, URL, path, or malformed arguments"
+    when:
+      - "the decision and executor schemas validate it"
+    then:
+      - "validation fails before any operational method is called"
+      - "no generic shell, HTTP, SQL, or API execution path is available"
+  - id: last-resort-actions-require-evidence
+    given:
+      - "a decision proposes worktree recovery, force approval, skip validation, or force completion"
+    when:
+      - "the executor evaluates the proposal"
+    then:
+      - "a reason, evidence references, remaining risk, legal pod state, and unused action budget are required"
+      - "missing evidence or repeated same-signature rescue does not execute"
+required_facts:
+  - id: fact-podsitter-actor-provenance
+    proves: [actor-provenance-is-accurate]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/pods/pod-manager.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pod-manager.test.ts -t "records human automation and Podsitter actors"
+  - id: fact-full-parity-action-map
+    proves: [full-parity-action-map, last-resort-actions-require-evidence]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/podsitter/action-executor.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- action-executor.test.ts -t "maps the full Podsitter action contract"
+  - id: fact-action-race-guard
+    proves: [stale-or-duplicate-action-fails-closed]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/podsitter/action-executor.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- action-executor.test.ts -t "rejects stale and duplicate decisions before side effects"
+  - id: fact-no-open-ended-actions
+    proves: [open-ended-action-is-impossible]
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/podsitter/action-executor.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- action-executor.test.ts -t "has no open-ended action path"
+  - id: fact-actor-route-compatibility
+    proves: [actor-provenance-is-accurate]
+    kind: integration-test
+    artifact:
+      path: packages/daemon/src/api/routes/pods.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- pods.test.ts -t "passes authenticated human actor to interventions"
+human_review: []
