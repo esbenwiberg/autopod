@@ -155,17 +155,52 @@ describe('PodsitterService', () => {
 
   it('recovers durable work without duplicate actions', async () => {
     const harness = setup();
-    const run = vi.fn(async () => ({
-      ok: true as const,
-      decision: harness.decision(),
-      telemetry: {},
-      cleanup: 'clean' as const,
-    }));
-    await service(harness, run).reconcile();
+    const attention = harness.repository.recordAttention({
+      id: 'crashed-attention',
+      podId: 'pod-1',
+      signature: 'attention-current',
+      now: new Date(NOW.getTime() - 20 * 60_000).toISOString(),
+    });
+    const lease = harness.repository.acquireAttentionLease(
+      attention.id,
+      'crashed-worker',
+      new Date(NOW.getTime() - 60_000).toISOString(),
+      new Date(NOW.getTime() - 20 * 60_000).toISOString(),
+    );
+    if (!lease) throw new Error('expected crashed attention lease');
+    const decision = harness.repository.createDecision({
+      id: 'crashed-decision',
+      attentionId: attention.id,
+      leaseOwner: 'crashed-worker',
+      leaseVersion: lease.leaseVersion,
+      podId: 'pod-1',
+      attentionSignature: 'attention-current',
+      configurationGeneration: 1,
+      evidenceHash: 'old-evidence',
+      evidenceVersion: 1,
+      target: {
+        providerAccountId: 'sitter-account',
+        runtime: 'codex',
+        model: 'gpt-5',
+      },
+      now: new Date(NOW.getTime() - 19 * 60_000).toISOString(),
+    });
+    harness.repository.completeDecision(
+      decision.id,
+      {
+        leaseOwner: 'crashed-worker',
+        leaseVersion: lease.leaseVersion,
+        decision: harness.decision(),
+        outcome: 'completed',
+      },
+      new Date(NOW.getTime() - 18 * 60_000).toISOString(),
+    );
+    const run = vi.fn();
     const reconstructed = service(harness, run);
     await reconstructed.start();
     await reconstructed.stop();
 
+    expect(run).not.toHaveBeenCalled();
     expect(harness.execute).toHaveBeenCalledTimes(1);
     expect(harness.repository.listPendingAttention()).toHaveLength(0);
   });
@@ -378,5 +413,112 @@ describe('PodsitterService', () => {
 
     expect(reapLeakedSandboxes).toHaveBeenCalledTimes(1);
     expect(cleanupEvents).toEqual(['system-leaked']);
+  });
+
+  it('restarts expired pending inference with fresh evidence', async () => {
+    const harness = setup();
+    const attention = harness.repository.recordAttention({
+      id: 'pending-crash-attention',
+      podId: 'pod-1',
+      signature: 'attention-current',
+      now: new Date(NOW.getTime() - 20 * 60_000).toISOString(),
+    });
+    const lease = harness.repository.acquireAttentionLease(
+      attention.id,
+      'crashed-worker',
+      new Date(NOW.getTime() - 60_000).toISOString(),
+      new Date(NOW.getTime() - 20 * 60_000).toISOString(),
+    );
+    if (!lease) throw new Error('expected crashed attention lease');
+    harness.repository.createDecision({
+      id: 'pending-crash-decision',
+      attentionId: attention.id,
+      leaseOwner: 'crashed-worker',
+      leaseVersion: lease.leaseVersion,
+      podId: 'pod-1',
+      attentionSignature: 'attention-current',
+      configurationGeneration: 1,
+      evidenceHash: 'stale-evidence',
+      evidenceVersion: 1,
+      target: {
+        providerAccountId: 'sitter-account',
+        runtime: 'codex',
+        model: 'gpt-5',
+      },
+      now: new Date(NOW.getTime() - 19 * 60_000).toISOString(),
+    });
+    harness.setEvidenceRevision(2);
+    const run = vi.fn(async () => ({
+      ok: true as const,
+      decision: harness.decision(),
+      telemetry: {},
+      cleanup: 'clean' as const,
+    }));
+
+    await service(harness, run).reconcile();
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(harness.repository.getDecisionById('pending-crash-decision')).toMatchObject({
+      outcome: 'completed',
+      evidenceHash: expect.any(String),
+    });
+    expect(harness.repository.getDecisionById('pending-crash-decision')?.evidenceHash).not.toBe(
+      'stale-evidence',
+    );
+    expect(harness.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects fabricated evidence references before a last-resort action', async () => {
+    const harness = setup();
+    const fabricatedDecision: PodsitterDecision = {
+      contractVersion: 1,
+      attentionSignature: 'attention-current',
+      action: 'force_approve',
+      arguments: {
+        failedPhases: ['tests'],
+        manualEvidenceRefs: ['invented:manual-proof'],
+      },
+      reason: 'Force approval using claimed evidence',
+      evidenceRefs: ['invented:manual-proof'],
+      confidence: 'high',
+      remainingRisk: 'Known test failure',
+      stopCondition: 'Approval completes',
+    };
+    const run = vi.fn(async () => ({
+      ok: true as const,
+      decision: fabricatedDecision,
+      telemetry: {},
+      cleanup: 'clean' as const,
+    }));
+
+    await service(harness, run).reconcile();
+
+    expect(harness.execute).not.toHaveBeenCalled();
+    expect(harness.repository.listDecisions().items[0]).toMatchObject({
+      outcome: 'failed',
+      failureCode: 'unknown_evidence_reference',
+    });
+    expect(harness.repository.listPendingAttention()).toHaveLength(0);
+  });
+
+  it('supersedes durable attention when the pod no longer needs intervention', async () => {
+    const harness = setup();
+    harness.repository.recordAttention({
+      id: 'resolved-attention',
+      podId: 'pod-1',
+      signature: 'attention-current',
+      now: new Date(NOW.getTime() - 60_000).toISOString(),
+    });
+    harness.evidenceProvider.listCandidates.mockResolvedValue([]);
+    harness.evidenceProvider.getCandidate.mockResolvedValue(null);
+
+    await service(harness, vi.fn()).reconcile();
+
+    expect(harness.repository.listPendingAttention()).toHaveLength(0);
+    expect(
+      harness.db
+        .prepare('SELECT state FROM podsitter_attention WHERE id = ?')
+        .get('resolved-attention'),
+    ).toEqual({ state: 'superseded' });
   });
 });

@@ -206,17 +206,6 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
     if (!target) return false;
     const activation = evaluatePodsitterActivation(configuration, now());
     if (!activation.active || !activation.windowId) return false;
-    const candidate = await deps.evidenceProvider.getCandidate(
-      attention.podId,
-      now(),
-      configuration,
-    );
-    if (!candidate || candidate.signature !== attention.signature) return false;
-
-    const provider = deps.repository.getProviderState(target.providerAccountId);
-    if (provider && provider.status !== 'available' && !candidate.deterministicApproval)
-      return false;
-
     const lease = deps.repository.acquireAttentionLease(
       attention.id,
       owner,
@@ -224,7 +213,113 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
       now().toISOString(),
     );
     if (!lease) return false;
+    const candidate = await deps.evidenceProvider.getCandidate(
+      attention.podId,
+      now(),
+      configuration,
+    );
+    if (!candidate || candidate.signature !== attention.signature) {
+      deps.repository.releaseAttentionLease(
+        lease.id,
+        owner,
+        lease.leaseVersion,
+        'superseded',
+        lease.decisionId,
+        now().toISOString(),
+      );
+      return false;
+    }
+
+    const provider = deps.repository.getProviderState(target.providerAccountId);
+    if (provider && provider.status !== 'available' && !candidate.deterministicApproval) {
+      deps.repository.releaseAttentionLease(
+        lease.id,
+        owner,
+        lease.leaseVersion,
+        'deferred',
+        lease.decisionId,
+        now().toISOString(),
+      );
+      return false;
+    }
+
     const priorDecision = deps.repository.getDecisionForAttention(lease.id);
+    const evidenceReferencesAreCurrent = (references: string[]): boolean => {
+      const available = new Set(candidate.evidence.evidenceRefs);
+      return references.every((reference) => available.has(reference));
+    };
+    const executeCompletedDecision = async (
+      decisionId: string,
+      decision: NonNullable<typeof priorDecision>['decision'],
+    ): Promise<boolean> => {
+      if (!decision || !evidenceReferencesAreCurrent(decision.evidenceRefs)) {
+        deps.repository.releaseAttentionLease(
+          lease.id,
+          owner,
+          lease.leaseVersion,
+          'superseded',
+          decisionId,
+          now().toISOString(),
+        );
+        return false;
+      }
+      const actor = {
+        type: 'podsitter' as const,
+        decisionId,
+        providerAccountId: target.providerAccountId,
+        model: target.model,
+      };
+      const execution =
+        decision.action === 'no_action'
+          ? { outcome: 'not_executed' as const, detail: 'Model selected no_action' }
+          : await deps.actionExecutor.execute({
+              podId: candidate.pod.id,
+              decision,
+              actor,
+              activationGeneration: configuration.generation,
+              windowId: activation.windowId,
+              failureSignature: candidate.failureSignature,
+            });
+      const executed = execution.outcome === 'executed';
+      if (executed) deps.repository.markDecisionExecuted(decisionId, now().toISOString());
+      deps.repository.releaseAttentionLease(
+        lease.id,
+        owner,
+        lease.leaseVersion,
+        executed ? (decision.action === 'report' ? 'reported' : 'acted') : 'superseded',
+        decisionId,
+        now().toISOString(),
+      );
+      if (decision.action !== 'no_action') {
+        emit({
+          type: executed ? 'podsitter.action_executed' : 'podsitter.action_rejected',
+          timestamp: now().toISOString(),
+          podId: candidate.pod.id,
+          decisionId,
+          action: decision.action,
+          ...(executed ? { actor } : { policyResult: execution.detail }),
+        } as SystemEvent);
+      }
+      return executed;
+    };
+    if (priorDecision?.outcome === 'completed') {
+      return executeCompletedDecision(priorDecision.id, priorDecision.decision);
+    }
+    if (
+      priorDecision &&
+      priorDecision.outcome !== 'failed' &&
+      priorDecision.outcome !== 'pending'
+    ) {
+      deps.repository.releaseAttentionLease(
+        lease.id,
+        owner,
+        lease.leaseVersion,
+        'superseded',
+        priorDecision.id,
+        now().toISOString(),
+      );
+      return false;
+    }
     const record = priorDecision
       ? deps.repository.refreshDecisionForRetry({
           attentionId: lease.id,
@@ -273,12 +368,6 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
         remainingRisk: '',
         stopCondition: 'Pod leaves validated state',
       };
-      const actor = {
-        type: 'podsitter' as const,
-        decisionId,
-        providerAccountId: target.providerAccountId,
-        model: target.model,
-      };
       deps.repository.completeDecision(
         record.id,
         {
@@ -298,25 +387,7 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
         outcome: 'completed',
         evidenceRefs: decision.evidenceRefs,
       });
-      const execution = await deps.actionExecutor.execute({
-        podId: candidate.pod.id,
-        decision,
-        actor,
-        activationGeneration: configuration.generation,
-        windowId: activation.windowId,
-        failureSignature: candidate.failureSignature,
-      });
-      const executed = execution.outcome === 'executed';
-      if (executed) deps.repository.markDecisionExecuted(record.id, now().toISOString());
-      deps.repository.releaseAttentionLease(
-        lease.id,
-        owner,
-        lease.leaseVersion,
-        executed ? 'acted' : 'superseded',
-        record.id,
-        now().toISOString(),
-      );
-      return executed;
+      return executeCompletedDecision(record.id, decision);
     }
 
     deps.repository.initializeProviderState(target.providerAccountId, now().toISOString());
@@ -422,12 +493,37 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
       );
       return false;
     }
-    const actor = {
-      type: 'podsitter' as const,
-      decisionId,
-      providerAccountId: target.providerAccountId,
-      model: target.model,
-    };
+    if (!evidenceReferencesAreCurrent(result.decision.evidenceRefs)) {
+      deps.repository.completeDecision(
+        record.id,
+        {
+          leaseOwner: owner,
+          leaseVersion: lease.leaseVersion,
+          decision: result.decision,
+          outcome: 'failed',
+          failureCode: 'unknown_evidence_reference',
+          ...result.telemetry,
+        },
+        now().toISOString(),
+      );
+      deps.repository.releaseAttentionLease(
+        lease.id,
+        owner,
+        lease.leaseVersion,
+        'failed',
+        record.id,
+        now().toISOString(),
+      );
+      emit({
+        type: 'podsitter.action_rejected',
+        timestamp: now().toISOString(),
+        podId: candidate.pod.id,
+        decisionId,
+        action: result.decision.action,
+        policyResult: 'unknown_evidence_reference',
+      });
+      return false;
+    }
     deps.repository.completeDecision(
       record.id,
       {
@@ -448,36 +544,7 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
       outcome: 'completed',
       evidenceRefs: result.decision.evidenceRefs,
     });
-    const execution =
-      result.decision.action === 'no_action'
-        ? { outcome: 'not_executed' as const, detail: 'Model selected no_action' }
-        : await deps.actionExecutor.execute({
-            podId: candidate.pod.id,
-            decision: result.decision,
-            actor,
-            activationGeneration: configuration.generation,
-            windowId: activation.windowId,
-            failureSignature: candidate.failureSignature,
-          });
-    const executed = execution.outcome === 'executed';
-    if (executed) deps.repository.markDecisionExecuted(record.id, now().toISOString());
-    deps.repository.releaseAttentionLease(
-      lease.id,
-      owner,
-      lease.leaseVersion,
-      executed ? (result.decision.action === 'report' ? 'reported' : 'acted') : 'superseded',
-      record.id,
-      now().toISOString(),
-    );
-    emit({
-      type: executed ? 'podsitter.action_executed' : 'podsitter.action_rejected',
-      timestamp: now().toISOString(),
-      podId: candidate.pod.id,
-      decisionId,
-      action: result.decision.action,
-      ...(executed ? { actor } : { policyResult: execution.detail }),
-    } as SystemEvent);
-    return executed;
+    return executeCompletedDecision(record.id, result.decision);
   }
 
   async function reconcileInternal(options: { readOnly?: boolean } = {}) {

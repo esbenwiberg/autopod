@@ -907,7 +907,10 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
              outcome = 'pending', failure_code = NULL, input_tokens = NULL,
              output_tokens = NULL, cost_usd = NULL, completed_at = NULL, executed_at = NULL
            WHERE attention_id = ?
-             AND outcome = 'failed'
+             AND (
+               outcome = 'failed'
+               OR (outcome = 'pending' AND completed_at IS NULL)
+             )
              AND EXISTS (
                SELECT 1 FROM podsitter_attention attention
                WHERE attention.id = podsitter_decisions.attention_id
