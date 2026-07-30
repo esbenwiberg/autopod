@@ -331,9 +331,10 @@ The Scruffy warm image has a dedicated PostgreSQL smoke that exercises the real 
 runtime. The image wraps PostgreSQL's real `initdb` and appends
 `unix_socket_directories = ''` to each successfully generated cluster; changing Debian's
 `postgresql.conf.sample` is insufficient because PostgreSQL 17 rewrites that setting during
-initialization. The smoke initializes a clean TCP-only cluster, replaces an agent-like cluster
-whose administrator is `scruffy`, repeats the validation reset, and verifies the final role,
-database ownership, and application connection:
+initialization. PostgreSQL starts with `pg_ctl -l "$PGDATA/postgres.log"` so the detached server
+does not retain the Azure exec stream's output handles and block the response. The smoke initializes
+a clean TCP-only cluster, replaces an agent-like cluster whose administrator is `scruffy`, repeats
+the validation reset, and verifies the final role, database ownership, and application connection:
 
 ```bash
 npx pnpm --filter @autopod/daemon build
@@ -350,7 +351,7 @@ After publishing the corrected `autopod-node22-pw-pg` base image and rebuilding 
 warm image, replace the hosted Scruffy `validationSetupCommand` with this exact command:
 
 ```sh
-npm ci && if [ -s "$PGDATA/PG_VERSION" ] && pg_ctl -D "$PGDATA" status >/dev/null 2>&1; then pg_ctl -D "$PGDATA" -m fast -w stop; fi && rm -rf -- "$PGDATA" && initdb -D "$PGDATA" -U postgres --auth=trust && pg_ctl -D "$PGDATA" -o "-h 127.0.0.1 -p 5433" -w start && createuser -h 127.0.0.1 -p 5433 -U postgres --login scruffy && createdb -h 127.0.0.1 -p 5433 -U postgres -O scruffy scruffy
+npm ci && if [ -s "$PGDATA/PG_VERSION" ] && pg_ctl -D "$PGDATA" status >/dev/null 2>&1; then pg_ctl -D "$PGDATA" -m fast -w stop; fi && rm -rf -- "$PGDATA" && initdb -D "$PGDATA" -U postgres --auth=trust && pg_ctl -D "$PGDATA" -o "-h 127.0.0.1 -p 5433" -l "$PGDATA/postgres.log" -w start && createuser -h 127.0.0.1 -p 5433 -U postgres --login scruffy && createdb -h 127.0.0.1 -p 5433 -U postgres -O scruffy scruffy
 ```
 
 Keep `SCRUFFY_REQUIRE_DB=1` in the profile build environment. Review the stored command after the

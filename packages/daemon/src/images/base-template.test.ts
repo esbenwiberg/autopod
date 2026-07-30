@@ -155,6 +155,8 @@ printf "#unix_socket_directories = '/var/run/postgresql'\\n" > "$pgdata/postgres
     expect(smoke).toContain('pg_ctl -D "$PGDATA" -m fast -w stop');
     expect(smoke).toContain('rm -rf -- "$PGDATA"');
     expect(smoke).toContain('initdb -D "$PGDATA" -U postgres --auth=trust');
+    expect(smoke.match(/-l "\$PGDATA\/postgres\.log" -w start/g)).toHaveLength(3);
+    expect(smoke).not.toContain('-p 5433" -w start');
     expect(smoke).toContain('createuser -h 127.0.0.1 -p 5433 -U postgres --login scruffy');
     expect(smoke).toContain('createdb -h 127.0.0.1 -p 5433 -U postgres -O scruffy scruffy');
     expect(smoke).toContain('postgresql://scruffy@127.0.0.1:5433/scruffy');

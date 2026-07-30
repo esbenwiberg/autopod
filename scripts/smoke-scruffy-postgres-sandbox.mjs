@@ -54,7 +54,7 @@ const resetAndProvision = [
   'fi',
   'rm -rf -- "$PGDATA"',
   'initdb -D "$PGDATA" -U postgres --auth=trust',
-  'pg_ctl -D "$PGDATA" -o "-h 127.0.0.1 -p 5433" -w start',
+  'pg_ctl -D "$PGDATA" -o "-h 127.0.0.1 -p 5433" -l "$PGDATA/postgres.log" -w start',
   'createuser -h 127.0.0.1 -p 5433 -U postgres --login scruffy',
   'createdb -h 127.0.0.1 -p 5433 -U postgres -O scruffy scruffy',
 ].join('\n');
@@ -79,7 +79,7 @@ try {
     'rm -rf -- "$PGDATA"',
     'initdb -D "$PGDATA" -U postgres --auth=trust',
     'grep -Fx "unix_socket_directories = \'\'" "$PGDATA/postgresql.conf"',
-    'pg_ctl -D "$PGDATA" -o "-h 127.0.0.1 -p 5433" -w start',
+    'pg_ctl -D "$PGDATA" -o "-h 127.0.0.1 -p 5433" -l "$PGDATA/postgres.log" -w start',
     'pg_isready -h 127.0.0.1 -p 5433 -U postgres -d postgres',
   ]);
 
@@ -87,7 +87,7 @@ try {
     'pg_ctl -D "$PGDATA" -m fast -w stop',
     'rm -rf -- "$PGDATA"',
     'initdb -D "$PGDATA" -U scruffy --auth=trust',
-    'pg_ctl -D "$PGDATA" -o "-h 127.0.0.1 -p 5433" -w start',
+    'pg_ctl -D "$PGDATA" -o "-h 127.0.0.1 -p 5433" -l "$PGDATA/postgres.log" -w start',
     'psql -h 127.0.0.1 -p 5433 -U scruffy -d postgres -v ON_ERROR_STOP=1 -tAc "SELECT current_user" | grep -Fx scruffy',
     'test "$(psql -h 127.0.0.1 -p 5433 -U scruffy -d postgres -tAc "SELECT count(*) FROM pg_roles WHERE rolname = \'autopod\'")" = 0',
   ]);
