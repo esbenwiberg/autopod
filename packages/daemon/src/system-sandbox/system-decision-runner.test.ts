@@ -26,6 +26,8 @@ function harness(
     spawnFailsAfterCreate?: boolean;
     spawnHangs?: boolean;
     repairWriteHangs?: boolean;
+    readFileHangs?: boolean;
+    createRunFails?: boolean;
   } = {},
 ) {
   const spawns: ContainerSpawnConfig[] = [];
@@ -46,6 +48,7 @@ function harness(
       }
     }),
     readFile: vi.fn(async () => {
+      if (options.readFileHangs) return await new Promise<string>(() => undefined);
       throw new Error('absent');
     }),
     execInContainer: vi.fn(async (_id, command: string[]) =>
@@ -63,7 +66,10 @@ function harness(
   } as unknown as ContainerManager;
   const runs: Array<{ id: string; outcome?: string; cleanupState?: string }> = [];
   const repository = {
-    createSandboxRun: vi.fn(({ id }) => runs.push({ id })),
+    createSandboxRun: vi.fn(({ id }) => {
+      if (options.createRunFails) throw new Error('duplicate key secret=repository-token');
+      runs.push({ id });
+    }),
     setSandboxContainer: vi.fn(() => true),
     closeSandboxRun: vi.fn((id, update) => {
       runs.push({ id, ...update });
@@ -108,6 +114,7 @@ function harness(
       dockerNetworkManager,
       logger: pino({ level: 'silent' }),
       hostedImage: 'autopod.azurecr.io/autopod/system-decision:2026.07.30',
+      credentialReadbackTimeoutMs: 10,
     }),
   };
 }
@@ -229,6 +236,22 @@ describe('SystemDecisionRunner', () => {
     expect(created.manager.kill).toHaveBeenCalledWith('system-container');
   });
 
+  it('returns a typed sanitized failure when run creation fails', async () => {
+    const duplicate = harness({ createRunFails: true });
+
+    const result = await duplicate.runner.run(input);
+
+    expect(result).toMatchObject({
+      ok: false,
+      kind: 'infrastructure',
+      failure: { code: 'SYSTEM_SANDBOX_FAILED' },
+      cleanup: 'clean',
+    });
+    expect(JSON.stringify(result)).not.toContain('repository-token');
+    expect(duplicate.manager.spawn).not.toHaveBeenCalled();
+    expect(duplicate.repository.closeSandboxRun).not.toHaveBeenCalled();
+  });
+
   it('fails durably when OAuth credential readback cannot be persisted', async () => {
     const oauth = harness({
       output: JSON.stringify({ item: { text: JSON.stringify(decision) } }),
@@ -264,6 +287,49 @@ describe('SystemDecisionRunner', () => {
       'system-decision-1',
       expect.objectContaining({
         outcome: 'failed',
+        failureCode: 'CREDENTIAL_PERSISTENCE_FAILED',
+      }),
+    );
+  });
+
+  it('bounds credential readback and proceeds to sandbox teardown', async () => {
+    const oauth = harness({
+      output: JSON.stringify({ item: { text: JSON.stringify(decision) } }),
+      readFileHangs: true,
+    });
+    vi.mocked(oauth.providerAccountStore.get).mockReturnValue({
+      id: 'openai-decision',
+      name: 'OpenAI decision',
+      provider: 'openai',
+      credentials: {
+        provider: 'openai',
+        authMode: 'chatgpt',
+        authJson: '{"tokens":{"access_token":"issued"}}',
+      },
+      failoverPolicy: null,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      lastAuthenticatedAt: new Date(0).toISOString(),
+      lastUsedAt: null,
+    });
+
+    const result = await oauth.runner.run({
+      ...input,
+      providerAccountId: 'openai-decision',
+      runtime: 'codex',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      kind: 'infrastructure',
+      failure: { code: 'CREDENTIAL_PERSISTENCE_FAILED' },
+    });
+    expect(oauth.manager.kill).toHaveBeenCalledWith('system-container');
+    expect(oauth.repository.closeSandboxRun).toHaveBeenCalledWith(
+      'system-decision-1',
+      expect.objectContaining({
+        outcome: 'failed',
+        cleanupState: 'clean',
         failureCode: 'CREDENTIAL_PERSISTENCE_FAILED',
       }),
     );

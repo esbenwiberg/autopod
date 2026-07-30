@@ -29,6 +29,7 @@ const MAX_PROMPT_BYTES = 256_000;
 const MAX_DIAGNOSTIC_BYTES = 4_000;
 const MAX_TIMEOUT_MS = 60 * 60 * 1000;
 const LOCAL_IMAGE_DEFAULT = 'autopod-system-decision:local';
+const DEFAULT_CREDENTIAL_READBACK_TIMEOUT_MS = 10_000;
 
 export interface SystemDecisionRunInput {
   decisionId: string;
@@ -65,6 +66,7 @@ export interface SystemDecisionRunnerOptions {
   dockerNetworkManager?: Pick<DockerNetworkManager, 'buildNetworkConfig' | 'removeNetworkForPod'>;
   localImage?: string;
   hostedImage?: string;
+  credentialReadbackTimeoutMs?: number;
 }
 
 export class SystemDecisionRunner {
@@ -74,7 +76,8 @@ export class SystemDecisionRunner {
     const deadline = Date.now() + input.timeoutMs;
     const runId = `system-${input.decisionId}`;
     const backend = input.executionTarget === 'sandbox' ? 'azure-sandbox' : 'docker';
-    this.options.repository.createSandboxRun({ id: runId, decisionId: input.decisionId, backend });
+    let runCreated = false;
+    let networkProvisioned = false;
     let containerId: string | null = null;
     let result: SystemDecisionRunResult | null = null;
     let failureCode: string | null = null;
@@ -82,6 +85,8 @@ export class SystemDecisionRunner {
     let providerEnv: ProviderEnvResult | null = null;
 
     try {
+      this.options.repository.createSandboxRun({ id: runId, decisionId: input.decisionId, backend });
+      runCreated = true;
       manager = this.resolveManager(input.executionTarget);
       assertInput(input);
       const image = this.resolveImage(input.executionTarget);
@@ -112,6 +117,7 @@ export class SystemDecisionRunner {
               'network provisioning',
             )
           : null;
+      networkProvisioned = networkConfig !== null;
       containerId = await withinDeadline(
         manager.spawn({
           image,
@@ -218,21 +224,25 @@ export class SystemDecisionRunner {
       let cleanup: 'clean' | 'leaked' = 'clean';
       if (containerId && manager) {
         if (providerEnv) {
-          await persistProviderAccountCredentials(
-            containerId,
-            manager,
-            this.options.providerAccountStore,
-            input.providerAccountId,
-            this.options.logger,
-            {
-              maxLineage: providerEnv.maxCredentialLineage,
-              openAiLineage: providerEnv.requiresOpenAiAuthJsonPersistence
-                ? providerEnv.openAiAuthJsonLineage
-                : undefined,
-              piLineage: providerEnv.requiresPiAuthJsonPersistence
-                ? providerEnv.piAuthJsonLineage
-                : undefined,
-            },
+          await withinTimeout(
+            persistProviderAccountCredentials(
+              containerId,
+              manager,
+              this.options.providerAccountStore,
+              input.providerAccountId,
+              this.options.logger,
+              {
+                maxLineage: providerEnv.maxCredentialLineage,
+                openAiLineage: providerEnv.requiresOpenAiAuthJsonPersistence
+                  ? providerEnv.openAiAuthJsonLineage
+                  : undefined,
+                piLineage: providerEnv.requiresPiAuthJsonPersistence
+                  ? providerEnv.piAuthJsonLineage
+                  : undefined,
+              },
+            ),
+            this.options.credentialReadbackTimeoutMs ?? DEFAULT_CREDENTIAL_READBACK_TIMEOUT_MS,
+            'credential readback',
           ).catch((error) => {
             const message = sanitizeProviderMessage(String(error));
             this.options.logger.error(
@@ -258,7 +268,7 @@ export class SystemDecisionRunner {
           );
         }
       }
-      if (input.executionTarget === 'local' && this.options.dockerNetworkManager) {
+      if (networkProvisioned && this.options.dockerNetworkManager) {
         await this.options.dockerNetworkManager.removeNetworkForPod(runId).catch((error) => {
           cleanup = 'leaked';
           this.options.logger.error(
@@ -277,11 +287,26 @@ export class SystemDecisionRunner {
         );
         failureCode = 'CLEANUP_FAILED';
       }
-      this.options.repository.closeSandboxRun(runId, {
-        outcome: cleanup === 'leaked' ? 'leaked' : result.ok ? 'completed' : 'failed',
-        cleanupState: cleanup === 'leaked' ? 'retryable' : 'clean',
-        failureCode,
-      });
+      if (runCreated) {
+        try {
+          this.options.repository.closeSandboxRun(runId, {
+            outcome: cleanup === 'leaked' ? 'leaked' : result.ok ? 'completed' : 'failed',
+            cleanupState: cleanup === 'leaked' ? 'retryable' : 'clean',
+            failureCode,
+          });
+        } catch (error) {
+          this.options.logger.error(
+            { runId, err: sanitizeProviderMessage(String(error)) },
+            'System decision run outcome persistence failed',
+          );
+          result = failureResult(
+            'infrastructure',
+            'System decision run outcome persistence failed',
+            cleanup,
+            'RUN_PERSISTENCE_FAILED',
+          );
+        }
+      }
     }
     return result;
   }
@@ -561,6 +586,30 @@ async function withinDeadline<T>(
   operation: string,
 ): Promise<T> {
   const timeoutMs = remainingTimeout(deadline);
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`System decision ${operation} timed out`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function withinTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  operation: string,
+): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error(`System decision ${operation} timeout is invalid`);
+  }
   let timer: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
