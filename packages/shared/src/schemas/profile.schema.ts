@@ -34,6 +34,7 @@ export const reasoningEffortSchema = z.enum(['auto', 'low', 'medium', 'high', 'x
 
 const anthropicCredentialsSchema = z.object({
   provider: z.literal('anthropic'),
+  apiKey: z.string().min(1).optional(),
 });
 
 const openAiCredentialsSchema = z.object({

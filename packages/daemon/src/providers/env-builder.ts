@@ -133,7 +133,7 @@ export async function buildProviderEnv(
 
   switch (provider) {
     case 'anthropic':
-      return buildAnthropicEnv();
+      return buildAnthropicEnv(auth);
 
     case 'max':
       return buildMaxEnv(boundProfile, auth, logger, options);
@@ -201,7 +201,14 @@ export async function buildProviderAccountEnv(
 
   switch (provider) {
     case 'anthropic':
-      throw new Error('Dedicated Anthropic accounts require stored account credentials');
+      if (auth.credentials?.provider !== 'anthropic' || !auth.credentials.apiKey) {
+        throw new AutopodError(
+          `Provider account "${auth.account.name}" has no stored Anthropic API key`,
+          'PROVIDER_ACCOUNT_CREDENTIALS_MISSING',
+          400,
+        );
+      }
+      return buildAnthropicEnv(auth);
     case 'max':
       return buildMaxEnv(subject, auth, logger, accountOptions);
     case 'openai':
@@ -281,11 +288,14 @@ function isMaxRefreshCredentials(creds: MaxCredentials): creds is MaxRefreshCred
  * The key is written to a 0400 secret file inside the container; the exec env
  * carries only the _FILE pointer so the raw key never appears in env dumps.
  */
-function buildAnthropicEnv(): ProviderEnvResult {
+function buildAnthropicEnv(auth: ProviderAuthResolution): ProviderEnvResult {
   const env = withRuntimeTelemetryOptOutEnv();
   const secretFiles: ProviderEnvResult['secretFiles'] = [];
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey =
+    auth.credentials?.provider === 'anthropic' && auth.credentials.apiKey
+      ? auth.credentials.apiKey
+      : process.env.ANTHROPIC_API_KEY;
   if (apiKey) {
     const filePath = `${SECRET_DIR}/anthropic-api-key`;
     secretFiles.push({ path: filePath, content: apiKey });
@@ -297,6 +307,7 @@ function buildAnthropicEnv(): ProviderEnvResult {
     containerFiles: buildClaudeConfigFiles(),
     secretFiles,
     requiresPostExecPersistence: false,
+    credentialOwner: auth.owner ?? undefined,
   };
 }
 

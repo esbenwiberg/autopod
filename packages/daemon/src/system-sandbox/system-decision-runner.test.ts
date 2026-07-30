@@ -118,7 +118,7 @@ describe('SystemDecisionRunner', () => {
         [
           'system-container',
           expect.arrayContaining([expect.stringContaining('copilot')]),
-          expect.objectContaining({ cwd: '/tmp', timeout: 30_000 }),
+          expect.objectContaining({ cwd: '/tmp', timeout: expect.any(Number) }),
         ],
       ]),
     );
@@ -137,6 +137,9 @@ describe('SystemDecisionRunner', () => {
       .mocked(first.manager.execInContainer)
       .mock.calls.filter(([, command]) => command[0] !== 'chmod');
     expect(inferenceCalls).toHaveLength(2);
+    expect((inferenceCalls[1]?.[2] as { timeout: number }).timeout).toBeLessThanOrEqual(
+      (inferenceCalls[0]?.[2] as { timeout: number }).timeout,
+    );
 
     const second = harness();
     vi.mocked(second.repository.listActiveSandboxRuns).mockReturnValue([

@@ -35,6 +35,7 @@ function account(provider: string, credentials: ProviderAccount['credentials']):
 describe('system provider auth', () => {
   it('prepares only the dedicated account for each compatible runtime', async () => {
     const fixtures = [
+      ['anthropic', 'claude', { provider: 'anthropic', apiKey: 'anthropic-secret' }],
       [
         'max',
         'claude',

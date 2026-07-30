@@ -64,6 +64,7 @@ export class SystemDecisionRunner {
   constructor(private readonly options: SystemDecisionRunnerOptions) {}
 
   async run(input: SystemDecisionRunInput): Promise<SystemDecisionRunResult> {
+    const deadline = Date.now() + input.timeoutMs;
     const runId = `system-${input.decisionId}`;
     const backend = input.executionTarget === 'sandbox' ? 'azure-sandbox' : 'docker';
     this.options.repository.createSandboxRun({ id: runId, decisionId: input.decisionId, backend });
@@ -102,7 +103,7 @@ export class SystemDecisionRunner {
 
       let execResult = await manager.execInContainer(containerId, invocation.command, {
         cwd: '/tmp',
-        timeout: input.timeoutMs,
+        timeout: remainingTimeout(deadline),
         env: providerEnv.env,
       });
       if (execResult.exitCode !== 0) {
@@ -123,7 +124,7 @@ export class SystemDecisionRunner {
           await manager.writeFile(containerId, invocation.promptPath, repairPrompt);
           execResult = await manager.execInContainer(containerId, invocation.command, {
             cwd: '/tmp',
-            timeout: input.timeoutMs,
+            timeout: remainingTimeout(deadline),
             env: providerEnv.env,
           });
           if (execResult.exitCode !== 0) {
@@ -367,6 +368,12 @@ function parseTelemetry(stdout: string): {
 
 function isTimeout(error: unknown): boolean {
   return error instanceof Error && /timed?\s*out|timeout/i.test(error.message);
+}
+
+function remainingTimeout(deadline: number): number {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error('System decision run timed out');
+  return remaining;
 }
 
 function providerRequiredHosts(
