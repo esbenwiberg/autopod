@@ -1456,7 +1456,12 @@ export interface PodManager {
     options?: { force?: boolean },
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }>;
   /** Create a linked workspace pod on the same branch as a failed worker pod for human fixes. */
-  fixManually(podId: string, userId: string, creator?: PodCreator): Pod;
+  fixManually(
+    podId: string,
+    actor: OperatorActor | string,
+    creator?: PodCreator,
+    instructions?: string,
+  ): Pod;
   createHistoryWorkspace(
     profileName: string,
     userId: string,
@@ -12930,8 +12935,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     },
 
-    fixManually(podId: string, userId: string, creator?: PodCreator): Pod {
+    fixManually(
+      podId: string,
+      actorOrUserId: OperatorActor | string,
+      creator?: PodCreator,
+      instructions?: string,
+    ): Pod {
       const worker = podRepo.getOrThrow(podId);
+      const actor: OperatorActor =
+        typeof actorOrUserId === 'string'
+          ? { type: 'human', userId: actorOrUserId }
+          : actorOrUserId;
       if (
         worker.status !== 'failed' &&
         worker.status !== 'review_required' &&
@@ -12948,21 +12962,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       const workspace = this.createSession(
         {
           profileName: worker.profileName,
-          task: `Human fix for failed pod ${worker.id}: ${worker.task}`,
+          task: [
+            `${actorLabel(actor)} fix for pod ${worker.id}: ${worker.task}`,
+            ...(instructions?.trim() ? [`Instructions: ${instructions.trim()}`] : []),
+          ].join('\n\n'),
           branch: worker.branch,
           outputMode: 'workspace',
           baseBranch: worker.baseBranch ?? undefined,
           linkedPodId: worker.id,
         },
-        userId,
+        actor.type === 'human' ? actor.userId : `${actor.type}:${actorLabel(actor)}`,
         creator,
       );
 
       logger.info(
         { workerId: podId, workspaceId: workspace.id },
-        'Created linked workspace for human fix',
+        'Created linked workspace for operator fix',
       );
-      emitActivityStatus(podId, `Human fix workspace created: ${workspace.id}`);
+      emitActivityStatus(podId, `${actorLabel(actor)} fix workspace created: ${workspace.id}`);
 
       return workspace;
     },

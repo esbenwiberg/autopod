@@ -41,7 +41,7 @@ const ALLOWED_STATUSES: Partial<Record<PodsitterAction, readonly Pod['status'][]
   force_approve: ['failed', 'review_required', 'awaiting_input'],
   skip_validation: ['failed', 'review_required', 'awaiting_input', 'validating'],
   force_complete: ['failed'],
-  fix_manually: ['failed', 'review_required', 'merge_pending'],
+  fix_manually: ['failed', 'review_required', 'validated'],
 };
 
 export interface PodsitterActionOperations {
@@ -205,7 +205,9 @@ export class PodsitterActionExecutor {
     try {
       // Re-read after the transactional reservation so lifecycle races still
       // become audited not_executed outcomes before any operational call.
-      assertActionStatus(decision.action, this.podManager.getSession(input.podId));
+      const currentPod = this.podManager.getSession(input.podId);
+      assertActionStatus(decision.action, currentPod);
+      assertLastResortPreconditions(decision, currentPod);
       await this.dispatch(input.podId, decision, actor);
       this.repository.completeAction(key, 'executed');
       return { outcome: 'executed', detail: 'Action executed' };
@@ -318,7 +320,7 @@ export class PodsitterActionExecutor {
         await this.podManager.forceComplete(podId, decision.reason, actor);
         return;
       case 'fix_manually':
-        this.podManager.fixManually(podId, `podsitter:${actor.decisionId}`);
+        this.podManager.fixManually(podId, actor, undefined, decision.arguments.instructions);
         return;
     }
   }

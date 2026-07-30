@@ -1032,7 +1032,7 @@ export function podRoutes(
   // POST /pods/:podId/fix-manually — create linked workspace for human fixes
   app.post('/pods/:podId/fix-manually', async (request, reply) => {
     const { podId } = request.params as { podId: string };
-    const workspace = podManager.fixManually(podId, request.user.oid, {
+    const workspace = podManager.fixManually(podId, humanActor(request), {
       email: request.user.preferred_username,
       name: request.user.name,
     });

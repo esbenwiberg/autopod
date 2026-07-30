@@ -68,7 +68,7 @@ const statusByAction: Partial<Record<PodsitterAction, Pod['status']>> = {
   force_approve: 'failed',
   skip_validation: 'failed',
   force_complete: 'failed',
-  fix_manually: 'failed',
+  fix_manually: 'validated',
 };
 
 const operationByAction: Record<PodsitterAction, string | null> = {
@@ -199,6 +199,22 @@ describe('PodsitterActionExecutor', () => {
       seen.add(action);
     }
     expect([...seen]).toEqual([...PODSITTER_ACTIONS]);
+
+    const invalidManualFix = harness();
+    vi.mocked(invalidManualFix.manager.getSession).mockReturnValue({
+      ...invalidManualFix.manager.getSession('pod-1'),
+      status: 'merge_pending',
+    } as Pod);
+    await expect(
+      invalidManualFix.executor.execute({
+        podId: 'pod-1',
+        decision: decision('fix_manually'),
+        actor,
+        activationGeneration: 7,
+        windowId: 'always:7',
+      }),
+    ).resolves.toMatchObject({ outcome: 'not_executed' });
+    expect(invalidManualFix.calls).toEqual([]);
 
     const h = harness();
     await expect(
