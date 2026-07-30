@@ -449,15 +449,25 @@ export class SystemDecisionRunner {
     if (ownership.exitCode !== 0) {
       throw new Error('Failed to assign system sandbox credential ownership');
     }
-    await manager.execInContainer(containerId, ['chmod', '0500', SYSTEM_CREDENTIAL_SHIM_PATH], {
-      user: 'root',
-      timeout: 5_000,
-    });
+    const shimMode = await manager.execInContainer(
+      containerId,
+      ['chmod', '0500', SYSTEM_CREDENTIAL_SHIM_PATH],
+      {
+        user: 'root',
+        timeout: 5_000,
+      },
+    );
+    if (shimMode.exitCode !== 0) {
+      throw new Error('Failed to restrict system sandbox credential shim permissions');
+    }
     for (const path of secretPaths) {
-      await manager.execInContainer(containerId, ['chmod', '0400', path], {
+      const secretMode = await manager.execInContainer(containerId, ['chmod', '0400', path], {
         user: 'root',
         timeout: 5_000,
       });
+      if (secretMode.exitCode !== 0) {
+        throw new Error('Failed to restrict system sandbox credential permissions');
+      }
     }
   }
 

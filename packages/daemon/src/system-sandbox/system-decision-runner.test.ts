@@ -29,6 +29,7 @@ function harness(
     readFileHangs?: boolean;
     createRunFails?: boolean;
     rootOwnedUploads?: boolean;
+    chmodFails?: boolean;
     networkProvisioning?: Promise<{ networkName: string; firewallScript: string }>;
   } = {},
 ) {
@@ -60,7 +61,13 @@ function harness(
         for (const path of command.slice(2)) fileOwners.set(path, command[1] ?? '');
         return { stdout: '', stderr: '', exitCode: 0 };
       }
-      if (command[0] === 'chmod') return { stdout: '', stderr: '', exitCode: 0 };
+      if (command[0] === 'chmod') {
+        return {
+          stdout: '',
+          stderr: options.chmodFails ? 'permission denied' : '',
+          exitCode: options.chmodFails ? 1 : 0,
+        };
+      }
       if (
         options.rootOwnedUploads &&
         (fileOwners.get('/run/autopod/system-credential-shim.sh') !== '1000:1000' ||
@@ -221,6 +228,20 @@ describe('SystemDecisionRunner', () => {
         '/run/autopod/copilot-token',
       ],
       expect.objectContaining({ user: 'root' }),
+    );
+  });
+
+  it('fails closed and tears down when secret permissions cannot be restricted', async () => {
+    const unsafe = harness({ chmodFails: true });
+
+    await expect(unsafe.runner.run(input)).resolves.toMatchObject({
+      ok: false,
+      kind: 'infrastructure',
+    });
+    expect(unsafe.manager.kill).toHaveBeenCalledWith('system-container');
+    expect(unsafe.repository.closeSandboxRun).toHaveBeenCalledWith(
+      'system-decision-1',
+      expect.objectContaining({ outcome: 'failed', cleanupState: 'clean' }),
     );
   });
 
