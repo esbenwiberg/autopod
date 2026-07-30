@@ -1,7 +1,12 @@
 import type { EscalationRequest } from './escalation.js';
 import type { ValidationResult } from './validation.js';
 
-export type NotificationType = 'pod_validated' | 'pod_failed' | 'pod_needs_input' | 'pod_error';
+export type NotificationType =
+  | 'pod_validated'
+  | 'pod_failed'
+  | 'pod_needs_input'
+  | 'pod_error'
+  | 'podsitter';
 
 export interface NotificationPayload {
   type: NotificationType;

@@ -102,7 +102,7 @@ describe('NotificationService', () => {
     config = {
       teams: {
         webhookUrl: 'https://webhook.example.com',
-        enabledEvents: ['pod_validated', 'pod_failed', 'pod_needs_input', 'pod_error'],
+        enabledEvents: ['pod_validated', 'pod_failed', 'pod_needs_input', 'pod_error', 'podsitter'],
       },
     };
   });
@@ -363,6 +363,38 @@ describe('NotificationService', () => {
 
       await new Promise((r) => setTimeout(r, 50));
       expect(teamsAdapter.send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('podsitter events', () => {
+    it('sends rate-limited provider and consequential action notifications', async () => {
+      const service = createService();
+      service.start();
+
+      eventBus.emit({
+        type: 'podsitter.provider_limited',
+        timestamp: '2026-01-01T00:00:00.000Z',
+        providerAccountId: 'sitter-account',
+        status: 'quota_exhausted',
+        retryAt: '2026-01-01T01:00:00.000Z',
+      });
+      eventBus.emit({
+        type: 'podsitter.action_executed',
+        timestamp: '2026-01-01T00:01:00.000Z',
+        podId: 'sess-123',
+        decisionId: 'decision-1',
+        action: 'report',
+        actor: {
+          type: 'podsitter',
+          decisionId: 'decision-1',
+          providerAccountId: 'sitter-account',
+          model: 'gpt-5',
+        },
+      });
+
+      await vi.waitFor(() => expect(teamsAdapter.send).toHaveBeenCalledTimes(2));
+      expect(rateLimiter.canSend).toHaveBeenCalledWith('podsitter-provider:sitter-account');
+      expect(rateLimiter.canSend).toHaveBeenCalledWith('sess-123');
     });
   });
 

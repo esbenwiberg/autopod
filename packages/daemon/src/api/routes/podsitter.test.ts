@@ -157,4 +157,44 @@ describe('Podsitter routes', () => {
     });
     expect(response.statusCode).toBe(400);
   });
+
+  it('looks up decision details directly beyond the history page', async () => {
+    const harness = await setup();
+    apps.push(harness.app);
+    vi.spyOn(harness.repository, 'listDecisions').mockImplementation(() => {
+      throw new Error('detail route must not scan a bounded page');
+    });
+    vi.spyOn(harness.repository, 'getDecisionById').mockReturnValue({
+      id: 'old-decision',
+      attentionId: 'old-attention',
+      podId: 'old-pod',
+      attentionSignature: 'old-signature',
+      configurationGeneration: 1,
+      activationWindowId: 'always:g1',
+      evidenceHash: 'hash',
+      evidenceVersion: 1,
+      target: {
+        providerAccountId: 'sitter',
+        runtime: 'codex',
+        model: 'gpt-5',
+      },
+      decision: null,
+      outcome: 'failed',
+      failureCode: 'old',
+      inputTokens: null,
+      outputTokens: null,
+      costUsd: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      completedAt: '2026-01-01T00:01:00.000Z',
+      executedAt: null,
+    });
+
+    const response = await harness.app.inject({
+      method: 'GET',
+      url: '/podsitter/decisions/old-decision',
+      headers,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ id: 'old-decision' });
+  });
 });

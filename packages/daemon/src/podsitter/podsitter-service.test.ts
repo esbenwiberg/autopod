@@ -2,8 +2,10 @@ import type { Pod, PodsitterDecision } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { createEventBus } from '../pods/event-bus.js';
 import { createEventRepository } from '../pods/event-repository.js';
+import type { PodManager } from '../pods/pod-manager.js';
 import { createProviderAccountStore } from '../provider-accounts/provider-account-store.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
+import { PodsitterActionExecutor } from './action-executor.js';
 import { buildPodsitterEvidence } from './evidence-builder.js';
 import { createPodsitterRepository } from './podsitter-repository.js';
 import { createPodsitterService } from './podsitter-service.js';
@@ -94,13 +96,14 @@ function service(
   options: {
     now?: () => Date;
     probeProvider?: ReturnType<typeof vi.fn>;
+    actionExecutor?: Pick<PodsitterActionExecutor, 'execute'>;
   } = {},
 ) {
   return createPodsitterService({
     repository: harness.repository,
     evidenceProvider: harness.evidenceProvider,
     decisionRunner: { run },
-    actionExecutor: { execute: harness.execute },
+    actionExecutor: options.actionExecutor ?? { execute: harness.execute },
     eventBus: harness.eventBus,
     logger,
     executionTarget: 'local',
@@ -113,19 +116,36 @@ function service(
 describe('PodsitterService', () => {
   it('executes one current authorized decision', async () => {
     const harness = setup();
+    const report = vi.fn();
+    const realExecutor = new PodsitterActionExecutor(
+      harness.repository,
+      {
+        getSession: () => ({
+          id: 'pod-1',
+          profileName: 'test-profile',
+          status: 'failed',
+        }),
+      } as unknown as PodManager,
+      { report, dismissValidationFinding: vi.fn() },
+    );
     const run = vi.fn(async () => ({
       ok: true as const,
       decision: harness.decision(),
       telemetry: {},
       cleanup: 'clean' as const,
     }));
-    const sitter = service(harness, run);
+    const sitter = service(harness, run, {
+      actionExecutor: realExecutor,
+    });
 
     await sitter.reconcile();
     await sitter.reconcile();
 
     expect(run).toHaveBeenCalledTimes(1);
-    expect(harness.execute).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(harness.db.prepare('SELECT daemon_result FROM podsitter_action_audit').get()).toEqual({
+      daemon_result: 'executed',
+    });
     expect(harness.repository.listDecisions().items[0]).toMatchObject({
       evidenceHash: expect.any(String),
       outcome: 'completed',
@@ -252,5 +272,37 @@ describe('PodsitterService', () => {
 
     expect(harness.execute).not.toHaveBeenCalled();
     expect(harness.repository.listDecisions().items[0]?.outcome).toBe('not_executed');
+  });
+
+  it('emits one durable activation transition when authorization expires', async () => {
+    const harness = setup();
+    let clock = NOW;
+    const current = harness.repository.getConfiguration();
+    if (!current) throw new Error('missing configuration');
+    harness.repository.replaceConfiguration(
+      {
+        enabled: true,
+        activation: current.activation,
+        authorizedUntil: new Date(NOW.getTime() + 60_000).toISOString(),
+        profileScope: current.profileScope,
+        decisionTarget: current.decisionTarget,
+        budgets: current.budgets,
+        updatedBy: { type: 'human', userId: 'operator' },
+      },
+      NOW.toISOString(),
+    );
+    harness.evidenceProvider.listCandidates.mockResolvedValue([]);
+    const events: string[] = [];
+    harness.eventBus.subscribe((event) => {
+      if (event.type === 'podsitter.activation_changed') events.push(event.reason ?? 'unknown');
+    });
+    const sitter = service(harness, vi.fn(), { now: () => clock });
+
+    await sitter.reconcile();
+    clock = new Date(NOW.getTime() + 2 * 60_000);
+    await sitter.reconcile();
+    await sitter.reconcile();
+
+    expect(events).toEqual(['expired']);
   });
 });

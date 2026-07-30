@@ -123,6 +123,7 @@ export interface PodsitterRepository {
   }): boolean;
   completeAction(idempotencyKey: string, daemonResult: string, now?: string): boolean;
   getDecisionForAttention(attentionId: string): PodsitterDecisionRecord | null;
+  getDecisionById(id: string): PodsitterDecisionRecord | null;
   refreshDecisionForRetry(input: {
     attentionId: string;
     leaseOwner: string;
@@ -166,6 +167,7 @@ export interface PodsitterRepository {
     },
     now?: string,
   ): PodsitterDecisionRecord;
+  markDecisionExecuted(id: string, now?: string): boolean;
   createSandboxRun(input: {
     id: string;
     decisionId?: string | null;
@@ -877,6 +879,12 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
         .get(attentionId) as Record<string, unknown> | undefined;
       return row ? hydrateDecision(row) : null;
     },
+    getDecisionById(id) {
+      const row = db.prepare('SELECT * FROM podsitter_decisions WHERE id = ?').get(id) as
+        | Record<string, unknown>
+        | undefined;
+      return row ? hydrateDecision(row) : null;
+    },
     refreshDecisionForRetry(input) {
       const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
       const existing = this.getDecisionForAttention(input.attentionId);
@@ -1140,6 +1148,18 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
         }
       })();
       return getDecision(id);
+    },
+    markDecisionExecuted(id, now = new Date().toISOString()) {
+      const normalizedNow = normalizeIso(now, 'now');
+      return (
+        db
+          .prepare(
+            `UPDATE podsitter_decisions
+             SET executed_at = ?
+             WHERE id = ? AND outcome = 'completed' AND executed_at IS NULL`,
+          )
+          .run(normalizedNow, id).changes === 1
+      );
     },
     createSandboxRun(input) {
       const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');

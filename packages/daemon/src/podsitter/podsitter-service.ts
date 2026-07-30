@@ -124,6 +124,7 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
   let unsubscribe: (() => void) | null = null;
   let chain = Promise.resolve();
   let stopped = true;
+  let activationObservation: string | null = null;
 
   const serialize = <T>(work: () => Promise<T>): Promise<T> => {
     const result = chain.then(work, work);
@@ -277,6 +278,25 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
         providerAccountId: target.providerAccountId,
         model: target.model,
       };
+      deps.repository.completeDecision(
+        record.id,
+        {
+          leaseOwner: owner,
+          leaseVersion: lease.leaseVersion,
+          decision,
+          outcome: 'completed',
+        },
+        now().toISOString(),
+      );
+      emit({
+        type: 'podsitter.decision_completed',
+        timestamp: now().toISOString(),
+        podId: candidate.pod.id,
+        decisionId,
+        action: decision.action,
+        outcome: 'completed',
+        evidenceRefs: decision.evidenceRefs,
+      });
       const execution = await deps.actionExecutor.execute({
         podId: candidate.pod.id,
         decision,
@@ -286,22 +306,12 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
         failureSignature: candidate.failureSignature,
       });
       const executed = execution.outcome === 'executed';
-      deps.repository.completeDecision(
-        record.id,
-        {
-          leaseOwner: owner,
-          leaseVersion: lease.leaseVersion,
-          decision,
-          outcome: executed ? 'completed' : 'not_executed',
-          executedAt: executed ? now().toISOString() : null,
-        },
-        now().toISOString(),
-      );
+      if (executed) deps.repository.markDecisionExecuted(record.id, now().toISOString());
       deps.repository.releaseAttentionLease(
         lease.id,
         owner,
         lease.leaseVersion,
-        executed ? 'acted' : 'deferred',
+        executed ? 'acted' : 'superseded',
         record.id,
         now().toISOString(),
       );
@@ -397,6 +407,26 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
       providerAccountId: target.providerAccountId,
       model: target.model,
     };
+    deps.repository.completeDecision(
+      record.id,
+      {
+        leaseOwner: owner,
+        leaseVersion: lease.leaseVersion,
+        decision: result.decision,
+        outcome: 'completed',
+        ...result.telemetry,
+      },
+      now().toISOString(),
+    );
+    emit({
+      type: 'podsitter.decision_completed',
+      timestamp: now().toISOString(),
+      podId: candidate.pod.id,
+      decisionId,
+      action: result.decision.action,
+      outcome: 'completed',
+      evidenceRefs: result.decision.evidenceRefs,
+    });
     const execution =
       result.decision.action === 'no_action'
         ? { outcome: 'not_executed' as const, detail: 'Model selected no_action' }
@@ -409,23 +439,12 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
             failureSignature: candidate.failureSignature,
           });
     const executed = execution.outcome === 'executed';
-    deps.repository.completeDecision(
-      record.id,
-      {
-        leaseOwner: owner,
-        leaseVersion: lease.leaseVersion,
-        decision: result.decision,
-        outcome: executed ? 'completed' : 'not_executed',
-        executedAt: executed ? now().toISOString() : null,
-        ...result.telemetry,
-      },
-      now().toISOString(),
-    );
+    if (executed) deps.repository.markDecisionExecuted(record.id, now().toISOString());
     deps.repository.releaseAttentionLease(
       lease.id,
       owner,
       lease.leaseVersion,
-      result.decision.action === 'report' ? 'reported' : 'acted',
+      executed ? (result.decision.action === 'report' ? 'reported' : 'acted') : 'superseded',
       record.id,
       now().toISOString(),
     );
@@ -455,6 +474,19 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
       await probeInternal();
     }
     const activation = evaluatePodsitterActivation(configuration, now());
+    const observation = `${configuration.generation}:${activation.reason}:${activation.windowId ?? ''}`;
+    if (activation.reason === 'expired' && activationObservation !== observation) {
+      emit({
+        type: 'podsitter.activation_changed',
+        timestamp: now().toISOString(),
+        enabled: configuration.enabled,
+        active: false,
+        reason: 'expired',
+        generation: configuration.generation,
+        actor: { type: 'automation', id: 'podsitter-authorization-expiry' },
+      });
+    }
+    activationObservation = observation;
     if (!activation.active) return { queued, processed: 0 };
     let processed = 0;
     for (const attention of deps.repository.listPendingAttention()) {

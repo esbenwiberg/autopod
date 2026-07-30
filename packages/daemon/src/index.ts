@@ -805,7 +805,7 @@ const notificationConfig: NotificationConfig = TEAMS_WEBHOOK_URL
   ? {
       teams: {
         webhookUrl: TEAMS_WEBHOOK_URL,
-        enabledEvents: ['pod_validated', 'pod_failed', 'pod_needs_input', 'pod_error'],
+        enabledEvents: ['pod_validated', 'pod_failed', 'pod_needs_input', 'pod_error', 'podsitter'],
       },
     }
   : {};

@@ -147,6 +147,8 @@ export interface PodsitterActivationChangedEvent {
   enabled: boolean;
   generation: number;
   actor: OperatorActor;
+  active?: boolean;
+  reason?: 'enabled' | 'disabled' | 'expired' | 'outside_window';
 }
 
 export interface PodsitterSandboxCleanupFailedEvent {

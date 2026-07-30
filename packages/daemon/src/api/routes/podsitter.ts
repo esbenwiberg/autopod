@@ -103,6 +103,8 @@ export function podsitterRoutes(app: FastifyInstance, deps: PodsitterRouteDepend
       type: 'podsitter.activation_changed',
       timestamp: new Date().toISOString(),
       enabled: configuration.enabled,
+      active: configuration.enabled,
+      reason: configuration.enabled ? 'enabled' : 'disabled',
       generation: configuration.generation,
       actor: actor(request),
     });
@@ -126,6 +128,8 @@ export function podsitterRoutes(app: FastifyInstance, deps: PodsitterRouteDepend
       type: 'podsitter.activation_changed',
       timestamp: new Date().toISOString(),
       enabled: true,
+      active: true,
+      reason: 'enabled',
       generation: configuration.generation,
       actor: actor(request),
     });
@@ -146,6 +150,8 @@ export function podsitterRoutes(app: FastifyInstance, deps: PodsitterRouteDepend
       type: 'podsitter.activation_changed',
       timestamp: new Date().toISOString(),
       enabled: false,
+      active: false,
+      reason: 'disabled',
       generation: configuration.generation,
       actor: actor(request),
     });
@@ -174,9 +180,7 @@ export function podsitterRoutes(app: FastifyInstance, deps: PodsitterRouteDepend
 
   app.get('/podsitter/decisions/:id', async (request) => {
     const { id } = request.params as { id: string };
-    const decision = deps.repository
-      .listDecisions({ limit: 200 })
-      .items.find((item) => item.id === id);
+    const decision = deps.repository.getDecisionById(id);
     if (!decision) throw new AutopodError('Podsitter decision not found', 'NOT_FOUND', 404);
     return decision;
   });
