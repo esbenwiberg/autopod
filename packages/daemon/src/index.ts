@@ -61,6 +61,7 @@ import {
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
 import { ScreenshotRetention } from './pods/screenshot-retention.js';
 import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
+import { createPodsitterRepository } from './podsitter/podsitter-repository.js';
 import { createProfileStore } from './profiles/index.js';
 import { createProviderAccountStore } from './provider-accounts/index.js';
 import {
@@ -76,6 +77,7 @@ import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-rep
 import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
 import { createScheduledJobTemplateRepository } from './scheduled-jobs/scheduled-job-template-repository.js';
 import { createModelManager, createRepoScanner, createScanRepository } from './security/index.js';
+import { SystemDecisionRunner } from './system-sandbox/index.js';
 import { capLargeStrings } from './util/log-sanitizer.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
@@ -204,6 +206,7 @@ const sessionTokenIssuer = createPodTokenIssuer(secretsKeyPath);
 // Repositories
 const profileStore = createProfileStore(db, credentialsCipher);
 const providerAccountStore = createProviderAccountStore(db, credentialsCipher);
+const podsitterRepo = createPodsitterRepository(db);
 // Stores that let daemon-side LLM helpers (PR body, auto-commit message) resolve
 // the same live provider-account credentials the agent authenticates with.
 const llmDeps = { profileStore, providerAccountStore };
@@ -605,6 +608,27 @@ const runtimeContainerManager = new RoutingContainerManager({
     return podRepo.list().find((pod) => pod.containerId === containerId)?.executionTarget;
   },
 });
+
+const systemDecisionRunner = new SystemDecisionRunner({
+  localContainerManager: containerManager,
+  sandboxContainerManager,
+  providerAccountStore,
+  repository: podsitterRepo,
+  logger: logger.child({ component: 'system-decision-runner' }),
+  localImage: process.env.AUTOPOD_SYSTEM_DECISION_LOCAL_IMAGE,
+  hostedImage: process.env.AUTOPOD_SYSTEM_DECISION_IMAGE,
+});
+await systemDecisionRunner.reapLeakedRuns().catch((err) => {
+  logger.error({ err }, 'Startup system sandbox reaping failed');
+});
+const systemSandboxReaper = setInterval(
+  () =>
+    systemDecisionRunner.reapLeakedRuns().catch((err) => {
+      logger.error({ err }, 'Periodic system sandbox reaping failed');
+    }),
+  5 * 60 * 1000,
+);
+systemSandboxReaper.unref();
 
 // Validation execs against the pod's existing container (pod.containerId), so it
 // MUST route by execution target exactly like the runtimes do — otherwise a
@@ -1040,6 +1064,7 @@ async function shutdown(signal: string) {
 
   // Stop perf-mark cleaner
   clearInterval(perfClearTimer);
+  clearInterval(systemSandboxReaper);
 
   // Stop the stuck-pod watchdog and sleep detector
   podManager.stopStuckPodWatchdog();

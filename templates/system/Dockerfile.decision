@@ -1,0 +1,31 @@
+FROM node:22.18.0-slim
+
+ARG CLAUDE_VERSION=2.1.211
+ARG CODEX_VERSION=0.144.4
+ARG COPILOT_VERSION=1.0.71
+ARG PI_VERSION=0.80.6
+
+RUN userdel --remove node 2>/dev/null; groupdel node 2>/dev/null; \
+    groupadd --gid 1000 autopod && \
+    useradd --uid 1000 --gid autopod --shell /bin/sh --create-home autopod \
+    && mkdir -p /run/autopod /tmp/system-decision \
+    && chown -R autopod:autopod /run/autopod /tmp/system-decision
+
+RUN npm install -g \
+      "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
+      "@openai/codex@${CODEX_VERSION}" \
+      "@github/copilot@${COPILOT_VERSION}" \
+      "@earendil-works/pi-coding-agent@${PI_VERSION}" \
+    && npm cache clean --force
+
+ENV HOME=/home/autopod \
+    CODEX_HOME=/home/autopod/.codex \
+    PI_CODING_AGENT_DIR=/home/autopod/.pi/agent \
+    DISABLE_AUTOUPDATER=1
+
+WORKDIR /tmp/system-decision
+USER autopod
+
+# The daemon uses buffered exec for exactly one CLI invocation. The base process
+# has no repository, daemon client, Docker socket, MCP server, or listening port.
+CMD ["sleep", "infinity"]

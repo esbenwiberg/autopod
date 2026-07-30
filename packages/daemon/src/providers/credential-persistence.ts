@@ -225,6 +225,162 @@ export async function refreshAndPersistMaxCredentials(
   });
 }
 
+/** Refresh a dedicated account under its owner lock without a ProfileStore. */
+export async function refreshAndPersistProviderAccountMaxCredentials(
+  providerAccountStore: ProviderAccountStore,
+  providerAccountId: string,
+  fallbackCreds: MaxRefreshCredentials,
+  logger: Logger,
+): Promise<{ credentials: MaxRefreshCredentials; lineage: MaxCredentialLineage }> {
+  const owner: CredentialOwner = { type: 'provider-account', id: providerAccountId };
+  return withOwnerLock(credentialOwnerKey(owner), async () => {
+    const rawCurrent = providerAccountStore.get(providerAccountId).credentials;
+    const current = isMaxRefreshCredentials(rawCurrent) ? rawCurrent : fallbackCreds;
+    const refreshed = await refreshOAuthToken(current, logger);
+    if (!sameMaxCredentials(refreshed, current)) {
+      providerAccountStore.updateCredentials(
+        providerAccountId,
+        mergeMaxMetadata(refreshed, current),
+      );
+    }
+    const persisted = providerAccountStore.get(providerAccountId).credentials;
+    const credentials = isMaxRefreshCredentials(persisted) ? persisted : refreshed;
+    return {
+      credentials,
+      lineage: { owner, issuedRefreshToken: credentials.refreshToken },
+    };
+  });
+}
+
+export async function persistProviderAccountCredentials(
+  containerId: string,
+  containerManager: ContainerManager,
+  providerAccountStore: ProviderAccountStore,
+  providerAccountId: string,
+  logger: Logger,
+  options: {
+    maxLineage?: MaxCredentialLineage;
+    openAi?: boolean;
+    pi?: boolean;
+  } = {},
+): Promise<void> {
+  const owner: CredentialOwner = { type: 'provider-account', id: providerAccountId };
+  if (options.maxLineage) {
+    await persistProviderAccountMaxReadback(
+      containerId,
+      containerManager,
+      providerAccountStore,
+      owner,
+      logger,
+      options.maxLineage,
+    );
+  }
+  if (options.openAi) {
+    await persistProviderAccountOpenAiReadback(
+      containerId,
+      containerManager,
+      providerAccountStore,
+      owner,
+      logger,
+    );
+  }
+  if (options.pi) {
+    await persistProviderAccountPiReadback(
+      containerId,
+      containerManager,
+      providerAccountStore,
+      owner,
+      logger,
+    );
+  }
+}
+
+async function persistProviderAccountMaxReadback(
+  containerId: string,
+  containerManager: ContainerManager,
+  store: ProviderAccountStore,
+  owner: Extract<CredentialOwner, { type: 'provider-account' }>,
+  logger: Logger,
+  lineage: MaxCredentialLineage,
+): Promise<void> {
+  let raw: string;
+  try {
+    raw = await containerManager.readFile(containerId, CREDENTIALS_PATH);
+  } catch {
+    return;
+  }
+  let parsed: {
+    claudeAiOauth?: { accessToken?: string; refreshToken?: string; expiresAt?: number };
+  };
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  const oauth = parsed.claudeAiOauth;
+  if (!oauth?.accessToken || !oauth.refreshToken || !oauth.expiresAt) return;
+  await withOwnerLock(credentialOwnerKey(owner), async () => {
+    const current = store.get(owner.id).credentials;
+    if (
+      !isMaxRefreshCredentials(current) ||
+      credentialOwnerKey(lineage.owner) !== credentialOwnerKey(owner) ||
+      current.refreshToken !== lineage.issuedRefreshToken
+    ) {
+      return;
+    }
+    store.updateCredentials(owner.id, {
+      ...current,
+      accessToken: oauth.accessToken,
+      refreshToken: oauth.refreshToken,
+      expiresAt: new Date(oauth.expiresAt).toISOString(),
+    });
+    logger.info(ownerLogFields(owner), 'Persisted system sandbox MAX credential rotation');
+  });
+}
+
+async function persistProviderAccountOpenAiReadback(
+  containerId: string,
+  containerManager: ContainerManager,
+  store: ProviderAccountStore,
+  owner: Extract<CredentialOwner, { type: 'provider-account' }>,
+  logger: Logger,
+): Promise<void> {
+  let raw: string;
+  try {
+    raw = await containerManager.readFile(containerId, CODEX_AUTH_PATH);
+    JSON.parse(raw);
+  } catch {
+    return;
+  }
+  await withOwnerLock(credentialOwnerKey(owner), async () => {
+    const current = store.get(owner.id).credentials;
+    if (current?.provider !== 'openai') return;
+    store.updateCredentials(owner.id, { provider: 'openai', authMode: 'chatgpt', authJson: raw });
+    logger.info(ownerLogFields(owner), 'Persisted system sandbox Codex credential rotation');
+  });
+}
+
+async function persistProviderAccountPiReadback(
+  containerId: string,
+  containerManager: ContainerManager,
+  store: ProviderAccountStore,
+  owner: Extract<CredentialOwner, { type: 'provider-account' }>,
+  logger: Logger,
+): Promise<void> {
+  let raw: string;
+  try {
+    raw = await containerManager.readFile(containerId, PI_AUTH_PATH);
+  } catch {
+    return;
+  }
+  await withOwnerLock(credentialOwnerKey(owner), async () => {
+    const current = store.get(owner.id).credentials;
+    if (current?.provider !== 'pi') return;
+    const updated = parsePiCredential(raw, current.providerId, owner.id, logger);
+    if (updated) store.updateCredentials(owner.id, updated);
+  });
+}
+
 /**
  * Read back OAuth credentials from the container after agent execution.
  *

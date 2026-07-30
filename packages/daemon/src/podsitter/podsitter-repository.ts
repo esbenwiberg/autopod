@@ -135,6 +135,13 @@ export interface PodsitterRepository {
     containerId?: string | null;
     now?: string;
   }): void;
+  setSandboxContainer(id: string, containerId: string, now?: string): boolean;
+  listActiveSandboxRuns(): Array<{
+    id: string;
+    decisionId: string | null;
+    backend: string;
+    containerId: string | null;
+  }>;
   closeSandboxRun(
     id: string,
     update: {
@@ -954,6 +961,31 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
           ),
       )();
     },
+    setSandboxContainer(id, containerId, now = new Date().toISOString()) {
+      return (
+        db
+          .prepare(
+            `UPDATE system_sandbox_runs
+             SET container_id = ?, cleanup_state = 'active', updated_at = ?
+             WHERE id = ? AND completed_at IS NULL`,
+          )
+          .run(containerId, normalizeIso(now, 'now'), id).changes === 1
+      );
+    },
+    listActiveSandboxRuns() {
+      return db
+        .prepare(
+          `SELECT id, decision_id as decisionId, backend, container_id as containerId
+           FROM system_sandbox_runs
+           WHERE completed_at IS NULL OR (outcome = 'leaked' AND cleanup_state = 'retryable')`,
+        )
+        .all() as Array<{
+        id: string;
+        decisionId: string | null;
+        backend: string;
+        containerId: string | null;
+      }>;
+    },
     closeSandboxRun(id, update, now = new Date().toISOString()) {
       const normalizedNow = normalizeIso(now, 'now');
       return (
@@ -963,7 +995,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               `UPDATE system_sandbox_runs SET
                outcome = ?, cleanup_state = ?, failure_code = ?,
                 completed_at = ?, updated_at = ?
-               WHERE id = ? AND completed_at IS NULL`,
+               WHERE id = ? AND (completed_at IS NULL OR outcome = 'leaked')`,
             )
             .run(
               update.outcome,
