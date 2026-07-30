@@ -328,9 +328,12 @@ sync-back, restricted egress-policy refresh, and then destroys the sandbox plus 
 ### Scruffy PostgreSQL smoke and validation setup
 
 The Scruffy warm image has a dedicated PostgreSQL smoke that exercises the real Azure Sandbox
-runtime. It initializes a clean TCP-only cluster, replaces an agent-like cluster whose
-administrator is `scruffy`, repeats the validation reset, and verifies the final role, database
-ownership, and application connection:
+runtime. The image wraps PostgreSQL's real `initdb` and appends
+`unix_socket_directories = ''` to each successfully generated cluster; changing Debian's
+`postgresql.conf.sample` is insufficient because PostgreSQL 17 rewrites that setting during
+initialization. The smoke initializes a clean TCP-only cluster, replaces an agent-like cluster
+whose administrator is `scruffy`, repeats the validation reset, and verifies the final role,
+database ownership, and application connection:
 
 ```bash
 npx pnpm --filter @autopod/daemon build

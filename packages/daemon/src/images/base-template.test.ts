@@ -1,10 +1,14 @@
-import { readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 
 const imageDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(imageDir, '../../../..');
+const execFileAsync = promisify(execFile);
 
 const playwrightBaseTemplates = [
   'Dockerfile.node22-pw',
@@ -31,6 +35,14 @@ async function readScript(filename: string): Promise<string> {
   return readFile(path.join(repoRoot, 'scripts', filename), 'utf8');
 }
 
+function extractInitdbWrapper(dockerfile: string): string {
+  const match = dockerfile.match(
+    /COPY <<'AUTOPOD_INITDB' \/usr\/local\/bin\/initdb\n([\s\S]+?)\nAUTOPOD_INITDB/,
+  );
+  if (!match?.[1]) throw new Error('node22-pw-pg initdb wrapper is missing');
+  return match[1];
+}
+
 describe('Playwright base image templates', () => {
   it.each(playwrightBaseTemplates)(
     '%s exports the browser cache path and verifies Chromium launch',
@@ -54,13 +66,79 @@ describe('PostgreSQL base image templates', () => {
     expect(dockerfile).toContain('postgresql-17');
     expect(dockerfile).toContain('/usr/share/postgresql/17/extension/pgcrypto.control');
     expect(dockerfile).toContain("unix_socket_directories = ''");
-    expect(dockerfile).toContain('/usr/share/postgresql/17/postgresql.conf.sample');
+    expect(dockerfile).toContain("COPY <<'AUTOPOD_INITDB' /usr/local/bin/initdb");
+    expect(dockerfile).toContain('real_initdb=/usr/lib/postgresql/17/bin/initdb');
     expect(dockerfile).not.toContain('/var/run/postgresql');
     expect(dockerfile).toContain('ENV PGDATA=/tmp/pgdata');
     expect(dockerfile).toContain('ENV PGHOST=127.0.0.1');
     expect(dockerfile).toContain('ENV PGPORT=5433');
-    expect(dockerfile).toContain('for binary in initdb pg_ctl postgres');
+    expect(dockerfile).toContain('for binary in pg_ctl postgres');
     expect(dockerfile).not.toContain('pip install');
+  });
+
+  it('makes every successfully initialized cluster TCP-only', async () => {
+    const dockerfile = await readBaseTemplate('Dockerfile.node22-pw-pg');
+    const tempDir = await mkdtemp(path.join(tmpdir(), 'autopod-initdb-'));
+
+    try {
+      const fakeInitdb = path.join(tempDir, 'real-initdb');
+      const wrapperPath = path.join(tempDir, 'initdb');
+      const fakeScript = `#!/bin/sh
+set -eu
+if [ "\${1:-}" = "--version" ]; then
+  echo "initdb (PostgreSQL) test"
+  exit 0
+fi
+pgdata=\${PGDATA:-}
+expect_pgdata=0
+for arg in "$@"; do
+  if [ "$expect_pgdata" -eq 1 ]; then
+    pgdata=$arg
+    expect_pgdata=0
+    continue
+  fi
+  case "$arg" in
+    -D|--pgdata) expect_pgdata=1 ;;
+    -D?*) pgdata=\${arg#-D} ;;
+    --pgdata=*) pgdata=\${arg#--pgdata=} ;;
+    -*) ;;
+    *) pgdata=$arg ;;
+  esac
+done
+mkdir -p "$pgdata"
+printf "#unix_socket_directories = '/var/run/postgresql'\\n" > "$pgdata/postgresql.conf"
+`;
+      const wrapper = extractInitdbWrapper(dockerfile).replace(
+        'real_initdb=/usr/lib/postgresql/17/bin/initdb',
+        `real_initdb=${JSON.stringify(fakeInitdb)}`,
+      );
+      await writeFile(fakeInitdb, fakeScript);
+      await writeFile(wrapperPath, wrapper);
+      await chmod(fakeInitdb, 0o755);
+      await chmod(wrapperPath, 0o755);
+      await expect(execFileAsync(wrapperPath, ['--version'])).resolves.toMatchObject({
+        stdout: 'initdb (PostgreSQL) test\n',
+      });
+
+      const cases = [
+        { args: ['-D', path.join(tempDir, 'short-option')], pgdata: '' },
+        { args: [`--pgdata=${path.join(tempDir, 'long-option')}`], pgdata: '' },
+        { args: [path.join(tempDir, 'positional')], pgdata: '' },
+        { args: [], pgdata: path.join(tempDir, 'environment') },
+      ];
+      for (const testCase of cases) {
+        await execFileAsync(wrapperPath, testCase.args, {
+          env: { ...process.env, PGDATA: testCase.pgdata },
+        });
+        const clusterPath =
+          testCase.pgdata || testCase.args.at(-1)?.replace(/^--pgdata=/, '') || '';
+        const config = await readFile(path.join(clusterPath, 'postgresql.conf'), 'utf8');
+        expect(config).toContain("#unix_socket_directories = '/var/run/postgresql'");
+        expect(config.match(/^unix_socket_directories = ''$/gm)).toHaveLength(1);
+      }
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('keeps the Scruffy PostgreSQL smoke on Azure Sandbox and replaces dirty state', async () => {
