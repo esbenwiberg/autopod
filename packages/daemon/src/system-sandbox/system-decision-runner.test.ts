@@ -183,6 +183,13 @@ describe('SystemDecisionRunner', () => {
       'leaked-run',
       expect.objectContaining({ cleanupState: 'clean' }),
     );
+
+    const leaked = harness({ killFails: true });
+    await leaked.runner.run(input);
+    expect(leaked.repository.closeSandboxRun).toHaveBeenCalledWith(
+      'system-decision-1',
+      expect.objectContaining({ outcome: 'leaked', cleanupState: 'retryable' }),
+    );
   });
 
   it('classifies provider limits without leaking secrets', async () => {

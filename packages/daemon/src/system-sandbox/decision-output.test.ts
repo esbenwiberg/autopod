@@ -1,3 +1,7 @@
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DecisionOutputError, parseSystemDecisionOutput } from './decision-output.js';
 import {
@@ -88,6 +92,31 @@ describe('system decision output', () => {
       expect(buildSystemRuntimeInvocation({ runtime, model: 'model' }).command.join(' ')).toContain(
         SYSTEM_CREDENTIAL_SHIM_PATH,
       );
+    }
+  });
+
+  it('expands a secret pointer only for the invoked CLI process', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'system-credential-shim-'));
+    try {
+      const shimPath = join(directory, 'shim.sh');
+      const secretPath = join(directory, 'secret');
+      writeFileSync(shimPath, SYSTEM_CREDENTIAL_SHIM);
+      writeFileSync(secretPath, 'account-owned-secret\n');
+      chmodSync(shimPath, 0o500);
+
+      const result = spawnSync(
+        shimPath,
+        ['sh', '-c', 'printf "%s|%s" "$ANTHROPIC_API_KEY" "${ANTHROPIC_API_KEY_FILE:-unset}"'],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, ANTHROPIC_API_KEY_FILE: secretPath },
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('account-owned-secret|unset');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 

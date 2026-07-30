@@ -218,7 +218,7 @@ export class SystemDecisionRunner {
       }
       this.options.repository.closeSandboxRun(runId, {
         outcome: cleanup === 'leaked' ? 'leaked' : result.ok ? 'completed' : 'failed',
-        cleanupState: cleanup,
+        cleanupState: cleanup === 'leaked' ? 'retryable' : 'clean',
         failureCode,
       });
     }
