@@ -4,6 +4,8 @@ export interface ContainerSpawnConfig {
   image: string;
   podId: string;
   env: Record<string, string>;
+  /** Initial working directory for the container process. Defaults to /workspace. */
+  workingDir?: string;
   ports?: { container: number; host: number }[];
   volumes?: { host: string; container: string; readOnly?: boolean }[];
   /** Docker network name for network isolation */
@@ -38,6 +40,8 @@ export interface ContainerSpawnConfig {
    * System-owned callers use this to durably record the resource before startup continues.
    */
   onCreated?: (containerId: string) => void;
+  /** Whether Docker should expose host.docker.internal inside the container. Defaults to true. */
+  exposeHostGateway?: boolean;
 }
 
 export interface ExecResult {

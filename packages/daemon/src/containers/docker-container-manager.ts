@@ -327,7 +327,9 @@ export class DockerContainerManager implements ContainerManager {
       hostConfig.CapAdd = ['NET_ADMIN', 'SETGID', 'SETUID'];
       // On Linux, host.docker.internal is not auto-added for custom bridge networks.
       // Inject it so containers can always reach the daemon's MCP endpoint.
-      hostConfig.ExtraHosts = ['host.docker.internal:host-gateway'];
+      if (config.exposeHostGateway !== false) {
+        hostConfig.ExtraHosts = ['host.docker.internal:host-gateway'];
+      }
     }
 
     const container = await createContainerWithStaleRetry(
@@ -337,7 +339,7 @@ export class DockerContainerManager implements ContainerManager {
         name: containerName,
         Env: env,
         Cmd: ['sleep', 'infinity'],
-        WorkingDir: '/workspace',
+        WorkingDir: config.workingDir ?? '/workspace',
         User: 'autopod',
         ExposedPorts: exposedPorts,
         HostConfig: hostConfig,

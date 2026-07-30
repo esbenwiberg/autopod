@@ -108,12 +108,14 @@ export class SystemDecisionRunner {
         image,
         podId: runId,
         env: {},
+        workingDir: '/tmp',
         volumes: [],
         ports: [],
         networkPolicyMode: 'restricted',
         allowedHosts: providerRequiredHosts(account, catalogProvider.requiredHosts),
         networkName: networkConfig?.networkName,
         firewallScript: networkConfig?.firewallScript,
+        exposeHostGateway: false,
         onCreated: (createdContainerId) => {
           containerId = createdContainerId;
           if (!this.options.repository.setSandboxContainer(runId, createdContainerId)) {
@@ -385,6 +387,7 @@ export class SystemDecisionRunner {
       [],
       [],
       0,
+      false,
     );
     if (!config) throw new Error('Docker network isolation did not produce a firewall');
     return config;

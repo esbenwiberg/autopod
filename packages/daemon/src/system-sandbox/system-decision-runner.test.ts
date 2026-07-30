@@ -121,8 +121,10 @@ describe('SystemDecisionRunner', () => {
       expect.objectContaining({
         image: 'autopod-system-decision:local',
         env: {},
+        workingDir: '/tmp',
         volumes: [],
         ports: [],
+        exposeHostGateway: false,
         networkPolicyMode: 'restricted',
         allowedHosts: expect.any(Array),
         networkName: 'autopod-system-decision-1',
@@ -162,6 +164,7 @@ describe('SystemDecisionRunner', () => {
       [],
       [],
       0,
+      false,
     );
     expect(dockerNetworkManager.removeNetworkForPod).toHaveBeenCalledWith('system-decision-1');
   });

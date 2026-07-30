@@ -202,4 +202,26 @@ describe('system provider auth', () => {
       }),
     ).rejects.toThrow(/no compatible stored credentials/);
   });
+
+  it.each([
+    ['anthropic', 'codex'],
+    ['openai', 'claude'],
+  ] as const)('rejects Foundry %s surface with the %s runtime', async (apiSurface, runtime) => {
+    const providerAccountStore = storeFor(
+      account('foundry', {
+        provider: 'foundry',
+        endpoint: 'https://project.services.ai.azure.com',
+        projectId: 'project',
+        apiKey: 'account-key',
+        apiSurface,
+      }),
+    );
+
+    await expect(
+      buildProviderAccountEnv('foundry-decision', pino({ level: 'silent' }), {
+        providerAccountStore,
+        runtime,
+      }),
+    ).rejects.toMatchObject({ code: 'PROVIDER_ACCOUNT_RUNTIME_MISMATCH' });
+  });
 });

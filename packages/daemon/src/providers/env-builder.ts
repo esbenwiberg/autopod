@@ -261,6 +261,17 @@ function assertAccountRuntimeCompatible(
   provider: NonNullable<ProviderAuthResolution['provider']>,
   runtime: RuntimeType,
 ): void {
+  if (provider === 'foundry' && account.credentials?.provider === 'foundry') {
+    const surface = account.credentials.apiSurface ?? 'anthropic';
+    const expectedRuntime = surface === 'openai' ? 'codex' : 'claude';
+    if (runtime !== expectedRuntime) {
+      throw new AutopodError(
+        `Provider account "${account.name}" uses the ${surface} Foundry API surface`,
+        'PROVIDER_ACCOUNT_RUNTIME_MISMATCH',
+        400,
+      );
+    }
+  }
   const compatible =
     (runtime === 'claude' && ['anthropic', 'max', 'foundry'].includes(provider)) ||
     (runtime === 'codex' && ['openai', 'openrouter', 'foundry'].includes(provider)) ||
