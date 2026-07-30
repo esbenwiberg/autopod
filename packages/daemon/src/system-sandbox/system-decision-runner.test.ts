@@ -122,12 +122,21 @@ describe('SystemDecisionRunner', () => {
         ],
       ]),
     );
+    expect(manager.execInContainer).toHaveBeenCalledWith(
+      'system-container',
+      ['chmod', '0400', '/run/autopod/copilot-token'],
+      expect.objectContaining({ user: 'root' }),
+    );
   });
 
   it('cleans and reaps system sandboxes', async () => {
     const first = harness({ output: 'invalid' });
     await first.runner.run(input);
     expect(first.manager.kill).toHaveBeenCalledWith('system-container');
+    const inferenceCalls = vi
+      .mocked(first.manager.execInContainer)
+      .mock.calls.filter(([, command]) => command[0] !== 'chmod');
+    expect(inferenceCalls).toHaveLength(2);
 
     const second = harness();
     vi.mocked(second.repository.listActiveSandboxRuns).mockReturnValue([

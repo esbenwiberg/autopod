@@ -12,6 +12,7 @@ import type { PodsitterRepository } from '../podsitter/podsitter-repository.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import { persistProviderAccountCredentials } from '../providers/credential-persistence.js';
 import { buildProviderAccountEnv } from '../providers/env-builder.js';
+import type { ProviderEnvResult } from '../providers/types.js';
 import {
   classifyProviderError,
   sanitizeProviderMessage,
@@ -70,6 +71,7 @@ export class SystemDecisionRunner {
     let result: SystemDecisionRunResult | null = null;
     let failureCode: string | null = null;
     let manager: ContainerManager | null = null;
+    let providerEnv: ProviderEnvResult | null = null;
 
     try {
       manager = this.resolveManager(input.executionTarget);
@@ -81,14 +83,10 @@ export class SystemDecisionRunner {
       );
       if (!catalogProvider)
         throw new Error('Dedicated provider is absent from the provider catalog');
-      const providerEnv = await buildProviderAccountEnv(
-        input.providerAccountId,
-        this.options.logger,
-        {
-          providerAccountStore: this.options.providerAccountStore,
-          runtime: input.runtime,
-        },
-      );
+      providerEnv = await buildProviderAccountEnv(input.providerAccountId, this.options.logger, {
+        providerAccountStore: this.options.providerAccountStore,
+        runtime: input.runtime,
+      });
       const invocation = buildSystemRuntimeInvocation(input);
       containerId = await manager.spawn({
         image,
@@ -149,18 +147,6 @@ export class SystemDecisionRunner {
           }
         }
       }
-      await persistProviderAccountCredentials(
-        containerId,
-        manager,
-        this.options.providerAccountStore,
-        input.providerAccountId,
-        this.options.logger,
-        {
-          maxLineage: providerEnv.maxCredentialLineage,
-          openAi: providerEnv.requiresOpenAiAuthJsonPersistence,
-          pi: providerEnv.requiresPiAuthJsonPersistence,
-        },
-      );
     } catch (error) {
       const timedOut = isTimeout(error);
       const message = error instanceof Error ? error.message : 'System decision run failed';
@@ -169,6 +155,25 @@ export class SystemDecisionRunner {
     } finally {
       let cleanup: 'clean' | 'leaked' = 'clean';
       if (containerId && manager) {
+        if (providerEnv) {
+          await persistProviderAccountCredentials(
+            containerId,
+            manager,
+            this.options.providerAccountStore,
+            input.providerAccountId,
+            this.options.logger,
+            {
+              maxLineage: providerEnv.maxCredentialLineage,
+              openAi: providerEnv.requiresOpenAiAuthJsonPersistence,
+              pi: providerEnv.requiresPiAuthJsonPersistence,
+            },
+          ).catch((error) => {
+            this.options.logger.warn(
+              { runId, err: sanitizeProviderMessage(String(error)) },
+              'System sandbox credential readback failed',
+            );
+          });
+        }
         try {
           await manager.kill(containerId);
         } catch (error) {
@@ -268,8 +273,14 @@ export class SystemDecisionRunner {
     ]) {
       await manager.writeFile(containerId, file.path, file.content);
     }
-    for (const file of providerEnv.secretFiles) {
-      await manager.execInContainer(containerId, ['chmod', '0400', file.path], {
+    const secretPaths = new Set([
+      ...providerEnv.secretFiles.map((file) => file.path),
+      ...providerEnv.containerFiles
+        .filter((file) => isCredentialFile(file.path))
+        .map((file) => file.path),
+    ]);
+    for (const path of secretPaths) {
+      await manager.execInContainer(containerId, ['chmod', '0400', path], {
         user: 'root',
         timeout: 5_000,
       });
@@ -289,6 +300,14 @@ export class SystemDecisionRunner {
       cleanup: 'clean',
     };
   }
+}
+
+function isCredentialFile(path: string): boolean {
+  return (
+    path.endsWith('/auth.json') ||
+    path.endsWith('/.credentials.json') ||
+    path.includes('/run/autopod/')
+  );
 }
 
 function assertInput(input: SystemDecisionRunInput): void {
