@@ -54,7 +54,7 @@ function assertTarget(
   if (!target)
     throw new AutopodError('A dedicated decision target is required', 'BAD_REQUEST', 400);
   const account = deps.providerAccountStore.get(target.providerAccountId);
-  if (!account.credentials && !['anthropic', 'openai'].includes(account.provider)) {
+  if (!account.credentials) {
     throw new AutopodError(
       'The dedicated provider account is not authenticated',
       'PODSITTER_ACCOUNT_UNAUTHENTICATED',

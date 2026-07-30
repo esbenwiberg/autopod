@@ -39,6 +39,7 @@ function setup() {
     NOW.toISOString(),
   );
   let evidenceRevision = 1;
+  let deterministicApproval = false;
   const candidate = () => ({
     pod: {
       id: 'pod-1',
@@ -52,6 +53,7 @@ function setup() {
       generatedAt: NOW.toISOString(),
       sources: [{ ref: 'pod:state', value: { revision: evidenceRevision } }],
     }),
+    deterministicApproval,
   });
   const evidenceProvider = {
     listCandidates: vi.fn(async () => [candidate()]),
@@ -79,6 +81,9 @@ function setup() {
     decision,
     setEvidenceRevision(value: number) {
       evidenceRevision = value;
+    },
+    setDeterministicApproval(value: boolean) {
+      deterministicApproval = value;
     },
   };
 }
@@ -161,15 +166,17 @@ describe('PodsitterService', () => {
     const sitter = service(harness, run);
 
     await sitter.reconcile();
+    harness.setDeterministicApproval(true);
     await sitter.reconcile();
 
     expect(run).toHaveBeenCalledTimes(1);
-    expect(harness.execute).not.toHaveBeenCalled();
+    expect(harness.execute).toHaveBeenCalledTimes(1);
+    expect(harness.execute.mock.calls[0]?.[0].decision.action).toBe('approve');
     expect(harness.repository.getProviderState('sitter-account')).toMatchObject({
       status: 'quota_exhausted',
       consecutiveFailures: 1,
     });
-    expect(harness.repository.listPendingAttention()[0]?.state).toBe('deferred');
+    expect(harness.repository.listPendingAttention()).toHaveLength(0);
   });
 
   it('rebuilds evidence after provider recovery', async () => {

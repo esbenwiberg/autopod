@@ -923,11 +923,6 @@ const podsitterService = createPodsitterService({
   logger: logger.child({ component: 'podsitter' }),
   executionTarget:
     sandboxContainerManager && process.env.AUTOPOD_SYSTEM_DECISION_IMAGE ? 'sandbox' : 'local',
-  approveDeterministically: (podId) =>
-    podManager.approveSession(podId, {
-      actor: { type: 'automation', id: 'podsitter-deterministic-ready' },
-      reason: 'Strict deterministic readiness approval while decision provider is unavailable',
-    }),
   probeProvider: (configuration) => {
     const target = configuration.decisionTarget;
     if (!target) throw new Error('Podsitter provider probe requires a decision target');

@@ -13,6 +13,11 @@ async function setup(role: 'admin' | 'operator' | 'viewer' = 'admin') {
   const db = createTestDb();
   const providerAccountStore = createProviderAccountStore(db);
   providerAccountStore.create({ id: 'sitter', name: 'Sitter', provider: 'openai' });
+  providerAccountStore.updateCredentials('sitter', {
+    provider: 'openai',
+    authMode: 'chatgpt',
+    authJson: '{}',
+  });
   const repository = createPodsitterRepository(db);
   const reconcile = vi.fn(async (options?: { readOnly?: boolean }) => ({
     queued: options?.readOnly ? 1 : 0,

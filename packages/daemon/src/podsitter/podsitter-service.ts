@@ -69,7 +69,6 @@ export interface PodsitterServiceDependencies {
   executionTarget: 'local' | 'sandbox';
   now?: () => Date;
   sweepIntervalMs?: number;
-  approveDeterministically?: (podId: string) => Promise<void>;
   probeProvider?: (configuration: PodsitterConfiguration) => Promise<SystemDecisionRunResult>;
 }
 
@@ -213,13 +212,8 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
     if (!candidate || candidate.signature !== attention.signature) return false;
 
     const provider = deps.repository.getProviderState(target.providerAccountId);
-    if (provider && provider.status !== 'available') {
-      if (candidate.deterministicApproval && deps.approveDeterministically) {
-        await deps.approveDeterministically(candidate.pod.id);
-        return true;
-      }
+    if (provider && provider.status !== 'available' && !candidate.deterministicApproval)
       return false;
-    }
 
     const lease = deps.repository.acquireAttentionLease(
       attention.id,
@@ -263,6 +257,56 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
       providerAccountId: target.providerAccountId,
       model: target.model,
     });
+
+    if (provider && provider.status !== 'available' && candidate.deterministicApproval) {
+      const decision = {
+        contractVersion: 1 as const,
+        attentionSignature: candidate.signature,
+        action: 'approve' as const,
+        arguments: {},
+        reason:
+          'Strict deterministic readiness: ready review, passing validation, sound worktree, and no blocker or escalation',
+        evidenceRefs: candidate.evidence.evidenceRefs,
+        confidence: 'high' as const,
+        remainingRisk: '',
+        stopCondition: 'Pod leaves validated state',
+      };
+      const actor = {
+        type: 'podsitter' as const,
+        decisionId,
+        providerAccountId: target.providerAccountId,
+        model: target.model,
+      };
+      const execution = await deps.actionExecutor.execute({
+        podId: candidate.pod.id,
+        decision,
+        actor,
+        activationGeneration: configuration.generation,
+        windowId: activation.windowId,
+        failureSignature: candidate.failureSignature,
+      });
+      const executed = execution.outcome === 'executed';
+      deps.repository.completeDecision(
+        record.id,
+        {
+          leaseOwner: owner,
+          leaseVersion: lease.leaseVersion,
+          decision,
+          outcome: executed ? 'completed' : 'not_executed',
+          executedAt: executed ? now().toISOString() : null,
+        },
+        now().toISOString(),
+      );
+      deps.repository.releaseAttentionLease(
+        lease.id,
+        owner,
+        lease.leaseVersion,
+        executed ? 'acted' : 'deferred',
+        record.id,
+        now().toISOString(),
+      );
+      return executed;
+    }
 
     deps.repository.initializeProviderState(target.providerAccountId, now().toISOString());
     const probeLease = deps.repository.acquireProviderProbeLease(
