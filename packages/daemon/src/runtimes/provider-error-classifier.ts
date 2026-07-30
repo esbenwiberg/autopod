@@ -36,7 +36,7 @@ const STRUCTURED_QUOTA_SIGNATURES: Readonly<
   ],
 };
 const CLAUDE_TERMINAL_SESSION_LIMIT =
-  /^You've hit your session limit · resets (?:[1-9]|1[0-2]):[0-5]\d(?:am|pm) \(UTC\)$/;
+  /^You've hit your session limit · resets (?:[1-9]|1[0-2])(?::[0-5]\d)?(?:am|pm) \(UTC\)$/;
 const COPILOT_QUOTA_MESSAGES = [
   /^You have exhausted your premium requests\.$/i,
   /^Copilot premium request limit reached$/i,

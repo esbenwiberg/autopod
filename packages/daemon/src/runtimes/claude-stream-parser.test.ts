@@ -140,13 +140,13 @@ describe('ClaudeStreamParser.mapEvent', () => {
     });
   });
 
-  it('classifies the bounded session-limit result without a structured code', () => {
+  it('classifies the hour-only session-limit result without a structured code', () => {
     const result = ClaudeStreamParser.mapEvent(
       {
         type: 'result',
         subtype: 'error_during_execution',
         is_error: true,
-        result: "You've hit your session limit · resets 12:30pm (UTC)",
+        result: "You've hit your session limit · resets 11am (UTC)",
       },
       POD_ID,
       fakeLogger(),
@@ -154,7 +154,7 @@ describe('ClaudeStreamParser.mapEvent', () => {
     expect(result).toMatchObject({
       type: 'error',
       fatal: true,
-      message: "You've hit your session limit · resets 12:30pm (UTC)",
+      message: "You've hit your session limit · resets 11am (UTC)",
       classification: { category: 'quota_exhausted', definitive: true },
     });
   });

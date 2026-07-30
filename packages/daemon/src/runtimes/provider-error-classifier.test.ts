@@ -21,6 +21,12 @@ const quotaFixtures = [
     },
   },
   {
+    runtime: 'claude' as const,
+    evidence: {
+      message: "You've hit your session limit · resets 11am (UTC)",
+    },
+  },
+  {
     runtime: 'codex' as const,
     evidence: {
       code: 'usage_limit_reached',
