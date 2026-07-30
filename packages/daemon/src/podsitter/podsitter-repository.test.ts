@@ -644,7 +644,7 @@ describe('PodsitterRepository', () => {
         podId: 'wrong-pod',
         now: '2026-07-29T00:08:00Z',
       }),
-    ).toThrow('matching current unexpired attention lease');
+    ).toThrow('active configuration authority');
   });
 
   it('rejects decisions after configuration replacement or disablement', () => {
@@ -720,6 +720,214 @@ describe('PodsitterRepository', () => {
         now: '2026-07-29T00:04:00Z',
       }),
     ).toThrow('active configuration authority');
+  });
+
+  it('rejects decisions for pods outside the configured profile scope', () => {
+    const { db, repository, actor } = setup();
+    insertTestProfile(db, { name: 'out-of-scope-profile' });
+    db.prepare(
+      `INSERT INTO pods (
+        id, profile_name, task, model, runtime, branch, user_id
+      ) VALUES (
+        'pod-out-of-scope', 'out-of-scope-profile', 'task', 'gpt-5', 'codex',
+        'autopod/pod-out-of-scope', 'operator-1'
+      )`,
+    ).run();
+    const configuration = repository.replaceConfiguration(
+      {
+        enabled: true,
+        activation: { mode: 'always' },
+        authorizedUntil: null,
+        profileScope: ['test-profile'],
+        decisionTarget: {
+          providerAccountId: 'sitter-account',
+          runtime: 'codex',
+          model: 'gpt-5',
+        },
+        updatedBy: actor,
+      },
+      '2026-07-29T00:00:00Z',
+    );
+    const attention = repository.recordAttention({
+      id: 'attention-out-of-scope',
+      podId: 'pod-out-of-scope',
+      signature: 'signature-out-of-scope',
+      now: '2026-07-29T00:00:00Z',
+    });
+    repository.acquireAttentionLease(
+      attention.id,
+      'scope-worker',
+      '2026-07-29T01:00:00Z',
+      '2026-07-29T00:01:00Z',
+    );
+
+    expect(() =>
+      repository.createDecision({
+        id: 'decision-out-of-scope',
+        attentionId: attention.id,
+        leaseOwner: 'scope-worker',
+        podId: attention.podId,
+        attentionSignature: attention.signature,
+        configurationGeneration: configuration.generation,
+        evidenceHash: 'sha256:out-of-scope',
+        evidenceVersion: 1,
+        target: { providerAccountId: 'sitter-account', runtime: 'codex', model: 'gpt-5' },
+        now: '2026-07-29T00:02:00Z',
+      }),
+    ).toThrow('active configuration authority');
+  });
+
+  it('retains but cannot execute decisions after configuration authority is revoked', () => {
+    const { repository, actor } = setup();
+    const attention = repository.recordAttention({
+      id: 'attention-revoked',
+      podId: 'pod-1',
+      signature: 'signature-revoked',
+      now: '2026-07-29T00:00:00Z',
+    });
+    repository.acquireAttentionLease(
+      attention.id,
+      'revoked-worker',
+      '2026-07-29T01:00:00Z',
+      '2026-07-29T00:01:00Z',
+    );
+    repository.createDecision({
+      id: 'decision-revoked',
+      attentionId: attention.id,
+      leaseOwner: 'revoked-worker',
+      podId: attention.podId,
+      attentionSignature: attention.signature,
+      configurationGeneration: 1,
+      evidenceHash: 'sha256:revoked',
+      evidenceVersion: 1,
+      target: { providerAccountId: 'sitter-account', runtime: 'codex', model: 'gpt-5' },
+      now: '2026-07-29T00:02:00Z',
+    });
+    repository.replaceConfiguration(
+      {
+        enabled: false,
+        activation: { mode: 'always' },
+        authorizedUntil: null,
+        profileScope: null,
+        decisionTarget: {
+          providerAccountId: 'sitter-account',
+          runtime: 'codex',
+          model: 'gpt-5',
+        },
+        updatedBy: actor,
+      },
+      '2026-07-29T00:03:00Z',
+    );
+    const decision = {
+      contractVersion: 1 as const,
+      attentionSignature: attention.signature,
+      action: 'no_action' as const,
+      arguments: {},
+      reason: 'No intervention is warranted.',
+      evidenceRefs: ['event:revoked'],
+      confidence: 'high' as const,
+      remainingRisk: 'None.',
+      stopCondition: 'Stop.',
+    };
+
+    expect(
+      repository.completeDecision(
+        'decision-revoked',
+        { decision, outcome: 'completed', executedAt: '2026-07-29T00:04:00Z' },
+        '2026-07-29T00:04:00Z',
+      ),
+    ).toMatchObject({
+      decision,
+      outcome: 'not_executed',
+      failureCode: 'authorization_revoked',
+      executedAt: null,
+    });
+    expect(
+      repository.reserveAction({
+        id: 'audit-revoked',
+        idempotencyKey: 'action:revoked',
+        podId: 'pod-1',
+        decisionId: 'decision-revoked',
+        actor,
+        action: 'no_action',
+        arguments: {},
+        policyResult: 'allowed',
+        now: '2026-07-29T00:05:00Z',
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects action reservation after the decision configuration generation changes', () => {
+    const { repository, actor } = setup();
+    const attention = repository.recordAttention({
+      id: 'attention-stale-action',
+      podId: 'pod-1',
+      signature: 'signature-stale-action',
+      now: '2026-07-29T00:00:00Z',
+    });
+    repository.acquireAttentionLease(
+      attention.id,
+      'stale-action-worker',
+      '2026-07-29T01:00:00Z',
+      '2026-07-29T00:01:00Z',
+    );
+    repository.createDecision({
+      id: 'decision-stale-action',
+      attentionId: attention.id,
+      leaseOwner: 'stale-action-worker',
+      podId: attention.podId,
+      attentionSignature: attention.signature,
+      configurationGeneration: 1,
+      evidenceHash: 'sha256:stale-action',
+      evidenceVersion: 1,
+      target: { providerAccountId: 'sitter-account', runtime: 'codex', model: 'gpt-5' },
+      now: '2026-07-29T00:02:00Z',
+    });
+    const decision = {
+      contractVersion: 1 as const,
+      attentionSignature: attention.signature,
+      action: 'no_action' as const,
+      arguments: {},
+      reason: 'No intervention is warranted.',
+      evidenceRefs: ['event:stale-action'],
+      confidence: 'high' as const,
+      remainingRisk: 'None.',
+      stopCondition: 'Stop.',
+    };
+    repository.completeDecision(
+      'decision-stale-action',
+      { decision, outcome: 'completed' },
+      '2026-07-29T00:03:00Z',
+    );
+    repository.replaceConfiguration(
+      {
+        enabled: true,
+        activation: { mode: 'always' },
+        authorizedUntil: null,
+        profileScope: null,
+        decisionTarget: {
+          providerAccountId: 'sitter-account',
+          runtime: 'codex',
+          model: 'gpt-5',
+        },
+        updatedBy: actor,
+      },
+      '2026-07-29T00:04:00Z',
+    );
+
+    expect(
+      repository.reserveAction({
+        id: 'audit-stale-generation',
+        idempotencyKey: 'action:stale-generation',
+        podId: 'pod-1',
+        decisionId: 'decision-stale-action',
+        actor,
+        action: 'no_action',
+        arguments: {},
+        policyResult: 'allowed',
+        now: '2026-07-29T00:05:00Z',
+      }),
+    ).toBe(false);
   });
 
   it('increments generation for every configuration replacement', () => {

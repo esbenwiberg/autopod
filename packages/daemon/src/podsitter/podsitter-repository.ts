@@ -310,6 +310,29 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
     if (!row) throw new Error(`Podsitter decision "${id}" not found`);
     return hydrateDecision(row);
   };
+  const hasCurrentAuthority = (
+    decision: Pick<PodsitterDecisionRecord, 'podId' | 'configurationGeneration' | 'target'>,
+    now: string,
+  ): boolean => {
+    const row = db
+      .prepare(
+        `SELECT config.*, pods.profile_name
+         FROM podsitter_config config
+         JOIN pods ON pods.id = ?
+         WHERE config.singleton_id = 1`,
+      )
+      .get(decision.podId) as Record<string, unknown> | undefined;
+    if (!row) return false;
+
+    const configuration = hydrateConfiguration(row);
+    return (
+      configuration.generation === decision.configurationGeneration &&
+      decisionTargetsMatch(configuration.decisionTarget, decision.target) &&
+      (configuration.profileScope === null ||
+        configuration.profileScope.includes(row.profile_name as string)) &&
+      evaluatePodsitterActivation(configuration, new Date(now)).active
+    );
+  };
 
   const replaceConfiguration = db.transaction(
     (input: PodsitterConfigurationInput, now: string): PodsitterConfiguration => {
@@ -578,8 +601,10 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
       assertRedacted(input.policyResult, 'policyResult');
       const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
       try {
-        const result = db.transaction(() =>
-          db
+        const result = db.transaction(() => {
+          const decision = getDecision(input.decisionId);
+          if (!hasCurrentAuthority(decision, now)) return false;
+          return db
             .prepare(
               `INSERT INTO podsitter_action_audit (
                 id, idempotency_key, pod_id, decision_id, failure_signature,
@@ -608,8 +633,8 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
               input.podId,
               input.action,
               json(actionArguments),
-            ),
-        )();
+            );
+        })();
         return result.changes === 1;
       } catch (error) {
         if (
@@ -645,16 +670,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
     createDecision(input) {
       const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
       const createOrRecover = db.transaction((): PodsitterDecisionRecord => {
-        const configurationRow = db
-          .prepare('SELECT * FROM podsitter_config WHERE singleton_id = 1')
-          .get() as Record<string, unknown> | undefined;
-        const configuration = configurationRow ? hydrateConfiguration(configurationRow) : null;
-        if (
-          configuration === null ||
-          configuration.generation !== input.configurationGeneration ||
-          !decisionTargetsMatch(configuration.decisionTarget, input.target) ||
-          !evaluatePodsitterActivation(configuration, new Date(now)).active
-        ) {
+        if (!hasCurrentAuthority(input, now)) {
           throw new Error('Podsitter decision requires the current active configuration authority');
         }
 
@@ -762,6 +778,12 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
           ? null
           : normalizeIso(update.executedAt, 'executedAt');
       db.transaction(() => {
+        const existing = getDecision(id);
+        const authorized = hasCurrentAuthority(existing, normalizedNow);
+        const outcome = authorized ? update.outcome : 'not_executed';
+        const failureCode = authorized
+          ? (update.failureCode ?? null)
+          : (update.failureCode ?? 'authorization_revoked');
         const result = db
           .prepare(
             `UPDATE podsitter_decisions SET
@@ -773,13 +795,13 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
           )
           .run(
             decision === null ? null : json(decision),
-            update.outcome,
-            update.failureCode ?? null,
+            outcome,
+            failureCode,
             update.inputTokens ?? null,
             update.outputTokens ?? null,
             update.costUsd ?? null,
             normalizedNow,
-            executedAt,
+            authorized ? executedAt : null,
             id,
             decision === null ? null : decision.attentionSignature,
             decision === null ? null : decision.attentionSignature,
