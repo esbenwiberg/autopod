@@ -95,35 +95,51 @@ export class SystemDecisionRunner {
           'PROVIDER_ACCOUNT_CATALOG_MISSING',
         );
       }
-      providerEnv = await buildProviderAccountEnv(input.providerAccountId, this.options.logger, {
-        providerAccountStore: this.options.providerAccountStore,
-        runtime: input.runtime,
-      });
+      providerEnv = await withinDeadline(
+        buildProviderAccountEnv(input.providerAccountId, this.options.logger, {
+          providerAccountStore: this.options.providerAccountStore,
+          runtime: input.runtime,
+        }),
+        deadline,
+        'provider authentication',
+      );
       const invocation = buildSystemRuntimeInvocation(input);
       const networkConfig =
         input.executionTarget === 'local'
-          ? await this.buildLocalNetworkConfig(runId, catalogProvider.requiredHosts, account)
+          ? await withinDeadline(
+              this.buildLocalNetworkConfig(runId, catalogProvider.requiredHosts, account),
+              deadline,
+              'network provisioning',
+            )
           : null;
-      containerId = await manager.spawn({
-        image,
-        podId: runId,
-        env: {},
-        workingDir: '/tmp',
-        volumes: [],
-        ports: [],
-        networkPolicyMode: 'restricted',
-        allowedHosts: providerRequiredHosts(account, catalogProvider.requiredHosts),
-        networkName: networkConfig?.networkName,
-        firewallScript: networkConfig?.firewallScript,
-        exposeHostGateway: false,
-        onCreated: (createdContainerId) => {
-          containerId = createdContainerId;
-          if (!this.options.repository.setSandboxContainer(runId, createdContainerId)) {
-            throw new Error('Failed to durably record system sandbox identity');
-          }
-        },
-      });
-      await this.writeRunFiles(manager, containerId, input.prompt, invocation, providerEnv);
+      containerId = await withinDeadline(
+        manager.spawn({
+          image,
+          podId: runId,
+          env: {},
+          workingDir: '/tmp',
+          volumes: [],
+          ports: [],
+          networkPolicyMode: 'restricted',
+          allowedHosts: providerRequiredHosts(account, catalogProvider.requiredHosts),
+          networkName: networkConfig?.networkName,
+          firewallScript: networkConfig?.firewallScript,
+          exposeHostGateway: false,
+          onCreated: (createdContainerId) => {
+            containerId = createdContainerId;
+            if (!this.options.repository.setSandboxContainer(runId, createdContainerId)) {
+              throw new Error('Failed to durably record system sandbox identity');
+            }
+          },
+        }),
+        deadline,
+        'sandbox provisioning',
+      );
+      await withinDeadline(
+        this.writeRunFiles(manager, containerId, input.prompt, invocation, providerEnv),
+        deadline,
+        'sandbox setup',
+      );
 
       let execResult = await manager.execInContainer(containerId, invocation.command, {
         cwd: '/tmp',
@@ -183,7 +199,12 @@ export class SystemDecisionRunner {
             'clean',
             configurationCode,
           )
-        : failureResult(timedOut ? 'timeout' : 'infrastructure', message);
+        : failureResult(
+            timedOut ? 'timeout' : 'infrastructure',
+            message,
+            'clean',
+            timedOut ? 'TIMEOUT' : 'SYSTEM_SANDBOX_FAILED',
+          );
       failureCode = configurationCode
         ? configurationCode
         : timedOut
@@ -314,7 +335,10 @@ export class SystemDecisionRunner {
   private resolveImage(target: ExecutionTarget): string {
     if (target !== 'sandbox') return this.options.localImage ?? LOCAL_IMAGE_DEFAULT;
     const image = this.options.hostedImage;
-    if (!image || !/^[a-z0-9.-]+\/.+(?::[^/]+|@sha256:[a-f0-9]{64})$/i.test(image)) {
+    if (
+      !image ||
+      !/^[a-z0-9-]+\.azurecr\.io\/.+(?::[^/]+|@sha256:[a-f0-9]{64})$/i.test(image)
+    ) {
       throw new SystemDecisionConfigurationError(
         'Hosted system decision image must be an ACR-qualified pinned tag or digest',
         'SYSTEM_DECISION_IMAGE_MISSING',
@@ -527,6 +551,28 @@ function remainingTimeout(deadline: number): number {
   return remaining;
 }
 
+async function withinDeadline<T>(
+  promise: Promise<T>,
+  deadline: number,
+  operation: string,
+): Promise<T> {
+  const timeoutMs = remainingTimeout(deadline);
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`System decision ${operation} timed out`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function providerRequiredHosts(
   account: ReturnType<ProviderAccountStore['get']>,
   catalogHosts: string[],
@@ -561,9 +607,21 @@ function providerRequiredHosts(
   }
   if (credentials?.provider === 'foundry') {
     try {
-      hosts.add(new URL(credentials.endpoint).hostname);
+      const endpoint = new URL(credentials.endpoint);
+      const hostname = endpoint.hostname.toLowerCase();
+      const isFoundryHost =
+        hostname.endsWith('.services.ai.azure.com') ||
+        hostname.endsWith('.openai.azure.com') ||
+        hostname.endsWith('.cognitiveservices.azure.com');
+      if (endpoint.protocol !== 'https:' || endpoint.port || !isFoundryHost) {
+        throw new Error('unsafe endpoint');
+      }
+      hosts.add(hostname);
     } catch {
-      throw new Error('Foundry provider account has an invalid endpoint');
+      throw new SystemDecisionConfigurationError(
+        'Foundry provider account has an invalid endpoint',
+        'PROVIDER_ACCOUNT_ENDPOINT_INVALID',
+      );
     }
   }
   return [...hosts];

@@ -24,12 +24,14 @@ function harness(
     exitCode?: number;
     killFails?: boolean;
     spawnFailsAfterCreate?: boolean;
+    spawnHangs?: boolean;
   } = {},
 ) {
   const spawns: ContainerSpawnConfig[] = [];
   const manager = {
     spawn: vi.fn(async (config: ContainerSpawnConfig) => {
       spawns.push(config);
+      if (options.spawnHangs) return await new Promise<string>(() => undefined);
       config.onCreated?.('system-container');
       if (options.spawnFailsAfterCreate) throw new Error('spawn interrupted after allocation');
       return 'system-container';
@@ -97,7 +99,7 @@ function harness(
       repository,
       dockerNetworkManager,
       logger: pino({ level: 'silent' }),
-      hostedImage: 'registry.example.io/autopod/system-decision:2026.07.30',
+      hostedImage: 'autopod.azurecr.io/autopod/system-decision:2026.07.30',
     }),
   };
 }
@@ -284,6 +286,22 @@ describe('SystemDecisionRunner', () => {
       failure: { code: 'SYSTEM_DECISION_IMAGE_MISSING' },
     });
 
+    const nonAcrImageRunner = new SystemDecisionRunner({
+      localContainerManager: hosted.manager,
+      sandboxContainerManager: hosted.manager,
+      providerAccountStore: hosted.providerAccountStore,
+      repository: hosted.repository,
+      logger: pino({ level: 'silent' }),
+      hostedImage: 'registry.example.io/autopod/system-decision:2026.07.30',
+    });
+    await expect(
+      nonAcrImageRunner.run({ ...input, executionTarget: 'sandbox' }),
+    ).resolves.toMatchObject({
+      ok: false,
+      kind: 'configuration',
+      failure: { code: 'SYSTEM_DECISION_IMAGE_MISSING' },
+    });
+
     const mismatch = harness();
     await expect(mismatch.runner.run({ ...input, runtime: 'codex' })).resolves.toMatchObject({
       ok: false,
@@ -308,6 +326,54 @@ describe('SystemDecisionRunner', () => {
       kind: 'configuration',
       failure: { code: 'PROVIDER_ACCOUNT_CREDENTIALS_MISSING' },
     });
+  });
+
+  it('bounds sandbox provisioning with the run timeout', async () => {
+    const hung = harness({ spawnHangs: true });
+
+    await expect(hung.runner.run({ ...input, timeoutMs: 10 })).resolves.toMatchObject({
+      ok: false,
+      kind: 'timeout',
+      failure: { code: 'TIMEOUT' },
+    });
+    expect(hung.repository.closeSandboxRun).toHaveBeenCalledWith(
+      'system-decision-1',
+      expect.objectContaining({ outcome: 'failed', failureCode: 'TIMEOUT' }),
+    );
+  });
+
+  it('rejects Foundry endpoints outside public Azure provider domains', async () => {
+    const foundry = harness();
+    vi.mocked(foundry.providerAccountStore.get).mockReturnValue({
+      id: 'foundry-decision',
+      name: 'Foundry decision',
+      provider: 'foundry',
+      credentials: {
+        provider: 'foundry',
+        endpoint: 'https://127.0.0.1',
+        projectId: 'project',
+        apiKey: 'account-key',
+        apiSurface: 'anthropic',
+      },
+      failoverPolicy: null,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      lastAuthenticatedAt: new Date(0).toISOString(),
+      lastUsedAt: null,
+    });
+
+    await expect(
+      foundry.runner.run({
+        ...input,
+        providerAccountId: 'foundry-decision',
+        runtime: 'claude',
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      kind: 'configuration',
+      failure: { code: 'PROVIDER_ACCOUNT_ENDPOINT_INVALID' },
+    });
+    expect(foundry.manager.spawn).not.toHaveBeenCalled();
   });
 
   it('classifies provider limits without leaking secrets', async () => {
