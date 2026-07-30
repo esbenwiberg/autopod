@@ -51,6 +51,7 @@ export interface ReadinessFinding {
 export interface ReadinessApproval {
   approvedAt: string;
   approvedBy?: string;
+  actor?: OperatorActor;
   statusAtApproval: ReadinessStatus;
   scope: 'pod' | 'series';
   seriesId?: string;
@@ -66,3 +67,4 @@ export interface ReadinessReview {
   findings: ReadinessFinding[];
   approval?: ReadinessApproval | null;
 }
+import type { OperatorActor } from './podsitter.js';

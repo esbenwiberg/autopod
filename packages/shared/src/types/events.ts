@@ -256,6 +256,7 @@ export interface PodReadinessApprovedEvent {
   seriesId?: string;
   summary: string;
   reason?: string;
+  actor?: OperatorActor;
 }
 
 export interface MemorySuggestionCreatedEvent {

@@ -21,6 +21,7 @@ import type {
   McpServerConfig,
   MemoryEntry,
   NetworkPolicy,
+  OperatorActor,
   PageResult,
   PhaseTokenUsage,
   Pod,
@@ -387,10 +388,25 @@ class ValidationWorkspaceReconcileError extends Error {
   }
 }
 
-function buildValidationWaiver(result: ValidationResult | null, reason?: string): ValidationWaiver {
+function actorLabel(actor: OperatorActor): string {
+  if (actor.type === 'human') return actor.displayName?.trim() || actor.userId;
+  if (actor.type === 'podsitter') return `Podsitter decision ${actor.decisionId}`;
+  return `automation:${actor.id}`;
+}
+
+function legacyRespondedBy(actor: OperatorActor): 'human' | 'ai' {
+  return actor.type === 'human' ? 'human' : 'ai';
+}
+
+function buildValidationWaiver(
+  result: ValidationResult | null,
+  reason: string | undefined,
+  actor: OperatorActor,
+): ValidationWaiver {
   return {
     waivedAt: new Date().toISOString(),
-    waivedBy: 'human',
+    waivedBy: actorLabel(actor),
+    actor,
     reason: reason?.trim() || 'Approved anyway by operator',
     attempt: result?.attempt ?? null,
     failedPhases: failedValidationPhases(result),
@@ -1350,6 +1366,7 @@ export interface ApproveSessionOptions {
   squash?: boolean;
   reason?: string;
   automation?: boolean;
+  actor?: OperatorActor;
 }
 
 export interface ApproveAllSkippedPod {
@@ -1367,13 +1384,13 @@ export interface PodManager {
     attempt?: number,
   ): Promise<AgentRunOutcome>;
   handleCompletion(podId: string): Promise<void>;
-  sendMessage(podId: string, message: string): Promise<void>;
+  sendMessage(podId: string, message: string, actor?: OperatorActor): Promise<void>;
   notifyEscalation(podId: string, escalation: EscalationRequest): void;
   touchHeartbeat(podId: string): void;
   getReviewerConfig(pod: Pod): { profile: Profile; credentials: ProviderCredentials | null };
   getReviewerExecEnv(pod: Pod): Promise<Record<string, string> | undefined>;
   approveSession(podId: string, options?: ApproveSessionOptions): Promise<void>;
-  rejectSession(podId: string, reason?: string): Promise<void>;
+  rejectSession(podId: string, reason?: string, actor?: OperatorActor): Promise<void>;
   approveAllValidated(): Promise<{ approved: string[]; skipped: ApproveAllSkippedPod[] }>;
   killAllFailed(): Promise<{ killed: string[] }>;
   extendAttempts(podId: string, additionalAttempts: number): Promise<void>;
@@ -1385,10 +1402,11 @@ export interface PodManager {
     podId: string,
     factId: string,
     reason?: string,
+    actor?: OperatorActor,
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }>;
   /** Bypass validation and transition the pod directly to validated.
    *  Valid from failed or review_required. The pod then awaits normal approval. */
-  forceApprove(podId: string, reason?: string): Promise<void>;
+  forceApprove(podId: string, reason?: string, actor?: OperatorActor): Promise<void>;
   extendPrAttempts(podId: string, additionalAttempts: number): Promise<void>;
   pauseSession(podId: string): Promise<void>;
   nudgeSession(podId: string, message: string): void;
@@ -1484,7 +1502,7 @@ export interface PodManager {
   /** Abort a currently running validation for the given pod. No-op if not validating. */
   interruptValidation(podId: string): void;
   /** Toggle skip-validation at runtime. When true, the next validation result is bypassed → validated. */
-  setSkipValidation(podId: string, skip: boolean): void;
+  setSkipValidation(podId: string, skip: boolean, actor?: OperatorActor): void;
   /**
    * Inject provider credentials directly into a running container without exposing the token.
    * Reads the PAT from the profile, runs the auth command inside the container, and deletes
@@ -1546,7 +1564,7 @@ export interface PodManager {
    * skipping push, PR creation, and validation. Persists `forceCompletedAt`
    * + reason on the pod row for audit.
    */
-  forceComplete(podId: string, reason?: string): Promise<void>;
+  forceComplete(podId: string, reason?: string, actor?: OperatorActor): Promise<void>;
   /**
    * Operator escape hatch to unstick a pod. On `queued` pods (e.g. if the queue
    * silently lost track), re-enqueues without state change. On `running` /
@@ -1554,7 +1572,11 @@ export interface PodManager {
    * `failed` so the slot frees up — the pod is then recoverable via
    * `resume` / `force-complete`. Persists `kickedAt` + reason for audit.
    */
-  kickPod(podId: string, reason?: string): Promise<{ action: 'requeued' | 'failed' }>;
+  kickPod(
+    podId: string,
+    reason?: string,
+    actor?: OperatorActor,
+  ): Promise<{ action: 'requeued' | 'failed' }>;
   /**
    * Start the global watchdog that detects `running` pods whose agent stream has
    * gone silent for longer than the configured threshold and transitions them to
@@ -2714,12 +2736,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   function persistReadinessApproval(
     podId: string,
     readiness: ApprovalReadiness,
+    actor: OperatorActor,
     reason?: string,
   ): void {
     const approval: ReadinessApproval = {
       approvedAt: new Date().toISOString(),
       statusAtApproval: readiness.status,
       scope: readiness.scope,
+      approvedBy: actorLabel(actor),
+      actor,
       ...(readiness.seriesId ? { seriesId: readiness.seriesId } : {}),
       ...(reason ? { reason } : {}),
     };
@@ -2740,6 +2765,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         summary: readiness.summary,
         ...(readiness.seriesId ? { seriesId: readiness.seriesId } : {}),
         ...(reason ? { reason } : {}),
+        actor,
       });
     }
   }
@@ -5751,9 +5777,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     summary: TaskSummary | null,
     fact: FactCheckResult,
     reason?: string,
+    actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
   ): TaskSummary {
     const existingSummary = summary ?? {
-      actualSummary: `Human approved required fact waiver for ${fact.factId}.`,
+      actualSummary: `${actorLabel(actor)} approved required fact waiver for ${fact.factId}.`,
       deviations: [],
     };
     const existingDeviations = existingSummary.factDeviations ?? [];
@@ -5769,6 +5796,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           factId: fact.factId,
           action: 'waive',
           decision: 'approved_waive',
+          actor,
           reason: approvalReason,
           whyImpossible,
         },
@@ -9750,7 +9778,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       await this.triggerValidation(podId);
     },
 
-    async sendMessage(podId: string, message: string): Promise<void> {
+    async sendMessage(
+      podId: string,
+      message: string,
+      actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
+    ): Promise<void> {
       if (pauseIntents.has(podId)) {
         throw new AutopodError(
           `Pod ${podId} pause is still settling; resume is not yet allowed`,
@@ -9836,7 +9868,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
           escalationRepo.update(pod.pendingEscalation.id, {
             respondedAt: new Date().toISOString(),
-            respondedBy: 'human',
+            respondedBy: legacyRespondedBy(actor),
+            actor,
             response: 'pat_updated',
           });
           // awaiting_input → validating: park-then-retry without re-running the
@@ -9962,7 +9995,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         escalationRepo.update(pod.pendingEscalation.id, {
           respondedAt: new Date().toISOString(),
-          respondedBy: 'human',
+          respondedBy: legacyRespondedBy(actor),
+          actor,
           response: 'approved',
         });
 
@@ -9994,7 +10028,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Resolve the escalation in the DB
         escalationRepo.update(pod.pendingEscalation.id, {
           respondedAt: new Date().toISOString(),
-          respondedBy: 'human',
+          respondedBy: legacyRespondedBy(actor),
+          actor,
           response: message,
         });
 
@@ -10122,6 +10157,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     async approveSession(podId: string, options: ApproveSessionOptions = {}): Promise<void> {
+      const actor =
+        options.actor ??
+        (options.automation
+          ? { type: 'automation' as const, id: 'auto-approve' }
+          : { type: 'automation' as const, id: 'direct-pod-manager' });
       const pod = podRepo.getOrThrow(podId);
       validateTransition(pod.id, pod.status, 'approved');
       const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
@@ -10209,7 +10249,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             forceWithLeaseAllowances.delete(podId);
           }
           const s1 = transition(pod, 'approved');
-          persistReadinessApproval(podId, readiness, approvalReason);
+          persistReadinessApproval(podId, readiness, actor, approvalReason);
           const s2 = transition(s1, 'merging');
           await cleanupContainerAfterAdvisorySettles(pod, 'approve-no-changes');
           const noChangePod = transition(s2, 'complete', {
@@ -10243,7 +10283,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       emitActivityStatus(podId, 'Approved — merging changes…');
       const s1 = transition(pod, 'approved');
-      persistReadinessApproval(podId, readiness, approvalReason);
+      persistReadinessApproval(podId, readiness, actor, approvalReason);
       const s2 = transition(s1, 'merging');
 
       // Merge the PR if one was created, otherwise fall back to branch push
@@ -10579,7 +10619,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       maybeTriggerDependents(completedPod);
     },
 
-    async rejectSession(podId: string, reason?: string): Promise<void> {
+    async rejectSession(
+      podId: string,
+      reason?: string,
+      actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
+    ): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
 
       const rejectableStates = ['validated', 'failed', 'review_required'] as const;
@@ -10595,7 +10639,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
       emitActivityStatus(
         podId,
-        reason ? `Rejected by human: ${reason}` : 'Rejected by human — resuming agent…',
+        reason
+          ? `Rejected by ${actorLabel(actor)}: ${reason}`
+          : `Rejected by ${actorLabel(actor)} — resuming agent…`,
       );
 
       // Reset validation attempts — human is giving a fresh chance
@@ -10604,7 +10650,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         lastValidationResult: null,
         lastCorrectionMessage: [
           REWORK_IN_PROGRESS_PREFIX,
-          reason ? `human rejection: ${reason}` : 'human rejection',
+          reason ? `${actorLabel(actor)} rejection: ${reason}` : `${actorLabel(actor)} rejection`,
         ].join(' '),
       });
 
@@ -11959,7 +12005,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         if (s2.skipValidation) {
           const validationWaiver =
             result.overall === 'fail'
-              ? buildValidationWaiver(result, 'Validation skipped by human toggle')
+              ? buildValidationWaiver(result, 'Validation skipped by operator', {
+                  type: 'automation',
+                  id: 'validation-skip-flag',
+                })
               : null;
           emitActivityStatus(
             podId,
@@ -13515,6 +13564,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podId: string,
       factId: string,
       reason?: string,
+      actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
       const pod = podRepo.getOrThrow(podId);
       const canRevalidateImmediately = pod.status === 'failed' || pod.status === 'review_required';
@@ -13561,13 +13611,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         );
       }
 
-      const nextTaskSummary = taskSummaryWithApprovedFactWaiver(pod.taskSummary, fact, reason);
+      const nextTaskSummary = taskSummaryWithApprovedFactWaiver(
+        pod.taskSummary,
+        fact,
+        reason,
+        actor,
+      );
       podRepo.update(podId, { taskSummary: nextTaskSummary });
       emitActivityStatus(
         podId,
         canRevalidateImmediately
-          ? `Approved waiver for required fact ${factId} — revalidating existing worktree`
-          : `Approved waiver for required fact ${factId} — next validation will use the decision`,
+          ? `${actorLabel(actor)} approved waiver for required fact ${factId} — revalidating existing worktree`
+          : `${actorLabel(actor)} approved waiver for required fact ${factId} — next validation will use the decision`,
       );
 
       if (!canRevalidateImmediately) {
@@ -13577,7 +13632,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return this.revalidateSession(podId, { force: true });
     },
 
-    async forceApprove(podId: string, reason?: string): Promise<void> {
+    async forceApprove(
+      podId: string,
+      reason?: string,
+      actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
+    ): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
       const allowed =
         pod.status === 'failed' ||
@@ -13592,16 +13651,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
       const note = reason
         ? `[FORCE APPROVED] ${reason}`
-        : '[FORCE APPROVED] Human overrode validation — no further agent run needed';
+        : `[FORCE APPROVED] ${actorLabel(actor)} overrode validation — no further agent run needed`;
       const validationWaiver =
         pod.lastValidationResult?.overall === 'fail'
-          ? buildValidationWaiver(pod.lastValidationResult, reason)
+          ? buildValidationWaiver(pod.lastValidationResult, reason, actor)
           : null;
       const forceApprovalMessage = validationWaiver
         ? `Force approved with validation waiver — failed phases: ${validationWaiver.failedPhases.join(', ') || 'unknown'}`
         : pod.lastValidationResult?.overall === 'pass'
-          ? 'Force approved — existing validation pass accepted by human'
-          : 'Force approved — validation bypassed by human';
+          ? `Force approved — existing validation pass accepted by ${actorLabel(actor)}`
+          : `Force approved — validation bypassed by ${actorLabel(actor)}`;
       podRepo.update(podId, {
         lastCorrectionMessage: note,
         ...(validationWaiver ? { validationWaiver } : {}),
@@ -13613,8 +13672,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       if (pod.pendingEscalation) {
         escalationRepo.update(pod.pendingEscalation.id, {
           respondedAt: new Date().toISOString(),
-          respondedBy: 'human',
-          response: `[force-approve] ${reason ?? 'human override'}`,
+          respondedBy: legacyRespondedBy(actor),
+          actor,
+          response: `[force-approve] ${reason ?? `${actorLabel(actor)} override`}`,
         });
         updates.pendingEscalation = null;
       }
@@ -13753,7 +13813,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return { ok: true, action: 'rebased', baseBranch, validation: 'started' };
     },
 
-    setSkipValidation(podId: string, skip: boolean): void {
+    setSkipValidation(
+      podId: string,
+      skip: boolean,
+      actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
+    ): void {
       const pod = podRepo.getOrThrow(podId);
       podRepo.update(podId, { skipValidation: skip });
       const msg = skip
@@ -13774,14 +13838,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const escalationId = pod.pendingEscalation.id;
         escalationRepo.update(escalationId, {
           respondedAt: new Date().toISOString(),
-          respondedBy: 'human',
-          response: '[skip-validation] dismissed by human',
+          respondedBy: legacyRespondedBy(actor),
+          actor,
+          response: `[skip-validation] dismissed by ${actorLabel(actor)}`,
         });
         const validationWaiver =
           pod.lastValidationResult?.overall === 'fail'
             ? buildValidationWaiver(
                 pod.lastValidationResult,
-                'Validation skipped — recurring findings dismissed by human',
+                `Validation skipped — recurring findings dismissed by ${actorLabel(actor)}`,
+                actor,
               )
             : null;
         const updated = transition(pod, 'validated', {
@@ -13791,8 +13857,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(
           podId,
           validationWaiver
-            ? 'Validation waived — recurring findings dismissed by human'
-            : 'Validation skipped — recurring findings dismissed by human',
+            ? `Validation waived — recurring findings dismissed by ${actorLabel(actor)}`
+            : `Validation skipped — recurring findings dismissed by ${actorLabel(actor)}`,
         );
         logger.info(
           { podId, escalationId },
@@ -14387,7 +14453,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       };
     },
 
-    async forceComplete(podId: string, reason?: string): Promise<void> {
+    async forceComplete(
+      podId: string,
+      reason?: string,
+      actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
+    ): Promise<void> {
       const pod = podRepo.getOrThrow(podId);
       if (pod.status === 'complete') {
         throw new AutopodError(`Pod ${podId} is already complete`, 'INVALID_STATE', 409);
@@ -14415,8 +14485,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       emitActivityStatus(
         podId,
         trimmedReason
-          ? `Force-completed by operator: ${trimmedReason}`
-          : 'Force-completed by operator',
+          ? `Force-completed by ${actorLabel(actor)}: ${trimmedReason}`
+          : `Force-completed by ${actorLabel(actor)}`,
       );
       logger.warn(
         { podId, reason: trimmedReason },
@@ -14432,7 +14502,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       maybeTriggerDependents(completedPod);
     },
 
-    async kickPod(podId: string, reason?: string): Promise<{ action: 'requeued' | 'failed' }> {
+    async kickPod(
+      podId: string,
+      reason?: string,
+      actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
+    ): Promise<{ action: 'requeued' | 'failed' }> {
       const pod = podRepo.getOrThrow(podId);
       const trimmedReason = reason?.trim() || null;
       const nowIso = new Date().toISOString();
@@ -14449,7 +14523,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         enqueueSession(podId);
         emitActivityStatus(
           podId,
-          trimmedReason ? `Re-enqueued by operator: ${trimmedReason}` : 'Re-enqueued by operator',
+          trimmedReason
+            ? `Re-enqueued by ${actorLabel(actor)}: ${trimmedReason}`
+            : `Re-enqueued by ${actorLabel(actor)}`,
         );
         logger.warn(
           { podId, reason: trimmedReason, clearedStuckEntry: cleared },
@@ -14474,8 +14550,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(
           podId,
           trimmedReason
-            ? `Kicked by operator (force-failed): ${trimmedReason}`
-            : 'Kicked by operator (force-failed)',
+            ? `Kicked by ${actorLabel(actor)} (force-failed): ${trimmedReason}`
+            : `Kicked by ${actorLabel(actor)} (force-failed)`,
         );
         logger.warn(
           { podId, previousStatus: pod.status, reason: trimmedReason },

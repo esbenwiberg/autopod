@@ -3058,7 +3058,7 @@ describe('POST /pods approve routes', () => {
     db.close();
   });
 
-  it('approve forwards optional squash and reason metadata', async () => {
+  it('passes authenticated human actor to interventions', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/pods/pod-ready/approve',
@@ -3071,6 +3071,11 @@ describe('POST /pods approve routes', () => {
     expect(podManager.approveSession).toHaveBeenCalledWith('pod-ready', {
       squash: true,
       reason: 'Reviewed readiness findings',
+      actor: {
+        type: 'human',
+        userId: testUser.oid,
+        displayName: testUser.name,
+      },
     });
   });
 

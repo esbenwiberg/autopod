@@ -289,7 +289,14 @@ function validationArea(inputs: ReadinessInputs): {
   const forceApprovedWithoutPassingValidation =
     forceApproved && latestValidation?.overall !== 'pass';
   if (pod.validationWaiver || forceApprovedWithoutPassingValidation) {
-    return area('validation', 'waived', 'Validation was waived by an operator.', [
+    const waiverActor = pod.validationWaiver?.actor;
+    const waivedBy =
+      waiverActor?.type === 'podsitter'
+        ? `Podsitter decision ${waiverActor.decisionId}`
+        : waiverActor?.type === 'automation'
+          ? `automation ${waiverActor.id}`
+          : pod.validationWaiver?.waivedBy || 'an operator';
+    return area('validation', 'waived', `Validation was waived by ${waivedBy}.`, [
       finding({
         id: 'validation-waiver',
         area: 'validation',

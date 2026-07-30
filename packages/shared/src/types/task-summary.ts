@@ -56,6 +56,8 @@ export interface FactDeviationRequest {
   whyImpossible: string;
   /** Human decision (single user) for this pod-scoped request. */
   decision?: 'approved_waive' | 'approved_replace' | 'rejected';
+  /** Structured identity of the operator that made the decision. */
+  actor?: import('./podsitter.js').OperatorActor;
   replacement?: {
     artifactPath: string;
     command: string;

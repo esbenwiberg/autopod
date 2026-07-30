@@ -91,6 +91,9 @@ export interface PodsitterRepository {
     idempotencyKey: string;
     podId: string;
     decisionId: string;
+    attentionSignature?: string;
+    activationGeneration?: number;
+    activationWindowId?: string;
     failureSignature?: string | null;
     actor: OperatorActor;
     action: PodsitterAction;
@@ -196,7 +199,13 @@ function assertRedacted(value: unknown, key = 'arguments'): void {
   }
   if (value && typeof value === 'object') {
     for (const [childKey, childValue] of Object.entries(value)) {
-      if (SENSITIVE_KEY.test(childKey) && childValue !== null && childValue !== '[redacted]') {
+      const safeReference = /(?:credential|secret|token|key)Id$/i.test(childKey);
+      if (
+        SENSITIVE_KEY.test(childKey) &&
+        !safeReference &&
+        childValue !== null &&
+        childValue !== '[redacted]'
+      ) {
         throw new Error(`Podsitter action arguments contain sensitive field "${childKey}"`);
       }
       assertRedacted(childValue, childKey);
@@ -668,6 +677,17 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
           const decision = getDecision(input.decisionId);
           const authority = hasCurrentAuthority(decision, now);
           if (!authority) return false;
+          if (
+            (input.attentionSignature !== undefined &&
+              decision.attentionSignature !== input.attentionSignature) ||
+            (input.activationGeneration !== undefined &&
+              decision.configurationGeneration !== input.activationGeneration) ||
+            (input.activationWindowId !== undefined &&
+              (decision.activationWindowId !== input.activationWindowId ||
+                authority.windowId !== input.activationWindowId))
+          ) {
+            return false;
+          }
           const reservedActions = db
             .prepare(
               `SELECT COUNT(*) AS count

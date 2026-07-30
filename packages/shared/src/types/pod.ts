@@ -2,6 +2,7 @@ import type { OutputMode } from './actions.js';
 import type { SpecContract } from './contract.js';
 import type { EscalationRequest } from './escalation.js';
 import type { PodOptions } from './pod-options.js';
+import type { OperatorActor } from './podsitter.js';
 import type { ExecutionTarget, NetworkPolicyMode, PimGroupConfig, Profile } from './profile.js';
 import type { ProviderAccountProvider } from './provider-account.js';
 import type { ReadinessReview } from './readiness.js';
@@ -133,6 +134,8 @@ export interface ValidationWaiver {
   waivedAt: string;
   /** Human identity if available; currently "human" for desktop/API force-approve. */
   waivedBy: string;
+  /** Structured provenance for new waivers; waivedBy remains for compatibility. */
+  actor?: OperatorActor;
   /** Operator-supplied reason or the daemon default. */
   reason: string;
   /** Validation attempt that produced the waived result. */
