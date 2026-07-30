@@ -136,7 +136,7 @@ export interface PodsitterRepository {
     now?: string;
   }): void;
   setSandboxContainer(id: string, containerId: string, now?: string): boolean;
-  listActiveSandboxRuns(): Array<{
+  listActiveSandboxRuns(staleBefore?: string): Array<{
     id: string;
     decisionId: string | null;
     backend: string;
@@ -972,14 +972,18 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
           .run(containerId, normalizeIso(now, 'now'), id).changes === 1
       );
     },
-    listActiveSandboxRuns() {
+    listActiveSandboxRuns(staleBefore) {
+      const normalizedStaleBefore = staleBefore ? normalizeIso(staleBefore, 'staleBefore') : null;
       return db
         .prepare(
           `SELECT id, decision_id as decisionId, backend, container_id as containerId
            FROM system_sandbox_runs
-           WHERE completed_at IS NULL OR (outcome = 'leaked' AND cleanup_state = 'retryable')`,
+           WHERE (
+             completed_at IS NULL
+             AND (? IS NULL OR updated_at <= ?)
+           ) OR (outcome = 'leaked' AND cleanup_state = 'retryable')`,
         )
-        .all() as Array<{
+        .all(normalizedStaleBefore, normalizedStaleBefore) as Array<{
         id: string;
         decisionId: string | null;
         backend: string;

@@ -19,8 +19,12 @@ export interface ProviderEnvResult {
   requiresPostExecPersistence: boolean;
   /** If true, caller should read back Codex ~/.codex/auth.json when possible. */
   requiresOpenAiAuthJsonPersistence?: boolean;
+  /** Exact account auth state issued to Codex, used to reject stale concurrent readback. */
+  openAiAuthJsonLineage?: string;
   /** If true, caller should read back Pi ~/.pi/agent/auth.json when possible. */
   requiresPiAuthJsonPersistence?: boolean;
+  /** Exact account OAuth state issued to Pi, used to reject stale concurrent readback. */
+  piAuthJsonLineage?: string;
   /** The auth owner that should receive any credential rotations/read-backs. */
   credentialOwner?: CredentialOwner;
   /** MAX/PRO credential lineage for guarding rotated refresh-token persistence. */

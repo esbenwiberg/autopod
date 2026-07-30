@@ -624,9 +624,11 @@ await systemDecisionRunner.reapLeakedRuns().catch((err) => {
 });
 const systemSandboxReaper = setInterval(
   () =>
-    systemDecisionRunner.reapLeakedRuns().catch((err) => {
-      logger.error({ err }, 'Periodic system sandbox reaping failed');
-    }),
+    systemDecisionRunner
+      .reapLeakedRuns(new Date(Date.now() - 65 * 60 * 1000).toISOString())
+      .catch((err) => {
+        logger.error({ err }, 'Periodic system sandbox reaping failed');
+      }),
   5 * 60 * 1000,
 );
 systemSandboxReaper.unref();

@@ -27,6 +27,7 @@ import {
 
 const MAX_PROMPT_BYTES = 256_000;
 const MAX_DIAGNOSTIC_BYTES = 4_000;
+const MAX_TIMEOUT_MS = 60 * 60 * 1000;
 const LOCAL_IMAGE_DEFAULT = 'autopod-system-decision:local';
 
 export interface SystemDecisionRunInput {
@@ -177,8 +178,12 @@ export class SystemDecisionRunner {
             this.options.logger,
             {
               maxLineage: providerEnv.maxCredentialLineage,
-              openAi: providerEnv.requiresOpenAiAuthJsonPersistence,
-              pi: providerEnv.requiresPiAuthJsonPersistence,
+              openAiLineage: providerEnv.requiresOpenAiAuthJsonPersistence
+                ? providerEnv.openAiAuthJsonLineage
+                : undefined,
+              piLineage: providerEnv.requiresPiAuthJsonPersistence
+                ? providerEnv.piAuthJsonLineage
+                : undefined,
             },
           ).catch((error) => {
             this.options.logger.warn(
@@ -225,9 +230,9 @@ export class SystemDecisionRunner {
     return result;
   }
 
-  async reapLeakedRuns(): Promise<number> {
+  async reapLeakedRuns(staleBefore?: string): Promise<number> {
     let reaped = 0;
-    for (const run of this.options.repository.listActiveSandboxRuns()) {
+    for (const run of this.options.repository.listActiveSandboxRuns(staleBefore)) {
       const manager =
         run.backend === 'azure-sandbox'
           ? this.options.sandboxContainerManager
@@ -373,8 +378,12 @@ function assertInput(input: SystemDecisionRunInput): void {
   if (input.contractVersion !== 1) throw new Error('Unsupported decision contract version');
   if (Buffer.byteLength(input.prompt) > MAX_PROMPT_BYTES)
     throw new Error('Decision prompt too large');
-  if (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0) {
-    throw new Error('System decision timeout must be positive');
+  if (
+    !Number.isFinite(input.timeoutMs) ||
+    input.timeoutMs <= 0 ||
+    input.timeoutMs > MAX_TIMEOUT_MS
+  ) {
+    throw new Error('System decision timeout must be between 1 ms and 60 minutes');
   }
 }
 

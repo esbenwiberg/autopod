@@ -334,6 +334,7 @@ function buildOpenAiEnv(auth: ProviderAuthResolution): ProviderEnvResult {
       secretFiles: [],
       requiresPostExecPersistence: true,
       requiresOpenAiAuthJsonPersistence: true,
+      openAiAuthJsonLineage: creds.authJson,
       credentialOwner: auth.owner ?? undefined,
     };
   }
@@ -576,6 +577,7 @@ function buildPiEnv(
     secretFiles: [],
     requiresPostExecPersistence: true,
     requiresPiAuthJsonPersistence: true,
+    piAuthJsonLineage: authJson,
     credentialOwner: auth.owner ?? undefined,
   };
 }

@@ -260,8 +260,8 @@ export async function persistProviderAccountCredentials(
   logger: Logger,
   options: {
     maxLineage?: MaxCredentialLineage;
-    openAi?: boolean;
-    pi?: boolean;
+    openAiLineage?: string;
+    piLineage?: string;
   } = {},
 ): Promise<void> {
   const owner: CredentialOwner = { type: 'provider-account', id: providerAccountId };
@@ -275,22 +275,24 @@ export async function persistProviderAccountCredentials(
       options.maxLineage,
     );
   }
-  if (options.openAi) {
+  if (options.openAiLineage) {
     await persistProviderAccountOpenAiReadback(
       containerId,
       containerManager,
       providerAccountStore,
       owner,
       logger,
+      options.openAiLineage,
     );
   }
-  if (options.pi) {
+  if (options.piLineage) {
     await persistProviderAccountPiReadback(
       containerId,
       containerManager,
       providerAccountStore,
       owner,
       logger,
+      options.piLineage,
     );
   }
 }
@@ -344,6 +346,7 @@ async function persistProviderAccountOpenAiReadback(
   store: ProviderAccountStore,
   owner: Extract<CredentialOwner, { type: 'provider-account' }>,
   logger: Logger,
+  issuedAuthJson: string,
 ): Promise<void> {
   let raw: string;
   try {
@@ -354,7 +357,7 @@ async function persistProviderAccountOpenAiReadback(
   }
   await withOwnerLock(credentialOwnerKey(owner), async () => {
     const current = store.get(owner.id).credentials;
-    if (current?.provider !== 'openai') return;
+    if (current?.provider !== 'openai' || current.authJson !== issuedAuthJson) return;
     store.updateCredentials(owner.id, { provider: 'openai', authMode: 'chatgpt', authJson: raw });
     logger.info(ownerLogFields(owner), 'Persisted system sandbox Codex credential rotation');
   });
@@ -366,6 +369,7 @@ async function persistProviderAccountPiReadback(
   store: ProviderAccountStore,
   owner: Extract<CredentialOwner, { type: 'provider-account' }>,
   logger: Logger,
+  issuedAuthJson: string,
 ): Promise<void> {
   let raw: string;
   try {
@@ -376,6 +380,8 @@ async function persistProviderAccountPiReadback(
   await withOwnerLock(credentialOwnerKey(owner), async () => {
     const current = store.get(owner.id).credentials;
     if (current?.provider !== 'pi') return;
+    const currentAuthJson = JSON.stringify({ [current.providerId]: current.credential }, null, 2);
+    if (currentAuthJson !== issuedAuthJson) return;
     const updated = parsePiCredential(raw, current.providerId, owner.id, logger);
     if (updated) store.updateCredentials(owner.id, updated);
   });

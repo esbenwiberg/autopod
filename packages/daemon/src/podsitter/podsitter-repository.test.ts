@@ -751,6 +751,30 @@ describe('PodsitterRepository', () => {
     ).toEqual({ decision_id: null });
   });
 
+  it('only lists stale unfinished sandbox runs during periodic cleanup', () => {
+    const { repository } = setup();
+    repository.createSandboxRun({
+      id: 'sandbox-stale',
+      backend: 'docker',
+      now: '2026-07-29T00:00:00Z',
+    });
+    repository.createSandboxRun({
+      id: 'sandbox-active',
+      backend: 'docker',
+      now: '2026-07-29T01:00:00Z',
+    });
+
+    expect(repository.listActiveSandboxRuns('2026-07-29T00:30:00Z')).toEqual([
+      expect.objectContaining({ id: 'sandbox-stale' }),
+    ]);
+    expect(repository.listActiveSandboxRuns()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'sandbox-stale' }),
+        expect.objectContaining({ id: 'sandbox-active' }),
+      ]),
+    );
+  });
+
   it('recovers a linked decision after a crash and rejects mismatched attention identity', () => {
     const { db, repository } = setup();
     const attention = repository.recordAttention({

@@ -99,13 +99,65 @@ describe('system provider auth', () => {
       providerAccountStore,
       'openai-decision',
       pino({ level: 'silent' }),
-      { openAi: true },
+      { openAiLineage: '{"old":true}' },
     );
     expect(providerAccountStore.updateCredentials).toHaveBeenCalledOnce();
     expect(providerAccountStore.updateCredentials).toHaveBeenCalledWith(
       'openai-decision',
       expect.objectContaining({ provider: 'openai' }),
     );
+  });
+
+  it('does not overwrite a newer account rotation with stale sandbox readback', async () => {
+    const providerAccountStore = storeFor(
+      account('openai', {
+        provider: 'openai',
+        authMode: 'chatgpt',
+        authJson: '{"newer":true}',
+      }),
+    );
+    const manager = {
+      readFile: vi.fn(async () => '{"staleRotation":true}'),
+    } as unknown as ContainerManager;
+
+    await persistProviderAccountCredentials(
+      'stale-container',
+      manager,
+      providerAccountStore,
+      'openai-decision',
+      pino({ level: 'silent' }),
+      { openAiLineage: '{"older":true}' },
+    );
+
+    expect(providerAccountStore.updateCredentials).not.toHaveBeenCalled();
+  });
+
+  it('applies the same lineage guard to Pi OAuth readback', async () => {
+    const providerAccountStore = storeFor(
+      account('pi', {
+        provider: 'pi',
+        providerId: 'anthropic',
+        credential: { access: 'newer' },
+      }),
+    );
+    const manager = {
+      readFile: vi.fn(async () =>
+        JSON.stringify({ anthropic: { type: 'oauth', access: 'stale-rotation' } }),
+      ),
+    } as unknown as ContainerManager;
+
+    await persistProviderAccountCredentials(
+      'stale-container',
+      manager,
+      providerAccountStore,
+      'pi-decision',
+      pino({ level: 'silent' }),
+      {
+        piLineage: JSON.stringify({ anthropic: { access: 'older' } }, null, 2),
+      },
+    );
+
+    expect(providerAccountStore.updateCredentials).not.toHaveBeenCalled();
   });
 
   it('rejects runtime/account mismatches without a profile fallback', async () => {
