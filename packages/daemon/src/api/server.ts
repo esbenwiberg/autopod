@@ -32,6 +32,8 @@ import type {
 } from '../pods/index.js';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import type { ValidationRepository } from '../pods/validation-repository.js';
+import type { PodsitterRepository } from '../podsitter/podsitter-repository.js';
+import type { PodsitterService } from '../podsitter/podsitter-service.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
@@ -54,6 +56,7 @@ import { memoryWorkspaceRoutes } from './routes/memory-workspace.js';
 import { memoryRoutes } from './routes/memory.js';
 import { modelProviderRoutes } from './routes/model-providers.js';
 import { podRoutes } from './routes/pods.js';
+import { podsitterRoutes } from './routes/podsitter.js';
 import { profileRoutes } from './routes/profiles.js';
 import { providerAccountRoutes } from './routes/provider-accounts.js';
 import { scheduledJobRoutes } from './routes/scheduled-jobs.js';
@@ -69,6 +72,9 @@ export interface ServerDependencies {
   podManager: PodManager;
   profileStore: ProfileStore;
   providerAccountStore?: ProviderAccountStore;
+  podsitterRepository?: PodsitterRepository;
+  podsitterService?: PodsitterService;
+  systemDecisionHostedImage?: string;
   worktreeManager?: WorktreeManager;
   eventBus: EventBus;
   eventRepo: EventRepository;
@@ -187,6 +193,16 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   );
   if (deps.providerAccountStore) {
     providerAccountRoutes(app, deps.providerAccountStore, deps.profileStore);
+  }
+  if (deps.providerAccountStore && deps.podsitterRepository && deps.podsitterService) {
+    podsitterRoutes(app, {
+      repository: deps.podsitterRepository,
+      service: deps.podsitterService,
+      providerAccountStore: deps.providerAccountStore,
+      eventBus: deps.eventBus,
+      hosted: process.env.AUTOPOD_EXECUTION_TARGET === 'sandbox',
+      hostedImage: deps.systemDecisionHostedImage,
+    });
   }
 
   // Scheduled jobs routes

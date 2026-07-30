@@ -61,7 +61,10 @@ import {
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
 import { ScreenshotRetention } from './pods/screenshot-retention.js';
 import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
+import { PodsitterActionExecutor } from './podsitter/action-executor.js';
+import { createDaemonPodsitterEvidenceProvider } from './podsitter/daemon-evidence-provider.js';
 import { createPodsitterRepository } from './podsitter/podsitter-repository.js';
+import { createPodsitterService } from './podsitter/podsitter-service.js';
 import { createProfileStore } from './profiles/index.js';
 import { createProviderAccountStore } from './provider-accounts/index.js';
 import {
@@ -889,12 +892,74 @@ const issueWatcherService = createIssueWatcherService({
 });
 issueWatcherService.start();
 
+const podsitterActionExecutor = new PodsitterActionExecutor(podsitterRepo, podManager, {
+  async dismissValidationFinding(podId, findingId, reason) {
+    pendingOverrideRepo.enqueue(podId, {
+      findingId,
+      description: findingId,
+      action: 'dismiss',
+      reason,
+    });
+    const pod = podManager.getSession(podId);
+    if (pod.status === 'review_required') await podManager.applyOverridesInstant(podId);
+  },
+  async report(podId, message, actor) {
+    await podManager.sendMessage(podId, `[Podsitter report] ${message}`, actor);
+  },
+});
+const podsitterEvidenceProvider = createDaemonPodsitterEvidenceProvider({
+  podManager,
+  eventRepo,
+  escalationRepo,
+  providerAttemptRepo,
+  repository: podsitterRepo,
+});
+const podsitterService = createPodsitterService({
+  repository: podsitterRepo,
+  evidenceProvider: podsitterEvidenceProvider,
+  decisionRunner: systemDecisionRunner,
+  actionExecutor: podsitterActionExecutor,
+  eventBus,
+  logger: logger.child({ component: 'podsitter' }),
+  executionTarget:
+    sandboxContainerManager && process.env.AUTOPOD_SYSTEM_DECISION_IMAGE ? 'sandbox' : 'local',
+  approveDeterministically: (podId) =>
+    podManager.approveSession(podId, {
+      actor: { type: 'automation', id: 'podsitter-deterministic-ready' },
+      reason: 'Strict deterministic readiness approval while decision provider is unavailable',
+    }),
+  probeProvider: (configuration) => {
+    const target = configuration.decisionTarget;
+    if (!target) throw new Error('Podsitter provider probe requires a decision target');
+    const signature = `provider-probe-${randomBytes(8).toString('hex')}`;
+    return systemDecisionRunner.run({
+      decisionId: signature,
+      auditDecisionId: null,
+      providerAccountId: target.providerAccountId,
+      runtime: target.runtime,
+      model: target.model,
+      reasoningEffort: target.reasoningEffort,
+      prompt: `Return exactly one PodsitterDecision v1 JSON object with attentionSignature "${signature}", action "no_action", empty arguments, a short reason, no evidenceRefs, confidence "high", empty remainingRisk, and stopCondition "probe complete".`,
+      contractVersion: 1,
+      executionTarget:
+        sandboxContainerManager && process.env.AUTOPOD_SYSTEM_DECISION_IMAGE ? 'sandbox' : 'local',
+      timeoutMs: 5 * 60_000,
+    });
+  },
+});
+await podsitterService.start().catch((err) => {
+  logger.error({ err }, 'Podsitter startup reconciliation failed');
+});
+
 // Server
 const app = await createServer({
   authModule,
   podManager,
   profileStore,
   providerAccountStore,
+  podsitterRepository: podsitterRepo,
+  podsitterService,
+  systemDecisionHostedImage: process.env.AUTOPOD_SYSTEM_DECISION_IMAGE,
   worktreeManager,
   eventBus,
   eventRepo,
@@ -1059,6 +1124,7 @@ async function shutdown(signal: string) {
   qualityScoreRecorder.stop();
   memoryCandidateRecorder.stop();
   issueWatcherService.stop();
+  await podsitterService.stop();
   screenshotRetention.stop();
 
   // Stop scheduled job scheduler
