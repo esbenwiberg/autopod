@@ -53,4 +53,18 @@ describe('Podsitter evidence boundary', () => {
       }),
     ).toThrow(/unique/);
   });
+
+  it('enforces the complete packet ceiling after section metadata', () => {
+    const packet = buildPodsitterEvidence({
+      podId: 'definite-stingray',
+      generatedAt: '2026-07-30T00:00:00.000Z',
+      maxTotalBytes: 2_048,
+      sources: Array.from({ length: 8 }, (_, index) => ({
+        ref: `section:${index}`,
+        value: 'x'.repeat(2_000),
+      })),
+    });
+    expect(Buffer.byteLength(JSON.stringify(packet), 'utf8')).toBeLessThanOrEqual(2_048);
+    expect(packet.sections.some((section) => section.truncated)).toBe(true);
+  });
 });

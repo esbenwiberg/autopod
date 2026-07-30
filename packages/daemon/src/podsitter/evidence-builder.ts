@@ -58,18 +58,20 @@ export function buildPodsitterEvidence(input: {
   sources: PodsitterEvidenceSource[];
   maxTotalBytes?: number;
 }): PodsitterEvidencePacket {
+  const maxTotalBytes = Math.max(2_048, input.maxTotalBytes ?? DEFAULT_TOTAL_BYTES);
   const seen = new Set<string>();
-  let remaining = input.maxTotalBytes ?? DEFAULT_TOTAL_BYTES;
+  let remaining = Math.max(0, maxTotalBytes - 1_024);
   const sections = input.sources.map((source) => {
     if (!source.ref.trim() || seen.has(source.ref)) {
       throw new Error(`Podsitter evidence reference must be unique: "${source.ref}"`);
     }
     seen.add(source.ref);
-    const processed = redactSecrets(
-      processContentDeep(source.value, getPresetConfig('strict')).result,
-    );
-    const limit = Math.max(256, Math.min(source.maxBytes ?? DEFAULT_SECTION_BYTES, remaining));
-    const bounded = boundedJson(processed, limit);
+    const processed =
+      remaining === 0
+        ? ''
+        : redactSecrets(processContentDeep(source.value, getPresetConfig('strict')).result);
+    const limit = Math.min(source.maxBytes ?? DEFAULT_SECTION_BYTES, remaining);
+    const bounded = limit === 0 ? { value: '', truncated: true } : boundedJson(processed, limit);
     remaining = Math.max(0, remaining - Buffer.byteLength(JSON.stringify(bounded.value), 'utf8'));
     return {
       ref: source.ref,
@@ -78,19 +80,37 @@ export function buildPodsitterEvidence(input: {
       unavailable: source.unavailable === true,
     };
   });
-  const canonical = JSON.stringify({
-    version: PODSITTER_EVIDENCE_VERSION,
-    podId: input.podId,
-    sections,
-  });
-  return {
+  const packet: PodsitterEvidencePacket = {
     version: PODSITTER_EVIDENCE_VERSION,
     podId: input.podId,
     generatedAt: input.generatedAt,
     sections,
     evidenceRefs: sections.map((section) => section.ref),
-    hash: createHash('sha256').update(canonical).digest('hex'),
+    hash: '0'.repeat(64),
   };
+  for (
+    let index = packet.sections.length - 1;
+    Buffer.byteLength(JSON.stringify(packet)) > maxTotalBytes && index >= 0;
+    index -= 1
+  ) {
+    const section = packet.sections[index];
+    if (!section) continue;
+    section.content = '';
+    section.truncated = true;
+  }
+  if (Buffer.byteLength(JSON.stringify(packet)) > maxTotalBytes) {
+    throw new Error('Podsitter evidence metadata exceeds the total packet limit');
+  }
+  packet.hash = createHash('sha256')
+    .update(
+      JSON.stringify({
+        version: PODSITTER_EVIDENCE_VERSION,
+        podId: input.podId,
+        sections: packet.sections,
+      }),
+    )
+    .digest('hex');
+  return packet;
 }
 
 export function buildPodsitterDecisionPrompt(packet: PodsitterEvidencePacket): string {

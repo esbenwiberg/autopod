@@ -49,6 +49,17 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
     const pendingEscalations = escalations.filter((item) => !item.response);
     const validationHistory = deps.podManager.getValidationHistory(pod.id);
     const providerAttempts = deps.providerAttemptRepo.list(pod.id);
+    const recentEvents = deps.eventRepo.getForSession(pod.id, { latest: 30 });
+    const seriesGraph = pod.seriesId
+      ? deps.podManager
+          .listSessions()
+          .filter((candidate) => candidate.seriesId === pod.seriesId)
+          .map((candidate) => ({
+            id: candidate.id,
+            status: candidate.status,
+            dependsOnPodIds: candidate.dependsOnPodIds ?? [],
+          }))
+      : [];
     const policyState = {
       status: pod.status,
       attempt: pod.validationAttempts,
@@ -84,8 +95,43 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
         { ref: 'provider:attempts', value: providerAttempts.slice(-10), maxBytes: 8_000 },
         {
           ref: 'events:recent',
-          value: deps.eventRepo.getForSession(pod.id, { latest: 30 }),
+          value: recentEvents,
           maxBytes: 16_000,
+        },
+        {
+          ref: 'logs:agent-build-tail',
+          value: recentEvents.filter(
+            (event) =>
+              event.type === 'pod.agent_activity' ||
+              event.type === 'pod.validation_phase_completed',
+          ),
+          maxBytes: 12_000,
+        },
+        {
+          ref: 'worktree:state',
+          value: {
+            pathPresent: Boolean(pod.worktreePath),
+            compromised: pod.worktreeCompromised ?? false,
+            branch: pod.branch,
+            prUrl: pod.prUrl ?? null,
+          },
+          maxBytes: 4_000,
+        },
+        { ref: 'series:graph', value: seriesGraph, maxBytes: 8_000 },
+        {
+          ref: 'diff:bounded',
+          value: { unavailable: true, reason: 'No safe diff reader is available for this backend' },
+          maxBytes: 1_000,
+          unavailable: true,
+        },
+        {
+          ref: 'touched-files:excerpts',
+          value: {
+            unavailable: true,
+            reason: 'No safe touched-file excerpt reader is available for this backend',
+          },
+          maxBytes: 1_000,
+          unavailable: true,
         },
         {
           ref: 'podsitter:prior-decisions',
