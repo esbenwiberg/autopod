@@ -123,6 +123,21 @@ export interface PodsitterRepository {
   }): boolean;
   completeAction(idempotencyKey: string, daemonResult: string, now?: string): boolean;
   getDecisionForAttention(attentionId: string): PodsitterDecisionRecord | null;
+  refreshDecisionForRetry(input: {
+    attentionId: string;
+    leaseOwner: string;
+    leaseVersion: number;
+    configurationGeneration: number;
+    evidenceHash: string;
+    evidenceVersion: number;
+    target: PodsitterDecisionTarget;
+    now?: string;
+  }): PodsitterDecisionRecord;
+  listDecisions(input?: {
+    podId?: string;
+    limit?: number;
+    offset?: number;
+  }): { items: PodsitterDecisionRecord[]; total: number };
   createDecision(input: {
     id: string;
     attentionId: string;
@@ -861,6 +876,72 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
         .prepare('SELECT * FROM podsitter_decisions WHERE attention_id = ?')
         .get(attentionId) as Record<string, unknown> | undefined;
       return row ? hydrateDecision(row) : null;
+    },
+    refreshDecisionForRetry(input) {
+      const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
+      const existing = this.getDecisionForAttention(input.attentionId);
+      if (!existing) throw new Error('Podsitter retry requires an existing decision');
+      const authority = hasCurrentAuthority(
+        {
+          podId: existing.podId,
+          configurationGeneration: input.configurationGeneration,
+          target: input.target,
+        },
+        now,
+      );
+      if (!authority) throw new Error('Podsitter retry requires current configuration authority');
+      const result = db
+        .prepare(
+          `UPDATE podsitter_decisions SET
+             configuration_generation = ?, activation_window_id = ?,
+             evidence_hash = ?, evidence_version = ?, provider_account_id = ?,
+             runtime = ?, model = ?, reasoning_effort = ?, decision = NULL,
+             outcome = 'pending', failure_code = NULL, input_tokens = NULL,
+             output_tokens = NULL, cost_usd = NULL, completed_at = NULL, executed_at = NULL
+           WHERE attention_id = ?
+             AND outcome = 'failed'
+             AND EXISTS (
+               SELECT 1 FROM podsitter_attention attention
+               WHERE attention.id = podsitter_decisions.attention_id
+                 AND attention.lease_owner = ?
+                 AND attention.lease_version = ?
+                 AND attention.lease_expires_at > ?
+             )`,
+        )
+        .run(
+          input.configurationGeneration,
+          authority.windowId,
+          input.evidenceHash,
+          input.evidenceVersion,
+          input.target.providerAccountId,
+          input.target.runtime,
+          input.target.model,
+          input.target.reasoningEffort ?? null,
+          input.attentionId,
+          input.leaseOwner,
+          input.leaseVersion,
+          now,
+        );
+      if (result.changes !== 1) throw new Error('Podsitter decision is not retryable');
+      return getDecision(existing.id);
+    },
+    listDecisions(input = {}) {
+      const limit = Math.max(1, Math.min(input.limit ?? 50, 200));
+      const offset = Math.max(0, input.offset ?? 0);
+      const where = input.podId ? 'WHERE pod_id = @podId' : '';
+      const parameters = { podId: input.podId, limit, offset };
+      const items = (
+        db
+          .prepare(
+            `SELECT * FROM podsitter_decisions ${where}
+             ORDER BY created_at DESC, id DESC LIMIT @limit OFFSET @offset`,
+          )
+          .all(parameters) as Record<string, unknown>[]
+      ).map(hydrateDecision);
+      const total = db
+        .prepare(`SELECT COUNT(*) AS count FROM podsitter_decisions ${where}`)
+        .get(parameters) as { count: number };
+      return { items, total: total.count };
     },
     createDecision(input) {
       const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');

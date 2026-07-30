@@ -35,6 +35,8 @@ const SYSTEM_RUNTIME_OWNER = '1000:1000';
 
 export interface SystemDecisionRunInput {
   decisionId: string;
+  /** Override the durable decision FK; null is used by provider availability probes. */
+  auditDecisionId?: string | null;
   providerAccountId: string;
   runtime: PodsitterRuntime;
   model: string;
@@ -95,7 +97,7 @@ export class SystemDecisionRunner {
     try {
       this.options.repository.createSandboxRun({
         id: runId,
-        decisionId: input.decisionId,
+        decisionId: input.auditDecisionId === undefined ? input.decisionId : input.auditDecisionId,
         backend,
       });
       runCreated = true;
