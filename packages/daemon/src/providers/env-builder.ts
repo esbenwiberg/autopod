@@ -69,7 +69,7 @@ export function buildClaudeConfigFiles(): ContainerFile[] {
     {
       theme: 'dark',
       autoUpdaterStatus: 'disabled',
-      env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: '1', ...RUNTIME_TELEMETRY_OPT_OUT_ENV },
+      env: RUNTIME_TELEMETRY_OPT_OUT_ENV,
     },
     null,
     2,
