@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { DecisionOutputError, parseSystemDecisionOutput } from './decision-output.js';
-import { buildSystemRuntimeInvocation } from './runtime-adapters.js';
+import {
+  SYSTEM_CREDENTIAL_SHIM,
+  SYSTEM_CREDENTIAL_SHIM_PATH,
+  buildSystemRuntimeInvocation,
+} from './runtime-adapters.js';
 
 const valid = {
   contractVersion: 1,
@@ -49,5 +53,53 @@ describe('system decision output', () => {
     expect(command).toContain('--no-prompt-templates');
     expect(command).toContain('--no-context-files');
     expect(command).toContain('--no-session');
+  });
+
+  it('disables Codex tools and user/project resources', () => {
+    const command = buildSystemRuntimeInvocation({ runtime: 'codex', model: 'gpt-5' }).command.join(
+      ' ',
+    );
+    expect(command).toContain(`${SYSTEM_CREDENTIAL_SHIM_PATH} codex exec`);
+    for (const feature of [
+      'shell_tool',
+      'unified_exec',
+      'browser_use',
+      'computer_use',
+      'apps',
+      'plugins',
+    ]) {
+      expect(command).toContain(`--disable ${feature}`);
+    }
+    expect(command).toContain('--ignore-user-config');
+    expect(command).toContain('--ignore-rules');
+    expect(command).toContain('--ephemeral');
+  });
+
+  it('expands file-pointer credentials before each affected CLI', () => {
+    for (const variable of [
+      'ANTHROPIC_API_KEY',
+      'OPENAI_API_KEY',
+      'CLAUDE_CODE_OAUTH_TOKEN',
+      'COPILOT_GITHUB_TOKEN',
+    ]) {
+      expect(SYSTEM_CREDENTIAL_SHIM).toContain(`read_secret ${variable}`);
+    }
+    for (const runtime of ['claude', 'codex', 'copilot'] as const) {
+      expect(buildSystemRuntimeInvocation({ runtime, model: 'model' }).command.join(' ')).toContain(
+        SYSTEM_CREDENTIAL_SHIM_PATH,
+      );
+    }
+  });
+
+  it('gives Copilot no tools, built-in MCP, instructions, or remote control', () => {
+    const command = buildSystemRuntimeInvocation({
+      runtime: 'copilot',
+      model: 'gpt-5',
+    }).command.join(' ');
+    expect(command).toContain('--available-tools=');
+    expect(command).toContain('--disable-builtin-mcps');
+    expect(command).toContain('--no-custom-instructions');
+    expect(command).toContain('--no-remote');
+    expect(command).not.toContain('--allow-all');
   });
 });

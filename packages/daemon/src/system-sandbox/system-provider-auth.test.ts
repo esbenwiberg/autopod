@@ -133,4 +133,21 @@ describe('system provider auth', () => {
       }),
     ).rejects.toThrow(/no stored Codex authentication state/);
   });
+
+  it('rejects Foundry daemon identity fallback for a dedicated account', async () => {
+    const providerAccountStore = storeFor(
+      account('foundry', {
+        provider: 'foundry',
+        endpoint: 'https://fixture.services.ai.azure.com',
+        projectId: 'fixture',
+        apiSurface: 'anthropic',
+      }),
+    );
+    await expect(
+      buildProviderAccountEnv('foundry-decision', pino({ level: 'silent' }), {
+        providerAccountStore,
+        runtime: 'claude',
+      }),
+    ).rejects.toThrow(/requires a stored Foundry API key/);
+  });
 });

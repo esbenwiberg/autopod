@@ -244,6 +244,21 @@ export class DockerNetworkManager {
     return name;
   }
 
+  /** Remove one per-run network after its container has been destroyed. */
+  async removeNetworkForPod(podId: string): Promise<void> {
+    const network = this.docker.getNetwork(networkNameForPod(podId));
+    try {
+      await boundedDockerCall(network.remove(), {
+        label: 'network.remove',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.removeNetwork,
+        logger: this.logger,
+      });
+    } catch (error) {
+      const statusCode = (error as { statusCode?: number }).statusCode;
+      if (statusCode !== 404) throw error;
+    }
+  }
+
   /**
    * Remove orphaned pod networks left behind by a crashed daemon. Called on
    * startup after pod reconciliation so we know which pod IDs are still active.

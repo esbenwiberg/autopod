@@ -614,6 +614,7 @@ const systemDecisionRunner = new SystemDecisionRunner({
   sandboxContainerManager,
   providerAccountStore,
   repository: podsitterRepo,
+  dockerNetworkManager: networkManager,
   logger: logger.child({ component: 'system-decision-runner' }),
   localImage: process.env.AUTOPOD_SYSTEM_DECISION_LOCAL_IMAGE,
   hostedImage: process.env.AUTOPOD_SYSTEM_DECISION_IMAGE,

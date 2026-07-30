@@ -52,6 +52,13 @@ function harness(options: { output?: string; exitCode?: number; killFails?: bool
     }),
     listActiveSandboxRuns: vi.fn(() => []),
   } as unknown as PodsitterRepository;
+  const dockerNetworkManager = {
+    buildNetworkConfig: vi.fn(async () => ({
+      networkName: 'autopod-system-decision-1',
+      firewallScript: '#!/bin/sh\niptables -A OUTPUT -j REJECT',
+    })),
+    removeNetworkForPod: vi.fn(async () => undefined),
+  };
   const account: ProviderAccount = {
     id: 'copilot-decision',
     name: 'Copilot decision',
@@ -72,11 +79,13 @@ function harness(options: { output?: string; exitCode?: number; killFails?: bool
     repository,
     spawns,
     runs,
+    dockerNetworkManager,
     runner: new SystemDecisionRunner({
       localContainerManager: manager,
       sandboxContainerManager: manager,
       providerAccountStore,
       repository,
+      dockerNetworkManager,
       logger: pino({ level: 'silent' }),
       hostedImage: 'registry.example.io/autopod/system-decision:2026.07.30',
     }),
@@ -96,7 +105,7 @@ const input = {
 
 describe('SystemDecisionRunner', () => {
   it('spawns a repo-free provider-only sandbox', async () => {
-    const { runner, spawns, manager } = harness();
+    const { runner, spawns, manager, dockerNetworkManager } = harness();
     await expect(runner.run(input)).resolves.toMatchObject({ ok: true });
     expect(spawns).toEqual([
       expect.objectContaining({
@@ -106,6 +115,8 @@ describe('SystemDecisionRunner', () => {
         ports: [],
         networkPolicyMode: 'restricted',
         allowedHosts: expect.any(Array),
+        networkName: 'autopod-system-decision-1',
+        firewallScript: expect.stringContaining('iptables'),
       }),
     ]);
     expect(JSON.stringify(spawns)).not.toContain('dedicated-secret');
@@ -127,6 +138,22 @@ describe('SystemDecisionRunner', () => {
       ['chmod', '0400', '/run/autopod/copilot-token'],
       expect.objectContaining({ user: 'root' }),
     );
+    expect(dockerNetworkManager.buildNetworkConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enabled: true,
+        mode: 'restricted',
+        replaceDefaults: true,
+        allowPackageManagers: false,
+      }),
+      [],
+      '127.0.0.1',
+      [],
+      'system-decision-1',
+      [],
+      [],
+      0,
+    );
+    expect(dockerNetworkManager.removeNetworkForPod).toHaveBeenCalledWith('system-decision-1');
   });
 
   it('cleans and reaps system sandboxes', async () => {

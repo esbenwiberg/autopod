@@ -214,6 +214,13 @@ export async function buildProviderAccountEnv(
     case 'openai':
       return buildOpenAiEnv(auth);
     case 'foundry':
+      if (auth.credentials?.provider !== 'foundry' || !auth.credentials.apiKey) {
+        throw new AutopodError(
+          `Provider account "${auth.account.name}" requires a stored Foundry API key`,
+          'PROVIDER_ACCOUNT_CREDENTIALS_MISSING',
+          400,
+        );
+      }
       return buildFoundryEnv(subject, auth, logger);
     case 'copilot':
       return buildCopilotEnv(subject, auth);

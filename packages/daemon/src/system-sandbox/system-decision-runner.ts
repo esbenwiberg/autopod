@@ -7,6 +7,7 @@ import type {
 } from '@autopod/shared';
 import { PROVIDER_CATALOG } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { DockerNetworkManager } from '../containers/docker-network-manager.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodsitterRepository } from '../podsitter/podsitter-repository.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
@@ -18,7 +19,11 @@ import {
   sanitizeProviderMessage,
 } from '../runtimes/provider-error-classifier.js';
 import { DecisionOutputError, parseSystemDecisionOutput } from './decision-output.js';
-import { buildSystemRuntimeInvocation } from './runtime-adapters.js';
+import {
+  SYSTEM_CREDENTIAL_SHIM,
+  SYSTEM_CREDENTIAL_SHIM_PATH,
+  buildSystemRuntimeInvocation,
+} from './runtime-adapters.js';
 
 const MAX_PROMPT_BYTES = 256_000;
 const MAX_DIAGNOSTIC_BYTES = 4_000;
@@ -56,6 +61,7 @@ export interface SystemDecisionRunnerOptions {
   providerAccountStore: ProviderAccountStore;
   repository: PodsitterRepository;
   logger: Logger;
+  dockerNetworkManager?: Pick<DockerNetworkManager, 'buildNetworkConfig' | 'removeNetworkForPod'>;
   localImage?: string;
   hostedImage?: string;
 }
@@ -89,6 +95,10 @@ export class SystemDecisionRunner {
         runtime: input.runtime,
       });
       const invocation = buildSystemRuntimeInvocation(input);
+      const networkConfig =
+        input.executionTarget === 'local'
+          ? await this.buildLocalNetworkConfig(runId, catalogProvider.requiredHosts, account)
+          : null;
       containerId = await manager.spawn({
         image,
         podId: runId,
@@ -97,6 +107,8 @@ export class SystemDecisionRunner {
         ports: [],
         networkPolicyMode: 'restricted',
         allowedHosts: providerRequiredHosts(account, catalogProvider.requiredHosts),
+        networkName: networkConfig?.networkName,
+        firewallScript: networkConfig?.firewallScript,
       });
       this.options.repository.setSandboxContainer(runId, containerId);
       await this.writeRunFiles(manager, containerId, input.prompt, invocation, providerEnv);
@@ -185,6 +197,15 @@ export class SystemDecisionRunner {
           );
         }
       }
+      if (input.executionTarget === 'local' && this.options.dockerNetworkManager) {
+        await this.options.dockerNetworkManager.removeNetworkForPod(runId).catch((error) => {
+          cleanup = 'leaked';
+          this.options.logger.error(
+            { runId, err: sanitizeProviderMessage(String(error)) },
+            'System decision sandbox network cleanup failed',
+          );
+        });
+      }
       if (!result) result = failureResult('infrastructure', 'System decision run did not complete');
       if (!result.ok && cleanup === 'leaked') result = { ...result, cleanup };
       if (result.ok && cleanup === 'leaked') {
@@ -221,6 +242,9 @@ export class SystemDecisionRunner {
       }
       try {
         await manager.kill(run.containerId);
+        if (run.backend === 'docker' && this.options.dockerNetworkManager) {
+          await this.options.dockerNetworkManager.removeNetworkForPod(run.id);
+        }
         this.options.repository.closeSandboxRun(run.id, {
           outcome: 'cancelled',
           cleanupState: 'clean',
@@ -268,6 +292,7 @@ export class SystemDecisionRunner {
   ): Promise<void> {
     for (const file of [
       ...invocation.controlFiles,
+      { path: SYSTEM_CREDENTIAL_SHIM_PATH, content: SYSTEM_CREDENTIAL_SHIM },
       { path: invocation.promptPath, content: prompt },
       ...providerEnv.containerFiles,
       ...providerEnv.secretFiles,
@@ -280,12 +305,45 @@ export class SystemDecisionRunner {
         .filter((file) => isCredentialFile(file.path))
         .map((file) => file.path),
     ]);
+    await manager.execInContainer(containerId, ['chmod', '0500', SYSTEM_CREDENTIAL_SHIM_PATH], {
+      user: 'root',
+      timeout: 5_000,
+    });
     for (const path of secretPaths) {
       await manager.execInContainer(containerId, ['chmod', '0400', path], {
         user: 'root',
         timeout: 5_000,
       });
     }
+  }
+
+  private async buildLocalNetworkConfig(
+    runId: string,
+    catalogHosts: string[],
+    account: ReturnType<ProviderAccountStore['get']>,
+  ): Promise<{ networkName: string; firewallScript: string }> {
+    if (!this.options.dockerNetworkManager) {
+      throw new Error('Local system decisions require Docker network isolation');
+    }
+    const allowedHosts = providerRequiredHosts(account, catalogHosts);
+    const config = await this.options.dockerNetworkManager.buildNetworkConfig(
+      {
+        enabled: true,
+        mode: 'restricted',
+        allowedHosts,
+        replaceDefaults: true,
+        allowPackageManagers: false,
+      },
+      [],
+      '127.0.0.1',
+      [],
+      runId,
+      [],
+      [],
+      0,
+    );
+    if (!config) throw new Error('Docker network isolation did not produce a firewall');
+    return config;
   }
 
   private providerFailure(
@@ -382,14 +440,32 @@ function providerRequiredHosts(
 ): string[] {
   const legacyHosts: Record<string, string[]> = {
     anthropic: ['api.anthropic.com'],
-    max: ['api.anthropic.com', 'claude.ai'],
-    openai: ['api.openai.com', 'chatgpt.com'],
-    copilot: ['api.githubcopilot.com', 'github.com'],
+    max: ['api.anthropic.com', 'platform.claude.com', 'claude.ai'],
+    openai: ['api.openai.com', 'chatgpt.com', '*.chatgpt.com', 'files.openai.com'],
+    copilot: [
+      'api.githubcopilot.com',
+      'api.enterprise.githubcopilot.com',
+      'copilot-proxy.githubusercontent.com',
+      'githubcopilot.com',
+    ],
     openrouter: ['openrouter.ai'],
-    pi: ['api.anthropic.com', 'api.openai.com'],
+    pi: [],
   };
   const hosts = new Set([...catalogHosts, ...(legacyHosts[account.provider] ?? [])]);
   const credentials = account.credentials;
+  if (credentials?.provider === 'pi') {
+    const piHosts: Record<string, string[]> = {
+      anthropic: ['api.anthropic.com'],
+      'openai-codex': ['api.openai.com', 'chatgpt.com', '*.chatgpt.com', 'files.openai.com'],
+      'github-copilot': [
+        'api.githubcopilot.com',
+        'api.enterprise.githubcopilot.com',
+        'copilot-proxy.githubusercontent.com',
+        'githubcopilot.com',
+      ],
+    };
+    for (const host of piHosts[credentials.providerId] ?? []) hosts.add(host);
+  }
   if (credentials?.provider === 'foundry') {
     try {
       hosts.add(new URL(credentials.endpoint).hostname);

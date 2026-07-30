@@ -10,6 +10,7 @@ if [[ "${1:-}" == "--check" ]]; then
   grep -q '@openai/codex@${CODEX_VERSION}' "$dockerfile"
   grep -q '@github/copilot@${COPILOT_VERSION}' "$dockerfile"
   grep -q '@earendil-works/pi-coding-agent@${PI_VERSION}' "$dockerfile"
+  grep -q 'haproxy iptables' "$dockerfile"
   if grep -Eq 'COPY .*workspace|COPY .*packages|git clone' "$dockerfile"; then
     echo "system decision image must remain repo-free" >&2
     exit 1
