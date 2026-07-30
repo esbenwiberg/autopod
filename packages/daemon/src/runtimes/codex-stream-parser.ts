@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
 import { canonicalModelKey, computeCostWithCache } from '@autopod/shared';
-import type { AgentEvent } from '@autopod/shared';
+import type { AgentErrorEvent, AgentEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { classifyProviderError } from './provider-error-classifier.js';
 
@@ -43,6 +43,14 @@ interface CodexTokenUsageInfo {
   last_token_usage?: CodexTokenUsage;
   model_context_window?: number | null;
 }
+
+/** Internal Codex lifecycle metadata consumed by CodexRuntime before events reach PodManager. */
+export interface CodexTurnAbortedEvent extends AgentErrorEvent {
+  codexAbortReason?: string;
+  codexTurnId?: string;
+}
+
+type CodexParserEvent = AgentEvent | CodexTurnAbortedEvent;
 
 const MAX_OUTPUT_LEN = 2000;
 const MAX_REASONING_LEN = 4000;
@@ -342,7 +350,7 @@ function mapFunctionOutput(msg: { [key: string]: unknown }, ts: string): AgentEv
  * Stateless — token accumulation and turn-completion stitching live in
  * `parse()` because they require carrying state across events.
  */
-function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEvent | null {
+function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): CodexParserEvent | null {
   const msg = unwrap(event);
   if (!msg || typeof msg.type !== 'string') return null;
   const ts = tsOf(event);
@@ -499,14 +507,8 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
       return { type: 'status', timestamp: ts, message: `Warning: ${message}` };
     }
 
-    case 'error':
-    case 'turn_aborted': {
-      const message =
-        typeof msg.message === 'string'
-          ? msg.message
-          : msg.type === 'turn_aborted'
-            ? 'Codex turn aborted'
-            : 'Codex error';
+    case 'error': {
+      const message = typeof msg.message === 'string' ? msg.message : 'Codex error';
       const classification = classifyProviderError('codex', {
         message,
         code: msg.code,
@@ -520,6 +522,25 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): AgentEv
         fatal: true,
         classification,
       };
+    }
+
+    case 'turn_aborted': {
+      const message = typeof msg.message === 'string' ? msg.message : 'Codex turn aborted';
+      const classification = classifyProviderError('codex', {
+        message,
+        code: msg.code,
+        status: msg.status,
+        retryAfter: msg.retry_after,
+      });
+      return {
+        type: 'error',
+        timestamp: ts,
+        message: classification.sanitizedMessage,
+        fatal: true,
+        classification,
+        ...(typeof msg.reason === 'string' ? { codexAbortReason: msg.reason } : {}),
+        ...(typeof msg.turn_id === 'string' ? { codexTurnId: msg.turn_id } : {}),
+      } satisfies CodexTurnAbortedEvent;
     }
 
     // Stateful events handled in `parse()` — `mapEvent` returns null so a
@@ -580,7 +601,7 @@ async function* parse(
   podId: string,
   logger: Logger,
   modelHint?: string,
-): AsyncIterable<AgentEvent> {
+): AsyncIterable<CodexParserEvent> {
   const rl = createInterface({ input: stream });
   let latestUsage: CodexTokenUsage | undefined;
   let latestModel: string | null = modelHint && modelHint !== 'auto' ? modelHint : null;

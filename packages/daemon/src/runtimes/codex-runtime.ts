@@ -15,7 +15,7 @@ import type { ContainerManager, StreamingExecResult } from '../interfaces/contai
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodRepository } from '../pods/pod-repository.js';
 import { codexStateDirForPod } from './codex-state-store.js';
-import { CodexStreamParser } from './codex-stream-parser.js';
+import { CodexStreamParser, type CodexTurnAbortedEvent } from './codex-stream-parser.js';
 import {
   awaitExitCodeBounded,
   withIdleLivenessProbe,
@@ -35,6 +35,9 @@ const DEFAULT_SUMMARY_RECOVERY_TIMEOUT_MS = 30_000;
 const DEFAULT_SANDBOX_IDLE_RECOVERY_MS = 60_000;
 const DEFAULT_STALLED_EXEC_KILL_TIMEOUT_MS = 5_000;
 const CONTAINER_CODEX_SESSIONS_PATH = `${CONTAINER_HOME_DIR}/.codex/sessions`;
+const INTERRUPTED_TURN_CONTINUATION = `The previous Codex turn was interrupted unexpectedly. Continue the same task from the current workspace and session state.
+
+Important: an MCP operation such as validation or pre-submit review may still be running or may have completed after the interruption. Inspect the current state and existing results before starting or repeating any tool call.`;
 
 const TOML_BARE_KEY = /^[A-Za-z0-9_-]+$/;
 const ROLLOUT_FILE_RE = /^rollout-.*\.jsonl$/;
@@ -68,6 +71,14 @@ interface RolloutTailState {
   carry: Buffer;
 }
 
+function isRecoverableCodexInterruption(event: AgentEvent): event is CodexTurnAbortedEvent {
+  return (
+    event.type === 'error' &&
+    'codexAbortReason' in event &&
+    event.codexAbortReason === 'interrupted'
+  );
+}
+
 function escapeTomlString(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
@@ -99,7 +110,7 @@ export class CodexRuntime implements Runtime {
   readonly type = 'codex' as const;
 
   private handles = new Map<string, StreamingExecResult>();
-  private intentionalSuspensions = new WeakSet<StreamingExecResult>();
+  private intentionalTerminations = new WeakSet<StreamingExecResult>();
   private suspensionSignals = new Map<string, () => void>();
   /** Maps autopod podId → Codex session ID for in-memory resume shortcut. */
   readonly codexSessionIds = new Map<string, string>();
@@ -169,45 +180,16 @@ export class CodexRuntime implements Runtime {
 
     this.handles.set(config.podId, handle);
 
-    const outputState: OutputState = {
-      events: 0,
-      nonStatusEvents: 0,
-      sawComplete: false,
-      sawFatal: false,
-    };
-    const recovery =
-      config.executionTarget === 'sandbox' ? { containerId: config.containerId } : undefined;
-    const enriched = this.parseWithRolloutFallback(
+    const interrupted = yield* this.streamInvocation(
       handle,
       config.podId,
-      outputState,
+      config.containerId,
       config.model,
-      recovery,
+      config.executionTarget === 'sandbox' ? { containerId: config.containerId } : undefined,
     );
-
-    try {
-      yield* withPostCompleteGrace(
-        withIdleLivenessProbe(enriched, {
-          streams: [handle.stdout, handle.stderr],
-          runtimeName: 'codex-runtime',
-          podId: config.podId,
-          logger: this.logger,
-          containerManager: this.containerManager,
-          containerId: config.containerId,
-        }),
-        {
-          streams: [handle.stdout, handle.stderr],
-          runtimeName: 'codex-runtime',
-          podId: config.podId,
-          logger: this.logger,
-        },
-      );
-    } finally {
-      this.handles.delete(config.podId);
+    if (interrupted) {
+      yield* this.recoverInterruptedTurn(config.podId, config.containerId, config.env);
     }
-
-    const exitError = await this.codexExitError(config.podId, handle, outputState);
-    if (exitError) yield exitError;
   }
 
   async *resume(
@@ -215,6 +197,7 @@ export class CodexRuntime implements Runtime {
     message: string,
     containerId: string,
     env?: Record<string, string>,
+    allowInterruptedRecovery = true,
   ): AsyncIterable<AgentEvent> {
     // Prefer in-memory shortcut; fall back to durable DB source across daemon restarts.
     const pod = this.podRepo.getOrThrow(podId);
@@ -296,47 +279,26 @@ export class CodexRuntime implements Runtime {
 
     this.handles.set(podId, handle);
 
-    const outputState: OutputState = {
-      events: 0,
-      nonStatusEvents: 0,
-      sawComplete: false,
-      sawFatal: false,
-    };
-    const recovery = pod.executionTarget === 'sandbox' ? { containerId } : undefined;
+    const interrupted = yield* this.streamInvocation(
+      handle,
+      podId,
+      containerId,
+      pod.model,
+      pod.executionTarget === 'sandbox' ? { containerId } : undefined,
+      rolloutTail,
+    );
+    if (!interrupted) return;
 
-    try {
-      yield* withPostCompleteGrace(
-        withIdleLivenessProbe(
-          this.parseWithRolloutFallback(
-            handle,
-            podId,
-            outputState,
-            pod.model,
-            recovery,
-            rolloutTail,
-          ),
-          {
-            streams: [handle.stdout, handle.stderr],
-            runtimeName: 'codex-runtime',
-            podId,
-            logger: this.logger,
-            containerManager: this.containerManager,
-            containerId,
-          },
-        ),
-        {
-          streams: [handle.stdout, handle.stderr],
-          runtimeName: 'codex-runtime',
-          podId,
-          logger: this.logger,
-        },
-      );
-    } finally {
-      this.handles.delete(podId);
+    if (!allowInterruptedRecovery) {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'Codex turn was interrupted again after automatic recovery',
+        fatal: true,
+      };
+      return;
     }
-
-    const exitError = await this.codexExitError(podId, handle, outputState);
-    if (exitError) yield exitError;
+    yield* this.recoverInterruptedTurn(podId, containerId, env);
   }
 
   async abort(podId: string): Promise<void> {
@@ -350,6 +312,7 @@ export class CodexRuntime implements Runtime {
       return;
     }
 
+    this.intentionalTerminations.add(handle);
     await handle.kill();
     this.handles.delete(podId);
     this.mcpServersBySession.delete(podId);
@@ -367,7 +330,7 @@ export class CodexRuntime implements Runtime {
       });
       return;
     }
-    this.intentionalSuspensions.add(handle);
+    this.intentionalTerminations.add(handle);
     this.suspensionSignals.get(podId)?.();
 
     this.logger.info({
@@ -388,6 +351,141 @@ export class CodexRuntime implements Runtime {
   ): void {
     this.mcpServersBySession.set(podId, mcpServers);
     this.reasoningEffortBySession.set(podId, reasoningEffort);
+  }
+
+  private async *streamInvocation(
+    handle: StreamingExecResult,
+    podId: string,
+    containerId: string,
+    modelHint?: string,
+    recovery?: SandboxRolloutRecovery,
+    rolloutTail?: RolloutTailState,
+  ): AsyncGenerator<AgentEvent, boolean, void> {
+    const outputState: OutputState = {
+      events: 0,
+      nonStatusEvents: 0,
+      sawComplete: false,
+      sawFatal: false,
+    };
+    const enriched = this.parseWithRolloutFallback(
+      handle,
+      podId,
+      outputState,
+      modelHint,
+      recovery,
+      rolloutTail,
+    );
+    let interrupted = false;
+    let sawNonRecoverableFatal = false;
+
+    try {
+      const guarded = withPostCompleteGrace(
+        withIdleLivenessProbe(enriched, {
+          streams: [handle.stdout, handle.stderr],
+          runtimeName: 'codex-runtime',
+          podId,
+          logger: this.logger,
+          containerManager: this.containerManager,
+          containerId,
+        }),
+        {
+          streams: [handle.stdout, handle.stderr],
+          runtimeName: 'codex-runtime',
+          podId,
+          logger: this.logger,
+        },
+      );
+      for await (const event of guarded) {
+        if (isRecoverableCodexInterruption(event)) {
+          interrupted = true;
+          continue;
+        }
+        if (event.type === 'error' && event.fatal) {
+          sawNonRecoverableFatal = true;
+        }
+        yield event;
+      }
+
+      if (interrupted && !this.intentionalTerminations.has(handle) && !outputState.sawComplete) {
+        const settled = await this.settleInterruptedInvocation(podId, handle);
+        if (!settled) {
+          yield {
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            message:
+              'Codex turn was interrupted, but the previous invocation could not be terminated safely',
+            fatal: true,
+          };
+          interrupted = false;
+        }
+      }
+
+      // Re-check after the bounded settle wait: suspend/abort can race that wait
+      // and must retain authority over automatic recovery.
+      const intentionallyTerminated = this.intentionalTerminations.has(handle);
+      const exitError = await this.codexExitError(podId, handle, outputState);
+      if (exitError) yield exitError;
+
+      return (
+        interrupted &&
+        !sawNonRecoverableFatal &&
+        !intentionallyTerminated &&
+        !outputState.sawComplete
+      );
+    } finally {
+      if (this.handles.get(podId) === handle) {
+        this.handles.delete(podId);
+      }
+    }
+  }
+
+  private async settleInterruptedInvocation(
+    podId: string,
+    handle: StreamingExecResult,
+  ): Promise<boolean> {
+    const exitResult = await awaitExitCodeBounded(handle.exitCode, {
+      runtimeName: 'codex-runtime',
+      podId,
+      logger: this.logger,
+    });
+    if (!exitResult.timedOut) return true;
+
+    const killResult = await settlePromiseWithin(handle.kill(), stalledExecKillTimeoutMs());
+    if (killResult.status === 'fulfilled') return true;
+
+    this.logger.warn(
+      {
+        component: 'codex-runtime',
+        podId,
+        status: killResult.status,
+        ...(killResult.status === 'rejected' ? { err: killResult.reason } : {}),
+      },
+      'Failed to terminate interrupted Codex invocation before automatic recovery',
+    );
+    return false;
+  }
+
+  private async *recoverInterruptedTurn(
+    podId: string,
+    containerId: string,
+    env?: Record<string, string>,
+  ): AsyncIterable<AgentEvent> {
+    if (!this.codexSessionIds.get(podId) && !this.podRepo.getOrThrow(podId).codexSessionId) {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'Codex turn was interrupted, but no session ID was available for safe recovery',
+        fatal: true,
+      };
+      return;
+    }
+
+    yield {
+      type: 'status',
+      timestamp: new Date().toISOString(),
+      message: 'Codex turn was interrupted — resuming the same session once',
+    };
+    yield* this.resume(podId, INTERRUPTED_TURN_CONTINUATION, containerId, env, false);
   }
 
   private buildSpawnArgs(config: SpawnConfig): string[] {
@@ -732,7 +830,7 @@ export class CodexRuntime implements Runtime {
     handle: StreamingExecResult,
     outputState: OutputState,
   ): Promise<AgentEvent | null> {
-    if (this.intentionalSuspensions.delete(handle)) {
+    if (this.intentionalTerminations.delete(handle)) {
       this.logger.info(
         { component: 'codex-runtime', podId },
         'Suppressing terminal exit classification after intentional suspension',

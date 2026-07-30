@@ -268,6 +268,70 @@ describe('CodexRuntime', () => {
       );
     });
 
+    it('recovers an interrupted initial turn in the same Codex session', async () => {
+      const firstHandle = createMockHandle();
+      const recoveryHandle = createMockHandle();
+      const cm = createMockContainerManager(firstHandle);
+      vi.mocked(cm.execStreaming)
+        .mockResolvedValueOnce(firstHandle)
+        .mockResolvedValueOnce(recoveryHandle);
+      const runtime = new CodexRuntime(
+        logger,
+        cm,
+        createMockPodRepo(null, { model: 'gpt-5.6-sol' }),
+      );
+
+      setTimeout(() => {
+        (firstHandle.stdout as PassThrough).write(
+          `${JSON.stringify({ type: 'thread.started', thread_id: 'spawn-session-123' })}\n`,
+        );
+        (firstHandle.stdout as PassThrough).write(
+          `${JSON.stringify({
+            id: 'abort-1',
+            msg: { type: 'turn_aborted', reason: 'interrupted', turn_id: 'turn-1' },
+          })}\n`,
+        );
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (firstHandle as any).finish(0);
+      }, 5);
+      setTimeout(() => {
+        (recoveryHandle.stdout as PassThrough).write(
+          `${JSON.stringify({
+            id: 'complete-2',
+            msg: {
+              type: 'task_complete',
+              turn_id: 'turn-2',
+              last_agent_message: 'Initial task recovered.',
+            },
+          })}\n`,
+        );
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (recoveryHandle as any).finish(0);
+      }, 25);
+
+      const events: AgentEvent[] = [];
+      for await (const event of runtime.spawn({
+        podId: 'interrupted-spawn',
+        task: 'Do the thing',
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'auto',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      })) {
+        events.push(event);
+      }
+
+      expect(cm.execStreaming).toHaveBeenCalledTimes(2);
+      const recoveryArgs = vi.mocked(cm.execStreaming).mock.calls[1]?.[1] as string[];
+      expect(recoveryArgs).toContain('spawn-session-123');
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'complete', result: 'Initial task recovered.' }),
+        ]),
+      );
+    });
+
     it('does not treat turn_complete as final task completion', async () => {
       const handle = createMockHandle();
       const cm = createMockContainerManager(handle);
@@ -1580,6 +1644,215 @@ describe('CodexRuntime', () => {
   });
 
   describe('resume', () => {
+    it('automatically resumes one interrupted Codex turn', async () => {
+      const firstHandle = createMockHandle();
+      const recoveryHandle = createMockHandle();
+      const cm = createMockContainerManager(firstHandle);
+      vi.mocked(cm.execStreaming)
+        .mockResolvedValueOnce(firstHandle)
+        .mockResolvedValueOnce(recoveryHandle);
+      const runtime = new CodexRuntime(
+        logger,
+        cm,
+        createMockPodRepo('session-123', { model: 'gpt-5.6-sol' }),
+      );
+
+      const events: AgentEvent[] = [];
+      const run = (async () => {
+        for await (const event of runtime.resume(
+          'interrupted-once',
+          'Continue the task.',
+          'container-123',
+          { OPENAI_API_KEY: 'test-key' },
+        )) {
+          events.push(event);
+        }
+      })();
+
+      await vi.waitFor(() => expect(cm.execStreaming).toHaveBeenCalledTimes(1));
+      (firstHandle.stdout as PassThrough).write(
+        `${JSON.stringify({
+          id: 'abort-1',
+          msg: { type: 'turn_aborted', reason: 'interrupted', turn_id: 'turn-1' },
+        })}\n`,
+      );
+      (firstHandle.stdout as PassThrough).push(null);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(cm.execStreaming).toHaveBeenCalledTimes(1);
+
+      // Recovery must not start merely because stdout ended; the previous exec
+      // has to settle first.
+      // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+      (firstHandle as any).finish(0);
+      await vi.waitFor(() => expect(cm.execStreaming).toHaveBeenCalledTimes(2));
+      (recoveryHandle.stdout as PassThrough).write(
+        `${JSON.stringify({
+          id: 'complete-2',
+          msg: {
+            type: 'task_complete',
+            turn_id: 'turn-2',
+            last_agent_message: 'Recovered and finished.',
+          },
+        })}\n`,
+      );
+      // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+      (recoveryHandle as any).finish(0);
+      await withTimeout(run, 1_000);
+
+      expect(cm.execStreaming).toHaveBeenCalledTimes(2);
+      const recoveryArgs = vi.mocked(cm.execStreaming).mock.calls[1]?.[1] as string[];
+      expect(recoveryArgs).toContain('session-123');
+      expect(recoveryArgs.at(-1)).toContain('previous Codex turn was interrupted unexpectedly');
+      expect(recoveryArgs.at(-1)).toContain('MCP operation');
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'status',
+            message: 'Codex turn was interrupted — resuming the same session once',
+          }),
+          expect.objectContaining({ type: 'complete', result: 'Recovered and finished.' }),
+        ]),
+      );
+      expect(events).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'error', message: 'Codex turn aborted' }),
+        ]),
+      );
+    });
+
+    it('fails after a repeated interrupted Codex turn', async () => {
+      const firstHandle = createMockHandle();
+      const recoveryHandle = createMockHandle();
+      const cm = createMockContainerManager(firstHandle);
+      vi.mocked(cm.execStreaming)
+        .mockResolvedValueOnce(firstHandle)
+        .mockResolvedValueOnce(recoveryHandle);
+      const runtime = new CodexRuntime(
+        logger,
+        cm,
+        createMockPodRepo('session-123', { model: 'gpt-5.6-sol' }),
+      );
+
+      setTimeout(() => {
+        (firstHandle.stdout as PassThrough).write(
+          `${JSON.stringify({
+            id: 'abort-1',
+            msg: { type: 'turn_aborted', reason: 'interrupted', turn_id: 'turn-1' },
+          })}\n`,
+        );
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (firstHandle as any).finish(0);
+      }, 5);
+      setTimeout(() => {
+        (recoveryHandle.stdout as PassThrough).write(
+          `${JSON.stringify({
+            id: 'abort-2',
+            msg: { type: 'turn_aborted', reason: 'interrupted', turn_id: 'turn-2' },
+          })}\n`,
+        );
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (recoveryHandle as any).finish(0);
+      }, 25);
+
+      const events: AgentEvent[] = [];
+      for await (const event of runtime.resume(
+        'interrupted-twice',
+        'Continue the task.',
+        'container-123',
+      )) {
+        events.push(event);
+      }
+
+      expect(cm.execStreaming).toHaveBeenCalledTimes(2);
+      expect(events.filter((event) => event.type === 'error' && event.fatal)).toEqual([
+        expect.objectContaining({
+          message: 'Codex turn was interrupted again after automatic recovery',
+        }),
+      ]);
+    });
+
+    it('does not recover a non-recoverable turn abort', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(
+        logger,
+        cm,
+        createMockPodRepo('session-123', { model: 'gpt-5.6-sol' }),
+      );
+
+      setTimeout(() => {
+        (handle.stdout as PassThrough).write(
+          `${JSON.stringify({
+            id: 'abort-1',
+            msg: { type: 'turn_aborted', reason: 'replaced', turn_id: 'turn-1' },
+          })}\n`,
+        );
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(0);
+      }, 5);
+
+      const events: AgentEvent[] = [];
+      for await (const event of runtime.resume(
+        'replaced-turn',
+        'Continue the task.',
+        'container-123',
+      )) {
+        events.push(event);
+      }
+
+      expect(cm.execStreaming).toHaveBeenCalledTimes(1);
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'error', fatal: true, message: 'Codex turn aborted' }),
+        ]),
+      );
+    });
+
+    it('does not recover an intentional suspension', async () => {
+      const handle = createMockHandle();
+      vi.mocked(handle.kill).mockImplementation(async () => {
+        // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+        (handle as any).finish(137);
+      });
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(
+        logger,
+        cm,
+        createMockPodRepo('session-123', { model: 'gpt-5.6-sol' }),
+      );
+      const events: AgentEvent[] = [];
+      const run = (async () => {
+        for await (const event of runtime.resume(
+          'intentionally-suspended',
+          'Continue the task.',
+          'container-123',
+        )) {
+          events.push(event);
+        }
+      })();
+
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      (handle.stdout as PassThrough).write(
+        `${JSON.stringify({
+          id: 'abort-1',
+          msg: { type: 'turn_aborted', reason: 'interrupted', turn_id: 'turn-1' },
+        })}\n`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await runtime.suspend('intentionally-suspended');
+      await withTimeout(run, 1_000);
+
+      expect(cm.execStreaming).toHaveBeenCalledTimes(1);
+      expect(handle.kill).toHaveBeenCalledOnce();
+      expect(events).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            message: expect.stringContaining('resuming the same session'),
+          }),
+        ]),
+      );
+    });
+
     it('ignores completed rollouts from a different session while a resume is active', async () => {
       const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
       const previousPollMs = process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
