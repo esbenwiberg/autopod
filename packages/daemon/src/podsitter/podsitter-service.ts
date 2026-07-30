@@ -70,6 +70,7 @@ export interface PodsitterServiceDependencies {
   now?: () => Date;
   sweepIntervalMs?: number;
   probeProvider?: (configuration: PodsitterConfiguration) => Promise<SystemDecisionRunResult>;
+  reapLeakedSandboxes?: () => Promise<number>;
 }
 
 function attentionId(podId: string, signature: string): string {
@@ -325,7 +326,27 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
       new Date(now().getTime() + LEASE_MS).toISOString(),
       now().toISOString(),
     );
-    if (probeLease === null) return false;
+    if (probeLease === null) {
+      deps.repository.completeDecision(
+        record.id,
+        {
+          leaseOwner: owner,
+          leaseVersion: lease.leaseVersion,
+          outcome: 'failed',
+          failureCode: 'provider_probe_busy',
+        },
+        now().toISOString(),
+      );
+      deps.repository.releaseAttentionLease(
+        lease.id,
+        owner,
+        lease.leaseVersion,
+        'deferred',
+        record.id,
+        now().toISOString(),
+      );
+      return false;
+    }
     const result = await deps.decisionRunner.run({
       decisionId,
       providerAccountId: target.providerAccountId,
@@ -562,6 +583,18 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
         deps.sweepIntervalMs ?? DEFAULT_SWEEP_MS,
       );
       await serialize(async () => {
+        if (deps.reapLeakedSandboxes) {
+          await deps.reapLeakedSandboxes();
+          for (const leaked of deps.repository.listActiveSandboxRuns()) {
+            emit({
+              type: 'podsitter.system_sandbox_cleanup_failed',
+              timestamp: now().toISOString(),
+              runId: leaked.id,
+              decisionId: leaked.decisionId,
+              failureCode: 'CLEANUP_RETRYABLE',
+            });
+          }
+        }
         const configuration = deps.repository.getConfiguration();
         const target = configuration?.decisionTarget;
         if (target) {

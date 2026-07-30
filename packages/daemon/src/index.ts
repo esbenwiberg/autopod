@@ -622,9 +622,6 @@ const systemDecisionRunner = new SystemDecisionRunner({
   localImage: process.env.AUTOPOD_SYSTEM_DECISION_LOCAL_IMAGE,
   hostedImage: process.env.AUTOPOD_SYSTEM_DECISION_IMAGE,
 });
-await systemDecisionRunner.reapLeakedRuns().catch((err) => {
-  logger.error({ err }, 'Startup system sandbox reaping failed');
-});
 const systemSandboxReaper = setInterval(
   () =>
     systemDecisionRunner
@@ -941,6 +938,7 @@ const podsitterService = createPodsitterService({
       timeoutMs: 5 * 60_000,
     });
   },
+  reapLeakedSandboxes: () => systemDecisionRunner.reapLeakedRuns(),
 });
 await podsitterService.start().catch((err) => {
   logger.error({ err }, 'Podsitter startup reconciliation failed');

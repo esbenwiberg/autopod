@@ -305,4 +305,78 @@ describe('PodsitterService', () => {
 
     expect(events).toEqual(['expired']);
   });
+
+  it('releases attention when the provider probe lease is busy', async () => {
+    const harness = setup();
+    harness.repository.initializeProviderState('sitter-account', NOW.toISOString());
+    const heldVersion = harness.repository.acquireProviderProbeLease(
+      'sitter-account',
+      'other-worker',
+      new Date(NOW.getTime() + 60_000).toISOString(),
+      NOW.toISOString(),
+    );
+    if (heldVersion === null) throw new Error('expected held provider lease');
+    const run = vi.fn(async () => ({
+      ok: true as const,
+      decision: harness.decision(),
+      telemetry: {},
+      cleanup: 'clean' as const,
+    }));
+    const sitter = service(harness, run);
+
+    await sitter.reconcile();
+    expect(harness.repository.listPendingAttention()[0]).toMatchObject({
+      state: 'deferred',
+      leaseOwner: null,
+    });
+    expect(harness.repository.listDecisions().items[0]).toMatchObject({
+      outcome: 'failed',
+      failureCode: 'provider_probe_busy',
+    });
+
+    harness.repository.releaseProviderProbeLease(
+      'sitter-account',
+      'other-worker',
+      heldVersion,
+      NOW.toISOString(),
+    );
+    await sitter.reconcile();
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(harness.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('reaps durable system sandboxes during startup and emits cleanup failures', async () => {
+    const harness = setup();
+    harness.evidenceProvider.listCandidates.mockResolvedValue([]);
+    harness.repository.createSandboxRun({
+      id: 'system-leaked',
+      backend: 'docker',
+      now: NOW.toISOString(),
+    });
+    const cleanupEvents: string[] = [];
+    harness.eventBus.subscribe((event) => {
+      if (event.type === 'podsitter.system_sandbox_cleanup_failed') {
+        cleanupEvents.push(event.runId);
+      }
+    });
+    const reapLeakedSandboxes = vi.fn(async () => 0);
+    const sitter = createPodsitterService({
+      repository: harness.repository,
+      evidenceProvider: harness.evidenceProvider,
+      decisionRunner: { run: vi.fn() },
+      actionExecutor: { execute: harness.execute },
+      eventBus: harness.eventBus,
+      logger,
+      executionTarget: 'local',
+      now: () => NOW,
+      reapLeakedSandboxes,
+      sweepIntervalMs: 60 * 60_000,
+    });
+
+    await sitter.start();
+    await sitter.stop();
+
+    expect(reapLeakedSandboxes).toHaveBeenCalledTimes(1);
+    expect(cleanupEvents).toEqual(['system-leaked']);
+  });
 });
