@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DecisionOutputError, parseSystemDecisionOutput } from './decision-output.js';
+import { buildSystemRuntimeInvocation } from './runtime-adapters.js';
 
 const valid = {
   contractVersion: 1,
@@ -34,5 +35,19 @@ describe('system decision output', () => {
     expect(() =>
       parseSystemDecisionOutput('copilot', JSON.stringify({ ...valid, contractVersion: 2 })),
     ).toThrow(DecisionOutputError);
+  });
+
+  it('disables Pi tools, extensions, skills, sessions, and project context', () => {
+    const invocation = buildSystemRuntimeInvocation({
+      runtime: 'pi',
+      model: 'anthropic/claude-sonnet',
+    });
+    const command = invocation.command.join(' ');
+    expect(command).toContain('--no-tools');
+    expect(command).toContain('--no-extensions');
+    expect(command).toContain('--no-skills');
+    expect(command).toContain('--no-prompt-templates');
+    expect(command).toContain('--no-context-files');
+    expect(command).toContain('--no-session');
   });
 });

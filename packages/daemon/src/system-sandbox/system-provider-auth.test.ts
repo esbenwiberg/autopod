@@ -122,4 +122,14 @@ describe('system provider auth', () => {
       }),
     ).rejects.toThrow(/incompatible/);
   });
+
+  it('rejects an account that would otherwise fall back to a daemon API key', async () => {
+    const providerAccountStore = storeFor(account('openai', { provider: 'openai' }));
+    await expect(
+      buildProviderAccountEnv('openai-decision', pino({ level: 'silent' }), {
+        providerAccountStore,
+        runtime: 'codex',
+      }),
+    ).rejects.toThrow(/no stored Codex authentication state/);
+  });
 });

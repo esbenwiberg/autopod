@@ -177,6 +177,16 @@ export async function buildProviderAccountEnv(
   const provider = auth.provider;
   if (!provider || !auth.account) throw new Error('Dedicated provider account has no provider');
   assertAccountRuntimeCompatible(auth.account, provider, options.runtime);
+  if (
+    provider === 'openai' &&
+    (auth.credentials?.provider !== 'openai' || !auth.credentials.authJson)
+  ) {
+    throw new AutopodError(
+      `Provider account "${auth.account.name}" has no stored Codex authentication state`,
+      'PROVIDER_ACCOUNT_CREDENTIALS_MISSING',
+      400,
+    );
+  }
   options.providerAccountStore.touchLastUsed(providerAccountId);
   const subject: ProviderEnvSubject = {
     name: `provider account ${providerAccountId}`,

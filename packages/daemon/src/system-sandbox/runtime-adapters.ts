@@ -65,7 +65,7 @@ export function buildSystemRuntimeInvocation(input: {
         command: [
           'sh',
           '-c',
-          'pi --print --mode json --model "$1" < "$2"',
+          'pi --print --mode json --no-session --no-tools --no-extensions --no-skills --no-prompt-templates --no-themes --no-context-files --model "$1" < "$2"',
           'system-decision',
           input.model,
           PROMPT_PATH,
