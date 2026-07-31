@@ -6,10 +6,14 @@ import { createPodsitterRepository } from '../../podsitter/podsitter-repository.
 import type { PodsitterService } from '../../podsitter/podsitter-service.js';
 import { createProviderAccountStore } from '../../provider-accounts/provider-account-store.js';
 import { createTestDb, logger } from '../../test-utils/mock-helpers.js';
+import { errorHandler } from '../error-handler.js';
 import { authPlugin } from '../plugins/auth.js';
 import { podsitterRoutes } from './podsitter.js';
 
-async function setup(role: 'admin' | 'operator' | 'viewer' = 'admin') {
+async function setup(
+  role: 'admin' | 'operator' | 'viewer' = 'admin',
+  options: { executionTarget?: 'local' | 'sandbox'; hostedImage?: string } = {},
+) {
   const db = createTestDb();
   const providerAccountStore = createProviderAccountStore(db);
   providerAccountStore.create({ id: 'sitter', name: 'Sitter', provider: 'openai' });
@@ -37,6 +41,7 @@ async function setup(role: 'admin' | 'operator' | 'viewer' = 'admin') {
     })),
   } satisfies PodsitterService;
   const app = Fastify({ logger: false });
+  app.setErrorHandler(errorHandler);
   authPlugin(app, {
     validateToken: vi.fn(async () => ({
       oid: 'operator-1',
@@ -50,7 +55,14 @@ async function setup(role: 'admin' | 'operator' | 'viewer' = 'admin') {
     })),
   });
   const eventBus = createEventBus(createEventRepository(db), logger);
-  podsitterRoutes(app, { repository, service, providerAccountStore, eventBus });
+  podsitterRoutes(app, {
+    repository,
+    service,
+    providerAccountStore,
+    eventBus,
+    executionTarget: options.executionTarget,
+    hostedImage: options.hostedImage,
+  });
   await app.ready();
   return { app, repository, providerAccountStore, eventBus, reconcile, probe };
 }
@@ -71,23 +83,29 @@ describe('Podsitter routes', () => {
     await Promise.all(apps.splice(0).map((app) => app.close()));
   });
 
-  it('requires operator role for mutations while allowing redacted status', async () => {
+  it('allows any authenticated user to mutate configuration while rejecting unauthenticated users', async () => {
     const viewer = await setup('viewer');
     apps.push(viewer.app);
     const denied = await viewer.app.inject({
       method: 'PUT',
       url: '/podsitter/config',
+      payload: configuration,
+    });
+    expect(denied.statusCode).toBe(401);
+    const configured = await viewer.app.inject({
+      method: 'PUT',
+      url: '/podsitter/config',
       headers,
       payload: configuration,
     });
-    expect(denied.statusCode).toBe(403);
+    expect(configured.statusCode).toBe(200);
     const status = await viewer.app.inject({ method: 'GET', url: '/podsitter', headers });
     expect(status.statusCode).toBe(200);
     expect(status.body).not.toContain('credentials');
   });
 
-  it('validates configuration and changes generation on enable and disable', async () => {
-    const harness = await setup();
+  it('allows an authenticated viewer to enable and disable Podsitter', async () => {
+    const harness = await setup('viewer');
     apps.push(harness.app);
     const configured = await harness.app.inject({
       method: 'PUT',
@@ -112,8 +130,56 @@ describe('Podsitter routes', () => {
     expect(disabled.json()).toMatchObject({ enabled: false, generation: 3 });
   });
 
-  it('keeps inactive checks read-only and exposes probe and paginated history', async () => {
-    const harness = await setup('operator');
+  it('rejects sandbox configuration and enablement without a pinned ACR image', async () => {
+    for (const hostedImage of [
+      undefined,
+      'ewiautopodacr.azurecr.io/autopod/system-decision:latest',
+      'registry.example.io/autopod/system-decision:95fe98e6',
+    ]) {
+      const harness = await setup('admin', { executionTarget: 'sandbox', hostedImage });
+      apps.push(harness.app);
+      const configured = await harness.app.inject({
+        method: 'PUT',
+        url: '/podsitter/config',
+        headers,
+        payload: configuration,
+      });
+      expect(configured.statusCode).toBe(400);
+      expect(configured.json()).toMatchObject({ error: 'PODSITTER_IMAGE_REQUIRED' });
+    }
+
+    const harness = await setup('admin', { executionTarget: 'sandbox' });
+    apps.push(harness.app);
+    harness.repository.replaceConfiguration({
+      ...configuration,
+      updatedBy: { type: 'human', userId: 'operator-1' },
+    });
+    const enabled = await harness.app.inject({
+      method: 'POST',
+      url: '/podsitter/enable',
+      headers,
+    });
+    expect(enabled.statusCode).toBe(400);
+    expect(enabled.json()).toMatchObject({ error: 'PODSITTER_IMAGE_REQUIRED' });
+  });
+
+  it('accepts sandbox configuration with an immutable ACR image', async () => {
+    const harness = await setup('admin', {
+      executionTarget: 'sandbox',
+      hostedImage: 'ewiautopodacr.azurecr.io/autopod/system-decision:95fe98e6',
+    });
+    apps.push(harness.app);
+    const configured = await harness.app.inject({
+      method: 'PUT',
+      url: '/podsitter/config',
+      headers,
+      payload: configuration,
+    });
+    expect(configured.statusCode).toBe(200);
+  });
+
+  it('allows an authenticated viewer to check, probe, and read paginated history', async () => {
+    const harness = await setup('viewer');
     apps.push(harness.app);
     await harness.app.inject({
       method: 'PUT',

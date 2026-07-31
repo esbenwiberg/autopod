@@ -130,9 +130,8 @@ public final class PodsitterStore {
             provider.policy.authorization == "supported"
       else { return [] }
     }
-    return RuntimeModelOptions.options(
+    return RuntimeModelOptions.defaultOptions(
       for: runtime,
-      role: .defaultModel,
       currentValue: selectedModel,
       catalog: catalog,
       providerId: account.provider
@@ -259,8 +258,8 @@ public final class PodsitterStore {
     if !compatibleRuntimes.contains(selectedRuntime) {
       selectedRuntime = compatibleRuntimes.first ?? .pi
     }
-    if !compatibleModels.contains(where: { $0.id == selectedModel }) {
-      selectedModel = compatibleModels.first?.id ?? ""
+    if !compatibleModels.contains(where: { $0.value == selectedModel }) {
+      selectedModel = compatibleModels.first?.value ?? ""
     }
   }
 

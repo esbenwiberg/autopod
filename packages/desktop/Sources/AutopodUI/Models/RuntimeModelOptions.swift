@@ -37,7 +37,7 @@ struct RuntimeModelPrice: Hashable, Sendable {
     }
 }
 
-public enum RuntimeModelRole: Sendable {
+enum RuntimeModelRole: Sendable {
     case defaultModel
     case reviewerModel
 }
@@ -183,7 +183,22 @@ public enum RuntimeModelOptions {
         "gpt-5.6-luna": "GPT-5.6 Luna",
     ]
 
-    public static func options(
+    public static func defaultOptions(
+        for runtime: RuntimeType,
+        currentValue: String? = nil,
+        catalog: ProviderCatalogResponse? = nil,
+        providerId: String? = nil
+    ) -> [RuntimeModelOption] {
+        options(
+            for: runtime,
+            role: .defaultModel,
+            currentValue: currentValue,
+            catalog: catalog,
+            providerId: providerId
+        )
+    }
+
+    static func options(
         for runtime: RuntimeType,
         role: RuntimeModelRole,
         currentValue: String? = nil,
@@ -194,17 +209,16 @@ public enum RuntimeModelOptions {
         if runtime == .pi, let catalog, let providerId,
            let provider = catalog.provider(id: providerId),
            provider.implementation.kind == "generic-pi-api" {
-            if provider.policy.runnable, provider.policy.authorization == "supported" {
-                options = catalog.models
-                    .filter {
-                        $0.providerId == providerId
-                            && provider.modelIds.contains($0.id)
-                    }
-                    .filter { $0.lifecycle == "active" }
-                    .map { RuntimeModelOption(value: $0.id, label: $0.displayName) }
-            } else {
-                options = []
+            guard provider.policy.runnable, provider.policy.authorization == "supported" else {
+                return []
             }
+            options = catalog.models
+                .filter {
+                    $0.providerId == providerId
+                        && provider.modelIds.contains($0.id)
+                }
+                .filter { $0.lifecycle == "active" }
+                .map { RuntimeModelOption(value: $0.id, label: $0.displayName) }
         }
         guard let currentValue, !currentValue.isEmpty else { return options }
 

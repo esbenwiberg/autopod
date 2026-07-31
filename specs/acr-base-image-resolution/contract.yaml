@@ -1,0 +1,89 @@
+contract_version: 1
+title: "Publish and resolve ACR base images durably"
+depends_on: []
+scenarios:
+  - id: acr-base-is-qualified-and-pinned
+    given:
+      - "an ACR-backed warm-image build uses a profile whose concrete template base exists in the configured registry"
+      - "the registry resolves that base tag to a manifest digest"
+    when:
+      - "ImageBuilder prepares and builds the profile warm image"
+    then:
+      - "the exact fully qualified digest reference is pulled with ACR authentication before the Docker build"
+      - "the generated Dockerfile uses the same fully qualified digest reference in FROM"
+      - "the profile warm-image build remains targeted at linux/amd64"
+  - id: acr-digest-references-round-trip
+    given:
+      - "an ACR image reference uses repo@sha256:digest syntax"
+    when:
+      - "AcrClient qualifies, resolves, or pulls the reference"
+    then:
+      - "the registry, repository, and digest remain intact"
+      - "the digest colon is not misinterpreted as a tag separator"
+      - "the authenticated Docker pull uses the exact digest reference"
+  - id: unresolved-acr-base-fails-actionably
+    given:
+      - "an ACR-backed warm-image build cannot resolve or pull its template base because it is missing or inaccessible"
+    when:
+      - "ImageBuilder prepares the profile warm image"
+    then:
+      - "the profile-image Docker build does not start"
+      - "the error identifies the profile template and qualified ACR base reference"
+      - "the builder does not fall back to an unqualified public-registry pull"
+      - "authentication and registry-access causes are not silently relabeled as a missing image"
+  - id: local-base-behavior-is-preserved
+    given:
+      - "ImageBuilder is configured without an ACR client"
+    when:
+      - "it builds a local profile warm image"
+    then:
+      - "the Dockerfile uses the existing local Autopod base reference"
+      - "no ACR resolution or pull is attempted"
+      - "the resulting profile warm-image tag remains local"
+  - id: publication-plan-covers-all-base-templates
+    given:
+      - "the repository contains concrete templates/base/Dockerfile.* base-image definitions"
+      - "an operator supplies a configurable ACR registry"
+    when:
+      - "the base-image publication utility runs in side-effect-free dry-run mode for all templates"
+    then:
+      - "every concrete base Dockerfile appears exactly once"
+      - "each image maps to the established autopod-<template> repository"
+      - "the plan includes Linux AMD64 publication and manifest verification"
+      - "the plan includes both an immutable source-revision tag and latest"
+      - "no Azure, registry, or Docker mutation occurs"
+required_facts:
+  - id: fact-acr-base-build-is-digest-pinned
+    proves:
+      - acr-base-is-qualified-and-pinned
+      - unresolved-acr-base-fails-actionably
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/images/image-builder.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- image-builder.test.ts --testNamePattern "acr-base-is-qualified-and-pinned|unresolved-acr-base-fails-actionably"
+  - id: fact-acr-digest-reference-round-trip
+    proves:
+      - acr-digest-references-round-trip
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/images/acr-client.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- acr-client.test.ts --testNamePattern acr-digest-references-round-trip
+  - id: fact-local-base-compatibility
+    proves:
+      - local-base-behavior-is-preserved
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/images/image-builder.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- image-builder.test.ts --testNamePattern local-base-behavior-is-preserved
+  - id: fact-publication-plan-is-complete-and-dry
+    proves:
+      - publication-plan-covers-all-base-templates
+    kind: custom-command
+    artifact:
+      path: scripts/publish-base-images.test.mjs
+      change: create
+    command: node --test scripts/publish-base-images.test.mjs
+human_review: []

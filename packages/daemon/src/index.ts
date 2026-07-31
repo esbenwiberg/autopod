@@ -81,7 +81,10 @@ import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-rep
 import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
 import { createScheduledJobTemplateRepository } from './scheduled-jobs/scheduled-job-template-repository.js';
 import { createModelManager, createRepoScanner, createScanRepository } from './security/index.js';
-import { SystemDecisionRunner } from './system-sandbox/index.js';
+import {
+  SystemDecisionRunner,
+  resolveSystemDecisionExecutionTarget,
+} from './system-sandbox/index.js';
 import { capLargeStrings } from './util/log-sanitizer.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
@@ -624,6 +627,9 @@ const systemDecisionRunner = new SystemDecisionRunner({
   localImage: process.env.AUTOPOD_SYSTEM_DECISION_LOCAL_IMAGE,
   hostedImage: process.env.AUTOPOD_SYSTEM_DECISION_IMAGE,
 });
+const systemDecisionExecutionTarget = resolveSystemDecisionExecutionTarget(
+  Boolean(sandboxContainerManager),
+);
 const systemSandboxReaper = setInterval(
   () =>
     systemDecisionRunner
@@ -924,8 +930,7 @@ const podsitterService = createPodsitterService({
   actionExecutor: podsitterActionExecutor,
   eventBus,
   logger: logger.child({ component: 'podsitter' }),
-  executionTarget:
-    sandboxContainerManager && process.env.AUTOPOD_SYSTEM_DECISION_IMAGE ? 'sandbox' : 'local',
+  executionTarget: systemDecisionExecutionTarget,
   probeProvider: (configuration) => {
     const target = configuration.decisionTarget;
     if (!target) throw new Error('Podsitter provider probe requires a decision target');
@@ -939,8 +944,7 @@ const podsitterService = createPodsitterService({
       reasoningEffort: target.reasoningEffort,
       prompt: `Return exactly one PodsitterDecision v1 JSON object with attentionSignature "${signature}", action "no_action", empty arguments, a short reason, no evidenceRefs, confidence "high", empty remainingRisk, and stopCondition "probe complete".`,
       contractVersion: 1,
-      executionTarget:
-        sandboxContainerManager && process.env.AUTOPOD_SYSTEM_DECISION_IMAGE ? 'sandbox' : 'local',
+      executionTarget: systemDecisionExecutionTarget,
       timeoutMs: 5 * 60_000,
     });
   },
@@ -958,6 +962,7 @@ const app = await createServer({
   providerAccountStore,
   podsitterRepository: podsitterRepo,
   podsitterService,
+  systemDecisionExecutionTarget,
   systemDecisionHostedImage: process.env.AUTOPOD_SYSTEM_DECISION_IMAGE,
   worktreeManager,
   eventBus,

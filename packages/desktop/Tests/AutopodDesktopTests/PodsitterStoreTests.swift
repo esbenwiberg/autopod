@@ -150,9 +150,9 @@ private actor MockPodsitterAPI: PodsitterAPIClient {
   static let catalogJSON = """
   {"manifestVersion":1,"piCompatibility":{"packageName":"pi","packageVersion":"1","source":"pinned"},
   "providers":[{"id":"openai","displayName":"OpenAI","description":"OpenAI","icon":null,
-    "implementation":{"kind":"legacy","adapterId":null,"piProviderId":null},
+    "implementation":{"kind":"legacy","adapterId":"openai","piProviderId":null},
     "credentialOptions":[],"modelIds":[],"requiredHosts":[],
-    "policy":{"lifecycle":"stable","authorization":"supported","runnable":true,"caveats":[]}}],
+    "policy":{"lifecycle":"active","authorization":"supported","runnable":true,"caveats":[]}}],
   "models":[]}
   """
 
@@ -212,9 +212,8 @@ final class PodsitterStoreTests: XCTestCase {
     XCTAssertTrue(PodsitterStore.compatibleRuntimes(provider: "unknown").isEmpty)
   }
 
-  func testBuiltInOpenAIModelsWorkWithoutCatalogModels() async {
-    let api = MockPodsitterAPI()
-    let store = PodsitterStore(api: api)
+  func testBuiltInOpenAIModelsDoNotDependOnCatalogEntries() async {
+    let store = PodsitterStore(api: MockPodsitterAPI())
     await store.load()
 
     XCTAssertEqual(store.selectedRuntime, .codex)
@@ -226,18 +225,12 @@ final class PodsitterStoreTests: XCTestCase {
     store.selectedModel = ""
     store.selectAccount("openai-sitter")
     XCTAssertEqual(store.selectedModel, "auto")
-    XCTAssertTrue(store.targetIsValid)
-    XCTAssertTrue(store.canSave)
-  }
+    XCTAssertTrue(store.canEnable)
 
-  func testBuiltInModelSelectionRetainsCompatibleConfiguredValueOutsideBaseOptions() async {
-    let api = MockPodsitterAPI(configuredModel: "gpt-5.2-codex")
-    let store = PodsitterStore(api: api)
-    await store.load()
-
-    XCTAssertEqual(store.selectedModel, "gpt-5.2-codex")
-    XCTAssertTrue(store.compatibleModels.contains { $0.value == "gpt-5.2-codex" })
-    XCTAssertTrue(store.targetIsValid)
+    store.selectedModel = "gpt-private-deployment"
+    store.selectAccount("openai-sitter")
+    XCTAssertEqual(store.selectedModel, "gpt-private-deployment")
+    XCTAssertTrue(store.compatibleModels.contains { $0.value == "gpt-private-deployment" })
   }
 
   func testOperationalStatesRemainDistinct() async {
