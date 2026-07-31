@@ -52,7 +52,7 @@ async function setup(role: 'admin' | 'operator' | 'viewer' = 'admin') {
   const eventBus = createEventBus(createEventRepository(db), logger);
   podsitterRoutes(app, { repository, service, providerAccountStore, eventBus });
   await app.ready();
-  return { app, repository, reconcile, probe };
+  return { app, repository, providerAccountStore, eventBus, reconcile, probe };
 }
 
 const headers = { authorization: 'Bearer test' };
@@ -143,19 +143,87 @@ describe('Podsitter routes', () => {
     expect(history.json()).toEqual({ items: [], total: 0 });
   });
 
-  it('rejects incompatible dedicated targets', async () => {
+  it('accepts MAX with Claude and OpenRouter with Codex while rejecting cross-runtime targets', async () => {
     const harness = await setup();
     apps.push(harness.app);
-    const response = await harness.app.inject({
+    harness.providerAccountStore.create({ id: 'max-sitter', name: 'Max Sitter', provider: 'max' });
+    harness.providerAccountStore.updateCredentials('max-sitter', {
+      provider: 'max',
+      oauthToken: 'oauth-token',
+    });
+    harness.providerAccountStore.create({
+      id: 'openrouter-sitter',
+      name: 'OpenRouter Sitter',
+      provider: 'openrouter',
+    });
+    harness.providerAccountStore.updateCredentials('openrouter-sitter', {
+      provider: 'openrouter',
+      apiKey: 'api-key',
+    });
+
+    for (const decisionTarget of [
+      { providerAccountId: 'max-sitter', runtime: 'claude', model: 'opus' },
+      { providerAccountId: 'openrouter-sitter', runtime: 'codex', model: 'gpt-5' },
+    ]) {
+      const response = await harness.app.inject({
+        method: 'PUT',
+        url: '/podsitter/config',
+        headers,
+        payload: { ...configuration, decisionTarget },
+      });
+      expect(response.statusCode, JSON.stringify(decisionTarget)).toBe(200);
+    }
+
+    for (const decisionTarget of [
+      { providerAccountId: 'sitter', runtime: 'claude', model: 'opus' },
+      { providerAccountId: 'sitter', runtime: 'pi', model: 'gpt-5' },
+      { providerAccountId: 'max-sitter', runtime: 'pi', model: 'opus' },
+    ]) {
+      const response = await harness.app.inject({
+        method: 'PUT',
+        url: '/podsitter/config',
+        headers,
+        payload: { ...configuration, decisionTarget },
+      });
+      expect(response.statusCode, JSON.stringify(decisionTarget)).toBe(400);
+    }
+  });
+
+  it('keeps manual checks read-only while enabled outside a recurring window', async () => {
+    const harness = await setup('operator');
+    apps.push(harness.app);
+    const current = new Date();
+    const outsideCron = `${current.getUTCMinutes()} ${(current.getUTCHours() + 2) % 24} * * *`;
+    const events: unknown[] = [];
+    const unsubscribe = harness.eventBus.subscribe((event) => events.push(event));
+    const configured = await harness.app.inject({
       method: 'PUT',
       url: '/podsitter/config',
       headers,
       payload: {
         ...configuration,
-        decisionTarget: { providerAccountId: 'sitter', runtime: 'claude', model: 'opus' },
+        enabled: true,
+        activation: {
+          mode: 'recurring',
+          cronExpression: outsideCron,
+          durationMinutes: 1,
+          timeZone: 'UTC',
+        },
       },
     });
-    expect(response.statusCode).toBe(400);
+    expect(configured.statusCode).toBe(200);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'podsitter.activation_changed',
+        enabled: true,
+        active: false,
+        reason: 'outside_window',
+      }),
+    );
+
+    await harness.app.inject({ method: 'POST', url: '/podsitter/check', headers });
+    expect(harness.reconcile).toHaveBeenLastCalledWith({ readOnly: true });
+    unsubscribe();
   });
 
   it('looks up decision details directly beyond the history page', async () => {

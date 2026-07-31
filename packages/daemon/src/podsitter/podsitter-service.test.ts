@@ -445,6 +445,54 @@ describe('PodsitterService', () => {
     expect(events).toEqual(['expired']);
   });
 
+  it('does not auto-probe a limited provider after authorization expires', async () => {
+    const harness = setup();
+    let clock = NOW;
+    const limited = {
+      ok: false as const,
+      kind: 'provider' as const,
+      failure: {
+        category: 'transient' as const,
+        definitive: false,
+        sanitizedMessage: 'rate limited',
+        retryAfter: null,
+      },
+      cleanup: 'clean' as const,
+    };
+    const run = vi.fn(async () => limited);
+    const probe = vi.fn(async () => ({
+      ok: true as const,
+      decision: harness.decision(),
+      telemetry: {},
+      cleanup: 'clean' as const,
+    }));
+    const sitter = service(harness, run, { now: () => clock, probeProvider: probe });
+    await sitter.reconcile();
+
+    const current = harness.repository.getConfiguration();
+    if (!current) throw new Error('missing configuration');
+    harness.repository.replaceConfiguration(
+      {
+        enabled: true,
+        activation: current.activation,
+        authorizedUntil: new Date(NOW.getTime() + 30_000).toISOString(),
+        profileScope: current.profileScope,
+        decisionTarget: current.decisionTarget,
+        budgets: current.budgets,
+        updatedBy: { type: 'human', userId: 'operator' },
+      },
+      NOW.toISOString(),
+    );
+    clock = new Date(NOW.getTime() + 2 * 60_000);
+
+    await sitter.reconcile();
+
+    expect(probe).not.toHaveBeenCalled();
+    expect(harness.repository.getProviderState('sitter-account')).toMatchObject({
+      status: 'rate_limited',
+    });
+  });
+
   it('releases attention when the provider probe lease is busy', async () => {
     const harness = setup();
     harness.repository.initializeProviderState('sitter-account', NOW.toISOString());

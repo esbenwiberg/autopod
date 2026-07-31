@@ -27,6 +27,7 @@ Verify every item before going live. Items marked **REQUIRED** will prevent the 
 | Variable | Recommended value | Notes |
 |---|---|---|
 | `AUTOPOD_FAIL_OPEN_FIREWALL` | _unset_ | **Leave unset in production.** Fail-closed firewall handling is the default for `deny-all`/`restricted` pods: a firewall setup failure aborts the spawn instead of running with open egress. Setting this to `1` opts out and is logged at `error` level. Only useful on dev hosts without iptables. |
+| `AUTOPOD_SYSTEM_DECISION_IMAGE` | Immutable ACR tag or digest | Required before enabling daemon-native Podsitter on a hosted daemon. Build and push with `SYSTEM_DECISION_IMAGE=<acr>/<image>:<tag> PUSH_SYSTEM_DECISION_IMAGE=1 scripts/build-system-decision-image.sh`. The image is repo-free and runs only the configured dedicated provider account. |
 | `LOG_LEVEL` | `warn` or `info` | `debug` logs raw request bodies — avoid in production. |
 | `MAX_CONCURRENCY` | ≤ number of CPU cores | Prevents resource exhaustion. Default is 3. |
 | `TEAMS_WEBHOOK_URL` | Your Teams channel webhook | Enables pod failure notifications. |

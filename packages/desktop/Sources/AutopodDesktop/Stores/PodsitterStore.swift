@@ -253,17 +253,12 @@ public final class PodsitterStore {
   }
 
   public static func compatibleRuntimes(provider: String) -> [PodsitterRuntime] {
-    var runtimes: [PodsitterRuntime] = [.pi]
-    if ["anthropic", "bedrock", "vertex", "foundry"].contains(provider) {
-      runtimes.insert(.claude, at: 0)
-    }
-    if ["openai", "foundry"].contains(provider) {
-      runtimes.insert(.codex, at: 0)
-    }
-    if provider == "copilot" {
-      runtimes.insert(.copilot, at: 0)
-    }
-    return runtimes
+    if ["anthropic", "max"].contains(provider) { return [.claude] }
+    if ["openai", "openrouter"].contains(provider) { return [.codex] }
+    if provider == "foundry" { return [.claude, .codex] }
+    if provider == "copilot" { return [.copilot] }
+    if provider == "pi" { return [.pi] }
+    return []
   }
 
   public static func isValidFiveFieldCron(_ expression: String) -> Bool {

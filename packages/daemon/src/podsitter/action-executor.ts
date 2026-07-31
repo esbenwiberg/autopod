@@ -290,7 +290,11 @@ export class PodsitterActionExecutor {
         await this.operations.report(podId, decision.arguments.message, actor);
         return;
       case 'approve':
-        await this.podManager.approveSession(podId, { actor, reason: decision.reason });
+        await this.podManager.approveSession(podId, {
+          actor,
+          reason: decision.reason,
+          automation: true,
+        });
         return;
       case 'reject':
         await this.podManager.rejectSession(podId, decision.arguments.message, actor);

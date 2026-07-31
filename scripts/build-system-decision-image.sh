@@ -5,7 +5,7 @@ image_ref="${SYSTEM_DECISION_IMAGE:-autopod-system-decision:local}"
 dockerfile="templates/system/Dockerfile.decision"
 
 if [[ "${1:-}" == "--check" ]]; then
-  grep -q '^FROM node:22.18.0-slim$' "$dockerfile"
+  grep -q '^FROM node:22.19.0-slim$' "$dockerfile"
   grep -q '@anthropic-ai/claude-code@${CLAUDE_VERSION}' "$dockerfile"
   grep -q '@openai/codex@${CODEX_VERSION}' "$dockerfile"
   grep -q '@github/copilot@${COPILOT_VERSION}' "$dockerfile"

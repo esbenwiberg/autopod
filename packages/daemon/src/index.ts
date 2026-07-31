@@ -910,6 +910,10 @@ const podsitterEvidenceProvider = createDaemonPodsitterEvidenceProvider({
   escalationRepo,
   providerAttemptRepo,
   repository: podsitterRepo,
+  containerManagerFactory,
+  profileStore,
+  worktreeManager,
+  logger: logger.child({ component: 'podsitter-evidence' }),
 });
 const podsitterService = createPodsitterService({
   repository: podsitterRepo,

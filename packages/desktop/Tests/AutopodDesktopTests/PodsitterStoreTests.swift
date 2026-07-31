@@ -184,6 +184,17 @@ final class PodsitterStoreTests: XCTestCase {
     XCTAssertFalse(store.targetIsValid, "OpenAI account must not run the Claude runtime")
   }
 
+  func testProviderRuntimeCompatibilityMatchesDaemonAccounts() {
+    XCTAssertEqual(PodsitterStore.compatibleRuntimes(provider: "anthropic"), [.claude])
+    XCTAssertEqual(PodsitterStore.compatibleRuntimes(provider: "max"), [.claude])
+    XCTAssertEqual(PodsitterStore.compatibleRuntimes(provider: "openai"), [.codex])
+    XCTAssertEqual(PodsitterStore.compatibleRuntimes(provider: "openrouter"), [.codex])
+    XCTAssertEqual(PodsitterStore.compatibleRuntimes(provider: "foundry"), [.claude, .codex])
+    XCTAssertEqual(PodsitterStore.compatibleRuntimes(provider: "copilot"), [.copilot])
+    XCTAssertEqual(PodsitterStore.compatibleRuntimes(provider: "pi"), [.pi])
+    XCTAssertTrue(PodsitterStore.compatibleRuntimes(provider: "unknown").isEmpty)
+  }
+
   func testOperationalStatesRemainDistinct() async {
     let limitedAPI = MockPodsitterAPI(providerStatus: "quota_exhausted", active: false)
     let limited = PodsitterStore(api: limitedAPI)

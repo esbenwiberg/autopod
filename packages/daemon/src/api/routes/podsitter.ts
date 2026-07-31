@@ -7,9 +7,11 @@ import {
 } from '@autopod/shared';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { EventBus } from '../../pods/event-bus.js';
+import { evaluatePodsitterActivation } from '../../podsitter/activation.js';
 import type { PodsitterRepository } from '../../podsitter/podsitter-repository.js';
 import type { PodsitterService } from '../../podsitter/podsitter-service.js';
 import type { ProviderAccountStore } from '../../provider-accounts/provider-account-store.js';
+import { isProviderAccountRuntimeCompatible } from '../../providers/env-builder.js';
 
 export interface PodsitterRouteDependencies {
   repository: PodsitterRepository;
@@ -62,12 +64,7 @@ function assertTarget(
     );
   }
   const provider = PROVIDER_CATALOG.providers.find((item) => item.id === account.provider);
-  const compatible =
-    target.runtime === 'pi' ||
-    (target.runtime === 'claude' &&
-      ['anthropic', 'bedrock', 'vertex', 'foundry'].includes(account.provider)) ||
-    (target.runtime === 'codex' && ['openai', 'foundry'].includes(account.provider)) ||
-    (target.runtime === 'copilot' && account.provider === 'copilot');
+  const compatible = isProviderAccountRuntimeCompatible(account, account.provider, target.runtime);
   if (!provider || !compatible) {
     throw new AutopodError(
       `Runtime "${target.runtime}" is incompatible with dedicated provider "${account.provider}"`,
@@ -99,12 +96,13 @@ export function podsitterRoutes(app: FastifyInstance, deps: PodsitterRouteDepend
       ...parsed,
       updatedBy: actor(request),
     });
+    const activation = evaluatePodsitterActivation(configuration, new Date());
     deps.eventBus.emit({
       type: 'podsitter.activation_changed',
       timestamp: new Date().toISOString(),
       enabled: configuration.enabled,
-      active: configuration.enabled,
-      reason: configuration.enabled ? 'enabled' : 'disabled',
+      active: activation.active,
+      reason: activation.reason,
       generation: configuration.generation,
       actor: actor(request),
     });
@@ -124,12 +122,13 @@ export function podsitterRoutes(app: FastifyInstance, deps: PodsitterRouteDepend
         body.authorizedUntil === undefined ? current.authorizedUntil : body.authorizedUntil,
       updatedBy: actor(request),
     });
+    const activation = evaluatePodsitterActivation(configuration, new Date());
     deps.eventBus.emit({
       type: 'podsitter.activation_changed',
       timestamp: new Date().toISOString(),
       enabled: true,
-      active: true,
-      reason: 'enabled',
+      active: activation.active,
+      reason: activation.reason,
       generation: configuration.generation,
       actor: actor(request),
     });
@@ -161,7 +160,8 @@ export function podsitterRoutes(app: FastifyInstance, deps: PodsitterRouteDepend
   app.post('/podsitter/check', async (request) => {
     requireOperator(request);
     const current = deps.repository.getConfiguration();
-    return deps.service.reconcile({ readOnly: !current?.enabled });
+    const active = current ? evaluatePodsitterActivation(current, new Date()).active : false;
+    return deps.service.reconcile({ readOnly: !active });
   });
 
   app.post('/podsitter/provider/probe', async (request) => {

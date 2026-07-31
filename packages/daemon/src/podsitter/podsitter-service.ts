@@ -558,16 +558,6 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
     const configuration = deps.repository.getConfiguration();
     const queued = await recordCandidates(configuration);
     if (options.readOnly || !configuration) return { queued, processed: 0 };
-    const target = configuration.decisionTarget;
-    const provider = target ? deps.repository.getProviderState(target.providerAccountId) : null;
-    if (
-      provider?.status !== 'available' &&
-      provider?.retryAt &&
-      Date.parse(provider.retryAt) <= now().getTime() &&
-      deps.probeProvider
-    ) {
-      await probeInternal();
-    }
     const activation = evaluatePodsitterActivation(configuration, now());
     const observation = `${configuration.generation}:${activation.reason}:${activation.windowId ?? ''}`;
     if (activation.reason === 'expired' && activationObservation !== observation) {
@@ -583,6 +573,16 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
     }
     activationObservation = observation;
     if (!activation.active) return { queued, processed: 0 };
+    const target = configuration.decisionTarget;
+    const provider = target ? deps.repository.getProviderState(target.providerAccountId) : null;
+    if (
+      provider?.status !== 'available' &&
+      provider?.retryAt &&
+      Date.parse(provider.retryAt) <= now().getTime() &&
+      deps.probeProvider
+    ) {
+      await probeInternal();
+    }
     let processed = 0;
     for (const attention of deps.repository.listPendingAttention()) {
       try {
@@ -671,7 +671,7 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
         }
         const configuration = deps.repository.getConfiguration();
         const target = configuration?.decisionTarget;
-        if (target) {
+        if (target && configuration && evaluatePodsitterActivation(configuration, now()).active) {
           const state = deps.repository.getProviderState(target.providerAccountId);
           if (state?.retryAt && Date.parse(state.retryAt) <= now().getTime()) {
             await probeInternal();

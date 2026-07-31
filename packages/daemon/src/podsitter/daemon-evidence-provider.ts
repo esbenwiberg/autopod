@@ -1,8 +1,12 @@
 import type { Pod, PodStatus, PodsitterConfiguration } from '@autopod/shared';
+import type { Logger } from 'pino';
+import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import type { EscalationRepository } from '../pods/escalation-repository.js';
 import type { EventRepository } from '../pods/event-repository.js';
-import type { PodManager } from '../pods/pod-manager.js';
+import { computePodDiff, computePodUntrackedPreview } from '../pods/pod-diff-fetcher.js';
+import type { ContainerManagerFactory, PodManager } from '../pods/pod-manager.js';
 import type { ProviderAttemptRepository } from '../pods/provider-attempt-repository.js';
+import { type ProfileStore, selectGitPat } from '../profiles/index.js';
 import { buildPodsitterEvidence, podsitterAttentionSignature } from './evidence-builder.js';
 import type { PodsitterRepository } from './podsitter-repository.js';
 import type { PodsitterCandidate, PodsitterEvidenceProvider } from './podsitter-service.js';
@@ -17,6 +21,46 @@ const ATTENTION_STATUSES = new Set<PodStatus>([
 ]);
 const STALE_STATUSES = new Set<PodStatus>(['queued', 'provisioning', 'running', 'validating']);
 const STALE_MS = 15 * 60_000;
+const MAX_DIFF_BYTES = 24_000;
+const MAX_TOUCHED_FILES = 8;
+const MAX_FILE_EXCERPT_BYTES = 1_200;
+
+function boundUtf8(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value, 'utf8') <= maxBytes) return value;
+  const suffix = '\n[truncated]';
+  return `${Buffer.from(value, 'utf8')
+    .subarray(0, Math.max(0, maxBytes - Buffer.byteLength(suffix)))
+    .toString('utf8')}${suffix}`;
+}
+
+function touchedFileExcerpts(diff: string): Array<{ path: string; excerpt: string }> {
+  return diff
+    .split(/^diff --git /m)
+    .filter(Boolean)
+    .slice(0, MAX_TOUCHED_FILES)
+    .flatMap((chunk) => {
+      const lines = chunk.split('\n');
+      const path =
+        lines
+          .find((line) => line.startsWith('+++ b/'))
+          ?.slice(6)
+          .trim() ??
+        lines
+          .find((line) => line.startsWith('--- a/'))
+          ?.slice(6)
+          .trim();
+      if (!path) return [];
+      const excerpt = lines
+        .filter(
+          (line) =>
+            line.startsWith('@@') ||
+            (line.startsWith('+') && !line.startsWith('+++')) ||
+            (line.startsWith('-') && !line.startsWith('---')),
+        )
+        .join('\n');
+      return [{ path, excerpt: boundUtf8(excerpt, MAX_FILE_EXCERPT_BYTES) }];
+    });
+}
 
 export function createDaemonPodsitterEvidenceProvider(deps: {
   podManager: PodManager;
@@ -24,12 +68,78 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
   escalationRepo: EscalationRepository;
   providerAttemptRepo: ProviderAttemptRepository;
   repository: PodsitterRepository;
+  containerManagerFactory: ContainerManagerFactory;
+  profileStore: ProfileStore;
+  worktreeManager: WorktreeManager;
+  logger: Logger;
 }): PodsitterEvidenceProvider {
-  function buildCandidate(
+  async function readDiff(
+    pod: Pod,
+  ): Promise<{ diff: string; source: string; unavailable: boolean }> {
+    const profile = (() => {
+      try {
+        return deps.profileStore.get(pod.profileName);
+      } catch {
+        return null;
+      }
+    })();
+    const defaultBranch = pod.baseBranch ?? profile?.defaultBranch ?? 'main';
+    const containerManager = pod.containerId
+      ? deps.containerManagerFactory.get(pod.executionTarget)
+      : undefined;
+    try {
+      const podSlice = {
+        containerId: pod.containerId ?? null,
+        worktreePath: pod.worktreePath ?? null,
+        startCommitSha: pod.startCommitSha ?? null,
+      };
+      const [tracked, untracked] = await Promise.all([
+        computePodDiff({
+          pod: podSlice,
+          defaultBranch,
+          containerManager,
+          worktreeManager: deps.worktreeManager,
+          maxLength: MAX_DIFF_BYTES,
+          logger: deps.logger,
+        }),
+        computePodUntrackedPreview({
+          pod: podSlice,
+          defaultBranch,
+          containerManager,
+          worktreeManager: deps.worktreeManager,
+          logger: deps.logger,
+        }),
+      ]);
+      let diff = [tracked.diff, ...untracked.files.map((file) => file.diff)]
+        .filter(Boolean)
+        .join('\n');
+      let source = tracked.source !== 'none' ? tracked.source : untracked.source;
+      if (source === 'none' && profile?.repoUrl && deps.worktreeManager.getBranchDiff) {
+        diff = await deps.worktreeManager.getBranchDiff({
+          repoUrl: profile.repoUrl,
+          branch: pod.branch,
+          baseBranch: defaultBranch,
+          pat: selectGitPat(profile),
+          startCommitSha: pod.startCommitSha,
+        });
+        if (diff.trim()) source = 'worktree';
+      }
+      return {
+        diff: boundUtf8(diff, MAX_DIFF_BYTES),
+        source,
+        unavailable: source === 'none',
+      };
+    } catch (error) {
+      deps.logger.warn({ err: error, podId: pod.id }, 'Podsitter diff evidence unavailable');
+      return { diff: '', source: 'none', unavailable: true };
+    }
+  }
+
+  async function buildCandidate(
     podId: string,
     now: Date,
     configuration: PodsitterConfiguration | null,
-  ): PodsitterCandidate | null {
+  ): Promise<PodsitterCandidate | null> {
     let pod: Pod;
     try {
       pod = deps.podManager.getSession(podId);
@@ -50,6 +160,8 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
     const validationHistory = deps.podManager.getValidationHistory(pod.id);
     const providerAttempts = deps.providerAttemptRepo.list(pod.id);
     const recentEvents = deps.eventRepo.getForSession(pod.id, { latest: 30 });
+    const diff = await readDiff(pod);
+    const excerpts = touchedFileExcerpts(diff.diff);
     const seriesGraph = pod.seriesId
       ? deps.podManager
           .listSessions()
@@ -64,6 +176,7 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
       status: pod.status,
       attempt: pod.validationAttempts,
       failureReason: pod.failureReason ?? null,
+      mergeBlockReason: pod.mergeBlockReason ?? null,
       worktreeCompromised: pod.worktreeCompromised ?? false,
       readiness: pod.readinessReview ?? null,
       validation: pod.lastValidationResult ?? null,
@@ -78,7 +191,7 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
       podId: pod.id,
       generatedAt,
       sources: [
-        { ref: 'pod:state', value: policyState, maxBytes: 16_000 },
+        { ref: 'pod:state', value: policyState, maxBytes: 12_000 },
         {
           ref: 'pod:task-contract',
           value: {
@@ -88,14 +201,6 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
             seriesDescription: pod.seriesDescription,
             seriesDesign: pod.seriesDesign,
           },
-          maxBytes: 20_000,
-        },
-        { ref: 'escalations:recent', value: escalations.slice(-20), maxBytes: 12_000 },
-        { ref: 'validation:history', value: validationHistory.slice(-5), maxBytes: 20_000 },
-        { ref: 'provider:attempts', value: providerAttempts.slice(-10), maxBytes: 8_000 },
-        {
-          ref: 'events:recent',
-          value: recentEvents,
           maxBytes: 16_000,
         },
         {
@@ -105,8 +210,24 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
               event.type === 'pod.agent_activity' ||
               event.type === 'pod.validation_phase_completed',
           ),
-          maxBytes: 12_000,
+          maxBytes: 10_000,
         },
+        {
+          ref: 'diff:bounded',
+          value: { source: diff.source, diff: diff.diff },
+          maxBytes: 25_000,
+          unavailable: diff.unavailable,
+        },
+        {
+          ref: 'touched-files:excerpts',
+          value: excerpts,
+          maxBytes: 10_000,
+          unavailable: diff.unavailable,
+        },
+        { ref: 'escalations:recent', value: escalations.slice(-20), maxBytes: 8_000 },
+        { ref: 'validation:history', value: validationHistory.slice(-5), maxBytes: 12_000 },
+        { ref: 'provider:attempts', value: providerAttempts.slice(-10), maxBytes: 6_000 },
+        { ref: 'events:recent', value: recentEvents, maxBytes: 8_000 },
         {
           ref: 'worktree:state',
           value: {
@@ -117,26 +238,11 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
           },
           maxBytes: 4_000,
         },
-        { ref: 'series:graph', value: seriesGraph, maxBytes: 8_000 },
-        {
-          ref: 'diff:bounded',
-          value: { unavailable: true, reason: 'No safe diff reader is available for this backend' },
-          maxBytes: 1_000,
-          unavailable: true,
-        },
-        {
-          ref: 'touched-files:excerpts',
-          value: {
-            unavailable: true,
-            reason: 'No safe touched-file excerpt reader is available for this backend',
-          },
-          maxBytes: 1_000,
-          unavailable: true,
-        },
+        { ref: 'series:graph', value: seriesGraph, maxBytes: 6_000 },
         {
           ref: 'podsitter:prior-decisions',
           value: deps.repository.listDecisions({ podId: pod.id, limit: 10 }).items,
-          maxBytes: 12_000,
+          maxBytes: 8_000,
         },
       ],
     });
@@ -146,6 +252,7 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
       pod.readinessReview?.status === 'ready' &&
       validationPass &&
       !pod.worktreeCompromised &&
+      !pod.mergeBlockReason &&
       pendingEscalations.length === 0 &&
       !pod.failureReason;
     return {
@@ -159,10 +266,10 @@ export function createDaemonPodsitterEvidenceProvider(deps: {
 
   return {
     async listCandidates(now, configuration) {
-      return deps.podManager
-        .listSessions()
-        .map((pod) => buildCandidate(pod.id, now, configuration))
-        .filter((candidate): candidate is PodsitterCandidate => candidate !== null);
+      const candidates = await Promise.all(
+        deps.podManager.listSessions().map((pod) => buildCandidate(pod.id, now, configuration)),
+      );
+      return candidates.filter((candidate): candidate is PodsitterCandidate => candidate !== null);
     },
     async getCandidate(podId, now, configuration) {
       return buildCandidate(podId, now, configuration);

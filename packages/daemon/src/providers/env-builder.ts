@@ -256,30 +256,35 @@ function assertDedicatedCredentialsPresent(
   }
 }
 
+export function isProviderAccountRuntimeCompatible(
+  account: ProviderAccount,
+  provider: NonNullable<ProviderAuthResolution['provider']>,
+  runtime: RuntimeType,
+): boolean {
+  if (provider === 'foundry' && account.credentials?.provider === 'foundry') {
+    const surface = account.credentials.apiSurface ?? 'anthropic';
+    return runtime === (surface === 'openai' ? 'codex' : 'claude');
+  }
+  return (
+    (runtime === 'claude' && ['anthropic', 'max'].includes(provider)) ||
+    (runtime === 'codex' && ['openai', 'openrouter'].includes(provider)) ||
+    (runtime === 'copilot' && provider === 'copilot') ||
+    (runtime === 'pi' && provider === 'pi')
+  );
+}
+
 function assertAccountRuntimeCompatible(
   account: ProviderAccount,
   provider: NonNullable<ProviderAuthResolution['provider']>,
   runtime: RuntimeType,
 ): void {
-  if (provider === 'foundry' && account.credentials?.provider === 'foundry') {
-    const surface = account.credentials.apiSurface ?? 'anthropic';
-    const expectedRuntime = surface === 'openai' ? 'codex' : 'claude';
-    if (runtime !== expectedRuntime) {
-      throw new AutopodError(
-        `Provider account "${account.name}" uses the ${surface} Foundry API surface`,
-        'PROVIDER_ACCOUNT_RUNTIME_MISMATCH',
-        400,
-      );
-    }
-  }
-  const compatible =
-    (runtime === 'claude' && ['anthropic', 'max', 'foundry'].includes(provider)) ||
-    (runtime === 'codex' && ['openai', 'openrouter', 'foundry'].includes(provider)) ||
-    (runtime === 'copilot' && provider === 'copilot') ||
-    (runtime === 'pi' && provider === 'pi');
-  if (!compatible) {
+  if (!isProviderAccountRuntimeCompatible(account, provider, runtime)) {
+    const detail =
+      provider === 'foundry' && account.credentials?.provider === 'foundry'
+        ? ` uses the ${account.credentials.apiSurface ?? 'anthropic'} Foundry API surface`
+        : ` is incompatible with the ${runtime} runtime`;
     throw new AutopodError(
-      `Provider account "${account.name}" is incompatible with the ${runtime} runtime`,
+      `Provider account "${account.name}"${detail}`,
       'PROVIDER_ACCOUNT_RUNTIME_MISMATCH',
       400,
     );

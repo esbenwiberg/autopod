@@ -121,6 +121,7 @@ function decision<Action extends PodsitterAction>(
 
 function harness(reserved = true, rejectedOperation?: string) {
   const calls: string[] = [];
+  const operationArguments: Record<string, unknown[][]> = {};
   const currentPod = {
     id: 'pod-1',
     status: 'failed',
@@ -147,8 +148,12 @@ function harness(reserved = true, rejectedOperation?: string) {
     {
       get(target, property, receiver) {
         if (Reflect.has(target as object, property)) return Reflect.get(target as object, property);
-        return (..._args: unknown[]) => {
-          calls.push(String(property));
+        return (...args: unknown[]) => {
+          const operation = String(property);
+          calls.push(operation);
+          const priorArguments = operationArguments[operation] ?? [];
+          priorArguments.push(args);
+          operationArguments[operation] = priorArguments;
           if (property === rejectedOperation) {
             throw new Error(`${String(property)} rejected the operation`);
           }
@@ -191,6 +196,7 @@ function harness(reserved = true, rejectedOperation?: string) {
   };
   return {
     calls,
+    operationArguments,
     manager,
     repository,
     operations,
@@ -329,6 +335,12 @@ describe('PodsitterActionExecutor', () => {
       );
       expect(h.repository.reserveAction, action).toHaveBeenCalledOnce();
       expect(h.repository.completeAction, action).toHaveBeenCalledOnce();
+      if (action === 'approve') {
+        expect(h.operationArguments.approveSession?.[0]?.[1]).toMatchObject({
+          actor,
+          automation: true,
+        });
+      }
       seen.add(action);
     }
     expect([...seen]).toEqual([...PODSITTER_ACTIONS]);
