@@ -9,6 +9,7 @@ import {
   readCredentials,
   writeCredentials,
 } from '../config/credential-store.js';
+import { deleteMsalCache } from './msal-cache.js';
 import { MsalClient } from './msal-client.js';
 
 /** Read the daemon's dev token written to ~/.autopod/dev-token on first run. */
@@ -39,7 +40,7 @@ export async function getToken(): Promise<string> {
   const devToken = readDevToken();
   if (devToken && shouldUseDevTokenForDaemonUrl(configStore.get('daemon'))) return devToken;
 
-  const creds = readCredentials();
+  const creds = readCredentials({ allowExpired: true });
   if (!creds) {
     throw new AuthError('Not authenticated. Run: ap login');
   }
@@ -107,6 +108,7 @@ export async function refresh(): Promise<AuthToken | null> {
 
 export function clear(): void {
   deleteCredentials();
+  deleteMsalCache();
 }
 
 export function getCurrentUser(): AuthToken | null {

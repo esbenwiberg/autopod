@@ -138,7 +138,7 @@ describe('auth commands', () => {
 
       expect(cap.exitCode).toBe(2);
       expect(cap.stdout.join('')).toBe('');
-      expect(cap.errors.join('\n')).toContain('Not authenticated. Run: ap login');
+      expect(cap.errors.join('\n')).toContain('Token expired and refresh failed. Run: ap login');
     });
   });
 });

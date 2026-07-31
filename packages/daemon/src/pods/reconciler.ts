@@ -8,22 +8,25 @@ export interface ReconcilerDependencies {
   podRepo: PodRepository;
   eventBus: EventBus;
   sandboxContainerManager: SandboxContainerManager;
+  preserveWorkspace: (podId: string) => Promise<void>;
   logger: Logger;
 }
 
 /**
  * Reconciles sandbox pods on daemon restart.
  *
- * Finds pods with status='running' and executionTarget='sandbox',
- * checks their sandbox state, and either reconnects or marks them failed.
+ * Finds active or parked pods with executionTarget='sandbox', checks their
+ * sandbox state, and preserves recoverable work without restarting the agent.
  */
 export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Promise<void> {
   const { podRepo, eventBus, logger } = deps;
 
-  // Find all running sandbox pods
-  const runningSessions = podRepo.list({ status: 'running' });
-  const sandboxSessions = runningSessions.filter(
-    (s) => s.executionTarget === 'sandbox' && s.containerId,
+  // Paused and awaiting-input pods can still contain workspace state that never
+  // reached the host before an earlier crash. Include them so deploying this
+  // recovery fix preserves already-parked sandboxes as well as newly interrupted runs.
+  const candidateStatuses = ['running', 'awaiting_input', 'paused'] as const;
+  const sandboxSessions = candidateStatuses.flatMap((status) =>
+    podRepo.list({ status }).filter((pod) => pod.executionTarget === 'sandbox' && pod.containerId),
   );
 
   if (sandboxSessions.length === 0) {
@@ -37,8 +40,11 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
     try {
       await reconcileSession(pod, deps);
     } catch (err) {
-      logger.error({ err, podId: pod.id }, 'Failed to reconcile sandbox pod');
-      markSessionFailed(pod, podRepo, eventBus, logger);
+      const reason = `Sandbox workspace preservation failed after daemon restart; the sandbox was retained for operator recovery: ${
+        err instanceof Error ? err.message : String(err)
+      }`;
+      logger.error({ err, podId: pod.id }, 'Failed to preserve sandbox pod during reconciliation');
+      parkSession(pod, 'failed', reason, podRepo, eventBus);
     }
   }
 }
@@ -52,18 +58,21 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
 
   switch (status) {
     case 'running': {
+      await deps.preserveWorkspace(pod.id);
       const reason =
-        'Sandbox is still running after daemon restart, but the agent stream cannot be reattached; operator action is required to inspect or recover the work before continuing.';
+        'Sandbox workspace was preserved after daemon restart, but the agent stream cannot be reattached; operator action is required before continuing.';
       logger.warn({ podId: pod.id, containerId }, reason);
       parkSession(pod, 'paused', reason, podRepo, eventBus);
       break;
     }
 
     case 'stopped': {
+      await sandboxContainerManager.start(containerId);
+      await deps.preserveWorkspace(pod.id);
       const reason =
-        'Sandbox stopped while the daemon was offline; agent completion was not observed, so validation and PR creation are blocked until the worktree is recovered or the pod is kicked.';
+        'Suspended sandbox was resumed and its workspace was preserved after daemon restart, but the agent stream cannot be reattached; operator action is required before continuing.';
       logger.warn({ podId: pod.id, containerId }, reason);
-      parkSession(pod, 'failed', reason, podRepo, eventBus);
+      parkSession(pod, 'paused', reason, podRepo, eventBus);
       break;
     }
 
@@ -86,7 +95,12 @@ function parkSession(
   const previousStatus = pod.status;
   podRepo.update(pod.id, {
     status,
-    pauseReason: status === 'paused' ? 'manual' : null,
+    pauseReason:
+      status === 'paused'
+        ? pod.status === 'paused'
+          ? (pod.pauseReason ?? 'manual')
+          : 'manual'
+        : null,
     lastCorrectionMessage: reason,
     ...(status === 'failed' ? { completedAt: new Date().toISOString() } : {}),
   });

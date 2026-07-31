@@ -87,7 +87,12 @@ export function registerAuthCommands(program: Command): void {
   program
     .command('whoami')
     .description('Show current authenticated user')
-    .action(() => {
+    .action(async () => {
+      try {
+        await getToken();
+      } catch {
+        // Fall through to the existing signed-out response.
+      }
       const user = getCurrentUser();
       if (!user) {
         console.log(chalk.dim('Not logged in. Run: ap login'));

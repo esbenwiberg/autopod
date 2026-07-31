@@ -9236,6 +9236,10 @@ describe('PodManager', () => {
           settled = true;
         });
 
+        // Workspace preservation now completes before destructive cleanup starts.
+        await waitForAssertion(() => {
+          expect(ctx.containerManager.kill).toHaveBeenCalledWith('sandbox-1');
+        });
         await vi.advanceTimersByTimeAsync(15_001);
         await Promise.resolve();
 
@@ -9308,6 +9312,70 @@ describe('PodManager', () => {
       expect(result.status).toBe('queued');
       expect(result.recoveryWorktreePath).toBe('/tmp/worktrees/test-branch');
       expect(ctx.enqueuedSessions).toContain(pod.id);
+    });
+
+    it('preserves sandbox workspace before forced rework cleanup', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/autopod/test-profile:latest',
+      });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve my work' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'sandbox-preserve',
+        worktreePath: '/tmp/worktrees/preserve',
+        codexSessionId: 'codex-preserve',
+      });
+
+      await manager.triggerValidation(pod.id, { force: true });
+
+      expect(ctx.containerManager.getStatus).toHaveBeenCalledWith('sandbox-preserve');
+      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalled();
+      expect(
+        ctx.containerManager.extractDirectoryFromContainer.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        ctx.containerManager.kill.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      );
+      expect(ctx.containerManager.kill).toHaveBeenCalledWith('sandbox-preserve');
+      expect(manager.getSession(pod.id).recoveryWorktreePath).toBe('/tmp/worktrees/preserve');
+    });
+
+    it('retains old sandbox when forced rework preservation fails', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/autopod/test-profile:latest',
+      });
+      vi.mocked(ctx.containerManager.getStatus).mockRejectedValueOnce(
+        new Error('sandbox status unavailable'),
+      );
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Do not lose my work' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'sandbox-retained',
+        worktreePath: '/tmp/worktrees/retained',
+        codexSessionId: 'codex-retained',
+      });
+      ctx.enqueuedSessions.length = 0;
+
+      await expect(manager.triggerValidation(pod.id, { force: true })).rejects.toMatchObject({
+        code: 'WORKSPACE_SYNC_FAILED',
+      });
+
+      expect(ctx.containerManager.kill).not.toHaveBeenCalledWith('sandbox-retained');
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: 'failed',
+        containerId: 'sandbox-retained',
+        worktreeCompromised: false,
+      });
+      expect(ctx.enqueuedSessions).not.toContain(pod.id);
     });
   });
 
@@ -10122,6 +10190,114 @@ describe('PodManager', () => {
       const reread = manager.getSession(root.id);
       expect(reread.fixPodId).toBe(fixPod?.id);
       expect(reread.prFixAttempts).toBe(1);
+    });
+
+    it('fresh canonical fix pod preserves provider binding through completion', async () => {
+      const ctx = createTestContext({ overall: 'pass' });
+      const attempts = createProviderAttemptRepository(ctx.db);
+      ctx.deps.providerAttemptRepo = attempts;
+      insertProviderAccount(ctx.db, 'anthropic-primary', 'anthropic', {
+        provider: 'anthropic',
+        apiKey: 'primary-key',
+      });
+      linkProfileToProviderAccount(ctx.db, 'test-profile', 'anthropic-primary');
+      ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
+
+      await manager.spawnFixSession(root.id, 'repair the PR');
+
+      const fixPod = ctx.podRepo.list({}).find((candidate) => candidate.linkedPodId === root.id);
+      if (!fixPod) throw new Error('fix pod missing');
+      expect(fixPod).toMatchObject({
+        providerAccountIdSnapshot: 'anthropic-primary',
+        providerIdSnapshot: 'anthropic',
+        runtime: root.runtime,
+        model: root.model,
+      });
+
+      ctx.fixFeedbackRepo.drain(root.id);
+      ctx.podRepo.update(fixPod.id, {
+        status: 'running',
+        containerId: 'fix-container',
+        worktreePath: '/tmp/worktree/abc',
+      });
+      const outcome = await manager.consumeAgentEvents(
+        fixPod.id,
+        (async function* () {
+          yield {
+            type: 'complete',
+            timestamp: '2026-07-30T18:30:00.000Z',
+            result: 'PR repair complete',
+          } as const;
+        })(),
+      );
+
+      expect(outcome).toBe('completed');
+      expect(attempts.list(fixPod.id).at(-1)).toMatchObject({
+        providerAccountId: 'anthropic-primary',
+        provider: 'anthropic',
+        runtime: root.runtime,
+        model: root.model,
+        outcome: 'completed',
+      });
+      await expect(manager.triggerValidation(fixPod.id)).resolves.toBeUndefined();
+      expect(manager.getSession(fixPod.id).status).not.toBe('failed');
+    });
+
+    it('recycled canonical fix pod repairs a null provider binding from its latest attempt', async () => {
+      const ctx = createTestContext();
+      const attempts = createProviderAttemptRepository(ctx.db);
+      ctx.deps.providerAttemptRepo = attempts;
+      insertProviderAccount(ctx.db, 'anthropic-primary', 'anthropic', {
+        provider: 'anthropic',
+        apiKey: 'primary-key',
+      });
+      linkProfileToProviderAccount(ctx.db, 'test-profile', 'anthropic-primary');
+      ctx.deps.providerAccountStore = createProviderAccountStore(ctx.db);
+      const manager = createPodManager(ctx.deps);
+      const root = mergePendingRoot(ctx, manager);
+
+      await manager.spawnFixSession(root.id, 'round one');
+      const fixPod = ctx.podRepo.list({}).find((candidate) => candidate.linkedPodId === root.id);
+      if (!fixPod) throw new Error('fix pod missing');
+      ctx.fixFeedbackRepo.drain(root.id);
+      attempts.open({
+        podId: fixPod.id,
+        provider: 'anthropic',
+        providerAccountId: 'anthropic-primary',
+        runtime: fixPod.runtime,
+        model: fixPod.model,
+        profileReference: `pod:${fixPod.id}@profile-snapshot#abcdef1`,
+        profileSnapshot: { name: 'test-profile', modelProvider: 'anthropic' },
+      });
+      attempts.close(fixPod.id, {
+        nativeSessionId: 'completed-fix-session',
+        outcome: 'completed',
+        inputTokens: 10,
+        outputTokens: 5,
+        costUsd: 0.1,
+      });
+      ctx.podRepo.update(fixPod.id, { status: 'complete' });
+      ctx.db
+        .prepare(
+          `UPDATE pods
+           SET provider_account_id_snapshot = NULL, provider_id_snapshot = NULL
+           WHERE id = ?`,
+        )
+        .run(fixPod.id);
+
+      await manager.spawnFixSession(root.id, 'round two');
+
+      const recycled = manager.getSession(fixPod.id);
+      expect(recycled).toMatchObject({
+        status: 'queued',
+        providerAccountIdSnapshot: 'anthropic-primary',
+        providerIdSnapshot: 'anthropic',
+        runtime: fixPod.runtime,
+        model: fixPod.model,
+      });
+      expect(() => manager.getReviewerConfig(recycled)).not.toThrow();
     });
 
     it('does not spawn a second fix pod while one is alive — just queues the message', async () => {
@@ -13183,6 +13359,34 @@ describe('worker startup diagnostics', () => {
     expect(failed.failureReason).toContain('Agent failed: Codex turn aborted');
     expect(failed.failureReason).toContain('[API_KEY_REDACTED]');
     expect(failed.failureReason).not.toContain('ghp_1234567890');
+  });
+
+  it('preserves a failed sandbox workspace on recovery request', async () => {
+    mockExecFileSuccess();
+    const ctx = createTestContext(undefined, {
+      executionTarget: 'sandbox',
+      warmImageTag: 'registry.azurecr.io/autopod/test-profile:latest',
+    });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Build widget', skipValidation: true },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'failed',
+      containerId: 'sandbox-failed',
+      worktreePath: '/tmp/worktrees/sandbox-failed',
+    });
+
+    await manager.preserveWorkspace(pod.id, 'fatal agent exit');
+
+    expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledWith(
+      'sandbox-failed',
+      '/workspace',
+      '/tmp/worktrees/sandbox-failed',
+      expect.any(Array),
+    );
+    expect(ctx.containerManager.kill).not.toHaveBeenCalledWith('sandbox-failed');
   });
 
   it('pre-agent setup failure emits a visible fatal activity', async () => {

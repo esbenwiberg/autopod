@@ -8,6 +8,7 @@ import {
   type SilentFlowRequest,
 } from '@azure/msal-node';
 import open from 'open';
+import { MsalFileCachePlugin } from './msal-cache.js';
 
 const DEFAULT_SCOPES = ['api://autopod/.default'];
 
@@ -20,6 +21,9 @@ export class MsalClient {
       auth: {
         clientId,
         authority: `https://login.microsoftonline.com/${tenantId}`,
+      },
+      cache: {
+        cachePlugin: new MsalFileCachePlugin(),
       },
     };
     this.pca = new PublicClientApplication(config);

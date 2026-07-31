@@ -14,6 +14,8 @@ export interface LocalReconcilerDependencies {
   containerManager: ContainerManager;
   enqueueSession: (podId: string) => void;
   validationRepo: ValidationRepository;
+  /** Clean up recorded sidecars and the per-pod network before replacement provisioning. */
+  cleanupPodResources?: (podId: string) => Promise<void>;
   logger: Logger;
   /** What caused this reconcile pass. Defaults to 'restart' for backwards compat. */
   trigger?: ReconcileTrigger;
@@ -263,6 +265,29 @@ async function recoverSession(
       await containerManager.kill(pod.containerId);
     } catch {
       // Container already gone — expected after a crash/restart
+    }
+  }
+
+  // A non-terminal pod's sidecars are intentionally excluded from global orphan
+  // reconciliation. Clean up this pod's recorded resources before enqueueing a
+  // replacement, otherwise sidecar spawn can collide with the surviving name.
+  if (deps.cleanupPodResources) {
+    try {
+      await deps.cleanupPodResources(pod.id);
+    } catch (err) {
+      const previousStatus = pod.status;
+      const failureReason = `Restart recovery could not clean up stale pod resources: ${
+        err instanceof Error ? err.message : String(err)
+      }`;
+      podRepo.update(pod.id, {
+        status: 'failed',
+        completedAt: new Date().toISOString(),
+        failureReason,
+      });
+      emitStatusChanged(pod.id, previousStatus, 'failed', eventBus);
+      logger.error({ err, podId: pod.id }, 'Pod resource cleanup failed during recovery');
+      result.killed.push(pod.id);
+      return;
     }
   }
 

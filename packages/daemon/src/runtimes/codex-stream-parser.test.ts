@@ -407,10 +407,40 @@ describe('CodexStreamParser', () => {
       },
     );
 
-    it('maps turn_aborted to a fatal AgentErrorEvent', () => {
-      const e = CodexStreamParser.mapEvent({ id: 's', msg: { type: 'turn_aborted' } }, 'pod-1');
-      expect(e).toMatchObject({ type: 'error', fatal: true });
+    it('preserves turn_aborted reason and turn id', () => {
+      const e = CodexStreamParser.mapEvent(
+        {
+          id: 's',
+          msg: {
+            type: 'turn_aborted',
+            reason: 'interrupted',
+            turn_id: 'turn-42',
+          },
+        },
+        'pod-1',
+      );
+      expect(e).toMatchObject({
+        type: 'error',
+        fatal: true,
+        codexAbortReason: 'interrupted',
+        codexTurnId: 'turn-42',
+      });
     });
+
+    it.each(['replaced', 'budget_limited', 'future_reason'])(
+      'keeps non-recoverable turn aborts fatal: %s',
+      (reason) => {
+        const e = CodexStreamParser.mapEvent(
+          { id: 's', msg: { type: 'turn_aborted', reason } },
+          'pod-1',
+        );
+        expect(e).toMatchObject({
+          type: 'error',
+          fatal: true,
+          codexAbortReason: reason,
+        });
+      },
+    );
 
     it('sanitizes Codex provider text in both terminal error fields', () => {
       const e = CodexStreamParser.mapEvent(

@@ -350,6 +350,13 @@ export class SandboxContainerManager implements ContainerManager {
   ): StreamingExecResult {
     const stdout = new Readable({ read() {} });
     const stderr = new Readable({ read() {} });
+    let streamsFinalized = false;
+    const finalizeStreams = (): void => {
+      if (streamsFinalized) return;
+      streamsFinalized = true;
+      if (!stdout.destroyed && !stdout.readableEnded) stdout.push(null);
+      if (!stderr.destroyed && !stderr.readableEnded) stderr.push(null);
+    };
     let cancelled = false;
     let cancelRemote: (() => Promise<void>) | null = null;
     let resolveCancelReady: ((cancel: () => Promise<void>) => void) | null = null;
@@ -401,11 +408,16 @@ export class SandboxContainerManager implements ContainerManager {
           if (chunk.exitCode != null) code = chunk.exitCode;
         }
       } catch (err) {
-        stderr.push(String(err instanceof Error ? err.message : err));
+        // kill() may already have finalized the public streams while remote
+        // cancellation was still unwinding the async iterator. Never write a
+        // cancellation diagnostic after EOF — the rejected kill promise carries
+        // the same error to the caller.
+        if (!streamsFinalized && !stderr.destroyed && !stderr.readableEnded) {
+          stderr.push(String(err instanceof Error ? err.message : err));
+        }
         code = 1;
       } finally {
-        stdout.push(null);
-        stderr.push(null);
+        finalizeStreams();
       }
       return code;
     })();
@@ -423,8 +435,7 @@ export class SandboxContainerManager implements ContainerManager {
             cancelRemote ?? (await Promise.race([cancelReady, exitCode.then(() => null)]));
           if (cancel) await cancel();
         } finally {
-          stdout.push(null);
-          stderr.push(null);
+          finalizeStreams();
         }
       },
     };
