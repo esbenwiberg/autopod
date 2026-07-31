@@ -14,6 +14,12 @@ import type {
   CreateScheduledJobTemplateRequest,
   Pod,
   PodStatus,
+  PodsitterActivation,
+  PodsitterBudgets,
+  PodsitterConfiguration,
+  PodsitterDecisionRecord,
+  PodsitterDecisionTarget,
+  PodsitterProviderState,
   Profile,
   ProfileEditorPayload,
   ProviderAccountProvider,
@@ -84,6 +90,28 @@ export interface ApproveAllValidatedResponse {
     status: ReadinessStatus;
     reason: string;
   }>;
+}
+
+export interface PodsitterStatusResponse {
+  configuration: PodsitterConfiguration | null;
+  activation: {
+    active: boolean;
+    windowId: string | null;
+    windowStartedAt: string | null;
+    windowEndsAt: string | null;
+    reason: 'active' | 'disabled' | 'expired' | 'outside_window';
+  } | null;
+  provider: PodsitterProviderState | null;
+  queueCount: number;
+}
+
+export interface UpdatePodsitterConfigurationRequest {
+  enabled: boolean;
+  activation: PodsitterActivation;
+  authorizedUntil: string | null;
+  profileScope: string[] | null;
+  decisionTarget: PodsitterDecisionTarget | null;
+  budgets: PodsitterBudgets;
 }
 import { fetch } from 'undici';
 
@@ -566,6 +594,45 @@ export class AutopodClient {
 
   async stopDaemon(): Promise<void> {
     await this.request<void>('POST', '/shutdown');
+  }
+
+  // Daemon-native Podsitter
+  async getPodsitterStatus(): Promise<PodsitterStatusResponse> {
+    return this.request<PodsitterStatusResponse>('GET', '/podsitter');
+  }
+
+  async updatePodsitterConfiguration(
+    req: UpdatePodsitterConfigurationRequest,
+  ): Promise<PodsitterConfiguration> {
+    return this.request<PodsitterConfiguration>('PUT', '/podsitter/config', req);
+  }
+
+  async disablePodsitter(): Promise<PodsitterConfiguration> {
+    return this.request<PodsitterConfiguration>('POST', '/podsitter/disable');
+  }
+
+  async checkPodsitter(): Promise<{ queued: number; processed: number }> {
+    return this.request<{ queued: number; processed: number }>('POST', '/podsitter/check');
+  }
+
+  async probePodsitterProvider(): Promise<{ recovered: boolean }> {
+    return this.request<{ recovered: boolean }>('POST', '/podsitter/provider/probe');
+  }
+
+  async listPodsitterDecisions(filters?: {
+    podId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<PodsitterDecisionRecord[]> {
+    const params = new URLSearchParams();
+    if (filters?.podId) params.set('podId', filters.podId);
+    if (filters?.limit !== undefined) params.set('limit', String(filters.limit));
+    if (filters?.offset !== undefined) params.set('offset', String(filters.offset));
+    const query = params.toString();
+    return this.request<PodsitterDecisionRecord[]>(
+      'GET',
+      `/podsitter/decisions${query ? `?${query}` : ''}`,
+    );
   }
 
   // Issue watcher
