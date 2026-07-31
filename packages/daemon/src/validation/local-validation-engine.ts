@@ -48,12 +48,15 @@ interface PackageJsonManifest {
   devDependencies?: Record<string, string>;
 }
 
-interface TestRunResult {
+interface InfrastructureAwareResult {
+  infrastructureFailure?: ValidationInfrastructureFailure;
+}
+
+interface TestRunResult extends InfrastructureAwareResult {
   status: 'pass' | 'fail' | 'skip';
   duration: number;
   stdout?: string;
   stderr?: string;
-  infrastructureFailure?: ValidationInfrastructureFailure;
 }
 
 /**
@@ -162,12 +165,24 @@ export function createLocalValidationEngine(
 
       try {
         const skipPhases = config.skipPhases ?? [];
+        let infrastructureFailure: ValidationInfrastructureFailure | undefined;
 
         // ── Phase 0: Reset worktree to HEAD ─────────────────────────────
         // Untracked / uncommitted files must not influence validation.
         // See `resetWorktreeToHead` for the full failure-mode rationale.
         checkAbort();
-        await resetWorktreeToHead(containerManager, config, log);
+        try {
+          await resetWorktreeToHead(containerManager, config, log);
+        } catch (err) {
+          const resetInfrastructureFailure = classifyValidationInfrastructureFailure('setup', err);
+          if (!resetInfrastructureFailure) throw err;
+          const setupResult = {
+            status: 'skip' as const,
+            output: validationInfrastructureOutput(err),
+            duration: Date.now() - startTime,
+          };
+          return makeSetupFailedResult(config, startTime, setupResult, resetInfrastructureFailure);
+        }
 
         // ── Phase 0.5: Setup ───────────────────────────────────────────
         // Optional pre-validation setup command (e.g. seed a DB, start a
@@ -200,6 +215,24 @@ export function createLocalValidationEngine(
             );
           } catch (err) {
             const duration = Date.now() - setupStart;
+            const setupInfrastructureFailure = classifyValidationInfrastructureFailure(
+              'setup',
+              err,
+            );
+            if (setupInfrastructureFailure) {
+              setupResult = {
+                status: 'skip',
+                output: validationInfrastructureOutput(err),
+                duration,
+              };
+              callbacks?.onPhaseCompleted?.('setup', 'skip', setupResult);
+              return makeSetupFailedResult(
+                config,
+                startTime,
+                setupResult,
+                setupInfrastructureFailure,
+              );
+            }
             const message = err instanceof Error ? err.message : String(err);
             setupResult = { status: 'fail', output: message, duration };
             callbacks?.onPhaseCompleted?.('setup', 'fail', setupResult);
@@ -233,27 +266,31 @@ export function createLocalValidationEngine(
           if (config.lintCommand) onProgress?.('Running lint…');
           lintResult = await runLint(containerManager, config, log);
         }
+        infrastructureFailure = lintResult.infrastructureFailure;
         callbacks?.onPhaseCompleted?.('lint', lintResult.status, lintResult);
 
         // ── Phase 2: SAST ──────────────────────────────────────────────
         checkAbort();
         let sastResult: Awaited<ReturnType<typeof runSast>>;
-        if (skipPhases.includes('sast')) {
+        if (skipPhases.includes('sast') || infrastructureFailure) {
           sastResult = { status: 'skip', output: '', duration: 0 };
         } else {
           callbacks?.onPhaseStarted?.('sast');
           if (config.sastCommand) onProgress?.('Running SAST…');
           sastResult = await runSast(containerManager, config, log);
         }
+        infrastructureFailure ??= sastResult.infrastructureFailure;
         callbacks?.onPhaseCompleted?.('sast', sastResult.status, sastResult);
 
         // ── Phase 3: Build ─────────────────────────────────────────────
         checkAbort();
         let buildResult: Awaited<ReturnType<typeof runBuild>>;
-        if (skipPhases.includes('build')) {
+        if (skipPhases.includes('build') || infrastructureFailure) {
           buildResult = {
             status: 'pass',
-            output: 'Build phase skipped by profile configuration',
+            output: infrastructureFailure
+              ? 'Build skipped — validation infrastructure failed earlier'
+              : 'Build phase skipped by profile configuration',
             duration: 0,
           };
         } else {
@@ -261,12 +298,17 @@ export function createLocalValidationEngine(
           if (config.buildCommand) onProgress?.('Running build…');
           buildResult = await runBuild(containerManager, config, log);
         }
-        callbacks?.onPhaseCompleted?.('build', buildResult.status, buildResult);
+        infrastructureFailure ??= buildResult.infrastructureFailure;
+        callbacks?.onPhaseCompleted?.(
+          'build',
+          infrastructureFailure?.phase === 'build' ? 'skip' : buildResult.status,
+          buildResult,
+        );
 
         // ── Phase 4: Test ──────────────────────────────────────────────
         checkAbort();
         let testResult: TestRunResult;
-        if (skipPhases.includes('test')) {
+        if (skipPhases.includes('test') || infrastructureFailure) {
           testResult = { status: 'skip', duration: 0 };
         } else {
           callbacks?.onPhaseStarted?.('test');
@@ -276,6 +318,7 @@ export function createLocalValidationEngine(
               ? await runTests(containerManager, config, log)
               : { status: 'skip' as const, duration: 0 };
         }
+        infrastructureFailure ??= testResult.infrastructureFailure;
         callbacks?.onPhaseCompleted?.('test', testResult.status, testResult);
 
         // ── Phase 5: Health check ──────────────────────────────────────
@@ -285,7 +328,7 @@ export function createLocalValidationEngine(
         checkAbort();
         const skipForNoWebUi = config.hasWebUi === false;
         let healthResult: HealthResult;
-        if (skipPhases.includes('health')) {
+        if (skipPhases.includes('health') || infrastructureFailure) {
           healthResult = { status: 'skip', url: '', responseCode: null, duration: 0 };
         } else {
           callbacks?.onPhaseStarted?.('health');
@@ -307,6 +350,8 @@ export function createLocalValidationEngine(
                   duration: 0,
                 };
         }
+        const infrastructureAwareHealth = healthResult as HealthResult & InfrastructureAwareResult;
+        infrastructureFailure ??= infrastructureAwareHealth.infrastructureFailure;
         callbacks?.onPhaseCompleted?.('health', healthResult.status, healthResult);
 
         // After health passes, watch for post-startup crashes in the background.
@@ -333,17 +378,27 @@ export function createLocalValidationEngine(
         checkAbort();
         let pages: PageResult[];
         let pagesStatus: 'pass' | 'fail' | 'skip';
-        if (skipPhases.includes('pages')) {
+        if (skipPhases.includes('pages') || infrastructureFailure) {
           pages = [];
           pagesStatus = 'skip';
         } else {
           callbacks?.onPhaseStarted?.('pages');
           if (healthResult.status === 'pass' && config.smokePages.length > 0)
             onProgress?.('Validating pages…');
-          pages =
-            healthResult.status === 'pass' && config.smokePages.length > 0
-              ? await runPageValidation(containerManager, config, log, hostBrowserRunner)
-              : [];
+          try {
+            pages =
+              healthResult.status === 'pass' && config.smokePages.length > 0
+                ? await runPageValidation(containerManager, config, log, hostBrowserRunner)
+                : [];
+          } catch (err) {
+            const pagesInfrastructureFailure = classifyValidationInfrastructureFailure(
+              'pages',
+              err,
+            );
+            if (!pagesInfrastructureFailure) throw err;
+            infrastructureFailure = pagesInfrastructureFailure;
+            pages = [];
+          }
           // Health must actually pass for Pages to mean anything. When health is
           // 'fail' the app never came up, so `pages` is the empty array — and
           // `[].every(...)` is vacuously true, which previously surfaced a
@@ -351,7 +406,9 @@ export function createLocalValidationEngine(
           // Health. Treat any non-pass health as 'skip' to keep Pages honest;
           // the upstream Health failure already trips the tier-1 gate.
           pagesStatus =
-            healthResult.status !== 'pass' || config.smokePages.length === 0
+            infrastructureFailure?.phase === 'pages' ||
+            healthResult.status !== 'pass' ||
+            config.smokePages.length === 0
               ? 'skip'
               : pages.every((p) => p.status === 'pass')
                 ? 'pass'
@@ -367,7 +424,7 @@ export function createLocalValidationEngine(
         // 'skip' counts as pass (legit skips: no test command, no smoke pages,
         // no web UI, profile-level skipPhases).
         const tier1Pass =
-          !testResult.infrastructureFailure &&
+          !infrastructureFailure &&
           lintResult.status !== 'fail' &&
           sastResult.status !== 'fail' &&
           buildResult.status === 'pass' &&
@@ -388,9 +445,26 @@ export function createLocalValidationEngine(
           callbacks?.onPhaseStarted?.('facts');
           if (tier1Pass && config.contract?.requiredFacts.length)
             onProgress?.('Checking required facts…');
-          factValidation = tier1Pass
-            ? await runFactValidation(containerManager, config, log, hostBrowserRunner)
-            : { status: 'skip', results: [] };
+          if (tier1Pass) {
+            try {
+              factValidation = await runFactValidation(
+                containerManager,
+                config,
+                log,
+                hostBrowserRunner,
+              );
+            } catch (err) {
+              const factsInfrastructureFailure = classifyValidationInfrastructureFailure(
+                'facts',
+                err,
+              );
+              if (!factsInfrastructureFailure) throw err;
+              infrastructureFailure = factsInfrastructureFailure;
+              factValidation = { status: 'skip', results: [] };
+            }
+          } else {
+            factValidation = { status: 'skip', results: [] };
+          }
           factsStatus = factValidation.status;
         }
         callbacks?.onPhaseCompleted?.('facts', factsStatus, factValidation);
@@ -405,12 +479,17 @@ export function createLocalValidationEngine(
           taskReview = null;
           reviewSkipReason = 'Skipped by profile configuration';
           reviewSkipKind = 'profile-skip';
-        } else if (!tier1Pass || factsStatus === 'fail' || factsStatus === 'pending_human') {
+        } else if (
+          infrastructureFailure ||
+          !tier1Pass ||
+          factsStatus === 'fail' ||
+          factsStatus === 'pending_human'
+        ) {
           // Don't burn AI tokens reviewing code that doesn't build, lint, or
           // pass tests/facts — the agent will rewrite it on the next attempt.
           callbacks?.onPhaseStarted?.('review');
           taskReview = null;
-          reviewSkipReason = testResult.infrastructureFailure
+          reviewSkipReason = infrastructureFailure
             ? 'Skipped — validation infrastructure failed'
             : factsStatus === 'pending_human'
               ? 'Skipped — required facts pending human decision'
@@ -501,6 +580,7 @@ export function createLocalValidationEngine(
         const isReviewBlocker =
           reviewSkipKind === 'review-failed' || reviewSkipKind === 'review-timeout';
         const overall =
+          !infrastructureFailure &&
           tier1Pass &&
           !factsFailed &&
           ((taskReview === null && !isReviewBlocker) || taskReview?.status === 'pass')
@@ -508,7 +588,16 @@ export function createLocalValidationEngine(
             : ('fail' as const);
 
         const duration = Date.now() - startTime;
-        const { infrastructureFailure, ...storedTestResult } = testResult;
+        const { infrastructureFailure: _testInfrastructureFailure, ...storedTestResult } =
+          testResult;
+        const { infrastructureFailure: _lintInfrastructureFailure, ...storedLintResult } =
+          lintResult;
+        const { infrastructureFailure: _sastInfrastructureFailure, ...storedSastResult } =
+          sastResult;
+        const { infrastructureFailure: _buildInfrastructureFailure, ...storedBuildResult } =
+          buildResult;
+        const { infrastructureFailure: _healthInfrastructureFailure, ...storedHealthResult } =
+          infrastructureAwareHealth;
 
         return {
           podId: config.podId,
@@ -518,13 +607,13 @@ export function createLocalValidationEngine(
           setup: setupResult,
           smoke: {
             status: smokeStatus,
-            build: buildResult,
-            health: healthResult,
+            build: storedBuildResult,
+            health: storedHealthResult,
             pages,
           },
           test: storedTestResult,
-          lint: lintResult,
-          sast: sastResult,
+          lint: storedLintResult,
+          sast: storedSastResult,
           factValidation,
           taskReview,
           ...(reviewTokenUsage && { reviewTokenUsage }),
@@ -628,6 +717,7 @@ function makeSetupFailedResult(
   config: ValidationEngineConfig,
   startTime: number,
   setupResult: import('@autopod/shared').SetupResult,
+  infrastructureFailure?: ValidationInfrastructureFailure,
 ): ValidationResult {
   return {
     podId: config.podId,
@@ -651,8 +741,11 @@ function makeSetupFailedResult(
     sast: { status: 'skip', output: '', duration: 0 },
     factValidation: { status: 'skip', results: [] },
     taskReview: null,
-    reviewSkipReason: 'Skipped — validation setup failed',
-    reviewSkipKind: null,
+    reviewSkipReason: infrastructureFailure
+      ? 'Skipped — validation infrastructure failed'
+      : 'Skipped — validation setup failed',
+    reviewSkipKind: infrastructureFailure ? 'upstream-failed' : null,
+    ...(infrastructureFailure && { infrastructureFailure }),
     overall: 'fail',
     duration: Date.now() - startTime,
   };
@@ -888,7 +981,21 @@ async function runBuild(
     const duration = Date.now() - buildStart;
     const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
     const message = err instanceof Error ? err.message : String(err);
-    log?.warn({ duration }, `build timed out: ${message}`);
+    const infrastructureFailure = classifyValidationInfrastructureFailure('build', err);
+    if (infrastructureFailure) {
+      log?.warn(
+        { err, duration, infrastructureFailure },
+        'build command could not run because validation infrastructure failed',
+      );
+      return {
+        status: 'pass' as const,
+        output: validationInfrastructureOutput(err, partial),
+        duration,
+        infrastructureFailure,
+      };
+    }
+    const timedOut = /timed?\s*out|timeout/i.test(message);
+    log?.warn({ err, duration }, timedOut ? 'build timed out' : 'build execution failed');
     return {
       status: 'fail' as const,
       output: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 50_000),
@@ -978,11 +1085,7 @@ async function runTests(
       return {
         status: 'skip',
         duration,
-        stdout:
-          `Validation infrastructure failure: ${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(
-            0,
-            50_000,
-          ),
+        stdout: validationInfrastructureOutput(err, partial),
         stderr: '',
         infrastructureFailure,
       };
@@ -1015,19 +1118,30 @@ async function runTests(
   };
 }
 
+function validationInfrastructureOutput(error: unknown, partial = ''): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return `Validation infrastructure failure: ${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(
+    0,
+    50_000,
+  );
+}
+
 function classifyValidationInfrastructureFailure(
   phase: ValidationInfrastructureFailure['phase'],
   error: unknown,
 ): ValidationInfrastructureFailure | null {
   if (!(error instanceof AutopodError) || !error.code.startsWith('AZURE_SANDBOX_')) return null;
 
+  const emptyForbidden =
+    error.statusCode === 403 &&
+    /failed with 403(?:\s*$|:\s*(?:diagnostics=\{|$))/i.test(error.message);
   return {
     phase,
     code: error.code,
     statusCode: error.statusCode,
     message: error.message,
     retryable:
-      error.statusCode === 403 ||
+      emptyForbidden ||
       error.statusCode === 429 ||
       error.statusCode === 502 ||
       error.statusCode === 503 ||
@@ -1202,6 +1316,7 @@ async function runFactValidation(
         );
       }
     } catch (err) {
+      if (classifyValidationInfrastructureFailure('facts', err)) throw err;
       const partial = (err as { partialOutput?: string })?.partialOutput;
       commandError = err instanceof Error ? err.message : String(err);
       commandResult = {
@@ -1897,7 +2012,21 @@ async function runLint(
     const duration = Date.now() - lintStart;
     const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
     const message = err instanceof Error ? err.message : String(err);
-    log?.warn({ duration }, `lint timed out: ${message}`);
+    const infrastructureFailure = classifyValidationInfrastructureFailure('lint', err);
+    if (infrastructureFailure) {
+      log?.warn(
+        { err, duration, infrastructureFailure },
+        'lint command could not run because validation infrastructure failed',
+      );
+      return {
+        status: 'skip' as const,
+        output: validationInfrastructureOutput(err, partial),
+        duration,
+        infrastructureFailure,
+      };
+    }
+    const timedOut = /timed?\s*out|timeout/i.test(message);
+    log?.warn({ err, duration }, timedOut ? 'lint timed out' : 'lint execution failed');
     return {
       status: 'fail' as const,
       output: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 50_000),
@@ -1949,7 +2078,21 @@ async function runSast(
     const duration = Date.now() - sastStart;
     const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
     const message = err instanceof Error ? err.message : String(err);
-    log?.warn({ duration }, `SAST timed out: ${message}`);
+    const infrastructureFailure = classifyValidationInfrastructureFailure('sast', err);
+    if (infrastructureFailure) {
+      log?.warn(
+        { err, duration, infrastructureFailure },
+        'SAST command could not run because validation infrastructure failed',
+      );
+      return {
+        status: 'skip' as const,
+        output: validationInfrastructureOutput(err, partial),
+        duration,
+        infrastructureFailure,
+      };
+    }
+    const timedOut = /timed?\s*out|timeout/i.test(message);
+    log?.warn({ err, duration }, timedOut ? 'SAST timed out' : 'SAST execution failed');
     return {
       status: 'fail' as const,
       output: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 50_000),
@@ -1972,7 +2115,7 @@ async function runSast(
 
 // ── Health check phase ──────────────────────────────────────────────────────
 
-interface HealthProbeResult {
+interface HealthProbeResult extends InfrastructureAwareResult {
   responseCode: number | null;
   responseBody?: string;
   error?: string;
@@ -2056,7 +2199,12 @@ async function probeHealthEndpointInContainer(
       error: result.exitCode === 0 ? undefined : error,
     };
   } catch (err) {
-    return { responseCode: null, error: err instanceof Error ? err.message : String(err) };
+    const infrastructureFailure = classifyValidationInfrastructureFailure('health', err);
+    return {
+      responseCode: null,
+      error: err instanceof Error ? err.message : String(err),
+      ...(infrastructureFailure && { infrastructureFailure }),
+    };
   }
 }
 
@@ -2119,6 +2267,21 @@ export async function runHealthCheck(
   while (Date.now() - healthStart < timeoutMs) {
     const probe = await probeHealthEndpoint(containerManager, config, 5_000);
     lastResponseCode = probe.responseCode;
+
+    if (probe.infrastructureFailure) {
+      const duration = Date.now() - healthStart;
+      log?.warn(
+        { infrastructureFailure: probe.infrastructureFailure, duration },
+        'health probe could not run because validation infrastructure failed',
+      );
+      return {
+        status: 'skip' as const,
+        url,
+        responseCode: null,
+        duration,
+        infrastructureFailure: probe.infrastructureFailure,
+      };
+    }
 
     if (isHealthyStatus(probe.responseCode)) {
       const duration = Date.now() - healthStart;
@@ -2263,6 +2426,7 @@ async function runPageValidationInContainer(
   try {
     await containerManager.writeFile(config.containerId, scriptPath, script);
   } catch (err) {
+    if (classifyValidationInfrastructureFailure('pages', err)) throw err;
     log?.warn({ err }, 'failed to write validation script to container');
     return [makeSyntheticFailure('/', `Failed to write validation script: ${err}`)];
   }
@@ -2296,6 +2460,7 @@ async function runPageValidationInContainer(
     );
     return pages;
   } catch (err) {
+    if (classifyValidationInfrastructureFailure('pages', err)) throw err;
     log?.warn({ err }, 'page validation exec failed');
     return [makeSyntheticFailure('/', `Exec failed: ${err}`)];
   }

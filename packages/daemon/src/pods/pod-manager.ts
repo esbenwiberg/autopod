@@ -236,21 +236,28 @@ function summarizeValidationPhases(result: ValidationResult): string {
   const lintStatus = result.lint?.status ?? 'skip';
   const sastStatus = result.sast?.status ?? 'skip';
   const buildStatus = setupStatus === 'fail' ? 'skip' : result.smoke.build.status;
+  const infrastructurePhase = result.infrastructureFailure?.phase;
+  const setupDisplay = infrastructurePhase === 'setup' ? 'infrastructure_error' : setupStatus;
+  const lintDisplay = infrastructurePhase === 'lint' ? 'infrastructure_error' : lintStatus;
+  const sastDisplay = infrastructurePhase === 'sast' ? 'infrastructure_error' : sastStatus;
+  const buildDisplay = infrastructurePhase === 'build' ? 'infrastructure_error' : buildStatus;
   const testStatus =
-    result.infrastructureFailure?.phase === 'test'
-      ? 'infrastructure_error'
-      : (result.test?.status ?? 'skip');
-  const healthStatus = result.smoke.health.status;
+    infrastructurePhase === 'test' ? 'infrastructure_error' : (result.test?.status ?? 'skip');
+  const healthStatus =
+    infrastructurePhase === 'health' ? 'infrastructure_error' : result.smoke.health.status;
   const pagesStatus =
     result.smoke.pages.length === 0
       ? 'skip'
       : result.smoke.pages.every((p) => p.status === 'pass')
         ? 'pass'
         : 'fail';
-  const factsStatus = result.factValidation?.status ?? 'skip';
+  const factsStatus =
+    infrastructurePhase === 'facts'
+      ? 'infrastructure_error'
+      : (result.factValidation?.status ?? 'skip');
   const reviewStatus = result.taskReview?.status ?? 'skip';
   return (
-    `setup: ${setupStatus}, lint: ${lintStatus}, sast: ${sastStatus}, build: ${buildStatus}, ` +
+    `setup: ${setupDisplay}, lint: ${lintDisplay}, sast: ${sastDisplay}, build: ${buildDisplay}, ` +
     `tests: ${testStatus}, health: ${healthStatus}, pages: ${pagesStatus}, ` +
     `facts: ${factsStatus}, review: ${reviewStatus}`
   );
@@ -1360,6 +1367,8 @@ export interface PodManagerDependencies {
   hostScreenshotDir?: (podId: string) => string;
   /** Test hook for shrinking review infrastructure retry delays. */
   reviewInfrastructureRetryBackoffMs?: readonly number[];
+  /** Bounded run-level retries for typed validation infrastructure failures. */
+  validationInfrastructureRetryBackoffMs?: readonly number[];
   /** Safety events repository for writing per-pattern detection rows. */
   safetyEventsRepo?: import('../safety/safety-events-repository.js').SafetyEventsRepository;
   /** Persisted behavioural quality scores used by Readiness Review when available. */
@@ -3231,6 +3240,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   /** Active AbortControllers for in-progress validation runs, keyed by podId. */
   const validationAbortControllers = new Map<string, AbortController>();
+  /** Slow operator recovery is detached from HTTP and coalesced per pod. */
+  const attemptExtensionRuns = new Map<string, Promise<void>>();
+  const infrastructureResumeRuns = new Map<string, Promise<void>>();
   const pauseIntents = new Map<string, symbol>();
   const activeAgentRuns = new Map<string, { token: symbol; settled: Promise<void> }>();
   const activeAgentRunResolvers = new Map<string, { token: symbol; resolve: () => void }>();
@@ -6415,7 +6427,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     };
   }
 
-  async function validateWithReviewInfraRetries(
+  async function validateWithInfrastructureRetries(
     validationConfig: Parameters<ValidationEngine['validate']>[0],
     validationController: AbortController,
     callbacks: Parameters<ValidationEngine['validate']>[3],
@@ -6437,7 +6449,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     };
 
-    const result = await runValidation();
+    let result = await runValidation();
+    const infrastructureBackoffs = deps.validationInfrastructureRetryBackoffMs ?? [1_000, 5_000];
+    for (const [index, waitMs] of infrastructureBackoffs.entries()) {
+      if (!result.infrastructureFailure?.retryable || validationController.signal.aborted) break;
+      emitActivityStatus(
+        podId,
+        `${validationInfrastructureFailureLabel(result)} — retrying validation without agent rework (${index + 1}/${infrastructureBackoffs.length})`,
+      );
+      if (waitMs > 0) await sleep(waitMs);
+      if (validationController.signal.aborted) break;
+      result = await runValidation();
+    }
 
     if (isReviewInfrastructureOnlyFailure(result)) {
       emitActivityStatus(
@@ -11894,7 +11917,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const validationController = new AbortController();
         validationAbortControllers.set(podId, validationController);
         try {
-          result = await validateWithReviewInfraRetries(
+          result = await validateWithInfrastructureRetries(
             validationConfig,
             validationController,
             buildPhaseEventCallbacks(podId),
@@ -12870,7 +12893,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const revalidateController = new AbortController();
         validationAbortControllers.set(podId, revalidateController);
         try {
-          result = await validateWithReviewInfraRetries(
+          result = await validateWithInfrastructureRetries(
             validationConfig,
             revalidateController,
             buildPhaseEventCallbacks(podId),
@@ -13706,6 +13729,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     async extendAttempts(podId: string, additionalAttempts: number): Promise<void> {
+      if (attemptExtensionRuns.has(podId)) {
+        logger.info({ podId }, 'Coalesced duplicate attempt extension during active recovery');
+        return;
+      }
+
       const pod = podRepo.getOrThrow(podId);
       if (pod.status !== 'review_required') {
         throw new AutopodError(
@@ -13728,12 +13756,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'Extended validation attempts',
       );
       emitActivityStatus(podId, `Validation attempts extended to ${newMax} — resuming validation`);
-      // Use force=true so triggerValidation re-provisions the container. The pod is in
-      // review_required (terminal), so force+fromTerminal triggers a clean re-provision:
-      // old container killed, worktree preserved, agent re-run with the "exhausted attempts"
-      // rework prompt. This is safer than manually calling cm.start() and silently swallowing
-      // errors — if the container was removed rather than stopped, exec calls would 404.
-      await this.triggerValidation(podId, { force: true });
+      // Recovery can spend minutes preserving a hosted workspace and provisioning Azure.
+      // Detach it from the HTTP acknowledgement and keep one authoritative run per pod so a
+      // client retry after an ambiguous timeout cannot increment the budget or race cleanup.
+      const recovery = this.triggerValidation(podId, { force: true })
+        .catch((err: unknown) => {
+          logger.warn({ err, podId }, 'Attempt-extension recovery failed after acceptance');
+          emitActivityStatus(
+            podId,
+            `Attempt extension accepted, but recovery failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        })
+        .finally(() => {
+          attemptExtensionRuns.delete(podId);
+        });
+      attemptExtensionRuns.set(podId, recovery);
+      void recovery;
     },
 
     async applyOverridesInstant(podId: string): Promise<{ advanced: boolean }> {
@@ -14404,12 +14442,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return { action: 'retry-fix-delivery' };
       }
 
-      if (pod.status !== 'failed') {
+      const isInfrastructureReviewResume =
+        pod.status === 'review_required' &&
+        pod.lastValidationResult?.infrastructureFailure !== undefined;
+      if (pod.status !== 'failed' && !isInfrastructureReviewResume) {
         throw new AutopodError(
-          `Cannot resume pod ${podId} in status ${pod.status} — only failed pods can be resumed`,
+          `Cannot resume pod ${podId} in status ${pod.status} — only failed or infrastructure-blocked review_required pods can be resumed`,
           'INVALID_STATE',
           409,
         );
+      }
+      if (isInfrastructureReviewResume && infrastructureResumeRuns.has(podId)) {
+        logger.info({ podId }, 'Coalesced duplicate validation infrastructure Resume');
+        return { action: 'revalidate' };
       }
       if (!pod.worktreePath) {
         throw new AutopodError(
@@ -14424,6 +14469,24 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           'WORKTREE_COMPROMISED',
           409,
         );
+      }
+
+      if (isInfrastructureReviewResume) {
+        emitActivityStatus(podId, 'Resume accepted — re-running validation without agent rework');
+        const recovery = this.revalidateSession(podId, { force: true })
+          .catch((err: unknown) => {
+            logger.warn({ err, podId }, 'Validation infrastructure Resume failed after acceptance');
+            emitActivityStatus(
+              podId,
+              `Validation Resume failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          })
+          .finally(() => {
+            infrastructureResumeRuns.delete(podId);
+          });
+        infrastructureResumeRuns.set(podId, recovery);
+        void recovery;
+        return { action: 'revalidate' };
       }
 
       // Path 1: validation already passed, downstream step (push / PR) blew up.

@@ -38,6 +38,25 @@ import Testing
   #expect(checks.allPassed == false)
 }
 
+@Test func infrastructureFailureUsesValidationOnlyResumeAction() {
+  let infrastructure = ValidationChecks(
+    smoke: true,
+    infrastructureFailure: ValidationInfrastructureFailureResponse(
+      phase: "lint",
+      code: "AZURE_SANDBOX_HTTP_ERROR",
+      statusCode: 403,
+      message: "Azure Sandboxes returned an empty 403",
+      retryable: true
+    )
+  )
+  let failedReview = ValidationChecks(smoke: true, review: false)
+  let exhausted = ValidationChecks(smoke: false)
+
+  #expect(reviewRequiredPrimaryAction(for: infrastructure) == .resumeValidation)
+  #expect(reviewRequiredPrimaryAction(for: failedReview) == .fixReview)
+  #expect(reviewRequiredPrimaryAction(for: exhausted) == .extendAttempts)
+}
+
 @Test func intentionalReviewSkipsRemainNeutral() {
   let disabled = ValidationChecks(
     smoke: true,

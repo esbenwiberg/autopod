@@ -1849,7 +1849,7 @@ describe('validate() — facts + review gate', () => {
     expect(result.overall).toBe('fail');
   });
 
-  it('keeps an ordinary nonzero test failure on the code-failure path', async () => {
+  it('ordinary command exits do not become infrastructure', async () => {
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
 
@@ -1862,42 +1862,187 @@ describe('validate() — facts + review gate', () => {
     expect(result.overall).toBe('fail');
   });
 
-  it('records a typed transport failure classification instead of claiming tests failed', async () => {
-    const base = stubContainerManager();
-    const execInContainer = vi.fn(
-      async (
-        _containerId: string,
-        command: string[],
-      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
-        const shell = command[2] ?? '';
-        if (shell.includes('git reset --hard HEAD')) {
-          return { stdout: '', stderr: '', exitCode: 0 };
-        }
-        if (shell.includes('vitest')) {
-          throw new AutopodError(
-            'Azure Sandboxes POST /executeShellCommand failed with 403',
-            'AZURE_SANDBOX_HTTP_ERROR',
-            403,
-          );
-        }
-        throw new Error(`unexpected command: ${JSON.stringify(command)}`);
+  it('classifies typed sandbox transport failures by validation phase', async () => {
+    const cases: Array<{
+      phase: 'setup' | 'lint' | 'sast' | 'build' | 'test';
+      marker: string;
+      config: Partial<ValidationEngineConfig>;
+    }> = [
+      {
+        phase: 'setup',
+        marker: 'infra-setup',
+        config: { validationSetupCommand: 'infra-setup' },
       },
-    );
-    const cm = { ...base, execInContainer } as ContainerManager;
-    const engine = createLocalValidationEngine(cm);
+      { phase: 'lint', marker: 'infra-lint', config: { lintCommand: 'infra-lint' } },
+      { phase: 'sast', marker: 'infra-sast', config: { sastCommand: 'infra-sast' } },
+      { phase: 'build', marker: 'infra-build', config: { buildCommand: 'infra-build' } },
+      { phase: 'test', marker: 'infra-test', config: { testCommand: 'infra-test' } },
+    ];
 
-    const result = await engine.validate(baseConfig({ testCommand: 'vitest' }));
+    for (const testCase of cases) {
+      const base = stubContainerManager();
+      const execInContainer = vi.fn(
+        async (
+          _containerId: string,
+          command: string[],
+        ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+          const shell = command[2] ?? '';
+          if (shell.includes(testCase.marker)) {
+            throw new AutopodError(
+              'Azure Sandboxes POST /executeShellCommand failed with 403',
+              'AZURE_SANDBOX_HTTP_ERROR',
+              403,
+            );
+          }
+          return { stdout: '', stderr: '', exitCode: 0 };
+        },
+      );
+      const cm = { ...base, execInContainer } as ContainerManager;
+      const engine = createLocalValidationEngine(cm);
 
-    expect(result.test?.status).toBe('skip');
-    expect(result.test?.stdout).toContain('Validation infrastructure failure');
-    expect(result.infrastructureFailure).toMatchObject({
-      phase: 'test',
-      code: 'AZURE_SANDBOX_HTTP_ERROR',
-      statusCode: 403,
-      retryable: true,
+      const result = await engine.validate(baseConfig(testCase.config));
+
+      expect(result.infrastructureFailure).toMatchObject({
+        phase: testCase.phase,
+        code: 'AZURE_SANDBOX_HTTP_ERROR',
+        statusCode: 403,
+        retryable: true,
+      });
+      expect(result.overall).toBe('fail');
+      expect(result.reviewSkipReason).toMatch(/validation infrastructure failed/i);
+      if (testCase.phase === 'lint') expect(result.lint?.status).toBe('skip');
+      if (testCase.phase === 'sast') expect(result.sast?.status).toBe('skip');
+      if (testCase.phase === 'test') expect(result.test?.status).toBe('skip');
+    }
+
+    const factBase = stubContainerManager();
+    const factExec = vi.fn(async (_containerId: string, command: string[]) => {
+      const shell = command[2] ?? '';
+      if (shell.includes('infra-fact')) {
+        throw new AutopodError(
+          'Azure Sandboxes POST /executeShellCommand failed with 403',
+          'AZURE_SANDBOX_HTTP_ERROR',
+          403,
+        );
+      }
+      if (shell.includes('sha256sum')) {
+        return { stdout: 'abc123  src/fact.ts\n', stderr: '', exitCode: 0 };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
     });
-    expect(result.factValidation?.status).toBe('skip');
-    expect(result.overall).toBe('fail');
+    const factEngine = createLocalValidationEngine({
+      ...factBase,
+      execInContainer: factExec,
+    } as ContainerManager);
+    const factResult = await factEngine.validate(
+      baseConfig({
+        diff: 'diff --git a/src/fact.ts b/src/fact.ts\n--- a/src/fact.ts\n+++ b/src/fact.ts\n+changed',
+        contract: parseSpecContract(`contract_version: 1
+title: Infrastructure fact
+depends_on: []
+scenarios:
+  - id: behavior
+    given: ["state"]
+    when: ["validated"]
+    then: ["works"]
+required_facts:
+  - id: fact-infra
+    proves: [behavior]
+    kind: unit-test
+    artifact:
+      path: src/fact.ts
+      change: update
+    command: infra-fact
+human_review: []
+`),
+      }),
+    );
+
+    expect(factResult.infrastructureFailure).toMatchObject({ phase: 'facts', retryable: true });
+    expect(factResult.factValidation).toEqual({ status: 'skip', results: [] });
+    expect(factResult.overall).toBe('fail');
+
+    const healthBase = stubContainerManager();
+    const healthExec = vi.fn(async (_containerId: string, command: string[]) => {
+      const shell = command[2] ?? '';
+      if (shell.includes('__AUTOPOD_STATUS__')) {
+        throw new AutopodError(
+          'Azure Sandboxes POST /executeShellCommand failed with 403',
+          'AZURE_SANDBOX_HTTP_ERROR',
+          403,
+        );
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    const healthEngine = createLocalValidationEngine({
+      ...healthBase,
+      execInContainer: healthExec,
+    } as ContainerManager);
+    const healthResult = await healthEngine.validate(
+      baseConfig({
+        hasWebUi: true,
+        startCommand: 'node server.js',
+        smokePages: [],
+        webProbeMode: 'container',
+      }),
+    );
+
+    expect(healthResult.infrastructureFailure).toMatchObject({ phase: 'health', retryable: true });
+    expect(healthResult.smoke.health.status).toBe('skip');
+    expect(healthResult.overall).toBe('fail');
+
+    const pagesBase = stubContainerManager();
+    const pagesExec = vi.fn(async (_containerId: string, command: string[]) => {
+      const shell = command[2] ?? '';
+      if (shell.includes('autopod-page-validation')) {
+        throw new AutopodError(
+          'Azure Sandboxes POST /executeShellCommand failed with 403',
+          'AZURE_SANDBOX_HTTP_ERROR',
+          403,
+        );
+      }
+      if (shell.includes('__AUTOPOD_STATUS__')) {
+        return { stdout: '__AUTOPOD_STATUS__200', stderr: '', exitCode: 0 };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    const pagesEngine = createLocalValidationEngine({
+      ...pagesBase,
+      execInContainer: pagesExec,
+      writeFile: vi.fn().mockResolvedValue(undefined),
+    } as ContainerManager);
+    const pagesResult = await pagesEngine.validate(
+      baseConfig({
+        hasWebUi: true,
+        startCommand: 'node server.js',
+        smokePages: [{ path: '/' }],
+        webProbeMode: 'container',
+      }),
+    );
+
+    expect(pagesResult.infrastructureFailure).toMatchObject({ phase: 'pages', retryable: true });
+    expect(pagesResult.smoke.pages).toEqual([]);
+    expect(pagesResult.overall).toBe('fail');
+  });
+
+  it('does not mark a non-empty deterministic sandbox 403 as retryable', async () => {
+    const base = stubContainerManager();
+    const execInContainer = vi.fn(async (_containerId: string, command: string[]) => {
+      const shell = command[2] ?? '';
+      if (shell.includes('infra-lint')) {
+        throw new AutopodError(
+          'Azure Sandboxes POST /executeShellCommand failed with 403: RBAC denied',
+          'AZURE_SANDBOX_HTTP_ERROR',
+          403,
+        );
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    const engine = createLocalValidationEngine({ ...base, execInContainer } as ContainerManager);
+
+    const result = await engine.validate(baseConfig({ lintCommand: 'infra-lint' }));
+
+    expect(result.infrastructureFailure).toMatchObject({ phase: 'lint', retryable: false });
   });
 
   it('runs Facts + Review when all tier-1 phases pass-or-skip', async () => {

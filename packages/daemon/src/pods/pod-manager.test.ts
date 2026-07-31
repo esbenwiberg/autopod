@@ -8224,8 +8224,12 @@ describe('PodManager', () => {
       expect(result.validationAttempts).toBe(1);
     });
 
-    it('validation infrastructure failure does not rework agent or consume an attempt', async () => {
-      const ctx = createTestContext(validationInfrastructureFailureResult());
+    it('bounded validation infrastructure recovery succeeds without agent rework', async () => {
+      const ctx = createTestContext();
+      ctx.deps.validationInfrastructureRetryBackoffMs = [0, 0];
+      vi.mocked(ctx.validationEngine.validate)
+        .mockResolvedValueOnce(validationInfrastructureFailureResult())
+        .mockResolvedValueOnce(makeValidationResult());
       const manager = createPodManager(ctx.deps);
 
       const pod = manager.createSession(
@@ -8240,7 +8244,35 @@ describe('PodManager', () => {
 
       await manager.triggerValidation(pod.id);
 
-      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      const result = manager.getSession(pod.id);
+      expect(result.status).toBe('validated');
+      expect(result.validationAttempts).toBe(1);
+      expect(result.lastCorrectionMessage).toBeNull();
+    });
+
+    it('persistent validation infrastructure failure parks once', async () => {
+      const ctx = createTestContext();
+      ctx.deps.validationInfrastructureRetryBackoffMs = [0, 0];
+      vi.mocked(ctx.validationEngine.validate).mockResolvedValue(
+        validationInfrastructureFailureResult(),
+      );
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(3);
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('review_required');
@@ -8253,12 +8285,49 @@ describe('PodManager', () => {
           const payload = event.payload as { event?: { message?: unknown } };
           return payload.event?.message;
         });
-      expect(messages).toContain(
-        'Validation infrastructure failure during test — parked for explicit Resume',
-      );
+      expect(
+        messages.filter(
+          (message) =>
+            message ===
+            'Validation infrastructure failure during test — parked for explicit Resume',
+        ),
+      ).toHaveLength(1);
     });
 
-    it('ordinary test failure still reworks the agent and consumes attempts', async () => {
+    it('resumes an infrastructure-blocked review_required pod with validation only', async () => {
+      const ctx = createTestContext();
+      ctx.deps.validationInfrastructureRetryBackoffMs = [0];
+      const pullGate = deferred<{ newCommits: boolean }>();
+      vi.mocked(ctx.worktreeManager.pullBranch).mockReturnValue(pullGate.promise);
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'review_required',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        validationAttempts: 0,
+        lastValidationResult: validationInfrastructureFailureResult(),
+      });
+
+      const outcome = await manager.resumePod(pod.id);
+      const duplicate = await manager.resumePod(pod.id);
+
+      expect(outcome).toEqual({ action: 'revalidate' });
+      expect(duplicate).toEqual({ action: 'revalidate' });
+      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledTimes(1);
+      expect(manager.getSession(pod.id).status).toBe('review_required');
+
+      pullGate.resolve({ newCommits: false });
+      await waitForAssertion(() => expect(manager.getSession(pod.id).status).toBe('validated'));
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).maxValidationAttempts).toBe(3);
+    });
+
+    it('ordinary validation failure still reworks the agent and consumes attempts', async () => {
       const ctx = createTestContext();
       vi.mocked(ctx.validationEngine.validate).mockResolvedValue(
         makeValidationResult(ordinaryTestFailureResult()),
@@ -8282,6 +8351,36 @@ describe('PodManager', () => {
       const result = manager.getSession(pod.id);
       expect(result.status).toBe('review_required');
       expect(result.validationAttempts).toBe(3);
+    });
+
+    it('coalesces duplicate attempt extensions while recovery is active', async () => {
+      const ctx = createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'autopod.azurecr.io/node22:test',
+      });
+      const statusGate = deferred<'running'>();
+      vi.mocked(ctx.containerManager.getStatus).mockReturnValue(statusGate.promise);
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'review_required',
+        containerId: 'ctr-1',
+        worktreePath: '/tmp/wt',
+        maxValidationAttempts: 3,
+      });
+
+      await manager.extendAttempts(pod.id, 2);
+      await manager.extendAttempts(pod.id, 2);
+
+      expect(manager.getSession(pod.id).maxValidationAttempts).toBe(5);
+      expect(ctx.containerManager.getStatus).toHaveBeenCalledTimes(1);
+
+      statusGate.resolve('running');
+      await waitForAssertion(() => expect(ctx.enqueuedSessions).toEqual([pod.id]));
     });
 
     it('passes setup command into validation and summarizes setup failures first', async () => {

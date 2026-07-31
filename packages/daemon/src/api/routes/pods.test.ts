@@ -357,6 +357,40 @@ const readinessReview: ReadinessReview = {
   approval: null,
 };
 
+describe('POST /pods/:podId/extend-attempts', () => {
+  it('acknowledges attempt extension before background recovery completes', async () => {
+    const app = Fastify({ logger: false });
+    let finishRecovery!: () => void;
+    const backgroundRecovery = new Promise<void>((resolve) => {
+      finishRecovery = resolve;
+    });
+    const extendAttempts = vi.fn(async () => {
+      void backgroundRecovery;
+    });
+    const podManager = {
+      extendAttempts,
+      getSession: vi.fn(() => ({ maxValidationAttempts: 5 })),
+    } as unknown as ReturnType<typeof createPodManager>;
+    podRoutes(app, podManager);
+    await app.ready();
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/pods/pod-1/extend-attempts',
+        payload: { additionalAttempts: 2 },
+      });
+
+      expect(response.statusCode).toBe(202);
+      expect(response.json()).toEqual({ ok: true, maxValidationAttempts: 5 });
+      expect(extendAttempts).toHaveBeenCalledWith('pod-1', 2);
+    } finally {
+      finishRecovery();
+      await app.close();
+    }
+  });
+});
+
 // ── Test setup ────────────────────────────────────────────────────────────────
 
 describe('GET /pods/analytics/reliability', () => {

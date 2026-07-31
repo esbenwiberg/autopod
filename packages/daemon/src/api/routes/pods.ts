@@ -879,12 +879,13 @@ export function podRoutes(
   });
 
   // POST /pods/:podId/extend-attempts — add more validation attempts to a review_required pod
-  app.post('/pods/:podId/extend-attempts', async (request) => {
+  app.post('/pods/:podId/extend-attempts', async (request, reply) => {
     const { podId } = request.params as { podId: string };
     const body = (request.body ?? {}) as { additionalAttempts?: number };
     const additionalAttempts = body.additionalAttempts ?? 3;
     await podManager.extendAttempts(podId, additionalAttempts);
     const pod = podManager.getSession(podId);
+    reply.status(202);
     return { ok: true, maxValidationAttempts: pod.maxValidationAttempts };
   });
 
@@ -913,9 +914,9 @@ export function podRoutes(
     }
   });
 
-  // POST /pods/:podId/resume — operator escape hatch for `failed` pods.
-  // Picks the cheapest recovery path that fits the pod's state — push + open PR
-  // if validation already passed, re-run validation otherwise. No agent rework.
+  // POST /pods/:podId/resume — operator escape hatch for failed pods and
+  // infrastructure-blocked review_required pods. Picks the cheapest recovery path:
+  // push + open PR if validation passed, otherwise validation-only. No agent rework.
   app.post('/pods/:podId/resume', async (request, reply) => {
     const { podId } = request.params as { podId: string };
     try {

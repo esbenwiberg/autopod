@@ -415,10 +415,11 @@ describe('E2E: max retries exhausted', () => {
     // Extend attempts and retry
     await manager.extendAttempts(pod.id, 2);
 
-    const final = manager.getSession(pod.id);
-    expect(final.maxValidationAttempts).toBe(3);
-    // Pod should have progressed past review_required (validation re-triggered)
-    expect(final.status).not.toBe('review_required');
+    expect(manager.getSession(pod.id).maxValidationAttempts).toBe(3);
+    // Acceptance is immediate; recovery continues asynchronously.
+    await vi.waitFor(() => {
+      expect(manager.getSession(pod.id).status).not.toBe('review_required');
+    });
   });
 });
 
