@@ -70,12 +70,22 @@ export function parsePodsitterDuration(value: string): number {
 }
 
 export function parsePodsitterExpiry(value: string, now = new Date()): string {
-  if (/^\d+(m|h|d|w)$/.test(value.trim())) {
-    return new Date(now.getTime() + parsePodsitterDuration(value) * 60_000).toISOString();
+  const trimmed = value.trim();
+  if (/^\d+(m|h|d|w)$/.test(trimmed)) {
+    return new Date(now.getTime() + parsePodsitterDuration(trimmed) * 60_000).toISOString();
   }
-  const timestamp = new Date(value);
+  const explicitZoneIso =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+  if (!explicitZoneIso.test(trimmed)) {
+    throw new Error(
+      `Invalid expiry "${value}"; use ISO-8601 with Z or an explicit offset, or a duration such as 12h`,
+    );
+  }
+  const timestamp = new Date(trimmed);
   if (Number.isNaN(timestamp.getTime())) {
-    throw new Error(`Invalid expiry "${value}"; use an ISO timestamp or duration such as 12h`);
+    throw new Error(
+      `Invalid expiry "${value}"; use ISO-8601 with Z or an explicit offset, or a duration such as 12h`,
+    );
   }
   return timestamp.toISOString();
 }
@@ -318,11 +328,14 @@ export function registerPodsitterCommands(program: Command, getClient: () => Aut
       const client = getClient();
       const before = await client.getPodsitterStatus();
       const result = await client.checkPodsitter();
-      const readOnly = !before.configuration?.enabled || !before.activation?.active;
+      const disabled = !before.configuration?.enabled;
+      const outsideWindow = !before.activation?.active;
       console.log(
-        readOnly
-          ? `Read-only check complete: ${result.queued} attention state(s) found; authorization is inactive.`
-          : `Check complete: ${result.queued} queued, ${result.processed} processed.`,
+        disabled
+          ? `Read-only check complete: ${result.queued} attention state(s) found; Podsitter is disabled.`
+          : outsideWindow
+            ? `Check complete outside the authorization window: ${result.queued} queued, ${result.processed} processed; provider state may be updated.`
+            : `Check complete: ${result.queued} queued, ${result.processed} processed.`,
       );
     });
 

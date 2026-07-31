@@ -294,6 +294,36 @@ describe('SystemDecisionRunner', () => {
     );
   });
 
+  it('kills a persisted Docker container before removing its attached network', async () => {
+    const crashed = harness();
+    let endpointAttached = true;
+    vi.mocked(crashed.repository.listActiveSandboxRuns).mockReturnValue([
+      {
+        id: 'attached-network-run',
+        decisionId: 'decision-old',
+        backend: 'docker',
+        containerId: 'attached-container',
+      },
+    ]);
+    vi.mocked(crashed.manager.kill).mockImplementation(async () => {
+      endpointAttached = false;
+    });
+    vi.mocked(crashed.dockerNetworkManager.removeNetworkForPod).mockImplementation(async () => {
+      if (endpointAttached) throw new Error('network has active endpoints');
+    });
+
+    await expect(crashed.runner.reapLeakedRuns()).resolves.toBe(1);
+
+    expect(crashed.manager.kill).toHaveBeenCalledWith('attached-container');
+    expect(crashed.dockerNetworkManager.removeNetworkForPod).toHaveBeenCalledWith(
+      'attached-network-run',
+    );
+    expect(crashed.repository.closeSandboxRun).toHaveBeenCalledWith(
+      'attached-network-run',
+      expect.objectContaining({ outcome: 'cancelled', cleanupState: 'clean' }),
+    );
+  });
+
   it('reaps a local network when a crash happened before container allocation', async () => {
     const crashed = harness();
     vi.mocked(crashed.repository.listActiveSandboxRuns).mockReturnValue([

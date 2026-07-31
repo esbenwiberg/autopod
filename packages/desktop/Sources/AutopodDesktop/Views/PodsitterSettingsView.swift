@@ -233,7 +233,7 @@ struct PodsitterSettingsView: View {
         HStack {
           Text(store.providerLabel)
             .font(.callout)
-            .foregroundStyle(store.isProviderAvailable ? .secondary : .orange)
+            .foregroundStyle(store.isProviderAvailable ? Color.secondary : Color.orange)
             .accessibilityLabel("Decision provider: \(store.providerLabel)")
           Spacer()
           Button("Probe now") { Task { await store.probeNow() } }

@@ -59,7 +59,7 @@ export interface ExecutePodsitterActionInput {
 }
 
 export interface PodsitterActionExecutionResult {
-  outcome: 'executed' | 'not_executed' | 'superseded' | 'duplicate';
+  outcome: 'executed' | 'not_executed' | 'superseded' | 'duplicate' | 'outcome_unknown';
   detail: string;
 }
 
@@ -179,7 +179,7 @@ export class PodsitterActionExecutor {
     this.podManager.getSession(input.podId);
 
     const key = idempotencyKey({ ...input, actor, decision });
-    const reserved = this.repository.reserveAction({
+    const reservation = {
       id: auditId(key),
       idempotencyKey: key,
       podId: input.podId,
@@ -192,12 +192,51 @@ export class PodsitterActionExecutor {
       action: decision.action,
       arguments: decision.arguments,
       policyResult: 'allowed',
-    });
-    if (!reserved) {
+    };
+    const reserved = this.repository.reserveAction(reservation);
+    let dispatch = this.repository.getActionDispatch(key);
+    if (!reserved && !dispatch) {
       return {
         outcome: 'superseded',
         detail:
           'Current activation, signature, decision, or reservation no longer authorizes action',
+      };
+    }
+    if (dispatch?.state === 'completed') {
+      return this.completedDispatchResult(dispatch.daemonResult);
+    }
+    if (dispatch?.state === 'dispatching') {
+      this.repository.completeAction(key, 'outcome_unknown:manual_review_required');
+      return {
+        outcome: 'outcome_unknown',
+        detail:
+          'Prior dispatch started but no durable outcome was recorded; manual review required',
+      };
+    }
+    const beganDispatch = this.repository.beginActionDispatch({
+      idempotencyKey: key,
+      podId: input.podId,
+      decisionId: actor.decisionId,
+      attentionSignature: decision.attentionSignature,
+      activationGeneration: input.activationGeneration,
+      activationWindowId: input.windowId,
+      failureSignature: input.failureSignature,
+    });
+    if (!beganDispatch) {
+      dispatch = this.repository.getActionDispatch(key);
+      if (dispatch?.state === 'completed') {
+        return this.completedDispatchResult(dispatch.daemonResult);
+      }
+      if (dispatch?.state === 'dispatching') {
+        this.repository.completeAction(key, 'outcome_unknown:manual_review_required');
+        return {
+          outcome: 'outcome_unknown',
+          detail: 'Concurrent or recovered dispatch has no durable outcome; manual review required',
+        };
+      }
+      return {
+        outcome: 'superseded',
+        detail: 'Current activation or attention no longer authorizes dispatch',
       };
     }
 
@@ -221,6 +260,22 @@ export class PodsitterActionExecutor {
       this.repository.completeAction(key, `not_executed:${auditCode}`);
       return { outcome: 'not_executed', detail };
     }
+  }
+
+  private completedDispatchResult(daemonResult: string | null): PodsitterActionExecutionResult {
+    if (daemonResult === 'executed') {
+      return { outcome: 'executed', detail: 'Action was already durably completed' };
+    }
+    if (daemonResult?.startsWith('outcome_unknown:')) {
+      return {
+        outcome: 'outcome_unknown',
+        detail: 'Prior dispatch outcome is unknown and requires manual review',
+      };
+    }
+    if (daemonResult?.startsWith('not_executed:')) {
+      return { outcome: 'not_executed', detail: daemonResult };
+    }
+    return { outcome: 'duplicate', detail: 'Action already has a durable terminal outcome' };
   }
 
   private async dispatch(

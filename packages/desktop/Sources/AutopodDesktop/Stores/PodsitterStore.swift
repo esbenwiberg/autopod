@@ -97,11 +97,11 @@ public final class PodsitterStore {
     case .unavailable: "unavailable"
     case let .unknown(value): value.replacingOccurrences(of: "_", with: " ")
     }
-    if let next = provider.retryAt ?? provider.resetAt {
-      return "\(state) · next probe \(Self.shortDate(next))"
-    }
     if provider.status == .available, let recoveredAt = provider.recoveredAt {
       return "\(state) · recovered \(Self.shortDate(recoveredAt))"
+    }
+    if let next = provider.retryAt ?? provider.resetAt {
+      return "\(state) · next probe \(Self.shortDate(next))"
     }
     return state
   }

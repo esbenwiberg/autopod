@@ -282,11 +282,18 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
             });
       const executed = execution.outcome === 'executed';
       if (executed) deps.repository.markDecisionExecuted(decisionId, now().toISOString());
+      const attentionState = executed
+        ? decision.action === 'report'
+          ? 'reported'
+          : 'acted'
+        : execution.outcome === 'outcome_unknown'
+          ? 'failed'
+          : 'superseded';
       deps.repository.releaseAttentionLease(
         lease.id,
         owner,
         lease.leaseVersion,
-        executed ? (decision.action === 'report' ? 'reported' : 'acted') : 'superseded',
+        attentionState,
         decisionId,
         now().toISOString(),
       );

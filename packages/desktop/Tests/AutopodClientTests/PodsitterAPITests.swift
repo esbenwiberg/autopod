@@ -39,7 +39,7 @@ private final class PodsitterURLProtocol: URLProtocol, @unchecked Sendable {
 
   override func stopLoading() {}
 
-  static let configurationJSON = { (enabled: Bool) in
+  static func configurationJSON(enabled: Bool) -> String {
     """
     {
       "enabled":\(enabled),"activation":{"mode":"always"},"authorizedUntil":null,
@@ -54,7 +54,7 @@ private final class PodsitterURLProtocol: URLProtocol, @unchecked Sendable {
 
   static let statusJSON = """
   {
-    "configuration":\(configurationJSON(true)),
+    "configuration":\(configurationJSON(enabled: true)),
     "activation":{"active":false,"windowId":null,"windowStartedAt":null,
       "windowEndsAt":"2026-08-01T03:00:00Z","reason":"outside_window"},
     "provider":{"providerAccountId":"sitter","status":"future_circuit_state",
@@ -83,6 +83,23 @@ private final class PodsitterURLProtocol: URLProtocol, @unchecked Sendable {
     }],"total":1
   }
   """
+}
+
+private func requestBodyData(from request: URLRequest) -> Data? {
+  if let body = request.httpBody { return body }
+  guard let stream = request.httpBodyStream else { return nil }
+  stream.open()
+  defer { stream.close() }
+  var data = Data()
+  let bufferSize = 4096
+  let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+  defer { buffer.deallocate() }
+  while stream.hasBytesAvailable {
+    let count = stream.read(buffer, maxLength: bufferSize)
+    if count <= 0 { break }
+    data.append(buffer, count: count)
+  }
+  return data
 }
 
 @Suite(.serialized)
@@ -135,7 +152,7 @@ struct PodsitterAPITests {
       "/podsitter/config", "/podsitter/enable", "/podsitter/disable",
       "/podsitter/check", "/podsitter/provider/probe",
     ])
-    let body = try #require(requests.first?.httpBody)
+    let body = try #require(requests.first.flatMap(requestBodyData))
     let object = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
     #expect(object["credentials"] == nil)
     #expect(object.keys.contains("authorizedUntil"))

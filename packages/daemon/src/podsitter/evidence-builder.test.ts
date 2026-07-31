@@ -33,6 +33,55 @@ describe('Podsitter evidence boundary', () => {
     expect(prompt).not.toContain('tools":');
   });
 
+  it('redacts provider and generic credential assignments from free-form evidence', () => {
+    const secrets = [
+      'openai-plain-long-secret',
+      'anthropic-plain-long-secret',
+      'copilot-plain-long-secret',
+      'foundry-plain-long-secret',
+      'azure-client-plain-long-secret',
+      'generic-password-plain-long-secret',
+      'query-token-plain-long-secret',
+    ];
+    const packet = buildPodsitterEvidence({
+      podId: 'secret-boundary-pod',
+      generatedAt: '2026-07-30T00:00:00.000Z',
+      sources: [
+        {
+          ref: 'logs:credentials',
+          value: [
+            `OPENAI_API_KEY=${secrets[0]}`,
+            `export ANTHROPIC_API_KEY='${secrets[1]}'`,
+            `COPILOT_GITHUB_TOKEN: "${secrets[2]}"`,
+            JSON.stringify({ FOUNDRY_API_KEY: secrets[3] }),
+            `AZURE_CLIENT_SECRET=${secrets[4]}`,
+            `password=${secrets[5]}`,
+            `https://example.test/callback?token=${secrets[6]}&safe=value`,
+          ].join('\n'),
+        },
+      ],
+    });
+    const serialized = JSON.stringify(packet);
+    const prompt = buildPodsitterDecisionPrompt(packet);
+
+    for (const secret of secrets) {
+      expect(serialized).not.toContain(secret);
+      expect(prompt).not.toContain(secret);
+    }
+    expect(serialized).toContain('[redacted]');
+  });
+
+  it('does not erase ordinary diagnostics that merely discuss credential handling', () => {
+    const text = 'Provider credentials were unavailable; retry after account authentication.';
+    const packet = buildPodsitterEvidence({
+      podId: 'diagnostic-pod',
+      generatedAt: '2026-07-30T00:00:00.000Z',
+      sources: [{ ref: 'logs:diagnostic', value: text }],
+    });
+
+    expect(packet.sections[0]?.content).toBe(text);
+  });
+
   it('keeps a crossed stale signature stable across polling ticks', () => {
     const state = { status: 'running', heartbeat: 'stale', attempt: 2 };
     expect(podsitterAttentionSignature(state, true)).toBe(podsitterAttentionSignature(state, true));

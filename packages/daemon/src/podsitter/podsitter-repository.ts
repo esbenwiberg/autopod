@@ -121,6 +121,20 @@ export interface PodsitterRepository {
     policyResult: string;
     now?: string;
   }): boolean;
+  beginActionDispatch(input: {
+    idempotencyKey: string;
+    podId: string;
+    decisionId: string;
+    attentionSignature: string;
+    activationGeneration: number;
+    activationWindowId: string;
+    failureSignature?: string | null;
+    now?: string;
+  }): boolean;
+  getActionDispatch(idempotencyKey: string): {
+    state: 'reserved' | 'dispatching' | 'completed';
+    daemonResult: string | null;
+  } | null;
   completeAction(idempotencyKey: string, daemonResult: string, now?: string): boolean;
   getDecisionForAttention(attentionId: string): PodsitterDecisionRecord | null;
   getDecisionById(id: string): PodsitterDecisionRecord | null;
@@ -857,6 +871,68 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
         throw error;
       }
     },
+    beginActionDispatch(input) {
+      const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
+      return db.transaction(() => {
+        const decision = getDecision(input.decisionId);
+        const authority = hasCurrentAuthority(decision, now);
+        if (
+          !authority ||
+          decision.podId !== input.podId ||
+          decision.attentionSignature !== input.attentionSignature ||
+          decision.configurationGeneration !== input.activationGeneration ||
+          decision.activationWindowId !== input.activationWindowId ||
+          authority.windowId !== input.activationWindowId
+        ) {
+          return false;
+        }
+        const attention = db
+          .prepare(
+            `SELECT signature, failure_signature, state, decision_id
+             FROM podsitter_attention
+             WHERE id = ? AND pod_id = ?`,
+          )
+          .get(decision.attentionId, input.podId) as
+          | {
+              signature: string;
+              failure_signature: string | null;
+              state: PodsitterAttentionState;
+              decision_id: string | null;
+            }
+          | undefined;
+        if (
+          !attention ||
+          attention.signature !== input.attentionSignature ||
+          attention.state !== 'deciding' ||
+          attention.decision_id !== input.decisionId ||
+          (input.failureSignature !== undefined &&
+            input.failureSignature !== attention.failure_signature)
+        ) {
+          return false;
+        }
+        return (
+          db
+            .prepare(
+              `UPDATE podsitter_action_audit
+               SET dispatch_state = 'dispatching', dispatch_started_at = ?
+               WHERE idempotency_key = ? AND pod_id = ? AND decision_id = ?
+                 AND dispatch_state = 'reserved' AND completed_at IS NULL`,
+            )
+            .run(now, input.idempotencyKey, input.podId, input.decisionId).changes === 1
+        );
+      })();
+    },
+    getActionDispatch(idempotencyKey) {
+      const row = db
+        .prepare(
+          `SELECT dispatch_state, daemon_result
+           FROM podsitter_action_audit WHERE idempotency_key = ?`,
+        )
+        .get(idempotencyKey) as
+        | { dispatch_state: 'reserved' | 'dispatching' | 'completed'; daemon_result: string | null }
+        | undefined;
+      return row ? { state: row.dispatch_state, daemonResult: row.daemon_result } : null;
+    },
     completeAction(idempotencyKey, daemonResult, now = new Date().toISOString()) {
       const persistedResult = sanitizeForAudit(daemonResult);
       assertRedacted(persistedResult, 'daemonResult');
@@ -866,7 +942,7 @@ export function createPodsitterRepository(db: Database.Database): PodsitterRepos
           db
             .prepare(
               `UPDATE podsitter_action_audit
-               SET daemon_result = ?, completed_at = ?
+               SET daemon_result = ?, dispatch_state = 'completed', completed_at = ?
                WHERE idempotency_key = ? AND completed_at IS NULL`,
             )
             .run(persistedResult, normalizedNow, idempotencyKey),

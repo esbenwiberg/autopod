@@ -369,26 +369,23 @@ export class SystemDecisionRunner {
         });
         continue;
       }
-      if (run.backend === 'docker' && this.options.dockerNetworkManager) {
-        try {
-          await this.options.dockerNetworkManager.removeNetworkForPod(run.id);
-        } catch {
-          this.options.repository.closeSandboxRun(run.id, {
-            outcome: 'leaked',
-            cleanupState: 'retryable',
-            failureCode: 'CLEANUP_FAILED',
-          });
-          continue;
-        }
-      }
       if (!run.containerId) {
-        if (run.backend === 'docker') {
-          this.options.repository.closeSandboxRun(run.id, {
-            outcome: 'cancelled',
-            cleanupState: 'clean',
-            failureCode: 'REAPED_NETWORK_AFTER_RESTART',
-          });
-          reaped += 1;
+        if (run.backend === 'docker' && this.options.dockerNetworkManager) {
+          try {
+            await this.options.dockerNetworkManager.removeNetworkForPod(run.id);
+            this.options.repository.closeSandboxRun(run.id, {
+              outcome: 'cancelled',
+              cleanupState: 'clean',
+              failureCode: 'REAPED_NETWORK_AFTER_RESTART',
+            });
+            reaped += 1;
+          } catch {
+            this.options.repository.closeSandboxRun(run.id, {
+              outcome: 'leaked',
+              cleanupState: 'retryable',
+              failureCode: 'CLEANUP_FAILED',
+            });
+          }
           continue;
         }
         this.options.repository.closeSandboxRun(run.id, {
@@ -407,7 +404,13 @@ export class SystemDecisionRunner {
         continue;
       }
       try {
+        // Docker refuses to remove a network while the persisted container still
+        // has an attached endpoint. Destroy the container before its deterministic
+        // per-run network so restart reaping can converge.
         await manager.kill(run.containerId);
+        if (run.backend === 'docker' && this.options.dockerNetworkManager) {
+          await this.options.dockerNetworkManager.removeNetworkForPod(run.id);
+        }
         this.options.repository.closeSandboxRun(run.id, {
           outcome: 'cancelled',
           cleanupState: 'clean',

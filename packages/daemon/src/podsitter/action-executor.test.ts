@@ -119,7 +119,7 @@ function decision<Action extends PodsitterAction>(
   } as PodsitterDecision;
 }
 
-function harness(reserved = true) {
+function harness(reserved = true, rejectedOperation?: string) {
   const calls: string[] = [];
   const currentPod = {
     id: 'pod-1',
@@ -149,6 +149,9 @@ function harness(reserved = true) {
         if (Reflect.has(target as object, property)) return Reflect.get(target as object, property);
         return (..._args: unknown[]) => {
           calls.push(String(property));
+          if (property === rejectedOperation) {
+            throw new Error(`${String(property)} rejected the operation`);
+          }
           if (property === 'revalidateSession' || property === 'approveFactWaiver') {
             return Promise.resolve({ newCommits: false, result: 'pass' });
           }
@@ -157,13 +160,34 @@ function harness(reserved = true) {
       },
     },
   );
+  let dispatchState: 'reserved' | 'dispatching' | 'completed' | null = reserved ? 'reserved' : null;
+  let daemonResult: string | null = null;
   const repository = {
     reserveAction: vi.fn(() => reserved),
-    completeAction: vi.fn(() => true),
+    beginActionDispatch: vi.fn(() => {
+      if (dispatchState !== 'reserved') return false;
+      dispatchState = 'dispatching';
+      return true;
+    }),
+    getActionDispatch: vi.fn(() => (dispatchState ? { state: dispatchState, daemonResult } : null)),
+    completeAction: vi.fn((_key: string, result: string) => {
+      if (dispatchState === 'completed') return false;
+      dispatchState = 'completed';
+      daemonResult = result;
+      return true;
+    }),
   } as unknown as PodsitterRepository;
   const operations = {
-    dismissValidationFinding: vi.fn(() => calls.push('dismissValidationFinding')),
-    report: vi.fn(() => calls.push('report')),
+    dismissValidationFinding: vi.fn(() => {
+      calls.push('dismissValidationFinding');
+      if (rejectedOperation === 'dismissValidationFinding') {
+        throw new Error('dismissValidationFinding rejected the operation');
+      }
+    }),
+    report: vi.fn(() => {
+      calls.push('report');
+      if (rejectedOperation === 'report') throw new Error('report rejected the operation');
+    }),
   };
   return {
     calls,
@@ -339,6 +363,232 @@ describe('PodsitterActionExecutor', () => {
       }),
     ).rejects.toMatchObject({ code: 'PODSITTER_EVIDENCE_REQUIRED' });
     expect(h.repository.reserveAction).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid arguments and statuses for every constrained action', async () => {
+    for (const action of PODSITTER_ACTIONS) {
+      const invalidArguments = harness();
+      await expect(
+        invalidArguments.executor.execute({
+          podId: 'pod-1',
+          decision: decision(action, {
+            arguments: { unexpected: true },
+          } as Partial<PodsitterDecision>),
+          actor,
+          activationGeneration: 7,
+          windowId: 'always:7',
+        }),
+        action,
+      ).rejects.toThrow();
+      expect(invalidArguments.repository.reserveAction, action).not.toHaveBeenCalled();
+
+      if (!statusByAction[action]) continue;
+      const invalidStatus = harness();
+      vi.mocked(invalidStatus.manager.getSession).mockReturnValue({
+        ...invalidStatus.manager.getSession('pod-1'),
+        status: 'killed',
+      } as Pod);
+      await expect(
+        invalidStatus.executor.execute({
+          podId: 'pod-1',
+          decision: decision(action),
+          actor,
+          activationGeneration: 7,
+          windowId: 'always:7',
+        }),
+        action,
+      ).resolves.toMatchObject({ outcome: 'not_executed' });
+      expect(invalidStatus.calls, action).toEqual([]);
+    }
+  });
+
+  it('audits action-specific operation rejections without reporting execution', async () => {
+    for (const action of PODSITTER_ACTIONS) {
+      const operation = operationByAction[action];
+      if (!operation) continue;
+      const rejected = harness(true, operation);
+      vi.mocked(rejected.manager.getSession).mockReturnValue({
+        ...rejected.manager.getSession('pod-1'),
+        status: statusByAction[action] ?? 'failed',
+      } as Pod);
+
+      await expect(
+        rejected.executor.execute({
+          podId: 'pod-1',
+          decision: decision(action),
+          actor,
+          activationGeneration: 7,
+          windowId: 'always:7',
+        }),
+        action,
+      ).resolves.toMatchObject({ outcome: 'not_executed' });
+      expect(rejected.calls, action).toEqual([operation]);
+      expect(rejected.repository.completeAction, action).toHaveBeenCalledWith(
+        expect.any(String),
+        'not_executed:Error',
+      );
+    }
+  });
+
+  it('rejects unsupported credential and tool values before reservation', async () => {
+    for (const [action, argumentsValue] of [
+      ['inject_credential', { credentialId: 'aws' }],
+      ['install_tool', { toolName: 'kubectl' }],
+    ] as const) {
+      const rejected = harness();
+      await expect(
+        rejected.executor.execute({
+          podId: 'pod-1',
+          decision: decision(action, { arguments: argumentsValue } as Partial<PodsitterDecision>),
+          actor,
+          activationGeneration: 7,
+          windowId: 'always:7',
+        }),
+      ).rejects.toThrow();
+      expect(rejected.repository.reserveAction).not.toHaveBeenCalled();
+    }
+  });
+
+  it('recovers reserved actions and never blindly repeats an unknown dispatch', async () => {
+    const executeInput = (
+      harnessValue: ReturnType<typeof durableHarness>,
+      decisionId: string,
+      signature: string,
+      failureSignature: string,
+      actionDecision: PodsitterDecision,
+    ) => ({
+      podId: 'pod-1',
+      decision: actionDecision,
+      actor: {
+        ...actor,
+        decisionId,
+        providerAccountId: 'sitter-account',
+      },
+      activationGeneration: harnessValue.configuration.generation,
+      windowId: `always:g${harnessValue.configuration.generation}`,
+      failureSignature,
+    });
+    const reserve = (
+      harnessValue: ReturnType<typeof durableHarness>,
+      input: ReturnType<typeof executeInput>,
+    ) => {
+      const key = `podsitter:${input.actor.decisionId}:${input.decision.attentionSignature}`;
+      expect(
+        harnessValue.repository.reserveAction({
+          id: `audit-${input.actor.decisionId}`,
+          idempotencyKey: key,
+          podId: input.podId,
+          decisionId: input.actor.decisionId,
+          attentionSignature: input.decision.attentionSignature,
+          activationGeneration: input.activationGeneration,
+          activationWindowId: input.windowId,
+          failureSignature: input.failureSignature,
+          actor: input.actor,
+          action: input.decision.action,
+          arguments: input.decision.arguments,
+          policyResult: 'allowed',
+        }),
+      ).toBe(true);
+      return key;
+    };
+
+    const reserved = durableHarness();
+    const reservedDecision = persistDecision(reserved.repository, {
+      id: 'decision-reserved',
+      attentionId: 'attention-reserved',
+      signature: 'signature-reserved',
+      failureSignature: 'failure-reserved',
+      generation: reserved.configuration.generation,
+    });
+    const reservedInput = executeInput(
+      reserved,
+      'decision-reserved',
+      'signature-reserved',
+      'failure-reserved',
+      reservedDecision,
+    );
+    const reservedKey = reserve(reserved, reservedInput);
+
+    await expect(reserved.executor.execute(reservedInput)).resolves.toMatchObject({
+      outcome: 'executed',
+    });
+    expect(reserved.sideEffect).toHaveBeenCalledTimes(1);
+    expect(reserved.repository.getActionDispatch(reservedKey)).toEqual({
+      state: 'completed',
+      daemonResult: 'executed',
+    });
+
+    const dispatching = durableHarness();
+    const dispatchingDecision = persistDecision(dispatching.repository, {
+      id: 'decision-dispatching',
+      attentionId: 'attention-dispatching',
+      signature: 'signature-dispatching',
+      failureSignature: 'failure-dispatching',
+      generation: dispatching.configuration.generation,
+    });
+    const dispatchingInput = executeInput(
+      dispatching,
+      'decision-dispatching',
+      'signature-dispatching',
+      'failure-dispatching',
+      dispatchingDecision,
+    );
+    const dispatchingKey = reserve(dispatching, dispatchingInput);
+    expect(
+      dispatching.repository.beginActionDispatch({
+        idempotencyKey: dispatchingKey,
+        podId: dispatchingInput.podId,
+        decisionId: dispatchingInput.actor.decisionId,
+        attentionSignature: dispatchingInput.decision.attentionSignature,
+        activationGeneration: dispatchingInput.activationGeneration,
+        activationWindowId: dispatchingInput.windowId,
+        failureSignature: dispatchingInput.failureSignature,
+      }),
+    ).toBe(true);
+
+    await expect(dispatching.executor.execute(dispatchingInput)).resolves.toMatchObject({
+      outcome: 'outcome_unknown',
+    });
+    expect(dispatching.sideEffect).not.toHaveBeenCalled();
+    expect(dispatching.repository.getActionDispatch(dispatchingKey)).toEqual({
+      state: 'completed',
+      daemonResult: 'outcome_unknown:manual_review_required',
+    });
+
+    const completed = durableHarness();
+    const completedDecision = persistDecision(completed.repository, {
+      id: 'decision-completed',
+      attentionId: 'attention-completed',
+      signature: 'signature-completed',
+      failureSignature: 'failure-completed',
+      generation: completed.configuration.generation,
+    });
+    const completedInput = executeInput(
+      completed,
+      'decision-completed',
+      'signature-completed',
+      'failure-completed',
+      completedDecision,
+    );
+    const completedKey = reserve(completed, completedInput);
+    expect(
+      completed.repository.beginActionDispatch({
+        idempotencyKey: completedKey,
+        podId: completedInput.podId,
+        decisionId: completedInput.actor.decisionId,
+        attentionSignature: completedInput.decision.attentionSignature,
+        activationGeneration: completedInput.activationGeneration,
+        activationWindowId: completedInput.windowId,
+        failureSignature: completedInput.failureSignature,
+      }),
+    ).toBe(true);
+    expect(completed.repository.completeAction(completedKey, 'executed')).toBe(true);
+
+    await expect(completed.executor.execute(completedInput)).resolves.toMatchObject({
+      outcome: 'executed',
+      detail: 'Action was already durably completed',
+    });
+    expect(completed.sideEffect).not.toHaveBeenCalled();
   });
 
   it('rejects stale and duplicate decisions before side effects', async () => {

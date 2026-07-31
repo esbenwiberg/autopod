@@ -205,6 +205,110 @@ describe('PodsitterService', () => {
     expect(harness.repository.listPendingAttention()).toHaveLength(0);
   });
 
+  it('surfaces an unknown crash-after-dispatch outcome without repeating the side effect', async () => {
+    const harness = setup();
+    const attention = harness.repository.recordAttention({
+      id: 'dispatch-crash-attention',
+      podId: 'pod-1',
+      signature: 'attention-current',
+      failureSignature: 'failure-current',
+      now: new Date(NOW.getTime() - 20 * 60_000).toISOString(),
+    });
+    const lease = harness.repository.acquireAttentionLease(
+      attention.id,
+      'crashed-worker',
+      new Date(NOW.getTime() - 60_000).toISOString(),
+      new Date(NOW.getTime() - 20 * 60_000).toISOString(),
+    );
+    if (!lease) throw new Error('expected crashed attention lease');
+    const record = harness.repository.createDecision({
+      id: 'dispatch-crash-decision',
+      attentionId: attention.id,
+      leaseOwner: 'crashed-worker',
+      leaseVersion: lease.leaseVersion,
+      podId: 'pod-1',
+      attentionSignature: 'attention-current',
+      configurationGeneration: 1,
+      evidenceHash: 'evidence-before-crash',
+      evidenceVersion: 1,
+      target: {
+        providerAccountId: 'sitter-account',
+        runtime: 'codex',
+        model: 'gpt-5',
+      },
+      now: new Date(NOW.getTime() - 19 * 60_000).toISOString(),
+    });
+    harness.repository.completeDecision(
+      record.id,
+      {
+        leaseOwner: 'crashed-worker',
+        leaseVersion: lease.leaseVersion,
+        decision: harness.decision(),
+        outcome: 'completed',
+      },
+      new Date(NOW.getTime() - 18 * 60_000).toISOString(),
+    );
+    const actionKey = 'podsitter:dispatch-crash-decision:attention-current';
+    const actor = {
+      type: 'podsitter' as const,
+      decisionId: record.id,
+      providerAccountId: 'sitter-account',
+      model: 'gpt-5',
+    };
+    expect(
+      harness.repository.reserveAction({
+        id: 'dispatch-crash-audit',
+        idempotencyKey: actionKey,
+        podId: 'pod-1',
+        decisionId: record.id,
+        attentionSignature: 'attention-current',
+        activationGeneration: 1,
+        activationWindowId: 'always:g1',
+        failureSignature: 'failure-current',
+        actor,
+        action: 'report',
+        arguments: harness.decision().arguments,
+        policyResult: 'allowed',
+        now: new Date(NOW.getTime() - 17 * 60_000).toISOString(),
+      }),
+    ).toBe(true);
+    expect(
+      harness.repository.beginActionDispatch({
+        idempotencyKey: actionKey,
+        podId: 'pod-1',
+        decisionId: record.id,
+        attentionSignature: 'attention-current',
+        activationGeneration: 1,
+        activationWindowId: 'always:g1',
+        failureSignature: 'failure-current',
+        now: new Date(NOW.getTime() - 17 * 60_000).toISOString(),
+      }),
+    ).toBe(true);
+    const report = vi.fn();
+    const realExecutor = new PodsitterActionExecutor(
+      harness.repository,
+      {
+        getSession: () => ({ id: 'pod-1', profileName: 'test-profile', status: 'failed' }),
+      } as unknown as PodManager,
+      { report, dismissValidationFinding: vi.fn() },
+    );
+
+    const reconstructed = service(harness, vi.fn(), { actionExecutor: realExecutor });
+    await reconstructed.start();
+    await reconstructed.stop();
+
+    expect(report).not.toHaveBeenCalled();
+    expect(harness.repository.getActionDispatch(actionKey)).toEqual({
+      state: 'completed',
+      daemonResult: 'outcome_unknown:manual_review_required',
+    });
+    expect(
+      harness.db
+        .prepare("SELECT state FROM podsitter_attention WHERE id = 'dispatch-crash-attention'")
+        .get(),
+    ).toEqual({ state: 'failed' });
+  });
+
   it('backs off provider limits without consuming action attempts', async () => {
     const harness = setup();
     const run = vi.fn(async () => ({

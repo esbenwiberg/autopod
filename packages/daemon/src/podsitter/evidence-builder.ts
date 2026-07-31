@@ -6,6 +6,8 @@ const DEFAULT_SECTION_BYTES = 12_000;
 const DEFAULT_TOTAL_BYTES = 96_000;
 const SECRET_KEY = /(authorization|credential|password|secret|token|api.?key)/i;
 const SECRET_VALUE = /\b(?:sk-|gh[opusr]_)[a-z0-9_-]{12,}\b|(?:bearer|basic)\s+[^\s,"'}]+/gi;
+const SECRET_ASSIGNMENT =
+  /(["']?(?:[a-z0-9_]*(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|credentials?)|token|secret)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}\]]+)/gi;
 
 export interface PodsitterEvidenceSource {
   ref: string;
@@ -42,7 +44,9 @@ function boundedJson(value: unknown, maxBytes: number): { value: unknown; trunca
 
 function redactSecrets(value: unknown, key = ''): unknown {
   if (SECRET_KEY.test(key) && value !== null) return '[redacted]';
-  if (typeof value === 'string') return value.replace(SECRET_VALUE, '[redacted]');
+  if (typeof value === 'string') {
+    return value.replace(SECRET_ASSIGNMENT, '$1[redacted]').replace(SECRET_VALUE, '[redacted]');
+  }
   if (Array.isArray(value)) return value.map((item) => redactSecrets(item));
   if (value && typeof value === 'object') {
     return Object.fromEntries(

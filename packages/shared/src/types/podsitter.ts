@@ -99,8 +99,8 @@ export interface PodsitterActionArguments {
   spawn_fix: Record<string, never>;
   retry_pr: Record<string, never>;
   update_from_base: Record<string, never>;
-  inject_credential: { credentialId: string };
-  install_tool: { toolName: string };
+  inject_credential: { credentialId: 'github' | 'ado' };
+  install_tool: { toolName: 'gh' | 'az' };
   recover_worktree: Record<string, never>;
   force_approve: { failedPhases: string[]; manualEvidenceRefs: string[] };
   skip_validation: { failedPhases: string[]; manualEvidenceRefs: string[] };

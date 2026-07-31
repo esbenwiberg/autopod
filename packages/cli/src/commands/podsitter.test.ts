@@ -220,9 +220,17 @@ describe('podsitter command', () => {
         'Mars/Olympus',
       ]),
     ).rejects.toThrow('Invalid IANA timezone');
-    await expect(run(client, ['on', '--always', '--until', 'tomorrow-ish'])).rejects.toThrow(
-      'Invalid expiry',
-    );
+    for (const ambiguousExpiry of [
+      '2026/08/07 20:00:00',
+      '2026-08-07T20:00:00',
+      'August 7, 2026 20:00:00',
+      '2026-08-07',
+      'tomorrow-ish',
+    ]) {
+      await expect(run(client, ['on', '--always', '--until', ambiguousExpiry])).rejects.toThrow(
+        'Invalid expiry',
+      );
+    }
   });
 
   it('renders redacted provider status and decisions', async () => {
@@ -309,6 +317,18 @@ describe('podsitter command', () => {
     await run(client, ['check']);
     expect(log.mock.calls.flat().join('\n')).toContain('Read-only check');
     expect(checkPodsitter).toHaveBeenCalledOnce();
+
+    log.mockClear();
+    getPodsitterStatus.mockResolvedValueOnce({
+      ...status,
+      configuration: { ...configuration, enabled: true },
+      activation: { ...status.activation, active: false, reason: 'outside_window' },
+    });
+    await run(client, ['check']);
+    const outsideWindow = log.mock.calls.flat().join('\n');
+    expect(outsideWindow).toContain('outside the authorization window');
+    expect(outsideWindow).toContain('provider state may be updated');
+    expect(outsideWindow).not.toContain('Read-only');
 
     log.mockClear();
     await run(client, ['probe']);
