@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -83,7 +83,7 @@ export async function executePublishPlan(
   const results = [];
   for (const entry of plan) {
     process.stdout.write(`\n==> building ${entry.template} (${entry.platform})\n`);
-    const queued = parseJson(runAz(entry.buildArgs, repoRoot), 'az acr build');
+    const queued = parseQueuedBuild(runAz(entry.buildArgs, repoRoot));
     const runId = queued.runId ?? queued.name ?? idSuffix(queued.id);
     if (typeof runId !== 'string' || !runId) {
       throw new Error(`ACR build for ${entry.template} did not return a run ID`);
@@ -235,7 +235,38 @@ function verifyRun(entry, run) {
 }
 
 function defaultRunAz(args, cwd) {
-  return execFileSync('az', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+  const result = spawnSync('az', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const detail = result.stderr.trim().split('\n').at(-1);
+    throw new Error(
+      `az ${args.join(' ')} failed with exit code ${result.status}${detail ? `: ${detail}` : ''}`,
+    );
+  }
+
+  // `az acr build --no-wait --output json` returns JSON on some Azure CLI
+  // versions, while others emit only "Queued a build with ID: ..." to stderr.
+  // Preserve stdout for all other commands so warnings cannot corrupt digest or
+  // run-status parsing.
+  if (args[0] === 'acr' && args[1] === 'build' && !result.stdout.trim()) {
+    return result.stderr;
+  }
+  return result.stdout;
+}
+
+function parseQueuedBuild(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    const runId = /Queued a build with ID:\s*([A-Za-z0-9-]+)/i.exec(value)?.[1];
+    if (runId) return { runId };
+    throw new Error('az acr build did not return JSON or a queued build ID');
+  }
 }
 
 function parseJson(value, command) {

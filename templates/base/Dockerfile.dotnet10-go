@@ -33,6 +33,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Global tools
+RUN npm install -g pnpm@9
+
 # Create non-root user (GID 1000 may already exist in the base image)
 RUN groupadd --gid 1000 autopod 2>/dev/null || groupmod -n autopod "$(getent group 1000 | cut -d: -f1)" && \
     useradd --uid 1000 --gid autopod --shell /bin/bash --create-home autopod 2>/dev/null || usermod -l autopod -d /home/autopod -m "$(getent passwd 1000 | cut -d: -f1)"

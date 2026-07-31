@@ -281,6 +281,13 @@ If maintenance reports `Unable to resolve ACR base image`, verify the named root
 was published and that the daemon identity can read it. Do not work around this by tagging only on
 the daemon VM, disabling maintenance, or allowing an unqualified Docker Hub fallback.
 
+Docker 29's containerd image store has an upstream defect that can make a successfully built warm
+image fail to push with `NotFound: content digest ... not found` (Moby issue #51665). Hosts that
+build and push profile warm images must currently use Docker's legacy image store. Set
+`features.containerd-snapshotter` to `false` in `/etc/docker/daemon.json`, restart Docker only when
+no pods or Docker containers are active, and verify `docker info` reports `overlay2` without
+`io.containerd.snapshotter.v1`. This is a host prerequisite, not a reason to weaken digest pinning.
+
 Sandbox pods do not fall back to stock base images. The pod manager requires `profile.warmImageTag`, and it must be an ACR-qualified tag such as:
 
 ```text

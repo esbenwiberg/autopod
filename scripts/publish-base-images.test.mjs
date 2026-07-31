@@ -58,6 +58,63 @@ test('publication-plan-covers-all-base-templates', async () => {
   assert.match(output, /az acr manifest show-metadata/);
 });
 
+test('publication accepts real Azure queue output without JSON', async () => {
+  const [entry] = createPublishPlan({
+    registry: 'example',
+    revision: 'abc123',
+    templates: ['node22'],
+    repoRoot,
+  });
+  const digest = `sha256:${'a'.repeat(64)}`;
+  const results = await executePublishPlan([entry], {
+    repoRoot,
+    pollIntervalMs: 0,
+    runAz: (args) => {
+      if (args[1] === 'build') return 'WARNING: Queued a build with ID: run-real\n';
+      if (args[1] === 'task') {
+        return JSON.stringify({
+          runId: 'run-real',
+          status: 'Succeeded',
+          platform: { os: 'Linux', architecture: 'amd64' },
+        });
+      }
+      if (args[1] === 'manifest') return `${digest}\n`;
+      throw new Error(`unexpected az command: ${args.join(' ')}`);
+    },
+  });
+
+  assert.deepEqual(results, [{ template: 'node22', digest, platform: 'linux/amd64' }]);
+});
+
+test('publication context exclusions keep required base inputs', () => {
+  const dockerignore = fs.readFileSync(path.join(repoRoot, '.dockerignore'), 'utf8');
+  const patterns = dockerignore
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
+
+  for (const excluded of [
+    '.git',
+    'node_modules',
+    'packages/desktop/.build',
+    'packages/desktop/build',
+    'packages/daemon/.autopod-data',
+  ]) {
+    assert.ok(patterns.includes(excluded), `${excluded} must be excluded from ACR context`);
+  }
+  for (const required of [
+    'package.json',
+    'pnpm-lock.yaml',
+    'pnpm-workspace.yaml',
+    'tsconfig.base.json',
+    'packages/pi-worker/package.json',
+    'packages/pi-worker/tsconfig.json',
+    'packages/pi-worker/src',
+  ]) {
+    assert.ok(!patterns.includes(required), `${required} must remain in ACR context`);
+  }
+});
+
 test('publication verifies completed run platform and matching manifests', async () => {
   const [entry] = createPublishPlan({
     registry: 'example',

@@ -19,6 +19,20 @@ const playwrightBaseTemplates = [
   'Dockerfile.dotnet10-go',
 ];
 
+const workerBaseTemplates = [
+  'Dockerfile.dotnet9',
+  'Dockerfile.dotnet10',
+  'Dockerfile.dotnet10-go',
+  'Dockerfile.go124',
+  'Dockerfile.go124-pw',
+  'Dockerfile.node22',
+  'Dockerfile.node22-pw',
+  'Dockerfile.node22-pw-pg',
+  'Dockerfile.python-node',
+  'Dockerfile.python-node-pg',
+  'Dockerfile.python312',
+];
+
 const daggerBaseTemplates = [
   ['Dockerfile.dotnet9', 'DAGGER_VERSION'],
   ['Dockerfile.dotnet10', 'DAGGER_VERSION'],
@@ -42,6 +56,17 @@ function extractInitdbWrapper(dockerfile: string): string {
   if (!match?.[1]) throw new Error('node22-pw-pg initdb wrapper is missing');
   return match[1];
 }
+
+describe('Trusted Pi worker base image prerequisites', () => {
+  it.each(workerBaseTemplates)('%s installs pinned pnpm before using it', async (filename) => {
+    const dockerfile = await readBaseTemplate(filename);
+    const installIndex = dockerfile.indexOf('npm install -g pnpm@9');
+    const workerBuildIndex = dockerfile.indexOf('pnpm --filter @autopod/pi-worker install');
+
+    expect(installIndex).toBeGreaterThanOrEqual(0);
+    expect(workerBuildIndex).toBeGreaterThan(installIndex);
+  });
+});
 
 describe('Playwright base image templates', () => {
   it.each(playwrightBaseTemplates)(
