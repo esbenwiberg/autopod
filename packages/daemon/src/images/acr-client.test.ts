@@ -106,6 +106,39 @@ describe('AcrClient', () => {
     );
   });
 
+  it('acr-digest-references-round-trip', async () => {
+    const mockDocker = createMockDocker();
+    const client = new AcrClient({ registryUrl: 'myregistry.azurecr.io' }, mockDocker);
+    const digest = `sha256:${'a'.repeat(64)}`;
+    const local = `autopod-node22-pw@${digest}`;
+    const qualified = `myregistry.azurecr.io/${local}`;
+
+    expect(client.resolveTag(local)).toBe(qualified);
+    expect(client.resolveTag(qualified)).toBe(qualified);
+    await expect(client.pullPinned(qualified)).resolves.toBe(qualified);
+    expect(mockDocker.pull).toHaveBeenCalledWith(
+      qualified,
+      expect.objectContaining({
+        authconfig: expect.objectContaining({ serveraddress: 'myregistry.azurecr.io' }),
+      }),
+    );
+    expect(mockGetArtifact).not.toHaveBeenCalled();
+  });
+
+  it('resolves a mutable tag and pulls its exact manifest digest', async () => {
+    const mockDocker = createMockDocker();
+    const client = new AcrClient({ registryUrl: 'myregistry.azurecr.io' }, mockDocker);
+
+    await expect(client.pullPinned('autopod-node22-pw:latest')).resolves.toBe(
+      'myregistry.azurecr.io/autopod-node22-pw@sha256:abc',
+    );
+    expect(mockGetArtifact).toHaveBeenCalledWith('autopod-node22-pw', 'latest');
+    expect(mockDocker.pull).toHaveBeenCalledWith(
+      'myregistry.azurecr.io/autopod-node22-pw@sha256:abc',
+      expect.anything(),
+    );
+  });
+
   it('reports whether it can pull a fully qualified image reference', () => {
     const mockDocker = createMockDocker();
     const client = new AcrClient({ registryUrl: 'myregistry.azurecr.io' }, mockDocker);
@@ -205,6 +238,9 @@ describe('AcrClient', () => {
     );
     expect(client.resolveTag('myregistry.azurecr.io/autopod/test-app:latest')).toBe(
       'myregistry.azurecr.io/autopod/test-app:latest',
+    );
+    expect(client.resolveTag('autopod/test-app@sha256:abc')).toBe(
+      'myregistry.azurecr.io/autopod/test-app@sha256:abc',
     );
   });
 });

@@ -289,6 +289,18 @@ describe('generateDockerfile', () => {
     expect(df).not.toContain('@autopod/pi-worker');
   });
 
+  it('uses an explicitly resolved base image reference', () => {
+    const baseImage = `example.azurecr.io/autopod-node22-pw@sha256:${'e'.repeat(64)}`;
+    const df = generateDockerfile({
+      profile: mockProfile({ template: 'node22-pw' }),
+      gitCredentials: 'none',
+      baseImage,
+    });
+
+    expect(df).toContain(`FROM ${baseImage}`);
+    expect(df).not.toContain('FROM autopod-node22-pw:latest');
+  });
+
   it('uses sha256 digest in FROM when imageDigests map is provided', () => {
     const digest = `sha256:${'f'.repeat(64)}`;
     const df = generateDockerfile({

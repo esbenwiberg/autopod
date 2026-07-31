@@ -5,7 +5,7 @@ import { pack as tarPack } from 'tar-stream';
 import { buildNuGetCredentialEnv } from '../pods/registry-injector.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { AcrClient } from './acr-client.js';
-import { generateDockerfile } from './dockerfile-generator.js';
+import { generateDockerfile, getConfiguredBaseImage } from './dockerfile-generator.js';
 
 const logger = pino({ name: 'autopod' }).child({ component: 'image-builder' });
 
@@ -63,10 +63,12 @@ export class ImageBuilder {
     logger.info({ profile: profile.name }, 'Building warm image');
     const startTime = Date.now();
 
-    // 1. Generate Dockerfile
+    // 1. Resolve and authenticate the base before generating the Dockerfile.
+    const baseImage = await this.resolveBaseImage(profile);
     const dockerfile = generateDockerfile({
       profile,
       gitCredentials: options.gitPat ? 'pat' : 'none',
+      ...(baseImage ? { baseImage } : {}),
     });
 
     // 2. Build image from Dockerfile
@@ -122,6 +124,23 @@ export class ImageBuilder {
     );
 
     return { tag: publishedTag, digest, size, buildDuration };
+  }
+
+  private async resolveBaseImage(profile: Profile): Promise<string | undefined> {
+    if (!this.acr) return undefined;
+
+    const template = profile.template ?? 'node22';
+    const configured = getConfiguredBaseImage(template);
+    const qualified = this.acr.resolveTag(configured);
+    try {
+      return await this.acr.pullPinned(configured);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Unable to resolve ACR base image for template "${template}" (${qualified}): ${reason}`,
+        { cause: err },
+      );
+    }
   }
 
   /** Check if a profile's warm image is stale. */

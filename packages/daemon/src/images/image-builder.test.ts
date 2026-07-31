@@ -1,4 +1,5 @@
 import type { Profile } from '@autopod/shared';
+import { extract as tarExtract } from 'tar-stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProfileStore } from '../profiles/index.js';
 import type { AcrClient } from './acr-client.js';
@@ -49,13 +50,36 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
   };
 }
 
+async function readDockerfile(stream: NodeJS.ReadableStream): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const extract = tarExtract();
+    let dockerfile = '';
+    extract.on('entry', (header, entry, next) => {
+      const chunks: Buffer[] = [];
+      entry.on('data', (chunk: Buffer) => chunks.push(chunk));
+      entry.on('end', () => {
+        if (header.name === 'Dockerfile') dockerfile = Buffer.concat(chunks).toString('utf8');
+        next();
+      });
+      entry.on('error', reject);
+    });
+    extract.on('finish', () => resolve(dockerfile));
+    extract.on('error', reject);
+    stream.pipe(extract);
+  });
+}
+
 function createMockDeps() {
   const followProgressCb = vi.fn((_stream: unknown, onComplete: (err: Error | null) => void) => {
     onComplete(null);
   });
+  const dockerfiles: string[] = [];
 
   const mockDocker = {
-    buildImage: vi.fn().mockResolvedValue('mock-build-stream'),
+    buildImage: vi.fn(async (stream: NodeJS.ReadableStream) => {
+      dockerfiles.push(await readDockerfile(stream));
+      return 'mock-build-stream';
+    }),
     getImage: vi.fn().mockReturnValue({
       tag: vi.fn().mockResolvedValue(undefined),
       inspect: vi.fn().mockResolvedValue({ Size: 512 * 1_048_576 }),
@@ -66,6 +90,9 @@ function createMockDeps() {
   const mockAcr = {
     push: vi.fn().mockResolvedValue('sha256:abc123'),
     pull: vi.fn().mockResolvedValue(undefined),
+    pullPinned: vi.fn(
+      async (tag: string) => `ewiacr.azurecr.io/${tag.replace(/:latest$/, '@sha256:base-digest')}`,
+    ),
     exists: vi.fn().mockResolvedValue(true),
     resolveTag: vi.fn((tag: string) => `ewiacr.azurecr.io/${tag}`),
   } as unknown as AcrClient;
@@ -76,7 +103,7 @@ function createMockDeps() {
     get: vi.fn(),
   } as unknown as ProfileStore;
 
-  return { mockDocker, mockAcr, mockProfileStore, followProgressCb };
+  return { mockDocker, mockAcr, mockProfileStore, followProgressCb, dockerfiles };
 }
 
 describe('ImageBuilder', () => {
@@ -112,8 +139,43 @@ describe('ImageBuilder', () => {
     );
   });
 
-  it('stores local tags when ACR is not configured', async () => {
-    const { mockDocker, mockProfileStore } = createMockDeps();
+  it('acr-base-is-qualified-and-pinned', async () => {
+    const { mockDocker, mockAcr, mockProfileStore, dockerfiles } = createMockDeps();
+    const builder = new ImageBuilder({
+      docker: mockDocker,
+      acr: mockAcr,
+      profileStore: mockProfileStore,
+    });
+
+    await builder.buildWarmImage(mockProfile({ template: 'node22-pw' }));
+
+    expect(mockAcr.pullPinned).toHaveBeenCalledWith('autopod-node22-pw:latest');
+    expect(dockerfiles).toEqual([
+      expect.stringContaining('FROM ewiacr.azurecr.io/autopod-node22-pw@sha256:base-digest'),
+    ]);
+    expect(mockDocker.buildImage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ platform: 'linux/amd64' }),
+    );
+  });
+
+  it('unresolved-acr-base-fails-actionably', async () => {
+    const { mockDocker, mockAcr, mockProfileStore } = createMockDeps();
+    vi.mocked(mockAcr.pullPinned).mockRejectedValueOnce(new Error('registry access denied'));
+    const builder = new ImageBuilder({
+      docker: mockDocker,
+      acr: mockAcr,
+      profileStore: mockProfileStore,
+    });
+
+    await expect(builder.buildWarmImage(mockProfile({ template: 'node22-pw' }))).rejects.toThrow(
+      'template "node22-pw" (ewiacr.azurecr.io/autopod-node22-pw:latest): registry access denied',
+    );
+    expect(mockDocker.buildImage).not.toHaveBeenCalled();
+  });
+
+  it('local-base-behavior-is-preserved', async () => {
+    const { mockDocker, mockProfileStore, dockerfiles } = createMockDeps();
     const builder = new ImageBuilder({
       docker: mockDocker,
       acr: null,
@@ -123,6 +185,7 @@ describe('ImageBuilder', () => {
     const result = await builder.buildWarmImage(mockProfile());
 
     expect(result.tag).toBe('autopod/test-app:latest');
+    expect(dockerfiles).toEqual([expect.stringContaining('FROM autopod-node22:latest')]);
     expect(mockProfileStore.setWarmImage).toHaveBeenCalledWith(
       'test-app',
       'autopod/test-app:latest',

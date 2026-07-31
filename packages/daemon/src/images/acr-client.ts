@@ -33,7 +33,11 @@ export class AcrClient {
     const authconfig = this.getDockerAuthConfig(refreshToken);
     await this.docker.checkAuth(authconfig);
 
-    const { version } = splitImageTag(tag);
+    const reference = parseImageReference(tag);
+    if (reference.kind === 'digest') {
+      throw new Error(`Cannot push immutable image reference: ${tag}`);
+    }
+    const { version } = reference;
     const acrTag = this.resolveTag(tag);
     const acrRepo = acrTag.slice(0, acrTag.length - `:${version}`.length);
 
@@ -87,6 +91,18 @@ export class AcrClient {
     logger.info({ tag: acrTag }, 'Pulled image from ACR');
   }
 
+  /** Resolve a tag to its digest, then authenticated-pull that exact immutable reference. */
+  async pullPinned(tag: string): Promise<string> {
+    const qualified = this.resolveTag(tag);
+    const reference = parseImageReference(this.stripRegistryPrefix(qualified));
+    const pinned =
+      reference.kind === 'digest'
+        ? qualified
+        : `${this.config.registryUrl}/${reference.repo}@${await this.resolveDigest(qualified)}`;
+    await this.pull(pinned);
+    return pinned;
+  }
+
   /** Whether this ACR client owns the fully-qualified image reference. */
   canPull(tag: string): boolean {
     return tag.startsWith(`${this.config.registryUrl}/`);
@@ -95,7 +111,7 @@ export class AcrClient {
   /** Check if an image exists in ACR. */
   async exists(tag: string): Promise<boolean> {
     try {
-      const { repo, version } = splitImageTag(this.stripRegistryPrefix(tag));
+      const { repo, version } = parseImageReference(this.stripRegistryPrefix(tag));
       const artifact = this.registryClient.getArtifact(repo, version || 'latest');
       await artifact.getManifestProperties();
       return true;
@@ -106,7 +122,7 @@ export class AcrClient {
 
   /** Resolve the current manifest digest for an ACR image reference. */
   async resolveDigest(tag: string): Promise<string> {
-    const { repo, version } = splitImageTag(this.stripRegistryPrefix(tag));
+    const { repo, version } = parseImageReference(this.stripRegistryPrefix(tag));
     const artifact = this.registryClient.getArtifact(repo, version || 'latest');
     const properties = await artifact.getManifestProperties();
     const digest = (properties as { digest?: unknown }).digest;
@@ -158,11 +174,12 @@ export class AcrClient {
     };
   }
 
-  /** Resolve a local repository tag to the ACR-qualified image reference. */
+  /** Resolve a local image reference to an ACR-qualified tag or digest. */
   resolveTag(tag: string): string {
     const stripped = this.stripRegistryPrefix(tag);
-    const { repo, version } = splitImageTag(stripped);
-    return `${this.config.registryUrl}/${repo}:${version}`;
+    const { repo, version, kind } = parseImageReference(stripped);
+    const separator = kind === 'digest' ? '@' : ':';
+    return `${this.config.registryUrl}/${repo}${separator}${version}`;
   }
 
   private stripRegistryPrefix(tag: string): string {
@@ -171,13 +188,30 @@ export class AcrClient {
   }
 }
 
-function splitImageTag(image: string): { repo: string; version: string } {
+interface ParsedImageReference {
+  repo: string;
+  version: string;
+  kind: 'tag' | 'digest';
+}
+
+function parseImageReference(image: string): ParsedImageReference {
   const lastSlash = image.lastIndexOf('/');
-  const lastColon = image.lastIndexOf(':');
-  if (lastColon > lastSlash) {
-    return { repo: image.slice(0, lastColon), version: image.slice(lastColon + 1) || 'latest' };
+  const digestSeparator = image.lastIndexOf('@');
+  if (digestSeparator > lastSlash) {
+    const digest = image.slice(digestSeparator + 1);
+    if (!digest) throw new Error(`Invalid image digest reference: ${image}`);
+    return { repo: image.slice(0, digestSeparator), version: digest, kind: 'digest' };
   }
-  return { repo: image, version: 'latest' };
+
+  const tagSeparator = image.lastIndexOf(':');
+  if (tagSeparator > lastSlash) {
+    return {
+      repo: image.slice(0, tagSeparator),
+      version: image.slice(tagSeparator + 1) || 'latest',
+      kind: 'tag',
+    };
+  }
+  return { repo: image, version: 'latest', kind: 'tag' };
 }
 
 function extractTenantId(token: string): string | undefined {

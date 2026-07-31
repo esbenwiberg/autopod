@@ -248,7 +248,38 @@ export AUTOPOD_MCP_BASE_URL=https://autopod-daemon-ewi.swedencentral.cloudapp.az
 
 See `docs/hosted-daemon-tls-entra.md` for the Caddy, NSG, cert renewal, and Entra desktop-login setup.
 
-## Warm Images
+## Base Images and Warm Images
+
+Profile warm images are built from repository-owned base templates in `templates/base/`. Publish
+those base images before asking the daemon to build or maintain profile warm images:
+
+```bash
+# Review every build and verification operation; this has no registry side effects.
+node scripts/publish-base-images.mjs \
+  --registry "$ACR_REGISTRY_URL" --all --dry-run
+
+# Explicit operator action: build all bases for linux/amd64 and publish revision + latest tags.
+node scripts/publish-base-images.mjs \
+  --registry "$ACR_REGISTRY_URL" --all
+```
+
+The utility maps `Dockerfile.<template>` to the root ACR repository
+`autopod-<template>`, uses the repository root as build context, and verifies the immutable and
+`latest` tags resolve to the same manifest digest. Use one or more `--template <name>` options for
+a bounded repair, but production readiness requires every concrete base template to be published.
+The registry argument is configurable and must not be hardcoded into source or profiles. Actual
+publication refuses a dirty worktree so the immutable tag describes the uploaded build context.
+
+When ACR is configured, the warm-image builder resolves each base tag in that registry, pulls the
+exact digest with ACR authentication, and emits
+`FROM <registry>/autopod-<template>@sha256:<digest>`. A non-null entry in
+`packages/daemon/src/images/image-digests.json` is an explicit digest override; a null entry means
+resolve the ACR tag to an immutable digest at build time. Without ACR, local Docker behavior remains
+unchanged and local base tags or configured local digests are used.
+
+If maintenance reports `Unable to resolve ACR base image`, verify the named root base repository
+was published and that the daemon identity can read it. Do not work around this by tagging only on
+the daemon VM, disabling maintenance, or allowing an unqualified Docker Hub fallback.
 
 Sandbox pods do not fall back to stock base images. The pod manager requires `profile.warmImageTag`, and it must be an ACR-qualified tag such as:
 

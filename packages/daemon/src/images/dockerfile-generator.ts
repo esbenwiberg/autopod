@@ -4,6 +4,8 @@ import type { PrivateRegistry, Profile, StackTemplate } from '@autopod/shared';
 export interface DockerfileOptions {
   profile: Profile;
   gitCredentials: 'pat' | 'ssh' | 'none';
+  /** Override the complete base reference after registry resolution. */
+  baseImage?: string;
   /** Override image digests for tests. Production code loads from image-digests.json. */
   imageDigests?: Partial<Record<StackTemplate, string | null>>;
   /** Override Dagger CLI version config for tests. */
@@ -58,7 +60,7 @@ export function generateDockerfile(options: DockerfileOptions): string {
   const { profile } = options;
   const digestMap = options.imageDigests ?? _imageDigestsConfig ?? {};
   const daggerVersion = options.daggerCliVersion ?? _daggerCliVersionConfig ?? null;
-  const baseImage = getBaseImage(profile.template ?? 'node22', digestMap);
+  const baseImage = options.baseImage ?? getBaseImage(profile.template ?? 'node22', digestMap);
   const installCommand = getInstallCommand(profile);
 
   const lines: string[] = [
@@ -244,6 +246,11 @@ export function getBaseImage(
   const name = BASE_IMAGE_NAMES[template];
   const digest = digestMap[template];
   return digest ? `${name}@${digest}` : `${name}:latest`;
+}
+
+/** Resolve a base using the bundled production digest configuration. */
+export function getConfiguredBaseImage(template: StackTemplate): string {
+  return getBaseImage(template, _imageDigestsConfig ?? {});
 }
 
 export function getInstallCommand(profile: Profile): string {
