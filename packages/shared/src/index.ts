@@ -295,7 +295,49 @@ export type {
   PreflightConflict,
   HostResumedEvent,
   FirewallDeniedEvent,
+  PodsitterAttentionQueuedEvent,
+  PodsitterDecisionStartedEvent,
+  PodsitterDecisionCompletedEvent,
+  PodsitterDecisionFailedEvent,
+  PodsitterActionExecutedEvent,
+  PodsitterActionRejectedEvent,
+  PodsitterProviderLimitedEvent,
+  PodsitterProviderRecoveredEvent,
+  PodsitterActivationChangedEvent,
+  PodsitterSandboxCleanupFailedEvent,
 } from './types/events.js';
+
+export type {
+  OperatorActor,
+  PodsitterAction,
+  PodsitterActionArguments,
+  PodsitterActivation,
+  PodsitterActivationEvaluation,
+  PodsitterAttention,
+  PodsitterAttentionState,
+  PodsitterAuthorization,
+  PodsitterBudgets,
+  PodsitterConfidence,
+  PodsitterConfiguration,
+  PodsitterDecision,
+  PodsitterDecisionOutcome,
+  PodsitterDecisionRecord,
+  PodsitterDecisionTarget,
+  PodsitterProviderCircuitStatus,
+  PodsitterProviderState,
+  PodsitterRuntime,
+  SystemSandboxRunOutcome,
+} from './types/podsitter.js';
+export { PODSITTER_ACTIONS } from './types/podsitter.js';
+export {
+  operatorActorSchema,
+  podsitterActivationSchema,
+  podsitterActionArgumentsSchemas,
+  podsitterBudgetsSchema,
+  podsitterConfigurationInputSchema,
+  podsitterDecisionSchema,
+  podsitterDecisionTargetSchema,
+} from './schemas/podsitter.schema.js';
 
 export type { WatchedIssue, WatchedIssueStatus } from './types/issue-watcher.js';
 

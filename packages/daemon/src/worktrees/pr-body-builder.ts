@@ -231,6 +231,14 @@ export function buildPrBody(config: PrBodyConfig): string {
   // ── Automated results ─────────────────────────────────────────────────────
 
   if (validationWaiver) {
+    const waiverActor =
+      validationWaiver.actor?.type === 'podsitter'
+        ? `Podsitter decision ${validationWaiver.actor.decisionId}`
+        : validationWaiver.actor?.type === 'automation'
+          ? `automation ${validationWaiver.actor.id}`
+          : validationWaiver.actor?.type === 'human'
+            ? validationWaiver.actor.displayName || validationWaiver.actor.userId
+            : validationWaiver.waivedBy;
     const failedPhases =
       validationWaiver.failedPhases.length > 0
         ? validationWaiver.failedPhases.join(', ')
@@ -241,7 +249,7 @@ export function buildPrBody(config: PrBodyConfig): string {
         : '';
     sections.push(`## Validation Waiver
 
-This PR was approved by a human despite failed validation.
+This PR was approved by ${escapeMd(waiverActor)} despite failed validation.
 
 - Reason: ${escapeMd(validationWaiver.reason)}
 - Attempt: ${validationWaiver.attempt ?? 'unknown'}

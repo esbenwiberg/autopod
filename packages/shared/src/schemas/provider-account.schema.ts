@@ -21,6 +21,7 @@ export const providerAccountNameSchema = z
 
 const anthropicCredentialsSchema = z.object({
   provider: z.literal('anthropic'),
+  apiKey: z.string().min(1).optional(),
 });
 
 const openAiCredentialsSchema = z.object({

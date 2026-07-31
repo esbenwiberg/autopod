@@ -452,6 +452,18 @@ export function createProviderAccountStore(
 
     delete(id: string): void {
       fetchRaw(id);
+      const podsitterReference = db
+        .prepare(
+          'SELECT 1 FROM podsitter_config WHERE singleton_id = 1 AND provider_account_id = ?',
+        )
+        .get(id);
+      if (podsitterReference) {
+        throw new AutopodError(
+          `Cannot delete provider account "${id}" while referenced by Podsitter configuration`,
+          'PROVIDER_ACCOUNT_PODSITTER_TARGET_IN_USE',
+          409,
+        );
+      }
       const failoverReferrers = listFailoverReferrerIds(id);
       const profileFailoverReferrers = listProfileFailoverReferrers(id);
       if (failoverReferrers.length > 0 || profileFailoverReferrers.length > 0) {

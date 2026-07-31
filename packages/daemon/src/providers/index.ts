@@ -1,5 +1,9 @@
 export type { MaxCredentialLineage, ProviderEnvResult } from './types.js';
-export { buildClaudeConfigFiles, buildProviderEnv } from './env-builder.js';
+export {
+  buildClaudeConfigFiles,
+  buildProviderAccountEnv,
+  buildProviderEnv,
+} from './env-builder.js';
 export { refreshOAuthToken } from './credential-refresh.js';
 export {
   persistOpenAiAuthJson,

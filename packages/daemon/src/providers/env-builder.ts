@@ -7,6 +7,7 @@ import type {
   MaxSetupTokenCredentials,
   PiOAuthCredentials,
   Profile,
+  ProviderAccount,
   PublicProviderCatalog,
   RuntimeType,
 } from '@autopod/shared';
@@ -14,9 +15,16 @@ import type { Logger } from 'pino';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import { RUNTIME_TELEMETRY_OPT_OUT_ENV, withRuntimeTelemetryOptOutEnv } from '../runtime-env.js';
-import { type ProviderAuthResolution, resolveProviderAuth } from './auth-resolution.js';
+import {
+  type ProviderAuthResolution,
+  resolveProviderAccountAuth,
+  resolveProviderAuth,
+} from './auth-resolution.js';
 import { getAzureToken } from './azure-token.js';
-import { refreshAndPersistMaxCredentials } from './credential-persistence.js';
+import {
+  refreshAndPersistMaxCredentials,
+  refreshAndPersistProviderAccountMaxCredentials,
+} from './credential-persistence.js';
 import { refreshOAuthToken } from './credential-refresh.js';
 import type { ProviderEnvResult } from './types.js';
 
@@ -36,6 +44,14 @@ export interface BuildProviderEnvOptions {
     providerId: string;
   };
 }
+
+export interface BuildProviderAccountEnvOptions {
+  providerAccountStore: ProviderAccountStore;
+  runtime: RuntimeType;
+  providerCatalog?: PublicProviderCatalog;
+}
+
+type ProviderEnvSubject = Pick<Profile, 'name' | 'modelProvider' | 'openrouterApiKey'>;
 
 /**
  * Returns the Claude Code config files to inject into every container:
@@ -117,7 +133,7 @@ export async function buildProviderEnv(
 
   switch (provider) {
     case 'anthropic':
-      return buildAnthropicEnv();
+      return buildAnthropicEnv(auth);
 
     case 'max':
       return buildMaxEnv(boundProfile, auth, logger, options);
@@ -140,6 +156,133 @@ export async function buildProviderEnv(
     default:
       // Exhaustiveness check
       throw new Error(`Unknown model provider: ${provider as string}`);
+  }
+}
+
+/**
+ * Account-first auth preparation for daemon-owned system inference.
+ * It deliberately has no Profile/ProfileStore input and therefore cannot inherit
+ * or fall back to pod, profile, or daemon credentials.
+ */
+export async function buildProviderAccountEnv(
+  providerAccountId: string,
+  logger: Logger,
+  options: BuildProviderAccountEnvOptions,
+): Promise<ProviderEnvResult> {
+  const catalog = options.providerCatalog ?? PROVIDER_CATALOG;
+  const auth = resolveProviderAccountAuth(providerAccountId, {
+    providerAccountStore: options.providerAccountStore,
+    providerCatalog: catalog,
+  });
+  const provider = auth.provider;
+  if (!provider || !auth.account) throw new Error('Dedicated provider account has no provider');
+  assertAccountRuntimeCompatible(auth.account, provider, options.runtime);
+  assertDedicatedCredentialsPresent(auth, provider);
+  options.providerAccountStore.touchLastUsed(providerAccountId);
+  const subject: ProviderEnvSubject = {
+    name: `provider account ${providerAccountId}`,
+    modelProvider: provider,
+    openrouterApiKey: undefined,
+  };
+  const accountOptions: BuildProviderEnvOptions = {
+    providerAccountStore: options.providerAccountStore,
+    providerCatalog: catalog,
+    runtime: options.runtime,
+  };
+
+  switch (provider) {
+    case 'anthropic':
+      if (auth.credentials?.provider !== 'anthropic' || !auth.credentials.apiKey) {
+        throw new AutopodError(
+          `Provider account "${auth.account.name}" has no stored Anthropic API key`,
+          'PROVIDER_ACCOUNT_CREDENTIALS_MISSING',
+          400,
+        );
+      }
+      return buildAnthropicEnv(auth);
+    case 'max':
+      return buildMaxEnv(subject, auth, logger, accountOptions);
+    case 'openai':
+      return buildOpenAiEnv(auth);
+    case 'foundry':
+      if (auth.credentials?.provider !== 'foundry' || !auth.credentials.apiKey) {
+        throw new AutopodError(
+          `Provider account "${auth.account.name}" requires a stored Foundry API key`,
+          'PROVIDER_ACCOUNT_CREDENTIALS_MISSING',
+          400,
+        );
+      }
+      return buildFoundryEnv(subject, auth, logger);
+    case 'copilot':
+      return buildCopilotEnv(subject, auth);
+    case 'openrouter':
+      return buildOpenRouterEnv(subject, auth);
+    case 'pi':
+      return buildPiEnv(subject, auth, catalog);
+    default:
+      throw new Error(`Unsupported dedicated provider: ${provider as string}`);
+  }
+}
+
+function assertDedicatedCredentialsPresent(
+  auth: ProviderAuthResolution,
+  provider: NonNullable<ProviderAuthResolution['provider']>,
+): void {
+  const credentials = auth.credentials;
+  const present =
+    (provider === 'anthropic' &&
+      credentials?.provider === 'anthropic' &&
+      Boolean(credentials.apiKey)) ||
+    (provider === 'max' && credentials?.provider === 'max') ||
+    (provider === 'openai' &&
+      credentials?.provider === 'openai' &&
+      Boolean(credentials.authJson)) ||
+    (provider === 'foundry' &&
+      credentials?.provider === 'foundry' &&
+      Boolean(credentials.apiKey)) ||
+    (provider === 'copilot' && credentials?.provider === 'copilot' && Boolean(credentials.token)) ||
+    (provider === 'openrouter' &&
+      credentials?.provider === 'openrouter' &&
+      Boolean(credentials.apiKey)) ||
+    (provider === 'pi' &&
+      ((credentials?.provider === 'pi' && Boolean(credentials.credential)) ||
+        (credentials?.provider === 'api-key' && Boolean(credentials.apiKey))));
+  if (!present) {
+    throw new AutopodError(
+      `Provider account "${auth.account?.name ?? 'unknown'}" has no compatible stored credentials`,
+      'PROVIDER_ACCOUNT_CREDENTIALS_MISSING',
+      400,
+    );
+  }
+}
+
+function assertAccountRuntimeCompatible(
+  account: ProviderAccount,
+  provider: NonNullable<ProviderAuthResolution['provider']>,
+  runtime: RuntimeType,
+): void {
+  if (provider === 'foundry' && account.credentials?.provider === 'foundry') {
+    const surface = account.credentials.apiSurface ?? 'anthropic';
+    const expectedRuntime = surface === 'openai' ? 'codex' : 'claude';
+    if (runtime !== expectedRuntime) {
+      throw new AutopodError(
+        `Provider account "${account.name}" uses the ${surface} Foundry API surface`,
+        'PROVIDER_ACCOUNT_RUNTIME_MISMATCH',
+        400,
+      );
+    }
+  }
+  const compatible =
+    (runtime === 'claude' && ['anthropic', 'max', 'foundry'].includes(provider)) ||
+    (runtime === 'codex' && ['openai', 'openrouter', 'foundry'].includes(provider)) ||
+    (runtime === 'copilot' && provider === 'copilot') ||
+    (runtime === 'pi' && provider === 'pi');
+  if (!compatible) {
+    throw new AutopodError(
+      `Provider account "${account.name}" is incompatible with the ${runtime} runtime`,
+      'PROVIDER_ACCOUNT_RUNTIME_MISMATCH',
+      400,
+    );
   }
 }
 
@@ -186,11 +329,14 @@ function isMaxRefreshCredentials(creds: MaxCredentials): creds is MaxRefreshCred
  * The key is written to a 0400 secret file inside the container; the exec env
  * carries only the _FILE pointer so the raw key never appears in env dumps.
  */
-function buildAnthropicEnv(): ProviderEnvResult {
+function buildAnthropicEnv(auth: ProviderAuthResolution): ProviderEnvResult {
   const env = withRuntimeTelemetryOptOutEnv();
   const secretFiles: ProviderEnvResult['secretFiles'] = [];
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey =
+    auth.credentials?.provider === 'anthropic' && auth.credentials.apiKey
+      ? auth.credentials.apiKey
+      : process.env.ANTHROPIC_API_KEY;
   if (apiKey) {
     const filePath = `${SECRET_DIR}/anthropic-api-key`;
     secretFiles.push({ path: filePath, content: apiKey });
@@ -202,6 +348,7 @@ function buildAnthropicEnv(): ProviderEnvResult {
     containerFiles: buildClaudeConfigFiles(),
     secretFiles,
     requiresPostExecPersistence: false,
+    credentialOwner: auth.owner ?? undefined,
   };
 }
 
@@ -221,6 +368,7 @@ function buildOpenAiEnv(auth: ProviderAuthResolution): ProviderEnvResult {
       secretFiles: [],
       requiresPostExecPersistence: true,
       requiresOpenAiAuthJsonPersistence: true,
+      openAiAuthJsonLineage: creds.authJson,
       credentialOwner: auth.owner ?? undefined,
     };
   }
@@ -254,7 +402,7 @@ function buildOpenAiEnv(auth: ProviderAuthResolution): ProviderEnvResult {
  * the setup-token path has no container credential file to read back.
  */
 async function buildMaxEnv(
-  profile: Profile,
+  profile: ProviderEnvSubject,
   auth: ProviderAuthResolution,
   logger: Logger,
   options: BuildProviderEnvOptions,
@@ -292,16 +440,23 @@ async function buildMaxEnv(
         providerAccountStore: options.providerAccountStore,
         owner: auth.owner ?? undefined,
       })
-    : await (async () => {
-        const credentials = await refreshOAuthToken(creds, logger);
-        return {
-          credentials,
-          lineage: {
-            owner: auth.owner ?? { type: 'profile', name: profile.name },
-            issuedRefreshToken: credentials.refreshToken,
-          },
-        };
-      })();
+    : auth.owner?.type === 'provider-account' && options.providerAccountStore
+      ? await refreshAndPersistProviderAccountMaxCredentials(
+          options.providerAccountStore,
+          auth.owner.id,
+          creds,
+          logger,
+        )
+      : await (async () => {
+          const credentials = await refreshOAuthToken(creds, logger);
+          return {
+            credentials,
+            lineage: {
+              owner: auth.owner ?? { type: 'profile' as const, name: profile.name },
+              issuedRefreshToken: credentials.refreshToken,
+            },
+          };
+        })();
   const refreshed = issued.credentials;
 
   // Build the credentials file that Claude Code expects at ~/.claude/.credentials.json.
@@ -339,7 +494,10 @@ async function buildMaxEnv(
  * GitHub Copilot CLI provider — token written to a 0400 secret file; env carries
  * only COPILOT_GITHUB_TOKEN_FILE so the raw token stays out of env dumps.
  */
-function buildCopilotEnv(profile: Profile, auth: ProviderAuthResolution): ProviderEnvResult {
+function buildCopilotEnv(
+  profile: ProviderEnvSubject,
+  auth: ProviderAuthResolution,
+): ProviderEnvResult {
   const creds = auth.credentials;
 
   if (!creds || creds.provider !== 'copilot') {
@@ -386,7 +544,7 @@ function isGenericApiKeyCredentials(creds: unknown): creds is GenericApiKeyCrede
 }
 
 function buildPiEnv(
-  profile: Profile,
+  profile: ProviderEnvSubject,
   auth: ProviderAuthResolution,
   providerCatalog: PublicProviderCatalog,
 ): ProviderEnvResult {
@@ -453,6 +611,7 @@ function buildPiEnv(
     secretFiles: [],
     requiresPostExecPersistence: true,
     requiresPiAuthJsonPersistence: true,
+    piAuthJsonLineage: authJson,
     credentialOwner: auth.owner ?? undefined,
   };
 }
@@ -471,7 +630,10 @@ const OPENROUTER_DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
  *
  * Only use models that have passed the spike telemetry contract.
  */
-function buildOpenRouterEnv(profile: Profile, auth: ProviderAuthResolution): ProviderEnvResult {
+function buildOpenRouterEnv(
+  profile: ProviderEnvSubject,
+  auth: ProviderAuthResolution,
+): ProviderEnvResult {
   const creds = auth.credentials;
   const isOpenRouterCreds = creds?.provider === 'openrouter';
   const baseUrl = isOpenRouterCreds
@@ -523,7 +685,7 @@ const FOUNDRY_TOKEN_SCOPE = 'https://cognitiveservices.azure.com/.default';
  * Claude's.
  */
 async function buildFoundryEnv(
-  profile: Profile,
+  profile: ProviderEnvSubject,
   auth: ProviderAuthResolution,
   logger: Logger,
 ): Promise<ProviderEnvResult> {

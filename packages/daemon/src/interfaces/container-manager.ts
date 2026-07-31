@@ -4,12 +4,19 @@ export interface ContainerSpawnConfig {
   image: string;
   podId: string;
   env: Record<string, string>;
+  /** Initial working directory for the container process. Defaults to /workspace. */
+  workingDir?: string;
   ports?: { container: number; host: number }[];
   volumes?: { host: string; container: string; readOnly?: boolean }[];
   /** Docker network name for network isolation */
   networkName?: string;
   /** Firewall script to execute after container start (iptables rules) */
   firewallScript?: string;
+  /**
+   * Grants the container's setup process CAP_SETPCAP so a subsequent trusted
+   * exec can irreversibly clear its capability bounding set before inference.
+   */
+  enableCapabilityDrop?: boolean;
   /**
    * Network policy mode — controls fail-closed behaviour on firewall errors.
    * For `deny-all` and `restricted` pods, spawn aborts by default if the
@@ -33,6 +40,13 @@ export interface ContainerSpawnConfig {
   nanoCpus?: number;
   /** Optional provisioning progress callback for backends with multi-stage startup. */
   onProgress?: (message: string) => void;
+  /**
+   * Called immediately after the backend allocates the container identity.
+   * System-owned callers use this to durably record the resource before startup continues.
+   */
+  onCreated?: (containerId: string) => void;
+  /** Whether Docker should expose host.docker.internal inside the container. Defaults to true. */
+  exposeHostGateway?: boolean;
 }
 
 export interface ExecResult {

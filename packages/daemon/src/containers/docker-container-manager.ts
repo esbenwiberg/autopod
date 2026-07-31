@@ -324,10 +324,17 @@ export class DockerContainerManager implements ContainerManager {
       // the firewall script fail (exit 5) and, with fail-closed mode, the pod
       // never spawns. The same caps are in Docker's default capability set;
       // we just have to add them back after CapDrop=ALL.
-      hostConfig.CapAdd = ['NET_ADMIN', 'SETGID', 'SETUID'];
+      hostConfig.CapAdd = [
+        'NET_ADMIN',
+        'SETGID',
+        'SETUID',
+        ...(config.enableCapabilityDrop ? ['SETPCAP'] : []),
+      ];
       // On Linux, host.docker.internal is not auto-added for custom bridge networks.
       // Inject it so containers can always reach the daemon's MCP endpoint.
-      hostConfig.ExtraHosts = ['host.docker.internal:host-gateway'];
+      if (config.exposeHostGateway !== false) {
+        hostConfig.ExtraHosts = ['host.docker.internal:host-gateway'];
+      }
     }
 
     const container = await createContainerWithStaleRetry(
@@ -337,7 +344,7 @@ export class DockerContainerManager implements ContainerManager {
         name: containerName,
         Env: env,
         Cmd: ['sleep', 'infinity'],
-        WorkingDir: '/workspace',
+        WorkingDir: config.workingDir ?? '/workspace',
         User: 'autopod',
         ExposedPorts: exposedPorts,
         HostConfig: hostConfig,
@@ -346,6 +353,7 @@ export class DockerContainerManager implements ContainerManager {
     );
 
     try {
+      config.onCreated?.(container.id);
       await boundedDockerCall(container.start(), {
         label: 'container.start (spawn)',
         timeoutMs: DOCKER_CALL_TIMEOUTS.start,

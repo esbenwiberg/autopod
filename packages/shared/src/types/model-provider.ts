@@ -23,6 +23,8 @@ export type ModelProvider =
 /** Anthropic API key provider — uses daemon env `ANTHROPIC_API_KEY`. No per-profile creds. */
 export interface AnthropicCredentials {
   provider: 'anthropic';
+  /** Stored API key for a dedicated provider account. Profiles may still use daemon env fallback. */
+  apiKey?: string;
 }
 
 /**

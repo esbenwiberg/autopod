@@ -2,6 +2,7 @@ import type {
   AgentMode,
   ExecutionTarget,
   NetworkPolicyMode,
+  OperatorActor,
   OutputMode,
   OutputTarget,
   PhaseTokenUsage,
@@ -169,6 +170,7 @@ export interface PodUpdates {
   preSubmitReview?: PreSubmitReviewSnapshot | null;
   validationOverrides?: ValidationOverride[] | null;
   validationWaiver?: ValidationWaiver | null;
+  skipValidationActor?: OperatorActor | null;
   readinessReview?: ReadinessReview | null;
   profileSnapshot?: Profile | null;
   prFixAttempts?: number;
@@ -324,6 +326,9 @@ function rowToSession(row: Record<string, unknown>): Pod {
     pendingEscalation: row.pending_escalation ? JSON.parse(row.pending_escalation as string) : null,
     escalationCount: row.escalation_count as number,
     skipValidation: Boolean(row.skip_validation),
+    skipValidationActor: row.skip_validation_actor
+      ? (JSON.parse(row.skip_validation_actor as string) as OperatorActor)
+      : null,
     createdAt: row.created_at as string,
     startedAt: (row.started_at as string) ?? null,
     completedAt: (row.completed_at as string) ?? null,
@@ -732,6 +737,11 @@ export function createPodRepository(db: Database.Database): PodRepository {
         setClauses.push('validation_waiver = @validationWaiver');
         params.validationWaiver =
           changes.validationWaiver !== null ? JSON.stringify(changes.validationWaiver) : null;
+      }
+      if (changes.skipValidationActor !== undefined) {
+        setClauses.push('skip_validation_actor = @skipValidationActor');
+        params.skipValidationActor =
+          changes.skipValidationActor !== null ? JSON.stringify(changes.skipValidationActor) : null;
       }
       if (changes.readinessReview !== undefined) {
         setClauses.push('readiness_review = @readinessReview');

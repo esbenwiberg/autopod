@@ -135,6 +135,24 @@ describe('DockerContainerManager', () => {
       expect(container.start).toHaveBeenCalledTimes(1);
     });
 
+    it('supports a repo-free working directory without exposing the host gateway', async () => {
+      await manager.spawn({
+        ...baseConfig,
+        workingDir: '/tmp',
+        networkName: 'autopod-system-decision',
+        exposeHostGateway: false,
+      });
+
+      expect(docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          WorkingDir: '/tmp',
+          HostConfig: expect.not.objectContaining({
+            ExtraHosts: expect.anything(),
+          }),
+        }),
+      );
+    });
+
     it('does not pull when the image is already present locally', async () => {
       await manager.spawn(baseConfig);
 
@@ -300,6 +318,17 @@ describe('DockerContainerManager', () => {
       expect(createCall.HostConfig.NetworkMode).toBe('autopod-net');
       // SETGID/SETUID are required for dnsmasq to drop privileges to `nobody`.
       expect(createCall.HostConfig.CapAdd).toEqual(['NET_ADMIN', 'SETGID', 'SETUID']);
+    });
+
+    it('adds SETPCAP only when a trusted runtime will drop its capability set', async () => {
+      await manager.spawn({
+        ...baseConfig,
+        networkName: 'autopod-net',
+        enableCapabilityDrop: true,
+      });
+
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
+      expect(createCall.HostConfig.CapAdd).toEqual(['NET_ADMIN', 'SETGID', 'SETUID', 'SETPCAP']);
     });
 
     it('does NOT set NetworkMode when networkName absent', async () => {

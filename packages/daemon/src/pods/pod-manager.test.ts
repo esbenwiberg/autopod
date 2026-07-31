@@ -3487,6 +3487,56 @@ describe('PodManager', () => {
   });
 
   describe('approveSession', () => {
+    it('records human automation and Podsitter actors', async () => {
+      const cases = [
+        {
+          actor: { type: 'human' as const, userId: 'user-1', displayName: 'Operator One' },
+          expectedBy: 'Operator One',
+        },
+        {
+          actor: { type: 'automation' as const, id: 'auto-approve' },
+          expectedBy: 'automation:auto-approve',
+        },
+        {
+          actor: {
+            type: 'podsitter' as const,
+            decisionId: 'decision-actor-1',
+            providerAccountId: 'account-1',
+            model: 'gpt-5',
+          },
+          expectedBy: 'Podsitter decision decision-actor-1',
+        },
+      ];
+
+      for (const testCase of cases) {
+        const ctx = createTestContext();
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: `Actor ${testCase.actor.type}` },
+          'user-1',
+        );
+        ctx.podRepo.update(pod.id, validatedPodUpdates(pod.id));
+
+        await manager.approveSession(pod.id, { actor: testCase.actor });
+
+        expect(manager.getSession(pod.id).readinessReview?.approval).toMatchObject({
+          approvedBy: testCase.expectedBy,
+          actor: testCase.actor,
+        });
+      }
+
+      const skipContext = createTestContext();
+      const skipManager = createPodManager(skipContext.deps);
+      const skipPod = skipManager.createSession(
+        { profileName: 'test-profile', task: 'Deferred skip actor' },
+        'user-1',
+      );
+      const skipActor = cases[2]?.actor;
+      expect(skipActor?.type).toBe('podsitter');
+      skipManager.setSkipValidation(skipPod.id, true, skipActor);
+      expect(skipManager.getSession(skipPod.id).skipValidationActor).toEqual(skipActor);
+    });
+
     it('transitions validated -> approved -> merging -> complete', async () => {
       const ctx = createTestContext();
       const manager = createPodManager(ctx.deps);
@@ -8265,7 +8315,13 @@ describe('PodManager', () => {
         },
       });
 
-      await manager.approveFactWaiver(pod.id, 'fact-swift-only', 'Swift is unavailable here');
+      const humanActor = { type: 'human' as const, userId: 'user-1' };
+      await manager.approveFactWaiver(
+        pod.id,
+        'fact-swift-only',
+        'Swift is unavailable here',
+        humanActor,
+      );
 
       const validateConfig = vi.mocked(ctx.validationEngine.validate).mock.calls[0]?.[0];
       expect(validateConfig?.taskSummary?.factDeviations).toEqual([
@@ -8273,6 +8329,7 @@ describe('PodManager', () => {
           factId: 'fact-swift-only',
           action: 'waive',
           decision: 'approved_waive',
+          actor: humanActor,
           reason: 'Swift is unavailable here',
           whyImpossible: pendingReasoning,
         },
@@ -8454,6 +8511,7 @@ describe('PodManager', () => {
         pod.id,
         'fact-swift-only',
         'Swift is unavailable here',
+        { type: 'human', userId: 'user-1' },
       );
 
       expect(result).toEqual({ newCommits: false, result: 'fail' });
@@ -8465,6 +8523,7 @@ describe('PodManager', () => {
           factId: 'fact-swift-only',
           action: 'waive',
           decision: 'approved_waive',
+          actor: { type: 'human', userId: 'user-1' },
           reason: 'Swift is unavailable here',
           whyImpossible: pendingReasoning,
         },
@@ -11680,7 +11739,10 @@ describe('PodManager', () => {
       const ctx = createTestContext();
       const { manager, pod } = setupFailedFactPod(ctx);
 
-      await manager.forceApprove(pod.id, 'manual inspection passed after harness failure');
+      await manager.forceApprove(pod.id, 'manual inspection passed after harness failure', {
+        type: 'human',
+        userId: 'human',
+      });
 
       const refreshed = manager.getSession(pod.id);
       expect(refreshed.status).toBe('validated');
@@ -11735,7 +11797,10 @@ describe('PodManager', () => {
       const events: unknown[] = [];
       ctx.eventBus.subscribe((event) => events.push(event));
 
-      await manager.forceApprove(pod.id, 'post-validation push failed');
+      await manager.forceApprove(pod.id, 'post-validation push failed', {
+        type: 'human',
+        userId: 'human',
+      });
 
       const refreshed = manager.getSession(pod.id);
       expect(refreshed.status).toBe('validated');

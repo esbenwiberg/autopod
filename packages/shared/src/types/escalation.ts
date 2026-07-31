@@ -73,8 +73,11 @@ export interface RequestCredentialPayload {
 export interface EscalationResponse {
   respondedAt?: string;
   respondedBy: 'human' | 'ai';
+  /** Structured provenance, including the durable Podsitter decision identity. */
+  actor?: OperatorActor;
   response: string;
   model?: string;
   /** Legacy alias for respondedAt; some call sites still emit this name. */
   timestamp?: string;
 }
+import type { OperatorActor } from './podsitter.js';

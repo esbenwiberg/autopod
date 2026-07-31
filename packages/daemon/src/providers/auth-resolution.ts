@@ -91,3 +91,34 @@ export function resolveProviderAuth(
     account: null,
   };
 }
+
+/** Resolve one dedicated account without consulting profile inheritance or fallbacks. */
+export function resolveProviderAccountAuth(
+  providerAccountId: string,
+  options: {
+    providerAccountStore: ProviderAccountStore;
+    providerCatalog?: PublicProviderCatalog;
+  },
+): ProviderAuthResolution {
+  const account = options.providerAccountStore.get(providerAccountId);
+  const catalogProvider = (options.providerCatalog ?? PROVIDER_CATALOG).providers.find(
+    (candidate) => candidate.id === account.provider,
+  );
+  if (!catalogProvider?.policy.runnable) {
+    throw new AutopodError(
+      `Provider account "${account.name}" is not configured for a runnable provider`,
+      'PROVIDER_ACCOUNT_NOT_RUNNABLE',
+      400,
+    );
+  }
+  const provider =
+    catalogProvider.implementation.kind === 'generic-pi-api'
+      ? 'pi'
+      : (catalogProvider.implementation.adapterId as ModelProvider);
+  return {
+    provider,
+    credentials: account.credentials,
+    owner: { type: 'provider-account', id: account.id },
+    account,
+  };
+}

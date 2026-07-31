@@ -156,6 +156,7 @@ export class SandboxContainerManager implements ContainerManager {
     this.egressPolicies.set(sandboxId, egressPolicy);
 
     try {
+      config.onCreated?.(sandboxId);
       if (config.volumes?.length) {
         config.onProgress?.('Uploading workspace to sandbox…');
         await this.uploadVolumes(sandboxId, config.volumes);
@@ -182,7 +183,11 @@ export class SandboxContainerManager implements ContainerManager {
   }
 
   async kill(containerId: string): Promise<void> {
-    await this.client.destroy(containerId);
+    try {
+      await this.client.destroy(containerId);
+    } catch (error) {
+      if (!isSandboxNotFound(error)) throw error;
+    }
     this.egressPolicies.delete(containerId);
   }
 
@@ -700,6 +705,17 @@ function pathExists(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isSandboxNotFound(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { statusCode?: unknown; status?: unknown; code?: unknown };
+  return (
+    candidate.statusCode === 404 ||
+    candidate.status === 404 ||
+    candidate.code === 'NotFound' ||
+    candidate.code === 'ResourceNotFound'
+  );
 }
 
 function normalizeExtractPath(pathname: string): string {

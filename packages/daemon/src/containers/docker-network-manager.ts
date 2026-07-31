@@ -64,6 +64,7 @@ export function computeNetworkPolicyAllowlist(
   daemonGatewayHost: string,
   registries: PrivateRegistry[] = [],
   extraAllowedHosts: string[] = [],
+  includeDaemonGateway = true,
 ): string[] {
   const hosts = new Set<string>();
 
@@ -80,9 +81,11 @@ export function computeNetworkPolicyAllowlist(
   }
 
   // Add daemon gateway so the container can reach the daemon's MCP endpoint
-  hosts.add(daemonGatewayHost);
-  // Also add host.docker.internal as a common alternative
-  hosts.add('host.docker.internal');
+  if (includeDaemonGateway) {
+    hosts.add(daemonGatewayHost);
+    // Also add host.docker.internal as a common alternative
+    hosts.add('host.docker.internal');
+  }
 
   // Add caller-supplied control-plane hostnames. Docker pods can reach the
   // daemon by bridge IP, but explicit HTTPS MCP URLs still present their DNS
@@ -244,6 +247,21 @@ export class DockerNetworkManager {
     return name;
   }
 
+  /** Remove one per-run network after its container has been destroyed. */
+  async removeNetworkForPod(podId: string): Promise<void> {
+    const network = this.docker.getNetwork(networkNameForPod(podId));
+    try {
+      await boundedDockerCall(network.remove(), {
+        label: 'network.remove',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.removeNetwork,
+        logger: this.logger,
+      });
+    } catch (error) {
+      const statusCode = (error as { statusCode?: number }).statusCode;
+      if (statusCode !== 404) throw error;
+    }
+  }
+
   /**
    * Remove orphaned pod networks left behind by a crashed daemon. Called on
    * startup after pod reconciliation so we know which pod IDs are still active.
@@ -373,6 +391,7 @@ export class DockerNetworkManager {
     daemonGatewayIp: string,
     registries: PrivateRegistry[] = [],
     extraAllowedHosts: string[] = [],
+    includeDaemonGateway = true,
   ): string[] {
     return computeNetworkPolicyAllowlist(
       policy,
@@ -380,6 +399,7 @@ export class DockerNetworkManager {
       daemonGatewayIp,
       registries,
       extraAllowedHosts,
+      includeDaemonGateway,
     );
   }
 
@@ -420,6 +440,7 @@ export class DockerNetworkManager {
      */
     extraAllowedIps: string[] = [],
     daemonGatewayPort = 3100,
+    includeDaemonGateway = true,
   ): Promise<string> {
     const lines = ['#!/bin/sh', 'set -e', ''];
 
@@ -454,16 +475,20 @@ export class DockerNetworkManager {
       // Without this, escalation tools (ask_human, report_plan, etc.) are unreachable.
       // host.docker.internal is in /etc/hosts (injected via ExtraHosts), not DNS,
       // so we must resolve it via getent inside the container.
-      lines.push('# Allow daemon gateway (MCP escalation endpoint)');
-      lines.push(
-        "for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1}' | sort -u); do",
-      );
-      lines.push(`  iptables -A OUTPUT -p tcp -d "$_gw_ip" --dport ${daemonGatewayPort} -j ACCEPT`);
-      lines.push('done');
-      if (daemonGatewayIp) {
+      if (includeDaemonGateway) {
+        lines.push('# Allow daemon gateway (MCP escalation endpoint)');
         lines.push(
-          `iptables -A OUTPUT -p tcp -d "${daemonGatewayIp}" --dport ${daemonGatewayPort} -j ACCEPT 2>/dev/null || true`,
+          "for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1}' | sort -u); do",
         );
+        lines.push(
+          `  iptables -A OUTPUT -p tcp -d "$_gw_ip" --dport ${daemonGatewayPort} -j ACCEPT`,
+        );
+        lines.push('done');
+        if (daemonGatewayIp) {
+          lines.push(
+            `iptables -A OUTPUT -p tcp -d "${daemonGatewayIp}" --dport ${daemonGatewayPort} -j ACCEPT 2>/dev/null || true`,
+          );
+        }
       }
       lines.push('');
       lines.push("# Allow DNS only to Docker's embedded resolver");
@@ -503,18 +528,20 @@ export class DockerNetworkManager {
     lines.push('iptables -A OUTPUT -p tcp -d 127.0.0.11 --dport 53 -j ACCEPT');
     lines.push('');
 
-    lines.push('# Allow daemon gateway (MCP escalation endpoint) — bypasses HAProxy');
-    lines.push(
-      "for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1}' | sort -u); do",
-    );
-    lines.push(`  iptables -A OUTPUT -p tcp -d "$_gw_ip" --dport ${daemonGatewayPort} -j ACCEPT`);
-    lines.push('done');
-    if (daemonGatewayIp) {
+    if (includeDaemonGateway) {
+      lines.push('# Allow daemon gateway (MCP escalation endpoint) — bypasses HAProxy');
       lines.push(
-        `iptables -A OUTPUT -p tcp -d "${daemonGatewayIp}" --dport ${daemonGatewayPort} -j ACCEPT 2>/dev/null || true`,
+        "for _gw_ip in $(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1}' | sort -u); do",
       );
+      lines.push(`  iptables -A OUTPUT -p tcp -d "$_gw_ip" --dport ${daemonGatewayPort} -j ACCEPT`);
+      lines.push('done');
+      if (daemonGatewayIp) {
+        lines.push(
+          `iptables -A OUTPUT -p tcp -d "${daemonGatewayIp}" --dport ${daemonGatewayPort} -j ACCEPT 2>/dev/null || true`,
+        );
+      }
+      lines.push('');
     }
-    lines.push('');
 
     if (extraAllowedIps.length > 0) {
       lines.push(
@@ -614,6 +641,7 @@ export class DockerNetworkManager {
     extraAllowedIps: string[] = [],
     extraAllowedHosts: string[] = [],
     daemonGatewayPort = 3100,
+    includeDaemonGateway = true,
   ): Promise<NetworkConfig | null> {
     if (!policy?.enabled) return null;
 
@@ -631,6 +659,7 @@ export class DockerNetworkManager {
       daemonGatewayIp,
       registries,
       extraAllowedHosts,
+      includeDaemonGateway,
     );
     const firewallScript = await this.generateFirewallScript(
       allowlist,
@@ -638,6 +667,7 @@ export class DockerNetworkManager {
       daemonGatewayIp,
       extraAllowedIps,
       daemonGatewayPort,
+      includeDaemonGateway,
     );
 
     return {

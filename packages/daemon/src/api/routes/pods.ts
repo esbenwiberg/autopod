@@ -3,6 +3,7 @@ import {
   type CompactPod,
   type CompactPodPage,
   type FirewallDeniedEvent,
+  type OperatorActor,
   type PodStatus,
   collectPiiPatternNames,
   createPodRequestSchema,
@@ -44,6 +45,14 @@ import type { ValidationRepository } from '../../pods/validation-repository.js';
 import type { SafetyEventsRepository } from '../../safety/safety-events-repository.js';
 import { resolvePublicPreviewOrigin, rewritePreviewUrlForBrowser } from '../preview-url.js';
 import { serializePodForWire, serializeValidationResult } from '../wire-serializers.js';
+
+function humanActor(request: FastifyRequest): OperatorActor {
+  return {
+    type: 'human',
+    userId: request.user.oid,
+    ...(request.user.name ? { displayName: request.user.name } : {}),
+  };
+}
 
 function parseEscalationsScope(query: Record<string, unknown>): EscalationsAnalyticsScope | null {
   const raw = query.scope;
@@ -515,7 +524,7 @@ export function podRoutes(
   app.post('/pods/:podId/message', async (request) => {
     const { podId } = request.params as { podId: string };
     const { message } = sendMessageSchema.parse(request.body);
-    await podManager.sendMessage(podId, message);
+    await podManager.sendMessage(podId, message, humanActor(request));
     return { ok: true };
   });
 
@@ -957,7 +966,7 @@ export function podRoutes(
     const reason =
       typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : undefined;
     try {
-      const result = await podManager.kickPod(podId, reason);
+      const result = await podManager.kickPod(podId, reason, humanActor(request));
       return { ok: true, action: result.action };
     } catch (err) {
       if (err instanceof AutopodError) {
@@ -976,7 +985,7 @@ export function podRoutes(
     const reason =
       typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : undefined;
     try {
-      await podManager.forceComplete(podId, reason);
+      await podManager.forceComplete(podId, reason, humanActor(request));
       return { ok: true };
     } catch (err) {
       if (err instanceof AutopodError) {
@@ -1023,7 +1032,7 @@ export function podRoutes(
   // POST /pods/:podId/fix-manually — create linked workspace for human fixes
   app.post('/pods/:podId/fix-manually', async (request, reply) => {
     const { podId } = request.params as { podId: string };
-    const workspace = podManager.fixManually(podId, request.user.oid, {
+    const workspace = podManager.fixManually(podId, humanActor(request), {
       email: request.user.preferred_username,
       name: request.user.name,
     });
@@ -1042,7 +1051,11 @@ export function podRoutes(
   app.post('/pods/:podId/approve', async (request) => {
     const { podId } = request.params as { podId: string };
     const body = approvePodBodySchema.parse(request.body ?? {});
-    await podManager.approveSession(podId, { squash: body.squash, reason: body.reason });
+    await podManager.approveSession(podId, {
+      squash: body.squash,
+      reason: body.reason,
+      actor: humanActor(request),
+    });
     return { ok: true };
   });
 
@@ -1050,7 +1063,7 @@ export function podRoutes(
   app.post('/pods/:podId/reject', async (request) => {
     const { podId } = request.params as { podId: string };
     const body = (request.body ?? {}) as { feedback?: string };
-    await podManager.rejectSession(podId, body.feedback);
+    await podManager.rejectSession(podId, body.feedback, humanActor(request));
     return { ok: true };
   });
 
@@ -1353,7 +1366,7 @@ export function podRoutes(
   app.post('/pods/:podId/skip-validation', async (request, reply) => {
     const { podId } = request.params as { podId: string };
     const body = request.body as { skip: boolean };
-    podManager.setSkipValidation(podId, Boolean(body.skip));
+    podManager.setSkipValidation(podId, Boolean(body.skip), humanActor(request));
     reply.status(204);
   });
 
@@ -1361,7 +1374,7 @@ export function podRoutes(
   app.post('/pods/:podId/force-approve', async (request, reply) => {
     const { podId } = request.params as { podId: string };
     const body = request.body as { reason?: string } | undefined;
-    await podManager.forceApprove(podId, body?.reason);
+    await podManager.forceApprove(podId, body?.reason, humanActor(request));
     reply.status(204);
   });
 
@@ -1373,7 +1386,7 @@ export function podRoutes(
     const reason =
       typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : undefined;
     try {
-      const result = await podManager.approveFactWaiver(podId, factId, reason);
+      const result = await podManager.approveFactWaiver(podId, factId, reason, humanActor(request));
       return { ok: true, ...result };
     } catch (err) {
       if (err instanceof AutopodError) {

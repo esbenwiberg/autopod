@@ -758,5 +758,28 @@ describe('DockerNetworkManager', () => {
         'acl allowed_sni var(sess.sni) -m str daemon.example.com',
       );
     });
+
+    it('can build a provider-only policy without daemon gateway access', async () => {
+      docker.mock._inspect.mockResolvedValueOnce({});
+      const result = await manager.buildNetworkConfig(
+        makePolicy({
+          enabled: true,
+          replaceDefaults: true,
+          allowedHosts: ['api.anthropic.com'],
+        }),
+        [],
+        GATEWAY,
+        [],
+        'system-decision',
+        [],
+        [],
+        0,
+        false,
+      );
+
+      expect(result?.firewallScript).toContain('api.anthropic.com');
+      expect(result?.firewallScript).not.toContain('host.docker.internal');
+      expect(result?.firewallScript).not.toContain(GATEWAY);
+    });
   });
 });

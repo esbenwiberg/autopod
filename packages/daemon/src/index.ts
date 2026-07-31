@@ -61,6 +61,10 @@ import {
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
 import { ScreenshotRetention } from './pods/screenshot-retention.js';
 import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
+import { PodsitterActionExecutor } from './podsitter/action-executor.js';
+import { createDaemonPodsitterEvidenceProvider } from './podsitter/daemon-evidence-provider.js';
+import { createPodsitterRepository } from './podsitter/podsitter-repository.js';
+import { createPodsitterService } from './podsitter/podsitter-service.js';
 import { createProfileStore } from './profiles/index.js';
 import { createProviderAccountStore } from './provider-accounts/index.js';
 import {
@@ -76,6 +80,7 @@ import { createScheduledJobRepository } from './scheduled-jobs/scheduled-job-rep
 import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-scheduler.js';
 import { createScheduledJobTemplateRepository } from './scheduled-jobs/scheduled-job-template-repository.js';
 import { createModelManager, createRepoScanner, createScanRepository } from './security/index.js';
+import { SystemDecisionRunner } from './system-sandbox/index.js';
 import { capLargeStrings } from './util/log-sanitizer.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';
 import { createLocalValidationEngine } from './validation/local-validation-engine.js';
@@ -204,6 +209,7 @@ const sessionTokenIssuer = createPodTokenIssuer(secretsKeyPath);
 // Repositories
 const profileStore = createProfileStore(db, credentialsCipher);
 const providerAccountStore = createProviderAccountStore(db, credentialsCipher);
+const podsitterRepo = createPodsitterRepository(db);
 // Stores that let daemon-side LLM helpers (PR body, auto-commit message) resolve
 // the same live provider-account credentials the agent authenticates with.
 const llmDeps = { profileStore, providerAccountStore };
@@ -606,6 +612,27 @@ const runtimeContainerManager = new RoutingContainerManager({
   },
 });
 
+const systemDecisionRunner = new SystemDecisionRunner({
+  localContainerManager: containerManager,
+  sandboxContainerManager,
+  providerAccountStore,
+  repository: podsitterRepo,
+  dockerNetworkManager: networkManager,
+  logger: logger.child({ component: 'system-decision-runner' }),
+  localImage: process.env.AUTOPOD_SYSTEM_DECISION_LOCAL_IMAGE,
+  hostedImage: process.env.AUTOPOD_SYSTEM_DECISION_IMAGE,
+});
+const systemSandboxReaper = setInterval(
+  () =>
+    systemDecisionRunner
+      .reapLeakedRuns(new Date(Date.now() - 65 * 60 * 1000).toISOString())
+      .catch((err) => {
+        logger.error({ err }, 'Periodic system sandbox reaping failed');
+      }),
+  5 * 60 * 1000,
+);
+systemSandboxReaper.unref();
+
 // Validation execs against the pod's existing container (pod.containerId), so it
 // MUST route by execution target exactly like the runtimes do — otherwise a
 // sandbox pod's container is looked up in local Docker and exec 404s ("no such
@@ -775,7 +802,7 @@ const notificationConfig: NotificationConfig = TEAMS_WEBHOOK_URL
   ? {
       teams: {
         webhookUrl: TEAMS_WEBHOOK_URL,
-        enabledEvents: ['pod_validated', 'pod_failed', 'pod_needs_input', 'pod_error'],
+        enabledEvents: ['pod_validated', 'pod_failed', 'pod_needs_input', 'pod_error', 'podsitter'],
       },
     }
   : {};
@@ -862,12 +889,70 @@ const issueWatcherService = createIssueWatcherService({
 });
 issueWatcherService.start();
 
+const podsitterActionExecutor = new PodsitterActionExecutor(podsitterRepo, podManager, {
+  async dismissValidationFinding(podId, findingId, reason) {
+    pendingOverrideRepo.enqueue(podId, {
+      findingId,
+      description: findingId,
+      action: 'dismiss',
+      reason,
+    });
+    const pod = podManager.getSession(podId);
+    if (pod.status === 'review_required') await podManager.applyOverridesInstant(podId);
+  },
+  async report(podId, message, actor) {
+    await podManager.sendMessage(podId, `[Podsitter report] ${message}`, actor);
+  },
+});
+const podsitterEvidenceProvider = createDaemonPodsitterEvidenceProvider({
+  podManager,
+  eventRepo,
+  escalationRepo,
+  providerAttemptRepo,
+  repository: podsitterRepo,
+});
+const podsitterService = createPodsitterService({
+  repository: podsitterRepo,
+  evidenceProvider: podsitterEvidenceProvider,
+  decisionRunner: systemDecisionRunner,
+  actionExecutor: podsitterActionExecutor,
+  eventBus,
+  logger: logger.child({ component: 'podsitter' }),
+  executionTarget:
+    sandboxContainerManager && process.env.AUTOPOD_SYSTEM_DECISION_IMAGE ? 'sandbox' : 'local',
+  probeProvider: (configuration) => {
+    const target = configuration.decisionTarget;
+    if (!target) throw new Error('Podsitter provider probe requires a decision target');
+    const signature = `provider-probe-${randomBytes(8).toString('hex')}`;
+    return systemDecisionRunner.run({
+      decisionId: signature,
+      auditDecisionId: null,
+      providerAccountId: target.providerAccountId,
+      runtime: target.runtime,
+      model: target.model,
+      reasoningEffort: target.reasoningEffort,
+      prompt: `Return exactly one PodsitterDecision v1 JSON object with attentionSignature "${signature}", action "no_action", empty arguments, a short reason, no evidenceRefs, confidence "high", empty remainingRisk, and stopCondition "probe complete".`,
+      contractVersion: 1,
+      executionTarget:
+        sandboxContainerManager && process.env.AUTOPOD_SYSTEM_DECISION_IMAGE ? 'sandbox' : 'local',
+      timeoutMs: 5 * 60_000,
+    });
+  },
+  reapLeakedSandboxes: () => systemDecisionRunner.reapLeakedRuns(),
+});
+await podsitterService.start().catch((err) => {
+  logger.error({ err }, 'Podsitter startup reconciliation failed');
+});
+
 // Server
 const app = await createServer({
   authModule,
   podManager,
   profileStore,
   providerAccountStore,
+  podsitterRepository: podsitterRepo,
+  podsitterService,
+  systemDecisionHostedImage: process.env.AUTOPOD_SYSTEM_DECISION_IMAGE,
   worktreeManager,
   eventBus,
   eventRepo,
@@ -1034,6 +1119,7 @@ async function shutdown(signal: string) {
   qualityScoreRecorder.stop();
   memoryCandidateRecorder.stop();
   issueWatcherService.stop();
+  await podsitterService.stop();
   screenshotRetention.stop();
 
   // Stop scheduled job scheduler
@@ -1042,6 +1128,7 @@ async function shutdown(signal: string) {
 
   // Stop perf-mark cleaner
   clearInterval(perfClearTimer);
+  clearInterval(systemSandboxReaper);
 
   // Stop the stuck-pod watchdog and sleep detector
   podManager.stopStuckPodWatchdog();

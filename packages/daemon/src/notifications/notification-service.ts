@@ -256,6 +256,52 @@ export function createNotificationService(deps: {
     await teamsAdapter.send(card);
   }
 
+  async function handlePodsitterEvent(event: SystemEvent): Promise<void> {
+    const podId = 'podId' in event ? event.podId : null;
+    const pod = podId ? getSessionSafe(podId) : null;
+    const profileName = pod?.profileName ?? '*';
+    const rateLimitKey =
+      podId ??
+      ('providerAccountId' in event
+        ? `podsitter-provider:${event.providerAccountId}`
+        : 'podsitter-control');
+    if (!isEventEnabled('podsitter', profileName)) return;
+    const rateCheck = rateLimiter.canSend(rateLimitKey);
+    if (!rateCheck.allowed) {
+      logger.debug(
+        { eventType: event.type, reason: rateCheck.reason },
+        'Podsitter notification rate limited',
+      );
+      return;
+    }
+    const detail =
+      event.type === 'podsitter.provider_limited'
+        ? `Decision provider limited (${event.status}); retry at ${event.retryAt ?? 'unknown'}`
+        : event.type === 'podsitter.provider_recovered'
+          ? 'Decision provider recovered'
+          : event.type === 'podsitter.action_executed'
+            ? `Executed ${event.action} for pod ${event.podId}`
+            : event.type === 'podsitter.action_rejected'
+              ? `Rejected ${event.action} for pod ${event.podId}: ${event.policyResult}`
+              : event.type === 'podsitter.activation_changed'
+                ? `Activation changed: ${event.enabled ? 'enabled' : 'disabled'}${event.reason ? ` (${event.reason})` : ''}`
+                : event.type === 'podsitter.system_sandbox_cleanup_failed'
+                  ? `System sandbox cleanup failed: ${event.failureCode}`
+                  : null;
+    if (!detail) return;
+    const notification: PodErrorNotification = {
+      type: 'pod_error',
+      podId: podId ?? rateLimitKey,
+      profileName,
+      task: pod ? sanitizeText(pod.task) : 'Daemon-native Podsitter',
+      timestamp: event.timestamp,
+      error: sanitizeText(detail),
+      fatal: false,
+    };
+    rateLimiter.recordSent(rateLimitKey);
+    await teamsAdapter.send(buildErrorCard(notification));
+  }
+
   function handleEvent(event: SystemEvent): void {
     // Fire-and-forget: wrap all sends in try/catch
     const promise = (async () => {
@@ -268,6 +314,14 @@ export function createNotificationService(deps: {
           break;
         case 'pod.status_changed':
           await handleStatusChanged(event);
+          break;
+        case 'podsitter.action_executed':
+        case 'podsitter.action_rejected':
+        case 'podsitter.provider_limited':
+        case 'podsitter.provider_recovered':
+        case 'podsitter.activation_changed':
+        case 'podsitter.system_sandbox_cleanup_failed':
+          await handlePodsitterEvent(event);
           break;
         // pod.completed could be handled here if needed
         default:

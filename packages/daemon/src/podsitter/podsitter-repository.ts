@@ -1,0 +1,1316 @@
+import {
+  type OperatorActor,
+  type PodsitterAction,
+  type PodsitterAttention,
+  type PodsitterAttentionState,
+  type PodsitterConfiguration,
+  type PodsitterDecision,
+  type PodsitterDecisionOutcome,
+  type PodsitterDecisionRecord,
+  type PodsitterDecisionTarget,
+  type PodsitterProviderCircuitStatus,
+  type PodsitterProviderState,
+  type SystemSandboxRunOutcome,
+  getPresetConfig,
+  operatorActorSchema,
+  podsitterActionArgumentsSchemas,
+  podsitterConfigurationInputSchema,
+  podsitterDecisionSchema,
+  sanitizeDeep,
+} from '@autopod/shared';
+import type Database from 'better-sqlite3';
+import { evaluatePodsitterActivation, validatePodsitterActivation } from './activation.js';
+
+const DEFAULT_BUDGETS = { maxDecisionsPerWindow: 20, maxActionsPerWindow: 10 };
+const SENSITIVE_KEY = /(credential|password|secret|token|api.?key|authorization)/i;
+const MAX_PERSISTED_PAYLOAD_BYTES = 32_000;
+const ONCE_PER_WINDOW_ACTIONS = new Set<PodsitterAction>(['extend_budget']);
+const ONCE_PER_FAILURE_ACTIONS = new Set<PodsitterAction>([
+  'extend_validation_attempts',
+  'extend_pr_attempts',
+  'kick',
+  'revalidate',
+  'spawn_fix',
+  'retry_pr',
+  'update_from_base',
+  'recover_worktree',
+  'fix_manually',
+]);
+const ONCE_PER_ATTENTION_ACTIONS = new Set<PodsitterAction>(['approve']);
+const ONCE_PER_POD_ACTIONS = new Set<PodsitterAction>([
+  'force_approve',
+  'skip_validation',
+  'force_complete',
+]);
+
+export interface PodsitterConfigurationInput {
+  enabled: boolean;
+  activation: PodsitterConfiguration['activation'];
+  authorizedUntil: string | null;
+  profileScope: string[] | null;
+  decisionTarget: PodsitterDecisionTarget | null;
+  budgets?: PodsitterConfiguration['budgets'];
+  updatedBy: OperatorActor;
+}
+
+export interface PodsitterRepository {
+  getConfiguration(): PodsitterConfiguration | null;
+  replaceConfiguration(input: PodsitterConfigurationInput, now?: string): PodsitterConfiguration;
+  recordAttention(input: {
+    id: string;
+    podId: string;
+    signature: string;
+    failureSignature?: string | null;
+    now?: string;
+  }): PodsitterAttention;
+  listPendingAttention(): PodsitterAttention[];
+  acquireAttentionLease(
+    id: string,
+    owner: string,
+    expiresAt: string,
+    now?: string,
+  ): PodsitterAttention | null;
+  releaseAttentionLease(
+    id: string,
+    owner: string,
+    leaseVersion: number,
+    state?: PodsitterAttentionState,
+    decisionId?: string | null,
+    now?: string,
+  ): boolean;
+  getProviderState(providerAccountId: string): PodsitterProviderState | null;
+  initializeProviderState(providerAccountId: string, now?: string): PodsitterProviderState;
+  setProviderState(
+    providerAccountId: string,
+    leaseOwner: string,
+    leaseVersion: number,
+    update: {
+      status: PodsitterProviderCircuitStatus;
+      consecutiveFailures: number;
+      retryAt?: string | null;
+      resetAt?: string | null;
+      sanitizedReason?: string | null;
+      recoveredAt?: string | null;
+    },
+    now?: string,
+  ): PodsitterProviderState;
+  acquireProviderProbeLease(
+    providerAccountId: string,
+    owner: string,
+    expiresAt: string,
+    now?: string,
+  ): number | null;
+  releaseProviderProbeLease(
+    providerAccountId: string,
+    owner: string,
+    leaseVersion: number,
+    now?: string,
+  ): boolean;
+  reserveAction(input: {
+    id: string;
+    idempotencyKey: string;
+    podId: string;
+    decisionId: string;
+    attentionSignature: string;
+    activationGeneration: number;
+    activationWindowId: string;
+    failureSignature?: string | null;
+    actor: OperatorActor;
+    action: PodsitterAction;
+    arguments: Record<string, unknown>;
+    policyResult: string;
+    now?: string;
+  }): boolean;
+  beginActionDispatch(input: {
+    idempotencyKey: string;
+    podId: string;
+    decisionId: string;
+    attentionSignature: string;
+    activationGeneration: number;
+    activationWindowId: string;
+    failureSignature?: string | null;
+    now?: string;
+  }): boolean;
+  getActionDispatch(idempotencyKey: string): {
+    state: 'reserved' | 'dispatching' | 'completed';
+    daemonResult: string | null;
+  } | null;
+  completeAction(idempotencyKey: string, daemonResult: string, now?: string): boolean;
+  getDecisionForAttention(attentionId: string): PodsitterDecisionRecord | null;
+  getDecisionById(id: string): PodsitterDecisionRecord | null;
+  refreshDecisionForRetry(input: {
+    attentionId: string;
+    leaseOwner: string;
+    leaseVersion: number;
+    configurationGeneration: number;
+    evidenceHash: string;
+    evidenceVersion: number;
+    target: PodsitterDecisionTarget;
+    now?: string;
+  }): PodsitterDecisionRecord;
+  listDecisions(input?: {
+    podId?: string;
+    limit?: number;
+    offset?: number;
+  }): { items: PodsitterDecisionRecord[]; total: number };
+  createDecision(input: {
+    id: string;
+    attentionId: string;
+    leaseOwner: string;
+    leaseVersion: number;
+    podId: string;
+    attentionSignature: string;
+    configurationGeneration: number;
+    evidenceHash: string;
+    evidenceVersion: number;
+    target: PodsitterDecisionTarget;
+    now?: string;
+  }): PodsitterDecisionRecord;
+  completeDecision(
+    id: string,
+    update: {
+      leaseOwner: string;
+      leaseVersion: number;
+      decision?: PodsitterDecision | null;
+      outcome: PodsitterDecisionOutcome;
+      failureCode?: string | null;
+      inputTokens?: number | null;
+      outputTokens?: number | null;
+      costUsd?: number | null;
+      executedAt?: string | null;
+    },
+    now?: string,
+  ): PodsitterDecisionRecord;
+  markDecisionExecuted(id: string, now?: string): boolean;
+  createSandboxRun(input: {
+    id: string;
+    decisionId?: string | null;
+    backend: string;
+    containerId?: string | null;
+    now?: string;
+  }): void;
+  setSandboxContainer(id: string, containerId: string, now?: string): boolean;
+  listActiveSandboxRuns(staleBefore?: string): Array<{
+    id: string;
+    decisionId: string | null;
+    backend: string;
+    containerId: string | null;
+  }>;
+  closeSandboxRun(
+    id: string,
+    update: {
+      outcome: SystemSandboxRunOutcome;
+      cleanupState: string;
+      failureCode?: string | null;
+    },
+    now?: string,
+  ): boolean;
+}
+
+function json<T>(value: T): string {
+  return JSON.stringify(value);
+}
+
+function canonicalize<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => canonicalize(item)) as T;
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, canonicalize(child)]),
+    ) as T;
+  }
+  return value;
+}
+
+function parse<T>(value: unknown): T {
+  return JSON.parse(value as string) as T;
+}
+
+function normalizeIso(value: string, field: string): string {
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds)) throw new Error(`${field} must be an ISO timestamp`);
+  return new Date(milliseconds).toISOString();
+}
+
+function normalizeFutureLease(expiresAt: string, now: string): string {
+  const normalizedExpiresAt = normalizeIso(expiresAt, 'expiresAt');
+  if (normalizedExpiresAt <= now) {
+    throw new Error('expiresAt must be later than now');
+  }
+  return normalizedExpiresAt;
+}
+
+function assertRedacted(value: unknown, key = 'arguments'): void {
+  if (Array.isArray(value)) {
+    for (const item of value) assertRedacted(item, key);
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [childKey, childValue] of Object.entries(value)) {
+      const safeReference = /(?:credential|secret|token|key)Id$/i.test(childKey);
+      if (
+        SENSITIVE_KEY.test(childKey) &&
+        !safeReference &&
+        childValue !== null &&
+        childValue !== '[redacted]'
+      ) {
+        throw new Error(`Podsitter action arguments contain sensitive field "${childKey}"`);
+      }
+      assertRedacted(childValue, childKey);
+    }
+  } else if (typeof value === 'string' && value.length > 4_000) {
+    throw new Error(`Podsitter ${key} exceeds the bounded field limit`);
+  }
+}
+
+function assertBoundedRedactedPayload(value: unknown, field: string): void {
+  assertRedacted(value, field);
+  if (Buffer.byteLength(JSON.stringify(value), 'utf8') > MAX_PERSISTED_PAYLOAD_BYTES) {
+    throw new Error(`Podsitter ${field} exceeds the bounded payload limit`);
+  }
+}
+
+function sanitizeForAudit<T>(value: T): T {
+  return canonicalize(sanitizeDeep(value, getPresetConfig('relaxed')) as T);
+}
+
+function hydrateConfiguration(row: Record<string, unknown>): PodsitterConfiguration {
+  const decisionTarget =
+    row.provider_account_id === null
+      ? null
+      : {
+          providerAccountId: row.provider_account_id as string,
+          runtime: row.runtime as PodsitterDecisionTarget['runtime'],
+          model: row.model as string,
+          ...(row.reasoning_effort
+            ? {
+                reasoningEffort: row.reasoning_effort as PodsitterDecisionTarget['reasoningEffort'],
+              }
+            : {}),
+        };
+  return {
+    enabled: row.enabled === 1,
+    activation: parse(row.activation),
+    authorizedUntil: row.authorized_until as string | null,
+    generation: row.generation as number,
+    profileScope: row.profile_scope === null ? null : parse(row.profile_scope),
+    decisionTarget,
+    budgets: parse(row.budgets),
+    updatedBy: parse(row.updated_by),
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
+function hydrateAttention(row: Record<string, unknown>): PodsitterAttention {
+  return {
+    id: row.id as string,
+    podId: row.pod_id as string,
+    signature: row.signature as string,
+    state: row.state as PodsitterAttentionState,
+    failureSignature: row.failure_signature as string | null,
+    decisionId: row.decision_id as string | null,
+    leaseOwner: row.lease_owner as string | null,
+    leaseVersion: row.lease_version as number,
+    leaseExpiresAt: row.lease_expires_at as string | null,
+    firstSeenAt: row.first_seen_at as string,
+    lastSeenAt: row.last_seen_at as string,
+    supersededAt: row.superseded_at as string | null,
+  };
+}
+
+function hydrateProviderState(row: Record<string, unknown>): PodsitterProviderState {
+  return {
+    providerAccountId: row.provider_account_id as string,
+    status: row.status as PodsitterProviderCircuitStatus,
+    consecutiveFailures: row.consecutive_failures as number,
+    retryAt: row.retry_at as string | null,
+    resetAt: row.reset_at as string | null,
+    sanitizedReason: row.sanitized_reason as string | null,
+    probeLeaseOwner: row.probe_lease_owner as string | null,
+    probeLeaseVersion: row.probe_lease_version as number,
+    probeLeaseExpiresAt: row.probe_lease_expires_at as string | null,
+    recoveredAt: row.recovered_at as string | null,
+    updatedAt: row.updated_at as string,
+  };
+}
+
+function hydrateDecision(row: Record<string, unknown>): PodsitterDecisionRecord {
+  return {
+    id: row.id as string,
+    attentionId: row.attention_id as string,
+    podId: row.pod_id as string,
+    attentionSignature: row.attention_signature as string,
+    configurationGeneration: row.configuration_generation as number,
+    activationWindowId: row.activation_window_id as string,
+    evidenceHash: row.evidence_hash as string,
+    evidenceVersion: row.evidence_version as number,
+    target: {
+      providerAccountId: row.provider_account_id as string,
+      runtime: row.runtime as PodsitterDecisionTarget['runtime'],
+      model: row.model as string,
+      ...(row.reasoning_effort
+        ? { reasoningEffort: row.reasoning_effort as PodsitterDecisionTarget['reasoningEffort'] }
+        : {}),
+    },
+    decision: row.decision === null ? null : parse(row.decision),
+    outcome: row.outcome as PodsitterDecisionOutcome,
+    failureCode: row.failure_code as string | null,
+    inputTokens: row.input_tokens as number | null,
+    outputTokens: row.output_tokens as number | null,
+    costUsd: row.cost_usd as number | null,
+    createdAt: row.created_at as string,
+    completedAt: row.completed_at as string | null,
+    executedAt: row.executed_at as string | null,
+  };
+}
+
+function decisionTargetsMatch(
+  left: PodsitterDecisionTarget | null,
+  right: PodsitterDecisionTarget,
+): boolean {
+  return (
+    left !== null &&
+    left.providerAccountId === right.providerAccountId &&
+    left.runtime === right.runtime &&
+    left.model === right.model &&
+    (left.reasoningEffort ?? null) === (right.reasoningEffort ?? null)
+  );
+}
+
+export function createPodsitterRepository(db: Database.Database): PodsitterRepository {
+  const getAttention = (id: string): PodsitterAttention => {
+    const row = db.prepare('SELECT * FROM podsitter_attention WHERE id = ?').get(id) as
+      | Record<string, unknown>
+      | undefined;
+    if (!row) throw new Error(`Podsitter attention "${id}" not found`);
+    return hydrateAttention(row);
+  };
+  const getDecision = (id: string): PodsitterDecisionRecord => {
+    const row = db.prepare('SELECT * FROM podsitter_decisions WHERE id = ?').get(id) as
+      | Record<string, unknown>
+      | undefined;
+    if (!row) throw new Error(`Podsitter decision "${id}" not found`);
+    return hydrateDecision(row);
+  };
+  const hasCurrentAuthority = (
+    decision: Pick<PodsitterDecisionRecord, 'podId' | 'configurationGeneration' | 'target'> &
+      Partial<Pick<PodsitterDecisionRecord, 'activationWindowId'>>,
+    now: string,
+  ): { configuration: PodsitterConfiguration; windowId: string } | null => {
+    const row = db
+      .prepare(
+        `SELECT config.*, pods.profile_name
+         FROM podsitter_config config
+         JOIN pods ON pods.id = ?
+         WHERE config.singleton_id = 1`,
+      )
+      .get(decision.podId) as Record<string, unknown> | undefined;
+    if (!row) return null;
+
+    const configuration = hydrateConfiguration(row);
+    const activation = evaluatePodsitterActivation(configuration, new Date(now));
+    const authorized =
+      configuration.generation === decision.configurationGeneration &&
+      decisionTargetsMatch(configuration.decisionTarget, decision.target) &&
+      (configuration.profileScope === null ||
+        configuration.profileScope.includes(row.profile_name as string)) &&
+      activation.active &&
+      activation.windowId !== null &&
+      (decision.activationWindowId === undefined ||
+        decision.activationWindowId === activation.windowId);
+    return authorized ? { configuration, windowId: activation.windowId } : null;
+  };
+
+  const replaceConfiguration = db.transaction(
+    (input: PodsitterConfigurationInput, now: string): PodsitterConfiguration => {
+      const normalized = podsitterConfigurationInputSchema.parse({
+        ...input,
+        budgets: input.budgets ?? DEFAULT_BUDGETS,
+      });
+      const authorizedUntil =
+        normalized.authorizedUntil === null
+          ? null
+          : normalizeIso(normalized.authorizedUntil, 'authorizedUntil');
+      validatePodsitterActivation(normalized.activation);
+      const current = db
+        .prepare('SELECT generation, created_at FROM podsitter_config WHERE singleton_id = 1')
+        .get() as { generation: number; created_at: string } | undefined;
+      const generation = (current?.generation ?? 0) + 1;
+      db.prepare(
+        `INSERT INTO podsitter_config (
+          singleton_id, enabled, activation, authorized_until, profile_scope,
+          provider_account_id, runtime, model, reasoning_effort, generation,
+          budgets, updated_by, created_at, updated_at
+        ) VALUES (
+          1, @enabled, @activation, @authorizedUntil, @profileScope,
+          @providerAccountId, @runtime, @model, @reasoningEffort, @generation,
+          @budgets, @updatedBy, @createdAt, @updatedAt
+        )
+        ON CONFLICT(singleton_id) DO UPDATE SET
+          enabled = excluded.enabled,
+          activation = excluded.activation,
+          authorized_until = excluded.authorized_until,
+          profile_scope = excluded.profile_scope,
+          provider_account_id = excluded.provider_account_id,
+          runtime = excluded.runtime,
+          model = excluded.model,
+          reasoning_effort = excluded.reasoning_effort,
+          generation = excluded.generation,
+          budgets = excluded.budgets,
+          updated_by = excluded.updated_by,
+          updated_at = excluded.updated_at`,
+      ).run({
+        enabled: normalized.enabled ? 1 : 0,
+        activation: json(normalized.activation),
+        authorizedUntil,
+        profileScope: normalized.profileScope === null ? null : json(normalized.profileScope),
+        providerAccountId: normalized.decisionTarget?.providerAccountId ?? null,
+        runtime: normalized.decisionTarget?.runtime ?? null,
+        model: normalized.decisionTarget?.model ?? null,
+        reasoningEffort: normalized.decisionTarget?.reasoningEffort ?? null,
+        generation,
+        budgets: json(normalized.budgets),
+        updatedBy: json(normalized.updatedBy),
+        createdAt: current?.created_at ?? now,
+        updatedAt: now,
+      });
+      const row = db
+        .prepare('SELECT * FROM podsitter_config WHERE singleton_id = 1')
+        .get() as Record<string, unknown>;
+      return hydrateConfiguration(row);
+    },
+  );
+
+  const recordAttention = db.transaction(
+    (input: {
+      id: string;
+      podId: string;
+      signature: string;
+      failureSignature?: string | null;
+      now: string;
+    }): PodsitterAttention => {
+      const existing = db
+        .prepare('SELECT * FROM podsitter_attention WHERE pod_id = ? AND signature = ?')
+        .get(input.podId, input.signature) as Record<string, unknown> | undefined;
+      if (existing) {
+        db.prepare(
+          `UPDATE podsitter_attention
+           SET last_seen_at = @now
+           WHERE pod_id = @podId AND signature = @signature`,
+        ).run(input);
+        return getAttention(existing.id as string);
+      }
+      db.prepare(
+        `UPDATE podsitter_decisions
+         SET outcome = 'superseded', completed_at = ?
+         WHERE completed_at IS NULL
+           AND attention_id IN (
+             SELECT id FROM podsitter_attention
+             WHERE pod_id = ?
+               AND signature <> ?
+               AND state IN ('pending', 'deferred', 'deciding')
+           )`,
+      ).run(input.now, input.podId, input.signature);
+      db.prepare(
+        `UPDATE podsitter_attention
+         SET state = 'superseded', superseded_at = @now,
+             lease_owner = NULL, lease_expires_at = NULL, last_seen_at = @now
+         WHERE pod_id = @podId
+           AND signature <> @signature
+           AND state IN ('pending', 'deferred', 'deciding')`,
+      ).run(input);
+      db.prepare(
+        `INSERT INTO podsitter_attention (
+          id, pod_id, signature, state, failure_signature, decision_id,
+          lease_owner, lease_expires_at, first_seen_at, last_seen_at, superseded_at
+        ) VALUES (
+          @id, @podId, @signature, 'pending', @failureSignature, NULL,
+          NULL, NULL, @now, @now, NULL
+        )
+        ON CONFLICT(pod_id, signature) DO NOTHING`,
+      ).run({ ...input, failureSignature: input.failureSignature ?? null });
+      const row = db
+        .prepare('SELECT * FROM podsitter_attention WHERE pod_id = ? AND signature = ?')
+        .get(input.podId, input.signature) as Record<string, unknown>;
+      return hydrateAttention(row);
+    },
+  );
+
+  return {
+    getConfiguration() {
+      const row = db.prepare('SELECT * FROM podsitter_config WHERE singleton_id = 1').get() as
+        | Record<string, unknown>
+        | undefined;
+      return row ? hydrateConfiguration(row) : null;
+    },
+    replaceConfiguration(input, now = new Date().toISOString()) {
+      const normalizedNow = normalizeIso(now, 'now');
+      return replaceConfiguration(input, normalizedNow);
+    },
+    recordAttention(input) {
+      const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
+      return recordAttention({ ...input, now });
+    },
+    listPendingAttention() {
+      return (
+        db
+          .prepare(
+            "SELECT * FROM podsitter_attention WHERE state IN ('pending', 'deferred', 'deciding') ORDER BY first_seen_at",
+          )
+          .all() as Record<string, unknown>[]
+      ).map(hydrateAttention);
+    },
+    acquireAttentionLease(id, owner, expiresAt, now = new Date().toISOString()) {
+      const normalizedNow = normalizeIso(now, 'now');
+      const normalizedExpiresAt = normalizeFutureLease(expiresAt, normalizedNow);
+      const acquired = db.transaction(() =>
+        db
+          .prepare(
+            `UPDATE podsitter_attention
+             SET lease_owner = ?, lease_version = lease_version + 1,
+                 lease_expires_at = ?, state = 'deciding'
+             WHERE id = ?
+               AND state IN ('pending', 'deferred', 'deciding')
+               AND (lease_expires_at IS NULL OR lease_expires_at <= ?)`,
+          )
+          .run(owner, normalizedExpiresAt, id, normalizedNow),
+      )();
+      return acquired.changes === 1 ? getAttention(id) : null;
+    },
+    releaseAttentionLease(
+      id,
+      owner,
+      leaseVersion,
+      state = 'pending',
+      decisionId = null,
+      now = new Date().toISOString(),
+    ) {
+      const normalizedNow = normalizeIso(now, 'now');
+      return (
+        db.transaction(() =>
+          db
+            .prepare(
+              `UPDATE podsitter_attention
+               SET lease_owner = NULL, lease_expires_at = NULL, state = ?,
+                   decision_id = COALESCE(?, decision_id), last_seen_at = ?
+               WHERE id = ? AND lease_owner = ? AND lease_version = ?
+                 AND lease_expires_at > ?`,
+            )
+            .run(state, decisionId, normalizedNow, id, owner, leaseVersion, normalizedNow),
+        )().changes === 1
+      );
+    },
+    getProviderState(providerAccountId) {
+      const row = db
+        .prepare('SELECT * FROM podsitter_provider_state WHERE provider_account_id = ?')
+        .get(providerAccountId) as Record<string, unknown> | undefined;
+      return row ? hydrateProviderState(row) : null;
+    },
+    initializeProviderState(providerAccountId, now = new Date().toISOString()) {
+      const normalizedNow = normalizeIso(now, 'now');
+      db.transaction(() =>
+        db
+          .prepare(
+            `INSERT INTO podsitter_provider_state (
+              provider_account_id, status, consecutive_failures, retry_at, reset_at,
+              sanitized_reason, probe_lease_owner, probe_lease_version,
+              probe_lease_expires_at, recovered_at, updated_at
+            ) VALUES (?, 'available', 0, NULL, NULL, NULL, NULL, 0, NULL, NULL, ?)
+            ON CONFLICT(provider_account_id) DO NOTHING`,
+          )
+          .run(providerAccountId, normalizedNow),
+      )();
+      const state = this.getProviderState(providerAccountId);
+      if (!state) throw new Error('Failed to initialize Podsitter provider state');
+      return state;
+    },
+    setProviderState(
+      providerAccountId,
+      leaseOwner,
+      leaseVersion,
+      update,
+      now = new Date().toISOString(),
+    ) {
+      assertRedacted(update.sanitizedReason, 'sanitizedReason');
+      const normalizedNow = normalizeIso(now, 'now');
+      const retryAt =
+        update.retryAt === undefined || update.retryAt === null
+          ? null
+          : normalizeIso(update.retryAt, 'retryAt');
+      const resetAt =
+        update.resetAt === undefined || update.resetAt === null
+          ? null
+          : normalizeIso(update.resetAt, 'resetAt');
+      const recoveredAt =
+        update.recoveredAt === undefined || update.recoveredAt === null
+          ? null
+          : normalizeIso(update.recoveredAt, 'recoveredAt');
+      const result = db.transaction(() =>
+        db
+          .prepare(
+            `UPDATE podsitter_provider_state SET
+              status = ?, consecutive_failures = ?, retry_at = ?, reset_at = ?,
+              sanitized_reason = ?, recovered_at = ?, updated_at = ?
+             WHERE provider_account_id = ?
+               AND probe_lease_owner = ?
+               AND probe_lease_version = ?
+               AND probe_lease_expires_at > ?`,
+          )
+          .run(
+            update.status,
+            update.consecutiveFailures,
+            retryAt,
+            resetAt,
+            update.sanitizedReason ?? null,
+            recoveredAt,
+            normalizedNow,
+            providerAccountId,
+            leaseOwner,
+            leaseVersion,
+            normalizedNow,
+          ),
+      )();
+      if (result.changes !== 1) {
+        throw new Error('Podsitter provider state requires the current unexpired probe lease');
+      }
+      const state = this.getProviderState(providerAccountId);
+      if (!state) throw new Error('Failed to persist Podsitter provider state');
+      return state;
+    },
+    acquireProviderProbeLease(providerAccountId, owner, expiresAt, now = new Date().toISOString()) {
+      const normalizedNow = normalizeIso(now, 'now');
+      const normalizedExpiresAt = normalizeFutureLease(expiresAt, normalizedNow);
+      const result = db.transaction(() =>
+        db
+          .prepare(
+            `UPDATE podsitter_provider_state
+               SET probe_lease_owner = ?, probe_lease_version = probe_lease_version + 1,
+                   probe_lease_expires_at = ?, updated_at = ?
+               WHERE provider_account_id = ?
+                 AND (probe_lease_expires_at IS NULL OR probe_lease_expires_at <= ?)`,
+          )
+          .run(owner, normalizedExpiresAt, normalizedNow, providerAccountId, normalizedNow),
+      )();
+      if (result.changes !== 1) return null;
+      const state = this.getProviderState(providerAccountId);
+      return state?.probeLeaseVersion ?? null;
+    },
+    releaseProviderProbeLease(
+      providerAccountId,
+      owner,
+      leaseVersion,
+      now = new Date().toISOString(),
+    ) {
+      const normalizedNow = normalizeIso(now, 'now');
+      return (
+        db.transaction(() =>
+          db
+            .prepare(
+              `UPDATE podsitter_provider_state
+               SET probe_lease_owner = NULL, probe_lease_expires_at = NULL, updated_at = ?
+               WHERE provider_account_id = ? AND probe_lease_owner = ?
+                 AND probe_lease_version = ? AND probe_lease_expires_at > ?`,
+            )
+            .run(normalizedNow, providerAccountId, owner, leaseVersion, normalizedNow),
+        )().changes === 1
+      );
+    },
+    reserveAction(input) {
+      const actor = operatorActorSchema.parse(input.actor);
+      const actionArguments = canonicalize(
+        podsitterActionArgumentsSchemas[input.action].parse(input.arguments),
+      );
+      const persistedArguments = sanitizeForAudit(actionArguments);
+      assertBoundedRedactedPayload(persistedArguments, 'arguments');
+      assertRedacted(input.policyResult, 'policyResult');
+      const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
+      try {
+        const result = db.transaction(() => {
+          const decision = getDecision(input.decisionId);
+          const authority = hasCurrentAuthority(decision, now);
+          if (!authority) return false;
+          if (
+            (input.attentionSignature !== undefined &&
+              decision.attentionSignature !== input.attentionSignature) ||
+            (input.activationGeneration !== undefined &&
+              decision.configurationGeneration !== input.activationGeneration) ||
+            (input.activationWindowId !== undefined &&
+              (decision.activationWindowId !== input.activationWindowId ||
+                authority.windowId !== input.activationWindowId))
+          ) {
+            return false;
+          }
+          if (
+            actor.type !== 'podsitter' ||
+            actor.decisionId !== decision.id ||
+            actor.providerAccountId !== decision.target.providerAccountId ||
+            actor.model !== decision.target.model
+          ) {
+            return false;
+          }
+          const attention = db
+            .prepare(
+              `SELECT signature, failure_signature, state, decision_id
+               FROM podsitter_attention
+               WHERE id = ? AND pod_id = ?`,
+            )
+            .get(decision.attentionId, input.podId) as
+            | {
+                signature: string;
+                failure_signature: string | null;
+                state: PodsitterAttentionState;
+                decision_id: string | null;
+              }
+            | undefined;
+          if (
+            !attention ||
+            attention.signature !== decision.attentionSignature ||
+            attention.signature !== input.attentionSignature ||
+            attention.state !== 'deciding' ||
+            attention.decision_id !== decision.id ||
+            (input.failureSignature !== undefined &&
+              input.failureSignature !== attention.failure_signature)
+          ) {
+            return false;
+          }
+          const reservedActions = db
+            .prepare(
+              `SELECT COUNT(*) AS count
+               FROM podsitter_action_audit audit
+               JOIN podsitter_decisions decision ON decision.id = audit.decision_id
+               WHERE decision.activation_window_id = ?`,
+            )
+            .get(authority.windowId) as { count: number };
+          if (reservedActions.count >= authority.configuration.budgets.maxActionsPerWindow) {
+            return false;
+          }
+          const repeat = (predicate: string, parameters: readonly unknown[]): boolean =>
+            (
+              db
+                .prepare(
+                  `SELECT COUNT(*) AS count
+                   FROM podsitter_action_audit audit
+                   JOIN podsitter_decisions prior ON prior.id = audit.decision_id
+                   WHERE audit.pod_id = ? AND ${predicate}`,
+                )
+                .get(input.podId, ...parameters) as { count: number }
+            ).count > 0;
+          const effectiveFailureSignature =
+            attention.failure_signature ?? decision.attentionSignature;
+          if (
+            (ONCE_PER_WINDOW_ACTIONS.has(input.action) &&
+              repeat('prior.activation_window_id = ? AND audit.action = ?', [
+                authority.windowId,
+                input.action,
+              ])) ||
+            (ONCE_PER_FAILURE_ACTIONS.has(input.action) &&
+              repeat(
+                `COALESCE(audit.failure_signature, prior.attention_signature) = ?
+                 AND audit.action = ?`,
+                [effectiveFailureSignature, input.action],
+              )) ||
+            (ONCE_PER_ATTENTION_ACTIONS.has(input.action) &&
+              repeat('prior.attention_signature = ? AND audit.action = ?', [
+                decision.attentionSignature,
+                input.action,
+              ])) ||
+            (input.action === 'approve_fact_waiver' &&
+              repeat(
+                `COALESCE(audit.failure_signature, prior.attention_signature) = ?
+                 AND audit.action = 'approve_fact_waiver'
+                 AND json_extract(audit.arguments, '$.factId') = ?`,
+                [effectiveFailureSignature, (actionArguments as { factId: string }).factId],
+              )) ||
+            (ONCE_PER_POD_ACTIONS.has(input.action) && repeat('audit.action = ?', [input.action]))
+          ) {
+            return false;
+          }
+          return db
+            .prepare(
+              `INSERT INTO podsitter_action_audit (
+                id, idempotency_key, pod_id, decision_id, failure_signature,
+                actor, action, arguments, policy_result, daemon_result, reserved_at, completed_at
+              )
+              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL
+              FROM podsitter_decisions
+              WHERE id = ?
+                AND pod_id = ?
+                AND outcome = 'completed'
+                AND json_extract(decision, '$.action') = ?
+                AND json_extract(decision, '$.arguments') = json(?)`,
+            )
+            .run(
+              input.id,
+              input.idempotencyKey,
+              input.podId,
+              input.decisionId,
+              attention.failure_signature,
+              json(actor),
+              input.action,
+              json(persistedArguments),
+              input.policyResult,
+              now,
+              input.decisionId,
+              input.podId,
+              input.action,
+              json(actionArguments),
+            );
+        })();
+        return result.changes === 1;
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          /UNIQUE constraint failed.*(?:idempotency_key|decision_id)/i.test(error.message)
+        ) {
+          return false;
+        }
+        throw error;
+      }
+    },
+    beginActionDispatch(input) {
+      const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
+      return db.transaction(() => {
+        const decision = getDecision(input.decisionId);
+        const authority = hasCurrentAuthority(decision, now);
+        if (
+          !authority ||
+          decision.podId !== input.podId ||
+          decision.attentionSignature !== input.attentionSignature ||
+          decision.configurationGeneration !== input.activationGeneration ||
+          decision.activationWindowId !== input.activationWindowId ||
+          authority.windowId !== input.activationWindowId
+        ) {
+          return false;
+        }
+        const attention = db
+          .prepare(
+            `SELECT signature, failure_signature, state, decision_id
+             FROM podsitter_attention
+             WHERE id = ? AND pod_id = ?`,
+          )
+          .get(decision.attentionId, input.podId) as
+          | {
+              signature: string;
+              failure_signature: string | null;
+              state: PodsitterAttentionState;
+              decision_id: string | null;
+            }
+          | undefined;
+        if (
+          !attention ||
+          attention.signature !== input.attentionSignature ||
+          attention.state !== 'deciding' ||
+          attention.decision_id !== input.decisionId ||
+          (input.failureSignature !== undefined &&
+            input.failureSignature !== attention.failure_signature)
+        ) {
+          return false;
+        }
+        return (
+          db
+            .prepare(
+              `UPDATE podsitter_action_audit
+               SET dispatch_state = 'dispatching', dispatch_started_at = ?
+               WHERE idempotency_key = ? AND pod_id = ? AND decision_id = ?
+                 AND dispatch_state = 'reserved' AND completed_at IS NULL`,
+            )
+            .run(now, input.idempotencyKey, input.podId, input.decisionId).changes === 1
+        );
+      })();
+    },
+    getActionDispatch(idempotencyKey) {
+      const row = db
+        .prepare(
+          `SELECT dispatch_state, daemon_result
+           FROM podsitter_action_audit WHERE idempotency_key = ?`,
+        )
+        .get(idempotencyKey) as
+        | { dispatch_state: 'reserved' | 'dispatching' | 'completed'; daemon_result: string | null }
+        | undefined;
+      return row ? { state: row.dispatch_state, daemonResult: row.daemon_result } : null;
+    },
+    completeAction(idempotencyKey, daemonResult, now = new Date().toISOString()) {
+      const persistedResult = sanitizeForAudit(daemonResult);
+      assertRedacted(persistedResult, 'daemonResult');
+      const normalizedNow = normalizeIso(now, 'now');
+      return (
+        db.transaction(() =>
+          db
+            .prepare(
+              `UPDATE podsitter_action_audit
+               SET daemon_result = ?, dispatch_state = 'completed', completed_at = ?
+               WHERE idempotency_key = ? AND completed_at IS NULL`,
+            )
+            .run(persistedResult, normalizedNow, idempotencyKey),
+        )().changes === 1
+      );
+    },
+    getDecisionForAttention(attentionId) {
+      const row = db
+        .prepare('SELECT * FROM podsitter_decisions WHERE attention_id = ?')
+        .get(attentionId) as Record<string, unknown> | undefined;
+      return row ? hydrateDecision(row) : null;
+    },
+    getDecisionById(id) {
+      const row = db.prepare('SELECT * FROM podsitter_decisions WHERE id = ?').get(id) as
+        | Record<string, unknown>
+        | undefined;
+      return row ? hydrateDecision(row) : null;
+    },
+    refreshDecisionForRetry(input) {
+      const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
+      const existing = this.getDecisionForAttention(input.attentionId);
+      if (!existing) throw new Error('Podsitter retry requires an existing decision');
+      const authority = hasCurrentAuthority(
+        {
+          podId: existing.podId,
+          configurationGeneration: input.configurationGeneration,
+          target: input.target,
+        },
+        now,
+      );
+      if (!authority) throw new Error('Podsitter retry requires current configuration authority');
+      const result = db
+        .prepare(
+          `UPDATE podsitter_decisions SET
+             configuration_generation = ?, activation_window_id = ?,
+             evidence_hash = ?, evidence_version = ?, provider_account_id = ?,
+             runtime = ?, model = ?, reasoning_effort = ?, decision = NULL,
+             outcome = 'pending', failure_code = NULL, input_tokens = NULL,
+             output_tokens = NULL, cost_usd = NULL, completed_at = NULL, executed_at = NULL
+           WHERE attention_id = ?
+             AND (
+               outcome = 'failed'
+               OR (outcome = 'pending' AND completed_at IS NULL)
+             )
+             AND EXISTS (
+               SELECT 1 FROM podsitter_attention attention
+               WHERE attention.id = podsitter_decisions.attention_id
+                 AND attention.lease_owner = ?
+                 AND attention.lease_version = ?
+                 AND attention.lease_expires_at > ?
+             )`,
+        )
+        .run(
+          input.configurationGeneration,
+          authority.windowId,
+          input.evidenceHash,
+          input.evidenceVersion,
+          input.target.providerAccountId,
+          input.target.runtime,
+          input.target.model,
+          input.target.reasoningEffort ?? null,
+          input.attentionId,
+          input.leaseOwner,
+          input.leaseVersion,
+          now,
+        );
+      if (result.changes !== 1) throw new Error('Podsitter decision is not retryable');
+      return getDecision(existing.id);
+    },
+    listDecisions(input = {}) {
+      const limit = Math.max(1, Math.min(input.limit ?? 50, 200));
+      const offset = Math.max(0, input.offset ?? 0);
+      const where = input.podId ? 'WHERE pod_id = @podId' : '';
+      const parameters = { podId: input.podId, limit, offset };
+      const items = (
+        db
+          .prepare(
+            `SELECT * FROM podsitter_decisions ${where}
+             ORDER BY created_at DESC, id DESC LIMIT @limit OFFSET @offset`,
+          )
+          .all(parameters) as Record<string, unknown>[]
+      ).map(hydrateDecision);
+      const total = db
+        .prepare(`SELECT COUNT(*) AS count FROM podsitter_decisions ${where}`)
+        .get(parameters) as { count: number };
+      return { items, total: total.count };
+    },
+    createDecision(input) {
+      const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
+      const createOrRecover = db.transaction((): PodsitterDecisionRecord => {
+        const authority = hasCurrentAuthority(input, now);
+        if (!authority) {
+          throw new Error('Podsitter decision requires the current active configuration authority');
+        }
+
+        const attention = db
+          .prepare(
+            `SELECT pod_id, signature, lease_owner, lease_version, lease_expires_at, state, decision_id
+             FROM podsitter_attention
+             WHERE id = ?`,
+          )
+          .get(input.attentionId) as
+          | {
+              pod_id: string;
+              signature: string;
+              lease_owner: string | null;
+              lease_version: number;
+              lease_expires_at: string | null;
+              state: PodsitterAttentionState;
+              decision_id: string | null;
+            }
+          | undefined;
+        if (
+          !attention ||
+          attention.pod_id !== input.podId ||
+          attention.signature !== input.attentionSignature ||
+          attention.lease_owner !== input.leaseOwner ||
+          attention.lease_version !== input.leaseVersion ||
+          attention.lease_expires_at === null ||
+          attention.lease_expires_at <= now ||
+          attention.state !== 'deciding'
+        ) {
+          throw new Error(
+            'Podsitter decision requires the matching current unexpired attention lease',
+          );
+        }
+
+        if (attention.decision_id !== null) {
+          return getDecision(attention.decision_id);
+        }
+
+        const decisionsInWindow = db
+          .prepare(
+            'SELECT COUNT(*) AS count FROM podsitter_decisions WHERE activation_window_id = ?',
+          )
+          .get(authority.windowId) as { count: number };
+        if (decisionsInWindow.count >= authority.configuration.budgets.maxDecisionsPerWindow) {
+          throw new Error('Podsitter decision budget is exhausted for the activation window');
+        }
+
+        const result = db
+          .prepare(
+            `INSERT INTO podsitter_decisions (
+              id, attention_id, pod_id, attention_signature, configuration_generation,
+              activation_window_id,
+              evidence_hash, evidence_version, provider_account_id, runtime, model,
+              reasoning_effort, decision, outcome, failure_code, input_tokens, output_tokens,
+              cost_usd, created_at, completed_at, executed_at
+            )
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', NULL, NULL, NULL, NULL, ?, NULL, NULL
+            WHERE EXISTS (
+              SELECT 1 FROM podsitter_attention
+              WHERE id = ?
+                AND pod_id = ?
+                AND signature = ?
+                AND lease_owner = ?
+                AND lease_version = ?
+                AND lease_expires_at > ?
+                AND state = 'deciding'
+                AND decision_id IS NULL
+            )`,
+          )
+          .run(
+            input.id,
+            input.attentionId,
+            input.podId,
+            input.attentionSignature,
+            input.configurationGeneration,
+            authority.windowId,
+            input.evidenceHash,
+            input.evidenceVersion,
+            input.target.providerAccountId,
+            input.target.runtime,
+            input.target.model,
+            input.target.reasoningEffort ?? null,
+            now,
+            input.attentionId,
+            input.podId,
+            input.attentionSignature,
+            input.leaseOwner,
+            input.leaseVersion,
+            now,
+          );
+        if (result.changes !== 1) {
+          throw new Error('Podsitter decision requires the current unexpired attention lease');
+        }
+        const linked = db
+          .prepare(
+            `UPDATE podsitter_attention
+             SET decision_id = ?, last_seen_at = ?
+             WHERE id = ? AND decision_id IS NULL`,
+          )
+          .run(input.id, now, input.attentionId);
+        if (linked.changes !== 1) {
+          throw new Error('Podsitter decision could not be linked to its attention');
+        }
+        return getDecision(input.id);
+      });
+      return createOrRecover();
+    },
+    completeDecision(id, update, now = new Date().toISOString()) {
+      const decision =
+        update.decision === undefined || update.decision === null
+          ? (update.decision ?? null)
+          : canonicalize(podsitterDecisionSchema.parse(update.decision));
+      if (update.outcome === 'completed' && decision === null) {
+        throw new Error('A completed Podsitter decision requires a decision payload');
+      }
+      if (decision !== null) {
+        assertBoundedRedactedPayload(decision.arguments, 'decision arguments');
+      }
+      const normalizedNow = normalizeIso(now, 'now');
+      const executedAt =
+        update.executedAt === undefined || update.executedAt === null
+          ? null
+          : normalizeIso(update.executedAt, 'executedAt');
+      db.transaction(() => {
+        const existing = getDecision(id);
+        const attention = db
+          .prepare(
+            `SELECT lease_owner, lease_version, lease_expires_at
+             FROM podsitter_attention WHERE id = ?`,
+          )
+          .get(existing.attentionId) as
+          | { lease_owner: string | null; lease_version: number; lease_expires_at: string | null }
+          | undefined;
+        if (
+          !attention ||
+          attention.lease_owner !== update.leaseOwner ||
+          attention.lease_version !== update.leaseVersion ||
+          attention.lease_expires_at === null ||
+          attention.lease_expires_at <= normalizedNow
+        ) {
+          throw new Error('Podsitter decision completion requires the current attention lease');
+        }
+        const authorized = hasCurrentAuthority(existing, normalizedNow) !== null;
+        const outcome = authorized ? update.outcome : 'not_executed';
+        const failureCode = authorized
+          ? (update.failureCode ?? null)
+          : (update.failureCode ?? 'authorization_revoked');
+        const result = db
+          .prepare(
+            `UPDATE podsitter_decisions SET
+              decision = ?, outcome = ?, failure_code = ?, input_tokens = ?,
+              output_tokens = ?, cost_usd = ?, completed_at = ?, executed_at = ?
+             WHERE id = ?
+               AND completed_at IS NULL
+               AND (? IS NULL OR attention_signature = ?)
+               AND EXISTS (
+                 SELECT 1 FROM podsitter_attention attention
+                 WHERE attention.id = podsitter_decisions.attention_id
+                   AND attention.lease_owner = ?
+                   AND attention.lease_version = ?
+                   AND attention.lease_expires_at > ?
+               )`,
+          )
+          .run(
+            decision === null ? null : json(decision),
+            outcome,
+            failureCode,
+            update.inputTokens ?? null,
+            update.outputTokens ?? null,
+            update.costUsd ?? null,
+            normalizedNow,
+            authorized ? executedAt : null,
+            id,
+            decision === null ? null : decision.attentionSignature,
+            decision === null ? null : decision.attentionSignature,
+            update.leaseOwner,
+            update.leaseVersion,
+            normalizedNow,
+          );
+        if (result.changes === 0 && decision !== null) {
+          const pending = db
+            .prepare(
+              'SELECT attention_signature FROM podsitter_decisions WHERE id = ? AND completed_at IS NULL',
+            )
+            .get(id) as { attention_signature: string } | undefined;
+          if (pending && pending.attention_signature !== decision.attentionSignature) {
+            throw new Error('Podsitter decision attention signature does not match its evidence');
+          }
+        }
+      })();
+      return getDecision(id);
+    },
+    markDecisionExecuted(id, now = new Date().toISOString()) {
+      const normalizedNow = normalizeIso(now, 'now');
+      return (
+        db
+          .prepare(
+            `UPDATE podsitter_decisions
+             SET executed_at = ?
+             WHERE id = ? AND outcome = 'completed' AND executed_at IS NULL`,
+          )
+          .run(normalizedNow, id).changes === 1
+      );
+    },
+    createSandboxRun(input) {
+      const now = normalizeIso(input.now ?? new Date().toISOString(), 'now');
+      db.transaction(() =>
+        db
+          .prepare(
+            `INSERT INTO system_sandbox_runs (
+              id, decision_id, backend, container_id, outcome, cleanup_state,
+              failure_code, created_at, started_at, completed_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'running', 'pending', NULL, ?, ?, NULL, ?)`,
+          )
+          .run(
+            input.id,
+            input.decisionId ?? null,
+            input.backend,
+            input.containerId ?? null,
+            now,
+            now,
+            now,
+          ),
+      )();
+    },
+    setSandboxContainer(id, containerId, now = new Date().toISOString()) {
+      return (
+        db
+          .prepare(
+            `UPDATE system_sandbox_runs
+             SET container_id = ?, cleanup_state = 'active', updated_at = ?
+             WHERE id = ? AND completed_at IS NULL`,
+          )
+          .run(containerId, normalizeIso(now, 'now'), id).changes === 1
+      );
+    },
+    listActiveSandboxRuns(staleBefore) {
+      const normalizedStaleBefore = staleBefore ? normalizeIso(staleBefore, 'staleBefore') : null;
+      return db
+        .prepare(
+          `SELECT id, decision_id as decisionId, backend, container_id as containerId
+           FROM system_sandbox_runs
+           WHERE (
+             completed_at IS NULL
+             AND (? IS NULL OR updated_at <= ?)
+           ) OR (outcome = 'leaked' AND cleanup_state = 'retryable')`,
+        )
+        .all(normalizedStaleBefore, normalizedStaleBefore) as Array<{
+        id: string;
+        decisionId: string | null;
+        backend: string;
+        containerId: string | null;
+      }>;
+    },
+    closeSandboxRun(id, update, now = new Date().toISOString()) {
+      const normalizedNow = normalizeIso(now, 'now');
+      return (
+        db.transaction(() =>
+          db
+            .prepare(
+              `UPDATE system_sandbox_runs SET
+               outcome = ?, cleanup_state = ?, failure_code = ?,
+                completed_at = ?, updated_at = ?
+               WHERE id = ? AND (completed_at IS NULL OR outcome = 'leaked')`,
+            )
+            .run(
+              update.outcome,
+              update.cleanupState,
+              update.failureCode ?? null,
+              normalizedNow,
+              normalizedNow,
+              id,
+            ),
+        )().changes === 1
+      );
+    },
+  };
+}
