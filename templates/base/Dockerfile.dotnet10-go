@@ -117,7 +117,7 @@ RUN mkdir -p ${GOPATH} ${GOCACHE} \
 # without reaching the Go proxy at runtime. DAGGER_GO_SDK_VERSION is declared
 # above (used for the CLI install too); redeclaring here is harmless and keeps
 # the arg scoped to the RUN below if Docker ever drops the inherited scope.
-ARG DAGGER_GO_SDK_VERSION
+ARG DAGGER_GO_SDK_VERSION=v0.20.8
 RUN mkdir -p /tmp/dagger-warmup \
     && cd /tmp/dagger-warmup \
     && go mod init warmup \

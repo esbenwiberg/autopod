@@ -88,7 +88,7 @@ RUN mkdir -p ${GOPATH} ${GOCACHE} \
 # Pre-cache the Dagger Go SDK into GOMODCACHE so pods can `import "dagger.io/dagger"`
 # without reaching the Go proxy at runtime. DAGGER_GO_SDK_VERSION declared
 # above; redeclare here so it remains in scope for this RUN (Docker ARG scope).
-ARG DAGGER_GO_SDK_VERSION
+ARG DAGGER_GO_SDK_VERSION=v0.20.8
 RUN mkdir -p /tmp/dagger-warmup \
     && cd /tmp/dagger-warmup \
     && go mod init warmup \

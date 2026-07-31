@@ -217,5 +217,8 @@ describe('Dagger base image templates', () => {
     const dockerfile = await readBaseTemplate(filename);
 
     expect(dockerfile).toContain(`go get dagger.io/dagger@\${${versionArgument}}`);
+    const declarations = dockerfile.match(new RegExp(`^ARG ${versionArgument}.*$`, 'gm')) ?? [];
+    expect(declarations.length).toBeGreaterThanOrEqual(1);
+    expect(declarations.every((line) => line === `ARG ${versionArgument}=v0.20.8`)).toBe(true);
   });
 });
