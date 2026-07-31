@@ -395,6 +395,11 @@ ap logout                    # Clear credentials
 ap whoami                    # Current user + daemon status
 ```
 
+Successful login persists MSAL refresh state with owner-only permissions so the
+CLI can renew hourly access tokens across invocations. `ap logout` clears both
+the access credentials and persisted refresh state. Entra policy or account
+revocation can still require a new interactive or device login.
+
 ### Daemon
 
 ```bash

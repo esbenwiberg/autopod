@@ -9,7 +9,7 @@ function getCredentialsPath(): string {
   return path.join(getConfigDir(), CREDENTIALS_FILE);
 }
 
-export function readCredentials(): AuthToken | null {
+export function readCredentials(options: { allowExpired?: boolean } = {}): AuthToken | null {
   const credPath = getCredentialsPath();
 
   try {
@@ -17,7 +17,7 @@ export function readCredentials(): AuthToken | null {
     const token = JSON.parse(raw) as AuthToken;
 
     // Check if expired
-    if (new Date(token.expiresAt) <= new Date()) {
+    if (!options.allowExpired && new Date(token.expiresAt) <= new Date()) {
       return null;
     }
 
