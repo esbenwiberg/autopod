@@ -129,8 +129,8 @@ struct PodsitterSettingsView: View {
               if store.compatibleModels.isEmpty {
                 Text("No compatible models").tag("")
               }
-              ForEach(store.compatibleModels, id: \.value) { model in
-                Text(model.label).tag(model.value)
+              ForEach(store.compatibleModels) { model in
+                Text(model.label).tag(model.id)
               }
             }
             .labelsHidden()

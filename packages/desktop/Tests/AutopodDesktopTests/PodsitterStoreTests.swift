@@ -17,15 +17,27 @@ private actor MockPodsitterAPI: PodsitterAPIClient {
   let catalog: ProviderCatalogResponse
   let history: PodsitterDecisionListResponse
 
-  init(providerStatus: String = "available", active: Bool = true, enabled: Bool = true) {
+  init(
+    providerStatus: String = "available",
+    active: Bool = true,
+    enabled: Bool = true,
+    configuredModel: String = "gpt-5"
+  ) {
     let decoder = JSONDecoder()
     configuration = try! decoder.decode(
       PodsitterConfigurationResponse.self,
-      from: Data(Self.configurationJSON(enabled: enabled).utf8)
+      from: Data(Self.configurationJSON(enabled: enabled, model: configuredModel).utf8)
     )
     status = try! decoder.decode(
       PodsitterStatusResponse.self,
-      from: Data(Self.statusJSON(providerStatus: providerStatus, active: active, enabled: enabled).utf8)
+      from: Data(
+        Self.statusJSON(
+          providerStatus: providerStatus,
+          active: active,
+          enabled: enabled,
+          model: configuredModel
+        ).utf8
+      )
     )
     accounts = try! decoder.decode(
       [PublicProviderAccountResponse].self,
@@ -98,20 +110,25 @@ private actor MockPodsitterAPI: PodsitterAPIClient {
   func setFailStatus(_ value: Bool) { failStatus = value }
   func recordedCalls() -> [String] { calls }
 
-  static func configurationJSON(enabled: Bool) -> String {
+  static func configurationJSON(enabled: Bool, model: String) -> String {
     """
     {"enabled":\(enabled),"activation":{"mode":"recurring","cronExpression":"0 20 * * *",
     "durationMinutes":720,"timeZone":"Europe/Copenhagen"},"authorizedUntil":null,
     "generation":1,"profileScope":["autopod-self"],
-    "decisionTarget":{"providerAccountId":"openai-sitter","runtime":"codex","model":"gpt-5"},
+    "decisionTarget":{"providerAccountId":"openai-sitter","runtime":"codex","model":"\(model)"},
     "budgets":{"maxDecisionsPerWindow":20,"maxActionsPerWindow":10},
     "createdAt":"2026-07-01T00:00:00Z","updatedAt":"2026-07-01T00:00:00Z"}
     """
   }
 
-  static func statusJSON(providerStatus: String, active: Bool, enabled: Bool) -> String {
+  static func statusJSON(
+    providerStatus: String,
+    active: Bool,
+    enabled: Bool,
+    model: String
+  ) -> String {
     """
-    {"configuration":\(configurationJSON(enabled: enabled)),
+    {"configuration":\(configurationJSON(enabled: enabled, model: model)),
     "activation":{"active":\(active),"windowId":"window","windowStartedAt":"2026-07-31T20:00:00Z",
     "windowEndsAt":"2026-08-01T08:00:00Z","reason":"\(active ? "active" : "outside_window")"},
     "provider":{"providerAccountId":"openai-sitter","status":"\(providerStatus)",
@@ -199,6 +216,7 @@ final class PodsitterStoreTests: XCTestCase {
     let store = PodsitterStore(api: MockPodsitterAPI())
     await store.load()
 
+    XCTAssertEqual(store.selectedRuntime, .codex)
     XCTAssertTrue(store.compatibleModels.contains { $0.value == "gpt-5" })
     XCTAssertEqual(store.selectedModel, "gpt-5")
     XCTAssertTrue(store.targetIsValid)

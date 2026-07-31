@@ -120,8 +120,16 @@ public final class PodsitterStore {
 
   public var compatibleModels: [RuntimeModelOption] {
     guard let account = selectedAccount,
+          compatibleRuntimes.contains(selectedRuntime),
           let runtime = RuntimeType(rawValue: selectedRuntime.rawValue)
     else { return [] }
+    if runtime == .pi {
+      guard let provider = catalog?.provider(id: account.provider),
+            provider.implementation.kind == "generic-pi-api",
+            provider.policy.runnable,
+            provider.policy.authorization == "supported"
+      else { return [] }
+    }
     return RuntimeModelOptions.defaultOptions(
       for: runtime,
       currentValue: selectedModel,
