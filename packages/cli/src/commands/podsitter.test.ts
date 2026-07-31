@@ -57,20 +57,20 @@ const decision: PodsitterDecisionRecord = {
   evidenceHash: 'hash',
   evidenceVersion: 1,
   target: {
-    providerAccountId: 'dedicated-codex',
+    providerAccountId: 'SENSITIVE_HISTORY_ACCOUNT',
     runtime: 'codex',
-    model: 'gpt-5.2-codex',
+    model: 'SENSITIVE_HISTORY_MODEL',
   },
   decision: {
     contractVersion: 1,
     attentionSignature: 'signature',
     action: 'report',
-    arguments: { message: 'Needs operator review' },
-    reason: 'Evidence is incomplete',
-    evidenceRefs: ['pod:uptight-eel', 'validation:latest'],
+    arguments: { message: 'SENSITIVE_ARGUMENT_VALUE' },
+    reason: 'SENSITIVE_REASON_VALUE',
+    evidenceRefs: ['SENSITIVE_EVIDENCE_REFERENCE'],
     confidence: 'medium',
-    remainingRisk: 'Validation remains blocked',
-    stopCondition: 'Wait for new evidence',
+    remainingRisk: 'SENSITIVE_REMAINING_RISK',
+    stopCondition: 'SENSITIVE_STOP_CONDITION',
   },
   outcome: 'completed',
   failureCode: null,
@@ -244,9 +244,19 @@ describe('podsitter command', () => {
 
     await run(client, ['status', '--json']);
     const json = JSON.parse(String(write.mock.calls.at(-1)?.[0]));
-    expect(json.provider.status).toBe('quota_exhausted');
+    expect(json.providerCircuit.status).toBe('quota_exhausted');
     expect(json.lastAction.id).toBe('decision-1');
-    expect(json).not.toHaveProperty('credentials');
+    expect(json.lastAction).toEqual({
+      id: 'decision-1',
+      podId: 'uptight-eel',
+      action: 'report',
+      outcome: 'completed',
+      confidence: 'medium',
+      evidenceRefCount: 1,
+      createdAt: '2026-07-31T01:00:00.000Z',
+      completedAt: '2026-07-31T01:01:00.000Z',
+      executedAt: null,
+    });
     expect(listPodsitterDecisions).toHaveBeenCalledWith({ limit: 1, offset: 0 });
 
     log.mockClear();
@@ -256,8 +266,37 @@ describe('podsitter command', () => {
       limit: 25,
       offset: 50,
     });
-    expect(log.mock.calls.flat().join('\n')).toContain('Validation remains blocked');
-    expect(log.mock.calls.flat().join('\n')).toContain('Showing 1 of 51');
+    const decisionText = log.mock.calls.flat().join('\n');
+    expect(decisionText).toContain('Evidence references: 1');
+    expect(decisionText).toContain('Showing 1 of 51');
+
+    await run(client, [
+      'decisions',
+      '--pod',
+      'uptight-eel',
+      '--limit',
+      '25',
+      '--offset',
+      '50',
+      '--json',
+    ]);
+    const decisionJson = JSON.parse(String(write.mock.calls.at(-1)?.[0]));
+    expect(decisionJson.items[0]).toEqual(json.lastAction);
+
+    const allOutput = `${log.mock.calls.flat().join('\n')}\n${write.mock.calls
+      .map((call) => String(call[0]))
+      .join('\n')}`;
+    for (const sensitiveValue of [
+      'SENSITIVE_HISTORY_ACCOUNT',
+      'SENSITIVE_HISTORY_MODEL',
+      'SENSITIVE_ARGUMENT_VALUE',
+      'SENSITIVE_REASON_VALUE',
+      'SENSITIVE_EVIDENCE_REFERENCE',
+      'SENSITIVE_REMAINING_RISK',
+      'SENSITIVE_STOP_CONDITION',
+    ]) {
+      expect(allOutput).not.toContain(sensitiveValue);
+    }
   });
 
   it('reports inactive checks and provider probe outcomes', async () => {

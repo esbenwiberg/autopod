@@ -16,6 +16,38 @@ import { withSpinner } from '../output/spinner.js';
 
 const DEFAULT_BUDGETS = { maxDecisionsPerWindow: 20, maxActionsPerWindow: 10 };
 
+interface RedactedPodsitterDecision {
+  id: string;
+  podId: string;
+  action: string | null;
+  outcome: PodsitterDecisionRecord['outcome'];
+  confidence: string | null;
+  evidenceRefCount: number;
+  createdAt: string;
+  completedAt: string | null;
+  executedAt: string | null;
+}
+
+interface RedactedPodsitterStatus {
+  enabled: boolean;
+  active: boolean;
+  activation: PodsitterActivation | null;
+  authorizedUntil: string | null;
+  decisionTarget: {
+    providerAccountId: string;
+    runtime: string;
+    model: string;
+  } | null;
+  providerCircuit: {
+    status: string;
+    consecutiveFailures: number;
+    nextProbeAt: string | null;
+    recoveredAt: string | null;
+  } | null;
+  pendingCount: number;
+  lastAction: RedactedPodsitterDecision | null;
+}
+
 function positiveInteger(value: string, label: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) {
@@ -78,49 +110,90 @@ function configurationRequest(
       };
 }
 
-function renderStatus(status: PodsitterStatusResponse, lastAction: PodsitterDecisionRecord | null) {
-  const config = status.configuration;
+function redactDecision(record: PodsitterDecisionRecord): RedactedPodsitterDecision {
+  return {
+    id: record.id,
+    podId: record.podId,
+    action: record.decision?.action ?? null,
+    outcome: record.outcome,
+    confidence: record.decision?.confidence ?? null,
+    evidenceRefCount: record.decision?.evidenceRefs.length ?? 0,
+    createdAt: record.createdAt,
+    completedAt: record.completedAt,
+    executedAt: record.executedAt,
+  };
+}
+
+function redactStatus(
+  status: PodsitterStatusResponse,
+  lastAction: PodsitterDecisionRecord | null,
+): RedactedPodsitterStatus {
+  const target = status.configuration?.decisionTarget;
+  const provider = status.provider;
+  return {
+    enabled: status.configuration?.enabled ?? false,
+    active: status.activation?.active ?? false,
+    activation: status.configuration?.activation ?? null,
+    authorizedUntil: status.configuration?.authorizedUntil ?? null,
+    decisionTarget: target
+      ? {
+          providerAccountId: target.providerAccountId,
+          runtime: target.runtime,
+          model: target.model,
+        }
+      : null,
+    providerCircuit: provider
+      ? {
+          status: provider.status,
+          consecutiveFailures: provider.consecutiveFailures,
+          nextProbeAt: provider.retryAt ?? provider.resetAt,
+          recoveredAt: provider.recoveredAt,
+        }
+      : null,
+    pendingCount: status.queueCount,
+    lastAction: lastAction ? redactDecision(lastAction) : null,
+  };
+}
+
+function renderStatus(status: RedactedPodsitterStatus) {
   console.log(chalk.bold.cyan('Daemon-native Podsitter'));
   console.log(chalk.dim("This is separate from Pilot's local /podsitter extension."));
-  console.log(`${chalk.bold('Enabled:')}      ${config?.enabled ? 'yes' : 'no'}`);
-  console.log(`${chalk.bold('Active:')}       ${status.activation?.active ? 'yes' : 'no'}`);
-  console.log(`${chalk.bold('Expiry:')}       ${config?.authorizedUntil ?? '-'}`);
-  if (config?.activation.mode === 'always') {
+  console.log(`${chalk.bold('Enabled:')}      ${status.enabled ? 'yes' : 'no'}`);
+  console.log(`${chalk.bold('Active:')}       ${status.active ? 'yes' : 'no'}`);
+  console.log(`${chalk.bold('Expiry:')}       ${status.authorizedUntil ?? '-'}`);
+  if (status.activation?.mode === 'always') {
     console.log(`${chalk.bold('Activation:')}   always`);
-  } else if (config?.activation.mode === 'recurring') {
+  } else if (status.activation?.mode === 'recurring') {
     console.log(
-      `${chalk.bold('Activation:')}   ${config.activation.cronExpression} for ${config.activation.durationMinutes}m (${config.activation.timeZone})`,
+      `${chalk.bold('Activation:')}   ${status.activation.cronExpression} for ${status.activation.durationMinutes}m (${status.activation.timeZone})`,
     );
   }
-  const target = config?.decisionTarget;
+  const target = status.decisionTarget;
   console.log(`${chalk.bold('Account:')}      ${target?.providerAccountId ?? '-'}`);
   console.log(
     `${chalk.bold('Runtime/model:')} ${target ? `${target.runtime} / ${target.model}` : '-'}`,
   );
-  console.log(`${chalk.bold('Provider:')}     ${status.provider?.status ?? 'unconfigured'}`);
+  console.log(`${chalk.bold('Provider:')}     ${status.providerCircuit?.status ?? 'unconfigured'}`);
+  console.log(`${chalk.bold('Next probe:')}   ${status.providerCircuit?.nextProbeAt ?? '-'}`);
+  console.log(`${chalk.bold('Pending:')}      ${status.pendingCount}`);
   console.log(
-    `${chalk.bold('Next probe:')}   ${status.provider?.retryAt ?? status.provider?.resetAt ?? '-'}`,
-  );
-  console.log(`${chalk.bold('Pending:')}      ${status.queueCount}`);
-  console.log(
-    `${chalk.bold('Last action:')}  ${lastAction?.decision?.action ?? '-'}${lastAction ? ` (${lastAction.outcome})` : ''}`,
+    `${chalk.bold('Last action:')}  ${status.lastAction?.action ?? '-'}${status.lastAction ? ` (${status.lastAction.outcome})` : ''}`,
   );
 }
 
-function renderDecisions(result: { items: PodsitterDecisionRecord[]; total: number }): void {
+function renderDecisions(result: {
+  items: RedactedPodsitterDecision[];
+  total: number;
+}): void {
   if (result.items.length === 0) {
     console.log(chalk.dim('No daemon-native Podsitter decisions found.'));
     return;
   }
   for (const record of result.items) {
+    console.log(`${record.createdAt}  ${record.podId}  ${record.action ?? '-'}  ${record.outcome}`);
     console.log(
-      `${record.createdAt}  ${record.podId}  ${record.decision?.action ?? '-'}  ${record.outcome}`,
+      `  Confidence: ${record.confidence ?? '-'} · Evidence references: ${record.evidenceRefCount}`,
     );
-    if (record.decision) {
-      console.log(`  Reason: ${record.decision.reason}`);
-      console.log(`  Evidence: ${record.decision.evidenceRefs.join(', ') || '-'}`);
-      console.log(`  Remaining risk: ${record.decision.remainingRisk || '-'}`);
-    }
   }
   console.log(chalk.dim(`Showing ${result.items.length} of ${result.total} decision(s).`));
 }
@@ -234,8 +307,8 @@ export function registerPodsitterCommands(program: Command, getClient: () => Aut
         ),
         client.listPodsitterDecisions({ limit: 1, offset: 0 }),
       ]);
-      const output = { ...status, lastAction: decisions.items[0] ?? null };
-      withJsonOutput(opts, output, (data) => renderStatus(data, data.lastAction));
+      const output = redactStatus(status, decisions.items[0] ?? null);
+      withJsonOutput(opts, output, renderStatus);
     });
 
   podsitter
@@ -282,6 +355,10 @@ export function registerPodsitterCommands(program: Command, getClient: () => Aut
           offset: opts.offset,
         }),
       );
-      withJsonOutput(opts, result, renderDecisions);
+      const output = {
+        items: result.items.map(redactDecision),
+        total: result.total,
+      };
+      withJsonOutput(opts, output, renderDecisions);
     });
 }
