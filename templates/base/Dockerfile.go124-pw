@@ -84,6 +84,8 @@ ENV GOMODCACHE=/home/autopod/go/pkg/mod
 ENV PATH=${GOPATH}/bin:${PATH}
 # Disable go.work (workspace requires Go 1.26; image ships 1.24)
 ENV GOWORK=off
+# Dagger v0.20.8 requires Go 1.25; cache the verified toolchain during image build.
+ENV GOTOOLCHAIN=auto
 # Go module proxy: reach the public proxy when network is available; GOSUMDB=off
 # skips the checksum database (requires separate outbound + isn't useful when the
 # repo's go.sum is trusted). Pods under deny-all network policy rely on the

@@ -216,6 +216,7 @@ describe('Dagger base image templates', () => {
   )('%s keeps the cached Go SDK aligned with the CLI', async (filename, versionArgument) => {
     const dockerfile = await readBaseTemplate(filename);
 
+    expect(dockerfile).toContain('ENV GOTOOLCHAIN=auto');
     expect(dockerfile).toContain(
       `GOSUMDB=sum.golang.org go get dagger.io/dagger@\${${versionArgument}}`,
     );
