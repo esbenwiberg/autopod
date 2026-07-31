@@ -84,6 +84,12 @@ public enum PodStatus: String, Sendable {
 
 // MARK: - Supporting types
 
+public enum TokenTelemetryAccuracy: String, Codable, Sendable {
+    case complete
+    case partial
+    case repaired
+}
+
 public struct DiffStats: Sendable {
     public let added: Int
     public let removed: Int
@@ -705,6 +711,7 @@ public struct Pod: Identifiable, Sendable {
     public var inputTokens: Int
     public var outputTokens: Int
     public var costUsd: Double
+    public var tokenTelemetryAccuracy: TokenTelemetryAccuracy
     public var commitCount: Int
 
     /// Task summary reported by the agent at completion
@@ -848,6 +855,7 @@ public struct Pod: Identifiable, Sendable {
         inputTokens: Int = 0,
         outputTokens: Int = 0,
         costUsd: Double = 0,
+        tokenTelemetryAccuracy: TokenTelemetryAccuracy = .partial,
         commitCount: Int = 0,
         taskSummary: TaskSummary? = nil,
         linkedSessionId: String? = nil,
@@ -889,7 +897,8 @@ public struct Pod: Identifiable, Sendable {
         self.latestActivity = latestActivity; self.errorSummary = errorSummary
         self.attempts = attempts; self.queuePosition = queuePosition
         self.inputTokens = inputTokens; self.outputTokens = outputTokens
-        self.costUsd = costUsd; self.commitCount = commitCount
+        self.costUsd = costUsd; self.tokenTelemetryAccuracy = tokenTelemetryAccuracy
+        self.commitCount = commitCount
         self.taskSummary = taskSummary; self.linkedSessionId = linkedSessionId
         self.fixPodId = fixPodId
         self.prFixAttempts = prFixAttempts

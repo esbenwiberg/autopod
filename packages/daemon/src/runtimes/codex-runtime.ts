@@ -15,7 +15,12 @@ import type { ContainerManager, StreamingExecResult } from '../interfaces/contai
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodRepository } from '../pods/pod-repository.js';
 import { codexStateDirForPod } from './codex-state-store.js';
-import { CodexStreamParser, type CodexTurnAbortedEvent } from './codex-stream-parser.js';
+import {
+  CodexStreamParser,
+  type CodexTurnAbortedEvent,
+  type CodexUsageAccumulator,
+  createCodexUsageAccumulator,
+} from './codex-stream-parser.js';
 import {
   awaitExitCodeBounded,
   withIdleLivenessProbe,
@@ -120,6 +125,8 @@ export class CodexRuntime implements Runtime {
   private reasoningEffortBySession = new Map<string, ReasoningEffort>();
   /** Maps autopod podId → generated Autopod instructions for no-session resume fallback. */
   private customInstructionsBySession = new Map<string, string>();
+  /** Shared by stdout and rollout parsers for one invocation. */
+  private usageAccumulators = new Map<string, CodexUsageAccumulator>();
   private logger: Logger;
   private containerManager: ContainerManager;
   private podRepo: PodRepository;
@@ -367,6 +374,8 @@ export class CodexRuntime implements Runtime {
       sawComplete: false,
       sawFatal: false,
     };
+    const usageAccumulator = createCodexUsageAccumulator();
+    this.usageAccumulators.set(podId, usageAccumulator);
     const enriched = this.parseWithRolloutFallback(
       handle,
       podId,
@@ -435,6 +444,9 @@ export class CodexRuntime implements Runtime {
     } finally {
       if (this.handles.get(podId) === handle) {
         this.handles.delete(podId);
+      }
+      if (this.usageAccumulators.get(podId) === usageAccumulator) {
+        this.usageAccumulators.delete(podId);
       }
     }
   }
@@ -952,7 +964,13 @@ export class CodexRuntime implements Runtime {
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
     const stats: ParseStats = { events: 0, nonStatusEvents: 0, sawComplete: false };
 
-    for await (const event of CodexStreamParser.parse(lines, podId, this.logger, modelHint)) {
+    for await (const event of CodexStreamParser.parse(
+      lines,
+      podId,
+      this.logger,
+      modelHint,
+      this.usageAccumulators.get(podId),
+    )) {
       stats.events += 1;
       if (event.type !== 'status') stats.nonStatusEvents += 1;
       if (event.type === 'complete') stats.sawComplete = true;

@@ -229,7 +229,7 @@ describe('ClaudeStreamParser.mapEvent', () => {
     });
   });
 
-  it('extracts input_tokens and output_tokens from usage object in result event', () => {
+  it('includes cache usage in total input while preserving native cost', () => {
     const event = {
       type: 'result',
       subtype: 'success',
@@ -238,16 +238,18 @@ describe('ClaudeStreamParser.mapEvent', () => {
       usage: {
         input_tokens: 8000,
         output_tokens: 3000,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 2000,
+        cache_read_input_tokens: 5000,
       },
     };
     const result = ClaudeStreamParser.mapEvent(event, POD_ID, fakeLogger());
     expect(result).toMatchObject({
       type: 'complete',
       costUsd: 0.05,
-      totalInputTokens: 8000,
+      totalInputTokens: 15000,
       totalOutputTokens: 3000,
+      cachedInputTokens: 5000,
+      cacheCreationInputTokens: 2000,
     });
   });
 

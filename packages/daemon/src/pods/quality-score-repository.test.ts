@@ -190,7 +190,7 @@ describe('QualityScoreRepository', () => {
     expect(recentP1.map((r) => r.podId)).toEqual(['new']);
   });
 
-  it('uses provider-attempt compatibility values in wrapped list, trend, and analytics queries', () => {
+  it('uses effective corrected attempt telemetry in list, trend, and analytics queries', () => {
     const attemptRepo = createProviderAttemptRepository(db);
     repo.insert(
       baseScore({
@@ -234,6 +234,15 @@ describe('QualityScoreRepository', () => {
       outputTokens: 40,
       costUsd: 0.75,
     });
+    attemptRepo.upsertTelemetryCorrection({
+      podId: 'attempt-pod',
+      ordinal: 2,
+      inputTokens: 50,
+      outputTokens: 10,
+      costUsd: 0.25,
+      source: 'codex_rollout',
+      reason: 'fixture correction',
+    });
     repo.insert(
       baseScore({
         podId: 'legacy-pod',
@@ -250,9 +259,9 @@ describe('QualityScoreRepository', () => {
         podId: 'attempt-pod',
         runtime: 'codex',
         model: 'gpt-5.6-terra',
-        inputTokens: 300,
-        outputTokens: 60,
-        costUsd: 2,
+        inputTokens: 150,
+        outputTokens: 30,
+        costUsd: 1.5,
       }),
     ]);
     expect(repo.list({ runtime: 'claude' }).map((score) => score.podId)).toEqual(['legacy-pod']);
@@ -276,9 +285,9 @@ describe('QualityScoreRepository', () => {
           podId: 'attempt-pod',
           runtime: 'codex',
           model: 'gpt-5.6-terra',
-          inputTokens: 300,
-          outputTokens: 60,
-          costUsd: 2,
+          inputTokens: 150,
+          outputTokens: 30,
+          costUsd: 1.5,
         }),
         expect.objectContaining({
           podId: 'legacy-pod',

@@ -12,6 +12,7 @@ export { buildEvidenceDocument, renderEvidenceYaml } from './evidence.js';
 
 export type {
   PhaseTokenUsage,
+  TokenTelemetryAccuracy,
   PodCostBreakdownResponse,
   PodCostBucket,
   PodCostSegment,

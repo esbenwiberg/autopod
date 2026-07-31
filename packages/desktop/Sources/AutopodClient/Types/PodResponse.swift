@@ -79,6 +79,13 @@ public struct CompactPodResponse: Codable, Sendable {
   public let lastCorrectionMessage: String?
   public let pendingEscalationSummary: String?
   public let progressSummary: String?
+  public let inputTokens: Int?
+  public let outputTokens: Int?
+  public let costUsd: Double?
+  public let tokenTelemetryAccuracy: String?
+  public let filesChanged: Int?
+  public let linesAdded: Int?
+  public let linesRemoved: Int?
 }
 
 // Partial PodConfig for create/update requests — every field is optional.
@@ -154,6 +161,7 @@ public struct SessionResponse: Codable, Sendable {
   public let inputTokens: Int
   public let outputTokens: Int
   public let costUsd: Double
+  public let tokenTelemetryAccuracy: String?
   public let commitCount: Int
   public let lastCommitAt: String?
   public let linkedPodId: String?
@@ -228,7 +236,7 @@ public struct SessionResponse: Codable, Sendable {
     case outputMode
     case pod = "options"
     case baseBranch, recoveryWorktreePath, lastHeartbeatAt
-    case inputTokens, outputTokens, costUsd, commitCount, lastCommitAt
+    case inputTokens, outputTokens, costUsd, tokenTelemetryAccuracy, commitCount, lastCommitAt
     case linkedPodId, linkedSessionId, taskSummary, lastCorrectionMessage, profileSnapshot
     case dependsOnPodId, dependsOnPodIds, seriesId, seriesName, seriesDescription, seriesDesign, dependencyStartedAt
     case artifactsPath

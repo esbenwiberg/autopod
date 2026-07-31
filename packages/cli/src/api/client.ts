@@ -127,6 +127,27 @@ interface ClientConfig {
   getToken: () => Promise<string>;
 }
 
+export interface TokenTelemetryRepairReport {
+  mode: 'dry-run' | 'apply';
+  startedAt: string;
+  completedAt: string;
+  repairedPods: number;
+  partialPods: number;
+  skippedPods: number;
+  entries: Array<{
+    podId: string;
+    status: 'repaired' | 'partial' | 'skipped';
+    reason: string;
+    corrections: number;
+    originalInputTokens: number;
+    originalOutputTokens: number;
+    originalCostUsd: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    costUsd?: number;
+  }>;
+}
+
 export class AutopodClient {
   private baseUrl: string;
   private getToken: () => Promise<string>;
@@ -633,6 +654,13 @@ export class AutopodClient {
       'GET',
       `/podsitter/decisions${query ? `?${query}` : ''}`,
     );
+  }
+
+  async repairTokenTelemetry(apply = false): Promise<TokenTelemetryRepairReport> {
+    return this.request<TokenTelemetryRepairReport>('POST', '/admin/token-telemetry/repair', {
+      apply,
+      ...(apply && { confirmation: 'APPLY_TOKEN_TELEMETRY_REPAIR' }),
+    });
   }
 
   // Issue watcher

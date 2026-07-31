@@ -172,6 +172,7 @@ export interface TaskReviewResult {
     inputTokens: number;
     outputTokens: number;
     cachedInputTokens?: number;
+    cacheCreationInputTokens?: number;
     costUsd?: number;
   };
 }
@@ -200,6 +201,7 @@ export interface AdvisoryBrowserQaResult {
     inputTokens: number;
     outputTokens: number;
     cachedInputTokens?: number;
+    cacheCreationInputTokens?: number;
     costUsd?: number;
   };
 }

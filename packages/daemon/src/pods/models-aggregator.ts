@@ -212,10 +212,12 @@ function cheapestDollarPerPrForWindow(
            AND completed_at <  datetime('now', '-' || @endDays   || ' days')
        )
        SELECT a.model, a.outcome AS status,
-              a.input_tokens AS inputTokens,
-              a.output_tokens AS outputTokens,
-              a.cost_usd AS costUsd
+              COALESCE(tc.input_tokens, a.input_tokens) AS inputTokens,
+              COALESCE(tc.output_tokens, a.output_tokens) AS outputTokens,
+              COALESCE(tc.cost_usd, a.cost_usd) AS costUsd
        FROM provider_attempts a
+       LEFT JOIN provider_attempt_telemetry_corrections tc
+         ON tc.pod_id = a.pod_id AND tc.ordinal = a.ordinal
        JOIN cohort p ON p.id = a.pod_id
        UNION ALL
        SELECT p.model, p.status,
@@ -291,12 +293,14 @@ export function computeModelsAnalytics(
        SELECT p.id, a.model, a.runtime, p.status,
               p.created_at AS createdAt,
               p.completed_at AS completedAt,
-              a.input_tokens AS inputTokens,
-              a.output_tokens AS outputTokens,
-              a.cost_usd AS costUsd,
+              COALESCE(tc.input_tokens, a.input_tokens) AS inputTokens,
+              COALESCE(tc.output_tokens, a.output_tokens) AS outputTokens,
+              COALESCE(tc.cost_usd, a.cost_usd) AS costUsd,
               a.ordinal AS attemptOrdinal,
               a.outcome AS attemptOutcome
        FROM provider_attempts a
+       LEFT JOIN provider_attempt_telemetry_corrections tc
+         ON tc.pod_id = a.pod_id AND tc.ordinal = a.ordinal
        JOIN cohort p ON p.id = a.pod_id
        UNION ALL
        SELECT p.id, p.model, p.runtime, p.status,

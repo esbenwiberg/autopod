@@ -61,6 +61,7 @@ import {
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
 import { ScreenshotRetention } from './pods/screenshot-retention.js';
 import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
+import { createTokenTelemetryRepair } from './pods/token-telemetry-repair.js';
 import { PodsitterActionExecutor } from './podsitter/action-executor.js';
 import { createDaemonPodsitterEvidenceProvider } from './podsitter/daemon-evidence-provider.js';
 import { createPodsitterRepository } from './podsitter/podsitter-repository.js';
@@ -215,6 +216,7 @@ const podsitterRepo = createPodsitterRepository(db);
 const llmDeps = { profileStore, providerAccountStore };
 const podRepo = createPodRepository(db);
 const providerAttemptRepo = createProviderAttemptRepository(db);
+const tokenTelemetryRepair = createTokenTelemetryRepair({ db, podRepo, providerAttemptRepo });
 const eventRepo = createEventRepository(db);
 const escalationRepo = createEscalationRepository(db);
 const nudgeRepo = createNudgeRepository(db);
@@ -985,6 +987,7 @@ const app = await createServer({
   safetyEventsRepo,
   issueWatcherRepo,
   screenshotStore,
+  tokenTelemetryRepair,
   logLevel: LOG_LEVEL,
   prettyLog: IS_DEV,
   onShutdown: () => void shutdown('API'),

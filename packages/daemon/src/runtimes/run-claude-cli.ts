@@ -77,6 +77,7 @@ export interface ClaudeCliTokenUsage {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens?: number;
+  cacheCreationInputTokens?: number;
   costUsd?: number;
 }
 
@@ -242,21 +243,35 @@ export function parseClaudeCliStdout(
 
   const result = typeof record.result === 'string' ? record.result : stdout;
   const usage = asRecord(record.usage);
-  const inputTokens = numberField(usage?.input_tokens) ?? numberField(record.input_tokens);
+  const directInputTokens = numberField(usage?.input_tokens) ?? numberField(record.input_tokens);
   const outputTokens = numberField(usage?.output_tokens) ?? numberField(record.output_tokens);
   const cacheReadTokens =
     numberField(usage?.cache_read_input_tokens) ?? numberField(record.cache_read_input_tokens);
+  const cacheCreationTokens =
+    numberField(usage?.cache_creation_input_tokens) ??
+    numberField(record.cache_creation_input_tokens);
+  const hasInputTelemetry =
+    directInputTokens !== undefined ||
+    cacheReadTokens !== undefined ||
+    cacheCreationTokens !== undefined;
+  const inputTokens = hasInputTelemetry
+    ? (directInputTokens ?? 0) + (cacheReadTokens ?? 0) + (cacheCreationTokens ?? 0)
+    : undefined;
   const costUsd = numberField(record.total_cost_usd);
 
   const tokenUsage =
     inputTokens !== undefined ||
     outputTokens !== undefined ||
     cacheReadTokens !== undefined ||
+    cacheCreationTokens !== undefined ||
     costUsd !== undefined
       ? {
           inputTokens: inputTokens ?? 0,
           outputTokens: outputTokens ?? 0,
           ...(cacheReadTokens !== undefined && { cachedInputTokens: cacheReadTokens }),
+          ...(cacheCreationTokens !== undefined && {
+            cacheCreationInputTokens: cacheCreationTokens,
+          }),
           ...(costUsd !== undefined && { costUsd }),
         }
       : undefined;

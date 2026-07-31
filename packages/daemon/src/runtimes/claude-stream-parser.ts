@@ -227,12 +227,31 @@ export class ClaudeStreamParser {
           };
         }
         const costUsd = typeof event.total_cost_usd === 'number' ? event.total_cost_usd : undefined;
-        const totalInputTokens =
+        const directInputTokens =
           typeof event.usage?.input_tokens === 'number'
             ? event.usage.input_tokens
             : typeof event.input_tokens === 'number'
               ? event.input_tokens
               : undefined;
+        const cachedInputTokens =
+          typeof event.usage?.cache_read_input_tokens === 'number'
+            ? event.usage.cache_read_input_tokens
+            : typeof event.cache_read_input_tokens === 'number'
+              ? event.cache_read_input_tokens
+              : undefined;
+        const cacheCreationInputTokens =
+          typeof event.usage?.cache_creation_input_tokens === 'number'
+            ? event.usage.cache_creation_input_tokens
+            : typeof event.cache_creation_input_tokens === 'number'
+              ? event.cache_creation_input_tokens
+              : undefined;
+        const hasInputTelemetry =
+          directInputTokens !== undefined ||
+          cachedInputTokens !== undefined ||
+          cacheCreationInputTokens !== undefined;
+        const totalInputTokens = hasInputTelemetry
+          ? (directInputTokens ?? 0) + (cachedInputTokens ?? 0) + (cacheCreationInputTokens ?? 0)
+          : undefined;
         const totalOutputTokens =
           typeof event.usage?.output_tokens === 'number'
             ? event.usage.output_tokens
@@ -246,6 +265,8 @@ export class ClaudeStreamParser {
           costUsd,
           totalInputTokens,
           totalOutputTokens,
+          ...(cachedInputTokens !== undefined && { cachedInputTokens }),
+          ...(cacheCreationInputTokens !== undefined && { cacheCreationInputTokens }),
         };
       }
 

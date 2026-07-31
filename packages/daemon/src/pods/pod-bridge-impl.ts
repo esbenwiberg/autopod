@@ -979,6 +979,9 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         const previousReview = existingUsage.review ?? { inputTokens: 0, outputTokens: 0 };
         const cachedInputTokens =
           (previousReview.cachedInputTokens ?? 0) + (result.tokenUsage.cachedInputTokens ?? 0);
+        const cacheCreationInputTokens =
+          (previousReview.cacheCreationInputTokens ?? 0) +
+          (result.tokenUsage.cacheCreationInputTokens ?? 0);
         const costUsd = (previousReview.costUsd ?? 0) + (result.tokenUsage.costUsd ?? 0);
         podRepo.update(podId, {
           phaseTokenUsage: {
@@ -987,6 +990,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
               inputTokens: previousReview.inputTokens + result.tokenUsage.inputTokens,
               outputTokens: previousReview.outputTokens + result.tokenUsage.outputTokens,
               ...(cachedInputTokens > 0 && { cachedInputTokens }),
+              ...(cacheCreationInputTokens > 0 && { cacheCreationInputTokens }),
               ...(costUsd > 0 && { costUsd }),
             },
           },

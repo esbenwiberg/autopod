@@ -318,6 +318,37 @@ describe('AutopodClient', () => {
     });
   });
 
+  describe('token telemetry repair', () => {
+    it('dry-runs by default and sends the explicit apply confirmation', async () => {
+      const report = {
+        mode: 'dry-run',
+        repairedPods: 1,
+        partialPods: 0,
+        skippedPods: 0,
+        entries: [],
+      };
+      mockFetch.mockResolvedValue(jsonResponse(report));
+
+      await client.repairTokenTelemetry();
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        'http://localhost:3100/admin/token-telemetry/repair',
+        expect.objectContaining({ method: 'POST', body: JSON.stringify({ apply: false }) }),
+      );
+
+      await client.repairTokenTelemetry(true);
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        'http://localhost:3100/admin/token-telemetry/repair',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            apply: true,
+            confirmation: 'APPLY_TOKEN_TELEMETRY_REPAIR',
+          }),
+        }),
+      );
+    });
+  });
+
   describe('health check', () => {
     it('returns health info', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ status: 'ok', version: '1.0.0' }));

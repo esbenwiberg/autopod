@@ -43,11 +43,26 @@ export interface UpdateActiveProviderAttempt {
   costUsd: number;
 }
 
+export interface ProviderAttemptTelemetryCorrection {
+  podId: string;
+  ordinal: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  source: 'codex_rollout';
+  reason: string;
+  correctedAt?: string;
+}
+
 export interface ProviderAttemptRepository {
   open(input: OpenProviderAttempt): ProviderAttempt;
   updateActive(podId: string, input: UpdateActiveProviderAttempt): ProviderAttempt;
   close(podId: string, input: CloseProviderAttempt): ProviderAttempt;
+  /** Effective attempts with audited telemetry corrections projected when present. */
   list(podId: string): ProviderAttempt[];
+  /** Original append-only attempt evidence without correction projection. */
+  listRaw(podId: string): ProviderAttempt[];
+  upsertTelemetryCorrection(input: ProviderAttemptTelemetryCorrection): void;
   getActive(podId: string): ProviderAttempt | null;
   getActiveProfileSnapshot(podId: string): Record<string, unknown> | null;
   totals(podId: string): ProviderAttemptTotals;
@@ -148,7 +163,17 @@ function hydrate(row: AttemptRow): ProviderAttempt {
 }
 
 export function createProviderAttemptRepository(db: Database.Database): ProviderAttemptRepository {
-  const selectList = db.prepare(
+  const selectList = db.prepare(`
+    SELECT a.*,
+      COALESCE(c.input_tokens, a.input_tokens) AS input_tokens,
+      COALESCE(c.output_tokens, a.output_tokens) AS output_tokens,
+      COALESCE(c.cost_usd, a.cost_usd) AS cost_usd
+    FROM provider_attempts a
+    LEFT JOIN provider_attempt_telemetry_corrections c
+      ON c.pod_id = a.pod_id AND c.ordinal = a.ordinal
+    WHERE a.pod_id = ? ORDER BY a.ordinal ASC
+  `);
+  const selectRawList = db.prepare(
     'SELECT * FROM provider_attempts WHERE pod_id = ? ORDER BY ordinal ASC',
   );
   const selectActive = db.prepare(
@@ -185,6 +210,20 @@ export function createProviderAttemptRepository(db: Database.Database): Provider
       output_tokens = @outputTokens,
       cost_usd = @costUsd
     WHERE pod_id = @podId AND ended_at IS NULL
+  `);
+  const upsertTelemetryCorrection = db.prepare(`
+    INSERT INTO provider_attempt_telemetry_corrections (
+      pod_id, ordinal, input_tokens, output_tokens, cost_usd, source, reason, corrected_at
+    ) VALUES (
+      @podId, @ordinal, @inputTokens, @outputTokens, @costUsd, @source, @reason, @correctedAt
+    )
+    ON CONFLICT(pod_id, ordinal) DO NOTHING
+  `);
+  const selectTelemetryCorrection = db.prepare(`
+    SELECT input_tokens AS inputTokens, output_tokens AS outputTokens, cost_usd AS costUsd,
+           source, reason
+    FROM provider_attempt_telemetry_corrections
+    WHERE pod_id = ? AND ordinal = ?
   `);
   const reservePreSubmitReview = db.prepare(`
     UPDATE provider_attempts
@@ -269,6 +308,49 @@ export function createProviderAttemptRepository(db: Database.Database): Provider
       return (selectList.all(podId) as AttemptRow[]).map(hydrate);
     },
 
+    listRaw(podId) {
+      return (selectRawList.all(podId) as AttemptRow[]).map(hydrate);
+    },
+
+    upsertTelemetryCorrection(input) {
+      if (!Number.isInteger(input.inputTokens) || input.inputTokens < 0) {
+        throw new Error('Corrected inputTokens must be a non-negative integer');
+      }
+      if (!Number.isInteger(input.outputTokens) || input.outputTokens < 0) {
+        throw new Error('Corrected outputTokens must be a non-negative integer');
+      }
+      if (!Number.isFinite(input.costUsd) || input.costUsd < 0) {
+        throw new Error('Corrected costUsd must be a non-negative finite number');
+      }
+      const result = upsertTelemetryCorrection.run({
+        ...input,
+        correctedAt: input.correctedAt ?? new Date().toISOString(),
+      });
+      if (result.changes === 0) {
+        const existing = selectTelemetryCorrection.get(input.podId, input.ordinal) as
+          | {
+              inputTokens: number;
+              outputTokens: number;
+              costUsd: number;
+              source: string;
+              reason: string;
+            }
+          | undefined;
+        if (
+          !existing ||
+          existing.inputTokens !== input.inputTokens ||
+          existing.outputTokens !== input.outputTokens ||
+          existing.costUsd !== input.costUsd ||
+          existing.source !== input.source ||
+          existing.reason !== input.reason
+        ) {
+          throw new Error(
+            `Conflicting telemetry correction already exists for ${input.podId}#${input.ordinal}`,
+          );
+        }
+      }
+    },
+
     getActive(podId) {
       const row = selectActive.get(podId) as AttemptRow | undefined;
       return row ? hydrate(row) : null;
@@ -283,10 +365,13 @@ export function createProviderAttemptRepository(db: Database.Database): Provider
       const row = db
         .prepare(`
           SELECT
-            COALESCE(SUM(input_tokens), 0) AS inputTokens,
-            COALESCE(SUM(output_tokens), 0) AS outputTokens,
-            COALESCE(SUM(cost_usd), 0) AS costUsd
-          FROM provider_attempts WHERE pod_id = ?
+            COALESCE(SUM(COALESCE(c.input_tokens, a.input_tokens)), 0) AS inputTokens,
+            COALESCE(SUM(COALESCE(c.output_tokens, a.output_tokens)), 0) AS outputTokens,
+            COALESCE(SUM(COALESCE(c.cost_usd, a.cost_usd)), 0) AS costUsd
+          FROM provider_attempts a
+          LEFT JOIN provider_attempt_telemetry_corrections c
+            ON c.pod_id = a.pod_id AND c.ordinal = a.ordinal
+          WHERE a.pod_id = ?
         `)
         .get(podId) as ProviderAttemptTotals;
       return row;

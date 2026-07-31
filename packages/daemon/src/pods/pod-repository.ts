@@ -17,6 +17,7 @@ import type {
   SpecContract,
   SpecFile,
   TaskSummary,
+  TokenTelemetryAccuracy,
   ValidationOverride,
   ValidationResult,
   ValidationSuite,
@@ -162,6 +163,7 @@ export interface PodUpdates {
   inputTokens?: number;
   outputTokens?: number;
   costUsd?: number;
+  tokenTelemetryAccuracy?: TokenTelemetryAccuracy;
   commitCount?: number;
   lastCommitAt?: string | null;
   startCommitSha?: string | null;
@@ -366,6 +368,8 @@ function rowToSession(row: Record<string, unknown>): Pod {
     inputTokens: (row.input_tokens as number) ?? 0,
     outputTokens: (row.output_tokens as number) ?? 0,
     costUsd: (row.cost_usd as number) ?? 0,
+    tokenTelemetryAccuracy:
+      (row.token_telemetry_accuracy as TokenTelemetryAccuracy | undefined) ?? 'partial',
     commitCount: (row.commit_count as number) ?? 0,
     lastCommitAt: (row.last_commit_at as string) ?? null,
     startCommitSha: (row.start_commit_sha as string) ?? null,
@@ -701,6 +705,10 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.costUsd !== undefined) {
         setClauses.push('cost_usd = @costUsd');
         params.costUsd = changes.costUsd;
+      }
+      if (changes.tokenTelemetryAccuracy !== undefined) {
+        setClauses.push('token_telemetry_accuracy = @tokenTelemetryAccuracy');
+        params.tokenTelemetryAccuracy = changes.tokenTelemetryAccuracy;
       }
       if (changes.commitCount !== undefined) {
         setClauses.push('commit_count = @commitCount');

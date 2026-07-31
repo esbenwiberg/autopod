@@ -116,8 +116,13 @@ export interface AgentCompleteEvent {
   type: 'complete';
   timestamp: string;
   result: string;
+  /** Per-run input delta including cached and cache-creation input. */
   totalInputTokens?: number;
   totalOutputTokens?: number;
+  /** Cached-input subset of totalInputTokens, when reported by the provider. */
+  cachedInputTokens?: number;
+  /** Cache-creation subset of totalInputTokens, when reported separately. */
+  cacheCreationInputTokens?: number;
   costUsd?: number;
 }
 

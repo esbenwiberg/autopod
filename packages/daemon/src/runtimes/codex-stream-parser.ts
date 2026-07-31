@@ -44,6 +44,40 @@ interface CodexTokenUsageInfo {
   model_context_window?: number | null;
 }
 
+export interface CodexUsageAccumulator {
+  accumulatedLastUsage: CodexTokenUsage;
+  latestTotalUsage?: CodexTokenUsage;
+  seenTokenCounts: Set<string>;
+  callCount: number;
+}
+
+export function createCodexUsageAccumulator(): CodexUsageAccumulator {
+  return {
+    accumulatedLastUsage: {},
+    seenTokenCounts: new Set<string>(),
+    callCount: 0,
+  };
+}
+
+function addUsage(target: CodexTokenUsage, usage: CodexTokenUsage): void {
+  target.input_tokens = (target.input_tokens ?? 0) + (usage.input_tokens ?? 0);
+  target.cached_input_tokens = (target.cached_input_tokens ?? 0) + (usage.cached_input_tokens ?? 0);
+  target.output_tokens = (target.output_tokens ?? 0) + (usage.output_tokens ?? 0);
+  target.reasoning_output_tokens =
+    (target.reasoning_output_tokens ?? 0) + (usage.reasoning_output_tokens ?? 0);
+}
+
+function resetUsageAccumulator(state: CodexUsageAccumulator): void {
+  state.accumulatedLastUsage = {};
+  state.latestTotalUsage = undefined;
+  state.seenTokenCounts.clear();
+  state.callCount = 0;
+}
+
+function accumulatedUsage(state: CodexUsageAccumulator): CodexTokenUsage | undefined {
+  return state.callCount > 0 ? state.accumulatedLastUsage : state.latestTotalUsage;
+}
+
 /** Internal Codex lifecycle metadata consumed by CodexRuntime before events reach PodManager. */
 export interface CodexTurnAbortedEvent extends AgentErrorEvent {
   codexAbortReason?: string;
@@ -195,6 +229,7 @@ function completeEventFromState(
 ): AgentEvent {
   const inputTokens = latestUsage?.input_tokens;
   const outputTokens = latestUsage?.output_tokens;
+  const cachedInputTokens = latestUsage?.cached_input_tokens;
   const costUsd = completionCostUsd(latestUsage, latestModel, podId, logger);
   return {
     type: 'complete',
@@ -202,6 +237,7 @@ function completeEventFromState(
     result: completionResult(msg),
     ...(inputTokens !== undefined && { totalInputTokens: inputTokens }),
     ...(outputTokens !== undefined && { totalOutputTokens: outputTokens }),
+    ...(cachedInputTokens !== undefined && { cachedInputTokens }),
     ...(costUsd !== undefined && { costUsd }),
   };
 }
@@ -601,9 +637,9 @@ async function* parse(
   podId: string,
   logger: Logger,
   modelHint?: string,
+  usageState: CodexUsageAccumulator = createCodexUsageAccumulator(),
 ): AsyncIterable<CodexParserEvent> {
   const rl = createInterface({ input: stream });
-  let latestUsage: CodexTokenUsage | undefined;
   let latestModel: string | null = modelHint && modelHint !== 'auto' ? modelHint : null;
   let latestAgentMessage: string | undefined;
 
@@ -636,8 +672,19 @@ async function* parse(
 
     if (msg.type === 'token_count') {
       const info = msg.info as CodexTokenUsageInfo | undefined;
-      const usage = info?.total_token_usage ?? info?.last_token_usage;
-      if (usage) latestUsage = usage;
+      if (info?.total_token_usage) usageState.latestTotalUsage = info.total_token_usage;
+      if (info?.last_token_usage) {
+        const key = JSON.stringify({
+          timestamp: env.timestamp ?? null,
+          id: env.id ?? null,
+          usage: info.last_token_usage,
+        });
+        if (!usageState.seenTokenCounts.has(key)) {
+          usageState.seenTokenCounts.add(key);
+          addUsage(usageState.accumulatedLastUsage, info.last_token_usage);
+          usageState.callCount += 1;
+        }
+      }
       continue;
     }
 
@@ -676,6 +723,7 @@ async function* parse(
         logger,
       );
       latestAgentMessage = undefined;
+      resetUsageAccumulator(usageState);
       continue;
     }
 
@@ -722,8 +770,15 @@ async function* parse(
     }
 
     if (msg.type === 'task_complete') {
-      yield completeEventFromState(msg, env, latestUsage, latestModel, podId, logger);
-      latestUsage = undefined;
+      yield completeEventFromState(
+        msg,
+        env,
+        accumulatedUsage(usageState),
+        latestModel,
+        podId,
+        logger,
+      );
+      resetUsageAccumulator(usageState);
       continue;
     }
 

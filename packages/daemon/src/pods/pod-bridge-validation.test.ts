@@ -1288,6 +1288,7 @@ describe('PodBridge.runPreSubmitReview', () => {
         tokenUsage: {
           inputTokens: 20_000,
           cachedInputTokens: 12_000,
+          cacheCreationInputTokens: 1_000,
           outputTokens: 800,
           costUsd: 0.0195,
         },
@@ -1303,6 +1304,7 @@ describe('PodBridge.runPreSubmitReview', () => {
         review: {
           inputTokens: 20_000,
           cachedInputTokens: 12_000,
+          cacheCreationInputTokens: 1_000,
           outputTokens: 800,
           costUsd: 0.0195,
         },

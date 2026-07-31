@@ -90,6 +90,11 @@ public enum PodMapper {
       startedAt: parseDate(response.startedAt ?? response.createdAt),
       updatedAt: parseDate(response.updatedAt),
       baseBranch: response.baseBranch,
+      diffStats: DiffStats(
+        added: response.linesAdded ?? 0,
+        removed: response.linesRemoved ?? 0,
+        files: response.filesChanged ?? 0
+      ),
       escalationQuestion: response.pendingEscalationSummary,
       containerUrl: response.previewUrl.flatMap(URL.init(string:)),
       hasWebUi: response.hasWebUi,
@@ -98,6 +103,11 @@ public enum PodMapper {
         ?? response.mergeBlockReason
         ?? response.failureReason,
       errorSummary: response.failureReason,
+      inputTokens: response.inputTokens ?? 0,
+      outputTokens: response.outputTokens ?? 0,
+      costUsd: response.costUsd ?? 0,
+      tokenTelemetryAccuracy:
+        TokenTelemetryAccuracy(rawValue: response.tokenTelemetryAccuracy ?? "partial") ?? .partial,
       briefTitle: response.title,
       seriesId: response.seriesId,
       seriesName: response.seriesName,
@@ -418,6 +428,8 @@ public enum PodMapper {
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
       costUsd: response.costUsd,
+      tokenTelemetryAccuracy:
+        TokenTelemetryAccuracy(rawValue: response.tokenTelemetryAccuracy ?? "partial") ?? .partial,
       commitCount: response.commitCount,
       taskSummary: taskSummary,
       linkedSessionId: response.linkedPodId ?? response.linkedSessionId,

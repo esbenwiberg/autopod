@@ -616,6 +616,68 @@ describe('CodexStreamParser', () => {
       expect(complete).toMatchObject({ totalInputTokens: 999, totalOutputTokens: 800 });
     });
 
+    it('emits per-run usage across compaction and resume from per-call deltas', async () => {
+      const stream = createMockStream([
+        envelope(
+          'token_count',
+          {
+            info: {
+              total_token_usage: {
+                input_tokens: 1000,
+                cached_input_tokens: 700,
+                output_tokens: 50,
+              },
+              last_token_usage: { input_tokens: 600, cached_input_tokens: 400, output_tokens: 30 },
+            },
+          },
+          'call-1',
+        ),
+        envelope(
+          'token_count',
+          {
+            info: {
+              // Context compaction makes the snapshot decrease; it is not a delta.
+              total_token_usage: { input_tokens: 900, cached_input_tokens: 650, output_tokens: 45 },
+              last_token_usage: { input_tokens: 500, cached_input_tokens: 450, output_tokens: 20 },
+            },
+          },
+          'call-2',
+        ),
+        envelope('task_complete', { last_agent_message: 'first' }, 'complete-1'),
+        envelope(
+          'token_count',
+          {
+            info: {
+              // A resumed turn continues the session total but contributes only this call.
+              total_token_usage: {
+                input_tokens: 1500,
+                cached_input_tokens: 1000,
+                output_tokens: 70,
+              },
+              last_token_usage: { input_tokens: 400, cached_input_tokens: 300, output_tokens: 25 },
+            },
+          },
+          'call-3',
+        ),
+        envelope('task_complete', { last_agent_message: 'second' }, 'complete-2'),
+      ]);
+      const completes: AgentEvent[] = [];
+      for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger, 'gpt-5')) {
+        if (event.type === 'complete') completes.push(event);
+      }
+      expect(completes).toHaveLength(2);
+      expect(completes[0]).toMatchObject({
+        totalInputTokens: 1100,
+        cachedInputTokens: 850,
+        totalOutputTokens: 50,
+      });
+      expect(completes[1]).toMatchObject({
+        totalInputTokens: 400,
+        cachedInputTokens: 300,
+        totalOutputTokens: 25,
+      });
+    });
+
     it('falls back to last_token_usage when total_token_usage is absent', async () => {
       const stream = createMockStream([
         envelope('token_count', {

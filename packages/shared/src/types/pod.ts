@@ -60,9 +60,17 @@ export interface SpecFile {
 export type PhaseTokenUsage = Partial<
   Record<
     'agent_initial' | `agent_rework_${number}` | 'review' | 'plan_eval' | 'advisory',
-    { inputTokens: number; outputTokens: number; cachedInputTokens?: number; costUsd?: number }
+    {
+      inputTokens: number;
+      outputTokens: number;
+      cachedInputTokens?: number;
+      cacheCreationInputTokens?: number;
+      costUsd?: number;
+    }
   >
 >;
+
+export type TokenTelemetryAccuracy = 'complete' | 'partial' | 'repaired';
 
 export type PodCostBucket = 'work' | 'rework' | 'validation' | 'advisory' | 'unattributed';
 
@@ -249,6 +257,8 @@ export interface Pod {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  /** Whether token/cost telemetry is complete, partial, or repaired from durable evidence. */
+  tokenTelemetryAccuracy: TokenTelemetryAccuracy;
   /**
    * Ordered provider execution history when attempt-ledger persistence is available.
    * Undefined on internal/legacy repository objects; full pod API responses project `[]`.
@@ -611,6 +621,13 @@ export interface CompactPod {
   lastCorrectionMessage: string | null;
   pendingEscalationSummary: string | null;
   progressSummary: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  tokenTelemetryAccuracy: TokenTelemetryAccuracy;
+  filesChanged: number;
+  linesAdded: number;
+  linesRemoved: number;
 }
 
 /** Bounded keyset page used by fleet-discovery clients. */

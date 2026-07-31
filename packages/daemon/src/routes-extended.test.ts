@@ -384,7 +384,9 @@ describe('Extended Route Tests', () => {
             .prepare(
               `UPDATE pods
                SET status = ?, created_at = ?, task = ?, failure_reason = ?,
-                   preview_url = ?
+                   preview_url = ?, input_tokens = 1200, output_tokens = 34,
+                   cost_usd = 1.25, token_telemetry_accuracy = 'complete',
+                   files_changed = 4, lines_added = 50, lines_removed = 7
                WHERE id = ?`,
             )
             .run(
@@ -415,6 +417,15 @@ describe('Extended Route Tests', () => {
       expect(String(pods[0]?.taskExcerpt)).toHaveLength(2_000);
       expect(String(pods[0]?.failureReason)).toHaveLength(500);
       expect(pods[0]?.hasWebUi).toBe(true);
+      expect(pods[0]).toMatchObject({
+        inputTokens: 1200,
+        outputTokens: 34,
+        costUsd: 1.25,
+        tokenTelemetryAccuracy: 'complete',
+        filesChanged: 4,
+        linesAdded: 50,
+        linesRemoved: 7,
+      });
       expect(pods[0]?.previewUrl).toBe(
         `http://api.example.com/pods/${String(pods[0]?.id)}/preview/proxy/`,
       );

@@ -430,6 +430,14 @@ private struct SeriesSummaryView: View {
             .reduce(0.0) { $0 + $1.costUsd }
     }
 
+    private var hasPartialTelemetry: Bool {
+        pods.contains { $0.tokenTelemetryAccuracy == .partial }
+    }
+
+    private func telemetryPrefix(for pod: Pod) -> String {
+        pod.tokenTelemetryAccuracy == .partial ? "~" : ""
+    }
+
     private var deliveredCount: Int {
         pods.filter { deliveredStatuses.contains($0.status) }.count
     }
@@ -464,14 +472,14 @@ private struct SeriesSummaryView: View {
             metricTile(
                 icon: "dollarsign.circle",
                 label: "Cost",
-                value: String(format: "$%.2f", totalCost),
+                value: String(format: "%@$%.2f", hasPartialTelemetry ? "~" : "", totalCost),
                 detail: pods.isEmpty ? "0 pods" : String(format: "$%.2f/pod", totalCost / Double(pods.count)),
                 color: totalCost > 50 ? .orange : .green
             )
             metricTile(
                 icon: "number",
                 label: "Tokens",
-                value: formatTokenCount(totalInputTokens + totalOutputTokens),
+                value: "\(hasPartialTelemetry ? "~" : "")\(formatTokenCount(totalInputTokens + totalOutputTokens))",
                 detail: "in \(formatTokenCount(totalInputTokens)) / out \(formatTokenCount(totalOutputTokens))",
                 color: .blue
             )
@@ -607,9 +615,13 @@ private struct SeriesSummaryView: View {
             .frame(width: 220, alignment: .leading)
             statusPill(pod.status)
                 .frame(width: 100, alignment: .leading)
-            tableText(String(format: "$%.2f", pod.costUsd), width: 78, align: .trailing)
             tableText(
-                formatTokenCount(pod.inputTokens + pod.outputTokens),
+                String(format: "%@$%.2f", telemetryPrefix(for: pod), pod.costUsd),
+                width: 78,
+                align: .trailing
+            )
+            tableText(
+                "\(telemetryPrefix(for: pod))\(formatTokenCount(pod.inputTokens + pod.outputTokens))",
                 width: 110,
                 color: .secondary,
                 align: .trailing

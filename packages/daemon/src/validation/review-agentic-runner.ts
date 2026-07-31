@@ -11,6 +11,7 @@ export interface AgenticReviewTokenUsage {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens?: number;
+  cacheCreationInputTokens?: number;
   costUsd?: number;
 }
 
@@ -140,20 +141,32 @@ export function parseAgenticReviewOutput(stdout: string): {
   if (!record) return { stdout };
   const result = typeof record.result === 'string' ? record.result : stdout;
   const usage = asRecord(record.usage);
-  const inputTokens = numberField(usage?.input_tokens) ?? numberField(record.input_tokens);
+  const directInputTokens = numberField(usage?.input_tokens) ?? numberField(record.input_tokens);
   const outputTokens = numberField(usage?.output_tokens) ?? numberField(record.output_tokens);
   const cachedInputTokens =
     numberField(usage?.cache_read_input_tokens) ?? numberField(record.cache_read_input_tokens);
+  const cacheCreationInputTokens =
+    numberField(usage?.cache_creation_input_tokens) ??
+    numberField(record.cache_creation_input_tokens);
+  const hasInputTelemetry =
+    directInputTokens !== undefined ||
+    cachedInputTokens !== undefined ||
+    cacheCreationInputTokens !== undefined;
+  const inputTokens = hasInputTelemetry
+    ? (directInputTokens ?? 0) + (cachedInputTokens ?? 0) + (cacheCreationInputTokens ?? 0)
+    : undefined;
   const costUsd = numberField(record.total_cost_usd);
   const tokenUsage =
     inputTokens !== undefined ||
     outputTokens !== undefined ||
     cachedInputTokens !== undefined ||
+    cacheCreationInputTokens !== undefined ||
     costUsd !== undefined
       ? {
           inputTokens: inputTokens ?? 0,
           outputTokens: outputTokens ?? 0,
           ...(cachedInputTokens !== undefined && { cachedInputTokens }),
+          ...(cacheCreationInputTokens !== undefined && { cacheCreationInputTokens }),
           ...(costUsd !== undefined && { costUsd }),
         }
       : undefined;

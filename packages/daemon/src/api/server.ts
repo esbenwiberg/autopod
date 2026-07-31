@@ -31,6 +31,7 @@ import type {
   QualityScoreRepository,
 } from '../pods/index.js';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
+import type { TokenTelemetryRepair } from '../pods/token-telemetry-repair.js';
 import type { ValidationRepository } from '../pods/validation-repository.js';
 import type { PodsitterRepository } from '../podsitter/podsitter-repository.js';
 import type { PodsitterService } from '../podsitter/podsitter-service.js';
@@ -64,6 +65,7 @@ import { screenshotRoutes } from './routes/screenshots.js';
 import { seriesRoutes } from './routes/series.js';
 import { skillRoutes } from './routes/skills.js';
 import { terminalRoutes } from './routes/terminal.js';
+import { tokenTelemetryRoutes } from './routes/token-telemetry.js';
 import { websocketHandler } from './websocket.js';
 import './types.js';
 
@@ -103,6 +105,7 @@ export interface ServerDependencies {
   safetyEventsRepo?: SafetyEventsRepository;
   issueWatcherRepo?: IssueWatcherRepository;
   screenshotStore?: ScreenshotStore;
+  tokenTelemetryRepair?: TokenTelemetryRepair;
   logLevel?: string;
   prettyLog?: boolean;
   onShutdown?: () => void;
@@ -181,6 +184,9 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
     } as unknown as WorktreeManager);
   }
   historyRoutes(app, deps.podManager);
+  if (deps.tokenTelemetryRepair) {
+    tokenTelemetryRoutes(app, deps.tokenTelemetryRepair);
+  }
   memoryWorkspaceRoutes(app, deps.podManager);
   modelProviderRoutes(app);
   profileRoutes(

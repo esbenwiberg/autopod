@@ -130,7 +130,7 @@ describe('runContainerReviewer', () => {
 
     expect(result.stdout).toBe('review output\n');
     expect(result.tokenUsage).toEqual({
-      inputTokens: 4321,
+      inputTokens: 7321,
       cachedInputTokens: 3000,
       outputTokens: 123,
       costUsd: 0.045,

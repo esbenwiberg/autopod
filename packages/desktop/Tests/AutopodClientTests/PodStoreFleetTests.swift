@@ -4,6 +4,8 @@ import Testing
 @testable import AutopodDesktop
 import AutopodUI
 
+@Suite(.serialized)
+struct PodStoreFleetTests {
 @MainActor
 @Test func podStoreLoadsEveryCompactPageWithoutDetailRequests() async throws {
   let recorder = FleetRequestRecorder()
@@ -49,6 +51,14 @@ import AutopodUI
   await store.loadSessions()
 
   #expect(store.pods.map(\.id) == ["websocket-pod", "newer-pod", "older-pod"])
+  let compactPod = store.pods.first(where: { $0.id == "newer-pod" })
+  #expect(compactPod?.inputTokens == 1_200)
+  #expect(compactPod?.outputTokens == 34)
+  #expect(compactPod?.costUsd == 1.25)
+  #expect(compactPod?.tokenTelemetryAccuracy == .complete)
+  #expect(compactPod?.diffStats?.files == 4)
+  #expect(compactPod?.diffStats?.added == 50)
+  #expect(compactPod?.diffStats?.removed == 7)
   #expect(await recorder.podPaths == ["/pods", "/pods"])
 
   store.updateStatus("newer-pod", to: .running)
@@ -131,6 +141,7 @@ import AutopodUI
   #expect(store.pods.first?.status == .failed)
   #expect(await recorder.detailPaths == ["/pods/selected-pod", "/pods/selected-pod"])
 }
+}
 
 private func compactPage(
   id: String,
@@ -149,7 +160,9 @@ private func compactPage(
     "createdAt":"2026-07-01T00:00:00Z","startedAt":null,"runningAt":null,
     "updatedAt":"\(updatedAt)","completedAt":null,"lastHeartbeatAt":null,
     "failureReason":null,"mergeBlockReason":null,"lastCorrectionMessage":null,
-    "pendingEscalationSummary":null,"progressSummary":null
+    "pendingEscalationSummary":null,"progressSummary":null,
+    "inputTokens":1200,"outputTokens":34,"costUsd":1.25,
+    "tokenTelemetryAccuracy":"complete","filesChanged":4,"linesAdded":50,"linesRemoved":7
   }],"nextCursor":\(nextCursor)}
   """
 }
@@ -166,7 +179,7 @@ private func fullPod(id: String) -> String {
     "filesChanged":1,"linesAdded":2,"linesRemoved":0,"previewUrl":null,"prUrl":null,
     "plan":null,"progress":null,"claudeSessionId":null,"outputMode":"pr",
     "options":{"agentMode":"auto","output":"pr","validate":true,"promotable":false},
-    "inputTokens":0,"outputTokens":0,"costUsd":0,"commitCount":1
+    "inputTokens":0,"outputTokens":0,"costUsd":0,"tokenTelemetryAccuracy":"complete","commitCount":1
   }
   """
 }

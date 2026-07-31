@@ -153,6 +153,13 @@ function compactPod(
     progressSummary: pod.progress
       ? `${pod.progress.phase}: ${pod.progress.description}`.slice(0, 240)
       : null,
+    inputTokens: pod.inputTokens,
+    outputTokens: pod.outputTokens,
+    costUsd: pod.costUsd,
+    tokenTelemetryAccuracy: pod.tokenTelemetryAccuracy,
+    filesChanged: pod.filesChanged,
+    linesAdded: pod.linesAdded,
+    linesRemoved: pod.linesRemoved,
   };
 }
 

@@ -672,6 +672,35 @@ describe('computeModelsAnalytics', () => {
     ).toBeCloseTo(2);
   });
 
+  it('uses corrected provider attempt telemetry without double-counting base values', () => {
+    const podId = insertPod(db, {
+      id: 'corrected-attempt-pod',
+      runtime: 'codex',
+      model: 'gpt-5',
+      costUsd: 99,
+    });
+    insertProviderAttempt(db, {
+      podId,
+      ordinal: 1,
+      runtime: 'codex',
+      model: 'gpt-5',
+      outcome: 'completed',
+      inputTokens: 1000,
+      outputTokens: 100,
+      costUsd: 5,
+    });
+    db.prepare(`
+      INSERT INTO provider_attempt_telemetry_corrections (
+        pod_id, ordinal, input_tokens, output_tokens, cost_usd, source, reason, corrected_at
+      ) VALUES (?, 1, 200, 20, 0.5, 'codex_rollout', 'fixture', datetime('now'))
+    `).run(podId);
+
+    const result = computeModelsAnalytics(db, 30);
+    expect(result.byModel.find((row) => row.model === 'gpt-5')).toMatchObject({
+      totalCostUsd: 0.5,
+    });
+  });
+
   it('provider-attempt preserves legacy pod attribution when no ledger rows exist', () => {
     insertPod(db, {
       runtime: 'claude',

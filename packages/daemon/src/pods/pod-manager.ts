@@ -1664,6 +1664,8 @@ function agentCompleteEventKey(event: Extract<AgentEvent, { type: 'complete' }>)
         result: event.result,
         totalInputTokens: event.totalInputTokens ?? null,
         totalOutputTokens: event.totalOutputTokens ?? null,
+        cachedInputTokens: event.cachedInputTokens ?? null,
+        cacheCreationInputTokens: event.cacheCreationInputTokens ?? null,
         costUsd: event.costUsd ?? null,
       }),
     )
@@ -9406,17 +9408,43 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               const existing = currentSession.phaseTokenUsage ?? {};
               const prev = existing[bucketKey] ?? { inputTokens: 0, outputTokens: 0 };
               const phaseCostUsd = (prev.costUsd ?? 0) + (event.costUsd ?? 0);
+              const phaseCachedInputTokens =
+                (prev.cachedInputTokens ?? 0) + (event.cachedInputTokens ?? 0);
+              const phaseCacheCreationInputTokens =
+                (prev.cacheCreationInputTokens ?? 0) + (event.cacheCreationInputTokens ?? 0);
               tokenUpdates.phaseTokenUsage = {
                 ...existing,
                 [bucketKey]: {
                   inputTokens: prev.inputTokens + (event.totalInputTokens ?? 0),
                   outputTokens: prev.outputTokens + (event.totalOutputTokens ?? 0),
+                  ...(phaseCachedInputTokens > 0 && {
+                    cachedInputTokens: phaseCachedInputTokens,
+                  }),
+                  ...(phaseCacheCreationInputTokens > 0 && {
+                    cacheCreationInputTokens: phaseCacheCreationInputTokens,
+                  }),
                   ...(phaseCostUsd > 0 && { costUsd: phaseCostUsd }),
                 },
               };
             }
             if (event.costUsd !== undefined) {
               tokenUpdates.costUsd = currentSession.costUsd + event.costUsd;
+            }
+            if (
+              event.totalInputTokens !== undefined ||
+              event.totalOutputTokens !== undefined ||
+              event.costUsd !== undefined
+            ) {
+              const hasPriorTelemetry =
+                currentSession.inputTokens > 0 ||
+                currentSession.outputTokens > 0 ||
+                currentSession.costUsd > 0;
+              tokenUpdates.tokenTelemetryAccuracy =
+                currentSession.tokenTelemetryAccuracy === 'repaired'
+                  ? 'repaired'
+                  : currentSession.tokenTelemetryAccuracy === 'partial' && hasPriorTelemetry
+                    ? 'partial'
+                    : 'complete';
             }
             if (Object.keys(tokenUpdates).length > 0) {
               podRepo.update(podId, tokenUpdates);

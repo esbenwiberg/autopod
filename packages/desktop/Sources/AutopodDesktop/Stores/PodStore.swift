@@ -126,6 +126,11 @@ public final class PodStore {
     merged.seriesId = incoming.seriesId
     merged.seriesName = incoming.seriesName
     merged.runningAt = incoming.runningAt
+    merged.inputTokens = incoming.inputTokens
+    merged.outputTokens = incoming.outputTokens
+    merged.costUsd = incoming.costUsd
+    merged.tokenTelemetryAccuracy = incoming.tokenTelemetryAccuracy
+    merged.diffStats = incoming.diffStats
     return merged
   }
 
@@ -396,6 +401,7 @@ public final class PodStore {
     pods[index].inputTokens = input
     pods[index].outputTokens = output
     pods[index].costUsd = cost
+    pods[index].tokenTelemetryAccuracy = .complete
   }
 
   // MARK: - History workspace

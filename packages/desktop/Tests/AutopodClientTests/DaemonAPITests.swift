@@ -28,7 +28,7 @@ import AutopodUI
   let recorder = RequestRecorder()
   let configuration = URLSessionConfiguration.ephemeral
   configuration.protocolClasses = [RecordingURLProtocol.self]
-  RecordingURLProtocol.handler = { request in
+  RecordingURLProtocol.healthHandler = { request in
     await recorder.record(request.value(forHTTPHeaderField: "Authorization"))
     let response = HTTPURLResponse(
       url: request.url!,
@@ -38,7 +38,7 @@ import AutopodUI
     )!
     return (response, #"{"status":"ok"}"#.data(using: .utf8)!)
   }
-  defer { RecordingURLProtocol.handler = nil }
+  defer { RecordingURLProtocol.healthHandler = nil }
 
   let api = DaemonAPI(
     baseURL: URL(string: "https://daemon.example.com")!,
@@ -109,7 +109,7 @@ import AutopodUI
   let recorder = PathRecorder()
   let configuration = URLSessionConfiguration.ephemeral
   configuration.protocolClasses = [RecordingURLProtocol.self]
-  RecordingURLProtocol.handler = { request in
+  RecordingURLProtocol.podsHandler = { request in
     await recorder.record(request.url!)
     let hasCursor = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
       .queryItems?.contains(where: { $0.name == "cursor" }) == true
@@ -134,7 +134,7 @@ import AutopodUI
     )!
     return (response, Data(body.utf8))
   }
-  defer { RecordingURLProtocol.handler = nil }
+  defer { RecordingURLProtocol.podsHandler = nil }
 
   let api = DaemonAPI(
     baseURL: URL(string: "https://daemon.example.com")!,
@@ -444,7 +444,8 @@ private actor PathRecorder {
 private final class RecordingURLProtocol: URLProtocol, @unchecked Sendable {
   typealias Handler = @Sendable (URLRequest) async throws -> (HTTPURLResponse, Data)
 
-  nonisolated(unsafe) static var handler: Handler?
+  nonisolated(unsafe) static var healthHandler: Handler?
+  nonisolated(unsafe) static var podsHandler: Handler?
 
   override class func canInit(with request: URLRequest) -> Bool {
     true
@@ -455,7 +456,8 @@ private final class RecordingURLProtocol: URLProtocol, @unchecked Sendable {
   }
 
   override func startLoading() {
-    guard let handler = Self.handler else {
+    let handler = request.url?.path == "/health" ? Self.healthHandler : Self.podsHandler
+    guard let handler else {
       client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
       return
     }

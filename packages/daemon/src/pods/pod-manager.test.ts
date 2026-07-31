@@ -1304,7 +1304,7 @@ describe('PodManager', () => {
     expect(() => manager.getReviewerConfig(ctx.podRepo.getOrThrow(pod.id))).toThrow();
   });
 
-  it('ledgers successful, resumed, failed, paused, and killed runtime segments', async () => {
+  it('ledgers runtime segments and persists cache-aware agent usage', async () => {
     const ctx = createTestContext(undefined, {
       repoUrl:
         'https://user:password@example.com/org/repo?token=secret&X-Amz-Signature=signed#api_key=hidden',
@@ -1316,7 +1316,12 @@ describe('PodManager', () => {
       { profileName: 'test-profile', task: 'Ledger runtime attempts' },
       'user-1',
     );
-    ctx.podRepo.update(pod.id, { inputTokens: 5, outputTokens: 1, costUsd: 0.05 });
+    ctx.podRepo.update(pod.id, {
+      inputTokens: 5,
+      outputTokens: 1,
+      costUsd: 0.05,
+      tokenTelemetryAccuracy: 'complete',
+    });
 
     await manager.consumeAgentEvents(
       pod.id,
@@ -1333,6 +1338,8 @@ describe('PodManager', () => {
           result: 'done',
           totalInputTokens: 10,
           totalOutputTokens: 2,
+          cachedInputTokens: 6,
+          cacheCreationInputTokens: 1,
           costUsd: 0.1,
         } as const;
       })(),
@@ -1400,12 +1407,55 @@ describe('PodManager', () => {
       outputTokens: 2,
       costUsd: 0.1,
     });
+    expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+      tokenTelemetryAccuracy: 'complete',
+      phaseTokenUsage: {
+        agent_initial: {
+          inputTokens: 10,
+          outputTokens: 2,
+          cachedInputTokens: 6,
+          cacheCreationInputTokens: 1,
+          costUsd: 0.1,
+        },
+      },
+    });
     expect(attempts.list(pod.id)[2]?.classification).toMatchObject({
       category: 'quota_exhausted',
       definitive: true,
       sanitizedMessage: 'Provider quota exhausted',
       retryAfter: '2026-07-25T10:03:00Z',
     });
+  });
+
+  it('does not upgrade partial historical telemetry after a later completion', async () => {
+    const ctx = createTestContext();
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Continue a partially metered pod' },
+      'user-1',
+    );
+    ctx.podRepo.update(pod.id, { inputTokens: 5, outputTokens: 1, costUsd: 0.05 });
+
+    await manager.consumeAgentEvents(
+      pod.id,
+      (async function* () {
+        yield {
+          type: 'complete',
+          timestamp: '2026-07-24T10:01:00.000Z',
+          result: 'done',
+          totalInputTokens: 10,
+          totalOutputTokens: 2,
+          costUsd: 0.1,
+        } as const;
+      })(),
+    );
+
+    expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+      inputTokens: 15,
+      outputTokens: 3,
+      tokenTelemetryAccuracy: 'partial',
+    });
+    expect(ctx.podRepo.getOrThrow(pod.id).costUsd).toBeCloseTo(0.15);
   });
 
   it('same-pod-provider-failover closes, drains, protects, and requeues in order', async () => {

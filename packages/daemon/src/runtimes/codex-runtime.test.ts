@@ -1245,7 +1245,7 @@ describe('CodexRuntime', () => {
       }
     });
 
-    it('emits one completion when stdout and rollout both finish', async () => {
+    it('deduplicates usage across stdout and rollout recovery', async () => {
       const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
       const previousPollMs = process.env.AUTOPOD_CODEX_ROLLOUT_POLL_MS;
       const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-runtime-dual-complete-'));
@@ -1264,7 +1264,18 @@ describe('CodexRuntime', () => {
               type: 'event_msg',
               payload: {
                 type: 'token_count',
-                info: { total_token_usage: { input_tokens: 120, output_tokens: 30 } },
+                info: {
+                  total_token_usage: {
+                    input_tokens: 120,
+                    cached_input_tokens: 20,
+                    output_tokens: 30,
+                  },
+                  last_token_usage: {
+                    input_tokens: 120,
+                    cached_input_tokens: 20,
+                    output_tokens: 30,
+                  },
+                },
               },
             }),
             JSON.stringify({

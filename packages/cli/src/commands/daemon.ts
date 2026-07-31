@@ -58,4 +58,46 @@ export function registerDaemonCommands(program: Command): void {
         process.exit(1);
       }
     });
+
+  program
+    .command('repair-token-telemetry')
+    .description('Dry-run historical token telemetry repair (use --apply after review)')
+    .option('--apply', 'Apply audited corrections instead of dry-run only')
+    .option('--json', 'Print the complete machine-readable report')
+    .action(async (options: { apply?: boolean; json?: boolean }) => {
+      const daemonUrl = configStore.get('daemon');
+      if (!daemonUrl) {
+        console.error(chalk.red('No daemon configured. Run: ap connect <url>'));
+        process.exitCode = 1;
+        return;
+      }
+      const client = new AutopodClient({ baseUrl: daemonUrl, getToken });
+      const report = await withSpinner(
+        options.apply ? 'Applying telemetry repair...' : 'Scanning telemetry evidence...',
+        () => client.repairTokenTelemetry(options.apply === true),
+      );
+      if (options.json) {
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
+      console.log(
+        `${options.apply ? chalk.green('Applied') : chalk.cyan('Dry run')}: ` +
+          `${report.repairedPods} repairable, ${report.partialPods} partial, ` +
+          `${report.skippedPods} skipped`,
+      );
+      for (const entry of report.entries) {
+        const marker =
+          entry.status === 'repaired'
+            ? chalk.green('repaired')
+            : entry.status === 'partial'
+              ? chalk.yellow('partial')
+              : chalk.dim('skipped');
+        console.log(`  ${entry.podId}  ${marker}  ${entry.reason}`);
+      }
+      if (!options.apply && report.repairedPods > 0) {
+        console.log(
+          chalk.dim('Review this report, then rerun with --apply to persist corrections.'),
+        );
+      }
+    });
 }

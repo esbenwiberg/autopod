@@ -274,6 +274,73 @@ describe('provider attempt repository', () => {
     });
   });
 
+  it('projects audited telemetry corrections without rewriting raw attempts', () => {
+    const db = createTestDb();
+    seedPod(db);
+    const repository = createProviderAttemptRepository(db);
+    repository.open({
+      podId: 'attempt-pod',
+      provider: 'openai',
+      providerAccountId: 'openai-private',
+      runtime: 'codex',
+      model: 'gpt-5',
+      profileReference: 'pod:attempt-pod@profile-snapshot#abcdef1',
+      profileSnapshot: { name: 'test-profile' },
+    });
+    repository.close('attempt-pod', {
+      nativeSessionId: 'session-1',
+      outcome: 'completed',
+      inputTokens: 1000,
+      outputTokens: 100,
+      costUsd: 2,
+    });
+
+    repository.upsertTelemetryCorrection({
+      podId: 'attempt-pod',
+      ordinal: 1,
+      inputTokens: 400,
+      outputTokens: 40,
+      costUsd: 0.75,
+      source: 'codex_rollout',
+      reason: 'fixture reconstruction',
+      correctedAt: '2026-07-30T20:00:00.000Z',
+    });
+
+    expect(repository.listRaw('attempt-pod')[0]).toMatchObject({
+      inputTokens: 1000,
+      outputTokens: 100,
+      costUsd: 2,
+    });
+    expect(repository.list('attempt-pod')[0]).toMatchObject({
+      inputTokens: 400,
+      outputTokens: 40,
+      costUsd: 0.75,
+    });
+    expect(repository.totals('attempt-pod')).toEqual({
+      inputTokens: 400,
+      outputTokens: 40,
+      costUsd: 0.75,
+    });
+    expect(() =>
+      db
+        .prepare(
+          'UPDATE provider_attempt_telemetry_corrections SET input_tokens = 1 WHERE pod_id = ?',
+        )
+        .run('attempt-pod'),
+    ).toThrow(/append-only/);
+    expect(() =>
+      repository.upsertTelemetryCorrection({
+        podId: 'attempt-pod',
+        ordinal: 1,
+        inputTokens: 401,
+        outputTokens: 40,
+        costUsd: 0.75,
+        source: 'codex_rollout',
+        reason: 'different evidence',
+      }),
+    ).toThrow(/Conflicting telemetry correction/);
+  });
+
   it('reserves at most two pre-submit reviews per active attempt', () => {
     const db = createTestDb();
     seedPod(db);

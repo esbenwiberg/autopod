@@ -9,6 +9,7 @@ describe('parseAgenticReviewOutput', () => {
         usage: {
           input_tokens: 300,
           cache_read_input_tokens: 120,
+          cache_creation_input_tokens: 80,
           output_tokens: 30,
         },
         total_cost_usd: 0.012,
@@ -18,8 +19,9 @@ describe('parseAgenticReviewOutput', () => {
     expect(result).toEqual({
       stdout: '{"status":"pass","reasoning":"clean","issues":[]}',
       tokenUsage: {
-        inputTokens: 300,
+        inputTokens: 500,
         cachedInputTokens: 120,
+        cacheCreationInputTokens: 80,
         outputTokens: 30,
         costUsd: 0.012,
       },

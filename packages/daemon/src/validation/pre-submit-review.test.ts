@@ -199,7 +199,7 @@ describe('runPreSubmitReview', () => {
     expect(result.status).toBe('pass');
     expect(result.reasoning).toBe('Container Claude says clean.');
     expect(result.tokenUsage).toEqual({
-      inputTokens: 4321,
+      inputTokens: 7321,
       cachedInputTokens: 3000,
       outputTokens: 123,
       costUsd: 0.045,
