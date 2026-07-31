@@ -1,0 +1,145 @@
+contract_version: 1
+title: "Separate process health from outcome quality"
+depends_on: []
+scenarios:
+  - id: wrapped-inspection-is-measured
+    given:
+      - "a Codex activity command wraps a supported repository inspection in /bin/bash -lc"
+      - "the inspected file is subsequently modified"
+    when:
+      - "the daemon normalizes process-health activity"
+    then:
+      - "the nested inspection is credited to the canonical repository path"
+      - "the later modification is not classified as blind"
+      - "the command is analyzed as data and is never executed"
+  - id: ambiguous-inspection-is-unavailable
+    given:
+      - "a pod emits an inspection-looking compound shell command whose repository paths cannot be resolved safely"
+      - "the pod also mutates repository files"
+    when:
+      - "the daemon computes and persists process health"
+    then:
+      - "inspection availability is unavailable instead of treating the command as zero reads"
+      - "the persisted process score is null"
+      - "a non-sensitive availability reason and ambiguous-inspection count explain the missing score"
+  - id: process-score-excludes-outcomes
+    given:
+      - "two pods have identical inspection, mutation, tell, interruption, and churn behavior"
+      - "their completion, validation, killed-state, or PR-fix outcomes differ"
+    when:
+      - "algorithm version 3 computes process health"
+    then:
+      - "both pods receive the same process-health score"
+      - "validation, terminal outcome, and PR fixes remain separately visible"
+  - id: process-score-normalizes-task-size
+    given:
+      - "two pods have the same absolute number of blind and churned files"
+      - "one pod modifies substantially more distinct existing files"
+    when:
+      - "algorithm version 3 computes process health"
+    then:
+      - "blind and churn penalties use rates over distinct modified existing files"
+      - "the larger modified-file set is not penalized as if the same fraction of its work were blind or churned"
+  - id: latest-validation-is-reported
+    given:
+      - "a pod has an earlier passing validation attempt followed by a later failing attempt"
+    when:
+      - "live or persisted process-health details expose validationPassed"
+    then:
+      - "validationPassed is false because the latest attempt failed"
+      - "an earlier pass does not mask the current outcome"
+  - id: v3-preserves-v2-history
+    given:
+      - "the database contains an algorithm version 2 quality row"
+      - "the daemon starts its quality-history maintenance"
+    when:
+      - "algorithm version 3 is active"
+    then:
+      - "the version 2 row and its v2 values remain unchanged"
+      - "new terminal pods persist version 3 shadow values"
+      - "v3 analytics exclude legacy rows and disclose excluded and unavailable counts"
+  - id: model-process-attribution-is-homogeneous
+    given:
+      - "one scored pod retries with the same model and runtime"
+      - "another scored pod contains distinct provider-attempt models or runtimes"
+    when:
+      - "model analytics aggregate process health"
+    then:
+      - "the homogeneous retry contributes one comparable process score"
+      - "the mixed-attempt pod does not affect scoredCount, average process health, or the best-process headline"
+      - "best-process headline selection requires at least 20 comparable scored pods"
+  - id: desktop-separates-process-and-outcome
+    given:
+      - "the operator opens pod, analytics, and model-comparison views"
+    when:
+      - "Desktop renders quality-v3 data"
+    then:
+      - "trajectory scoring is labeled Process Health"
+      - "the existing reliability funnel and first-pass surface are labeled Outcome Quality"
+      - "model averages and simulator axes say Process rather than Quality"
+      - "HTTP route and navigation compatibility is preserved"
+  - id: empty-days-are-not-zero-quality
+    given:
+      - "a process-health sparkline contains days with podCount zero"
+    when:
+      - "Desktop builds the visible sparkline values"
+    then:
+      - "no-data days are omitted rather than rendered as a zero process-health score"
+required_facts:
+  - id: fact-quality-activity-honesty
+    proves:
+      - wrapped-inspection-is-measured
+      - ambiguous-inspection-is-unavailable
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/quality-activity.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- quality-activity.test.ts --testNamePattern "wrapped-inspection-is-measured|ambiguous-inspection-is-unavailable"
+  - id: fact-process-score-separation
+    proves:
+      - process-score-excludes-outcomes
+      - process-score-normalizes-task-size
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/quality-score.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- quality-score.test.ts --testNamePattern "process-score-excludes-outcomes|process-score-normalizes-task-size"
+  - id: fact-latest-validation
+    proves:
+      - latest-validation-is-reported
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/quality-signals.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- quality-signals.test.ts --testNamePattern latest-validation-is-reported
+  - id: fact-v3-history-preservation
+    proves:
+      - v3-preserves-v2-history
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/quality-score-recorder.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- quality-score-recorder.test.ts --testNamePattern v3-preserves-v2-history
+  - id: fact-model-process-attribution
+    proves:
+      - model-process-attribution-is-homogeneous
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/models-aggregator.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- models-aggregator.test.ts --testNamePattern model-process-attribution-is-homogeneous
+  - id: fact-quality-analytics-transparency
+    proves:
+      - v3-preserves-v2-history
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/pods/quality-score-repository.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- quality-score-repository.test.ts --testNamePattern quality-v3-analytics-transparency
+human_review:
+  - id: review-desktop-quality-semantics
+    covers:
+      - desktop-separates-process-and-outcome
+      - empty-days-are-not-zero-quality
+    criterion: "On a macOS/Xcode-capable machine, verify Analytics shows separate Process Health and Outcome Quality surfaces, pod/model labels use process terminology, no-data process days do not plot as zero, and existing navigation still works. Run focused Swift tests and build the touched Desktop targets."
+    reason: "Autopod validation runs in Linux, while Desktop SwiftUI/AppKit behavior and Xcode compilation require a macOS-capable environment."
