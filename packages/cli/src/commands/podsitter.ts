@@ -107,12 +107,12 @@ function renderStatus(status: PodsitterStatusResponse, lastAction: PodsitterDeci
   );
 }
 
-function renderDecisions(decisions: PodsitterDecisionRecord[]): void {
-  if (decisions.length === 0) {
+function renderDecisions(result: { items: PodsitterDecisionRecord[]; total: number }): void {
+  if (result.items.length === 0) {
     console.log(chalk.dim('No daemon-native Podsitter decisions found.'));
     return;
   }
-  for (const record of decisions) {
+  for (const record of result.items) {
     console.log(
       `${record.createdAt}  ${record.podId}  ${record.decision?.action ?? '-'}  ${record.outcome}`,
     );
@@ -122,6 +122,7 @@ function renderDecisions(decisions: PodsitterDecisionRecord[]): void {
       console.log(`  Remaining risk: ${record.decision.remainingRisk || '-'}`);
     }
   }
+  console.log(chalk.dim(`Showing ${result.items.length} of ${result.total} decision(s).`));
 }
 
 export function registerPodsitterCommands(program: Command, getClient: () => AutopodClient): void {
@@ -233,7 +234,7 @@ export function registerPodsitterCommands(program: Command, getClient: () => Aut
         ),
         client.listPodsitterDecisions({ limit: 1, offset: 0 }),
       ]);
-      const output = { ...status, lastAction: decisions[0] ?? null };
+      const output = { ...status, lastAction: decisions.items[0] ?? null };
       withJsonOutput(opts, output, (data) => renderStatus(data, data.lastAction));
     });
 
@@ -274,13 +275,13 @@ export function registerPodsitterCommands(program: Command, getClient: () => Aut
     .option('--offset <n>', 'Pagination offset', (v) => positiveInteger(v, 'offset'))
     .option('--json', 'Output redacted daemon data as JSON')
     .action(async (opts: { pod?: string; limit?: number; offset?: number; json?: boolean }) => {
-      const decisions = await withSpinner('Fetching Podsitter decisions...', () =>
+      const result = await withSpinner('Fetching Podsitter decisions...', () =>
         getClient().listPodsitterDecisions({
           podId: opts.pod,
           limit: opts.limit,
           offset: opts.offset,
         }),
       );
-      withJsonOutput(opts, decisions, renderDecisions);
+      withJsonOutput(opts, result, renderDecisions);
     });
 }

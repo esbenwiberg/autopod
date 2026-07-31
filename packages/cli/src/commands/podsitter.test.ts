@@ -227,7 +227,7 @@ describe('podsitter command', () => {
 
   it('renders redacted provider status and decisions', async () => {
     const getPodsitterStatus = vi.fn(async () => status);
-    const listPodsitterDecisions = vi.fn(async () => [decision]);
+    const listPodsitterDecisions = vi.fn(async () => ({ items: [decision], total: 51 }));
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     const client = { getPodsitterStatus, listPodsitterDecisions };
@@ -257,6 +257,7 @@ describe('podsitter command', () => {
       offset: 50,
     });
     expect(log.mock.calls.flat().join('\n')).toContain('Validation remains blocked');
+    expect(log.mock.calls.flat().join('\n')).toContain('Showing 1 of 51');
   });
 
   it('reports inactive checks and provider probe outcomes', async () => {

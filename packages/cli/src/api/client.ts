@@ -623,13 +623,13 @@ export class AutopodClient {
     podId?: string;
     limit?: number;
     offset?: number;
-  }): Promise<PodsitterDecisionRecord[]> {
+  }): Promise<{ items: PodsitterDecisionRecord[]; total: number }> {
     const params = new URLSearchParams();
     if (filters?.podId) params.set('podId', filters.podId);
     if (filters?.limit !== undefined) params.set('limit', String(filters.limit));
     if (filters?.offset !== undefined) params.set('offset', String(filters.offset));
     const query = params.toString();
-    return this.request<PodsitterDecisionRecord[]>(
+    return this.request<{ items: PodsitterDecisionRecord[]; total: number }>(
       'GET',
       `/podsitter/decisions${query ? `?${query}` : ''}`,
     );
