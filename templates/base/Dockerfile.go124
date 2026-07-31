@@ -92,7 +92,7 @@ ARG DAGGER_GO_SDK_VERSION=v0.20.8
 RUN mkdir -p /tmp/dagger-warmup \
     && cd /tmp/dagger-warmup \
     && go mod init warmup \
-    && go get dagger.io/dagger@${DAGGER_GO_SDK_VERSION} \
+    && GOSUMDB=sum.golang.org go get dagger.io/dagger@${DAGGER_GO_SDK_VERSION} \
     && cd / && rm -rf /tmp/dagger-warmup \
     && chown -R autopod:autopod ${GOPATH} /home/autopod/.cache
 
