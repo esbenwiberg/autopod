@@ -130,7 +130,7 @@ struct PodsitterSettingsView: View {
                 Text("No compatible models").tag("")
               }
               ForEach(store.compatibleModels) { model in
-                Text(model.displayName).tag(model.id)
+                Text(model.label).tag(model.id)
               }
             }
             .labelsHidden()
