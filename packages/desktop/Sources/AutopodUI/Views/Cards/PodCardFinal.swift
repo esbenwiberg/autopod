@@ -56,14 +56,18 @@ public struct SessionCardFinal: View {
     }
 
     @State private var isHovered = false
+    @State private var isInfrastructureResumePending = false
 
     private var isAdvisoryQaRunning: Bool {
         pod.validationProgress?.advisory.status == .running
     }
 
+    private var reviewRequiredAction: ReviewRequiredPrimaryAction {
+        reviewRequiredPrimaryAction(for: pod.validationChecks)
+    }
+
     private var shouldFixReviewFindings: Bool {
-        guard let checks = pod.validationChecks, checks.review == false else { return false }
-        return checks.reviewSkipKind != "review-failed" && checks.reviewSkipKind != "review-timeout"
+        reviewRequiredAction == .fixReview
     }
 
     private var reworkActionTitle: String {
@@ -872,7 +876,9 @@ public struct SessionCardFinal: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                         .font(.system(size: 11))
-                    Text("Validation attempts exhausted — human review needed")
+                    Text(reviewRequiredAction == .resumeValidation
+                        ? "Validation infrastructure needs retry"
+                        : "Validation attempts exhausted — human review needed")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -883,10 +889,22 @@ public struct SessionCardFinal: View {
                 }
                 HStack(spacing: 6) {
                     Button {
-                        Task { await actions.extendAttempts(pod.id, 2) }
+                        Task {
+                            switch reviewRequiredAction {
+                            case .resumeValidation:
+                                guard !isInfrastructureResumePending else { return }
+                                isInfrastructureResumePending = true
+                                defer { isInfrastructureResumePending = false }
+                                await actions.resume(pod.id)
+                            case .fixReview, .extendAttempts:
+                                await actions.extendAttempts(pod.id, 2)
+                            }
+                        }
                     } label: {
                         Label(
-                            shouldFixReviewFindings ? "Fix Review" : "Extend Attempts",
+                            reviewRequiredAction == .resumeValidation
+                                ? "Resume Validation"
+                                : shouldFixReviewFindings ? "Fix Review" : "Extend Attempts",
                             systemImage: "arrow.clockwise"
                         )
                             .frame(maxWidth: .infinity)
@@ -894,6 +912,7 @@ public struct SessionCardFinal: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .tint(.orange)
+                    .disabled(reviewRequiredAction == .resumeValidation && isInfrastructureResumePending)
                     Button {
                         Task { await actions.fixManually(pod.id) }
                     } label: {

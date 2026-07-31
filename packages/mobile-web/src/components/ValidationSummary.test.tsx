@@ -57,6 +57,29 @@ describe('validation display helpers', () => {
     expect(items[0]?.result.overall).toBe('pass');
   });
 
+  it('labels infrastructure failure without claiming tests failed', () => {
+    const rows = rowsFor(
+      result({
+        overall: 'fail',
+        test: { status: 'skip', duration: 25, stdout: '', stderr: '' },
+        infrastructureFailure: {
+          phase: 'test',
+          code: 'AZURE_SANDBOX_HTTP_ERROR',
+          statusCode: 403,
+          message: 'Azure Sandboxes returned an empty 403',
+          retryable: true,
+        },
+      }),
+    );
+
+    expect(rows).toContainEqual({
+      label: 'test infrastructure',
+      status: 'fail',
+      note: 'Azure Sandboxes returned an empty 403',
+    });
+    expect(rows).not.toContainEqual(expect.objectContaining({ note: 'Tests failed' }));
+  });
+
   it('adds concise failure notes for failed phases', () => {
     const rows = rowsFor(
       result({

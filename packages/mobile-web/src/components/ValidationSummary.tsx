@@ -20,6 +20,13 @@ interface Row {
 
 export function rowsFor(result: ValidationResult): Row[] {
   const rows: Row[] = [];
+  if (result.infrastructureFailure) {
+    rows.push({
+      label: `${result.infrastructureFailure.phase} infrastructure`,
+      status: 'fail',
+      note: firstLine(result.infrastructureFailure.message),
+    });
+  }
   rows.push({
     label: 'build',
     status: result.smoke.build.status,

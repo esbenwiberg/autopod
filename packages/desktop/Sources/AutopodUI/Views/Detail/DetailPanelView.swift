@@ -2,6 +2,22 @@ import AppKit
 import AutopodClient
 import SwiftUI
 
+enum ReviewRequiredPrimaryAction: Equatable {
+    case resumeValidation
+    case fixReview
+    case extendAttempts
+}
+
+func reviewRequiredPrimaryAction(for checks: ValidationChecks?) -> ReviewRequiredPrimaryAction {
+    if checks?.infrastructureFailure != nil { return .resumeValidation }
+    if checks?.review == false,
+       checks?.reviewSkipKind != "review-failed",
+       checks?.reviewSkipKind != "review-timeout" {
+        return .fixReview
+    }
+    return .extendAttempts
+}
+
 /// Detail panel — shown when a pod is selected. Tabbed around operator questions:
 /// Overview, Work, Validation, Evidence, Diff, Logs, Terminal, and Series.
 public struct DetailPanelView: View {
@@ -121,6 +137,7 @@ public struct DetailPanelView: View {
     }
 
     @State private var requestedEvidenceSection: EvidenceSection?
+    @State private var isInfrastructureResumePending = false
     @State private var didCopyName: Bool = false
     @State private var showRelatedEventsDebug: Bool = false
 
@@ -625,9 +642,12 @@ public struct DetailPanelView: View {
         return "\(result.message)\n\nBlocking paths:\n\(preview)\(suffix)"
     }
 
+    private var reviewRequiredAction: ReviewRequiredPrimaryAction {
+        reviewRequiredPrimaryAction(for: pod.validationChecks)
+    }
+
     private var shouldFixReviewFindings: Bool {
-        guard let checks = pod.validationChecks, checks.review == false else { return false }
-        return checks.reviewSkipKind != "review-failed" && checks.reviewSkipKind != "review-timeout"
+        reviewRequiredAction == .fixReview
     }
 
     private var reworkActionTitle: String {
@@ -895,19 +915,34 @@ public struct DetailPanelView: View {
 
             case .reviewRequired:
                 Button {
-                    Task { await actions.extendAttempts(pod.id, 2) }
+                    Task {
+                        switch reviewRequiredAction {
+                        case .resumeValidation:
+                            guard !isInfrastructureResumePending else { return }
+                            isInfrastructureResumePending = true
+                            defer { isInfrastructureResumePending = false }
+                            await actions.resume(pod.id)
+                        case .fixReview, .extendAttempts:
+                            await actions.extendAttempts(pod.id, 2)
+                        }
+                    }
                 } label: {
                     Label(
-                        shouldFixReviewFindings ? "Fix Review Findings" : "Extend Attempts",
+                        reviewRequiredAction == .resumeValidation
+                            ? "Resume Validation"
+                            : shouldFixReviewFindings ? "Fix Review Findings" : "Extend Attempts",
                         systemImage: "arrow.clockwise"
                     )
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .tint(.orange)
-                .help(shouldFixReviewFindings
-                    ? "Add retry budget and re-run the agent with the failed review findings as feedback."
-                    : "Add retry budget and re-run validation.")
+                .disabled(reviewRequiredAction == .resumeValidation && isInfrastructureResumePending)
+                .help(reviewRequiredAction == .resumeValidation
+                    ? "Retry validation only without changing attempt budget or rerunning the agent."
+                    : shouldFixReviewFindings
+                        ? "Add retry budget and re-run the agent with the failed review findings as feedback."
+                        : "Add retry budget and re-run validation.")
                 Button {
                     Task { await actions.fixManually(pod.id) }
                 } label: {

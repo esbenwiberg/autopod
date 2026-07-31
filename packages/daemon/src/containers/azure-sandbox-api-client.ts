@@ -1136,6 +1136,12 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     // processed, so retrying any method is safe. We honor the platform's
     // `retryAfterSeconds` (clamped) so we back off exactly as long as it asks,
     // then give up after `retryMaxAttempts` rather than hanging forever.
+    //
+    // The preview data plane has also returned a rare empty 403 between two
+    // successful buffered execs. A received empty Forbidden response means the
+    // operation was rejected before command execution, so one bounded retry is
+    // safe. Non-empty 403s and ARM 403s remain deterministic failures.
+    let emptyForbiddenRetries = 0;
     for (let attempt = 1; ; attempt++) {
       const headers = new Headers(options.headers);
       headers.set('Authorization', `Bearer ${token.token}`);
@@ -1174,6 +1180,30 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         this.logger.warn(
           { plane, method, url, attempt, maxAttempts: this.retryMaxAttempts, waitMs },
           'Azure Sandboxes data plane rate-limited (429) — backing off and retrying',
+        );
+        await sleep(waitMs);
+        continue;
+      }
+
+      if (
+        plane === 'data' &&
+        response.status === 403 &&
+        emptyForbiddenRetries === 0 &&
+        attempt < this.retryMaxAttempts &&
+        (await response.clone().text()).trim() === ''
+      ) {
+        emptyForbiddenRetries++;
+        const waitMs = Math.min(this.retryBaseDelayMs, this.retryMaxDelayMs);
+        this.logger.warn(
+          {
+            plane,
+            method,
+            url,
+            attempt,
+            waitMs,
+            ...safeAzureResponseDiagnostics(response),
+          },
+          'Azure Sandboxes data plane returned an empty 403 — retrying once',
         );
         await sleep(waitMs);
         continue;
@@ -1497,11 +1527,31 @@ async function throwAzureHttpError(
   url: string,
 ): Promise<never> {
   const content = await response.text().catch(() => '');
+  const diagnostics = safeAzureResponseDiagnostics(response);
+  const diagnosticText = Object.keys(diagnostics).length
+    ? ` diagnostics=${JSON.stringify(diagnostics)}`
+    : '';
   throw new AutopodError(
-    `Azure Sandboxes ${method} ${url} failed with ${response.status}: ${content.slice(0, 1000)}`,
+    `Azure Sandboxes ${method} ${url} failed with ${response.status}: ${content.slice(0, 1000)}${diagnosticText}`,
     'AZURE_SANDBOX_HTTP_ERROR',
     response.status,
   );
+}
+
+function safeAzureResponseDiagnostics(response: Response): Record<string, string> {
+  const safeHeaders = [
+    'x-ms-request-id',
+    'x-ms-correlation-request-id',
+    'request-id',
+    'traceparent',
+    'retry-after',
+  ];
+  const diagnostics: Record<string, string> = {};
+  for (const name of safeHeaders) {
+    const value = response.headers.get(name)?.trim();
+    if (value) diagnostics[name] = value.slice(0, 256);
+  }
+  return diagnostics;
 }
 
 function isStatusError(err: unknown, status: number): boolean {

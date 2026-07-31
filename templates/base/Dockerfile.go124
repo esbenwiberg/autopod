@@ -48,8 +48,8 @@ RUN cd /opt/autopod \
     && pnpm --filter @autopod/pi-worker build \
     && cd /opt/autopod/packages/pi-worker \
     && npm install -g . \
-    && test -x /usr/local/bin/pi \
-    && test -f /usr/local/lib/node_modules/@autopod/pi-worker/dist/index.js \
+    && command -v pi \
+    && test -f "$(npm root -g)/@autopod/pi-worker/dist/index.js" \
     && rm -rf node_modules /root/.npm
 
 # Dagger version — single source of truth for CLI, SDK, and the engine digest
@@ -76,6 +76,8 @@ ENV GOMODCACHE=/home/autopod/go/pkg/mod
 ENV PATH=${GOPATH}/bin:${PATH}
 # Disable go.work (workspace requires Go 1.26; image ships 1.24)
 ENV GOWORK=off
+# Dagger v0.20.8 requires Go 1.25; cache the verified toolchain during image build.
+ENV GOTOOLCHAIN=auto
 # Go module proxy: reach the public proxy when network is available; GOSUMDB=off
 # skips the checksum database (requires separate outbound + isn't useful when the
 # repo's go.sum is trusted). Pods under deny-all network policy rely on the
@@ -88,11 +90,11 @@ RUN mkdir -p ${GOPATH} ${GOCACHE} \
 # Pre-cache the Dagger Go SDK into GOMODCACHE so pods can `import "dagger.io/dagger"`
 # without reaching the Go proxy at runtime. DAGGER_GO_SDK_VERSION declared
 # above; redeclare here so it remains in scope for this RUN (Docker ARG scope).
-ARG DAGGER_GO_SDK_VERSION
+ARG DAGGER_GO_SDK_VERSION=v0.20.8
 RUN mkdir -p /tmp/dagger-warmup \
     && cd /tmp/dagger-warmup \
     && go mod init warmup \
-    && go get dagger.io/dagger@${DAGGER_GO_SDK_VERSION} \
+    && GOSUMDB=sum.golang.org go get dagger.io/dagger@${DAGGER_GO_SDK_VERSION} \
     && cd / && rm -rf /tmp/dagger-warmup \
     && chown -R autopod:autopod ${GOPATH} /home/autopod/.cache
 

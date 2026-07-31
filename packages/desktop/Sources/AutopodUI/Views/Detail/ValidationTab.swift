@@ -252,6 +252,7 @@ public struct ValidationTab: View {
       reviewReasoning: response.taskReview?.reasoning,
       reviewSkipReason: response.reviewSkipReason,
       reviewSkipKind: response.reviewSkipKind,
+      infrastructureFailure: response.infrastructureFailure,
       validationSuite: response.validationSuite,
       healthCheck: healthCheck,
       pages: pages,
@@ -340,6 +341,7 @@ public struct ValidationTab: View {
 
   /// Per-phase status, derived from either live progress or the final checks result.
   private func phaseStatus(_ phase: ValidationPhase) -> PhaseStatus {
+    if displayedChecks?.infrastructureFailure?.phase == phase.rawValue { return .failed }
     if let p = progress { return p.state(for: phase).status }
     guard let c = displayedChecks else { return .notStarted }
     switch phase {
@@ -840,6 +842,9 @@ public struct ValidationTab: View {
     if pod.validationWaiver != nil {
       return "Approved with validation waiver"
     }
+    if displayedChecks?.infrastructureFailure != nil {
+      return "Validation infrastructure needs attention"
+    }
     if let failed = displayedPhases.first(where: { phaseStatus($0) == .failed }) {
       return "\(failed.displayName) needs attention"
     }
@@ -865,6 +870,11 @@ public struct ValidationTab: View {
     if let waiver = pod.validationWaiver {
       let facts = waiver.failedFactIds.isEmpty ? "" : " Failed facts: \(waiver.failedFactIds.joined(separator: ", "))."
       return ["Human override: \(waiver.reason).\(facts)", contractSummary].compactMap { $0 }.joined(separator: " ")
+    }
+    if let failure = displayedChecks?.infrastructureFailure {
+      let phase = ValidationPhase(rawValue: failure.phase)?.displayName ?? failure.phase
+      return ["\(phase) could not run because validation infrastructure failed.", contractSummary]
+        .compactMap { $0 }.joined(separator: " ")
     }
     if let failed = displayedPhases.first(where: { phaseStatus($0) == .failed }) {
       return [failed.displayName + " failed.", contractSummary].compactMap { $0 }.joined(separator: " ")
@@ -1002,7 +1012,12 @@ public struct ValidationTab: View {
     let smokeOk = !setupFailed && (displayedChecks?.smoke ?? (progress?.build.status == .passed))
 
     VStack(alignment: .leading, spacing: 12) {
-      phaseStatusRow(status: status, passLabel: "All tests passed", failLabel: "Tests failed",
+      phaseStatusRow(
+        status: status,
+        passLabel: "All tests passed",
+        failLabel: displayedChecks?.infrastructureFailure?.phase == ValidationPhase.test.rawValue
+          ? "Tests could not run — validation infrastructure failed"
+          : "Tests failed",
                      skipLabel: setupFailed
                        ? "Setup failed — tests skipped"
                        : (smokeOk ? "No test command configured" : "Build failed — tests skipped"),

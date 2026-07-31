@@ -32,6 +32,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Global tools
+RUN npm install -g pnpm@9
+
 # Create non-root user (GID 1000 may already exist in the base image)
 RUN groupadd --gid 1000 autopod 2>/dev/null || groupmod -n autopod "$(getent group 1000 | cut -d: -f1)" && \
     useradd --uid 1000 --gid autopod --shell /bin/bash --create-home autopod 2>/dev/null || usermod -l autopod -d /home/autopod -m "$(getent passwd 1000 | cut -d: -f1)"
@@ -65,8 +68,8 @@ RUN cd /opt/autopod \
     && pnpm --filter @autopod/pi-worker build \
     && cd /opt/autopod/packages/pi-worker \
     && npm install -g . \
-    && test -x /usr/local/bin/pi \
-    && test -f /usr/local/lib/node_modules/@autopod/pi-worker/dist/index.js \
+    && command -v pi \
+    && test -f "$(npm root -g)/@autopod/pi-worker/dist/index.js" \
     && rm -rf node_modules /root/.npm
 
 # Dagger CLI — pre-installed so pods with restricted/deny-all network policies

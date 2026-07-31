@@ -1,0 +1,29 @@
+# Git metadata can contain sockets (for example fsmonitor--daemon.ipc) that
+# Azure CLI cannot archive as an ACR build context.
+.git
+.git/**
+
+# Dependency and generated build state is not consumed by templates/base Dockerfiles.
+node_modules
+**/node_modules
+.turbo
+**/.turbo
+dist
+**/dist
+coverage
+**/coverage
+packages/desktop/.build
+packages/desktop/build
+packages/daemon/.autopod-data
+
+# Local databases, logs, and OS/editor state.
+*.db
+*.db-*
+*.log
+.DS_Store
+.idea
+.vscode
+
+# Local planning artifacts are never part of base images.
+investigations
+specs

@@ -1353,6 +1353,48 @@ private let minimalSessionJson = """
   #expect(pod.latestActivity == "Agent failed: Codex CLI 0.144.3 is incompatible")
 }
 
+@Test func mapperMapsValidationInfrastructureWithoutClaimingTestsFailed() throws {
+  let validation = #"""
+  {
+    "podId": "web-ui-pod",
+    "attempt": 1,
+    "timestamp": "2026-07-31T14:03:31Z",
+    "overall": "fail",
+    "duration": 1200,
+    "smoke": {
+      "status": "pass",
+      "build": { "status": "pass", "output": "", "duration": 1000 },
+      "health": { "status": "skip", "url": "", "responseCode": null, "duration": 0 },
+      "pages": []
+    },
+    "test": { "status": "skip", "duration": 100, "stdout": "", "stderr": "" },
+    "lint": { "status": "skip", "output": "", "duration": 0 },
+    "sast": { "status": "skip", "output": "", "duration": 0 },
+    "factValidation": { "status": "skip", "results": [] },
+    "infrastructureFailure": {
+      "phase": "test",
+      "code": "AZURE_SANDBOX_HTTP_ERROR",
+      "statusCode": 403,
+      "message": "Azure Sandboxes returned an empty 403",
+      "retryable": true
+    }
+  }
+  """#
+  let json = (minimalSessionJson.replacingOccurrences(
+    of: #""lastValidationResult": null"#,
+    with: #""lastValidationResult": \#(validation)"#
+  ) + " }").data(using: .utf8)!
+
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+  let checks = try #require(pod.validationChecks)
+
+  #expect(checks.tests == nil)
+  #expect(checks.infrastructureFailure?.phase == "test")
+  #expect(checks.infrastructureFailure?.statusCode == 403)
+  #expect(checks.allPassed == false)
+}
+
 @Test func mapperMapsSetupFailureAsBlockingValidationPhase() throws {
   let validation = #"""
   {

@@ -32,6 +32,22 @@ public struct ScreenshotRefResponse: Codable, Sendable, Hashable {
 
 // MARK: - Validation result (mirrors packages/shared/src/types/validation.ts)
 
+public struct ValidationInfrastructureFailureResponse: Codable, Sendable {
+  public let phase: String
+  public let code: String
+  public let statusCode: Int?
+  public let message: String
+  public let retryable: Bool
+
+  public init(phase: String, code: String, statusCode: Int?, message: String, retryable: Bool) {
+    self.phase = phase
+    self.code = code
+    self.statusCode = statusCode
+    self.message = message
+    self.retryable = retryable
+  }
+}
+
 public struct ValidationResponse: Codable, Sendable {
   public let podId: String
   public let attempt: Int
@@ -49,6 +65,8 @@ public struct ValidationResponse: Codable, Sendable {
   /// Machine-readable kind paired with reviewSkipReason. Values:
   /// "upstream-failed" | "profile-skip" | "no-changes" | "review-failed" | "review-timeout".
   public let reviewSkipKind: String?
+  /// Blocking harness/container failure, distinct from a command that exited non-zero.
+  public let infrastructureFailure: ValidationInfrastructureFailureResponse?
   public let overall: String  // "pass" | "fail"
   public let duration: Int
 }

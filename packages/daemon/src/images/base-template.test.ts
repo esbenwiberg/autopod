@@ -19,6 +19,20 @@ const playwrightBaseTemplates = [
   'Dockerfile.dotnet10-go',
 ];
 
+const workerBaseTemplates = [
+  'Dockerfile.dotnet9',
+  'Dockerfile.dotnet10',
+  'Dockerfile.dotnet10-go',
+  'Dockerfile.go124',
+  'Dockerfile.go124-pw',
+  'Dockerfile.node22',
+  'Dockerfile.node22-pw',
+  'Dockerfile.node22-pw-pg',
+  'Dockerfile.python-node',
+  'Dockerfile.python-node-pg',
+  'Dockerfile.python312',
+];
+
 const daggerBaseTemplates = [
   ['Dockerfile.dotnet9', 'DAGGER_VERSION'],
   ['Dockerfile.dotnet10', 'DAGGER_VERSION'],
@@ -35,13 +49,19 @@ async function readScript(filename: string): Promise<string> {
   return readFile(path.join(repoRoot, 'scripts', filename), 'utf8');
 }
 
-function extractInitdbWrapper(dockerfile: string): string {
-  const match = dockerfile.match(
-    /COPY <<'AUTOPOD_INITDB' \/usr\/local\/bin\/initdb\n([\s\S]+?)\nAUTOPOD_INITDB/,
-  );
-  if (!match?.[1]) throw new Error('node22-pw-pg initdb wrapper is missing');
-  return match[1];
-}
+describe('Trusted Pi worker base image prerequisites', () => {
+  it.each(workerBaseTemplates)('%s installs pinned pnpm before using it', async (filename) => {
+    const dockerfile = await readBaseTemplate(filename);
+    const installIndex = dockerfile.indexOf('npm install -g pnpm@9');
+    const workerBuildIndex = dockerfile.indexOf('pnpm --filter @autopod/pi-worker install');
+
+    expect(installIndex).toBeGreaterThanOrEqual(0);
+    expect(workerBuildIndex).toBeGreaterThan(installIndex);
+    expect(dockerfile).toContain('command -v pi');
+    expect(dockerfile).toContain('$(npm root -g)/@autopod/pi-worker/dist/index.js');
+    expect(dockerfile).not.toContain('/usr/local/lib/node_modules/@autopod/pi-worker');
+  });
+});
 
 describe('Playwright base image templates', () => {
   it.each(playwrightBaseTemplates)(
@@ -61,13 +81,16 @@ describe('Playwright base image templates', () => {
 describe('PostgreSQL base image templates', () => {
   it('configures node22-pw-pg without a volatile runtime socket directory', async () => {
     const dockerfile = await readBaseTemplate('Dockerfile.node22-pw-pg');
+    const initdbWrapper = await readBaseTemplate('node22-pw-pg-initdb.sh');
 
     expect(dockerfile).toContain('FROM node:22-slim');
     expect(dockerfile).toContain('postgresql-17');
     expect(dockerfile).toContain('/usr/share/postgresql/17/extension/pgcrypto.control');
-    expect(dockerfile).toContain("unix_socket_directories = ''");
-    expect(dockerfile).toContain("COPY <<'AUTOPOD_INITDB' /usr/local/bin/initdb");
-    expect(dockerfile).toContain('real_initdb=/usr/lib/postgresql/17/bin/initdb');
+    expect(initdbWrapper).toContain("unix_socket_directories = ''");
+    expect(dockerfile).toContain(
+      'COPY templates/base/node22-pw-pg-initdb.sh /usr/local/bin/initdb',
+    );
+    expect(initdbWrapper).toContain('real_initdb=/usr/lib/postgresql/17/bin/initdb');
     expect(dockerfile).not.toContain('/var/run/postgresql');
     expect(dockerfile).toContain('ENV PGDATA=/tmp/pgdata');
     expect(dockerfile).toContain('ENV PGHOST=127.0.0.1');
@@ -108,7 +131,7 @@ done
 mkdir -p "$pgdata"
 printf "#unix_socket_directories = '/var/run/postgresql'\\n" > "$pgdata/postgresql.conf"
 `;
-      const wrapper = extractInitdbWrapper(dockerfile).replace(
+      const wrapper = (await readBaseTemplate('node22-pw-pg-initdb.sh')).replace(
         'real_initdb=/usr/lib/postgresql/17/bin/initdb',
         `real_initdb=${JSON.stringify(fakeInitdb)}`,
       );
@@ -188,6 +211,12 @@ describe('Dagger base image templates', () => {
   )('%s keeps the cached Go SDK aligned with the CLI', async (filename, versionArgument) => {
     const dockerfile = await readBaseTemplate(filename);
 
-    expect(dockerfile).toContain(`go get dagger.io/dagger@\${${versionArgument}}`);
+    expect(dockerfile).toContain('ENV GOTOOLCHAIN=auto');
+    expect(dockerfile).toContain(
+      `GOSUMDB=sum.golang.org go get dagger.io/dagger@\${${versionArgument}}`,
+    );
+    const declarations = dockerfile.match(new RegExp(`^ARG ${versionArgument}.*$`, 'gm')) ?? [];
+    expect(declarations.length).toBeGreaterThanOrEqual(1);
+    expect(declarations.every((line) => line === `ARG ${versionArgument}=v0.20.8`)).toBe(true);
   });
 });

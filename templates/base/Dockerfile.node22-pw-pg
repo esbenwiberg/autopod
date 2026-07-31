@@ -42,49 +42,7 @@ RUN for binary in pg_ctl postgres; do \
       test -x "/usr/lib/postgresql/17/bin/$binary"; \
       ln -s "/usr/lib/postgresql/17/bin/$binary" "/usr/local/bin/$binary"; \
     done
-COPY <<'AUTOPOD_INITDB' /usr/local/bin/initdb
-#!/bin/sh
-set -eu
-
-real_initdb=/usr/lib/postgresql/17/bin/initdb
-pgdata=
-expect_pgdata=0
-
-for arg in "$@"; do
-  if [ "$expect_pgdata" -eq 1 ]; then
-    pgdata=$arg
-    expect_pgdata=0
-    continue
-  fi
-  case "$arg" in
-    -D|--pgdata) expect_pgdata=1 ;;
-    -D?*) pgdata=${arg#-D} ;;
-    --pgdata=*) pgdata=${arg#--pgdata=} ;;
-  esac
-done
-
-"$real_initdb" "$@"
-
-config=
-if [ -n "$pgdata" ] && [ -f "$pgdata/postgresql.conf" ]; then
-  config=$pgdata/postgresql.conf
-else
-  for arg in "$@"; do
-    if [ -f "$arg/postgresql.conf" ]; then
-      config=$arg/postgresql.conf
-    fi
-  done
-  if [ -z "$config" ] && [ -n "${PGDATA:-}" ] && [ -f "$PGDATA/postgresql.conf" ]; then
-    config=$PGDATA/postgresql.conf
-  fi
-fi
-
-# Preserve informational invocations such as --version, which create no cluster.
-[ -n "$config" ] || exit 0
-if ! grep -Fxq "unix_socket_directories = ''" "$config"; then
-  printf "\n# Autopod transient clusters are TCP-only.\nunix_socket_directories = ''\n" >> "$config"
-fi
-AUTOPOD_INITDB
+COPY templates/base/node22-pw-pg-initdb.sh /usr/local/bin/initdb
 RUN chmod 0755 /usr/local/bin/initdb \
     && /usr/local/bin/initdb --version
 
@@ -119,8 +77,8 @@ RUN cd /opt/autopod \
     && pnpm --filter @autopod/pi-worker build \
     && cd /opt/autopod/packages/pi-worker \
     && npm install -g . \
-    && test -x /usr/local/bin/pi \
-    && test -f /usr/local/lib/node_modules/@autopod/pi-worker/dist/index.js \
+    && command -v pi \
+    && test -f "$(npm root -g)/@autopod/pi-worker/dist/index.js" \
     && rm -rf node_modules /root/.npm
 
 # Pre-install Playwright + Chromium with all system dependencies.

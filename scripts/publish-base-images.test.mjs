@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
+  createPublicationContext,
   createPublishPlan,
   discoverBaseTemplates,
   executePublishPlan,
@@ -56,6 +57,59 @@ test('publication-plan-covers-all-base-templates', async () => {
   assert.match(output, /az acr build/);
   assert.match(output, /--platform linux\/amd64/);
   assert.match(output, /az acr manifest show-metadata/);
+});
+
+test('publication accepts real Azure queue output without JSON', async () => {
+  const [entry] = createPublishPlan({
+    registry: 'example',
+    revision: 'abc123',
+    templates: ['node22'],
+    repoRoot,
+  });
+  const digest = `sha256:${'a'.repeat(64)}`;
+  const results = await executePublishPlan([entry], {
+    repoRoot,
+    pollIntervalMs: 0,
+    runAz: (args) => {
+      if (args[1] === 'build') return 'WARNING: Queued a build with ID: run-real\n';
+      if (args[1] === 'task') {
+        return JSON.stringify({
+          runId: 'run-real',
+          status: 'Succeeded',
+          platform: { os: 'Linux', architecture: 'amd64' },
+        });
+      }
+      if (args[1] === 'manifest') return `${digest}\n`;
+      throw new Error(`unexpected az command: ${args.join(' ')}`);
+    },
+  });
+
+  assert.deepEqual(results, [{ template: 'node22', digest, platform: 'linux/amd64' }]);
+});
+
+test('publication context exclusions keep required base inputs', () => {
+  const marker = path.join(repoRoot, 'node_modules', '.autopod-base-context-test');
+  fs.writeFileSync(marker, 'must not be uploaded');
+  const context = createPublicationContext(repoRoot);
+
+  try {
+    assert.ok(!fs.existsSync(path.join(context.path, '.git')));
+    assert.ok(!fs.existsSync(path.join(context.path, 'node_modules')));
+    for (const required of [
+      'package.json',
+      'pnpm-lock.yaml',
+      'pnpm-workspace.yaml',
+      'tsconfig.base.json',
+      'packages/pi-worker/package.json',
+      'packages/pi-worker/tsconfig.json',
+      'packages/pi-worker/src',
+    ]) {
+      assert.ok(fs.existsSync(path.join(context.path, required)), `${required} must be archived`);
+    }
+  } finally {
+    context.cleanup();
+    fs.rmSync(marker, { force: true });
+  }
 });
 
 test('publication verifies completed run platform and matching manifests', async () => {

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -80,55 +81,86 @@ export async function executePublishPlan(
 ) {
   if (dryRun) return formatPublishPlan(plan);
 
-  const results = [];
-  for (const entry of plan) {
-    process.stdout.write(`\n==> building ${entry.template} (${entry.platform})\n`);
-    const queued = parseJson(runAz(entry.buildArgs, repoRoot), 'az acr build');
-    const runId = queued.runId ?? queued.name ?? idSuffix(queued.id);
-    if (typeof runId !== 'string' || !runId) {
-      throw new Error(`ACR build for ${entry.template} did not return a run ID`);
-    }
+  const publicationContext = createPublicationContext(repoRoot);
+  try {
+    const results = [];
+    for (const entry of plan) {
+      process.stdout.write(`\n==> building ${entry.template} (${entry.platform})\n`);
+      const buildArgs = [...entry.buildArgs];
+      buildArgs[buildArgs.length - 1] = publicationContext.path;
+      const queued = parseQueuedBuild(runAz(buildArgs, repoRoot));
+      const runId = queued.runId ?? queued.name ?? idSuffix(queued.id);
+      if (typeof runId !== 'string' || !runId) {
+        throw new Error(`ACR build for ${entry.template} did not return a run ID`);
+      }
 
-    const run = await waitForRun({
-      registry: entry.registry.name,
-      runId,
-      repoRoot,
-      runAz,
-      pollIntervalMs,
-      timeoutMs,
-    });
-    verifyRun(entry, run);
-
-    const digests = entry.verifyTags.map((tag) =>
-      runAz(
-        [
-          'acr',
-          'manifest',
-          'show-metadata',
-          '--registry',
-          entry.registry.name,
-          '--name',
-          tag,
-          '--query',
-          'digest',
-          '--output',
-          'tsv',
-        ],
+      const run = await waitForRun({
+        registry: entry.registry.name,
+        runId,
         repoRoot,
-      ).trim(),
-    );
-    if (digests.some((digest) => !/^sha256:[a-f0-9]{64}$/i.test(digest))) {
-      throw new Error(`ACR manifest verification returned an invalid digest for ${entry.template}`);
-    }
-    if (new Set(digests).size !== 1) {
-      throw new Error(`Immutable and latest tags do not match for ${entry.template}`);
-    }
+        runAz,
+        pollIntervalMs,
+        timeoutMs,
+      });
+      verifyRun(entry, run);
 
-    const [digest] = digests;
-    process.stdout.write(`published ${entry.latestRef}@${digest}\n`);
-    results.push({ template: entry.template, digest, platform: entry.platform });
+      const digests = entry.verifyTags.map((tag) =>
+        runAz(
+          [
+            'acr',
+            'manifest',
+            'show-metadata',
+            '--registry',
+            entry.registry.name,
+            '--name',
+            tag,
+            '--query',
+            'digest',
+            '--output',
+            'tsv',
+          ],
+          repoRoot,
+        ).trim(),
+      );
+      if (digests.some((digest) => !/^sha256:[a-f0-9]{64}$/i.test(digest))) {
+        throw new Error(
+          `ACR manifest verification returned an invalid digest for ${entry.template}`,
+        );
+      }
+      if (new Set(digests).size !== 1) {
+        throw new Error(`Immutable and latest tags do not match for ${entry.template}`);
+      }
+
+      const [digest] = digests;
+      process.stdout.write(`published ${entry.latestRef}@${digest}\n`);
+      results.push({ template: entry.template, digest, platform: entry.platform });
+    }
+    return results;
+  } finally {
+    publicationContext.cleanup();
   }
-  return results;
+}
+
+export function createPublicationContext(repoRoot = DEFAULT_REPO_ROOT) {
+  const root = fs.mkdtempSync(path.join(tmpdir(), 'autopod-base-context-'));
+  const archive = path.join(root, 'source.tar');
+  const source = path.join(root, 'source');
+  try {
+    fs.mkdirSync(source);
+    execFileSync('git', ['archive', '--format=tar', '--output', archive, 'HEAD'], {
+      cwd: repoRoot,
+      stdio: 'ignore',
+    });
+    execFileSync('tar', ['-xf', archive, '-C', source], { stdio: 'ignore' });
+    fs.rmSync(archive, { force: true });
+    return {
+      path: source,
+      cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
+    };
+  } catch (error) {
+    fs.rmSync(root, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 export function formatPublishPlan(plan) {
@@ -235,7 +267,38 @@ function verifyRun(entry, run) {
 }
 
 function defaultRunAz(args, cwd) {
-  return execFileSync('az', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+  const result = spawnSync('az', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const detail = result.stderr.trim().split('\n').at(-1);
+    throw new Error(
+      `az ${args.join(' ')} failed with exit code ${result.status}${detail ? `: ${detail}` : ''}`,
+    );
+  }
+
+  // `az acr build --no-wait --output json` returns JSON on some Azure CLI
+  // versions, while others emit only "Queued a build with ID: ..." to stderr.
+  // Preserve stdout for all other commands so warnings cannot corrupt digest or
+  // run-status parsing.
+  if (args[0] === 'acr' && args[1] === 'build' && !result.stdout.trim()) {
+    return result.stderr;
+  }
+  return result.stdout;
+}
+
+function parseQueuedBuild(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    const runId = /Queued a build with ID:\s*([A-Za-z0-9-]+)/i.exec(value)?.[1];
+    if (runId) return { runId };
+    throw new Error('az acr build did not return JSON or a queued build ID');
+  }
 }
 
 function parseJson(value, command) {

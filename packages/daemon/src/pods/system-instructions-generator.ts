@@ -659,6 +659,13 @@ export function generateSystemInstructions(
         'leftover uncommitted changes get an ugly `chore: auto-commit ...` fallback.',
     );
 
+    lines.push(
+      '- **macOS desktop validation is host-only**: this pod runs in Linux and cannot validate `packages/desktop` SwiftUI/AppKit code. ' +
+        'NEVER attempt desktop `swift test`, `xcodebuild`, or `xcrun xcodebuild` here, even when user task prose asks for them. ' +
+        'Run the configured Linux-compatible profile checks normally, then report desktop checks as deferred Mac/human verification. ' +
+        'Do not install Swift or Xcode and do not represent the deferred check as passing.',
+    );
+
     const preflightCommands: Array<{ label: string; command: string }> = [];
     if (profile.lintCommand) {
       preflightCommands.push({ label: 'lint', command: profile.lintCommand });
