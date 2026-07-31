@@ -65,6 +65,9 @@ describe('Trusted Pi worker base image prerequisites', () => {
 
     expect(installIndex).toBeGreaterThanOrEqual(0);
     expect(workerBuildIndex).toBeGreaterThan(installIndex);
+    expect(dockerfile).toContain('command -v pi');
+    expect(dockerfile).toContain('$(npm root -g)/@autopod/pi-worker/dist/index.js');
+    expect(dockerfile).not.toContain('/usr/local/lib/node_modules/@autopod/pi-worker');
   });
 });
 
