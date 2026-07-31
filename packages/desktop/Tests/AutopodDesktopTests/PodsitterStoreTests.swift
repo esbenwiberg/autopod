@@ -133,10 +133,10 @@ private actor MockPodsitterAPI: PodsitterAPIClient {
   static let catalogJSON = """
   {"manifestVersion":1,"piCompatibility":{"packageName":"pi","packageVersion":"1","source":"pinned"},
   "providers":[{"id":"openai","displayName":"OpenAI","description":"OpenAI","icon":null,
-    "implementation":{"kind":"built-in","adapterId":null,"piProviderId":null},
-    "credentialOptions":[],"modelIds":["gpt-5"],"requiredHosts":[],
-    "policy":{"lifecycle":"stable","authorization":"supported","runnable":true,"caveats":[]}}],
-  "models":[{"id":"gpt-5","providerId":"openai","displayName":"GPT-5","lifecycle":"stable"}]}
+    "implementation":{"kind":"legacy","adapterId":"openai","piProviderId":null},
+    "credentialOptions":[],"modelIds":[],"requiredHosts":[],
+    "policy":{"lifecycle":"active","authorization":"supported","runnable":true,"caveats":[]}}],
+  "models":[]}
   """
 
   static let historyJSON = """
@@ -193,6 +193,26 @@ final class PodsitterStoreTests: XCTestCase {
     XCTAssertEqual(PodsitterStore.compatibleRuntimes(provider: "copilot"), [.copilot])
     XCTAssertEqual(PodsitterStore.compatibleRuntimes(provider: "pi"), [.pi])
     XCTAssertTrue(PodsitterStore.compatibleRuntimes(provider: "unknown").isEmpty)
+  }
+
+  func testBuiltInOpenAIModelsDoNotDependOnCatalogEntries() async {
+    let store = PodsitterStore(api: MockPodsitterAPI())
+    await store.load()
+
+    XCTAssertTrue(store.compatibleModels.contains { $0.value == "gpt-5" })
+    XCTAssertEqual(store.selectedModel, "gpt-5")
+    XCTAssertTrue(store.targetIsValid)
+    XCTAssertTrue(store.canSave)
+
+    store.selectedModel = ""
+    store.selectAccount("openai-sitter")
+    XCTAssertEqual(store.selectedModel, "auto")
+    XCTAssertTrue(store.canEnable)
+
+    store.selectedModel = "gpt-private-deployment"
+    store.selectAccount("openai-sitter")
+    XCTAssertEqual(store.selectedModel, "gpt-private-deployment")
+    XCTAssertTrue(store.compatibleModels.contains { $0.value == "gpt-private-deployment" })
   }
 
   func testOperationalStatesRemainDistinct() async {

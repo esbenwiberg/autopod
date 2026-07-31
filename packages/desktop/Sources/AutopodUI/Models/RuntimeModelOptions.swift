@@ -1,9 +1,9 @@
 import AutopodClient
 import Foundation
 
-struct RuntimeModelOption: Hashable, Sendable {
-    let value: String
-    let label: String
+public struct RuntimeModelOption: Hashable, Sendable {
+    public let value: String
+    public let label: String
 }
 
 struct RuntimeModelPrice: Hashable, Sendable {
@@ -52,7 +52,7 @@ public enum ClaudeModelCanonicalizer {
     }
 }
 
-enum RuntimeModelOptions {
+public enum RuntimeModelOptions {
     private static let modelPricing: [String: RuntimeModelPrice] = [
         "claude-fable-5": RuntimeModelPrice(
             inputPer1M: 10,
@@ -180,6 +180,21 @@ enum RuntimeModelOptions {
         "gpt-5.6-terra": "GPT-5.6 Terra",
         "gpt-5.6-luna": "GPT-5.6 Luna",
     ]
+
+    public static func defaultOptions(
+        for runtime: RuntimeType,
+        currentValue: String? = nil,
+        catalog: ProviderCatalogResponse? = nil,
+        providerId: String? = nil
+    ) -> [RuntimeModelOption] {
+        options(
+            for: runtime,
+            role: .defaultModel,
+            currentValue: currentValue,
+            catalog: catalog,
+            providerId: providerId
+        )
+    }
 
     static func options(
         for runtime: RuntimeType,
