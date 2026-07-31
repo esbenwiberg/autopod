@@ -156,13 +156,13 @@ export function computeMemoryEffectivenessAnalytics(
                 p.rework_count,
                 p.pr_fix_attempts,
                 p.cost_usd,
-                q.score_v2 AS quality_score,
+                q.score_v3 AS quality_score,
                 q.validation_passed,
                 COUNT(e.id) AS escalation_count
          FROM pods p
          LEFT JOIN pod_quality_scores q
            ON q.pod_id = p.id
-          AND q.algorithm_version = 2
+          AND q.algorithm_version = 3
           AND q.inspection_availability = 'available'
          LEFT JOIN escalations e ON e.pod_id = p.id
          WHERE p.output_mode != 'workspace'

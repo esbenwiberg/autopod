@@ -6,8 +6,11 @@ function signals(overrides: Partial<QualitySignals> = {}): QualitySignals {
   return {
     podId: 'pod-1',
     inspectionAvailability: 'available',
+    inspectionUnavailableReason: null,
+    ambiguousInspectionCount: 0,
     readCount: 10,
     editCount: 2,
+    modifiedFileCount: 2,
     readEditRatio: 5,
     editsWithoutPriorRead: 0,
     userInterrupts: 0,
@@ -19,46 +22,86 @@ function signals(overrides: Partial<QualitySignals> = {}): QualitySignals {
     tokens: { input: 0, output: 0, costUsd: 0 },
     grade: 'green',
     score: null,
-    model: 'claude-opus-4-7',
+    model: 'claude-opus-5',
     ...overrides,
   };
 }
 
-describe('computeScore', () => {
-  it('separates provisional scoring from the terminal completion bonus', () => {
-    const qualitySignals = signals({
-      readEditRatio: 1,
-      editsWithoutPriorRead: 2,
-      userInterrupts: 1,
+describe('computeScore v3 process health', () => {
+  it('process-score-excludes-outcomes', () => {
+    const process = signals({
+      readEditRatio: 1.5,
+      editsWithoutPriorRead: 1,
       editChurnCount: 1,
+      prFixAttempts: 4,
+      validationPassed: false,
     });
 
-    const provisional = computeScore({
-      signals: qualitySignals,
-      stage: { kind: 'provisional' },
-    });
     const completed = computeScore({
-      signals: qualitySignals,
+      signals: process,
       stage: { kind: 'terminal', finalStatus: 'complete' },
     });
     const killed = computeScore({
-      signals: qualitySignals,
+      signals: { ...process, validationPassed: true, prFixAttempts: 0 },
       stage: { kind: 'terminal', finalStatus: 'killed' },
     });
+    const provisional = computeScore({ signals: process, stage: { kind: 'provisional' } });
 
-    expect(completed - provisional).toBe(10);
+    expect(completed).toBe(killed);
     expect(killed).toBe(provisional);
   });
 
-  it('conservatively gates unavailable, mixed Pi, and historical Pi evidence', () => {
-    const availableSignals = signals();
-
-    expect(
-      isQualityScoreEligible({
-        signals: availableSignals,
-        hasPiAttempt: false,
-        hasNonPiAttempt: true,
+  it('process-score-normalizes-task-size', () => {
+    const small = computeScore({
+      signals: signals({
+        modifiedFileCount: 5,
+        editsWithoutPriorRead: 4,
+        editChurnCount: 4,
       }),
+      stage: { kind: 'provisional' },
+    });
+    const large = computeScore({
+      signals: signals({
+        modifiedFileCount: 50,
+        editsWithoutPriorRead: 4,
+        editChurnCount: 4,
+      }),
+      stage: { kind: 'provisional' },
+    });
+
+    expect(large).toBeGreaterThan(small);
+  });
+
+  it('awards 100 to a clean observable trajectory', () => {
+    expect(computeScore({ signals: signals(), stage: { kind: 'provisional' } })).toBe(100);
+  });
+
+  it('saturates inspection discipline at a read/edit ratio of three', () => {
+    const three = computeScore({
+      signals: signals({ readEditRatio: 3 }),
+      stage: { kind: 'provisional' },
+    });
+    const twenty = computeScore({
+      signals: signals({ readEditRatio: 20 }),
+      stage: { kind: 'provisional' },
+    });
+    expect(three).toBe(twenty);
+  });
+
+  it('keeps read-only pods neutral', () => {
+    expect(
+      computeScore({
+        signals: signals({ editCount: 0, modifiedFileCount: 0, readEditRatio: 0 }),
+        stage: { kind: 'provisional' },
+      }),
+    ).toBe(100);
+  });
+});
+
+describe('isQualityScoreEligible', () => {
+  it('rejects unavailable, mixed Pi, and historical Pi evidence', () => {
+    expect(
+      isQualityScoreEligible({ signals: signals(), hasPiAttempt: false, hasNonPiAttempt: true }),
     ).toBe(true);
     expect(
       isQualityScoreEligible({
@@ -68,149 +111,15 @@ describe('computeScore', () => {
       }),
     ).toBe(false);
     expect(
-      isQualityScoreEligible({
-        signals: availableSignals,
-        hasPiAttempt: true,
-        hasNonPiAttempt: true,
-      }),
+      isQualityScoreEligible({ signals: signals(), hasPiAttempt: true, hasNonPiAttempt: true }),
     ).toBe(false);
     expect(
       isQualityScoreEligible({
-        signals: availableSignals,
+        signals: signals(),
         hasPiAttempt: true,
         hasNonPiAttempt: false,
         historical: true,
       }),
     ).toBe(false);
-  });
-
-  it('keeps unavailable inspection telemetry neutral', () => {
-    const score = computeScore({
-      signals: signals({
-        inspectionAvailability: 'unavailable',
-        readCount: null,
-        readEditRatio: null,
-        editsWithoutPriorRead: null,
-      }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-
-    expect(score).toBe(100);
-  });
-
-  it('awards a high score to a disciplined completed pod', () => {
-    const score = computeScore({
-      signals: signals({ readCount: 10, editCount: 2, readEditRatio: 5 }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-    // 30 (reading) + 20 (no blind) + 20 (no tells) + 15 (no interrupts) + 10 (complete) + 10 (no churn) = 105 → 100
-    expect(score).toBe(100);
-  });
-
-  it('subtracts the completion bonus when killed', () => {
-    const score = computeScore({
-      signals: signals({ readCount: 10, editCount: 2, readEditRatio: 5 }),
-      stage: { kind: 'terminal', finalStatus: 'killed' },
-    });
-    // 30 + 20 + 20 + 15 + 0 (killed) + 10 = 95
-    expect(score).toBe(95);
-  });
-
-  it('penalises blind edits linearly up to five', () => {
-    const score = computeScore({
-      signals: signals({ editsWithoutPriorRead: 5 }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-    // 30 + 0 (blind) + 20 + 15 + 10 + 10 = 85
-    expect(score).toBe(85);
-  });
-
-  it('saturates the reading score at ratio 5', () => {
-    const tight = computeScore({
-      signals: signals({ readCount: 25, editCount: 5, readEditRatio: 5 }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-    const absurd = computeScore({
-      signals: signals({ readCount: 1000, editCount: 5, readEditRatio: 200 }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-    expect(tight).toBe(absurd);
-  });
-
-  it('penalises interrupts', () => {
-    const score = computeScore({
-      signals: signals({ userInterrupts: 3 }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-    // 30 + 20 + 20 + 0 (interrupts) + 10 + 10 = 90
-    expect(score).toBe(90);
-  });
-
-  it('does not crash a research pod with zero edits', () => {
-    const score = computeScore({
-      signals: signals({ readCount: 20, editCount: 0, readEditRatio: 0 }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-    // reading short-circuits to full 30; 30+20+20+15+10+10 = 105 → 100
-    expect(score).toBe(100);
-  });
-
-  it('penalises edit churn', () => {
-    const score = computeScore({
-      signals: signals({ editChurnCount: 2 }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-    // 30 + 20 + 20 + 15 + 10 + 0 (churn) = 95
-    expect(score).toBe(95);
-  });
-
-  it('penalises PR fix attempts up to -20', () => {
-    const oneFixScore = computeScore({
-      signals: signals({ prFixAttempts: 1 }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-    const fourFixScore = computeScore({
-      signals: signals({ prFixAttempts: 4 }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-    // 4+ fix attempts cap at -20, same as exactly 4
-    const fiveFixScore = computeScore({
-      signals: signals({ prFixAttempts: 5 }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-    // 1 fix: 105 - 5 = 100; 4 fix: 105 - 20 = 85; 5 fix: 105 - 20 = 85 (capped)
-    expect(oneFixScore).toBe(100);
-    expect(fourFixScore).toBe(85);
-    expect(fiveFixScore).toBe(85);
-  });
-
-  it('applies validation bonus and penalty', () => {
-    // Use an imperfect pod (3 blind edits) so the ±5 is visible.
-    // blindEditScore = 20*(1-3/5) = 8; base = 30+8+20+15+10+10 = 93
-    const passed = computeScore({
-      signals: signals({ editsWithoutPriorRead: 3, validationPassed: true }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-    const failed = computeScore({
-      signals: signals({ editsWithoutPriorRead: 3, validationPassed: false }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-    const none = computeScore({
-      signals: signals({ editsWithoutPriorRead: 3, validationPassed: null }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-    expect(passed).toBe(98); // 93 + 5
-    expect(failed).toBe(88); // 93 - 5
-    expect(none).toBe(93); // 93 ± 0
-  });
-
-  it('applies tell penalties per distinct pattern', () => {
-    const score = computeScore({
-      signals: signals({ tellsCount: 5 }),
-      stage: { kind: 'terminal', finalStatus: 'complete' },
-    });
-    // tells 20 * (1 - 5/5) = 0; 30+0+0+15+10+10 = 65... wait:
-    // 30 + 20 (blind) + 0 (tells) + 15 + 10 + 10 = 85
-    expect(score).toBe(85);
   });
 });

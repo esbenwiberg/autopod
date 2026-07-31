@@ -524,7 +524,7 @@ public struct SessionCardFinal: View {
         .foregroundStyle(qualityColor(measuredScore).opacity(0.9))
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .help(
-            "Quality score \(measuredScore)/100 · "
+            "Process health \(measuredScore)/100 · "
             + "\(score.runtime) · \(score.model ?? "?") · "
             + "read/edit \(readEdit) · "
             + "blind edits \(blindEdits) · "

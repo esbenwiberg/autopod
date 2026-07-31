@@ -21,7 +21,7 @@ public struct ModelsSummary: Decodable, Equatable, Sendable {
     public let cheapestDollarPerPrModel: String?
     /// dollarPerPr for cheapestDollarPerPrModel. Null when cheapestDollarPerPrModel is null.
     public let cheapestDollarPerPr: Double?
-    /// Canonical model with highest avgQuality across eligible rows. Null when none qualify.
+    /// Canonical model with highest process health across >=20 comparable rows.
     public let bestQualityModel: String?
     /// avgQuality for bestQualityModel. Null when bestQualityModel is null.
     public let bestQuality: Double?
@@ -69,7 +69,7 @@ public struct PerModelAggregate: Decodable, Equatable, Sendable {
     /// totalCostUsd / completeCount. Null when completeCount == 0 or model == "<unknown>".
     public let dollarPerPr: Double?
     public let scoredCount: Int
-    /// Mean of pod_quality_scores.score. Null when scoredCount == 0. In [0, 100].
+    /// Mean process-health score. Legacy wire name retained for compatibility.
     public let avgQuality: Double?
     /// Mean (completed_at - created_at) seconds. Null when completeCount == 0.
     public let meanTtmSeconds: Double?

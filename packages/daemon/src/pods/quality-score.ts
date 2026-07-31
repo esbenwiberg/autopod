@@ -1,7 +1,19 @@
 import type { QualitySignals } from '@autopod/shared';
 
+export type ProcessHealthSignalInputs = Pick<
+  QualitySignals,
+  | 'editCount'
+  | 'modifiedFileCount'
+  | 'readEditRatio'
+  | 'editsWithoutPriorRead'
+  | 'tellsCount'
+  | 'userInterrupts'
+  | 'editChurnCount'
+>;
+
 export interface ScoreInputs {
   signals: QualitySignals;
+  /** Retained for call-site compatibility; v3 process health is outcome-independent. */
   stage: { kind: 'provisional' } | { kind: 'terminal'; finalStatus: 'complete' | 'killed' };
 }
 
@@ -20,58 +32,38 @@ export function isQualityScoreEligible(inputs: QualityEligibilityInputs): boolea
 }
 
 /**
- * Weighted 0..100 blend of the behavioural signals. Higher is better.
+ * Version 3 process-health score (0..100). Higher means a cleaner observable
+ * trajectory; it is deliberately not an end-result quality score.
  *
- * The weights are a starting point — tune from real data once the table has
- * a few hundred rows.
+ *   30  inspection discipline  read/edit ratio, saturated at 3
+ *   25  blind modification     rate over distinct modified existing files
+ *   20  stop/confusion tells   zero at 0, floor at 5
+ *   15  human interruptions    zero at 0, floor at 3
+ *   10  edit churn             rate over distinct modified existing files
  *
- *   30  reading behavior      readEditRatio saturates at 5
- *   20  blind-edit penalty    zero at 0 blind edits, floor at 5
- *   20  stop-phrase tells     zero at 0, floor at 5
- *   15  interrupt penalty     zero at 0, floor at 3
- *   10  complete bonus
- *   10  edit churn penalty    0 churned files = full, 2+ = zero
- *  ±5  validation outcome    +5 if passed, −5 if failed
- *  −20  PR fix attempt cap    −5 per fix cycle, max −20
+ * Completion, killed state, validation, and PR-fix outcomes do not affect this
+ * score. They remain separate outcome/reliability evidence.
  */
 export function computeScore(inputs: ScoreInputs): number {
-  const { signals, stage } = inputs;
+  return computeProcessHealthScore(inputs.signals);
+}
 
-  // A research/no-edit pod can't really be scored on read:edit — give it the
-  // full reading weight so those runs don't land at 0.
+export function computeProcessHealthScore(signals: ProcessHealthSignalInputs): number {
+  // Read-only/research pods have no mutation discipline to assess.
   const readingScore =
-    signals.inspectionAvailability === 'unavailable' || signals.editCount === 0
-      ? 30
-      : 30 * clamp01((signals.readEditRatio ?? 0) / 5);
+    signals.editCount === 0 ? 30 : 30 * clamp01((signals.readEditRatio ?? 0) / 3);
 
-  const blindEditScore =
-    signals.inspectionAvailability === 'unavailable'
-      ? 20
-      : 20 * (1 - Math.min((signals.editsWithoutPriorRead ?? 0) / 5, 1));
+  const modifiedDenominator = Math.max(signals.modifiedFileCount, 1);
+  const blindRate = (signals.editsWithoutPriorRead ?? 0) / modifiedDenominator;
+  const blindEditScore = 25 * (1 - clamp01(blindRate));
   const tellsScore = 20 * (1 - Math.min(signals.tellsCount / 5, 1));
   const interruptScore = 15 * (1 - Math.min(signals.userInterrupts / 3, 1));
-  const completeBonus = stage.kind === 'terminal' && stage.finalStatus === 'complete' ? 10 : 0;
+  const churnRate = signals.editChurnCount / modifiedDenominator;
+  const churnScore = 10 * (1 - clamp01(churnRate));
 
-  // Edit churn: 0 churned files → 10pts; 1 → 5pts; 2+ → 0pts.
-  const churnScore = signals.editChurnCount === 0 ? 10 : signals.editChurnCount === 1 ? 5 : 0;
-
-  // Validation outcome: binary ±5 on top of base score.
-  const validationBonus =
-    signals.validationPassed === true ? 5 : signals.validationPassed === false ? -5 : 0;
-
-  // PR fix penalty: -5 per fix cycle, capped at -20.
-  const fixPenalty = -Math.min(signals.prFixAttempts * 5, 20);
-
-  const total =
-    readingScore +
-    blindEditScore +
-    tellsScore +
-    interruptScore +
-    completeBonus +
-    churnScore +
-    validationBonus +
-    fixPenalty;
-  return Math.round(clamp(total, 0, 100));
+  return Math.round(
+    clamp(readingScore + blindEditScore + tellsScore + interruptScore + churnScore, 0, 100),
+  );
 }
 
 function clamp(v: number, lo: number, hi: number): number {

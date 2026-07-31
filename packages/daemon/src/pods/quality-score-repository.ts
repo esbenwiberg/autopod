@@ -26,20 +26,36 @@ export interface QualityScoreRepository {
   getQualityAnalytics(days: number): QualityAnalyticsResponse;
 }
 
-export const QUALITY_SCORE_ALGORITHM_VERSION = 2;
+export const QUALITY_SCORE_ALGORITHM_VERSION = 3;
 
 const ATTEMPT_COMPATIBILITY_PROJECTION = `
   SELECT q.pod_id,
-         CASE WHEN q.algorithm_version = 2 THEN q.score_v2 ELSE q.score END AS score,
+         CASE q.algorithm_version
+           WHEN 3 THEN q.score_v3
+           WHEN 2 THEN q.score_v2
+           ELSE q.score
+         END AS score,
          q.algorithm_version,
          q.inspection_availability,
-         CASE WHEN q.algorithm_version = 2 THEN q.read_count_v2 ELSE q.read_count END AS read_count,
+         q.inspection_unavailable_reason,
+         q.ambiguous_inspection_count,
+         CASE q.algorithm_version
+           WHEN 3 THEN q.read_count_v3
+           WHEN 2 THEN q.read_count_v2
+           ELSE q.read_count
+         END AS read_count,
          q.edit_count,
-         CASE WHEN q.algorithm_version = 2
-           THEN q.read_edit_ratio_v2 ELSE q.read_edit_ratio END AS read_edit_ratio,
-         CASE WHEN q.algorithm_version = 2
-           THEN q.edits_without_prior_read_v2
-           ELSE q.edits_without_prior_read END AS edits_without_prior_read,
+         q.modified_file_count,
+         CASE q.algorithm_version
+           WHEN 3 THEN q.read_edit_ratio_v3
+           WHEN 2 THEN q.read_edit_ratio_v2
+           ELSE q.read_edit_ratio
+         END AS read_edit_ratio,
+         CASE q.algorithm_version
+           WHEN 3 THEN q.edits_without_prior_read_v3
+           WHEN 2 THEN q.edits_without_prior_read_v2
+           ELSE q.edits_without_prior_read
+         END AS edits_without_prior_read,
          q.user_interrupts,
          q.tells_count,
          q.profile_name,
@@ -96,8 +112,12 @@ function rowToScore(row: Record<string, unknown>): PodQualityScore {
     score: available ? (row.score as number) : null,
     algorithmVersion: row.algorithm_version as number,
     inspectionAvailability,
+    inspectionUnavailableReason:
+      (row.inspection_unavailable_reason as PodQualityScore['inspectionUnavailableReason']) ?? null,
+    ambiguousInspectionCount: (row.ambiguous_inspection_count as number | undefined) ?? 0,
     readCount: available ? (row.read_count as number) : null,
     editCount: row.edit_count as number,
+    modifiedFileCount: (row.modified_file_count as number | undefined) ?? 0,
     readEditRatio: available ? (row.read_edit_ratio as number) : null,
     editsWithoutPriorRead: available ? (row.edits_without_prior_read as number) : null,
     userInterrupts: row.user_interrupts as number,
@@ -133,22 +153,26 @@ function rowToTrend(row: Record<string, unknown>): QualityTrend {
 export function createQualityScoreRepository(db: Database.Database): QualityScoreRepository {
   return {
     insert(score: PodQualityScore): void {
-      // ON CONFLICT REPLACE — re-running a pod (fix-pod flow) should overwrite
-      // its prior score, not raise a unique-constraint error.
+      // Re-recording under the same algorithm refreshes the row. A newer
+      // algorithm must never silently reinterpret a retained historical row.
       db.prepare(
         `INSERT INTO pod_quality_scores (
-          pod_id, score, score_v2, algorithm_version, inspection_availability,
-          read_count, edit_count, read_edit_ratio,
+          pod_id, score, score_v2, score_v3, algorithm_version, inspection_availability,
+          inspection_unavailable_reason, ambiguous_inspection_count,
+          read_count, edit_count, modified_file_count, read_edit_ratio,
           edits_without_prior_read, read_count_v2, read_edit_ratio_v2,
-          edits_without_prior_read_v2, user_interrupts, edit_churn_count,
+          edits_without_prior_read_v2, read_count_v3, read_edit_ratio_v3,
+          edits_without_prior_read_v3, user_interrupts, edit_churn_count,
           tells_count, pr_fix_attempts, validation_passed,
           input_tokens, output_tokens, cost_usd,
           runtime, profile_name, model, final_status, completed_at, computed_at
         ) VALUES (
-          @podId, @legacyScore, @score, @algorithmVersion, @inspectionAvailability,
-          @readCount, @editCount, @readEditRatio,
+          @podId, @legacyScore, @scoreV2, @scoreV3, @algorithmVersion, @inspectionAvailability,
+          @inspectionUnavailableReason, @ambiguousInspectionCount,
+          @readCount, @editCount, @modifiedFileCount, @readEditRatio,
           @editsWithoutPriorRead, @readCountV2, @readEditRatioV2,
-          @editsWithoutPriorReadV2, @userInterrupts, @editChurnCount,
+          @editsWithoutPriorReadV2, @readCountV3, @readEditRatioV3,
+          @editsWithoutPriorReadV3, @userInterrupts, @editChurnCount,
           @tellsCount, @prFixAttempts, @validationPassed,
           @inputTokens, @outputTokens, @costUsd,
           @runtime, @profileName, @model, @finalStatus, @completedAt, @computedAt
@@ -156,20 +180,32 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
         ON CONFLICT(pod_id) DO UPDATE SET
           score = CASE WHEN pod_quality_scores.algorithm_version = 1
             THEN pod_quality_scores.score ELSE excluded.score END,
-          score_v2 = excluded.score_v2,
+          score_v2 = CASE WHEN pod_quality_scores.algorithm_version = 2
+            THEN pod_quality_scores.score_v2 ELSE excluded.score_v2 END,
+          score_v3 = excluded.score_v3,
           algorithm_version = excluded.algorithm_version,
           inspection_availability = excluded.inspection_availability,
+          inspection_unavailable_reason = excluded.inspection_unavailable_reason,
+          ambiguous_inspection_count = excluded.ambiguous_inspection_count,
           read_count = CASE WHEN pod_quality_scores.algorithm_version = 1
             THEN pod_quality_scores.read_count ELSE excluded.read_count END,
           edit_count = excluded.edit_count,
+          modified_file_count = excluded.modified_file_count,
           read_edit_ratio = CASE WHEN pod_quality_scores.algorithm_version = 1
             THEN pod_quality_scores.read_edit_ratio ELSE excluded.read_edit_ratio END,
           edits_without_prior_read = CASE WHEN pod_quality_scores.algorithm_version = 1
             THEN pod_quality_scores.edits_without_prior_read
             ELSE excluded.edits_without_prior_read END,
-          read_count_v2 = excluded.read_count_v2,
-          read_edit_ratio_v2 = excluded.read_edit_ratio_v2,
-          edits_without_prior_read_v2 = excluded.edits_without_prior_read_v2,
+          read_count_v2 = CASE WHEN pod_quality_scores.algorithm_version = 2
+            THEN pod_quality_scores.read_count_v2 ELSE excluded.read_count_v2 END,
+          read_edit_ratio_v2 = CASE WHEN pod_quality_scores.algorithm_version = 2
+            THEN pod_quality_scores.read_edit_ratio_v2 ELSE excluded.read_edit_ratio_v2 END,
+          edits_without_prior_read_v2 = CASE WHEN pod_quality_scores.algorithm_version = 2
+            THEN pod_quality_scores.edits_without_prior_read_v2
+            ELSE excluded.edits_without_prior_read_v2 END,
+          read_count_v3 = excluded.read_count_v3,
+          read_edit_ratio_v3 = excluded.read_edit_ratio_v3,
+          edits_without_prior_read_v3 = excluded.edits_without_prior_read_v3,
           user_interrupts = excluded.user_interrupts,
           edit_churn_count = excluded.edit_churn_count,
           tells_count = excluded.tells_count,
@@ -183,20 +219,28 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
           model = excluded.model,
           final_status = excluded.final_status,
           completed_at = excluded.completed_at,
-          computed_at = excluded.computed_at`,
+          computed_at = excluded.computed_at
+        WHERE pod_quality_scores.algorithm_version = excluded.algorithm_version`,
       ).run({
         podId: score.podId,
         legacyScore: score.score ?? 0,
-        score: score.score,
+        scoreV2: score.algorithmVersion === 2 ? score.score : null,
+        scoreV3: score.algorithmVersion === 3 ? score.score : null,
         algorithmVersion: score.algorithmVersion,
         inspectionAvailability: score.inspectionAvailability,
+        inspectionUnavailableReason: score.inspectionUnavailableReason ?? null,
+        ambiguousInspectionCount: score.ambiguousInspectionCount ?? 0,
         readCount: score.readCount ?? 0,
-        readCountV2: score.readCount,
+        readCountV2: score.algorithmVersion === 2 ? score.readCount : null,
+        readCountV3: score.algorithmVersion === 3 ? score.readCount : null,
         editCount: score.editCount,
+        modifiedFileCount: score.modifiedFileCount ?? 0,
         readEditRatio: score.readEditRatio ?? 5,
-        readEditRatioV2: score.readEditRatio,
+        readEditRatioV2: score.algorithmVersion === 2 ? score.readEditRatio : null,
+        readEditRatioV3: score.algorithmVersion === 3 ? score.readEditRatio : null,
         editsWithoutPriorRead: score.editsWithoutPriorRead ?? 0,
-        editsWithoutPriorReadV2: score.editsWithoutPriorRead,
+        editsWithoutPriorReadV2: score.algorithmVersion === 2 ? score.editsWithoutPriorRead : null,
+        editsWithoutPriorReadV3: score.algorithmVersion === 3 ? score.editsWithoutPriorRead : null,
         userInterrupts: score.userInterrupts,
         editChurnCount: score.editChurnCount,
         tellsCount: score.tellsCount,
@@ -275,13 +319,9 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
         .prepare(
           `SELECT projected.* FROM (${ATTEMPT_COMPATIBILITY_PROJECTION}) projected
            JOIN pods p ON p.id = projected.pod_id
-           WHERE (
-             projected.algorithm_version <> @algorithmVersion
-             OR (
-               p.readiness_review IS NOT NULL
-               AND projected.computed_at >= json_extract(p.readiness_review, '$.computedAt')
-             )
-           )
+           WHERE projected.algorithm_version = @algorithmVersion
+             AND p.readiness_review IS NOT NULL
+             AND projected.computed_at >= json_extract(p.readiness_review, '$.computedAt')
              AND (@afterPodId IS NULL OR projected.pod_id > @afterPodId)
            ORDER BY projected.pod_id ASC
            LIMIT @limit`,
@@ -333,6 +373,19 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
       >[];
       const scores = scoreRows.map(rowToScore);
       const total = scores.length;
+      const excluded = db
+        .prepare(
+          `SELECT
+             SUM(CASE WHEN algorithm_version <> @algorithmVersion THEN 1 ELSE 0 END) AS legacy,
+             SUM(CASE WHEN algorithm_version = @algorithmVersion
+               AND inspection_availability = 'unavailable' THEN 1 ELSE 0 END) AS unavailable
+           FROM pod_quality_scores
+           WHERE completed_at >= datetime('now', '-' || @days || ' days')`,
+        )
+        .get({ days, algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION }) as {
+        legacy: number | null;
+        unavailable: number | null;
+      };
 
       // Single pass: compute summary counts, sparkline buckets, histogram, and reasons.
       const BUCKETS = [
@@ -405,7 +458,7 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
 
       let deltaValue = 0;
       let deltaDirection: 'up' | 'down' | 'flat' = 'flat';
-      if (priorAgg.cnt > 0 && priorAgg.avgScore !== null) {
+      if (total > 0 && priorAgg.cnt > 0 && priorAgg.avgScore !== null) {
         deltaValue = avgScore - priorAgg.avgScore;
         deltaDirection = deltaValue > 0 ? 'up' : deltaValue < 0 ? 'down' : 'flat';
       }
@@ -426,7 +479,10 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
 
       return {
         summary: {
+          algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
           totalPodsScored: total,
+          legacyRowsExcluded: excluded.legacy ?? 0,
+          unavailableRows: excluded.unavailable ?? 0,
           avgScore,
           redCount,
           yellowCount,

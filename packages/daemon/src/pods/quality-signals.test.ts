@@ -234,10 +234,10 @@ describe('computeQualitySignals', () => {
       INSERT INTO pod_quality_scores (
         pod_id, score, runtime, profile_name, model, final_status, completed_at,
         input_tokens, output_tokens, cost_usd, algorithm_version, inspection_availability,
-        score_v2
+        score_v3
       ) VALUES (
         ?, 90, 'claude', 'test-profile', 'stale-model', 'complete', ?, 999, 999, 99,
-        2, 'available', 90
+        3, 'available', 90
       )
     `).run(POD_ID, new Date().toISOString());
 
@@ -294,6 +294,18 @@ describe('computeQualitySignals', () => {
     expect(signals.readCount).toBe(1);
     expect(signals.editCount).toBe(1);
     expect(signals.editsWithoutPriorRead).toBe(0);
+  });
+
+  it('marks ambiguous shell inspection unavailable even without a mutation', () => {
+    podRepo.insert(basePod({ runtime: 'codex' }));
+    eventRepo.insert(toolUse('Bash', { command: 'cat src/a.ts | wc -l' }));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.inspectionAvailability).toBe('unavailable');
+    expect(signals.inspectionUnavailableReason).toBe('ambiguous_inspection');
+    expect(signals.ambiguousInspectionCount).toBe(1);
+    expect(signals.readCount).toBeNull();
   });
 
   it('counts repeated modifications to one unread file as one blind edit', () => {
@@ -410,17 +422,17 @@ describe('computeQualitySignals', () => {
     expect(signals.grade).toBe('yellow');
   });
 
-  it('adds one interrupt when the pod ended killed', () => {
+  it('does not treat killed state as a process interruption', () => {
     podRepo.insert(basePod({ status: 'killed' }));
     eventRepo.insert(readTool('src/a.ts'));
     eventRepo.insert(fileChange('src/a.ts', 'modify'));
 
     const signals = computeQualitySignals(POD_ID, deps);
 
-    expect(signals.userInterrupts).toBe(1);
+    expect(signals.userInterrupts).toBe(0);
   });
 
-  it('marks red when the read:edit ratio is below 1', () => {
+  it('low read:edit contributes to the composite process grade', () => {
     podRepo.insert(basePod());
     eventRepo.insert(readTool('src/a.ts'));
     eventRepo.insert(fileChange('src/a.ts', 'modify'));
@@ -430,7 +442,7 @@ describe('computeQualitySignals', () => {
     const signals = computeQualitySignals(POD_ID, deps);
 
     expect(signals.readEditRatio).toBeLessThan(1);
-    expect(signals.grade).toBe('red');
+    expect(signals.grade).toBe('yellow');
   });
 
   it('pulls token usage from the pod row', () => {
@@ -531,8 +543,8 @@ describe('computeQualitySignals', () => {
     expect(signals.prFixAttempts).toBe(2);
   });
 
-  describe('userInterrupts (widened)', () => {
-    it('counts each human-attention escalation type', () => {
+  describe('userInterrupts (human attention only)', () => {
+    it('excludes autonomous credential vending', () => {
       podRepo.insert(basePod());
       escalationRepo.insert(escalation('e1', 'ask_human'));
       escalationRepo.insert(escalation('e2', 'report_blocker'));
@@ -542,7 +554,7 @@ describe('computeQualitySignals', () => {
 
       const signals = computeQualitySignals(POD_ID, deps);
 
-      expect(signals.userInterrupts).toBe(5);
+      expect(signals.userInterrupts).toBe(4);
     });
 
     it('does not count ask_ai (agent-to-agent, no human in the loop)', () => {
@@ -644,7 +656,7 @@ describe('computeQualitySignals', () => {
     });
   });
 
-  describe('validationPassed (multi-run reduction)', () => {
+  describe('validationPassed (latest attempt)', () => {
     let validationRepo: ValidationRepository;
     let depsWithValidation: typeof deps & { validationRepo: ValidationRepository };
 
@@ -666,7 +678,7 @@ describe('computeQualitySignals', () => {
       expect(signals.validationPassed).toBeNull();
     });
 
-    it('returns true when at least one of multiple runs passed', () => {
+    it('returns true when the latest run passed', () => {
       podRepo.insert(basePod());
       validationRepo.insert(POD_ID, 1, validationResult('fail'));
       validationRepo.insert(POD_ID, 2, validationResult('fail'));
@@ -677,9 +689,9 @@ describe('computeQualitySignals', () => {
       expect(signals.validationPassed).toBe(true);
     });
 
-    it('returns false when all runs failed', () => {
+    it('latest-validation-is-reported', () => {
       podRepo.insert(basePod());
-      validationRepo.insert(POD_ID, 1, validationResult('fail'));
+      validationRepo.insert(POD_ID, 1, validationResult('pass'));
       validationRepo.insert(POD_ID, 2, validationResult('fail'));
 
       const signals = computeQualitySignals(POD_ID, depsWithValidation);

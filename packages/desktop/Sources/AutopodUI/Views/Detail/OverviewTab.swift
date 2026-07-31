@@ -191,9 +191,9 @@ struct OverviewTab: View {
                 snapshotTile(icon: "doc.text", label: "Diff", value: "\(diff.files) files, +\(diff.added)/-\(diff.removed)")
             }
             if let quality {
-                snapshotTile(icon: "checkmark.seal", label: "Quality", value: quality.score.map { "\($0)/100" } ?? quality.grade.capitalized)
+                snapshotTile(icon: "checkmark.seal", label: "Process", value: quality.score.map { "\($0)/100" } ?? quality.grade.capitalized)
             } else {
-                snapshotTile(icon: "checkmark.seal", label: "Quality", value: "—")
+                snapshotTile(icon: "checkmark.seal", label: "Process", value: "—")
             }
         }
     }
@@ -910,7 +910,7 @@ struct OverviewTab: View {
                               value: "\(signals.userInterrupts)",
                               label: "Interrupts")
                 } else {
-                    Text("No quality data yet")
+                    Text("No process data yet")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .padding(.top, 2)

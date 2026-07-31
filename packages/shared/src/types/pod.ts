@@ -637,27 +637,38 @@ export interface CompactPodPage {
 }
 
 /**
- * Per-pod behavioural telemetry derived from the agent event stream plus
- * escalation/pod state. Surfaces how the agent actually worked — reading
- * before editing, how often the human had to intervene, cost — so sketchy
- * sessions can be spotted at a glance.
+ * Per-pod process telemetry derived from the agent event stream plus
+ * escalation/pod state. It describes how the agent worked, not whether the
+ * resulting code is correct.
  */
 export type QualityGrade = 'green' | 'yellow' | 'red';
 export type QualityInspectionAvailability = 'available' | 'unavailable';
+export type QualityInspectionUnavailableReason =
+  | 'no_activity'
+  | 'ambiguous_inspection'
+  | 'unresolved_write'
+  | 'mixed_pi_runtime'
+  | 'historical_pi';
 
 export interface QualitySignals {
   podId: string;
   /** Whether retained events support inspection-dependent judgments. */
   inspectionAvailability: QualityInspectionAvailability;
+  /** Non-sensitive explanation when inspection evidence is unavailable. */
+  inspectionUnavailableReason: QualityInspectionUnavailableReason | null;
+  /** Inspection-looking shell commands that could not be resolved safely. */
+  ambiguousInspectionCount: number;
   /** Count of recognized repository inspections (`null` when unavailable). */
   readCount: number | null;
   /** Count of `create` + `modify` file-change events. */
   editCount: number;
+  /** Distinct existing files modified; denominator for size-normalized process penalties. */
+  modifiedFileCount: number;
   /** `readCount / max(editCount, 1)` — higher is better; `null` when unavailable. */
   readEditRatio: number | null;
   /** Distinct existing files modified before inspection; `null` when unavailable. */
   editsWithoutPriorRead: number | null;
-  /** `ask_human` escalations plus 1 if the pod ended in `killed`. */
+  /** Human-attention escalations; excludes autonomous credential vending and terminal state. */
   userInterrupts: number;
   /** Distinct files with 3+ modify events — indicates thrashing. */
   editChurnCount: number;
@@ -665,7 +676,7 @@ export interface QualitySignals {
   tellsCount: number;
   /** Number of PR fix cycles the pod went through. */
   prFixAttempts: number;
-  /** Whether smoke validation passed (null = no validation ran). */
+  /** Whether the latest validation attempt passed (null = no validation ran). */
   validationPassed: boolean | null;
   /**
    * Aggregate of agent-driven `validate_in_browser` MCP calls, parsed from
@@ -691,8 +702,8 @@ export interface QualitySignals {
 }
 
 /**
- * Persisted record written to `pod_quality_scores` on pod completion. Used
- * for fleet-wide queries (leaderboards, drift detection, model A/B).
+ * Persisted process-health record written to `pod_quality_scores` on completion.
+ * The table/field names remain for wire compatibility across score versions.
  */
 export interface PodQualityScore {
   podId: string;
@@ -700,8 +711,11 @@ export interface PodQualityScore {
   score: number | null;
   algorithmVersion: number;
   inspectionAvailability: QualityInspectionAvailability;
+  inspectionUnavailableReason: QualityInspectionUnavailableReason | null;
+  ambiguousInspectionCount: number;
   readCount: number | null;
   editCount: number;
+  modifiedFileCount: number;
   readEditRatio: number | null;
   editsWithoutPriorRead: number | null;
   userInterrupts: number;

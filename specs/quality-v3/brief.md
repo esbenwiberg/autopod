@@ -13,13 +13,24 @@ touches:
   - packages/daemon/src/pods/quality-score-repository.test.ts
   - packages/daemon/src/pods/models-aggregator.ts
   - packages/daemon/src/pods/models-aggregator.test.ts
-  - packages/daemon/src/db/migrations/132_quality_score_v3.sql
+  - packages/daemon/src/pods/memory-effectiveness-aggregator.ts
+  - packages/daemon/src/pods/memory-effectiveness-aggregator.test.ts
+  - packages/daemon/src/pods/readiness-review.ts
+  - packages/daemon/src/pods/readiness-review.test.ts
+  - packages/daemon/src/api/routes/pods.ts
+  - packages/daemon/src/db/migrations/135_quality_score_v3.sql
+  - packages/shared/src/index.ts
   - packages/shared/src/types/pod.ts
   - packages/shared/src/types/analytics.ts
   - packages/desktop/Sources/AutopodClient/Types/
   - packages/desktop/Sources/AutopodUI/Views/Analytics/
-  - packages/desktop/Sources/AutopodUI/Views/Shared/SessionQualityCard.swift
   - packages/desktop/Sources/AutopodUI/Views/Cards/PodCardFinal.swift
+  - packages/desktop/Sources/AutopodUI/Views/Detail/
+  - packages/desktop/Sources/AutopodUI/Views/Features/
+  - packages/desktop/Sources/AutopodUI/Views/Series/SeriesPipelineView.swift
+  - packages/desktop/Sources/AutopodUI/Views/Shared/SessionQualityCard.swift
+  - packages/desktop/Sources/AutopodUI/Views/Shared/StatTile.swift
+  - packages/desktop/Tests/AutopodClientTests/QualityAnalyticsResponseTests.swift
 does_not_touch:
   - packages/shared/src/types/profile.ts
   - packages/daemon/src/profiles/
@@ -101,9 +112,9 @@ payloads in the reason.
 ### 2. Process-score v3 is outcome-independent and size-normalized
 
 Persist v3 values in new shadow columns, leaving legacy and v2 columns intact.
-Before creating the migration, re-check the highest migration prefix and do not
-reuse a colliding number; `132_quality_score_v3.sql` is correct only while 131 is
-still the highest prefix.
+The rebased implementation uses `135_quality_score_v3.sql`, immediately after
+Podsitter migrations 131–133 and token-telemetry repair migration 134. Do not
+reuse an existing migration prefix.
 
 The v3 score remains a 0–100 diagnostic, but contains only process dimensions:
 

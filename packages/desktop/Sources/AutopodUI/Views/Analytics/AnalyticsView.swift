@@ -78,7 +78,10 @@ public struct AnalyticsView: View {
     }
 
     private var avgQualityValue: String {
-        if let q = qualityData { return "\(Int(q.summary.avgScore.rounded()))" }
+        if let q = qualityData {
+            guard q.summary.totalPodsScored > 0 else { return "—" }
+            return "\(Int(q.summary.avgScore.rounded()))"
+        }
         if qualityLoadError != nil { return "Error" }
         if scoresLoadError != nil { return "Error" }
         let measured = scores.compactMap(\.score)
@@ -88,7 +91,7 @@ public struct AnalyticsView: View {
     }
 
     private var qualityCardSparkline: [Double]? {
-        qualityData.map { $0.sparkline.map(\.avgScore) }
+        qualityData.map { $0.sparkline.filter { $0.podCount > 0 }.map(\.avgScore) }
     }
 
     private var qualityCardDelta: AnalyticsCardDelta? {
@@ -102,7 +105,7 @@ public struct AnalyticsView: View {
 
     private var qualityCardSubline: String? {
         guard let q = qualityData, q.summary.redCount > 0 else { return nil }
-        return "\(q.summary.redCount) red pod\(q.summary.redCount == 1 ? "" : "s")"
+        return "\(q.summary.redCount) low-process pod\(q.summary.redCount == 1 ? "" : "s")"
     }
 
     private var costCardValue: String {
@@ -242,7 +245,7 @@ public struct AnalyticsView: View {
             line1Parts.append("$\(String(format: "%.2f", dpr))/PR")
         }
         if let best = m.summary.bestQualityModel {
-            line1Parts.append("best: \(best)")
+            line1Parts.append("best process: \(best)")
         }
         let line1 = line1Parts.joined(separator: " \u{00B7} ")
         if !line1.isEmpty { lines.append(line1) }
@@ -264,7 +267,7 @@ public struct AnalyticsView: View {
         guard let m = memoryData else { return nil }
         if let quality = m.impact.qualityDelta {
             return AnalyticsCardDelta(
-                value: String(format: "%+.0fpp quality", quality),
+                value: String(format: "%+.0fpp process", quality),
                 direction: quality > 0 ? .up : quality < 0 ? .down : .flat
             )
         }
@@ -308,7 +311,7 @@ public struct AnalyticsView: View {
                         onClick: { selectedCard = selectedCard == .cost ? nil : .cost }
                     )
                     AnalyticsCard(
-                        title: "Quality",
+                        title: "Process Health",
                         value: avgQualityValue,
                         sparkline: qualityCardSparkline,
                         delta: qualityCardDelta,
@@ -323,7 +326,7 @@ public struct AnalyticsView: View {
                         onClick: { selectedCard = selectedCard == .status ? nil : .status }
                     )
                     AnalyticsCard(
-                        title: "Reliability",
+                        title: "Outcome Quality",
                         value: reliabilityCardValue,
                         sparkline: reliabilityDataIfPopulated.map { $0.firstPassRateSparkline.map(\.rate) },
                         delta: reliabilityDataIfPopulated.map {
@@ -332,6 +335,7 @@ public struct AnalyticsView: View {
                                 direction: AnalyticsCardDelta.Direction($0.firstPassRateDelta.direction)
                             )
                         },
+                        subline: reliabilityDataIfPopulated == nil ? nil : "first-pass completion",
                         isSelected: selectedCard == .reliability,
                         onClick: { selectedCard = selectedCard == .reliability ? nil : .reliability }
                     )

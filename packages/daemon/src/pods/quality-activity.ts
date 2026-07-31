@@ -16,7 +16,17 @@ export type QualityActivity =
       callId?: string;
     };
 
+export interface QualityActivityEvidence {
+  activities: QualityActivity[];
+  /** An inspection-looking shell command existed, but its paths were not provable. */
+  ambiguousInspection: boolean;
+}
+
 const WORKSPACE_ROOT = '/workspace';
+const INSPECTION_AFTER_CONTROL = /(?:^|&&|\|\||[;|])\s*(?:cat|head|tail|sed|rg|grep)(?:\s|$)/;
+const BASH_LOGIN_INSPECTION =
+  /^(?:\/bin\/)?bash\s+-lc\s+['"]?\s*(?:cat|head|tail|sed|rg|grep)(?:\s|$)/;
+const EXPANDING_DOUBLE_QUOTE_META = new Set(['$', '`', '\n', '\r']);
 const SHELL_META = new Set([
   ';',
   '|',
@@ -40,22 +50,34 @@ const SHELL_META = new Set([
 ]);
 
 export function normalizeQualityActivity(event: AgentEvent): QualityActivity[] {
-  if (event.type === 'file_change') return normalizeFileChange(event);
-  if (event.type !== 'tool_use') return [];
+  return normalizeQualityActivityEvidence(event).activities;
+}
+
+export function normalizeQualityActivityEvidence(event: AgentEvent): QualityActivityEvidence {
+  if (event.type === 'file_change') {
+    return { activities: normalizeFileChange(event), ambiguousInspection: false };
+  }
+  if (event.type !== 'tool_use') return { activities: [], ambiguousInspection: false };
 
   const callId = stringInput(event, 'call_id') ?? stringInput(event, 'callId');
   const native = normalizeNativeTool(event, callId);
-  if (native.length > 0 || event.tool !== 'Bash') return native;
+  if (native.length > 0 || event.tool !== 'Bash') {
+    return { activities: native, ambiguousInspection: false };
+  }
 
   const command = stringInput(event, 'command');
-  if (!command) return [];
+  if (!command) return { activities: [], ambiguousInspection: false };
   const cwd = stringInput(event, 'cwd') ?? WORKSPACE_ROOT;
-  return inspectedShellPaths(command, cwd).map((path) => ({
-    kind: 'inspection',
-    path,
-    source: 'shell-command',
-    ...(callId && { callId }),
-  }));
+  const shellEvidence = inspectedShellEvidence(command, cwd);
+  return {
+    activities: shellEvidence.paths.map((path) => ({
+      kind: 'inspection',
+      path,
+      source: 'shell-command',
+      ...(callId && { callId }),
+    })),
+    ambiguousInspection: shellEvidence.ambiguous,
+  };
 }
 
 export function canonicalRepositoryPath(
@@ -123,9 +145,34 @@ function normalizeNativeTool(
   ];
 }
 
-function inspectedShellPaths(command: string, cwd: string): string[] {
+function inspectedShellEvidence(
+  command: string,
+  cwd: string,
+): { paths: string[]; ambiguous: boolean } {
+  const compound = splitReadOnlyCompound(command);
+  if (compound !== null) {
+    if (compound.length === 0) return { paths: [], ambiguous: looksLikeInspection(command) };
+    const parts = compound.map((part) => inspectedShellEvidence(part, cwd));
+    if (parts.some((part) => part.ambiguous || part.paths.length === 0)) {
+      return { paths: [], ambiguous: looksLikeInspection(command) };
+    }
+    return {
+      paths: [...new Set(parts.flatMap((part) => part.paths))],
+      ambiguous: false,
+    };
+  }
+
   const tokens = tokenizeShell(command);
-  if (!tokens || tokens.length < 2) return [];
+  if (!tokens) {
+    return { paths: [], ambiguous: looksLikeInspection(command) };
+  }
+
+  const unwrapped = unwrapBashLoginCommand(tokens);
+  if (unwrapped !== null) return inspectedShellEvidence(unwrapped, cwd);
+  if (tokens.length < 2) {
+    return { paths: [], ambiguous: looksLikeInspection(command) };
+  }
+
   const [program, ...args] = tokens;
   let operands: string[];
 
@@ -144,15 +191,81 @@ function inspectedShellPaths(command: string, cwd: string): string[] {
       operands = sedOperands(args);
       break;
     case 'rg':
+    case 'grep':
       operands = ripgrepOperands(args);
       break;
     default:
-      return [];
+      return { paths: [], ambiguous: looksLikeInspection(command) };
   }
 
-  if (operands.length === 0 || operands.some((operand) => operand === '-')) return [];
+  if (operands.length === 0 || operands.some((operand) => operand === '-')) {
+    return { paths: [], ambiguous: looksLikeInspection(command) };
+  }
   const paths = operands.map((operand) => canonicalRepositoryPath(operand, cwd));
-  return paths.every((path): path is string => path !== null) ? [...new Set(paths)] : [];
+  return paths.every((path): path is string => path !== null)
+    ? { paths: [...new Set(paths)], ambiguous: false }
+    : { paths: [], ambiguous: true };
+}
+
+function unwrapBashLoginCommand(tokens: string[]): string | null {
+  const [program, flag, nested, ...rest] = tokens;
+  if ((program !== '/bin/bash' && program !== 'bash') || flag !== '-lc') return null;
+  if (!nested || rest.length > 0) return null;
+  return nested;
+}
+
+function looksLikeInspection(command: string): boolean {
+  return INSPECTION_AFTER_CONTROL.test(command) || BASH_LOGIN_INSPECTION.test(command);
+}
+
+/** Split only simple `&&`/`;` sequences; every segment must later prove read-only. */
+function splitReadOnlyCompound(command: string): string[] | null {
+  const segments: string[] = [];
+  let segment = '';
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  let foundSeparator = false;
+
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index];
+    if (!character) return [];
+    if (escaped) {
+      segment += character;
+      escaped = false;
+      continue;
+    }
+    if (character === '\\' && quote !== "'") {
+      segment += character;
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      segment += character;
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      segment += character;
+      continue;
+    }
+    const pair = command.slice(index, index + 2);
+    if (character === ';' || pair === '&&') {
+      if (!segment.trim()) return [];
+      segments.push(segment.trim());
+      segment = '';
+      foundSeparator = true;
+      if (pair === '&&') index += 1;
+      continue;
+    }
+    if ('|&<>`(){}\n\r'.includes(character) || character === '$') return [];
+    segment += character;
+  }
+
+  if (!foundSeparator) return null;
+  if (escaped || quote || !segment.trim()) return [];
+  segments.push(segment.trim());
+  return segments;
 }
 
 function tokenizeShell(command: string): string[] | null {
@@ -177,7 +290,7 @@ function tokenizeShell(command: string): string[] | null {
     if (quote) {
       if (character === quote) quote = null;
       else {
-        if (quote === '"' && SHELL_META.has(character)) return null;
+        if (quote === '"' && EXPANDING_DOUBLE_QUOTE_META.has(character)) return null;
         token += character;
       }
       active = true;
@@ -250,11 +363,43 @@ function sedOperands(args: string[]): string[] {
 }
 
 function ripgrepOperands(args: string[]): string[] {
-  if (args.length < 2) return [];
-  const pattern = args[0];
-  if (!pattern || pattern.startsWith('-')) return [];
-  const paths = args.slice(1);
-  if (paths.some((arg) => arg.startsWith('-') || arg === '.')) return [];
+  const safeFlags = new Set([
+    '-n',
+    '--line-number',
+    '-H',
+    '--with-filename',
+    '-S',
+    '--smart-case',
+    '-i',
+    '--ignore-case',
+    '-s',
+    '--case-sensitive',
+    '-F',
+    '--fixed-strings',
+    '-w',
+    '--word-regexp',
+    '-x',
+    '--line-regexp',
+    '--hidden',
+    '--no-ignore',
+    '-l',
+    '--files-with-matches',
+    '-c',
+    '--count',
+  ]);
+  let index = 0;
+  while (index < args.length && args[index]?.startsWith('-')) {
+    if (args[index] === '--') {
+      index += 1;
+      break;
+    }
+    if (!safeFlags.has(args[index] ?? '')) return [];
+    index += 1;
+  }
+  const pattern = args[index];
+  if (!pattern) return [];
+  const paths = args.slice(index + 1);
+  if (paths.length === 0 || paths.some((arg) => arg.startsWith('-') || arg === '.')) return [];
   return paths;
 }
 

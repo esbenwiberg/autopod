@@ -27,7 +27,7 @@ export interface QualityScoreRecorderDeps {
   escalationRepo: EscalationRepository;
   qualityScoreRepo: QualityScoreRepository;
   logger: Logger;
-  /** Optional — when wired, validation outcome is included in the score. */
+  /** Optional — validation outcome is persisted as separate outcome context. */
   validationRepo?: ValidationRepository;
   providerAttemptRepo?: ProviderAttemptRepository;
   /** Recompute dependent snapshots after the score row is durably persisted. */
@@ -36,7 +36,7 @@ export interface QualityScoreRecorderDeps {
 
 /**
  * Listens for `pod.completed` and writes one `pod_quality_scores` row per
- * terminal pod. Failures are logged and swallowed — a bad score must never
+ * terminal pod. Failures are logged and swallowed — telemetry must never
  * block the pod lifecycle. Idempotent via `INSERT … ON CONFLICT` in the repo.
  */
 export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): QualityScoreRecorder {
@@ -57,7 +57,7 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
     try {
       return onScorePersisted?.(podId) !== false;
     } catch (err) {
-      logger.warn({ err, podId }, 'Failed to refresh readiness after quality score persistence');
+      logger.warn({ err, podId }, 'Failed to refresh readiness after process-health persistence');
       return false;
     }
   }
@@ -66,7 +66,6 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
     podId: string,
     finalStatus: 'complete' | 'killed',
     completedAt: string,
-    options: { historical?: boolean } = {},
   ): boolean {
     const pod = podRepo.getOrThrow(podId);
     const signals = computeQualitySignals(podId, {
@@ -92,17 +91,23 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
       signals,
       hasPiAttempt,
       hasNonPiAttempt,
-      historical: options.historical,
     });
     const inspectionAvailability = available ? 'available' : 'unavailable';
+    const inspectionUnavailableReason = available
+      ? null
+      : (signals.inspectionUnavailableReason ??
+        (hasPiAttempt && hasNonPiAttempt ? 'mixed_pi_runtime' : 'no_activity'));
 
     qualityScoreRepo.insert({
       podId,
       score: available ? computedScore : null,
       algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
       inspectionAvailability,
+      inspectionUnavailableReason,
+      ambiguousInspectionCount: signals.ambiguousInspectionCount,
       readCount: available ? signals.readCount : null,
       editCount: signals.editCount,
+      modifiedFileCount: signals.modifiedFileCount,
       readEditRatio: available ? signals.readEditRatio : null,
       editsWithoutPriorRead: available ? signals.editsWithoutPriorRead : null,
       userInterrupts: signals.userInterrupts,
@@ -135,7 +140,7 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
         tellsCount: signals.tellsCount,
         editChurnCount: signals.editChurnCount,
       },
-      'Recorded pod quality score',
+      'Recorded pod process-health score',
     );
     return readinessRefreshed;
   }
@@ -144,7 +149,7 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
     try {
       persistScore(event.podId, event.finalStatus, event.timestamp);
     } catch (err) {
-      logger.warn({ err, podId: event.podId }, 'Failed to record pod quality score');
+      logger.warn({ err, podId: event.podId }, 'Failed to record pod process-health score');
     }
   }
 
@@ -159,20 +164,17 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
       let upgraded = 0;
       for (const score of stale) {
         try {
-          const readinessRefreshed =
-            score.algorithmVersion === QUALITY_SCORE_ALGORITHM_VERSION
-              ? refreshAfterPersistence(score.podId)
-              : persistScore(score.podId, score.finalStatus, score.completedAt, {
-                  historical: true,
-                });
-          if (readinessRefreshed) upgraded += 1;
+          // V3 deliberately never reinterprets retained v1/v2 traces. Repository
+          // selection should return current rows only; keep this guard fail-closed.
+          if (score.algorithmVersion !== QUALITY_SCORE_ALGORITHM_VERSION) continue;
+          if (refreshAfterPersistence(score.podId)) upgraded += 1;
         } catch (err) {
-          logger.warn({ err, podId: score.podId }, 'Failed to upgrade pod quality score');
+          logger.warn({ err, podId: score.podId }, 'Failed to refresh process-health readiness');
         }
       }
       logger.info(
         { upgraded, selected: stale.length, limit },
-        'Quality score history upgrade completed',
+        'Process-health readiness refresh completed',
       );
       return {
         selected: stale.length,
@@ -184,7 +186,7 @@ export function createQualityScoreRecorder(deps: QualityScoreRecorderDeps): Qual
     start(): void {
       const unsub = eventBus.subscribe(handleEvent);
       unsubscribers.push(unsub);
-      logger.info('Quality score recorder started');
+      logger.info('Process-health recorder started');
     },
 
     stop(): void {

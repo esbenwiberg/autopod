@@ -196,7 +196,7 @@ private struct CardSparklineView: View {
 
 #Preview("AnalyticsCard — selected, sparkline + delta") {
     AnalyticsCard(
-        title: "Quality Score",
+        title: "Process Health",
         value: "82",
         sparkline: [1, 3, 2, 5, 4, 6],
         delta: AnalyticsCardDelta(value: "+18%", direction: .up),

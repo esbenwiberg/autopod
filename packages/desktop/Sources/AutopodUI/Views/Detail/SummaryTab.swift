@@ -27,7 +27,7 @@ struct WorkTab: View {
             case .plan: "Plan"
             case .summary: "Summary"
             case .deviations: "Deviations"
-            case .quality: "Quality"
+            case .quality: "Process"
             case .cost: "Cost"
             }
         }
@@ -149,7 +149,7 @@ struct WorkTab: View {
             if let signals = quality {
                 SessionQualityCard(signals: signals)
             } else {
-                emptyWorkSection("No quality signals yet", icon: "gauge.with.dots.needle.67percent")
+                emptyWorkSection("No process signals yet", icon: "gauge.with.dots.needle.67percent")
             }
         case .cost:
             if let cost {

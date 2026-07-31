@@ -28,7 +28,7 @@ enum QualityBand: String, CaseIterable {
 
 // MARK: - QualityDrillView
 
-/// Right-pane drill for the Quality card — band chips, days picker, histogram,
+/// Right-pane drill for Process Health — band chips, days picker, histogram,
 /// reason tiles, and a filterable sortable scores table.
 struct QualityDrillView: View {
     /// Called with the current `days` value when the view loads or days changes.
@@ -60,7 +60,7 @@ struct QualityDrillView: View {
                 headerRow
 
                 if let err = loadError {
-                    Text("Couldn't load quality data: \(err)")
+                    Text("Couldn't load process-health data: \(err)")
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
@@ -71,7 +71,7 @@ struct QualityDrillView: View {
                         .padding(.top, 40)
                 } else if let r = response {
                     if r.summary.totalPodsScored == 0 {
-                        Text("No completed pods scored in the last \(days) days.")
+                        Text("No comparable process-health v\(r.summary.algorithmVersion ?? 3) scores in the last \(days) days (\(r.summary.legacyRowsExcluded ?? 0) legacy excluded, \(r.summary.unavailableRows ?? 0) unavailable).")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .center)
@@ -98,7 +98,7 @@ struct QualityDrillView: View {
             HStack(spacing: 8) {
                 Image(systemName: "speedometer")
                     .foregroundStyle(.secondary)
-                Text("Quality Analytics")
+                Text("Process Health Analytics")
                     .font(.title3.weight(.semibold))
                 Spacer()
                 if isLoading { ProgressView().controlSize(.small) }
@@ -107,6 +107,11 @@ struct QualityDrillView: View {
                 bandChips
                 Spacer()
                 daysPicker
+            }
+            if let summary = response?.summary {
+                Text("Process v\(summary.algorithmVersion ?? 3) · \(summary.totalPodsScored) comparable · \(summary.legacyRowsExcluded ?? 0) legacy excluded · \(summary.unavailableRows ?? 0) unavailable")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
     }
@@ -206,14 +211,12 @@ struct QualityDrillView: View {
                 prFixAttempts: 0, editChurn: 0, tells: 0))
             : reasonCounts(for: filtered)
         return VStack(alignment: .leading, spacing: 8) {
-            Text("Quality Signals")
+            Text("Process Signals")
                 .font(.subheadline.weight(.semibold))
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 10)], spacing: 10) {
                 reasonTile(label: "Low read/edit", count: reasons.lowReadEditRatio, total: total)
                 reasonTile(label: "Edits w/o read", count: reasons.editsWithoutPriorRead, total: total)
                 reasonTile(label: "User interrupts", count: reasons.userInterrupts, total: total)
-                reasonTile(label: "Validation failed", count: reasons.validationFailed, total: total)
-                reasonTile(label: "PR fix attempts", count: reasons.prFixAttempts, total: total)
                 reasonTile(label: "Edit churn", count: reasons.editChurn, total: total)
                 reasonTile(label: "Tells", count: reasons.tells, total: total)
             }

@@ -83,7 +83,7 @@ struct MemoryAnalyticsDrillView: View {
             Text("Repeated-Pain Deltas")
                 .font(.headline)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 138), spacing: 10)], spacing: 10) {
-                deltaMetric("quality", impact.qualityDelta, suffix: "pp", lowerIsBetter: false)
+                deltaMetric("process health", impact.qualityDelta, suffix: "pp", lowerIsBetter: false)
                 deltaMetric("validation", impact.validationFailureDelta, suffix: "", lowerIsBetter: true)
                 deltaMetric("fix attempts", impact.fixAttemptDelta, suffix: "", lowerIsBetter: true)
                 deltaMetric("escalations", impact.escalationDelta, suffix: "", lowerIsBetter: true)

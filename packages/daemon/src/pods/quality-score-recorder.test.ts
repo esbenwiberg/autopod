@@ -125,9 +125,8 @@ describe('QualityScoreRecorder', () => {
     expect(persisted?.costUsd).toBe(0.05);
     expect(persisted?.algorithmVersion).toBe(QUALITY_SCORE_ALGORITHM_VERSION);
     expect(persisted?.inspectionAvailability).toBe('available');
-    // 3 reads / 1 edit = 3.0 ratio, no blind edits, no interrupts, completed
-    // reading 30*clamp(3/5)=18, blind 20, tells 20, interrupts 15, complete 10, churn 10 = 93
-    expect(persisted?.score).toBe(93);
+    // V3 saturates inspection discipline at 3 and excludes completion outcomes.
+    expect(persisted?.score).toBe(100);
   });
 
   it('refreshes readiness after the pod.completed score row is persisted', () => {
@@ -160,7 +159,7 @@ describe('QualityScoreRecorder', () => {
     expect(observedScores).toEqual([100]);
   });
 
-  it('records killed pods with the completion bonus missing', () => {
+  it('records killed pods without changing process health', () => {
     ctx.podRepo.insert(basePod({ status: 'killed' }));
     ctx.eventRepo.insert(readEvent('src/a.ts'));
 
@@ -185,9 +184,7 @@ describe('QualityScoreRecorder', () => {
 
     const persisted = ctx.qualityScoreRepo.get(POD_ID);
     expect(persisted?.finalStatus).toBe('killed');
-    // zero edits → reading 30 (short-circuit); 1 kill → userInterrupts=1 → interruptScore=15*(1-1/3)=10
-    // 30 + 20 (blind) + 20 (tells) + 10 (interrupts) + 0 (killed) + 10 (churn) = 90
-    expect(persisted?.score).toBe(90);
+    expect(persisted?.score).toBe(100);
   });
 
   it('records unavailable inspection telemetry without exposing invented counters', () => {
@@ -324,63 +321,39 @@ describe('QualityScoreRecorder', () => {
     );
   });
 
-  it('rebuilds retained Codex history once with normalized inspection evidence', () => {
+  it('v3-preserves-v2-history', () => {
     ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5' }));
-    ctx.eventRepo.insert(codexInspectionEvent('cat src/a.ts'));
-    ctx.eventRepo.insert(editEvent('src/a.ts'));
     ctx.db
       .prepare(`
-      INSERT INTO pod_quality_scores (
-        pod_id, score, runtime, profile_name, model, final_status, completed_at
-      ) VALUES (?, 40, 'codex', 'test-profile', 'gpt-5', 'complete', ?)
-    `)
+        INSERT INTO pod_quality_scores (
+          pod_id, score, score_v2, algorithm_version, inspection_availability,
+          read_count_v2, read_edit_ratio_v2, edits_without_prior_read_v2,
+          runtime, profile_name, model, final_status, completed_at
+        ) VALUES (?, 40, 72, 2, 'available', 8, 2, 1,
+          'codex', 'test-profile', 'gpt-5', 'complete', ?)
+      `)
       .run(POD_ID, '2026-04-23T12:00:00.000Z');
 
-    expect(ctx.recorder.upgradeHistory()).toEqual({
-      selected: 1,
-      upgraded: 1,
-      lastPodId: POD_ID,
-    });
-    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
-      expect.objectContaining({
-        algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
-        inspectionAvailability: 'available',
-        readCount: 1,
-        editCount: 1,
-        readEditRatio: 1,
-        editsWithoutPriorRead: 0,
-      }),
-    );
-    expect(
-      (
-        ctx.db.prepare('SELECT score FROM pod_quality_scores WHERE pod_id = ?').get(POD_ID) as {
-          score: number;
-        }
-      ).score,
-    ).toBe(40);
     expect(ctx.recorder.upgradeHistory()).toEqual({
       selected: 0,
       upgraded: 0,
       lastPodId: null,
     });
-  });
-
-  it('refreshes readiness after upgrading a stale history row', () => {
-    const refresh = vi.fn<(podId: string) => void>();
-    ctx = setup(refresh);
-    ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5' }));
-    ctx.eventRepo.insert(codexInspectionEvent('cat src/a.ts'));
-    ctx.db
-      .prepare(`
-        INSERT INTO pod_quality_scores (
-          pod_id, score, runtime, profile_name, model, final_status, completed_at
-        ) VALUES (?, 40, 'codex', 'test-profile', 'gpt-5', 'complete', ?)
-      `)
-      .run(POD_ID, '2026-04-23T12:00:00.000Z');
-
-    expect(ctx.recorder.upgradeHistory().upgraded).toBe(1);
-    expect(refresh).toHaveBeenCalledOnce();
-    expect(refresh).toHaveBeenCalledWith(POD_ID);
+    expect(
+      ctx.db
+        .prepare(`
+      SELECT algorithm_version, score_v2, read_count_v2,
+             read_edit_ratio_v2, edits_without_prior_read_v2
+      FROM pod_quality_scores WHERE pod_id = ?
+    `)
+        .get(POD_ID),
+    ).toEqual({
+      algorithm_version: 2,
+      score_v2: 72,
+      read_count_v2: 8,
+      read_edit_ratio_v2: 2,
+      edits_without_prior_read_v2: 1,
+    });
   });
 
   it('refreshes a stale readiness snapshot for a current quality row without recomputing it', () => {
@@ -420,120 +393,6 @@ describe('QualityScoreRecorder', () => {
     });
     expect(refresh).toHaveBeenCalledWith(POD_ID);
     expect(ctx.qualityScoreRepo.get(POD_ID)?.computedAt).toBe(originalComputedAt);
-  });
-
-  it('marks discarded historical Pi activity unavailable and upgrades in bounded batches', () => {
-    ctx.podRepo.insert(basePod({ runtime: 'pi', model: 'pi-model' }));
-    ctx.db
-      .prepare(`
-      INSERT INTO pod_quality_scores (
-        pod_id, score, runtime, profile_name, model, final_status, completed_at
-      ) VALUES (?, 10, 'pi', 'test-profile', 'pi-model', 'complete', ?)
-    `)
-      .run(POD_ID, '2026-04-23T12:00:00.000Z');
-
-    expect(ctx.recorder.upgradeHistory(1)).toEqual({
-      selected: 1,
-      upgraded: 1,
-      lastPodId: POD_ID,
-    });
-    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
-      expect.objectContaining({
-        algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
-        inspectionAvailability: 'unavailable',
-        score: null,
-        readCount: null,
-        readEditRatio: null,
-        editsWithoutPriorRead: null,
-      }),
-    );
-    expect(ctx.recorder.upgradeHistory(1)).toEqual({
-      selected: 0,
-      upgraded: 0,
-      lastPodId: null,
-    });
-  });
-
-  it('keeps historical Pi unavailable when only partial normalized activity survives', () => {
-    ctx.podRepo.insert(basePod({ runtime: 'pi', model: 'pi-model' }));
-    ctx.eventRepo.insert({
-      type: 'pod.agent_activity',
-      timestamp: new Date().toISOString(),
-      podId: POD_ID,
-      event: {
-        type: 'tool_use',
-        timestamp: new Date().toISOString(),
-        tool: 'read',
-        input: { path: 'src/a.ts' },
-      },
-    });
-    ctx.eventRepo.insert(editEvent('src/a.ts'));
-    ctx.db
-      .prepare(`
-        INSERT INTO pod_quality_scores (
-          pod_id, score, runtime, profile_name, model, final_status, completed_at
-        ) VALUES (?, 75, 'pi', 'test-profile', 'pi-model', 'complete', ?)
-      `)
-      .run(POD_ID, '2026-04-23T12:00:00.000Z');
-
-    expect(ctx.recorder.upgradeHistory().upgraded).toBe(1);
-    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
-      expect.objectContaining({
-        algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
-        inspectionAvailability: 'unavailable',
-        score: null,
-        readCount: null,
-        readEditRatio: null,
-        editsWithoutPriorRead: null,
-      }),
-    );
-  });
-
-  it('keeps mixed historical Pi to Codex attempts unavailable', () => {
-    ctx.podRepo.insert(basePod({ runtime: 'codex', model: 'gpt-5' }));
-    ctx.eventRepo.insert(codexInspectionEvent('cat src/a.ts'));
-    ctx.eventRepo.insert(editEvent('src/a.ts'));
-    ctx.providerAttemptRepo.open({
-      podId: POD_ID,
-      provider: 'openrouter',
-      providerAccountId: null,
-      runtime: 'pi',
-      model: 'pi-model',
-      profileReference: `pod:${POD_ID}@profile-snapshot#abcdef1`,
-      profileSnapshot: {},
-    });
-    ctx.providerAttemptRepo.close(POD_ID, {
-      outcome: 'quota_exhausted',
-      inputTokens: 1,
-      outputTokens: 1,
-      costUsd: 0,
-    });
-    ctx.providerAttemptRepo.open({
-      podId: POD_ID,
-      provider: 'openai',
-      providerAccountId: null,
-      runtime: 'codex',
-      model: 'gpt-5',
-      profileReference: `pod:${POD_ID}@profile-snapshot#abcdef1`,
-      profileSnapshot: {},
-    });
-    ctx.db
-      .prepare(`
-        INSERT INTO pod_quality_scores (
-          pod_id, score, runtime, profile_name, model, final_status, completed_at
-        ) VALUES (?, 40, 'codex', 'test-profile', 'gpt-5', 'complete', ?)
-      `)
-      .run(POD_ID, '2026-04-23T12:00:00.000Z');
-
-    expect(ctx.recorder.upgradeHistory().upgraded).toBe(1);
-    expect(ctx.qualityScoreRepo.get(POD_ID)).toEqual(
-      expect.objectContaining({
-        algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
-        inspectionAvailability: 'unavailable',
-        score: null,
-        readCount: null,
-      }),
-    );
   });
 
   it('unsubscribes on stop()', () => {

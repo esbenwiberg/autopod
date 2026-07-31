@@ -485,7 +485,7 @@ private struct SeriesSummaryView: View {
             )
             metricTile(
                 icon: "checkmark.seal",
-                label: "Quality",
+                label: "Process",
                 value: averageQuality.map { String(format: "%.0f", $0) } ?? "n/a",
                 detail: "\(scoredRows.count)/\(pods.count) scored",
                 color: qualityColor(averageQuality.map { Int($0.rounded()) })
@@ -592,7 +592,7 @@ private struct SeriesSummaryView: View {
             tableText("Status", width: 100, color: .secondary)
             tableText("Cost", width: 78, color: .secondary, align: .trailing)
             tableText("Tokens", width: 110, color: .secondary, align: .trailing)
-            tableText("Quality", width: 70, color: .secondary, align: .trailing)
+            tableText("Process", width: 70, color: .secondary, align: .trailing)
             tableText("Validation", width: 86, color: .secondary)
             tableText("Diff", width: 110, color: .secondary, align: .trailing)
         }
@@ -689,7 +689,7 @@ private struct SeriesSummaryView: View {
 
     private var qualityBreakdown: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Quality Signals")
+            Text("Process Signals")
                 .font(.subheadline.weight(.semibold))
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 150), spacing: 10)],

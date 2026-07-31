@@ -4,7 +4,7 @@ import SwiftUI
 
 // MARK: - ReliabilityDrillView
 
-/// Right-pane drill for the Reliability card — fetches reliability analytics and renders
+/// Right-pane drill for Outcome Quality — fetches reliability analytics and renders
 /// four sections: funnel, stage failures, profile heatmap, and summary callout.
 struct ReliabilityDrillView: View {
     let loadReliability: (() async throws -> ReliabilityAnalyticsResponse)?
@@ -20,14 +20,14 @@ struct ReliabilityDrillView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.shield")
                         .foregroundStyle(.secondary)
-                    Text("Reliability Analytics")
+                    Text("Outcome Quality Analytics")
                         .font(.title3.weight(.semibold))
                     Spacer()
                     if isLoading { ProgressView().controlSize(.small) }
                 }
 
                 if let err = loadError {
-                    InlineErrorBanner(message: "Couldn't load reliability data: \(err)")
+                    InlineErrorBanner(message: "Couldn't load outcome-quality data: \(err)")
                 }
 
                 if let d = data {

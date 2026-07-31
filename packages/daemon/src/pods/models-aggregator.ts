@@ -24,7 +24,8 @@ import type Database from 'better-sqlite3';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const MIN_COHORT_FOR_HEADLINE = 5;
+const MIN_COST_COHORT_FOR_HEADLINE = 5;
+const MIN_PROCESS_COHORT_FOR_HEADLINE = 20;
 const MAX_UNKNOWN_MODELS = 10;
 const HUMAN_ATTENTION_SQL = `('ask_human','report_blocker','validation_override','action_approval')`;
 
@@ -252,7 +253,7 @@ function cheapestDollarPerPrForWindow(
 
   let cheapest: number | null = null;
   for (const [, data] of acc) {
-    if (data.completeCount < MIN_COHORT_FOR_HEADLINE) continue;
+    if (data.completeCount < MIN_COST_COHORT_FOR_HEADLINE) continue;
     const dpr = data.totalCost / data.completeCount;
     if (cheapest === null || dpr < cheapest) cheapest = dpr;
   }
@@ -430,7 +431,7 @@ export function computeModelsAnalytics(
   // Uses subquery to avoid SQLITE_MAX_VARIABLE_NUMBER on large cohorts.
   const qualityRows = db
     .prepare(
-      `SELECT q.pod_id AS podId, q.score_v2 AS score,
+      `SELECT q.pod_id AS podId, q.score_v3 AS score,
               COALESCE((
                 SELECT a.model FROM provider_attempts a
                 WHERE a.pod_id = p.id ORDER BY a.ordinal DESC LIMIT 1
@@ -441,9 +442,17 @@ export function computeModelsAnalytics(
               ), p.runtime) AS runtime
        FROM pod_quality_scores q
        JOIN pods p ON p.id = q.pod_id
-       WHERE q.algorithm_version = 2
+       WHERE q.algorithm_version = 3
          AND q.inspection_availability = 'available'
-         AND q.pod_id IN (SELECT id FROM pods WHERE ${terminalCohortWhere()})`,
+         AND q.pod_id IN (SELECT id FROM pods WHERE ${terminalCohortWhere()})
+         AND NOT EXISTS (
+           SELECT 1
+           FROM provider_attempts mixed
+           WHERE mixed.pod_id = q.pod_id
+           GROUP BY mixed.pod_id
+           HAVING COUNT(DISTINCT mixed.model) > 1
+              OR COUNT(DISTINCT mixed.runtime) > 1
+         )`,
     )
     .all({ days }) as QualityRow[];
 
@@ -575,7 +584,7 @@ export function computeModelsAnalytics(
   let currentCheapest: { model: string; dpr: number } | null = null;
   for (const [model, accum] of byModelAccum) {
     if (model === '<unknown>') continue;
-    if (accum.completeCount < MIN_COHORT_FOR_HEADLINE) continue;
+    if (accum.completeCount < MIN_COST_COHORT_FOR_HEADLINE) continue;
     const dpr = accum.totalCostUsd / accum.completeCount;
     if (currentCheapest === null || dpr < currentCheapest.dpr) currentCheapest = { model, dpr };
   }
@@ -680,7 +689,7 @@ export function computeModelsAnalytics(
   let bestQuality: number | null = null;
   for (const row of byModel) {
     if (row.model === '<unknown>') continue;
-    if (row.scoredCount < MIN_COHORT_FOR_HEADLINE) continue;
+    if (row.scoredCount < MIN_PROCESS_COHORT_FOR_HEADLINE) continue;
     if (row.avgQuality === null) continue;
     if (bestQuality === null || row.avgQuality > bestQuality) {
       bestQuality = row.avgQuality;

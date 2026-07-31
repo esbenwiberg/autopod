@@ -81,7 +81,7 @@ public struct AnalyticsRightPaneView: View {
                     Image(systemName: "speedometer")
                         .font(.system(size: 48, weight: .thin))
                         .foregroundStyle(.tertiary)
-                    Text("Quality analytics not available")
+                    Text("Process-health analytics not available")
                         .foregroundStyle(.secondary)
                     Spacer()
                 }

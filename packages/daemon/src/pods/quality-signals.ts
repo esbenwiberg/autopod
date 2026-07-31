@@ -11,8 +11,12 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
-import { type QualityActivity, normalizeQualityActivity } from './quality-activity.js';
-import type { QualityScoreRepository } from './quality-score-repository.js';
+import { type QualityActivity, normalizeQualityActivityEvidence } from './quality-activity.js';
+import {
+  QUALITY_SCORE_ALGORITHM_VERSION,
+  type QualityScoreRepository,
+} from './quality-score-repository.js';
+import { computeProcessHealthScore } from './quality-score.js';
 import type { ValidationRepository } from './validation-repository.js';
 
 export interface QualitySignalsDeps {
@@ -56,7 +60,6 @@ function detectTells(texts: string[]): number {
 const HUMAN_INTERRUPT_TYPES: EscalationType[] = [
   'ask_human',
   'report_blocker',
-  'request_credential',
   'action_approval',
   'validation_override',
 ];
@@ -71,13 +74,16 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
   let browserCalls = 0;
   let browserTotalChecks = 0;
   let browserPassedChecks = 0;
+  let ambiguousInspectionCount = 0;
 
   for (const stored of events) {
     if (stored.type !== 'pod.agent_activity') continue;
     const activity = stored.payload as AgentActivityEvent;
     const event = activity.event;
 
-    qualityActivities.push(...normalizeQualityActivity(event));
+    const activityEvidence = normalizeQualityActivityEvidence(event);
+    qualityActivities.push(...activityEvidence.activities);
+    if (activityEvidence.ambiguousInspection) ambiguousInspectionCount += 1;
 
     if (event.type === 'tool_use') {
       const tool = event as AgentToolUseEvent;
@@ -140,12 +146,16 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
     if (count >= 3) editChurnCount += 1;
   }
 
-  const escalationCount = deps.escalationRepo.countBySessionAndTypes(podId, HUMAN_INTERRUPT_TYPES);
-  const killed = pod.status === 'killed' ? 1 : 0;
-  const userInterrupts = escalationCount + killed;
-
-  const inspectionAvailability =
-    correlatedActivities.length > 0 && inspectionEvidenceComplete ? 'available' : 'unavailable';
+  const userInterrupts = deps.escalationRepo.countBySessionAndTypes(podId, HUMAN_INTERRUPT_TYPES);
+  const modifiedFileCount = fileModifyCounts.size;
+  const inspectionUnavailableReason = !inspectionEvidenceComplete
+    ? 'unresolved_write'
+    : ambiguousInspectionCount > 0
+      ? 'ambiguous_inspection'
+      : correlatedActivities.length === 0
+        ? 'no_activity'
+        : null;
+  const inspectionAvailability = inspectionUnavailableReason === null ? 'available' : 'unavailable';
   const availableReadCount = inspectionAvailability === 'available' ? readCount : null;
   const readEditRatio =
     inspectionAvailability === 'available'
@@ -158,13 +168,11 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
   const tellsCount = detectTells(textSamples);
   const prFixAttempts = pod.prFixAttempts ?? 0;
 
-  // Validation outcome: pass if any attempt's overall result is 'pass'.
+  // Compatibility/display field: report the latest attempt, never "any pass ever".
   let validationPassed: boolean | null = null;
   if (deps.validationRepo) {
-    const validations = deps.validationRepo.getForSession(podId);
-    if (validations.length > 0) {
-      validationPassed = validations.some((v) => v.result.overall === 'pass');
-    }
+    const latestValidation = deps.validationRepo.getForSession(podId).at(-1);
+    if (latestValidation) validationPassed = latestValidation.result.overall === 'pass';
   }
 
   // Surface the persisted score + model string when available. Both are null
@@ -185,8 +193,11 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
   return {
     podId,
     inspectionAvailability,
+    inspectionUnavailableReason,
+    ambiguousInspectionCount,
     readCount: availableReadCount,
     editCount,
+    modifiedFileCount,
     readEditRatio,
     editsWithoutPriorRead,
     userInterrupts,
@@ -200,14 +211,20 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
       output: hasAttempts ? (attemptTotals?.outputTokens ?? 0) : pod.outputTokens,
       costUsd: hasAttempts ? (attemptTotals?.costUsd ?? 0) : pod.costUsd,
     },
-    grade: grade({
-      inspectionAvailability,
-      readEditRatio,
-      editCount,
-      editsWithoutPriorRead,
-      userInterrupts,
-    }),
-    score: persisted?.score ?? null,
+    grade: grade(
+      inspectionAvailability === 'available'
+        ? computeProcessHealthScore({
+            readEditRatio,
+            editCount,
+            modifiedFileCount,
+            editsWithoutPriorRead,
+            userInterrupts,
+            editChurnCount,
+            tellsCount,
+          })
+        : null,
+    ),
+    score: persisted?.algorithmVersion === QUALITY_SCORE_ALGORITHM_VERSION ? persisted.score : null,
     model: persisted?.model ?? pod.model,
   };
 }
@@ -240,23 +257,9 @@ function toolBaseName(toolName: string): string {
   return separator === -1 ? toolName : toolName.slice(separator + 2);
 }
 
-function grade(s: {
-  inspectionAvailability: 'available' | 'unavailable';
-  readEditRatio: number | null;
-  editCount: number;
-  editsWithoutPriorRead: number | null;
-  userInterrupts: number;
-}): QualityGrade {
-  // A pod that never edited anything isn't sketchy — it's either queued,
-  // validating, or a read-only research run. Don't punish it.
-  if (s.editCount === 0) return 'green';
-  if (s.inspectionAvailability === 'unavailable') {
-    return s.userInterrupts <= 1 ? 'green' : 'yellow';
-  }
-  if (s.readEditRatio === null || s.editsWithoutPriorRead === null) return 'green';
-  if (s.readEditRatio < 1 || s.editsWithoutPriorRead >= 3) return 'red';
-  if (s.readEditRatio >= 3 && s.editsWithoutPriorRead === 0 && s.userInterrupts <= 1) {
-    return 'green';
-  }
-  return 'yellow';
+function grade(score: number | null): QualityGrade {
+  if (score === null) return 'green';
+  if (score >= 80) return 'green';
+  if (score >= 60) return 'yellow';
+  return 'red';
 }

@@ -40,7 +40,7 @@ const SOURCE_REFS = {
     { kind: 'evidence', label: 'Action audit', id: 'actions' },
   ] satisfies ReadinessSourceRef[],
   event: [{ kind: 'event', label: 'Pod events' }] satisfies ReadinessSourceRef[],
-  quality: [{ kind: 'quality', label: 'Quality score' }] satisfies ReadinessSourceRef[],
+  quality: [{ kind: 'quality', label: 'Process health' }] satisfies ReadinessSourceRef[],
   pr: [{ kind: 'pr', label: 'Pull request' }] satisfies ReadinessSourceRef[],
   work: [{ kind: 'work', label: 'Worktree' }] satisfies ReadinessSourceRef[],
 };
@@ -530,18 +530,23 @@ function qualityArea(inputs: ReadinessInputs): {
 } {
   const score = inputs.qualityScore;
   if (score === null || score === undefined) {
-    return area('quality', 'not_available', 'No eligible quality score is available yet.', []);
+    return area(
+      'quality',
+      'not_available',
+      'No eligible process-health score is available yet.',
+      [],
+    );
   }
   const provisional = inputs.qualityScoreStage === 'provisional';
-  const label = provisional ? 'Provisional quality score' : 'Quality score';
+  const label = provisional ? 'Provisional process health' : 'Process health';
   if (score < 60) {
     return area('quality', 'needs_review', `${label} is low (${score}).`, [
       finding({
         id: 'quality-low-score',
         area: 'quality',
         severity: 'warning',
-        title: 'Low quality score',
-        detail: `The ${provisional ? 'provisional' : 'persisted'} pod quality score is ${score}.`,
+        title: 'Low process health',
+        detail: `The ${provisional ? 'provisional' : 'persisted'} pod process-health score is ${score}.`,
         sourceRefs: SOURCE_REFS.quality,
       }),
     ]);

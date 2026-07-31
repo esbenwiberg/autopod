@@ -66,10 +66,10 @@ function insertQuality(db: Database.Database, podId: string, score: number): voi
   db.prepare(`
     INSERT INTO pod_quality_scores
       (pod_id, score, runtime, profile_name, model, final_status, completed_at,
-       algorithm_version, inspection_availability, score_v2)
+       algorithm_version, inspection_availability, score_v3)
     VALUES
       (@podId, @score, 'claude', 'test-profile', 'claude-opus-4-7', 'complete', @completedAt,
-       2, 'available', @score)
+       3, 'available', @score)
   `).run({ podId, score, completedAt: new Date().toISOString() });
 }
 
@@ -201,9 +201,9 @@ describe('computeModelsAnalytics', () => {
     expect(row.scoredCount).toBe(5);
     expect(row.avgQuality).toBeCloseTo(80);
 
-    // Summary
+    // Cost has enough completed pods, but five process scores are below the v3 headline floor.
     expect(result.summary.cheapestDollarPerPrModel).toBe('claude-opus-4-7');
-    expect(result.summary.bestQualityModel).toBe('claude-opus-4-7');
+    expect(result.summary.bestQualityModel).toBeNull();
     expect(result.summary.mostUsedModel).toBe('claude-opus-4-7');
   });
 
@@ -277,14 +277,14 @@ describe('computeModelsAnalytics', () => {
 
   // ── MIN_COHORT_FOR_HEADLINE — best quality ───────────────────────────────
 
-  it('MIN_COHORT_FOR_HEADLINE — haiku has 2 scored pods (< 5), excluded from best-quality headline', () => {
-    // Haiku: 2 scored pods at quality 95
-    for (let i = 0; i < 2; i++) {
+  it('process headline requires 20 comparable scored pods', () => {
+    // Haiku: 19 scored pods at process health 95 — still below the headline floor.
+    for (let i = 0; i < 19; i++) {
       const pid = insertPod(db, { model: 'claude-haiku-4-5' });
       insertQuality(db, pid, 95);
     }
-    // Opus: 50 scored pods at quality 80
-    for (let i = 0; i < 50; i++) {
+    // Opus: exactly 20 comparable scores at process health 80.
+    for (let i = 0; i < 20; i++) {
       const pid = insertPod(db, { model: 'claude-opus-4-7' });
       insertQuality(db, pid, 80);
     }
@@ -670,6 +670,69 @@ describe('computeModelsAnalytics', () => {
     expect(
       result.byRuntime.reduce((total, runtime) => total + runtime.totalCostUsd, 0),
     ).toBeCloseTo(2);
+  });
+
+  it('model-process-attribution-is-homogeneous', () => {
+    const homogeneous = insertPod(db, {
+      id: 'homogeneous-process',
+      runtime: 'codex',
+      model: 'gpt-5',
+    });
+    insertQuality(db, homogeneous, 90);
+    insertProviderAttempt(db, {
+      podId: homogeneous,
+      ordinal: 1,
+      runtime: 'codex',
+      model: 'gpt-5',
+      outcome: 'quota_exhausted',
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsd: 0,
+    });
+    insertProviderAttempt(db, {
+      podId: homogeneous,
+      ordinal: 2,
+      runtime: 'codex',
+      model: 'gpt-5',
+      outcome: 'completed',
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsd: 0,
+    });
+
+    const mixed = insertPod(db, {
+      id: 'mixed-process',
+      runtime: 'codex',
+      model: 'gpt-5',
+    });
+    insertQuality(db, mixed, 10);
+    insertProviderAttempt(db, {
+      podId: mixed,
+      ordinal: 1,
+      runtime: 'claude',
+      model: 'claude-opus-5',
+      outcome: 'quota_exhausted',
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsd: 0,
+    });
+    insertProviderAttempt(db, {
+      podId: mixed,
+      ordinal: 2,
+      runtime: 'codex',
+      model: 'gpt-5',
+      outcome: 'completed',
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsd: 0,
+    });
+
+    const result = computeModelsAnalytics(db, 30);
+    expect(result.byModel.find((row) => row.model === 'gpt-5')).toMatchObject({
+      scoredCount: 1,
+      avgQuality: 90,
+    });
+    expect(result.summary.bestQualityModel).toBeNull();
   });
 
   it('uses corrected provider attempt telemetry without double-counting base values', () => {

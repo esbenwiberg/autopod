@@ -7,8 +7,11 @@ public struct PodQualityScore: Codable, Equatable, Sendable, Identifiable {
   public let score: Int?
   public let algorithmVersion: Int
   public let inspectionAvailability: QualityInspectionAvailability
+  public let inspectionUnavailableReason: String?
+  public let ambiguousInspectionCount: Int?
   public let readCount: Int?
   public let editCount: Int
+  public let modifiedFileCount: Int?
   public let readEditRatio: Double?
   public let editsWithoutPriorRead: Int?
   public let userInterrupts: Int

@@ -57,11 +57,11 @@ function insertQuality(
       pod_id, score, read_count, edit_count, read_edit_ratio, edits_without_prior_read,
       user_interrupts, edit_churn_count, tells_count, pr_fix_attempts, validation_passed,
       input_tokens, output_tokens, cost_usd, runtime, profile_name, model, final_status,
-      completed_at, computed_at, algorithm_version, inspection_availability, score_v2
+      completed_at, computed_at, algorithm_version, inspection_availability, score_v3
     ) VALUES (
       @podId, @score, 1, 1, 1, 0, 0, 0, 0, @prFixAttempts, @validationPassed,
       100, 50, 0.1, 'claude', 'test-profile', 'claude-opus-4-7', 'complete',
-      datetime('now'), datetime('now'), 2, 'available', @score
+      datetime('now'), datetime('now'), 3, 'available', @score
     )`,
   ).run({
     podId: opts.podId,

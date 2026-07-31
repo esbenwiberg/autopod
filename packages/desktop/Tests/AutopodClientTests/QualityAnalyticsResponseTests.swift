@@ -9,7 +9,10 @@ import Testing
     let response = try JSONDecoder().decode(QualityAnalyticsResponse.self, from: json)
 
     // summary
+    #expect(response.summary.algorithmVersion == 3)
     #expect(response.summary.totalPodsScored == 45)
+    #expect(response.summary.legacyRowsExcluded == 12)
+    #expect(response.summary.unavailableRows == 4)
     #expect(abs(response.summary.avgScore - 72.4) < 0.001)
     #expect(response.summary.redCount == 5)
     #expect(response.summary.yellowCount == 20)
@@ -251,7 +254,10 @@ private func makeFullFixtureJSON(days: Int) -> String {
     return """
     {
       "summary": {
+        "algorithmVersion": 3,
         "totalPodsScored": 45,
+        "legacyRowsExcluded": 12,
+        "unavailableRows": 4,
         "avgScore": 72.4,
         "redCount": 5,
         "yellowCount": 20,

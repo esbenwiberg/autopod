@@ -1,6 +1,6 @@
 import Foundation
 
-/// Whether retained activity can support inspection-dependent quality judgments.
+/// Whether retained activity can support inspection-dependent process judgments.
 public enum QualityInspectionAvailability: String, Codable, Equatable, Sendable {
   case available
   case unavailable
@@ -11,8 +11,11 @@ public enum QualityInspectionAvailability: String, Codable, Equatable, Sendable 
 public struct PodQualitySignals: Codable, Sendable {
   public let podId: String
   public let inspectionAvailability: QualityInspectionAvailability
+  public let inspectionUnavailableReason: String?
+  public let ambiguousInspectionCount: Int?
   public let readCount: Int?
   public let editCount: Int
+  public let modifiedFileCount: Int?
   public let readEditRatio: Double?
   public let editsWithoutPriorRead: Int?
   public let userInterrupts: Int
@@ -29,7 +32,7 @@ public struct PodQualitySignals: Codable, Sendable {
   public let browserChecks: PodBrowserChecks?
   public let tokens: PodQualityTokens
   public let grade: String  // "green" | "yellow" | "red"
-  /// Persisted numeric score (0..100); nil for pods that haven't reached terminal state.
+  /// Persisted process-health score (0..100); nil when unavailable or non-terminal.
   public let score: Int?
   /// Exact model string at completion, e.g. "claude-opus-4-7".
   public let model: String?

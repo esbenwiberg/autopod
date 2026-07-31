@@ -676,7 +676,7 @@ export function podRoutes(
     };
   });
 
-  // GET /pods/:podId/quality — behavioural quality signals computed on the fly
+  // GET /pods/:podId/quality — process-health signals (legacy route name)
   app.get('/pods/:podId/quality', async (request, reply) => {
     const { podId } = request.params as { podId: string };
     // Verify pod exists (throws 404 if not found)
@@ -701,7 +701,7 @@ export function podRoutes(
     return computePodCostBreakdown(podManager.getSession(podId));
   });
 
-  // GET /pods/quality/trends — daily average quality scores (trailing N days)
+  // GET /pods/quality/trends — daily average process-health scores (legacy route name)
   app.get('/pods/quality/trends', async (request, reply) => {
     if (!qualityScoreRepo) {
       reply.status(503);
@@ -726,7 +726,7 @@ export function podRoutes(
     return aggregateCost({ podRepo }, { days });
   });
 
-  // GET /pods/analytics/quality — trailing-window quality composite analytics
+  // GET /pods/analytics/quality — trailing-window process-health analytics
   app.get('/pods/analytics/quality', async (request, reply) => {
     if (!qualityScoreRepo) {
       reply.status(503);
@@ -740,7 +740,7 @@ export function podRoutes(
     return qualityScoreRepo.getQualityAnalytics(days);
   });
 
-  // GET /pods/analytics/reliability — trailing-window reliability funnel + stage failure analytics
+  // GET /pods/analytics/reliability — outcome quality: first pass, funnel, and stage failures
   app.get('/pods/analytics/reliability', async (request, reply) => {
     if (!db) {
       reply.status(503);
@@ -842,7 +842,7 @@ export function podRoutes(
     return computeMemoryEffectivenessAnalytics(db, days);
   });
 
-  // GET /pods/scores — persisted quality-score leaderboard / history
+  // GET /pods/scores — persisted process-health leaderboard / history
   app.get('/pods/scores', async (request, reply) => {
     if (!qualityScoreRepo) {
       reply.status(503);

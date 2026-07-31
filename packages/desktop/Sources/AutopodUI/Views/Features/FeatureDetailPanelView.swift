@@ -603,10 +603,10 @@ public struct FeatureDetailPanelView: View {
     private var analyticsDashboardDiagram: some View {
         let dashboards: [(String, String, Color)] = [
             ("dollarsign.circle", "Cost", .green),
-            ("chart.line.downtrend.xyaxis", "Reliability", .blue),
+            ("chart.line.downtrend.xyaxis", "Outcome Quality", .blue),
             ("speedometer", "Throughput", .cyan),
             ("exclamationmark.shield", "Safety", .red),
-            ("star.circle", "Quality", .purple),
+            ("star.circle", "Process Health", .purple),
             ("bubble.left.and.exclamationmark.bubble.right", "Escalations", .orange),
             ("cpu", "Models", .cyan),
         ]

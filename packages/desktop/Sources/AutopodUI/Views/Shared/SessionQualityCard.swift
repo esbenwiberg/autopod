@@ -1,9 +1,9 @@
 import AutopodClient
 import SwiftUI
 
-/// Compact card surfacing per-pod behavioural telemetry — Read/Edit ratio,
+/// Compact card surfacing per-pod process telemetry — Read/Edit ratio,
 /// blind edits, interrupts, churn, tells, PR fixes, smoke tests, browser checks,
-/// cost. Single source of truth for "how is this agent doing?" across `SummaryTab`
+/// cost. This describes observable process health, not end-result correctness, across `SummaryTab`
 /// and the Series-tab slide-in panel.
 public struct SessionQualityCard: View {
     public let signals: PodQualitySignals
@@ -16,21 +16,32 @@ public struct SessionQualityCard: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(qualityColor(signals.grade))
+                    .fill(signals.inspectionAvailability == .available ? qualityColor(signals.grade) : .gray)
                     .frame(width: 10, height: 10)
-                Text("Session Quality")
+                Text("Session Process Health")
                     .font(.system(.headline).weight(.semibold))
                     .lineLimit(1)
                 Spacer()
                 if signals.inspectionAvailability == .available,
                    let score = signals.score {
                     qualityScoreBadge(score)
+                } else if signals.inspectionAvailability == .unavailable {
+                    Text("Unavailable")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .help(signals.inspectionUnavailableReason ?? "Inspection telemetry unavailable")
                 }
-                Text(signals.grade.capitalized)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if signals.inspectionAvailability == .available {
+                    Text(signals.grade.capitalized)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
+
+            Text("The score uses inspection discipline, blind-modification rate, tells, human interruptions, and churn. Validation and PR fixes are shown only as outcome context.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
 
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 156), spacing: 12)],
@@ -40,15 +51,15 @@ public struct SessionQualityCard: View {
                 let readEdit = signals.readEditTile
                 StatTile(icon: "doc.text.magnifyingglass", label: "Read / Edit",
                          value: readEdit.value, health: readEdit.health, hint: readEdit.hint,
-                         description: "Ratio of Read calls to Edit/Write/MultiEdit calls. ≥1.5 = green, ≥0.8 = yellow, <0.8 = red. Agents that read before they edit tend to make more accurate, context-aware changes.")
+                         description: "Ratio of recognized repository inspections to file mutations. ≥3 = green, ≥1 = yellow, <1 = red. Unresolved inspection-looking shell activity makes this signal unavailable rather than falsely low.")
                 let blind = signals.blindEditsTile
                 StatTile(icon: "eye.slash", label: "Blind Edits",
                          value: blind.value, health: blind.health, hint: blind.hint,
-                         description: "Files modified without a prior Read call this session. Editing without reading first often leads to incorrect changes or missed context. 0 = green, ≤2 = yellow, >2 = red.")
+                         description: "Existing files modified without a prior recognized inspection. Health uses the rate over distinct modified existing files so larger tasks are not penalized by absolute count.")
                 let interrupts = signals.interruptsTile
                 StatTile(icon: "hand.raised", label: "Interrupts",
                          value: interrupts.value, health: interrupts.health, hint: interrupts.hint,
-                         description: "Human-required escalations: ask_human, report_blocker, request_credential, action_approval, or validation_override. Counts +1 if the pod was killed early. 0 = green, ≤2 = yellow, >2 = red.")
+                         description: "Human-attention escalations: ask_human, report_blocker, action_approval, or validation_override. Autonomous credential vending and killed state are excluded. 0 = green, ≤2 = yellow, >2 = red.")
                 let inputTokens = signals.inputTokensTile
                 StatTile(icon: "arrow.up.circle", label: "Tokens In",
                          value: inputTokens.value, health: inputTokens.health, hint: inputTokens.hint,
@@ -64,7 +75,7 @@ public struct SessionQualityCard: View {
                 let churn = signals.churnTile
                 StatTile(icon: "arrow.triangle.2.circlepath", label: "Churn",
                          value: churn.value, health: churn.health, hint: churn.hint,
-                         description: "Files modified 3+ times in one session. High churn suggests the agent is struggling with a problem or repeatedly reverting its own work. ≤2 = green, ≤5 = yellow, >5 = red.")
+                         description: "Existing files modified 3+ times in one session. Health uses the churn rate over distinct modified files, avoiding an absolute task-size penalty.")
                 let tells = signals.tellsTile
                 StatTile(icon: "quote.bubble", label: "Tells",
                          value: tells.value, health: tells.health, hint: tells.hint,
@@ -143,6 +154,6 @@ public struct SessionQualityCard: View {
             Capsule()
                 .stroke(color.opacity(0.42), lineWidth: 1)
         )
-        .help("Quality score \(score)/100")
+        .help("Process health \(score)/100")
     }
 }

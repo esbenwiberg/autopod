@@ -14,7 +14,10 @@ public struct QualityAnalyticsResponse: Decodable, Equatable, Sendable {
 // MARK: - Summary
 
 public struct QualityAnalyticsSummary: Decodable, Equatable, Sendable {
+    public let algorithmVersion: Int?
     public let totalPodsScored: Int
+    public let legacyRowsExcluded: Int?
+    public let unavailableRows: Int?
     public let avgScore: Double
     /// Pods with score < 60.
     public let redCount: Int

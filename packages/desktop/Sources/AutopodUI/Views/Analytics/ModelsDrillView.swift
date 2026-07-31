@@ -5,7 +5,7 @@ import SwiftUI
 // MARK: - ModelsDrillView
 
 /// Right-pane drill for the Models card — three sections:
-/// 1. Leaderboard table (model · pods · success rate · $/PR · avg quality · mean TTM · escalation rate)
+/// 1. Leaderboard table (model · pods · success rate · $/PR · process health · mean TTM · escalation rate)
 /// 2. Side-by-side comparison panel (5 horizontal bar charts)
 /// 3. Failure-stage matrix (model rows × 8 stage columns)
 struct ModelsDrillView: View {
@@ -107,6 +107,7 @@ struct ModelsDrillView: View {
                     podCount: m.podCount,
                     successRate: m.successRate,
                     dollarPerPr: m.dollarPerPr,
+                    scoredCount: m.scoredCount,
                     avgQuality: m.avgQuality,
                     meanTtmSeconds: m.meanTtmSeconds,
                     escalationRate: m.escalationRate
@@ -120,6 +121,7 @@ struct ModelsDrillView: View {
                     podCount: rt.podCount,
                     successRate: rt.successRate,
                     dollarPerPr: rt.dollarPerPr,
+                    scoredCount: rt.scoredCount,
                     avgQuality: rt.avgQuality,
                     meanTtmSeconds: rt.meanTtmSeconds,
                     escalationRate: rt.escalationRate
@@ -306,7 +308,7 @@ private struct WhatIfSimulatorSection: View {
                      projected: projected.dollarPerPr.map { String(format: "$%.2f", $0) } ?? "—",
                      delta: dollarDelta(current.dollarPerPr, projected.dollarPerPr))
             Divider()
-            tableRow("Avg quality",
+            tableRow("Process health",
                      current: current.avgQuality.map { "\(Int(round($0)))" } ?? "—",
                      projected: projected.avgQuality.map { "\(Int(round($0)))" } ?? "—",
                      delta: intDelta(current.avgQuality, projected.avgQuality))
@@ -408,6 +410,7 @@ private struct LeaderboardRow: Identifiable {
     let podCount: Int
     let successRate: Double
     let dollarPerPr: Double?
+    let scoredCount: Int
     let avgQuality: Double?
     let meanTtmSeconds: Double?
     let escalationRate: Double
@@ -420,8 +423,8 @@ private struct ModelsLeaderboardSectionView: View {
     let days: Int
     let grain: ModelsDrillView.Grain
 
-    // MIN_COHORT_FOR_HEADLINE mirrors the daemon constant (models-aggregator.ts).
-    private let minCohort = 5
+    // Process-health headline floor mirrors models-aggregator.ts.
+    private let minProcessCohort = 20
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -453,7 +456,7 @@ private struct ModelsLeaderboardSectionView: View {
                 .frame(width: 60, alignment: .trailing)
             Text("$/PR")
                 .frame(width: 58, alignment: .trailing)
-            Text("Quality")
+            Text("Process")
                 .frame(width: 58, alignment: .trailing)
             Text("TTM")
                 .frame(width: 60, alignment: .trailing)
@@ -503,8 +506,8 @@ private struct ModelsLeaderboardSectionView: View {
                     .frame(width: 48, alignment: .trailing)
                     .foregroundStyle(.secondary)
             }
-            if row.podCount < minCohort {
-                Text("\(row.podCount) pods — low-signal")
+            if row.scoredCount < minProcessCohort {
+                Text("Process n=\(row.scoredCount) — low-signal below \(minProcessCohort)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -545,7 +548,7 @@ private struct ModelsComparisonSectionView: View {
                     items: rows.enumerated().compactMap { i, r in r.dollarPerPr.map { (r, i, $0) } },
                     format: { String(format: "$%.2f", $0) }
                 )
-                axisChart(title: "Avg Quality", keyPath: \.avgQuality, format: { "\(Int(round($0)))" })
+                axisChart(title: "Process Health", keyPath: \.avgQuality, format: { "\(Int(round($0)))" })
                 axisChart(title: "Mean TTM", keyPath: \.meanTtmSeconds, format: { formatMttmSeconds($0) ?? "—" })
                 axisChart(title: "Escalation Rate", keyPath: \.escalationRate, format: { "\(Int(round($0 * 100)))%" })
 

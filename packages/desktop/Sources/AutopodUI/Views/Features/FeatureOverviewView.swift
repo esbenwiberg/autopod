@@ -338,7 +338,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .issueWatcher:
             "Label a GitHub or ADO issue autopod and the daemon spawns a pod, posts progress comments back to the issue, and updates labels automatically through the pod lifecycle."
         case .analyticsDashboard:
-            "Fleet metrics across 7 dimensions: cost by phase/model, first-pass reliability rate, throughput + MTTM, safety events + quarantine scores, quality composite scores, escalation patterns, and model performance."
+            "Fleet metrics across 7 dimensions: cost by phase/model, outcome quality + first-pass completion, throughput + MTTM, safety events + quarantine scores, process-health scores, escalation patterns, and model performance."
         }
     }
 
@@ -356,7 +356,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .seriesWorkflows:      ["DAG", "3 PR Modes", "Fan-in"]
         case .scheduledJobs:        ["Cron", "Catchup", "Manual Trigger"]
         case .issueWatcher:         ["GitHub", "ADO", "Auto-Label"]
-        case .analyticsDashboard:   ["Cost", "Quality", "Models"]
+        case .analyticsDashboard:   ["Cost", "Outcomes", "Process", "Models"]
         }
     }
 
@@ -374,7 +374,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .seriesWorkflows:      "Contract-backed briefs, DAG dependency resolution, fan-in, 3 PR modes"
         case .scheduledJobs:        "DB-driven cron scheduler, catchup on restart, manual trigger, enable/disable"
         case .issueWatcher:         "Label-triggered pod spawning for GitHub + ADO, lifecycle comments, PII-safe quarantine"
-        case .analyticsDashboard:   "7 fleet dashboards: cost, reliability funnel, throughput, safety, quality, escalations, models"
+        case .analyticsDashboard:   "7 fleet dashboards: cost, outcome quality, throughput, safety, process health, escalations, models"
         }
     }
 
@@ -407,7 +407,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .issueWatcher:
             "Daemon polls GitHub and ADO issues every 60 seconds on profiles with issueWatcherEnabled. When a trigger label is found, the issue title and body are sanitized (PII stripped, injection quarantine applied) and a pod is spawned. The trigger label is replaced with autopod:in-progress. Agent escalations are posted as issue comments. On pod completion, the label updates to autopod:done or autopod:failed and a summary comment is posted."
         case .analyticsDashboard:
-            "Seven fleet analytics dashboards, each queryable over a configurable time window (default 30 days, max 365). Cost tracks spend by phase (agent_initial, agent_rework, review, plan_eval) and by profile+model, with top-10 pods and waste (killed/failed). Reliability tracks first-pass rate, funnel drop-offs by band, and per-stage failure rates. Throughput tracks pods/day, MTTM, and time-in-status percentiles. Safety tracks PII+injection events, quarantine score histogram, network policy distribution, and audit chain integrity. Quality tracks composite scores (0–100) per pod. Escalations track counts by type and profile. Models tracks runtime/model performance and simulator inputs."
+            "Seven fleet analytics dashboards, each queryable over a configurable time window (default 30 days, max 365). Cost tracks spend by phase (agent_initial, agent_rework, review, plan_eval) and by profile+model, with top-10 pods and waste (killed/failed). Outcome Quality tracks first-pass completion, funnel drop-offs, and validation-stage failures. Throughput tracks pods/day, MTTM, and time-in-status percentiles. Safety tracks PII+injection events, quarantine score histogram, network policy distribution, and audit chain integrity. Process Health tracks versioned observable trajectory scores (0–100) per pod. Escalations track counts by type and profile. Models tracks runtime/model performance and simulator inputs."
         }
     }
 
@@ -469,7 +469,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
         case .issueWatcher:
             "Poll loop: every 60s, query each watched profile's issue provider for issues with the trigger label. For each new hit: sanitize title+body via processContent (quarantine + PII redact), check (provider, issueId, profile) uniqueness, spawn pod, swap label to <prefix>:in-progress, post 'pod started' comment. On pod status change events: update DB status, swap label to <prefix>:done or <prefix>:failed, post outcome comment. ask_human escalations post the question as an issue comment and await reply."
         case .analyticsDashboard:
-            "All analytics queries operate on a terminal cohort: non-workspace pods with final status (complete, killed, failed) that completed within the requested window. Cost aggregation groups token usage by phase key (phase_type + attempt_index), joins to model pricing JSON for USD conversion. Reliability funnel counts pods that reached each band, computing drop-off between adjacent bands. Throughput buckets completion timestamps by day. Safety joins safety_events + action_audit tables for dual-source threat counts. Quality reads pre-computed quality_scores table. Models aggregates runtime/model performance for the leaderboard and simulator. All endpoints return HTTP 400 for invalid days, HTTP 503 if data is unavailable."
+            "All analytics queries operate on a terminal cohort: non-workspace pods with final status (complete, killed, failed) that completed within the requested window. Cost aggregation groups token usage by phase key and joins model pricing for USD conversion. Outcome Quality counts first-pass completion, funnel progress, and validation failures. Throughput buckets completion timestamps by day. Safety joins safety_events + action_audit. Process Health reads versioned, telemetry-eligible quality_scores rows without mixing algorithms. Models aggregates outcome metrics and attribution-safe process health. All endpoints return HTTP 400 for invalid days and HTTP 503 if data is unavailable."
         }
     }
 
@@ -654,10 +654,10 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
                 "All endpoints: GET /pods/analytics/{cost|reliability|throughput|safety|quality|escalations}?days=N",
                 "Terminal cohort: non-workspace pods, final status (complete|killed|failed), completed in window",
                 "Cost: total USD, daily sparkline, deltaVsPrior, byPhase (agent_initial/rework/review/plan_eval), byProfileModel, top10, waste",
-                "Reliability: firstPassRate (0 rework), sparkline, funnel bands + drops with topPods, stageFailures table, profileHeatmap",
+                "Outcome Quality (reliability route): firstPassRate (0 rework), sparkline, funnel bands + drops with topPods, stageFailures table, profileHeatmap",
                 "Throughput: podsPerDay sparkline, MTTM (mean time to merge), queue depth by hour (max + mean), time-in-status percentiles (p25/p50/p75/p90/max)",
                 "Safety: PII + injection event counts by kind/pattern/source, quarantine histogram (10 buckets 0.0–1.0), network policy distribution, audit chain integrity",
-                "Quality: composite score 0–100 per pod (read:edit ratio, blind edits, stop phrases, validation pass, churn, fix attempts)",
+                "Process Health (quality route): versioned score 0–100 per pod from inspection discipline, blind-modification rate, stop phrases, human interruptions, and churn rate",
                 "Escalations: total by type, by profile, daily sparkline",
                 "Models: per-model leaderboard, runtime aggregates, failure-stage matrix, what-if simulator inputs",
                 "Error handling: HTTP 400 for invalid days param, HTTP 503 if data unavailable",

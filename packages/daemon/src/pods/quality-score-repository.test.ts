@@ -15,8 +15,11 @@ function baseScore(overrides: Partial<PodQualityScore> = {}): PodQualityScore {
     score: 85,
     algorithmVersion: QUALITY_SCORE_ALGORITHM_VERSION,
     inspectionAvailability: 'available',
+    inspectionUnavailableReason: null,
+    ambiguousInspectionCount: 0,
     readCount: 10,
     editCount: 2,
+    modifiedFileCount: 2,
     readEditRatio: 5,
     editsWithoutPriorRead: 0,
     userInterrupts: 0,
@@ -129,6 +132,29 @@ describe('QualityScoreRepository', () => {
         readCount: null,
         readEditRatio: null,
         editsWithoutPriorRead: null,
+      }),
+    );
+  });
+
+  it('does not silently replace a retained v2 row with v3', () => {
+    db.prepare(`
+      INSERT INTO pod_quality_scores (
+        pod_id, score, score_v2, algorithm_version, inspection_availability,
+        read_count_v2, read_edit_ratio_v2, edits_without_prior_read_v2,
+        runtime, profile_name, final_status, completed_at
+      ) VALUES ('retained-v2', 72, 72, 2, 'available', 8, 2, 1,
+        'codex', 'test-profile', 'complete', datetime('now'))
+    `).run();
+
+    repo.insert(baseScore({ podId: 'retained-v2', score: 99 }));
+
+    expect(repo.get('retained-v2')).toEqual(
+      expect.objectContaining({
+        algorithmVersion: 2,
+        score: 72,
+        readCount: 8,
+        readEditRatio: 2,
+        editsWithoutPriorRead: 1,
       }),
     );
   });
@@ -410,6 +436,17 @@ describe('QualityScoreRepository.getQualityAnalytics', () => {
     expect(result.summary.deltaVsPrior.value).toBeCloseTo(20, 5);
   });
 
+  it('deltaVsPrior is flat when current window has no comparable v3 pods', () => {
+    const priorAt = (db.prepare(`SELECT datetime('now', '-45 days') AS t`).get() as { t: string })
+      .t;
+    repo.insert(baseScore({ podId: 'prior', score: 80, completedAt: priorAt }));
+
+    expect(repo.getQualityAnalytics(30).summary.deltaVsPrior).toEqual({
+      value: 0,
+      direction: 'flat',
+    });
+  });
+
   it('deltaVsPrior is flat when prior window has zero pods', () => {
     repo.insert(baseScore({ podId: 'p1', score: 75 }));
     const result = repo.getQualityAnalytics(30);
@@ -435,6 +472,36 @@ describe('QualityScoreRepository.getQualityAnalytics', () => {
     expect(summary.redCount).toBe(1);
     expect(summary.yellowCount).toBe(1);
     expect(summary.greenCount).toBe(1);
+  });
+
+  it('quality-v3-analytics-transparency', () => {
+    repo.insert(baseScore({ podId: 'current' }));
+    repo.insert(
+      baseScore({
+        podId: 'unavailable',
+        score: null,
+        inspectionAvailability: 'unavailable',
+        inspectionUnavailableReason: 'ambiguous_inspection',
+        ambiguousInspectionCount: 2,
+        readCount: null,
+        readEditRatio: null,
+        editsWithoutPriorRead: null,
+      }),
+    );
+    db.prepare(`
+      INSERT INTO pod_quality_scores (
+        pod_id, score, score_v2, algorithm_version, inspection_availability,
+        runtime, profile_name, final_status, completed_at
+      ) VALUES ('v2', 70, 70, 2, 'available', 'codex', 'test-profile', 'complete', datetime('now'))
+    `).run();
+
+    const { summary } = repo.getQualityAnalytics(30);
+    expect(summary).toMatchObject({
+      algorithmVersion: 3,
+      totalPodsScored: 1,
+      legacyRowsExcluded: 1,
+      unavailableRows: 1,
+    });
   });
 
   it('sparkline length always equals days even when no pods scored', () => {

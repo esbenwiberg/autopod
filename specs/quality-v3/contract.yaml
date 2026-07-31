@@ -89,7 +89,6 @@ required_facts:
   - id: fact-quality-activity-honesty
     proves:
       - wrapped-inspection-is-measured
-      - ambiguous-inspection-is-unavailable
     kind: unit-test
     artifact:
       path: packages/daemon/src/pods/quality-activity.test.ts
@@ -104,14 +103,15 @@ required_facts:
       path: packages/daemon/src/pods/quality-score.test.ts
       change: update
     command: npx pnpm --filter @autopod/daemon test -- quality-score.test.ts --testNamePattern "process-score-excludes-outcomes|process-score-normalizes-task-size"
-  - id: fact-latest-validation
+  - id: fact-process-signal-reduction
     proves:
+      - ambiguous-inspection-is-unavailable
       - latest-validation-is-reported
     kind: unit-test
     artifact:
       path: packages/daemon/src/pods/quality-signals.test.ts
       change: update
-    command: npx pnpm --filter @autopod/daemon test -- quality-signals.test.ts --testNamePattern latest-validation-is-reported
+    command: npx pnpm --filter @autopod/daemon test -- quality-signals.test.ts --testNamePattern "latest-validation-is-reported|marks ambiguous shell inspection"
   - id: fact-v3-history-preservation
     proves:
       - v3-preserves-v2-history
@@ -127,7 +127,7 @@ required_facts:
     artifact:
       path: packages/daemon/src/pods/models-aggregator.test.ts
       change: update
-    command: npx pnpm --filter @autopod/daemon test -- models-aggregator.test.ts --testNamePattern model-process-attribution-is-homogeneous
+    command: npx pnpm --filter @autopod/daemon test -- models-aggregator.test.ts --testNamePattern "model-process-attribution-is-homogeneous|process headline requires"
   - id: fact-quality-analytics-transparency
     proves:
       - v3-preserves-v2-history

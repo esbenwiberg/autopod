@@ -144,8 +144,8 @@ public extension PodQualitySignals {
         }
         let value = String(format: "%.1f", readEditRatio)
         let health: StatHealth =
-            readEditRatio >= 1.5 ? .good :
-            readEditRatio >= 0.8 ? .warn : .bad
+            readEditRatio >= 3 ? .good :
+            readEditRatio >= 1 ? .warn : .bad
         return (value, health, hint)
     }
 
@@ -158,14 +158,16 @@ public extension PodQualitySignals {
                 "Blind Edits is unavailable because retained events cannot show whether files were inspected before editing."
             )
         }
-        let health: StatHealth = n == 0 ? .good : (n <= 2 ? .warn : .bad)
-        return ("\(n)", health, "\(n) files modified without being Read first this session.")
+        let denominator = max(modifiedFileCount ?? 0, 1)
+        let rate = Double(n) / Double(denominator)
+        let health: StatHealth = n == 0 ? .good : (rate <= 0.2 ? .warn : .bad)
+        return ("\(n)/\(denominator)", health, "\(n) of \(denominator) existing modified files lacked a prior recognized inspection.")
     }
 
     var interruptsTile: (value: String, health: StatHealth, hint: String) {
         let n = userInterrupts
         let health: StatHealth = n == 0 ? .good : (n <= 2 ? .warn : .bad)
-        let hint = "\(n) escalations needing human attention (ask_human, report_blocker, request_credential, action_approval, validation_override) + 1 if pod was killed."
+        let hint = "\(n) escalations needing human attention (ask_human, report_blocker, action_approval, validation_override)."
         return ("\(n)", health, hint)
     }
 
@@ -187,8 +189,10 @@ public extension PodQualitySignals {
 
     var churnTile: (value: String, health: StatHealth, hint: String) {
         let n = editChurnCount
-        let health: StatHealth = n <= 2 ? .good : (n <= 5 ? .warn : .bad)
-        return ("\(n)", health, "\(n) files modified 3+ times this session — indicates rework.")
+        let denominator = max(modifiedFileCount ?? 0, 1)
+        let rate = Double(n) / Double(denominator)
+        let health: StatHealth = n == 0 ? .good : (rate <= 0.2 ? .warn : .bad)
+        return ("\(n)/\(denominator)", health, "\(n) of \(denominator) existing modified files were changed 3+ times.")
     }
 
     var tellsTile: (value: String, health: StatHealth, hint: String) {

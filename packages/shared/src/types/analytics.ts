@@ -3,7 +3,13 @@ import type { PodQualityScore } from './pod.js';
 export interface QualityAnalyticsResponse {
   /** High-level totals over the trailing window. */
   summary: {
+    /** Active process-health algorithm; analytics never mix versions. */
+    algorithmVersion: number;
     totalPodsScored: number;
+    /** Rows in the window retained under older score semantics. */
+    legacyRowsExcluded: number;
+    /** Current-version rows whose process telemetry is unavailable. */
+    unavailableRows: number;
     avgScore: number;
     redCount: number; // score < 60
     yellowCount: number; // 60..79
@@ -364,7 +370,7 @@ export interface PerModelAggregate {
   /** totalCostUsd / completeCount. Null when completeCount === 0 or model === '<unknown>'. */
   dollarPerPr: number | null;
   scoredCount: number;
-  /** Mean pod_quality_scores.score. Null when scoredCount === 0. In [0, 100]. */
+  /** Mean process-health score. Legacy wire name retained for compatibility. */
   avgQuality: number | null;
   /** Mean seconds from created_at to completed_at for complete pods. Null when completeCount === 0. */
   meanTtmSeconds: number | null;
@@ -405,7 +411,7 @@ export interface ModelsSummary {
   cheapestDollarPerPrModel: string | null;
   /** dollarPerPr value for cheapestDollarPerPrModel. Null when cheapestDollarPerPrModel is null. */
   cheapestDollarPerPr: number | null;
-  /** Canonical model with the highest avgQuality (scoredCount >= 5, not '<unknown>'). Null if none. */
+  /** Canonical model with highest process health (>=20 comparable scores). */
   bestQualityModel: string | null;
   bestQuality: number | null;
   /** Canonical model with the highest podCount (no MIN_COHORT gate). May be '<unknown>'. Null if empty. */

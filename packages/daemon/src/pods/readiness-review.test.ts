@@ -649,7 +649,7 @@ describe('createReadinessService', () => {
         expect.objectContaining({
           area: 'quality',
           status: 'needs_review',
-          summary: expect.stringMatching(/Provisional quality score is low \(\d+\)/),
+          summary: expect.stringMatching(/Provisional process health is low \(\d+\)/),
         }),
       ]),
     );
@@ -657,7 +657,7 @@ describe('createReadinessService', () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: 'quality-low-score',
-          detail: expect.stringContaining('provisional pod quality score'),
+          detail: expect.stringContaining('provisional pod process-health score'),
         }),
       ]),
     );

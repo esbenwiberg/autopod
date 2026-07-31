@@ -1,6 +1,10 @@
 import type { AgentEvent } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import { canonicalRepositoryPath, normalizeQualityActivity } from './quality-activity.js';
+import {
+  canonicalRepositoryPath,
+  normalizeQualityActivity,
+  normalizeQualityActivityEvidence,
+} from './quality-activity.js';
 
 const bash = (command: string, cwd = '/workspace'): AgentEvent => ({
   type: 'tool_use',
@@ -51,6 +55,63 @@ describe('normalizeQualityActivity', () => {
     'cat "unterminated',
   ])('rejects unknown, mutating, or ambiguous command %s', (command) => {
     expect(normalizeQualityActivity(bash(command))).toEqual([]);
+  });
+
+  it('wrapped-inspection-is-measured', () => {
+    expect(
+      normalizeQualityActivityEvidence(bash("/bin/bash -lc 'sed -n 1,40p src/app.ts'")),
+    ).toEqual({
+      activities: [
+        {
+          kind: 'inspection',
+          path: 'src/app.ts',
+          source: 'shell-command',
+          callId: 'call-1',
+        },
+      ],
+      ambiguousInspection: false,
+    });
+    expect(normalizeQualityActivity(bash(`/bin/bash -lc "rg -n 'foo|bar' src/search.ts"`))).toEqual(
+      [
+        {
+          kind: 'inspection',
+          path: 'src/search.ts',
+          source: 'shell-command',
+          callId: 'call-1',
+        },
+      ],
+    );
+    expect(normalizeQualityActivity(bash('cat src/a.ts && sed -n 1,20p src/b.ts'))).toEqual([
+      {
+        kind: 'inspection',
+        path: 'src/a.ts',
+        source: 'shell-command',
+        callId: 'call-1',
+      },
+      {
+        kind: 'inspection',
+        path: 'src/b.ts',
+        source: 'shell-command',
+        callId: 'call-1',
+      },
+    ]);
+  });
+
+  it('ambiguous-inspection-is-unavailable', () => {
+    const evidence = normalizeQualityActivityEvidence(bash('cat src/app.ts | wc -l'));
+    expect(evidence.activities).toEqual([]);
+    expect(evidence.ambiguousInspection).toBe(true);
+
+    const flattenedWrapper = normalizeQualityActivityEvidence(
+      bash('/bin/bash -lc sed -n 1,40p src/app.ts'),
+    );
+    expect(flattenedWrapper.activities).toEqual([]);
+    expect(flattenedWrapper.ambiguousInspection).toBe(true);
+  });
+
+  it('does not make unrelated compound commands ambiguous', () => {
+    const evidence = normalizeQualityActivityEvidence(bash('npm test && git status'));
+    expect(evidence).toEqual({ activities: [], ambiguousInspection: false });
   });
 
   it('uses the Codex working directory for relative operands', () => {

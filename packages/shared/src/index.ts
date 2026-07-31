@@ -30,6 +30,7 @@ export type {
   ValidationWaiver,
   QualityGrade,
   QualityInspectionAvailability,
+  QualityInspectionUnavailableReason,
   QualitySignals,
   PodQualityScore,
   QualityTrend,
