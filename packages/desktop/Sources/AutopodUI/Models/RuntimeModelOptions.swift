@@ -193,16 +193,18 @@ public enum RuntimeModelOptions {
         var options = baseOptions(for: runtime, role: role)
         if runtime == .pi, let catalog, let providerId,
            let provider = catalog.provider(id: providerId),
-           provider.implementation.kind == "generic-pi-api",
-           provider.policy.runnable,
-           provider.policy.authorization == "supported" {
-            options = catalog.models
-                .filter {
-                    $0.providerId == providerId
-                        && provider.modelIds.contains($0.id)
-                }
-                .filter { $0.lifecycle == "active" }
-                .map { RuntimeModelOption(value: $0.id, label: $0.displayName) }
+           provider.implementation.kind == "generic-pi-api" {
+            if provider.policy.runnable, provider.policy.authorization == "supported" {
+                options = catalog.models
+                    .filter {
+                        $0.providerId == providerId
+                            && provider.modelIds.contains($0.id)
+                    }
+                    .filter { $0.lifecycle == "active" }
+                    .map { RuntimeModelOption(value: $0.id, label: $0.displayName) }
+            } else {
+                options = []
+            }
         }
         guard let currentValue, !currentValue.isEmpty else { return options }
 
