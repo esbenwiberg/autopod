@@ -1,5 +1,6 @@
 import type { PodBridge } from '@autopod/escalation-mcp';
 import type { PendingRequests } from '@autopod/escalation-mcp';
+import type { ExecutionTarget } from '@autopod/shared';
 import websocket from '@fastify/websocket';
 import type Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
@@ -76,6 +77,7 @@ export interface ServerDependencies {
   providerAccountStore?: ProviderAccountStore;
   podsitterRepository?: PodsitterRepository;
   podsitterService?: PodsitterService;
+  systemDecisionExecutionTarget?: ExecutionTarget;
   systemDecisionHostedImage?: string;
   worktreeManager?: WorktreeManager;
   eventBus: EventBus;
@@ -206,7 +208,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
       service: deps.podsitterService,
       providerAccountStore: deps.providerAccountStore,
       eventBus: deps.eventBus,
-      hosted: process.env.AUTOPOD_EXECUTION_TARGET === 'sandbox',
+      executionTarget: deps.systemDecisionExecutionTarget,
       hostedImage: deps.systemDecisionHostedImage,
     });
   }

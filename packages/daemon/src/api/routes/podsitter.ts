@@ -1,5 +1,6 @@
 import {
   AutopodError,
+  type ExecutionTarget,
   type OperatorActor,
   PROVIDER_CATALOG,
   type PodsitterConfiguration,
@@ -12,13 +13,14 @@ import type { PodsitterRepository } from '../../podsitter/podsitter-repository.j
 import type { PodsitterService } from '../../podsitter/podsitter-service.js';
 import type { ProviderAccountStore } from '../../provider-accounts/provider-account-store.js';
 import { isProviderAccountRuntimeCompatible } from '../../providers/env-builder.js';
+import { isPinnedHostedSystemDecisionImage } from '../../system-sandbox/execution-target.js';
 
 export interface PodsitterRouteDependencies {
   repository: PodsitterRepository;
   service: PodsitterService;
   providerAccountStore: ProviderAccountStore;
   eventBus: EventBus;
-  hosted?: boolean;
+  executionTarget?: ExecutionTarget;
   hostedImage?: string;
 }
 
@@ -66,9 +68,9 @@ function assertTarget(
       400,
     );
   }
-  if (deps.hosted && !deps.hostedImage) {
+  if (deps.executionTarget === 'sandbox' && !isPinnedHostedSystemDecisionImage(deps.hostedImage)) {
     throw new AutopodError(
-      'SYSTEM_DECISION_IMAGE is required for hosted Podsitter inference',
+      'AUTOPOD_SYSTEM_DECISION_IMAGE must be an ACR-qualified pinned tag or digest for hosted Podsitter inference',
       'PODSITTER_IMAGE_REQUIRED',
       400,
     );

@@ -24,7 +24,7 @@ if [[ "${PUSH_SYSTEM_DECISION_IMAGE:-0}" == "1" ]]; then
     echo "hosted image must use an ACR-qualified pinned tag or digest" >&2
     exit 1
   fi
-  docker buildx build --file "$dockerfile" --tag "$image_ref" --push .
+  docker buildx build --platform linux/amd64 --file "$dockerfile" --tag "$image_ref" --push .
 else
   docker build --file "$dockerfile" --tag "$image_ref" .
 fi
