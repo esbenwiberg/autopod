@@ -605,6 +605,50 @@ public actor DaemonAPI {
     return try await request("POST", "/provider-accounts/import-from-profile", body: body)
   }
 
+  // MARK: - Podsitter
+
+  public func getPodsitterStatus() async throws -> PodsitterStatusResponse {
+    try await request("GET", "/podsitter")
+  }
+
+  public func configurePodsitter(
+    _ configuration: PodsitterConfigurationRequest
+  ) async throws -> PodsitterConfigurationResponse {
+    try await request("PUT", "/podsitter/config", body: try encode(configuration))
+  }
+
+  public func enablePodsitter(
+    authorizedUntil: String? = nil
+  ) async throws -> PodsitterConfigurationResponse {
+    try await request(
+      "POST",
+      "/podsitter/enable",
+      body: try encode(PodsitterEnableBody(authorizedUntil: authorizedUntil))
+    )
+  }
+
+  public func disablePodsitter() async throws -> PodsitterConfigurationResponse {
+    try await request("POST", "/podsitter/disable")
+  }
+
+  public func checkPodsitter() async throws -> PodsitterCheckResponse {
+    try await request("POST", "/podsitter/check")
+  }
+
+  public func probePodsitterProvider() async throws -> PodsitterProbeResponse {
+    try await request("POST", "/podsitter/provider/probe")
+  }
+
+  public func listPodsitterDecisions(
+    podId: String? = nil,
+    limit: Int = 20,
+    offset: Int = 0
+  ) async throws -> PodsitterDecisionListResponse {
+    var query = ["limit": String(limit), "offset": String(offset)]
+    if let podId { query["podId"] = podId }
+    return try await request("GET", "/podsitter/decisions", query: query)
+  }
+
   // MARK: - History
 
   public func createHistoryWorkspace(
@@ -1005,6 +1049,10 @@ public actor DaemonAPI {
     }
     return "Bearer \(Self.normalizeBearerToken(accessToken))"
   }
+}
+
+private struct PodsitterEnableBody: Encodable {
+  let authorizedUntil: String?
 }
 
 // MARK: - Internal request/response types
