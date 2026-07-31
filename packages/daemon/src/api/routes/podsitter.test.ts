@@ -71,23 +71,29 @@ describe('Podsitter routes', () => {
     await Promise.all(apps.splice(0).map((app) => app.close()));
   });
 
-  it('requires operator role for mutations while allowing redacted status', async () => {
+  it('allows any authenticated user to mutate configuration while rejecting unauthenticated users', async () => {
     const viewer = await setup('viewer');
     apps.push(viewer.app);
     const denied = await viewer.app.inject({
       method: 'PUT',
       url: '/podsitter/config',
+      payload: configuration,
+    });
+    expect(denied.statusCode).toBe(401);
+    const configured = await viewer.app.inject({
+      method: 'PUT',
+      url: '/podsitter/config',
       headers,
       payload: configuration,
     });
-    expect(denied.statusCode).toBe(403);
+    expect(configured.statusCode).toBe(200);
     const status = await viewer.app.inject({ method: 'GET', url: '/podsitter', headers });
     expect(status.statusCode).toBe(200);
     expect(status.body).not.toContain('credentials');
   });
 
-  it('validates configuration and changes generation on enable and disable', async () => {
-    const harness = await setup();
+  it('allows an authenticated viewer to enable and disable Podsitter', async () => {
+    const harness = await setup('viewer');
     apps.push(harness.app);
     const configured = await harness.app.inject({
       method: 'PUT',
@@ -112,8 +118,8 @@ describe('Podsitter routes', () => {
     expect(disabled.json()).toMatchObject({ enabled: false, generation: 3 });
   });
 
-  it('keeps inactive checks read-only and exposes probe and paginated history', async () => {
-    const harness = await setup('operator');
+  it('allows an authenticated viewer to check, probe, and read paginated history', async () => {
+    const harness = await setup('viewer');
     apps.push(harness.app);
     await harness.app.inject({
       method: 'PUT',

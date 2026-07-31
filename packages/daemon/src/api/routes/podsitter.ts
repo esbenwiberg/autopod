@@ -22,12 +22,6 @@ export interface PodsitterRouteDependencies {
   hostedImage?: string;
 }
 
-function requireOperator(request: FastifyRequest): void {
-  if (!request.user.roles.some((role) => role === 'admin' || role === 'operator')) {
-    throw new AutopodError('Podsitter operator role required', 'FORBIDDEN', 403);
-  }
-}
-
 function actor(request: FastifyRequest): OperatorActor {
   return {
     type: 'human',
@@ -85,7 +79,6 @@ export function podsitterRoutes(app: FastifyInstance, deps: PodsitterRouteDepend
   app.get('/podsitter', async () => deps.service.status());
 
   app.put('/podsitter/config', async (request) => {
-    requireOperator(request);
     const body = request.body as Record<string, unknown>;
     const parsed = podsitterConfigurationInputSchema.omit({ updatedBy: true }).parse(body) as Omit<
       Parameters<PodsitterRepository['replaceConfiguration']>[0],
@@ -110,7 +103,6 @@ export function podsitterRoutes(app: FastifyInstance, deps: PodsitterRouteDepend
   });
 
   app.post('/podsitter/enable', async (request) => {
-    requireOperator(request);
     const current = deps.repository.getConfiguration();
     if (!current) throw new AutopodError('Podsitter is not configured', 'NOT_FOUND', 404);
     assertTarget(current.decisionTarget, deps);
@@ -137,7 +129,6 @@ export function podsitterRoutes(app: FastifyInstance, deps: PodsitterRouteDepend
   });
 
   app.post('/podsitter/disable', async (request) => {
-    requireOperator(request);
     const current = deps.repository.getConfiguration();
     if (!current) throw new AutopodError('Podsitter is not configured', 'NOT_FOUND', 404);
     const configuration = deps.repository.replaceConfiguration({
@@ -158,14 +149,12 @@ export function podsitterRoutes(app: FastifyInstance, deps: PodsitterRouteDepend
   });
 
   app.post('/podsitter/check', async (request) => {
-    requireOperator(request);
     const current = deps.repository.getConfiguration();
     const active = current ? evaluatePodsitterActivation(current, new Date()).active : false;
     return deps.service.reconcile({ readOnly: !active });
   });
 
-  app.post('/podsitter/provider/probe', async (request) => {
-    requireOperator(request);
+  app.post('/podsitter/provider/probe', async () => {
     return { recovered: await deps.service.probe() };
   });
 
