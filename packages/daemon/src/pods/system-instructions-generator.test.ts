@@ -98,6 +98,19 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('<!-- BEGIN USER TASK -->');
   });
 
+  it('defers macOS desktop validation instead of attempting it in Linux pods', () => {
+    const md = generateSystemInstructions(
+      makeProfile({ testCommand: 'npm test' }),
+      makeSession({ task: 'Run swift test for packages/desktop before finishing' }),
+      'http://localhost:8080/mcp/abc12345',
+    );
+
+    expect(md).toContain('macOS desktop validation is host-only');
+    expect(md).toContain('NEVER attempt desktop `swift test`, `xcodebuild`');
+    expect(md).toContain('deferred Mac/human verification');
+    expect(md).toContain('tests: `npm test`');
+  });
+
   it('tells agents to reference hyphenated pod ids without shortening them', () => {
     const md = generateSystemInstructions(
       makeProfile(),

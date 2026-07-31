@@ -254,6 +254,8 @@ public struct ValidationChecks: Sendable {
     public let reviewSkipReason: String?
     /// Machine-readable kind paired with reviewSkipReason — see backend ValidationResult.
     public let reviewSkipKind: String?
+    /// Blocking harness/container failure, distinct from a command that exited non-zero.
+    public let infrastructureFailure: ValidationInfrastructureFailureResponse?
     /// Autopod validation suite used for this attempt.
     public let validationSuite: String?
     public let healthCheck: HealthCheckDetail?
@@ -277,6 +279,7 @@ public struct ValidationChecks: Sendable {
         reviewReasoning: String? = nil,
         reviewSkipReason: String? = nil,
         reviewSkipKind: String? = nil,
+        infrastructureFailure: ValidationInfrastructureFailureResponse? = nil,
         validationSuite: String? = nil,
         healthCheck: HealthCheckDetail? = nil,
         pages: [PageDetail]? = nil,
@@ -299,6 +302,7 @@ public struct ValidationChecks: Sendable {
         self.reviewReasoning = reviewReasoning
         self.reviewSkipReason = reviewSkipReason
         self.reviewSkipKind = reviewSkipKind
+        self.infrastructureFailure = infrastructureFailure
         self.validationSuite = validationSuite
         self.healthCheck = healthCheck; self.pages = pages
         self.factValidation = factValidation; self.factChecks = factChecks
@@ -319,8 +323,9 @@ public struct ValidationChecks: Sendable {
     public var validationPhaseCount: Int { 9 }
 
     public var allPassed: Bool {
-        (setup ?? true) && smoke && (build ?? true) && (tests ?? true) && (lint ?? true) && (sast ?? true)
-        && (review ?? true) && (factValidation ?? true)
+        infrastructureFailure == nil
+        && (setup ?? true) && smoke && (build ?? true) && (tests ?? true)
+        && (lint ?? true) && (sast ?? true) && (review ?? true) && (factValidation ?? true)
     }
 }
 

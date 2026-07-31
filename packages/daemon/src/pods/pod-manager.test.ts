@@ -557,6 +557,52 @@ function insertApprovedMemory(
   });
 }
 
+function validationInfrastructureFailureResult(): Partial<ValidationResult> {
+  return {
+    overall: 'fail',
+    smoke: {
+      status: 'pass',
+      build: { status: 'pass', output: '', duration: 100 },
+      health: { status: 'skip', url: '', responseCode: null, duration: 0 },
+      pages: [],
+    },
+    test: {
+      status: 'skip',
+      duration: 25,
+      stdout: 'Validation infrastructure failure: Azure Sandboxes returned 403',
+      stderr: '',
+    },
+    infrastructureFailure: {
+      phase: 'test',
+      code: 'AZURE_SANDBOX_HTTP_ERROR',
+      statusCode: 403,
+      message: 'Azure Sandboxes returned an empty 403',
+      retryable: true,
+    },
+    factValidation: { status: 'skip', results: [] },
+    taskReview: null,
+    reviewSkipKind: 'upstream-failed',
+    reviewSkipReason: 'Skipped — validation infrastructure failed',
+  };
+}
+
+function ordinaryTestFailureResult(): Partial<ValidationResult> {
+  return {
+    overall: 'fail',
+    smoke: {
+      status: 'pass',
+      build: { status: 'pass', output: '', duration: 100 },
+      health: { status: 'skip', url: '', responseCode: null, duration: 0 },
+      pages: [],
+    },
+    test: { status: 'fail', duration: 25, stdout: '1 test failed', stderr: '' },
+    factValidation: { status: 'skip', results: [] },
+    taskReview: null,
+    reviewSkipKind: 'upstream-failed',
+    reviewSkipReason: 'Skipped — earlier validation phases failed',
+  };
+}
+
 function reviewInfrastructureFailureResult(
   reviewSkipKind: 'review-failed' | 'review-timeout' = 'review-timeout',
   overrides: Partial<ValidationResult> = {},
@@ -8178,9 +8224,45 @@ describe('PodManager', () => {
       expect(result.validationAttempts).toBe(1);
     });
 
-    it('keeps ordinary validation failures on correction feedback path', async () => {
+    it('validation infrastructure failure does not rework agent or consume an attempt', async () => {
+      const ctx = createTestContext(validationInfrastructureFailureResult());
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
+      const result = manager.getSession(pod.id);
+      expect(result.status).toBe('review_required');
+      expect(result.validationAttempts).toBe(0);
+      expect(result.lastCorrectionMessage).toBeNull();
+
+      const messages = ctx.eventRepo
+        .getForSession(pod.id, { type: 'pod.agent_activity' })
+        .map((event) => {
+          const payload = event.payload as { event?: { message?: unknown } };
+          return payload.event?.message;
+        });
+      expect(messages).toContain(
+        'Validation infrastructure failure during test — parked for explicit Resume',
+      );
+    });
+
+    it('ordinary test failure still reworks the agent and consumes attempts', async () => {
       const ctx = createTestContext();
-      vi.mocked(ctx.validationEngine.validate).mockResolvedValue(makeBuildFailure());
+      vi.mocked(ctx.validationEngine.validate).mockResolvedValue(
+        makeValidationResult(ordinaryTestFailureResult()),
+      );
       const manager = createPodManager(ctx.deps);
 
       const pod = manager.createSession(

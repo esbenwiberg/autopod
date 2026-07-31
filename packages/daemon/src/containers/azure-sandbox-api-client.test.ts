@@ -811,6 +811,64 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
+  it('retries an empty data-plane 403 once and returns the successful command result', async () => {
+    const { client, requests } = makeClient(
+      [
+        {
+          status: 403,
+          rawText: '',
+          headers: { 'x-ms-request-id': 'request-first' },
+        },
+        { status: 200, body: { stdout: 'tests passed', stderr: '', exitCode: 0 } },
+      ],
+      { retry: { maxDelayMs: 0 } },
+    );
+
+    const result = await client.exec('sbx-1', ['sh', '-c', 'pnpm test']);
+
+    expect(result).toEqual({ stdout: 'tests passed', stderr: '', exitCode: 0 });
+    expect(requests).toHaveLength(2);
+  });
+
+  it('does not retry a non-empty data-plane 403', async () => {
+    const { client, requests } = makeClient([{ status: 403, body: { error: 'RBAC denied' } }], {
+      retry: { maxDelayMs: 0 },
+    });
+
+    await expect(client.exec('sbx-1', ['true'])).rejects.toThrow(/RBAC denied/);
+    expect(requests).toHaveLength(1);
+  });
+
+  it('retains safe diagnostics after a persistent empty data-plane 403', async () => {
+    const { client, requests } = makeClient(
+      [
+        { status: 403, rawText: '' },
+        {
+          status: 403,
+          rawText: '',
+          headers: {
+            'x-ms-request-id': 'request-final',
+            'x-ms-correlation-request-id': 'correlation-final',
+            authorization: 'secret-that-must-not-appear',
+          },
+        },
+      ],
+      { retry: { maxDelayMs: 0 } },
+    );
+
+    let message = '';
+    try {
+      await client.exec('sbx-1', ['true']);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(requests).toHaveLength(2);
+    expect(message).toContain('request-final');
+    expect(message).toContain('correlation-final');
+    expect(message).not.toContain('secret-that-must-not-appear');
+  });
+
   it('honors a data-plane 429 (retryAfterSeconds) and retries the request', async () => {
     const { client, requests } = makeClient(
       [

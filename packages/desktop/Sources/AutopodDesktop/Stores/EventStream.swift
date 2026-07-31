@@ -256,6 +256,7 @@ public final class EventStream {
         review: PodMapper.mapTriState(result.taskReview?.status),
         reviewSkipReason: result.reviewSkipReason,
         reviewSkipKind: result.reviewSkipKind,
+        infrastructureFailure: result.infrastructureFailure,
         validationSuite: result.validationSuite
       )
       podStore.setValidationChecks(podId, checks: checks)

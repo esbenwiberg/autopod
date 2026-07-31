@@ -210,6 +210,49 @@ describe('NotificationService', () => {
       expect(card?.body[0]?.text).toContain('Validated');
     });
 
+    it('labels validation infrastructure failures without blaming tests', async () => {
+      const service = createService();
+      service.start();
+
+      const event: ValidationCompletedEvent = {
+        type: 'pod.validation_completed',
+        timestamp: '2026-01-01T00:00:00.000Z',
+        podId: 'sess-123',
+        result: {
+          podId: 'sess-123',
+          attempt: 2,
+          timestamp: '2026-01-01T00:00:00.000Z',
+          smoke: {
+            status: 'pass',
+            build: { status: 'pass', output: '', duration: 1000 },
+            health: { status: 'skip', url: '', responseCode: null, duration: 0 },
+            pages: [],
+          },
+          test: { status: 'skip', duration: 100, stdout: '', stderr: '' },
+          taskReview: null,
+          infrastructureFailure: {
+            phase: 'test',
+            code: 'AZURE_SANDBOX_HTTP_ERROR',
+            statusCode: 403,
+            message: 'Azure Sandboxes returned 403',
+            retryable: true,
+          },
+          overall: 'fail',
+          duration: 1100,
+        },
+      };
+      eventBus.emit(event);
+
+      await vi.waitFor(() => {
+        expect(teamsAdapter.send).toHaveBeenCalledTimes(1);
+      });
+
+      const card = vi.mocked(teamsAdapter.send).mock.calls[0]?.[0];
+      const serialized = JSON.stringify(card);
+      expect(serialized).toContain('Validation infrastructure failed during test');
+      expect(serialized).not.toContain('Tests failed');
+    });
+
     it('sends failed card on fail', async () => {
       const service = createService();
       service.start();

@@ -236,7 +236,10 @@ function summarizeValidationPhases(result: ValidationResult): string {
   const lintStatus = result.lint?.status ?? 'skip';
   const sastStatus = result.sast?.status ?? 'skip';
   const buildStatus = setupStatus === 'fail' ? 'skip' : result.smoke.build.status;
-  const testStatus = result.test?.status ?? 'skip';
+  const testStatus =
+    result.infrastructureFailure?.phase === 'test'
+      ? 'infrastructure_error'
+      : (result.test?.status ?? 'skip');
   const healthStatus = result.smoke.health.status;
   const pagesStatus =
     result.smoke.pages.length === 0
@@ -866,6 +869,16 @@ function formatReviewFeedbackReply(response: ReviewFeedbackResponseItem): string
   };
   const body = response.response.trim().slice(0, REVIEW_FEEDBACK_REPLY_MAX_CHARS);
   return `Autopod fix pod response: ${outcomeLabel[response.outcome]}\n\n${body}`;
+}
+
+function isValidationInfrastructureOnlyFailure(result: ValidationResult): boolean {
+  return result.overall === 'fail' && result.infrastructureFailure !== undefined;
+}
+
+function validationInfrastructureFailureLabel(result: ValidationResult): string {
+  const failure = result.infrastructureFailure;
+  if (!failure) return 'Validation infrastructure failure';
+  return `Validation infrastructure failure during ${failure.phase}`;
 }
 
 function isReviewInfrastructureOnlyFailure(result: ValidationResult): boolean {
@@ -6434,6 +6447,37 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
 
     return result;
+  }
+
+  async function parkOnValidationInfrastructureFailure(
+    pod: Pod,
+    result: ValidationResult,
+  ): Promise<void> {
+    const label = validationInfrastructureFailureLabel(result);
+    emitActivityStatus(pod.id, `${label} — parked for explicit Resume`);
+    transition(pod, 'review_required');
+    podRepo.update(pod.id, {
+      validationAttempts: Math.max(0, pod.validationAttempts - 1),
+      lastCorrectionMessage: null,
+    });
+
+    if (pod.containerId) {
+      try {
+        emitActivityStatus(pod.id, 'Stopping post-validation container…');
+        await stopSandboxPreviewProxy(pod.id);
+        const cm = containerManagerFactory.get(pod.executionTarget);
+        await cm.stop(pod.containerId);
+        logger.info(
+          { podId: pod.id, infrastructureFailure: result.infrastructureFailure },
+          'Container stopped after validation infrastructure failure',
+        );
+      } catch (stopErr) {
+        logger.warn(
+          { err: stopErr, podId: pod.id },
+          'Failed to stop container after validation infrastructure failure',
+        );
+      }
+    }
   }
 
   async function parkOnReviewInfrastructureFailure(pod: Pod): Promise<void> {
@@ -12056,6 +12100,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           }
         }
 
+        // Container/data-plane failures are daemon infrastructure, not agent work.
+        if (isValidationInfrastructureOnlyFailure(effectiveResult)) {
+          if (tryConsumeUpdateIntent()) return;
+          await parkOnValidationInfrastructureFailure(s2, effectiveResult);
+          return;
+        }
+
         // Reviewer process failures are daemon infrastructure, not agent work.
         if (isReviewInfrastructureOnlyFailure(effectiveResult)) {
           if (tryConsumeUpdateIntent()) return;
@@ -12867,6 +12918,11 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const s2 = podRepo.getOrThrow(podId);
 
         if (isTerminalState(s2.status) || s2.status === 'killing') {
+          return { newCommits, result: 'fail' };
+        }
+
+        if (isValidationInfrastructureOnlyFailure(result)) {
+          await parkOnValidationInfrastructureFailure(s2, result);
           return { newCommits, result: 'fail' };
         }
 

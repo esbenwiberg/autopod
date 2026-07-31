@@ -35,6 +35,9 @@ export interface SessionLookup {
  * pipeline in execution order and picks the first failing phase, falling back
  * to the task reviewer's reasoning, then a generic label. */
 function pickFailureReason(result: ValidationResult): string {
+  if (result.infrastructureFailure) {
+    return `Validation infrastructure failed during ${result.infrastructureFailure.phase}`;
+  }
   if (result.lint?.status === 'fail') return 'Lint failed';
   if (result.sast?.status === 'fail') return 'Security scan failed';
   if (result.smoke.build.status === 'fail') return 'Build failed';

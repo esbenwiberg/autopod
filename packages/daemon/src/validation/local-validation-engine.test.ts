@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { parseSpecContract } from '@autopod/shared';
+import { AutopodError, parseSpecContract } from '@autopod/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type {
@@ -1849,15 +1849,54 @@ describe('validate() — facts + review gate', () => {
     expect(result.overall).toBe('fail');
   });
 
-  it('skips Facts + Review when tests fail', async () => {
+  it('keeps an ordinary nonzero test failure on the code-failure path', async () => {
     const cm = stubContainerManager();
     const engine = createLocalValidationEngine(cm);
 
     const result = await engine.validate(baseConfig({ testCommand: 'vitest' }));
 
     expect(result.test?.status).toBe('fail');
+    expect(result.infrastructureFailure).toBeUndefined();
     expect(result.factValidation?.status).toBe('skip');
     expect(result.reviewSkipKind).toBe('upstream-failed');
+    expect(result.overall).toBe('fail');
+  });
+
+  it('records a typed transport failure classification instead of claiming tests failed', async () => {
+    const base = stubContainerManager();
+    const execInContainer = vi.fn(
+      async (
+        _containerId: string,
+        command: string[],
+      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+        const shell = command[2] ?? '';
+        if (shell.includes('git reset --hard HEAD')) {
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        if (shell.includes('vitest')) {
+          throw new AutopodError(
+            'Azure Sandboxes POST /executeShellCommand failed with 403',
+            'AZURE_SANDBOX_HTTP_ERROR',
+            403,
+          );
+        }
+        throw new Error(`unexpected command: ${JSON.stringify(command)}`);
+      },
+    );
+    const cm = { ...base, execInContainer } as ContainerManager;
+    const engine = createLocalValidationEngine(cm);
+
+    const result = await engine.validate(baseConfig({ testCommand: 'vitest' }));
+
+    expect(result.test?.status).toBe('skip');
+    expect(result.test?.stdout).toContain('Validation infrastructure failure');
+    expect(result.infrastructureFailure).toMatchObject({
+      phase: 'test',
+      code: 'AZURE_SANDBOX_HTTP_ERROR',
+      statusCode: 403,
+      retryable: true,
+    });
+    expect(result.factValidation?.status).toBe('skip');
     expect(result.overall).toBe('fail');
   });
 
@@ -2575,7 +2614,7 @@ human_review: []
     expect(completed).toContainEqual({ phase: 'facts', status: 'pending_human' });
   });
 
-  it('blocks validation as pending_human when a required fact command is unavailable', async () => {
+  it('macOS desktop fact is deferred without execution of its Swift command', async () => {
     const execInContainer = vi.fn(
       async (
         _containerId: string,
@@ -2595,7 +2634,7 @@ human_review: []
           return { stdout: '', stderr: '', exitCode: 0 };
         }
         if (shell.includes('swift test')) {
-          return { stdout: '', stderr: 'sh: 1: swift: not found\n', exitCode: 127 };
+          throw new Error('macOS desktop fact command must not execute in a Linux pod');
         }
         throw new Error(`stub: execInContainer unexpectedly called: ${JSON.stringify(command)}`);
       },
@@ -2641,11 +2680,12 @@ human_review: []
       factId: 'fact-swift-only',
       passed: false,
       status: 'pending_human',
-      exitCode: 127,
     });
-    expect(result.factValidation?.results[0]?.reasoning).toContain(
-      'required fact command `swift` is unavailable',
-    );
+    expect(result.factValidation?.results[0]?.exitCode).toBeUndefined();
+    expect(result.factValidation?.results[0]?.reasoning).toContain('command was not attempted');
+    expect(
+      execInContainer.mock.calls.some(([, command]) => command[2]?.includes('swift test')),
+    ).toBe(false);
     expect(result.reviewSkipReason).toBe('Skipped — required facts pending human decision');
     expect(result.overall).toBe('fail');
     expect(completed).toContainEqual({ phase: 'facts', status: 'pending_human' });

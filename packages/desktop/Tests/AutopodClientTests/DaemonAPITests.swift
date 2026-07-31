@@ -571,6 +571,58 @@ private final class RecordingURLProtocol: URLProtocol, @unchecked Sendable {
   #expect(result.advisoryBrowserQa?.screenshots.first?.source == "advisory")
 }
 
+@Test func validationResponseDecodesInfrastructureFailureAndHistoricalRowsRemainCompatible() throws {
+  let currentJSON = """
+  {
+    "podId": "infra-1",
+    "attempt": 1,
+    "timestamp": "2026-07-31T14:03:31Z",
+    "smoke": {
+      "status": "pass",
+      "build": { "status": "pass", "output": "", "duration": 45 },
+      "health": { "status": "skip", "url": "", "responseCode": null, "duration": 0 },
+      "pages": []
+    },
+    "test": { "status": "skip", "duration": 4, "stdout": "", "stderr": "" },
+    "taskReview": null,
+    "infrastructureFailure": {
+      "phase": "test",
+      "code": "AZURE_SANDBOX_HTTP_ERROR",
+      "statusCode": 403,
+      "message": "Azure Sandboxes returned an empty 403",
+      "retryable": true
+    },
+    "overall": "fail",
+    "duration": 49
+  }
+  """.data(using: .utf8)!
+
+  let current = try JSONDecoder().decode(ValidationResponse.self, from: currentJSON)
+  #expect(current.test?.status == "skip")
+  #expect(current.infrastructureFailure?.phase == "test")
+  #expect(current.infrastructureFailure?.statusCode == 403)
+
+  let historicalJSON = """
+  {
+    "podId": "historical-infra-1",
+    "attempt": 1,
+    "timestamp": "2026-07-01T09:10:00Z",
+    "smoke": {
+      "status": "pass",
+      "build": { "status": "pass", "output": "", "duration": 45 },
+      "health": { "status": "skip", "url": "", "responseCode": null, "duration": 0 },
+      "pages": []
+    },
+    "taskReview": null,
+    "overall": "pass",
+    "duration": 45
+  }
+  """.data(using: .utf8)!
+
+  let historical = try JSONDecoder().decode(ValidationResponse.self, from: historicalJSON)
+  #expect(historical.infrastructureFailure == nil)
+}
+
 @Test func validationResponseDecodesHistoricalWithoutSetup() throws {
   let json = """
   {

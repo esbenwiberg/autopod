@@ -302,6 +302,7 @@ public enum PodMapper {
         reviewReasoning: v.taskReview?.reasoning,
         reviewSkipReason: v.reviewSkipReason,
         reviewSkipKind: v.reviewSkipKind,
+        infrastructureFailure: v.infrastructureFailure,
         validationSuite: v.validationSuite,
         healthCheck: healthCheck,
         pages: pages,

@@ -10,10 +10,11 @@ import type {
   HealthResult,
   PageResult,
   TaskReviewResult,
+  ValidationInfrastructureFailure,
   ValidationOverride,
   ValidationResult,
 } from '@autopod/shared';
-import { computeCostWithCache } from '@autopod/shared';
+import { AutopodError, computeCostWithCache } from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
@@ -45,6 +46,14 @@ interface PackageJsonManifest {
   scripts?: Record<string, string>;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+}
+
+interface TestRunResult {
+  status: 'pass' | 'fail' | 'skip';
+  duration: number;
+  stdout?: string;
+  stderr?: string;
+  infrastructureFailure?: ValidationInfrastructureFailure;
 }
 
 /**
@@ -256,7 +265,7 @@ export function createLocalValidationEngine(
 
         // ── Phase 4: Test ──────────────────────────────────────────────
         checkAbort();
-        let testResult: { status: 'pass' | 'fail' | 'skip'; duration: number };
+        let testResult: TestRunResult;
         if (skipPhases.includes('test')) {
           testResult = { status: 'skip', duration: 0 };
         } else {
@@ -358,6 +367,7 @@ export function createLocalValidationEngine(
         // 'skip' counts as pass (legit skips: no test command, no smoke pages,
         // no web UI, profile-level skipPhases).
         const tier1Pass =
+          !testResult.infrastructureFailure &&
           lintResult.status !== 'fail' &&
           sastResult.status !== 'fail' &&
           buildResult.status === 'pass' &&
@@ -400,8 +410,9 @@ export function createLocalValidationEngine(
           // pass tests/facts — the agent will rewrite it on the next attempt.
           callbacks?.onPhaseStarted?.('review');
           taskReview = null;
-          reviewSkipReason =
-            factsStatus === 'pending_human'
+          reviewSkipReason = testResult.infrastructureFailure
+            ? 'Skipped — validation infrastructure failed'
+            : factsStatus === 'pending_human'
               ? 'Skipped — required facts pending human decision'
               : factsStatus === 'fail'
                 ? 'Skipped — required facts failed'
@@ -497,6 +508,7 @@ export function createLocalValidationEngine(
             : ('fail' as const);
 
         const duration = Date.now() - startTime;
+        const { infrastructureFailure, ...storedTestResult } = testResult;
 
         return {
           podId: config.podId,
@@ -510,7 +522,7 @@ export function createLocalValidationEngine(
             health: healthResult,
             pages,
           },
-          test: testResult,
+          test: storedTestResult,
           lint: lintResult,
           sast: sastResult,
           factValidation,
@@ -519,6 +531,7 @@ export function createLocalValidationEngine(
           advisoryBrowserQa: null,
           reviewSkipReason,
           reviewSkipKind,
+          ...(infrastructureFailure && { infrastructureFailure }),
           overall,
           duration,
         };
@@ -931,7 +944,7 @@ async function runTests(
   containerManager: ContainerManager,
   config: ValidationEngineConfig,
   log?: Logger,
-) {
+): Promise<TestRunResult> {
   if (!config.testCommand) {
     log?.info('no test command configured, skipping tests');
     return { status: 'skip' as const, duration: 0 };
@@ -956,9 +969,29 @@ async function runTests(
     const duration = Date.now() - testStart;
     const partial = (err as { partialOutput?: string })?.partialOutput ?? '';
     const message = err instanceof Error ? err.message : String(err);
-    log?.warn({ duration }, `tests timed out: ${message}`);
+    const infrastructureFailure = classifyValidationInfrastructureFailure('test', err);
+    if (infrastructureFailure) {
+      log?.warn(
+        { err, duration, infrastructureFailure },
+        'test command could not run because validation infrastructure failed',
+      );
+      return {
+        status: 'skip',
+        duration,
+        stdout:
+          `Validation infrastructure failure: ${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(
+            0,
+            50_000,
+          ),
+        stderr: '',
+        infrastructureFailure,
+      };
+    }
+
+    const timedOut = /timed?\s*out|timeout/i.test(message);
+    log?.warn({ err, duration }, timedOut ? 'tests timed out' : 'test execution failed');
     return {
-      status: 'fail' as const,
+      status: 'fail',
       duration,
       stdout: `${message}\n\n--- partial output (last 5 KB) ---\n${partial}`.slice(0, 50_000),
       stderr: '',
@@ -979,6 +1012,26 @@ async function runTests(
     duration,
     stdout: result.stdout.slice(0, 50_000),
     stderr: result.stderr.slice(0, 50_000),
+  };
+}
+
+function classifyValidationInfrastructureFailure(
+  phase: ValidationInfrastructureFailure['phase'],
+  error: unknown,
+): ValidationInfrastructureFailure | null {
+  if (!(error instanceof AutopodError) || !error.code.startsWith('AZURE_SANDBOX_')) return null;
+
+  return {
+    phase,
+    code: error.code,
+    statusCode: error.statusCode,
+    message: error.message,
+    retryable:
+      error.statusCode === 403 ||
+      error.statusCode === 429 ||
+      error.statusCode === 502 ||
+      error.statusCode === 503 ||
+      error.statusCode === 504,
   };
 }
 
@@ -1096,6 +1149,28 @@ async function runFactValidation(
       ? await artifactHashInContainer(containerManager, config, artifactPath, log)
       : undefined;
 
+    if (isMacOsDesktopFact(fact.command, artifactPath)) {
+      results.push({
+        factId: fact.id,
+        proves: fact.proves,
+        kind: fact.kind,
+        artifactPath,
+        command: fact.command,
+        passed: false,
+        status: 'pending_human',
+        artifact: {
+          path: artifactPath,
+          change: fact.artifact.change,
+          exists: artifactExists,
+          changed: artifactChanged,
+          ...(artifactHash ? { hash: artifactHash } : {}),
+        },
+        reasoning:
+          'Fact requires macOS desktop Swift/Xcode validation, which is not executable in the Linux pod. The command was not attempted; verify it on a Mac or through human review.',
+      });
+      continue;
+    }
+
     let commandResult: { stdout: string; stderr: string; exitCode: number } | null = null;
     let commandError: string | undefined;
     const commandStart = Date.now();
@@ -1199,6 +1274,16 @@ async function runFactValidation(
     'fact validation complete',
   );
   return { status, results };
+}
+
+function isMacOsDesktopFact(command: string, artifactPath: string): boolean {
+  const targetsDesktop =
+    artifactPath === 'packages/desktop' || artifactPath.startsWith('packages/desktop/');
+  if (!targetsDesktop) return false;
+  return (
+    /(^|[;&|]\s*|\s)(?:xcrun\s+)?xcodebuild(?:\s|$)/i.test(command) ||
+    /(^|[;&|]\s*|\s)swift\s+test(?:\s|$)/i.test(command)
+  );
 }
 
 function detectUnavailableFactCommand(result: {

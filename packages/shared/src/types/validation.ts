@@ -1,3 +1,4 @@
+import type { ValidationPhase } from './events.js';
 import type { ValidationSuite } from './pod-options.js';
 import type { PageAssertion } from './profile.js';
 import type { DeviationsAssessment } from './task-summary.js';
@@ -10,6 +11,19 @@ export interface ScreenshotRef {
   filename: string;
   /** Path relative to the data dir, e.g. `screenshots/abc12345/smoke/root.png`. */
   relativePath: string;
+}
+
+export interface ValidationInfrastructureFailure {
+  /** Validation phase that could not execute because the harness or container transport failed. */
+  phase: ValidationPhase;
+  /** Stable machine-readable transport/harness error code. */
+  code: string;
+  /** HTTP status when the underlying infrastructure exposed one. */
+  statusCode?: number;
+  /** Operator-safe diagnostic; must never contain credentials or authorization headers. */
+  message: string;
+  /** Whether an explicit validation retry may succeed without changing repository code. */
+  retryable: boolean;
 }
 
 export interface ValidationResult {
@@ -41,6 +55,8 @@ export interface ValidationResult {
     | 'no-changes'
     | 'review-failed'
     | 'review-timeout';
+  /** Blocking harness/container failure, distinct from a command that ran and exited non-zero. */
+  infrastructureFailure?: ValidationInfrastructureFailure;
   overall: 'pass' | 'fail';
   duration: number;
 }
