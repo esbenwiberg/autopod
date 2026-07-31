@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
+  createPublicationContext,
   createPublishPlan,
   discoverBaseTemplates,
   executePublishPlan,
@@ -87,31 +88,27 @@ test('publication accepts real Azure queue output without JSON', async () => {
 });
 
 test('publication context exclusions keep required base inputs', () => {
-  const dockerignore = fs.readFileSync(path.join(repoRoot, '.dockerignore'), 'utf8');
-  const patterns = dockerignore
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#'));
+  const marker = path.join(repoRoot, 'node_modules', '.autopod-base-context-test');
+  fs.writeFileSync(marker, 'must not be uploaded');
+  const context = createPublicationContext(repoRoot);
 
-  for (const excluded of [
-    '.git',
-    'node_modules',
-    'packages/desktop/.build',
-    'packages/desktop/build',
-    'packages/daemon/.autopod-data',
-  ]) {
-    assert.ok(patterns.includes(excluded), `${excluded} must be excluded from ACR context`);
-  }
-  for (const required of [
-    'package.json',
-    'pnpm-lock.yaml',
-    'pnpm-workspace.yaml',
-    'tsconfig.base.json',
-    'packages/pi-worker/package.json',
-    'packages/pi-worker/tsconfig.json',
-    'packages/pi-worker/src',
-  ]) {
-    assert.ok(!patterns.includes(required), `${required} must remain in ACR context`);
+  try {
+    assert.ok(!fs.existsSync(path.join(context.path, '.git')));
+    assert.ok(!fs.existsSync(path.join(context.path, 'node_modules')));
+    for (const required of [
+      'package.json',
+      'pnpm-lock.yaml',
+      'pnpm-workspace.yaml',
+      'tsconfig.base.json',
+      'packages/pi-worker/package.json',
+      'packages/pi-worker/tsconfig.json',
+      'packages/pi-worker/src',
+    ]) {
+      assert.ok(fs.existsSync(path.join(context.path, required)), `${required} must be archived`);
+    }
+  } finally {
+    context.cleanup();
+    fs.rmSync(marker, { force: true });
   }
 });
 

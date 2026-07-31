@@ -2,6 +2,7 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -80,55 +81,86 @@ export async function executePublishPlan(
 ) {
   if (dryRun) return formatPublishPlan(plan);
 
-  const results = [];
-  for (const entry of plan) {
-    process.stdout.write(`\n==> building ${entry.template} (${entry.platform})\n`);
-    const queued = parseQueuedBuild(runAz(entry.buildArgs, repoRoot));
-    const runId = queued.runId ?? queued.name ?? idSuffix(queued.id);
-    if (typeof runId !== 'string' || !runId) {
-      throw new Error(`ACR build for ${entry.template} did not return a run ID`);
-    }
+  const publicationContext = createPublicationContext(repoRoot);
+  try {
+    const results = [];
+    for (const entry of plan) {
+      process.stdout.write(`\n==> building ${entry.template} (${entry.platform})\n`);
+      const buildArgs = [...entry.buildArgs];
+      buildArgs[buildArgs.length - 1] = publicationContext.path;
+      const queued = parseQueuedBuild(runAz(buildArgs, repoRoot));
+      const runId = queued.runId ?? queued.name ?? idSuffix(queued.id);
+      if (typeof runId !== 'string' || !runId) {
+        throw new Error(`ACR build for ${entry.template} did not return a run ID`);
+      }
 
-    const run = await waitForRun({
-      registry: entry.registry.name,
-      runId,
-      repoRoot,
-      runAz,
-      pollIntervalMs,
-      timeoutMs,
-    });
-    verifyRun(entry, run);
-
-    const digests = entry.verifyTags.map((tag) =>
-      runAz(
-        [
-          'acr',
-          'manifest',
-          'show-metadata',
-          '--registry',
-          entry.registry.name,
-          '--name',
-          tag,
-          '--query',
-          'digest',
-          '--output',
-          'tsv',
-        ],
+      const run = await waitForRun({
+        registry: entry.registry.name,
+        runId,
         repoRoot,
-      ).trim(),
-    );
-    if (digests.some((digest) => !/^sha256:[a-f0-9]{64}$/i.test(digest))) {
-      throw new Error(`ACR manifest verification returned an invalid digest for ${entry.template}`);
-    }
-    if (new Set(digests).size !== 1) {
-      throw new Error(`Immutable and latest tags do not match for ${entry.template}`);
-    }
+        runAz,
+        pollIntervalMs,
+        timeoutMs,
+      });
+      verifyRun(entry, run);
 
-    const [digest] = digests;
-    process.stdout.write(`published ${entry.latestRef}@${digest}\n`);
-    results.push({ template: entry.template, digest, platform: entry.platform });
+      const digests = entry.verifyTags.map((tag) =>
+        runAz(
+          [
+            'acr',
+            'manifest',
+            'show-metadata',
+            '--registry',
+            entry.registry.name,
+            '--name',
+            tag,
+            '--query',
+            'digest',
+            '--output',
+            'tsv',
+          ],
+          repoRoot,
+        ).trim(),
+      );
+      if (digests.some((digest) => !/^sha256:[a-f0-9]{64}$/i.test(digest))) {
+        throw new Error(
+          `ACR manifest verification returned an invalid digest for ${entry.template}`,
+        );
+      }
+      if (new Set(digests).size !== 1) {
+        throw new Error(`Immutable and latest tags do not match for ${entry.template}`);
+      }
+
+      const [digest] = digests;
+      process.stdout.write(`published ${entry.latestRef}@${digest}\n`);
+      results.push({ template: entry.template, digest, platform: entry.platform });
+    }
+    return results;
+  } finally {
+    publicationContext.cleanup();
   }
-  return results;
+}
+
+export function createPublicationContext(repoRoot = DEFAULT_REPO_ROOT) {
+  const root = fs.mkdtempSync(path.join(tmpdir(), 'autopod-base-context-'));
+  const archive = path.join(root, 'source.tar');
+  const source = path.join(root, 'source');
+  try {
+    fs.mkdirSync(source);
+    execFileSync('git', ['archive', '--format=tar', '--output', archive, 'HEAD'], {
+      cwd: repoRoot,
+      stdio: 'ignore',
+    });
+    execFileSync('tar', ['-xf', archive, '-C', source], { stdio: 'ignore' });
+    fs.rmSync(archive, { force: true });
+    return {
+      path: source,
+      cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
+    };
+  } catch (error) {
+    fs.rmSync(root, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 export function formatPublishPlan(plan) {
