@@ -1,5 +1,6 @@
 import Foundation
 import AutopodClient
+import AutopodUI
 
 public protocol PodsitterAPIClient: Sendable {
   func getPodsitterStatus() async throws -> PodsitterStatusResponse
@@ -117,10 +118,25 @@ public final class PodsitterStore {
     return Self.compatibleRuntimes(provider: account.provider)
   }
 
-  public var compatibleModels: [ProviderCatalogModel] {
-    guard let account = selectedAccount else { return [] }
-    return (catalog?.models(providerId: account.provider) ?? [])
-      .filter { $0.lifecycle != "retired" }
+  public var compatibleModels: [RuntimeModelOption] {
+    guard let account = selectedAccount,
+          compatibleRuntimes.contains(selectedRuntime),
+          let runtime = RuntimeType(rawValue: selectedRuntime.rawValue)
+    else { return [] }
+    if runtime == .pi {
+      guard let provider = catalog?.provider(id: account.provider),
+            provider.implementation.kind == "generic-pi-api",
+            provider.policy.runnable,
+            provider.policy.authorization == "supported"
+      else { return [] }
+    }
+    return RuntimeModelOptions.options(
+      for: runtime,
+      role: .defaultModel,
+      currentValue: selectedModel,
+      catalog: catalog,
+      providerId: account.provider
+    )
   }
 
   public var selectedAccount: PublicProviderAccountResponse? {

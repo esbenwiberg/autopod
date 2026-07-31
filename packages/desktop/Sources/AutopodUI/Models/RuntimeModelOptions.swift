@@ -1,9 +1,11 @@
 import AutopodClient
 import Foundation
 
-struct RuntimeModelOption: Hashable, Sendable {
-    let value: String
-    let label: String
+public struct RuntimeModelOption: Hashable, Sendable, Identifiable {
+    public let value: String
+    public let label: String
+
+    public var id: String { value }
 }
 
 struct RuntimeModelPrice: Hashable, Sendable {
@@ -35,7 +37,7 @@ struct RuntimeModelPrice: Hashable, Sendable {
     }
 }
 
-enum RuntimeModelRole: Sendable {
+public enum RuntimeModelRole: Sendable {
     case defaultModel
     case reviewerModel
 }
@@ -52,7 +54,7 @@ public enum ClaudeModelCanonicalizer {
     }
 }
 
-enum RuntimeModelOptions {
+public enum RuntimeModelOptions {
     private static let modelPricing: [String: RuntimeModelPrice] = [
         "claude-fable-5": RuntimeModelPrice(
             inputPer1M: 10,
@@ -181,7 +183,7 @@ enum RuntimeModelOptions {
         "gpt-5.6-luna": "GPT-5.6 Luna",
     ]
 
-    static func options(
+    public static func options(
         for runtime: RuntimeType,
         role: RuntimeModelRole,
         currentValue: String? = nil,
@@ -191,12 +193,13 @@ enum RuntimeModelOptions {
         var options = baseOptions(for: runtime, role: role)
         if runtime == .pi, let catalog, let providerId,
            let provider = catalog.provider(id: providerId),
-           provider.implementation.kind == "generic-pi-api" {
+           provider.implementation.kind == "generic-pi-api",
+           provider.policy.runnable,
+           provider.policy.authorization == "supported" {
             options = catalog.models
                 .filter {
                     $0.providerId == providerId
                         && provider.modelIds.contains($0.id)
-                        && provider.policy.runnable
                 }
                 .filter { $0.lifecycle == "active" }
                 .map { RuntimeModelOption(value: $0.id, label: $0.displayName) }
