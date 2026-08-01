@@ -68,7 +68,7 @@ export class RoutingContainerManager implements ContainerManager {
     );
   }
 
-  getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'> {
+  getStatus(containerId: string): Promise<'running' | 'stopped' | 'deleted' | 'unknown'> {
     return this.delegate(containerId).getStatus(containerId);
   }
 

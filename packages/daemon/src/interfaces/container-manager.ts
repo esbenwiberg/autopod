@@ -139,7 +139,7 @@ export interface ContainerManager {
     hostPath: string,
     excludes?: string[],
   ): Promise<void>;
-  getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'>;
+  getStatus(containerId: string): Promise<'running' | 'stopped' | 'deleted' | 'unknown'>;
   execInContainer(
     containerId: string,
     command: string[],

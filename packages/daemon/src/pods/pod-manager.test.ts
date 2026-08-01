@@ -30,11 +30,16 @@ vi.mock('node:child_process', () => ({
   execFile: vi.fn(),
 }));
 
+vi.mock('node:timers/promises', () => ({
+  setTimeout: vi.fn(() => Promise.resolve()),
+}));
+
 vi.mock('../providers/memory-reviewer.js', () => ({
   createProfileMemoryReviewer: vi.fn(),
 }));
 
 import { execFile } from 'node:child_process';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 const mockedExecFile = vi.mocked(execFile);
 import type {
@@ -8273,6 +8278,7 @@ describe('PodManager', () => {
       await manager.triggerValidation(pod.id);
 
       expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(sleep)).toHaveBeenCalledWith(1);
       expect(manager.getSession(pod.id).status).toBe('validated');
     });
 

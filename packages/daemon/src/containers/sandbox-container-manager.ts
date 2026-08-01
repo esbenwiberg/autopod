@@ -254,7 +254,7 @@ export class SandboxContainerManager implements ContainerManager {
     }
   }
 
-  async getStatus(containerId: string): Promise<'running' | 'stopped' | 'unknown'> {
+  async getStatus(containerId: string): Promise<'running' | 'stopped' | 'deleted' | 'unknown'> {
     try {
       return await this.client.getStatus(containerId);
     } catch (err) {

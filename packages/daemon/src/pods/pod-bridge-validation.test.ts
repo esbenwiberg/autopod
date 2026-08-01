@@ -31,7 +31,7 @@ type Deps = SessionBridgeDependencies;
 interface BuildOpts {
   profileOverrides?: Parameters<typeof insertTestProfile>[1];
   containerId?: string | null;
-  containerStatus?: 'running' | 'stopped' | 'unknown';
+  containerStatus?: 'running' | 'stopped' | 'deleted' | 'unknown';
   reviewerExecEnv?: Record<string, string>;
   executionTarget?: 'local' | 'sandbox';
   execImpl?: (

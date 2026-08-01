@@ -137,7 +137,7 @@ export interface SandboxSnapshot {
   id: string;
 }
 
-export type SandboxStatus = 'running' | 'stopped' | 'unknown';
+export type SandboxStatus = 'running' | 'stopped' | 'deleted' | 'unknown';
 
 export interface SandboxApiClient {
   /** Provision a sandbox from an OCI image with an initial egress policy. Returns its id. */
