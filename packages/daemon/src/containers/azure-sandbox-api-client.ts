@@ -1137,11 +1137,11 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     // `retryAfterSeconds` (clamped) so we back off exactly as long as it asks,
     // then give up after `retryMaxAttempts` rather than hanging forever.
     //
-    // The preview data plane has also returned a rare empty 403 between two
-    // successful buffered execs. A received empty Forbidden response means the
-    // operation was rejected before command execution, so one bounded retry is
-    // safe. Non-empty 403s and ARM 403s remain deterministic failures.
-    let emptyForbiddenRetries = 0;
+    // The preview data plane can return an empty 403 for a data-plane request
+    // that it rejected before performing the operation. Retry it through the
+    // same bounded budget as 429s so idempotent file writes do not fail a pod
+    // after one transient rejection. Non-empty 403s and ARM 403s remain
+    // deterministic failures.
     for (let attempt = 1; ; attempt++) {
       const headers = new Headers(options.headers);
       headers.set('Authorization', `Bearer ${token.token}`);
@@ -1188,12 +1188,13 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       if (
         plane === 'data' &&
         response.status === 403 &&
-        emptyForbiddenRetries === 0 &&
         attempt < this.retryMaxAttempts &&
         (await response.clone().text()).trim() === ''
       ) {
-        emptyForbiddenRetries++;
-        const waitMs = Math.min(this.retryBaseDelayMs, this.retryMaxDelayMs);
+        const waitMs = Math.min(
+          await retryAfterMs(response, attempt, this.retryBaseDelayMs),
+          this.retryMaxDelayMs,
+        );
         this.logger.warn(
           {
             plane,
@@ -1203,7 +1204,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
             waitMs,
             ...safeAzureResponseDiagnostics(response),
           },
-          'Azure Sandboxes data plane returned an empty 403 — retrying once',
+          'Azure Sandboxes data plane returned an empty 403 — retrying through retry budget',
         );
         await sleep(waitMs);
         continue;

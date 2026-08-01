@@ -811,23 +811,20 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
-  it('retries an empty data-plane 403 once and returns the successful command result', async () => {
+  it('retries empty data-plane 403s through the retry budget for file writes', async () => {
     const { client, requests } = makeClient(
       [
-        {
-          status: 403,
-          rawText: '',
-          headers: { 'x-ms-request-id': 'request-first' },
-        },
-        { status: 200, body: { stdout: 'tests passed', stderr: '', exitCode: 0 } },
+        { status: 403, rawText: '', headers: { 'x-ms-request-id': 'request-first' } },
+        { status: 403, rawText: '', headers: { 'x-ms-request-id': 'request-second' } },
+        { status: 204 },
       ],
-      { retry: { maxDelayMs: 0 } },
+      { retry: { maxAttempts: 3, maxDelayMs: 0 } },
     );
 
-    const result = await client.exec('sbx-1', ['sh', '-c', 'pnpm test']);
+    await client.writeFile('sbx-1', '/home/autopod/.claude.json', Buffer.from('{}'));
 
-    expect(result).toEqual({ stdout: 'tests passed', stderr: '', exitCode: 0 });
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(3);
+    expect(requests.every((request) => request.url.includes('/sandboxes/sbx-1/files'))).toBe(true);
   });
 
   it('does not retry a non-empty data-plane 403', async () => {
@@ -839,9 +836,10 @@ describe('AzureSandboxApiClient', () => {
     expect(requests).toHaveLength(1);
   });
 
-  it('retains safe diagnostics after a persistent empty data-plane 403', async () => {
+  it('retains safe diagnostics after exhausting the empty data-plane 403 retry budget', async () => {
     const { client, requests } = makeClient(
       [
+        { status: 403, rawText: '' },
         { status: 403, rawText: '' },
         {
           status: 403,
@@ -853,7 +851,7 @@ describe('AzureSandboxApiClient', () => {
           },
         },
       ],
-      { retry: { maxDelayMs: 0 } },
+      { retry: { maxAttempts: 3, maxDelayMs: 0 } },
     );
 
     let message = '';
@@ -863,7 +861,7 @@ describe('AzureSandboxApiClient', () => {
       message = error instanceof Error ? error.message : String(error);
     }
 
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(3);
     expect(message).toContain('request-final');
     expect(message).toContain('correlation-final');
     expect(message).not.toContain('secret-that-must-not-appear');
