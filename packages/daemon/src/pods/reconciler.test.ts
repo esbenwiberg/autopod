@@ -43,22 +43,36 @@ function buildDeps(status: 'running' | 'stopped' | 'unknown') {
     start: vi.fn(async () => {}),
   } as unknown as SandboxContainerManager;
   const preserveWorkspace = vi.fn(async () => {});
+  const quiesceSandboxAgent = vi.fn(async () => {});
+  const suspendSandbox = vi.fn(async () => {});
 
-  return { pod, updates, podRepo, eventBus, sandboxContainerManager, preserveWorkspace };
+  return {
+    pod,
+    updates,
+    podRepo,
+    eventBus,
+    sandboxContainerManager,
+    preserveWorkspace,
+    quiesceSandboxAgent,
+    suspendSandbox,
+  };
 }
 
 describe('reconcileSandboxSessions', () => {
-  it('preserves a still-running sandbox before parking it', async () => {
+  it('quiesces, preserves, and suspends a still-running sandbox before parking it', async () => {
     const deps = buildDeps('running');
 
     await reconcileSandboxSessions({ ...deps, logger });
 
+    expect(deps.quiesceSandboxAgent).toHaveBeenCalledWith('pod-1');
     expect(deps.preserveWorkspace).toHaveBeenCalledWith('pod-1');
+    expect(deps.suspendSandbox).toHaveBeenCalledWith('pod-1');
     expect(deps.updates).toContainEqual(
       expect.objectContaining({
         status: 'paused',
         pauseReason: 'manual',
-        lastCorrectionMessage: expect.stringContaining('workspace was preserved'),
+        lastCorrectionMessage: expect.stringContaining('sandbox is suspended'),
+        lastRecoveryTrigger: 'restart',
       }),
     );
   });
@@ -75,18 +89,21 @@ describe('reconcileSandboxSessions', () => {
     );
   });
 
-  it('resumes and preserves a suspended sandbox before parking it', async () => {
+  it('resumes, quiesces, preserves, and suspends a stopped sandbox before parking it', async () => {
     const deps = buildDeps('stopped');
 
     await reconcileSandboxSessions({ ...deps, logger });
 
     expect(deps.sandboxContainerManager.start).toHaveBeenCalledWith('sandbox-1');
+    expect(deps.quiesceSandboxAgent).toHaveBeenCalledWith('pod-1');
     expect(deps.preserveWorkspace).toHaveBeenCalledWith('pod-1');
+    expect(deps.suspendSandbox).toHaveBeenCalledWith('pod-1');
     expect(deps.updates).toContainEqual(
       expect.objectContaining({
         status: 'paused',
         pauseReason: 'manual',
-        lastCorrectionMessage: expect.stringContaining('resumed'),
+        lastCorrectionMessage: expect.stringContaining('sandbox is suspended'),
+        lastRecoveryTrigger: 'restart',
       }),
     );
   });

@@ -370,6 +370,9 @@ export function podRoutes(
   actionAuditRepo?: ActionAuditRepository,
 ): void {
   const providerAttemptRepo = db ? createProviderAttemptRepository(db) : undefined;
+  // Rework can include a full sandbox filesystem sync. Keep it detached from the
+  // desktop request and coalesce repeats after a client-side timeout.
+  const reworkRuns = new Map<string, Promise<void>>();
   // POST /pods — create a new pod
   app.post('/pods', async (request, reply) => {
     const body = createPodRequestSchema.parse(request.body);
@@ -865,10 +868,29 @@ export function podRoutes(
   });
 
   // POST /pods/:podId/validate — trigger validation (agent rework on failure)
-  app.post('/pods/:podId/validate', async (request) => {
+  app.post('/pods/:podId/validate', async (request, reply) => {
     const { podId } = request.params as { podId: string };
-    await podManager.triggerValidation(podId, { force: true });
-    return { ok: true };
+    const pod = podManager.getSession(podId);
+    const isTerminalRework = ['failed', 'review_required', 'killed', 'validated'].includes(
+      pod.status,
+    );
+    if (!isTerminalRework) {
+      await podManager.triggerValidation(podId, { force: true });
+      return { ok: true };
+    }
+    if (!reworkRuns.has(podId)) {
+      const run = podManager
+        .triggerValidation(podId, { force: true })
+        .catch((err: unknown) => {
+          app.log.warn({ err, podId }, 'Detached pod Rework failed');
+        })
+        .finally(() => {
+          reworkRuns.delete(podId);
+        });
+      reworkRuns.set(podId, run);
+    }
+    reply.status(202);
+    return { ok: true, accepted: true };
   });
 
   // POST /pods/:podId/revalidate — pull latest + validate only (no agent rework)

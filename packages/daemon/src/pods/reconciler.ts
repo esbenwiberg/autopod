@@ -9,6 +9,8 @@ export interface ReconcilerDependencies {
   eventBus: EventBus;
   sandboxContainerManager: SandboxContainerManager;
   preserveWorkspace: (podId: string) => Promise<void>;
+  quiesceSandboxAgent: (podId: string) => Promise<void>;
+  suspendSandbox: (podId: string) => Promise<void>;
   logger: Logger;
 }
 
@@ -57,20 +59,17 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
   const status = await sandboxContainerManager.getStatus(containerId);
 
   switch (status) {
-    case 'running': {
-      await deps.preserveWorkspace(pod.id);
-      const reason =
-        'Sandbox workspace was preserved after daemon restart, but the agent stream cannot be reattached; operator action is required before continuing.';
-      logger.warn({ podId: pod.id, containerId }, reason);
-      parkSession(pod, 'paused', reason, podRepo, eventBus);
-      break;
-    }
-
+    case 'running':
     case 'stopped': {
-      await sandboxContainerManager.start(containerId);
+      if (status === 'stopped') await sandboxContainerManager.start(containerId);
+      // The original streaming exec is no longer observable after daemon restart.
+      // Stop that worker before snapshotting so it cannot mutate the workspace while
+      // recovery is being prepared. The sandbox itself is retained and suspended.
+      await deps.quiesceSandboxAgent(pod.id);
       await deps.preserveWorkspace(pod.id);
+      await deps.suspendSandbox(pod.id);
       const reason =
-        'Suspended sandbox was resumed and its workspace was preserved after daemon restart, but the agent stream cannot be reattached; operator action is required before continuing.';
+        'Sandbox workspace and session were preserved after daemon restart. The sandbox is suspended and will resume in place when work continues.';
       logger.warn({ podId: pod.id, containerId }, reason);
       parkSession(pod, 'paused', reason, podRepo, eventBus);
       break;
@@ -102,6 +101,7 @@ function parkSession(
           : 'manual'
         : null,
     lastCorrectionMessage: reason,
+    ...(status === 'paused' ? { lastRecoveryTrigger: 'restart' as const } : {}),
     ...(status === 'failed' ? { completedAt: new Date().toISOString() } : {}),
   });
 

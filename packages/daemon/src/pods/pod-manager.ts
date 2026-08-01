@@ -648,6 +648,12 @@ if [ -f ${AGENT_ENV_PATH} ]; then
   . ${AGENT_ENV_PATH}
 fi
 
+# Persist the worker PID so daemon restart recovery can terminate the orphaned
+# streaming process before resuming the durable CLI session in this sandbox.
+if mkdir -p /run/autopod 2>/dev/null; then
+  printf '%s\n' "$$" > /run/autopod/agent.pid 2>/dev/null || true
+fi
+
 _read_file_var() {
   local var_name="$1" file_var="\${1}_FILE"
   local path
@@ -1407,6 +1413,8 @@ export interface PodManager {
   ): Promise<AgentRunOutcome>;
   handleCompletion(podId: string): Promise<void>;
   preserveWorkspace(podId: string, reason?: string): Promise<void>;
+  quiesceSandboxAgent(podId: string): Promise<void>;
+  suspendSandboxForRecovery(podId: string): Promise<void>;
   cleanupPodResourcesForRecovery(podId: string): Promise<void>;
   sendMessage(podId: string, message: string, actor?: OperatorActor): Promise<void>;
   notifyEscalation(podId: string, escalation: EscalationRequest): void;
@@ -2504,17 +2512,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
   }
 
-  function primePiRuntimeForResume(
+  function primeRuntimeForResume(
     pod: Pod,
     runtime: Runtime,
     containerId: string,
     env: Record<string, string> | undefined,
-  ): void {
-    if (pod.runtime !== 'pi') return;
-
-    const piRuntime = runtime as PiRuntime;
-    if (pod.piSessionId) piRuntime.setPiSessionId(pod.id, pod.piSessionId);
-
+  ): McpServerConfig[] {
     const profile = profileStore.get(pod.profileName);
     const mcpUrl = `${mcpBaseUrl}/mcp/${pod.id}`;
     const mcpSessionToken = deps.sessionTokenIssuer?.generate(pod.id);
@@ -2547,20 +2550,33 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       ),
     ];
 
-    piRuntime.setPiResumeConfig({
-      podId: pod.id,
-      task: '',
-      model: pod.model,
-      reasoningEffort: resolvedReasoningEffort(
-        profile,
-        pod.profileSnapshot as unknown as Record<string, unknown> | null,
-      ),
-      workDir: '/workspace',
-      containerId,
-      customInstructions: 'resume',
-      env: env ?? {},
-      mcpServers,
-    });
+    const reasoningEffort = resolvedReasoningEffort(
+      profile,
+      pod.profileSnapshot as unknown as Record<string, unknown> | null,
+    );
+    if (pod.runtime === 'pi') {
+      const piRuntime = runtime as PiRuntime;
+      if (pod.piSessionId) piRuntime.setPiSessionId(pod.id, pod.piSessionId);
+      piRuntime.setPiResumeConfig({
+        podId: pod.id,
+        task: '',
+        model: pod.model,
+        reasoningEffort,
+        workDir: '/workspace',
+        containerId,
+        customInstructions: 'resume',
+        env: env ?? {},
+        mcpServers,
+      });
+    } else if (pod.runtime === 'claude' && 'setClaudeResumeConfig' in runtime) {
+      if (pod.claudeSessionId) {
+        (runtime as ClaudeRuntime).setClaudeSessionId(pod.id, pod.claudeSessionId);
+      }
+      (runtime as ClaudeRuntime).setClaudeResumeConfig(pod.id, mcpServers, reasoningEffort);
+    } else if (pod.runtime === 'codex' && 'setCodexResumeConfig' in runtime) {
+      (runtime as CodexRuntime).setCodexResumeConfig(pod.id, mcpServers, reasoningEffort);
+    }
+    return mcpServers;
   }
 
   async function syncSandboxRuntimeSessionState(podId: string): Promise<void> {
@@ -9148,7 +9164,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             rotateProviderAttemptForFreshSegment(pod, profile, hadActiveProviderAttempt);
           }
           emitStatus('Resuming Pi pod…');
-          primePiRuntimeForResume(pod, runtime, containerId, secretEnv);
+          primeRuntimeForResume(pod, runtime, containerId, secretEnv);
           // biome-ignore lint/style/noNonNullAssertion: recovery pods have a worktree
           const piContinuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
           events = runtime.resume(podId, piContinuationPrompt, containerId, secretEnv);
@@ -10263,7 +10279,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             const resumeEnv = await getResumeEnv(pod);
             const runtime = runtimeRegistry.get(pod.runtime);
             if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
-            primePiRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
+            primeRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
             const events = runtime.resume(podId, correctionMessage, pod.containerId, resumeEnv);
             const outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
             await persistRuntimeCredentialsForPod(
@@ -10323,9 +10339,42 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         const resumeEnv = await getResumeEnv(pod);
         const runtime = runtimeRegistry.get(pod.runtime);
         if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
-        primePiRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
-        const events = runtime.resume(podId, resumeMessage, pod.containerId, resumeEnv);
-        const outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
+        const resumingPreservedSandbox =
+          pod.lastRecoveryTrigger === 'restart' && pod.executionTarget === 'sandbox';
+        if (resumingPreservedSandbox) {
+          await containerManagerFactory.get('sandbox').start(pod.containerId);
+          podRepo.update(podId, { lastRecoveryTrigger: null });
+          emitActivityStatus(podId, 'Resuming preserved sandbox after daemon restart…');
+        }
+        const mcpServers = primeRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
+        let outcome: AgentRunOutcome;
+        try {
+          const events = runtime.resume(podId, resumeMessage, pod.containerId, resumeEnv);
+          outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
+        } catch (err) {
+          if (!(resumingPreservedSandbox && err instanceof ResumeSessionNotFoundError)) throw err;
+          if (!pod.worktreePath) throw err;
+          podRepo.update(podId, { claudeSessionId: null });
+          emitActivityStatus(
+            podId,
+            'Saved Claude session was unavailable — starting a fresh recovery worker in the preserved sandbox…',
+          );
+          const recoveryEvents = runtime.spawn({
+            podId,
+            task: await buildRecoveryTask(podRepo.getOrThrow(podId), pod.worktreePath),
+            model: pod.model,
+            reasoningEffort: resolvedReasoningEffort(
+              resolveEffectiveBoundProfile(pod),
+              pod.profileSnapshot as unknown as Record<string, unknown> | null,
+            ),
+            workDir: '/workspace',
+            containerId: pod.containerId,
+            env: resumeEnv,
+            mcpServers,
+            executionTarget: pod.executionTarget,
+          });
+          outcome = await this.consumeAgentEvents(podId, recoveryEvents, pod.validationAttempts);
+        }
         await persistRuntimeCredentialsForPod(
           podId,
           'Failed to persist rotated credentials after human-message resume',
@@ -10875,7 +10924,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         // Resume agent with rejection feedback
         const resumeEnv = await getResumeEnv(pod);
         const runtime = runtimeRegistry.get(pod.runtime);
-        primePiRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
+        primeRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
         const events = runtime.resume(podId, rejectionMessage, pod.containerId, resumeEnv);
         const outcome = await this.consumeAgentEvents(
           podId,
@@ -11549,6 +11598,44 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     async preserveWorkspace(podId: string, reason = 'operator recovery'): Promise<void> {
       await preservePodWorkspace(podRepo.getOrThrow(podId), reason);
+    },
+
+    async quiesceSandboxAgent(podId: string): Promise<void> {
+      const pod = podRepo.getOrThrow(podId);
+      if (pod.executionTarget !== 'sandbox' || !pod.containerId) return;
+      const cm = containerManagerFactory.get('sandbox');
+      if ((await cm.getStatus(pod.containerId)) !== 'running') return;
+      const result = await cm.execInContainer(
+        pod.containerId,
+        [
+          'sh',
+          '-c',
+          [
+            'pid_file=/run/autopod/agent.pid',
+            '[ -r "$pid_file" ] || { echo "missing agent PID" >&2; exit 70; }',
+            'pid=$(cat "$pid_file")',
+            'case "$pid" in ""|*[!0-9]*) rm -f "$pid_file"; exit 0;; esac',
+            'kill -TERM "$pid" 2>/dev/null || true',
+            'i=0; while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
+            'kill -KILL "$pid" 2>/dev/null || true',
+            'rm -f "$pid_file"',
+          ].join('; '),
+        ],
+        { timeout: 5_000 },
+      );
+      if (result.exitCode !== 0) {
+        throw new Error(
+          `Sandbox worker quiesce failed (exit ${result.exitCode}): ${result.stderr}`,
+        );
+      }
+      emitActivityStatus(podId, 'Orphaned sandbox worker stopped for daemon recovery.');
+    },
+
+    async suspendSandboxForRecovery(podId: string): Promise<void> {
+      const pod = podRepo.getOrThrow(podId);
+      if (pod.executionTarget !== 'sandbox' || !pod.containerId) return;
+      const cm = containerManagerFactory.get('sandbox');
+      if ((await cm.getStatus(pod.containerId)) === 'running') await cm.stop(pod.containerId);
     },
 
     async cleanupPodResourcesForRecovery(podId: string): Promise<void> {
@@ -12563,7 +12650,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           const resumeEnv = await getResumeEnv(s2);
           const runtime = runtimeRegistry.get(s2.runtime);
           if (!s2.containerId) throw new Error(`Pod ${podId} has no container`);
-          primePiRuntimeForResume(s2, runtime, s2.containerId, resumeEnv);
+          primeRuntimeForResume(s2, runtime, s2.containerId, resumeEnv);
           const events = runtime.resume(podId, correctionMessage, s2.containerId, resumeEnv);
           const outcome = await this.consumeAgentEvents(podId, events, attempt);
           await persistRuntimeCredentialsForPod(

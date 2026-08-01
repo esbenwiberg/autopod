@@ -58,7 +58,9 @@ SYSTEMD_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 CLAUDE_CLI_NPM_PACKAGE="${CLAUDE_CLI_NPM_PACKAGE:-@anthropic-ai/claude-code}"
 CODEX_CLI_NPM_PACKAGE="${CODEX_CLI_NPM_PACKAGE:-@openai/codex}"
 # Non-terminal pod statuses == "active"; we refuse to restart on top of these.
-NONTERMINAL="queued provisioning running validating validated approved merging merge_pending killing"
+# Any non-terminal pod can retain work or await an operator decision. Never restart
+# the daemon around one unless the operator explicitly passes --force.
+NONTERMINAL="queued provisioning running awaiting_input paused validating validated review_required approved merging merge_pending killing"
 
 # ---- args -----------------------------------------------------------------
 TARGET_REF=""

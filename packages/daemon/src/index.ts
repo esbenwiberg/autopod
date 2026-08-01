@@ -1046,6 +1046,8 @@ if (sandboxContainerManager) {
     eventBus,
     sandboxContainerManager,
     preserveWorkspace: (id) => podManager.preserveWorkspace(id, 'daemon restart'),
+    quiesceSandboxAgent: (id) => podManager.quiesceSandboxAgent(id),
+    suspendSandbox: (id) => podManager.suspendSandboxForRecovery(id),
     logger,
   }).catch((err) => {
     logger.error({ err }, 'Sandbox pod reconciliation failed');

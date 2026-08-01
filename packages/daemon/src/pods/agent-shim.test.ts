@@ -30,6 +30,13 @@ describe('AGENT_SHIM_SCRIPT — rendered output', () => {
       AGENT_SHIM_SCRIPT.indexOf('_read_file_var ANTHROPIC_API_KEY'),
     );
   });
+
+  it('records the agent PID for daemon-restart recovery', () => {
+    expect(AGENT_SHIM_SCRIPT).toContain('> /run/autopod/agent.pid');
+    expect(AGENT_SHIM_SCRIPT.indexOf('> /run/autopod/agent.pid')).toBeLessThan(
+      AGENT_SHIM_SCRIPT.indexOf('exec "$@"'),
+    );
+  });
 });
 
 describe('AGENT_SHIM_SCRIPT — runtime behaviour', () => {
