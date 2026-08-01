@@ -186,7 +186,7 @@ class FakeSandboxApiClient implements SandboxApiClient {
   }
 
   async getStatus(sandboxId: string): Promise<SandboxStatus> {
-    return this.sandboxes.get(sandboxId)?.status ?? 'unknown';
+    return this.sandboxes.get(sandboxId)?.status ?? 'deleted';
   }
 
   seedFile(sandboxId: string, path: string, content: Buffer): void {
@@ -604,9 +604,19 @@ describe('SandboxContainerManager', () => {
       expect(await mgr.getStatus(id)).toBe('running');
     });
 
-    it('getStatus returns unknown for a missing sandbox', async () => {
+    it('getStatus returns deleted for a missing sandbox', async () => {
       const mgr = new SandboxContainerManager(new FakeSandboxApiClient(), logger);
-      expect(await mgr.getStatus('nope')).toBe('unknown');
+      expect(await mgr.getStatus('nope')).toBe('deleted');
+    });
+
+    it('getStatus returns unknown when Sandbox status is indeterminate', async () => {
+      class UnavailableStatusClient extends FakeSandboxApiClient {
+        override async getStatus(): Promise<SandboxStatus> {
+          throw new Error('data plane unavailable');
+        }
+      }
+      const mgr = new SandboxContainerManager(new UnavailableStatusClient(), logger);
+      expect(await mgr.getStatus('sbx-uncertain')).toBe('unknown');
     });
 
     it('attachTerminal resumes an auto-suspended sandbox before attaching', async () => {

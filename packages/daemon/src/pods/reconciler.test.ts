@@ -25,7 +25,7 @@ function makePod(overrides: Partial<Pod> = {}): Pod {
   } as Pod;
 }
 
-function buildDeps(status: 'running' | 'stopped' | 'unknown') {
+function buildDeps(status: 'running' | 'stopped' | 'deleted' | 'unknown') {
   const pod = makePod();
   const updates: Array<Partial<Pod>> = [];
   const podRepo = {
@@ -136,5 +136,23 @@ describe('reconcileSandboxSessions', () => {
     );
     expect(deps.updates).not.toContainEqual(expect.objectContaining({ status: 'killing' }));
     expect(deps.updates).not.toContainEqual(expect.objectContaining({ status: 'killed' }));
+  });
+
+  it('marks a confirmed deleted sandbox as killed without attempting preservation', async () => {
+    const deps = buildDeps('deleted');
+    deps.pod.status = 'paused';
+
+    await reconcileSandboxSessions({ ...deps, logger });
+
+    expect(deps.sandboxContainerManager.start).not.toHaveBeenCalled();
+    expect(deps.preserveWorkspace).not.toHaveBeenCalled();
+    expect(deps.updates).toContainEqual(expect.objectContaining({ status: 'killed' }));
+    expect(deps.eventBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'pod.status_changed',
+        previousStatus: 'paused',
+        newStatus: 'killed',
+      }),
+    );
   });
 });

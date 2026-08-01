@@ -1015,10 +1015,10 @@ describe('AzureSandboxApiClient', () => {
     expect(requests[0]?.url).toContain('/sandboxGroups/autopod-spike/snapshots/snap-1');
   });
 
-  it('reports a deleted sandbox as stopped rather than unknown', async () => {
+  it('reports a deleted sandbox distinctly from stopped and unknown', async () => {
     const { client, requests } = makeClient([{ status: 404 }]);
 
-    await expect(client.getStatus('sbx-deleted')).resolves.toBe('stopped');
+    await expect(client.getStatus('sbx-deleted')).resolves.toBe('deleted');
     expect(requests[0]?.url).toContain('/sandboxes/sbx-deleted');
   });
 

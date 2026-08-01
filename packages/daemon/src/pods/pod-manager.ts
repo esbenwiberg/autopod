@@ -4624,7 +4624,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       try {
         const status = await cm.getStatus(containerId);
         if (status === 'running') return 'ready';
-        if (status === 'stopped') return 'gone';
+        if (status === 'stopped' || status === 'deleted') return 'gone';
         // 'unknown' → keep polling, engine may still be coming back.
       } catch {
         // Engine still unreachable — that's exactly the case we wait through.

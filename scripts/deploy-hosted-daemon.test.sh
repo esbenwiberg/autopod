@@ -37,18 +37,16 @@ if [ "$1" = account ]; then exit 0; fi
 count_file="$DEPLOY_TEST_AZ_COUNT"
 count=$(cat "$count_file" 2>/dev/null || echo 0)
 count=$((count + 1)); echo "$count" >"$count_file"
-case "$count" in
-  1) printf 'live:deadbeef\nactive\n' ;;
-  2) echo 'BUILD DONE' ;;
-  3) echo 'REVIEWER_CLI_PREWARM_OK' ;;
-  4)
-    while [ "$#" -gt 0 ]; do
-      if [ "$1" = --scripts ]; then remote_script="$2"; break; fi
-      shift
-    done
-    [ -n "${remote_script:-}" ] || { echo 'missing remote script' >&2; exit 1; }
-    sh -c "$remote_script"
-    ;;
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --scripts ]; then remote_script="$2"; break; fi
+  shift
+done
+[ -n "${remote_script:-}" ] || { echo 'missing remote script' >&2; exit 1; }
+case "$remote_script" in
+  *'echo live:'*) printf 'live:deadbeef\nactive\n' ;;
+  *'BUILD DONE'*) echo 'BUILD DONE' ;;
+  *'REVIEWER_CLI_PREWARM_OK'*) echo 'REVIEWER_CLI_PREWARM_OK' ;;
+  *'FINAL_ACTIVE='*) sh -c "$remote_script" ;;
   *) echo "unexpected VM command $count" >&2; exit 1 ;;
 esac
 EOF

@@ -85,6 +85,12 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
       parkSession(pod, 'paused', reason, podRepo, eventBus);
       break;
     }
+
+    case 'deleted': {
+      logger.warn({ podId: pod.id, containerId }, 'Sandbox was deleted, marking pod killed');
+      markSessionFailed(pod, podRepo, eventBus, logger);
+      break;
+    }
   }
 }
 
@@ -132,7 +138,8 @@ function markSessionFailed(
   logger: Logger,
 ): void {
   try {
-    // Transition: running → killing → killed (to respect state machine)
+    const previousStatus = pod.status;
+    // Route the interrupted state through killing → killed for terminal cleanup.
     podRepo.update(pod.id, { status: 'killing' });
     podRepo.update(pod.id, {
       status: 'killed',
@@ -143,7 +150,7 @@ function markSessionFailed(
       type: 'pod.status_changed',
       timestamp: new Date().toISOString(),
       podId: pod.id,
-      previousStatus: 'running',
+      previousStatus,
       newStatus: 'killed',
     });
 
