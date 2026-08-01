@@ -51,8 +51,8 @@ set -euo pipefail
 RG="ewi-sandboxes"
 VM="autopod-daemon"
 REPO_URL="https://github.com/esbenwiberg/autopod.git"
-RELEASES="/opt/autopod/releases"
-CURRENT_LINK="/opt/autopod/current"
+RELEASES="${AUTOPOD_DEPLOY_RELEASES:-/opt/autopod/releases}"
+CURRENT_LINK="${AUTOPOD_DEPLOY_CURRENT_LINK:-/opt/autopod/current}"
 SERVICE="autopod-daemon"
 HEALTH_URL="https://autopod-daemon-ewi.swedencentral.cloudapp.azure.com/health"
 SERVICE_USER="ewi"
@@ -480,30 +480,29 @@ fi
 # The drain blocks new admission for ordinary deployments. The forced bootstrap
 # path still gets this last check, but cannot provide the same admission guarantee.
 # Query SQLite on the VM rather than relying on an access token that may have
-# expired during build/prewarm. Ordinary deployments already hold the daemon
-# drain; forced bootstrap remains protected by this immediate database check.
-FINAL_ACTIVE_RAW="$(remote "
+# expired during build/prewarm. The assertion and restart deliberately share
+# one remote shell so forced bootstrap has no admission window between them.
+note "swapping symlink + restarting $SERVICE"
+if ! SWAP_OUT="$(remote "
 set -eu
 cd $CURRENT_LINK/packages/daemon
-sudo -u ewi -H env NONTERMINAL='$NONTERMINAL' node -e \"const Database = require('better-sqlite3'); const db = new Database('/data/autopod/autopod.db', { readonly: true }); const statuses = process.env.NONTERMINAL.split(/\\\\s+/).filter(Boolean); const placeholders = statuses.map(() => '?').join(','); const row = db.prepare('select count(*) as n from pods where status in (' + placeholders + ')').get(...statuses); console.log(row.n);\"
-" 2>/dev/null || true)"
-FINAL_ACTIVE="$(printf '%s\n' "$FINAL_ACTIVE_RAW" | awk '/^[0-9]+$/ { value = $0 } END { if (value != "") print value; else print "?" }')"
-[ "$FINAL_ACTIVE" = "0" ] || die "${FINAL_ACTIVE} active pod(s) at final restart gate — refusing deployment"
-
-note "swapping symlink + restarting $SERVICE"
-SWAP_OUT="$(remote "
-set -eu
-echo \"prev: \$(readlink $CURRENT_LINK)\"
+PREV=\$(readlink $CURRENT_LINK)
+FINAL_ACTIVE=\$(sudo -u ewi -H env NONTERMINAL='$NONTERMINAL' node -e \"const Database = require('better-sqlite3'); const db = new Database('/data/autopod/autopod.db', { readonly: true }); const statuses = process.env.NONTERMINAL.split(/\\\\s+/).filter(Boolean); const placeholders = statuses.map(() => '?').join(','); const row = db.prepare('select count(*) as n from pods where status in (' + placeholders + ')').get(...statuses); console.log(row.n);\")
+[ \"\$FINAL_ACTIVE\" = 0 ] || { echo \"\$FINAL_ACTIVE active pod(s) at final restart gate — refusing deployment\"; exit 1; }
 ln -sfn $NEW $CURRENT_LINK
-echo \"now:  \$(readlink $CURRENT_LINK)\"
 systemctl restart $SERVICE
+echo \"prev: \$PREV\"
+echo \"now:  \$(readlink $CURRENT_LINK)\"
 sleep 6
 echo \"active: \$(systemctl is-active $SERVICE)\"
 echo \"running on: \$(ps -o args= -C node | grep -o '$RELEASES/[^/]*' | head -1)\"
 curl -sS --max-time 8 http://127.0.0.1:3100/health || echo HEALTH_FAIL
 echo '--- journal tail ---'
 journalctl -u $SERVICE -n 12 --no-pager 2>&1 | tail -12
-")"
+")"; then
+  echo "$SWAP_OUT"
+  die "remote final gate or restart failed — symlink may be unchanged; inspect output above"
+fi
 echo "$SWAP_OUT"
 
 # ---- post-verify ----------------------------------------------------------

@@ -6,6 +6,8 @@ script="$(cd "$(dirname "$0")" && pwd)/deploy-hosted-daemon.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/home/.autopod"
+mkdir -p "$tmp/releases/deadbeef/packages/daemon"
+ln -s "$tmp/releases/deadbeef" "$tmp/current"
 printf 'daemon: https://daemon.example\n' >"$tmp/home/.autopod/config.yaml"
 
 cat >"$tmp/bin/ap" <<'EOF'
@@ -39,18 +41,38 @@ case "$count" in
   1) printf 'live:deadbeef\nactive\n' ;;
   2) echo 'BUILD DONE' ;;
   3) echo 'REVIEWER_CLI_PREWARM_OK' ;;
-  4) echo 1 ;;
+  4)
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = --scripts ]; then remote_script="$2"; break; fi
+      shift
+    done
+    [ -n "${remote_script:-}" ] || { echo 'missing remote script' >&2; exit 1; }
+    sh -c "$remote_script"
+    ;;
   *) echo "unexpected VM command $count" >&2; exit 1 ;;
 esac
 EOF
+cat >"$tmp/bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+# Simulate the VM database query observing a pod admitted after the API check.
+echo 1
+EOF
+cat >"$tmp/bin/systemctl" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = restart ]; then echo reached >"$DEPLOY_TEST_RESTART_MARKER"; fi
+exit 0
+EOF
 chmod +x "$tmp/bin"/*
 
-# The first API snapshot is empty, but the immediate VM gate sees one pod. A
-# real deployment must stop before it can issue the remote restart command.
+# The first API snapshot is empty, but the atomic VM gate sees one pod just
+# before restart. The same remote script must refuse before systemctl executes.
 if PATH="$tmp/bin:$PATH" HOME="$tmp/home" DEPLOY_TEST_AZ_COUNT="$tmp/az-count" \
+  DEPLOY_TEST_RESTART_MARKER="$tmp/restarted" \
+  AUTOPOD_DEPLOY_RELEASES="$tmp/releases" AUTOPOD_DEPLOY_CURRENT_LINK="$tmp/current" \
   bash "$script" --target cafebabe --yes --skip-playwright-prewarm >"$tmp/out" 2>&1; then
   echo 'deployment unexpectedly passed despite a pod at the final restart gate' >&2
   exit 1
 fi
 rg -q '1 active pod\(s\) at final restart gate — refusing deployment' "$tmp/out"
 [ "$(cat "$tmp/az-count")" = 4 ]
+[ ! -e "$tmp/restarted" ]
