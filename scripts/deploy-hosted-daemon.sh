@@ -478,31 +478,16 @@ fi
 # ---- final active-pod gate + atomic swap ----------------------------------
 # The drain blocks new admission for ordinary deployments. Bootstrap still gets
 # this last check, but cannot provide the same admission guarantee by design.
-if [ -n "$TOKEN" ] && [ -n "$DAEMON" ]; then
-  FINAL_ACTIVE="$(curl -sS --max-time 10 "$DAEMON/pods" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
-    | NONTERMINAL="$NONTERMINAL" python3 -c '
-import sys, json, os
-nt = set(os.environ["NONTERMINAL"].split())
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    print("?"); sys.exit(0)
-pods = d if isinstance(d, list) else d.get("pods", d.get("items", []))
-print(sum(1 for p in pods if isinstance(p, dict) and p.get("status") in nt))
-' 2>/dev/null || echo '?')"
-  if [ "$FINAL_ACTIVE" = "?" ]; then
-    note "WARN: final daemon API pod check was unavailable; falling back to VM DB"
-    FINAL_ACTIVE_RAW="$(remote "
+# Query SQLite on the VM rather than relying on an access token that may have
+# expired during build/prewarm. Ordinary deployments already hold the daemon
+# drain; bootstrap remains protected by this immediate database check.
+FINAL_ACTIVE_RAW="$(remote "
 set -eu
 cd $CURRENT_LINK/packages/daemon
 sudo -u ewi -H env NONTERMINAL='$NONTERMINAL' node -e \"const Database = require('better-sqlite3'); const db = new Database('/data/autopod/autopod.db', { readonly: true }); const statuses = process.env.NONTERMINAL.split(/\\\\s+/).filter(Boolean); const placeholders = statuses.map(() => '?').join(','); const row = db.prepare('select count(*) as n from pods where status in (' + placeholders + ')').get(...statuses); console.log(row.n);\"
 " 2>/dev/null || true)"
-    FINAL_ACTIVE="$(printf '%s\n' "$FINAL_ACTIVE_RAW" | awk '/^[0-9]+$/ { value = $0 } END { if (value != "") print value; else print "?" }')"
-  fi
-  [ "$FINAL_ACTIVE" = "0" ] || die "${FINAL_ACTIVE} active pod(s) at final restart gate — refusing deployment"
-else
-  die "cannot verify final active-pod count before restart"
-fi
+FINAL_ACTIVE="$(printf '%s\n' "$FINAL_ACTIVE_RAW" | awk '/^[0-9]+$/ { value = $0 } END { if (value != "") print value; else print "?" }')"
+[ "$FINAL_ACTIVE" = "0" ] || die "${FINAL_ACTIVE} active pod(s) at final restart gate — refusing deployment"
 
 note "swapping symlink + restarting $SERVICE"
 SWAP_OUT="$(remote "
