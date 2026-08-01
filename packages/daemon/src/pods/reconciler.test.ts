@@ -123,12 +123,18 @@ describe('reconcileSandboxSessions', () => {
     expect(deps.updates).not.toContainEqual(expect.objectContaining({ status: 'killed' }));
   });
 
-  it('marks an unknown sandbox as killed', async () => {
+  it('parks an unknown sandbox for recovery without killing it', async () => {
     const deps = buildDeps('unknown');
 
     await reconcileSandboxSessions({ ...deps, logger });
 
-    expect(deps.updates).toContainEqual(expect.objectContaining({ status: 'killing' }));
-    expect(deps.updates).toContainEqual(expect.objectContaining({ status: 'killed' }));
+    expect(deps.updates).toContainEqual(
+      expect.objectContaining({
+        status: 'paused',
+        lastCorrectionMessage: expect.stringContaining('status is unavailable'),
+      }),
+    );
+    expect(deps.updates).not.toContainEqual(expect.objectContaining({ status: 'killing' }));
+    expect(deps.updates).not.toContainEqual(expect.objectContaining({ status: 'killed' }));
   });
 });

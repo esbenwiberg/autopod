@@ -13,7 +13,7 @@
 # for the runbook and judgment that wraps it.
 #
 # Usage:
-#   scripts/deploy-hosted-daemon.sh [--target <sha|ref>] [--yes] [--force]
+#   scripts/deploy-hosted-daemon.sh [--target <sha|ref>] [--yes] [--force] [--bootstrap]
 #                                   [--full] [--keep N] [--verify-string STR]
 #                                   [--skip-playwright-prewarm]
 #   scripts/deploy-hosted-daemon.sh --rollback <sha>
@@ -21,6 +21,8 @@
 #   --target <sha|ref>   Commit/ref to deploy (default: origin/main HEAD).
 #   --yes                Skip the confirm-before-swap prompt (CI / unattended).
 #   --force              Override guards (active pods present, target == live).
+#   --bootstrap          One-time deployment of the drain feature onto an older daemon.
+#                        Still refuses active pods; it only bypasses the unavailable drain API.
 #   --full               Force clean clone + full `pnpm install` (no node_modules
 #                        reuse). Auto-selected when deps changed or live sha is
 #                        not present locally.
@@ -66,6 +68,7 @@ NONTERMINAL="queued provisioning running awaiting_input paused validating valida
 TARGET_REF=""
 ASSUME_YES=0
 FORCE=0
+BOOTSTRAP=0
 FULL=0
 KEEP=5
 VERIFY_STRING=""
@@ -80,6 +83,7 @@ while [ $# -gt 0 ]; do
     --target) TARGET_REF="${2:-}"; shift 2;;
     --yes|-y) ASSUME_YES=1; shift;;
     --force) FORCE=1; shift;;
+    --bootstrap) BOOTSTRAP=1; shift;;
     --full) FULL=1; shift;;
     --keep) KEEP="${2:-}"; shift 2;;
     --verify-string) VERIFY_STRING="${2:-}"; shift 2;;
@@ -214,6 +218,48 @@ sudo -u ewi -H env NONTERMINAL='$NONTERMINAL' node -e \"const Database = require
   if [ "$ACTIVE" = "?" ] && [ "$FORCE" -eq 0 ]; then
     die "could not determine active pods from API or VM DB (use --force only after manual verification)"
   fi
+fi
+
+# ---- deployment drain -----------------------------------------------------
+# The initial active-pod snapshot is not enough: a pod can be created while the
+# staged release builds. A durable daemon-owned drain closes admission, then we
+# take a second snapshot before proceeding. Bootstrap is only for deploying this
+# drain feature to an older daemon that cannot expose the endpoint yet.
+DEPLOY_DRAIN_ACTIVE=0
+release_hosted_deploy_drain() {
+  if [ "$DEPLOY_DRAIN_ACTIVE" -eq 1 ]; then
+    curl -sS --max-time 10 -X DELETE "$DAEMON/maintenance/hosted-deploy-drain" \
+      -H "Authorization: Bearer $TOKEN" >/dev/null 2>&1 || true
+    DEPLOY_DRAIN_ACTIVE=0
+  fi
+}
+
+if [ "$BOOTSTRAP" -eq 1 ]; then
+  note "BOOTSTRAP: deployment drain endpoint is bypassed; final active-pod gate remains mandatory"
+elif [ -z "$TOKEN" ] || [ -z "$DAEMON" ]; then
+  die "cannot activate hosted deployment drain without daemon token/URL (use --bootstrap only for the first rollout)"
+else
+  DRAIN_RESPONSE="$(curl -sS --max-time 10 -X POST "$DAEMON/maintenance/hosted-deploy-drain" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' \
+    --data '{"ttlSeconds":1800}')" || die "failed to activate hosted deployment drain"
+  echo "$DRAIN_RESPONSE" | grep -q '"expiresAt"' || die "hosted deployment drain was not accepted (use --bootstrap only for the first rollout)"
+  DEPLOY_DRAIN_ACTIVE=1
+  trap release_hosted_deploy_drain EXIT
+  note "hosted deployment drain active"
+
+  ACTIVE_AFTER_DRAIN="$(curl -sS --max-time 10 "$DAEMON/pods" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
+    | NONTERMINAL="$NONTERMINAL" python3 -c '
+import sys, json, os
+nt = set(os.environ["NONTERMINAL"].split())
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("?"); sys.exit(0)
+pods = d if isinstance(d, list) else d.get("pods", d.get("items", []))
+print(sum(1 for p in pods if isinstance(p, dict) and p.get("status") in nt))
+' 2>/dev/null || echo '?')"
+  [ "$ACTIVE_AFTER_DRAIN" = "0" ] || die "${ACTIVE_AFTER_DRAIN} active pod(s) remain after drain activation — refusing deployment"
 fi
 
 # ---- confirm --------------------------------------------------------------
@@ -429,7 +475,26 @@ if tr '\n' ' ' < \"\$NEW\" | grep -qF -- '$VERIFY_STRING'; then echo VERIFY_OK; 
   note "bundle verify OK"
 fi
 
-# ---- atomic swap + restart ------------------------------------------------
+# ---- final active-pod gate + atomic swap ----------------------------------
+# The drain blocks new admission for ordinary deployments. Bootstrap still gets
+# this last check, but cannot provide the same admission guarantee by design.
+if [ -n "$TOKEN" ] && [ -n "$DAEMON" ]; then
+  FINAL_ACTIVE="$(curl -sS --max-time 10 "$DAEMON/pods" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
+    | NONTERMINAL="$NONTERMINAL" python3 -c '
+import sys, json, os
+nt = set(os.environ["NONTERMINAL"].split())
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("?"); sys.exit(0)
+pods = d if isinstance(d, list) else d.get("pods", d.get("items", []))
+print(sum(1 for p in pods if isinstance(p, dict) and p.get("status") in nt))
+' 2>/dev/null || echo '?')"
+  [ "$FINAL_ACTIVE" = "0" ] || die "${FINAL_ACTIVE} active pod(s) at final restart gate — refusing deployment"
+else
+  die "cannot verify final active-pod count before restart"
+fi
+
 note "swapping symlink + restarting $SERVICE"
 SWAP_OUT="$(remote "
 set -eu
@@ -454,6 +519,8 @@ note "checking external HTTPS health"
 HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 "$HEALTH_URL" || echo 000)"
 [ "$HTTP_CODE" = "200" ] || die "external health returned $HTTP_CODE — investigate (Caddy?). ROLL BACK: scripts/deploy-hosted-daemon.sh --rollback $LIVE_SHA"
 note "external HTTPS health 200 OK"
+release_hosted_deploy_drain
+trap - EXIT
 
 # ---- prune old releases ---------------------------------------------------
 note "pruning old releases (keep $KEEP, never current or previous-live)"

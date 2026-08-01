@@ -240,6 +240,7 @@ describe('Integration', () => {
       eventBus,
       eventRepo,
       podRepo,
+      db,
       podBridge,
       pendingRequestsByPod: new Map(),
       logLevel: 'silent',
@@ -660,6 +661,42 @@ describe('Integration', () => {
       expect(res.statusCode).toBe(201);
       expect(res.json().profileName).toBe('test-app');
       expect(res.json().status).toBe('queued');
+    });
+
+    it('blocks pod admission while a hosted deployment drain is active', async () => {
+      const drain = await app.inject({
+        method: 'POST',
+        url: '/maintenance/hosted-deploy-drain',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { ttlSeconds: 60 },
+      });
+      expect(drain.statusCode).toBe(201);
+      expect(drain.json().active.actorUserId).toBe('test-user-1');
+
+      const blocked = await app.inject({
+        method: 'POST',
+        url: '/pods',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { profileName: 'test-app', task: 'Must wait for deployment' },
+      });
+      expect(blocked.statusCode).toBe(503);
+      expect(blocked.json().code).toBe('HOSTED_DEPLOY_DRAIN');
+      expect(blocked.headers['retry-after']).toBeDefined();
+
+      const cleared = await app.inject({
+        method: 'DELETE',
+        url: '/maintenance/hosted-deploy-drain',
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(cleared.statusCode).toBe(200);
+
+      const admitted = await app.inject({
+        method: 'POST',
+        url: '/pods',
+        headers: { authorization: 'Bearer test-token' },
+        payload: { profileName: 'test-app', task: 'Can start after deployment' },
+      });
+      expect(admitted.statusCode).toBe(201);
     });
 
     it('POST /pods stores spec files without returning their contents', async () => {

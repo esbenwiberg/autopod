@@ -356,6 +356,24 @@ function firstHeaderValue(value: string | string[] | undefined): string | null {
   return value ?? null;
 }
 
+type HostedDeployDrain = {
+  actorUserId: string;
+  actorName: string | null;
+  expiresAt: string;
+};
+
+function activeHostedDeployDrain(db: Database.Database | undefined): HostedDeployDrain | null {
+  if (!db) return null;
+  db.prepare('DELETE FROM hosted_deploy_drain WHERE expires_at <= ?').run(new Date().toISOString());
+  return (
+    (db
+      .prepare(
+        'SELECT actor_user_id AS actorUserId, actor_name AS actorName, expires_at AS expiresAt FROM hosted_deploy_drain WHERE singleton = 1',
+      )
+      .get() as HostedDeployDrain | undefined) ?? null
+  );
+}
+
 export function podRoutes(
   app: FastifyInstance,
   podManager: PodManager,
@@ -373,8 +391,65 @@ export function podRoutes(
   // Rework can include a full sandbox filesystem sync. Keep it detached from the
   // desktop request and coalesce repeats after a client-side timeout.
   const reworkRuns = new Map<string, Promise<void>>();
+  const hostedDeployDrainSchema = z.object({
+    ttlSeconds: z.number().int().min(60).max(3_600).default(1_800),
+  });
+
+  // These endpoints are intentionally daemon-authenticated rather than VM-authenticated:
+  // the deploy script holds the same user token as its active-pod preflight and leaves an
+  // auditable, expiring fence before it restarts the process.
+  app.get('/maintenance/hosted-deploy-drain', async (_request, reply) => {
+    if (!db) {
+      reply.status(503);
+      return { error: 'Hosted deployment drain is unavailable' };
+    }
+    return { active: activeHostedDeployDrain(db) };
+  });
+
+  app.post('/maintenance/hosted-deploy-drain', async (request, reply) => {
+    if (!db) {
+      reply.status(503);
+      return { error: 'Hosted deployment drain is unavailable' };
+    }
+    const { ttlSeconds } = hostedDeployDrainSchema.parse(request.body ?? {});
+    const expiresAt = new Date(Date.now() + ttlSeconds * 1_000).toISOString();
+    db.prepare(
+      `INSERT INTO hosted_deploy_drain (singleton, actor_user_id, actor_name, expires_at)
+       VALUES (1, ?, ?, ?)
+       ON CONFLICT(singleton) DO UPDATE SET
+         actor_user_id = excluded.actor_user_id,
+         actor_name = excluded.actor_name,
+         expires_at = excluded.expires_at,
+         created_at = datetime('now')`,
+    ).run(request.user.oid, request.user.name ?? null, expiresAt);
+    reply.status(201);
+    return { active: activeHostedDeployDrain(db) };
+  });
+
+  app.delete('/maintenance/hosted-deploy-drain', async (_request, reply) => {
+    if (!db) {
+      reply.status(503);
+      return { error: 'Hosted deployment drain is unavailable' };
+    }
+    db.prepare('DELETE FROM hosted_deploy_drain WHERE singleton = 1').run();
+    return { active: null };
+  });
+
   // POST /pods — create a new pod
   app.post('/pods', async (request, reply) => {
+    const drain = activeHostedDeployDrain(db);
+    if (drain) {
+      const retryAfterSeconds = Math.max(
+        1,
+        Math.ceil((Date.parse(drain.expiresAt) - Date.now()) / 1_000),
+      );
+      reply.header('Retry-After', String(retryAfterSeconds)).status(503);
+      return {
+        error: 'Hosted daemon deployment is in progress; retry pod creation after maintenance.',
+        code: 'HOSTED_DEPLOY_DRAIN',
+        retryAfterSeconds,
+      };
+    }
     const body = createPodRequestSchema.parse(request.body);
 
     // Sanitize human-authored free-text fields. Findings are quarantined into

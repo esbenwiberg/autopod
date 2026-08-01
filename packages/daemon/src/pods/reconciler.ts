@@ -76,9 +76,13 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
     }
 
     case 'unknown': {
-      // Sandbox gone — mark pod as failed
-      logger.warn({ podId: pod.id, containerId }, 'Sandbox not found, marking pod failed');
-      markSessionFailed(pod, podRepo, eventBus, logger);
+      // An indeterminate status can be a transient data-plane failure. Keep the
+      // sandbox and workspace intact so an operator or a later restart can
+      // recover it; only a confirmed stopped state may drive terminal cleanup.
+      const reason =
+        'Sandbox status is unavailable after daemon restart; retaining the sandbox and parking the pod for recovery.';
+      logger.warn({ podId: pod.id, containerId }, reason);
+      parkSession(pod, 'paused', reason, podRepo, eventBus);
       break;
     }
   }

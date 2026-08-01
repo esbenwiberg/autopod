@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { access, chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import type {
@@ -11861,7 +11862,36 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // cryptic Docker 409 "container stopped/paused" error from the exec call below.
           const cm = containerManagerFactory.get(pod.executionTarget);
           const containerStatus = await cm.getStatus(pod.containerId);
-          if (containerStatus !== 'running') {
+          if (containerStatus === 'unknown') {
+            emitActivityStatus(
+              podId,
+              'Sandbox status is unavailable before validation — waiting for recovery…',
+            );
+            const recovery = await waitForContainerReachable(pod.containerId, cm, 30_000);
+            if (recovery !== 'ready') {
+              const result = makeUnexpectedValidationFailureResult(
+                podId,
+                attempt,
+                new Error(`Sandbox status remained ${recovery} before validation could run`),
+              );
+              result.infrastructureFailure = {
+                phase: 'setup',
+                code: 'SANDBOX_STATUS_UNAVAILABLE',
+                message: `Sandbox status remained ${recovery} before validation could run`,
+                retryable: true,
+              };
+              podRepo.update(podId, { lastValidationResult: result });
+              validationRepo?.insert(podId, attempt, result);
+              eventBus.emit({
+                type: 'pod.validation_completed',
+                timestamp: new Date().toISOString(),
+                podId,
+                result,
+              });
+              await parkOnValidationInfrastructureFailure(podRepo.getOrThrow(podId), result);
+              return;
+            }
+          } else if (containerStatus !== 'running') {
             throw new Error(
               `Container exited before validation could run — check agent logs for errors (container status: ${containerStatus})`,
             );

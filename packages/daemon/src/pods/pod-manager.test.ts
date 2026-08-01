@@ -8252,6 +8252,62 @@ describe('PodManager', () => {
       expect(result.lastCorrectionMessage).toBeNull();
     });
 
+    it('retries retryable infrastructure validation after a non-zero backoff', async () => {
+      const ctx = createTestContext();
+      ctx.deps.validationInfrastructureRetryBackoffMs = [1];
+      vi.mocked(ctx.validationEngine.validate)
+        .mockResolvedValueOnce(validationInfrastructureFailureResult())
+        .mockResolvedValueOnce(makeValidationResult());
+      const manager = createPodManager(ctx.deps);
+
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
+      expect(manager.getSession(pod.id).status).toBe('validated');
+    });
+
+    it('parks an unknown sandbox status instead of failing validation', async () => {
+      const ctx = createTestContext();
+      vi.mocked(ctx.containerManager.getStatus)
+        .mockResolvedValueOnce('unknown')
+        .mockResolvedValue('unknown');
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add feature' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'running',
+        containerId: 'ctr-1',
+        validationAttempts: 0,
+      });
+
+      vi.useFakeTimers();
+      try {
+        const validation = manager.triggerValidation(pod.id);
+        await vi.advanceTimersByTimeAsync(30_000);
+        await validation;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(manager.getSession(pod.id).status).toBe('review_required');
+      expect(manager.getSession(pod.id).lastValidationResult?.infrastructureFailure?.code).toBe(
+        'SANDBOX_STATUS_UNAVAILABLE',
+      );
+    });
+
     it('persistent validation infrastructure failure parks once', async () => {
       const ctx = createTestContext();
       ctx.deps.validationInfrastructureRetryBackoffMs = [0, 0];
