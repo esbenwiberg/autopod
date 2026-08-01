@@ -1015,6 +1015,13 @@ describe('AzureSandboxApiClient', () => {
     expect(requests[0]?.url).toContain('/sandboxGroups/autopod-spike/snapshots/snap-1');
   });
 
+  it('reports a deleted sandbox as stopped rather than unknown', async () => {
+    const { client, requests } = makeClient([{ status: 404 }]);
+
+    await expect(client.getStatus('sbx-deleted')).resolves.toBe('stopped');
+    expect(requests[0]?.url).toContain('/sandboxes/sbx-deleted');
+  });
+
   it('treats existing directories as successful mkdirs', async () => {
     const { client, requests } = makeClient([
       { status: 409, body: { title: 'FileAlreadyExists', detail: 'directory already exists' } },

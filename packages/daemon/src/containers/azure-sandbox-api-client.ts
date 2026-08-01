@@ -750,7 +750,17 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   }
 
   async getStatus(sandboxId: string): Promise<SandboxStatus> {
-    const sandbox = await this.getSandbox(sandboxId);
+    const response = await this.request(
+      'data',
+      'GET',
+      `${this.dataEndpoint}${this.sandboxPath(sandboxId)}`,
+      { okStatuses: [200, 404], params: { 'api-version': API_VERSION } },
+    );
+    // A 404 is a confirmed deletion, not an indeterminate data-plane failure.
+    // Keep it distinct from an unavailable/unknown status so pod recovery does
+    // not wait or park a sandbox that Azure has definitively removed.
+    if (response.status === 404) return 'stopped';
+    const sandbox = (await readJsonOrEmpty(response)) as SandboxResponse;
     if (sandbox.state === 'Running') return 'running';
     if (stoppedStates.has(sandbox.state ?? '')) return 'stopped';
     return 'unknown';

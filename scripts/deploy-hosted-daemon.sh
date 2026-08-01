@@ -13,16 +13,16 @@
 # for the runbook and judgment that wraps it.
 #
 # Usage:
-#   scripts/deploy-hosted-daemon.sh [--target <sha|ref>] [--yes] [--force] [--bootstrap]
+#   scripts/deploy-hosted-daemon.sh [--target <sha|ref>] [--yes] [--force]
 #                                   [--full] [--keep N] [--verify-string STR]
 #                                   [--skip-playwright-prewarm]
 #   scripts/deploy-hosted-daemon.sh --rollback <sha>
 #
 #   --target <sha|ref>   Commit/ref to deploy (default: origin/main HEAD).
 #   --yes                Skip the confirm-before-swap prompt (CI / unattended).
-#   --force              Override guards (active pods present, target == live).
-#   --bootstrap          One-time deployment of the drain feature onto an older daemon.
-#                        Still refuses active pods; it only bypasses the unavailable drain API.
+#   --force              Override ordinary preflight guards and, when an older daemon
+#                        cannot serve the drain endpoint, audibly bootstrap this feature.
+#                        The immediate VM-database active-pod gate still cannot be bypassed.
 #   --full               Force clean clone + full `pnpm install` (no node_modules
 #                        reuse). Auto-selected when deps changed or live sha is
 #                        not present locally.
@@ -68,7 +68,6 @@ NONTERMINAL="queued provisioning running awaiting_input paused validating valida
 TARGET_REF=""
 ASSUME_YES=0
 FORCE=0
-BOOTSTRAP=0
 FULL=0
 KEEP=5
 VERIFY_STRING=""
@@ -83,7 +82,6 @@ while [ $# -gt 0 ]; do
     --target) TARGET_REF="${2:-}"; shift 2;;
     --yes|-y) ASSUME_YES=1; shift;;
     --force) FORCE=1; shift;;
-    --bootstrap) BOOTSTRAP=1; shift;;
     --full) FULL=1; shift;;
     --keep) KEEP="${2:-}"; shift 2;;
     --verify-string) VERIFY_STRING="${2:-}"; shift 2;;
@@ -186,6 +184,7 @@ fi
 note "checking for active pods"
 TOKEN="$(ap token 2>/dev/null || true)"
 DAEMON="$(grep -E '^daemon:' "$HOME/.autopod/config.yaml" | awk '{print $2}')"
+DRAIN_RESPONSE=""
 if [ -n "$TOKEN" ] && [ -n "$DAEMON" ]; then
   ACTIVE="$(curl -sS --max-time 10 "$DAEMON/pods" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
     | NONTERMINAL="$NONTERMINAL" python3 -c '
@@ -223,8 +222,8 @@ fi
 # ---- deployment drain -----------------------------------------------------
 # The initial active-pod snapshot is not enough: a pod can be created while the
 # staged release builds. A durable daemon-owned drain closes admission, then we
-# take a second snapshot before proceeding. Bootstrap is only for deploying this
-# drain feature to an older daemon that cannot expose the endpoint yet.
+# take a second snapshot before proceeding. An explicit --force is the sole
+# auditable bootstrap path for an older daemon that cannot expose this endpoint.
 DEPLOY_DRAIN_ACTIVE=0
 release_hosted_deploy_drain() {
   if [ "$DEPLOY_DRAIN_ACTIVE" -eq 1 ]; then
@@ -234,16 +233,14 @@ release_hosted_deploy_drain() {
   fi
 }
 
-if [ "$BOOTSTRAP" -eq 1 ]; then
-  note "BOOTSTRAP: deployment drain endpoint is bypassed; final active-pod gate remains mandatory"
-elif [ -z "$TOKEN" ] || [ -z "$DAEMON" ]; then
-  die "cannot activate hosted deployment drain without daemon token/URL (use --bootstrap only for the first rollout)"
-else
+if [ -n "$TOKEN" ] && [ -n "$DAEMON" ]; then
   DRAIN_RESPONSE="$(curl -sS --max-time 10 -X POST "$DAEMON/maintenance/hosted-deploy-drain" \
     -H "Authorization: Bearer $TOKEN" \
     -H 'Content-Type: application/json' \
-    --data '{"ttlSeconds":1800}')" || die "failed to activate hosted deployment drain"
-  echo "$DRAIN_RESPONSE" | grep -q '"expiresAt"' || die "hosted deployment drain was not accepted (use --bootstrap only for the first rollout)"
+    --data '{"ttlSeconds":1800}')" || DRAIN_RESPONSE=""
+fi
+
+if echo "$DRAIN_RESPONSE" | grep -q '"expiresAt"'; then
   DEPLOY_DRAIN_ACTIVE=1
   trap release_hosted_deploy_drain EXIT
   note "hosted deployment drain active"
@@ -260,6 +257,10 @@ pods = d if isinstance(d, list) else d.get("pods", d.get("items", []))
 print(sum(1 for p in pods if isinstance(p, dict) and p.get("status") in nt))
 ' 2>/dev/null || echo '?')"
   [ "$ACTIVE_AFTER_DRAIN" = "0" ] || die "${ACTIVE_AFTER_DRAIN} active pod(s) remain after drain activation — refusing deployment"
+elif [ "$FORCE" -eq 1 ]; then
+  note "FORCE BOOTSTRAP: drain endpoint unavailable or rejected; final VM-database active-pod gate remains mandatory"
+else
+  die "cannot activate hosted deployment drain; refusing unprotected rollout (use --force only for audited bootstrap)"
 fi
 
 # ---- confirm --------------------------------------------------------------
@@ -476,11 +477,11 @@ if tr '\n' ' ' < \"\$NEW\" | grep -qF -- '$VERIFY_STRING'; then echo VERIFY_OK; 
 fi
 
 # ---- final active-pod gate + atomic swap ----------------------------------
-# The drain blocks new admission for ordinary deployments. Bootstrap still gets
-# this last check, but cannot provide the same admission guarantee by design.
+# The drain blocks new admission for ordinary deployments. The forced bootstrap
+# path still gets this last check, but cannot provide the same admission guarantee.
 # Query SQLite on the VM rather than relying on an access token that may have
 # expired during build/prewarm. Ordinary deployments already hold the daemon
-# drain; bootstrap remains protected by this immediate database check.
+# drain; forced bootstrap remains protected by this immediate database check.
 FINAL_ACTIVE_RAW="$(remote "
 set -eu
 cd $CURRENT_LINK/packages/daemon
