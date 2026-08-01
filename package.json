@@ -18,7 +18,7 @@
     "clean": "node scripts/run-turbo.mjs clean"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "^2.5.3",
     "dependency-cruiser": "^17.0.0",
     "knip": "^6.26.0",
     "turbo": "^2.10.4",
