@@ -556,8 +556,7 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
 
   async function reconcileInternal(options: { readOnly?: boolean } = {}) {
     const configuration = deps.repository.getConfiguration();
-    const queued = await recordCandidates(configuration);
-    if (options.readOnly || !configuration) return { queued, processed: 0 };
+    if (!configuration) return { queued: 0, processed: 0 };
     const activation = evaluatePodsitterActivation(configuration, now());
     const observation = `${configuration.generation}:${activation.reason}:${activation.windowId ?? ''}`;
     if (activation.reason === 'expired' && activationObservation !== observation) {
@@ -572,7 +571,9 @@ export function createPodsitterService(deps: PodsitterServiceDependencies): Pods
       });
     }
     activationObservation = observation;
-    if (!activation.active) return { queued, processed: 0 };
+    if (!activation.active) return { queued: 0, processed: 0 };
+    const queued = await recordCandidates(configuration);
+    if (options.readOnly) return { queued, processed: 0 };
     const target = configuration.decisionTarget;
     const provider = target ? deps.repository.getProviderState(target.providerAccountId) : null;
     if (

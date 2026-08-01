@@ -114,6 +114,47 @@ function service(
 }
 
 describe('PodsitterService', () => {
+  it('does not collect evidence when disabled', async () => {
+    const harness = setup();
+    harness.repository.replaceConfiguration(
+      {
+        enabled: false,
+        activation: { mode: 'always' },
+        authorizedUntil: null,
+        profileScope: null,
+        decisionTarget: {
+          providerAccountId: 'sitter-account',
+          runtime: 'codex',
+          model: 'gpt-5',
+        },
+        updatedBy: { type: 'human', userId: 'operator' },
+      },
+      NOW.toISOString(),
+    );
+    const run = vi.fn();
+
+    await service(harness, run).reconcile();
+
+    expect(harness.evidenceProvider.listCandidates).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('records candidates when active', async () => {
+    const harness = setup();
+    const run = vi.fn(async () => ({
+      ok: true as const,
+      decision: harness.decision(),
+      telemetry: {},
+      cleanup: 'clean' as const,
+    }));
+
+    await service(harness, run).reconcile({ readOnly: true });
+
+    expect(harness.evidenceProvider.listCandidates).toHaveBeenCalledTimes(1);
+    expect(harness.repository.listPendingAttention()).toHaveLength(1);
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it('executes one current authorized decision', async () => {
     const harness = setup();
     const report = vi.fn();
