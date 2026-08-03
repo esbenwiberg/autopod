@@ -409,6 +409,25 @@ describe('applyOverrides', () => {
     expect(patched.overall).toBe('fail');
   });
 
+  it('does not allow human dismissal to clear structured review overflow', () => {
+    const marker = '[REVIEW OVERFLOW]';
+    const result = makeBaseResult({
+      taskReview: {
+        status: 'fail',
+        reasoning: 'bounded overflow',
+        issues: [marker],
+        model: 'sonnet',
+        screenshots: [],
+        diff: 'd',
+        firstGateOverflow: { reportedCount: 4_097, retainedFindingCount: 4_096 },
+      },
+    });
+    const patched = applyOverrides(result, [makeDismiss('task_review', marker)]);
+    expect(patched.taskReview?.issues).toEqual([marker]);
+    expect(patched.taskReview?.status).toBe('fail');
+    expect(patched.overall).toBe('fail');
+  });
+
   it('does not mutate the original result', () => {
     const result = makeBaseResult({
       taskReview: {

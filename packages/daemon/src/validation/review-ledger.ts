@@ -22,11 +22,33 @@ function boundedIdentifier(value: string): string {
 }
 
 function boundedLedgerEntry(entry: ReviewFindingLedgerEntry): ReviewFindingLedgerEntry {
+  const finding: ReviewFindingCandidate =
+    'source' in entry.finding
+      ? {
+          ...entry.finding,
+          id: boundedIdentifier(entry.finding.id),
+          issue: boundedField(entry.finding.issue, 8_000),
+        }
+      : {
+          ...entry.finding,
+          id: boundedIdentifier(entry.finding.id),
+          path: boundedField(entry.finding.path, 1_000),
+          ...(entry.finding.symbol ? { symbol: boundedField(entry.finding.symbol, 1_000) } : {}),
+          claim: boundedField(entry.finding.claim, 8_000),
+          evidence: boundedField(entry.finding.evidence, 8_000),
+          remediation: boundedField(entry.finding.remediation, 8_000),
+        };
   return {
     ...entry,
+    finding,
     semanticId: boundedIdentifier(entry.semanticId),
-    priorSourceIds: entry.priorSourceIds.map(boundedIdentifier),
-    currentSourceIds: entry.currentSourceIds.map(boundedIdentifier),
+    priorSourceIds: entry.priorSourceIds.slice(0, MAX_CLOSURE_SOURCE_IDS).map(boundedIdentifier),
+    currentSourceIds: entry.currentSourceIds
+      .slice(0, MAX_CLOSURE_SOURCE_IDS)
+      .map(boundedIdentifier),
+    ...(entry.closureEvidence
+      ? { closureEvidence: boundedField(entry.closureEvidence, 8_000) }
+      : {}),
   };
 }
 
@@ -207,7 +229,7 @@ export function reconcileReviewLedger(
       currentSourceIds: [...new Set(currentFinding.sourceIds)].sort(),
     });
   }
-  return out.sort((a, b) => a.semanticId.localeCompare(b.semanticId));
+  return out.sort((a, b) => a.semanticId.localeCompare(b.semanticId)).map(boundedLedgerEntry);
 }
 
 export function activeLedgerFindings(ledger: ReviewFindingLedgerEntry[]): ReviewFindingCandidate[] {

@@ -99,6 +99,13 @@ describe('reconcileReviewLedger', () => {
     const prompt = closurePrompt(chunk ?? [], '+ meaningful repair line 1234567890');
     expect(Buffer.byteLength(prompt)).toBeLessThan(42_000);
     expect(prompt).not.toContain(rawId);
+    expect(chunk?.[0]?.priorSourceIds).toHaveLength(16);
+    expect(chunk?.[0]?.currentSourceIds).toHaveLength(16);
+    const boundedFinding = chunk?.[0]?.finding;
+    if (!boundedFinding || 'source' in boundedFinding)
+      throw new Error('expected bounded structured finding');
+    expect(Buffer.byteLength(boundedFinding.claim)).toBeLessThanOrEqual(8_000);
+    expect(Buffer.byteLength(boundedFinding.evidence)).toBeLessThanOrEqual(8_000);
     expect(
       parseClosureVerification(
         JSON.stringify({

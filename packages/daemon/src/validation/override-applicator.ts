@@ -40,7 +40,10 @@ export function applyOverrides(
     // Recompute task review status
     const hasUnmetRequirements = patched.taskReview.requirementsCheck?.some((r) => !r.met);
     const hasIssues = patched.taskReview.issues.length > 0;
-    if (!hasUnmetRequirements && !hasIssues) {
+    const hasOverflow = Boolean(
+      patched.taskReview.firstGateOverflow ?? patched.taskReview.reviewBatch?.firstGateOverflow,
+    );
+    if (!hasUnmetRequirements && !hasIssues && !hasOverflow) {
       patched.taskReview.status = 'pass';
       patched.taskReview.reasoning = `[OVERRIDES APPLIED] ${patched.taskReview.reasoning}`;
     }
@@ -74,6 +77,11 @@ function isTaskReviewIssueDismissed(
   review: NonNullable<ValidationResult['taskReview']>,
   issue: string,
 ): boolean {
+  if (
+    (review.firstGateOverflow ?? review.reviewBatch?.firstGateOverflow) &&
+    issue.startsWith('[REVIEW OVERFLOW]')
+  )
+    return false;
   // Overrides persisted before council ledgers existed use the rendered issue's
   // task_review fingerprint. Keep accepting that identity after canonical
   // semantic IDs become available for the same issue.
