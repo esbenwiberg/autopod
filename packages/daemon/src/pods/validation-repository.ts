@@ -14,6 +14,7 @@ export interface ValidationRepository {
   insert(podId: string, attempt: number, result: ValidationResult): void;
   updateResult(podId: string, attempt: number, result: ValidationResult): boolean;
   getForSession(podId: string): StoredValidation[];
+  getLatestBefore(podId: string, attempt: number): StoredValidation | null;
 }
 
 function rowToStoredValidation(row: Record<string, unknown>): StoredValidation {
@@ -60,6 +61,15 @@ export function createValidationRepository(db: Database.Database): ValidationRep
         .prepare('SELECT * FROM validations WHERE pod_id = ? ORDER BY attempt ASC')
         .all(podId) as Record<string, unknown>[];
       return rows.map(rowToStoredValidation);
+    },
+
+    getLatestBefore(podId: string, attempt: number): StoredValidation | null {
+      const row = db
+        .prepare(
+          'SELECT * FROM validations WHERE pod_id = ? AND attempt < ? ORDER BY attempt DESC LIMIT 1',
+        )
+        .get(podId, attempt) as Record<string, unknown> | undefined;
+      return row ? rowToStoredValidation(row) : null;
     },
   };
 }

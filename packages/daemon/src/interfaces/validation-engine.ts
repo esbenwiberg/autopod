@@ -3,6 +3,7 @@ import type {
   ModelProvider,
   PreSubmitReviewSnapshot,
   ProviderCredentials,
+  ReviewBatchResult,
   SpecContract,
   TaskSummary,
   ValidationOverride,
@@ -121,6 +122,8 @@ export interface ValidationEngineConfig {
   preSubmitReview?: PreSubmitReviewSnapshot | null;
   /** Validation phases to skip unconditionally (profile-level harness decay control). */
   skipPhases?: ValidationPhase[];
+  /** Most recent completed review batch for this pod, never the in-progress attempt. */
+  priorReviewBatch?: ReviewBatchResult;
 }
 
 export interface ValidationPhaseCallbacks {

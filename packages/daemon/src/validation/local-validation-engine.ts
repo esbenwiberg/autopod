@@ -42,14 +42,17 @@ import {
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 import { runAgenticReview } from './review-agentic-runner.js';
-import {
-  createFrozenReviewPacket,
-  reviewBatchIssues,
-  runReviewBatch,
-} from './review-batch-runner.js';
+import { createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.js';
 import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
 import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
 import { applyDiffFilterToParsed } from './review-finding-filter.js';
+import {
+  activeLedgerEntries,
+  activeLedgerFindings,
+  closurePrompt,
+  parseClosureVerification,
+  reconcileReviewLedger,
+} from './review-ledger.js';
 import { runToolUseReview } from './review-tool-runner.js';
 
 const execFileAsync = promisify(execFile);
@@ -67,6 +70,47 @@ async function readReviewHead(
   }
 }
 
+async function readRepairDelta(
+  worktreePath: string | undefined,
+  fromHead: string,
+  toHead: string,
+): Promise<{
+  status: 'available' | 'unavailable';
+  fromHead: string;
+  toHead: string;
+  diff?: string;
+  diffHash?: string;
+  reason?: string;
+}> {
+  if (!worktreePath || fromHead === 'unavailable' || toHead === 'unavailable')
+    return { status: 'unavailable', fromHead, toHead, reason: 'reviewed heads unavailable' };
+  try {
+    await execFileAsync('git', ['merge-base', '--is-ancestor', fromHead, toHead], {
+      cwd: worktreePath,
+    });
+    const { stdout } = await execFileAsync(
+      'git',
+      ['diff', '--no-ext-diff', '--no-textconv', `${fromHead}..${toHead}`],
+      { cwd: worktreePath, maxBuffer: 1_100_000 },
+    );
+    const diff = boundedReviewPacketString(stdout, 1_000_000);
+    return {
+      status: 'available',
+      fromHead,
+      toHead,
+      diff,
+      diffHash: createHash('sha256').update(diff).digest('hex'),
+    };
+  } catch (error) {
+    return {
+      status: 'unavailable',
+      fromHead,
+      toHead,
+      reason: error instanceof Error ? error.message.slice(0, 500) : 'repair delta unavailable',
+    };
+  }
+}
+
 function boundedReviewPacketText(value: unknown, limit = 40_000): string {
   const config = getPresetConfig('strict');
   return sanitize(JSON.stringify(sanitizeDeep(value, config)) ?? 'null', config).slice(0, limit);
@@ -81,6 +125,7 @@ const MAX_INITIAL_REVIEW_BYTES = 200_000;
 
 function initialBroadFindings(review: TaskReviewResult) {
   const findings = [];
+  const seen = new Set<string>();
   let bytes = 0;
   for (const issue of review.issues) {
     if (findings.length >= MAX_INITIAL_REVIEW_FINDINGS || bytes >= MAX_INITIAL_REVIEW_BYTES) break;
@@ -88,11 +133,21 @@ function initialBroadFindings(review: TaskReviewResult) {
     const remaining = MAX_INITIAL_REVIEW_BYTES - bytes;
     const boundedIssue = sanitizedIssue.slice(0, remaining);
     if (!boundedIssue) break;
+    const id = `initial-${createHash('sha256')
+      .update(
+        boundedIssue
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim(),
+      )
+      .digest('hex')
+      .slice(0, 16)}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
     findings.push({
-      id: `initial-${createHash('sha256')
-        .update(`${findings.length}:${boundedIssue}`)
-        .digest('hex')
-        .slice(0, 16)}`,
+      // Identity is semantic: attempts and issue order must not change it.
+      id,
       source: 'initial-review' as const,
       issue: boundedIssue,
     });
@@ -603,12 +658,15 @@ export function createLocalValidationEngine(
           taskReview = reviewRun.result;
           reviewTokenUsage = reviewRun.tokenUsage;
           reviewSkipReason = reviewRun.skipReason;
-          // A normal full-suite review remains the first gate. Only a failed gate,
-          // or explicit deep review, pays for the isolated council.
+          const priorActive = activeLedgerEntries(config.priorReviewBatch);
+          // A normal full-suite review remains the first gate. Unresolved council
+          // findings also require a council run so a later repair can be proven.
           if (
             taskReview &&
             config.validationSuite === 'full' &&
-            (taskReview.status === 'fail' || config.reviewDepth === 'deep')
+            (taskReview.status === 'fail' ||
+              config.reviewDepth === 'deep' ||
+              priorActive.length > 0)
           ) {
             const reviewedHead = await readReviewHead(config.worktreePath, config.startCommitSha);
             const frozenDiff = boundedReviewPacketString(config.diff, 1_000_000);
@@ -671,13 +729,73 @@ export function createLocalValidationEngine(
                   logger: log,
                 }),
             });
+            const repair = await readRepairDelta(
+              config.worktreePath,
+              config.priorReviewBatch?.reviewedHead ?? 'unavailable',
+              reviewedHead,
+            );
+            let closure = undefined;
+            if (priorActive.length > 0) {
+              if (repair.status !== 'available') {
+                closure = { status: 'unavailable' as const, decisions: [], reason: repair.reason };
+              } else {
+                try {
+                  const response = await runContainerReviewer({
+                    podId: config.podId,
+                    containerId: config.containerId,
+                    containerManager,
+                    profile: {
+                      modelProvider: config.reviewerProvider ?? 'anthropic',
+                      providerCredentials: config.reviewerProviderCredentials ?? null,
+                    },
+                    model: config.reviewerModel ?? 'auto',
+                    prompt: closurePrompt(priorActive, repair.diff ?? frozenDiff),
+                    ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
+                    timeout: config.reviewTimeout ?? 300_000,
+                    logger: log,
+                  });
+                  closure = parseClosureVerification(
+                    response.stdout.slice(0, 200_000),
+                    priorActive,
+                  );
+                } catch (error) {
+                  closure = {
+                    status: 'unavailable' as const,
+                    decisions: [],
+                    reason:
+                      error instanceof Error
+                        ? error.message.slice(0, 500)
+                        : 'closure reviewer unavailable',
+                  };
+                }
+              }
+            }
+            const ledger = reconcileReviewLedger(config.priorReviewBatch, batch.accepted, closure);
+            batch.ledger = ledger;
+            batch.repairDelta = {
+              status: repair.status,
+              fromHead: repair.fromHead,
+              toHead: repair.toHead,
+              ...(repair.diffHash ? { diffHash: repair.diffHash } : {}),
+              ...(repair.reason ? { reason: repair.reason } : {}),
+            };
+            if (closure) batch.closureVerification = closure;
             // The council consolidates additional evidence; it never erases a
             // blocking first-gate verdict merely because no axis reproduced it.
-            const issues = [...new Set([...taskReview.issues, ...reviewBatchIssues(batch)])];
+            const ledgerIssues = activeLedgerFindings(ledger).map((finding) =>
+              'source' in finding
+                ? finding.issue
+                : `[${finding.severity}] ${finding.path}${finding.line ? `:${finding.line}` : ''} — ${finding.claim}`,
+            );
+            const issues = [...new Set([...taskReview.issues, ...ledgerIssues])];
             taskReview = {
               ...taskReview,
               status:
-                taskReview.status === 'fail' || batch.infrastructureUnavailable || issues.length > 0
+                taskReview.status === 'fail' ||
+                batch.infrastructureUnavailable ||
+                issues.length > 0 ||
+                closure?.status === 'invalid' ||
+                closure?.status === 'unavailable'
                   ? 'fail'
                   : 'pass',
               reasoning: batch.infrastructureUnavailable

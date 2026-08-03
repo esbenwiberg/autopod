@@ -12028,6 +12028,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           extraExecEnv: validationExecEnv,
           preSubmitReview: pod.preSubmitReview ?? undefined,
           skipPhases: getPodValidationSkipPhases(profile, s1),
+          priorReviewBatch: validationRepo?.getLatestBefore(podId, attempt)?.result.taskReview
+            ?.reviewBatch,
         };
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
