@@ -1078,7 +1078,7 @@ describe('validate() — hasWebUi gating', () => {
   });
 
   it('keeps initial semantic IDs stable when aggregate truncation changes stored text', () => {
-    const target = `target blocker ${'x'.repeat(200)}`;
+    const target = `target blocker ${'x'.repeat(16_000)}`;
     const prefix = [
       ...Array.from({ length: 24 }, (_, index) => `${index}-${'p'.repeat(8_000)}`),
       `tail-${'q'.repeat(7_945)}`,
@@ -1315,6 +1315,16 @@ describe('validate() — hasWebUi gating', () => {
       'initial-ca978112ca1bbdca': 'regressed',
       'initial-3e23e8160039594a': 'fixed',
       'initial-2e7d2c03a9507ae2': 'fixed',
+    });
+    // The engine's flattened feedback remains active-only while each prior
+    // packet retains immutable fixed/regressed history for later attempts.
+    expect(two.taskReview?.issues).toEqual(expect.arrayContaining(['B', 'C']));
+    expect(two.taskReview?.issues).not.toContain('A');
+    expect(three.taskReview?.issues).toEqual(['A']);
+    expect(states(two)).toEqual({
+      'initial-ca978112ca1bbdca': 'fixed',
+      'initial-3e23e8160039594a': 'open',
+      'initial-2e7d2c03a9507ae2': 'new',
     });
     expect(two.taskReview?.tokenUsage?.inputTokens).toBe(67);
     await fs.rm(repoPath, { recursive: true, force: true });

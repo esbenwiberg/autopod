@@ -123,6 +123,20 @@ function boundedReviewPacketString(value: string, limit: number): string {
 
 const MAX_INITIAL_REVIEW_FINDINGS = 100;
 const MAX_INITIAL_REVIEW_BYTES = 200_000;
+const MAX_INITIAL_SEMANTIC_BYTES = 32_000;
+
+function initialBroadFindingId(issue: string): string {
+  // This deliberately has a fixed per-issue bound, independent of packet space
+  // consumed by preceding findings. Never derive semantic identity from text
+  // after aggregate packet truncation. Keep the established normalization so
+  // existing initial-review override and ledger identities continue to match.
+  const normalized = boundedReviewPacketString(issue, MAX_INITIAL_SEMANTIC_BYTES)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return `initial-${createHash('sha256').update(normalized).digest('hex').slice(0, 16)}`;
+}
 
 export function initialBroadFindings(review: TaskReviewResult) {
   const findings = [];
@@ -131,16 +145,7 @@ export function initialBroadFindings(review: TaskReviewResult) {
   for (const issue of review.issues) {
     if (findings.length >= MAX_INITIAL_REVIEW_FINDINGS || bytes >= MAX_INITIAL_REVIEW_BYTES) break;
     const sanitizedIssue = boundedReviewPacketString(issue, 8_000);
-    const id = `initial-${createHash('sha256')
-      .update(
-        sanitizedIssue
-          .toLowerCase()
-          .replace(/[^a-z0-9\s]/g, '')
-          .replace(/\s+/g, ' ')
-          .trim(),
-      )
-      .digest('hex')
-      .slice(0, 16)}`;
+    const id = initialBroadFindingId(issue);
     if (seen.has(id)) continue;
     const remaining = MAX_INITIAL_REVIEW_BYTES - bytes;
     const boundedIssue = sanitizedIssue.slice(0, remaining);

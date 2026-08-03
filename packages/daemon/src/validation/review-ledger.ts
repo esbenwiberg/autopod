@@ -4,12 +4,12 @@ import type {
   ReviewFindingCandidate,
   ReviewFindingLedgerEntry,
 } from '@autopod/shared';
-import { getPresetConfig, sanitize, sanitizeDeep } from '@autopod/shared';
+import { getPresetConfig, sanitize } from '@autopod/shared';
 import { structuredFindingId } from './finding-fingerprint.js';
 
 const MAX_CLOSURE_FINDINGS = 100;
-const MAX_CLOSURE_FINDING_BYTES = 8_000;
-const MAX_CLOSURE_PRIOR_BYTES = 120_000;
+const MAX_CLOSURE_SOURCE_IDS = 100;
+const MAX_CLOSURE_PRIOR_BYTES = 40_000;
 
 function closableEntries(prior: ReviewFindingLedgerEntry[]): ReviewFindingLedgerEntry[] {
   return prior.filter((entry) => entry.state !== 'fixed').slice(0, MAX_CLOSURE_FINDINGS);
@@ -17,41 +17,17 @@ function closableEntries(prior: ReviewFindingLedgerEntry[]): ReviewFindingLedger
 
 function boundedClosurePrior(prior: ReviewFindingLedgerEntry[]): string {
   const config = getPresetConfig('strict');
-  const field = (value: unknown, limit = MAX_CLOSURE_FINDING_BYTES) =>
-    sanitize(String(value ?? ''), config)
-      .replace(/ignore\s+(?:all\s+)?previous\s+instructions/gi, '[INSTRUCTION_REDACTED]')
-      .slice(0, limit);
+  // Previous findings originate in model output. Do not replay their prose to a
+  // later model: closure is proven only against immutable current repair bytes.
+  // IDs are sufficient to require a complete, non-invented decision set.
+  const id = (value: string) => sanitize(value, config).slice(0, 256);
   const projected = closableEntries(prior).map((entry) => ({
-    semanticId: sanitize(entry.semanticId, config).slice(0, 256),
+    semanticId: id(entry.semanticId),
     state: entry.state,
-    finding:
-      'source' in entry.finding
-        ? {
-            id: field(entry.finding.id, 256),
-            source: 'initial-review',
-            issue: field(entry.finding.issue),
-          }
-        : {
-            id: field(entry.finding.id, 256),
-            axis: entry.finding.axis,
-            severity: entry.finding.severity,
-            path: field(entry.finding.path, 2_000),
-            symbol: field(entry.finding.symbol, 1_000),
-            claim: field(entry.finding.claim),
-            evidence: field(entry.finding.evidence),
-            remediation: field(entry.finding.remediation),
-          },
-    priorSourceIds: entry.priorSourceIds
-      .slice(0, 100)
-      .map((id) => sanitize(id, config).slice(0, 256)),
-    currentSourceIds: entry.currentSourceIds
-      .slice(0, 100)
-      .map((id) => sanitize(id, config).slice(0, 256)),
+    priorSourceIds: entry.priorSourceIds.slice(0, MAX_CLOSURE_SOURCE_IDS).map(id),
+    currentSourceIds: entry.currentSourceIds.slice(0, MAX_CLOSURE_SOURCE_IDS).map(id),
   }));
-  return sanitize(JSON.stringify(sanitizeDeep(projected, config)), config).slice(
-    0,
-    MAX_CLOSURE_PRIOR_BYTES,
-  );
+  return JSON.stringify(projected).slice(0, MAX_CLOSURE_PRIOR_BYTES);
 }
 
 function sourceIds(finding: ReviewFindingCandidate): string[] {
