@@ -12675,14 +12675,37 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           // Transition back to running for retry
           transition(s2, 'running');
 
-          // Resume the agent with correction feedback
-          emitActivityStatus(podId, 'Agent working on fixes…');
+          // Resume the agent with correction feedback. Azure's data-plane can time out before
+          // an idempotent sandbox resume setup command reaches Codex; retry that pre-turn
+          // transport failure once rather than marking the pod failed without agent rework.
           const resumeEnv = await getResumeEnv(s2);
           const runtime = runtimeRegistry.get(s2.runtime);
           if (!s2.containerId) throw new Error(`Pod ${podId} has no container`);
-          primeRuntimeForResume(s2, runtime, s2.containerId, resumeEnv);
-          const events = runtime.resume(podId, correctionMessage, s2.containerId, resumeEnv);
-          const outcome = await this.consumeAgentEvents(podId, events, attempt);
+          let outcome: AgentRunOutcome;
+          for (let resumeAttempt = 1; ; resumeAttempt++) {
+            emitActivityStatus(
+              podId,
+              resumeAttempt === 1
+                ? 'Agent working on fixes…'
+                : 'Sandbox resume transport timed out — retrying agent feedback…',
+            );
+            try {
+              primeRuntimeForResume(s2, runtime, s2.containerId, resumeEnv);
+              const events = runtime.resume(podId, correctionMessage, s2.containerId, resumeEnv);
+              outcome = await this.consumeAgentEvents(podId, events, attempt);
+              break;
+            } catch (error) {
+              const retryableSandboxTimeout =
+                s2.executionTarget === 'sandbox' &&
+                error instanceof AutopodError &&
+                error.code === 'AZURE_SANDBOX_TIMEOUT';
+              if (!retryableSandboxTimeout || resumeAttempt >= 2) throw error;
+              logger.warn(
+                { error, podId, attempt, resumeAttempt },
+                'Sandbox validation-feedback resume timed out before agent completion — retrying',
+              );
+            }
+          }
           await persistRuntimeCredentialsForPod(
             podId,
             'Failed to persist rotated credentials after validation-feedback resume',

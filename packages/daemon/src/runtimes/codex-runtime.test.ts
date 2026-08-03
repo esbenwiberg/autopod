@@ -9,6 +9,7 @@ import type {
   SpawnConfig,
   SystemEvent,
 } from '@autopod/shared';
+import { AutopodError } from '@autopod/shared';
 import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
@@ -2584,8 +2585,35 @@ describe('CodexRuntime', () => {
           '-c',
           "chown autopod:autopod '/home/autopod/.codex/config.toml' && chmod 0644 '/home/autopod/.codex/config.toml'",
         ],
-        { timeout: 5_000, user: 'root' },
+        { timeout: 30_000, user: 'root' },
       );
+    });
+
+    it('retries an idempotent sandbox config ownership command after a transport timeout', async () => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      vi.mocked(cm.execInContainer)
+        .mockRejectedValueOnce(
+          new AutopodError(
+            'Azure Sandboxes POST /executeShellCommand timed out',
+            'AZURE_SANDBOX_TIMEOUT',
+            504,
+          ),
+        )
+        .mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+
+      await callWriteMcpConfig(runtime)(
+        'c1',
+        [{ name: 'escalation', url: 'http://host.docker.internal:3100/mcp/abc' }],
+        'sandbox',
+      );
+
+      expect(cm.execInContainer).toHaveBeenCalledTimes(2);
+      expect(cm.execInContainer).toHaveBeenLastCalledWith('c1', expect.any(Array), {
+        timeout: 30_000,
+        user: 'root',
+      });
     });
 
     it('fails closed when the generated config permissions cannot be secured', async () => {
@@ -2781,7 +2809,7 @@ describe('CodexRuntime', () => {
       expect(cm.execInContainer).toHaveBeenCalledWith(
         'c1',
         expect.arrayContaining(['sh', '-c', expect.stringContaining('chmod 0644')]),
-        { timeout: 5_000, user: 'root' },
+        { timeout: 30_000, user: 'root' },
       );
     });
 

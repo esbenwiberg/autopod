@@ -2,7 +2,7 @@ import { type Dirent, createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/shared';
+import { AutopodError, CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/shared';
 import type {
   AgentEvent,
   ExecutionTarget,
@@ -39,6 +39,8 @@ const DEFAULT_SUMMARY_GRACE_MS = 30_000;
 const DEFAULT_SUMMARY_RECOVERY_TIMEOUT_MS = 30_000;
 const DEFAULT_SANDBOX_IDLE_RECOVERY_MS = 60_000;
 const DEFAULT_STALLED_EXEC_KILL_TIMEOUT_MS = 5_000;
+const SANDBOX_CONFIG_COMMAND_TIMEOUT_MS = 30_000;
+const SANDBOX_CONFIG_COMMAND_ATTEMPTS = 2;
 const CONTAINER_CODEX_SESSIONS_PATH = `${CONTAINER_HOME_DIR}/.codex/sessions`;
 const INTERRUPTED_TURN_CONTINUATION = `The previous Codex turn was interrupted unexpectedly. Continue the same task from the current workspace and session state.
 
@@ -1125,19 +1127,39 @@ export class CodexRuntime implements Runtime {
     // OPENAI_API_KEY is already 0444.
     // Docker keeps 0600 (single `autopod` user; exec runs as `autopod`).
     const configMode = executionTarget === 'sandbox' ? '0644' : '0600';
-    const secureConfig = await this.containerManager.execInContainer(
-      containerId,
-      [
-        'sh',
-        '-c',
-        `chown ${CONTAINER_USER}:${CONTAINER_USER} '${MCP_CONFIG_PATH}' && chmod ${configMode} '${MCP_CONFIG_PATH}'`,
-      ],
-      { timeout: 5_000, user: 'root' },
-    );
-    if (secureConfig.exitCode !== 0) {
-      throw new Error(
-        `Failed to secure Codex MCP config (exit ${secureConfig.exitCode}): ${secureConfig.stderr}`,
-      );
+    const secureCommand = [
+      'sh',
+      '-c',
+      `chown ${CONTAINER_USER}:${CONTAINER_USER} '${MCP_CONFIG_PATH}' && chmod ${configMode} '${MCP_CONFIG_PATH}'`,
+    ];
+    const timeout = executionTarget === 'sandbox' ? SANDBOX_CONFIG_COMMAND_TIMEOUT_MS : 5_000;
+    for (let attempt = 1; attempt <= SANDBOX_CONFIG_COMMAND_ATTEMPTS; attempt++) {
+      try {
+        const secureConfig = await this.containerManager.execInContainer(
+          containerId,
+          secureCommand,
+          {
+            timeout,
+            user: 'root',
+          },
+        );
+        if (secureConfig.exitCode !== 0) {
+          throw new Error(
+            `Failed to secure Codex MCP config (exit ${secureConfig.exitCode}): ${secureConfig.stderr}`,
+          );
+        }
+        return;
+      } catch (error) {
+        const retryableTimeout =
+          executionTarget === 'sandbox' &&
+          error instanceof AutopodError &&
+          error.code === 'AZURE_SANDBOX_TIMEOUT';
+        if (!retryableTimeout || attempt === SANDBOX_CONFIG_COMMAND_ATTEMPTS) throw error;
+        this.logger.warn(
+          { containerId, attempt, timeout },
+          'Sandbox Codex config ownership timed out — retrying idempotent command',
+        );
+      }
     }
   }
 }

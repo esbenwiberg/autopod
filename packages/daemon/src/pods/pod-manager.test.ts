@@ -8852,6 +8852,54 @@ describe('PodManager', () => {
       expect(result.validationAttempts).toBe(3);
     });
 
+    it('retries a transient sandbox timeout before abandoning validation-feedback resume', async () => {
+      const ctx = createTestContext(
+        { overall: 'fail' },
+        {
+          executionTarget: 'sandbox',
+          warmImageTag: 'ewiautopodacr.azurecr.io/autopod/test:immutable',
+        },
+      );
+      ctx.db
+        .prepare('UPDATE profiles SET max_validation_attempts = 2 WHERE name = ?')
+        .run('test-profile');
+      ctx.runtime.resume = vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            ({
+              [Symbol.asyncIterator]() {
+                return {
+                  next: async () => {
+                    throw new AutopodError('sandbox setup timed out', 'AZURE_SANDBOX_TIMEOUT', 504);
+                  },
+                };
+              },
+            }) as AsyncIterable<AgentEvent>,
+        )
+        .mockImplementationOnce(async function* (): AsyncIterable<AgentEvent> {
+          yield {
+            type: 'complete',
+            timestamp: new Date().toISOString(),
+            result: 'Applied validation feedback',
+          };
+        });
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Address review feedback' },
+        'user-1',
+      );
+      ctx.podRepo.update(pod.id, { status: 'running', containerId: 'ctr-1' });
+
+      await manager.triggerValidation(pod.id);
+
+      expect(ctx.runtime.resume).toHaveBeenCalledTimes(2);
+      expect(manager.getSession(pod.id).status).toBe('review_required');
+      expect(activityMessages(ctx, pod.id)).toContain(
+        'Sandbox resume transport timed out — retrying agent feedback…',
+      );
+    });
+
     it('keeps ordinary validation failures on correction feedback path', async () => {
       const ctx = createTestContext({
         overall: 'fail',
