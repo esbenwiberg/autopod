@@ -1055,11 +1055,17 @@ describe('validate() — hasWebUi gating', () => {
         validationSuite: 'full',
         startCommand: '',
         smokePages: [],
+        task: 'test task ghp_abcdefghijklmnopqrstuvwxyz1234567890',
       }),
     );
     expect(result.taskReview?.status).toBe('fail');
     expect(result.taskReview?.issues).toContain('real blocker');
     expect(runContainerReviewer).toHaveBeenCalledTimes(6);
+    expect(
+      vi
+        .mocked(runContainerReviewer)
+        .mock.calls.every(([config]) => !config.prompt.includes('ghp_')),
+    ).toBe(true);
     expect(result.taskReview?.tokenUsage).toMatchObject({ inputTokens: 160, outputTokens: 32 });
   });
 

@@ -50,9 +50,9 @@ export interface ReviewBatchRunnerOptions {
 }
 
 export function createFrozenReviewPacket(
-  input: Omit<FrozenReviewPacket, 'id' | 'diffHash'>,
+  input: Omit<FrozenReviewPacket, 'id' | 'diffHash'> & { diffHash?: string },
 ): FrozenReviewPacket {
-  const diffHash = createHash('sha256').update(input.diff).digest('hex');
+  const diffHash = input.diffHash ?? createHash('sha256').update(input.diff).digest('hex');
   return { ...input, diffHash, id: `review-batch-${diffHash.slice(0, 12)}-${randomUUID()}` };
 }
 

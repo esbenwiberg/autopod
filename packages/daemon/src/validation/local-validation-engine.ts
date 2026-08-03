@@ -65,12 +65,19 @@ function boundedReviewPacketText(value: unknown, limit = 40_000): string {
   return sanitize(JSON.stringify(value) ?? 'null', getPresetConfig('strict')).slice(0, limit);
 }
 
+function boundedReviewPacketString(value: string, limit: number): string {
+  return sanitize(value, getPresetConfig('strict')).slice(0, limit);
+}
+
 function initialBroadFindings(review: TaskReviewResult) {
-  return review.issues.map((issue) => ({
-    id: `initial-${createHash('sha256').update(issue).digest('hex').slice(0, 16)}`,
-    source: 'initial-review' as const,
-    issue,
-  }));
+  return review.issues.map((issue) => {
+    const sanitizedIssue = boundedReviewPacketString(issue, 8_000);
+    return {
+      id: `initial-${createHash('sha256').update(sanitizedIssue).digest('hex').slice(0, 16)}`,
+      source: 'initial-review' as const,
+      issue: sanitizedIssue,
+    };
+  });
 }
 
 interface PackageJsonManifest {
@@ -584,9 +591,10 @@ export function createLocalValidationEngine(
           ) {
             const reviewedHead = await readReviewHead(config.worktreePath, config.startCommitSha);
             const packet = createFrozenReviewPacket({
-              diff: config.diff,
+              diff: boundedReviewPacketString(config.diff, 1_000_000),
+              diffHash: hashDiff(config.diff),
               reviewedHead,
-              task: config.task,
+              task: boundedReviewPacketString(config.task, 40_000),
               context: boundedReviewPacketText({
                 plan: config.plan,
                 taskSummary: config.taskSummary,
