@@ -12,6 +12,7 @@ import type {
 } from '../interfaces/validation-engine.js';
 import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
+import { runContainerReviewer } from './container-reviewer-runner.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import {
   artifactChangeSatisfied,
@@ -28,6 +29,10 @@ import {
 import { runAgenticReview } from './review-agentic-runner.js';
 import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
 import { runToolUseReview } from './review-tool-runner.js';
+
+const containerReviewerDelegate = vi.hoisted(() => ({
+  actual: undefined as typeof runContainerReviewer | undefined,
+}));
 
 vi.mock('../runtimes/run-claude-cli.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../runtimes/run-claude-cli.js')>();
@@ -61,6 +66,12 @@ vi.mock('./review-agentic-runner.js', async (importOriginal) => {
   };
 });
 
+vi.mock('./container-reviewer-runner.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./container-reviewer-runner.js')>();
+  containerReviewerDelegate.actual = actual.runContainerReviewer;
+  return { ...actual, runContainerReviewer: vi.fn() };
+});
+
 vi.mock('./review-codex-runner.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./review-codex-runner.js')>();
   return {
@@ -76,6 +87,12 @@ beforeEach(() => {
     .mockResolvedValue({ ok: false, reason: 'no_anthropic_api_key' });
   vi.mocked(runToolUseReview).mockReset();
   vi.mocked(runAgenticReview).mockReset();
+  vi.mocked(runContainerReviewer)
+    .mockReset()
+    .mockImplementation((config) => {
+      if (!containerReviewerDelegate.actual) throw new Error('missing reviewer delegate');
+      return containerReviewerDelegate.actual(config);
+    });
   vi.mocked(runCodexReview).mockReset();
 });
 
@@ -1009,6 +1026,92 @@ describe('validate() — hasWebUi gating', () => {
       ...overrides,
     };
   }
+
+  const changedDiff = `diff --git a/a.ts b/a.ts
+--- a/a.ts
++++ b/a.ts
+@@ -1 +1 @@
+-old
++new
+`;
+
+  function mockCouncil() {
+    vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt }) => ({
+      stdout: prompt.includes('synthesizer') ? '{malformed' : JSON.stringify({ findings: [] }),
+      tokenUsage: { inputTokens: 10, outputTokens: 2 },
+    }));
+  }
+
+  it('keeps a failed first gate failed and counts axis plus synthesis usage once', async () => {
+    vi.mocked(runClaudeCli).mockResolvedValue({
+      stdout: JSON.stringify({ status: 'fail', reasoning: 'blocked', issues: ['real blocker'] }),
+      tokenUsage: { inputTokens: 100, outputTokens: 20 },
+    });
+    mockCouncil();
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: changedDiff,
+        validationSuite: 'full',
+        startCommand: '',
+        smokePages: [],
+      }),
+    );
+    expect(result.taskReview?.status).toBe('fail');
+    expect(result.taskReview?.issues).toContain('real blocker');
+    expect(runContainerReviewer).toHaveBeenCalledTimes(6);
+    expect(result.taskReview?.tokenUsage).toMatchObject({ inputTokens: 160, outputTokens: 32 });
+  });
+
+  it('runs only deep full reviews through the council after a clean first gate', async () => {
+    vi.mocked(runClaudeCli).mockResolvedValue({
+      stdout: JSON.stringify({ status: 'pass', reasoning: 'clean', issues: [] }),
+    });
+    mockCouncil();
+    const engine = createLocalValidationEngine(stubContainerManager());
+    const deep = await engine.validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: changedDiff,
+        validationSuite: 'full',
+        reviewDepth: 'deep',
+        startCommand: '',
+        smokePages: [],
+      }),
+    );
+    expect(deep.taskReview?.reviewBatch).toBeDefined();
+    expect(runContainerReviewer).toHaveBeenCalledTimes(6);
+
+    vi.mocked(runContainerReviewer).mockClear();
+    const standard = await engine.validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: changedDiff,
+        validationSuite: 'full',
+        reviewDepth: 'standard',
+        startCommand: '',
+        smokePages: [],
+      }),
+    );
+    expect(standard.taskReview?.reviewBatch).toBeUndefined();
+    expect(runContainerReviewer).not.toHaveBeenCalled();
+
+    vi.mocked(runContainerReviewer).mockClear();
+    vi.mocked(runClaudeCli).mockResolvedValue({
+      stdout: JSON.stringify({ status: 'fail', reasoning: 'blocked', issues: ['blocker'] }),
+    });
+    const nonFull = await engine.validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: changedDiff,
+        validationSuite: 'build',
+        startCommand: '',
+        smokePages: [],
+      }),
+    );
+    expect(nonFull.taskReview?.reviewBatch).toBeUndefined();
+    expect(runContainerReviewer).not.toHaveBeenCalled();
+  });
 
   function commandTrackingContainerManager(
     options: {

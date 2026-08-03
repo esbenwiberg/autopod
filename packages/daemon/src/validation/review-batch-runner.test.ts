@@ -95,13 +95,8 @@ describe('runReviewBatch', () => {
   it('keeps the initial broad-review blocker when synthesis fails', async () => {
     const initial = {
       id: 'broad-1',
-      axis: 'contract_completeness' as const,
-      severity: 'HIGH' as const,
-      path: 'a.ts',
-      claim: 'broad blocker',
-      evidence: 'first gate',
-      remediation: 'fix it',
-      confidence: 1,
+      source: 'initial-review' as const,
+      issue: 'broad blocker',
     };
     const batch = await runReviewBatch({
       packet: { ...packet(), initialFindings: [initial] },

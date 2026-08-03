@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type {
+  InitialReviewFinding,
   ReviewAxis,
   ReviewBatchResult,
+  ReviewFindingCandidate,
   StructuredReviewFinding,
   TaskReviewResult,
 } from '@autopod/shared';
@@ -25,7 +27,7 @@ export interface FrozenReviewPacket {
   task: string;
   context: string;
   executableContract?: string;
-  initialFindings: StructuredReviewFinding[];
+  initialFindings: InitialReviewFinding[];
   validationSummary?: string;
   factSummary?: string;
   promptVersion: string;
@@ -132,7 +134,7 @@ function parseCandidates(
   return candidates.filter((f) => allowed.has(`${f.path}: ${f.claim}`));
 }
 
-function dedupe(findings: StructuredReviewFinding[]): StructuredReviewFinding[] {
+function dedupe<T extends ReviewFindingCandidate>(findings: T[]): T[] {
   return [...new Map(findings.map((finding) => [finding.id, finding])).values()].sort((a, b) =>
     a.id.localeCompare(b.id),
   );
@@ -196,10 +198,9 @@ export async function runReviewBatch(
   };
   if (options.synthesize) {
     try {
-      const result = await options.synthesize(
-        reviewSynthesisPrompt(allCandidates),
-        `${options.packet.id}-synthesis`,
-      );
+      const prompt = reviewSynthesisPrompt(allCandidates);
+      if (prompt.length > 1_000_000) throw new Error('synthesis prompt exceeds bounded input');
+      const result = await options.synthesize(prompt, `${options.packet.id}-synthesis`);
       tokenUsage.push(result.tokenUsage);
       synthesized = parseSynthesis(result.stdout.slice(0, 1_000_000), allCandidates);
       synthesis = 'model';
@@ -228,7 +229,9 @@ export async function runReviewBatch(
 }
 
 export function reviewBatchIssues(batch: ReviewBatchResult): string[] {
-  return batch.accepted.map(
-    (f) => `[${f.severity}] ${f.path}${f.line ? `:${f.line}` : ''} — ${f.claim}`,
+  return batch.accepted.map((finding) =>
+    'source' in finding
+      ? finding.issue
+      : `[${finding.severity}] ${finding.path}${finding.line ? `:${finding.line}` : ''} — ${finding.claim}`,
   );
 }

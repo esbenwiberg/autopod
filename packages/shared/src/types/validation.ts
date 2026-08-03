@@ -216,6 +216,15 @@ export interface StructuredReviewFinding {
   state?: 'new' | 'fixed' | 'open' | 'regressed';
 }
 
+/** Exact source record from the standard first-gate reviewer; no metadata is inferred. */
+export interface InitialReviewFinding {
+  id: string;
+  source: 'initial-review';
+  issue: string;
+}
+
+export type ReviewFindingCandidate = StructuredReviewFinding | InitialReviewFinding;
+
 export interface ReviewAxisRun {
   axis: ReviewAxis;
   status: 'completed' | 'unavailable';
@@ -231,10 +240,10 @@ export interface ReviewBatchResult {
   schemaVersion: string;
   model: string;
   axes: ReviewAxisRun[];
-  candidates: StructuredReviewFinding[];
+  candidates: ReviewFindingCandidate[];
   /** Source-addressable findings produced by the standard first-gate review. */
-  initialFindings: StructuredReviewFinding[];
-  accepted: StructuredReviewFinding[];
+  initialFindings: InitialReviewFinding[];
+  accepted: ReviewFindingCandidate[];
   rejected: Array<{ sourceIds: string[]; reason: string }>;
   merged: Array<{ finding: StructuredReviewFinding; sourceIds: string[] }>;
   synthesis: 'model' | 'deterministic-fallback' | 'unavailable';

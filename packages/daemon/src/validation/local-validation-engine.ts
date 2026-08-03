@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { access, mkdir, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -32,7 +33,6 @@ import {
   ContainerReviewerUnavailableError,
   runContainerReviewer,
 } from './container-reviewer-runner.js';
-import { structuredFindingId } from './finding-fingerprint.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 import { runAgenticReview } from './review-agentic-runner.js';
@@ -62,24 +62,15 @@ async function readReviewHead(
 }
 
 function boundedReviewPacketText(value: unknown, limit = 40_000): string {
-  return sanitize(JSON.stringify(value), getPresetConfig('strict')).slice(0, limit);
+  return sanitize(JSON.stringify(value) ?? 'null', getPresetConfig('strict')).slice(0, limit);
 }
 
-function initialBroadFindings(review: TaskReviewResult, diff: string) {
-  const firstPath = diff.match(/^\+\+\+ b\/(.+)$/m)?.[1] ?? 'review';
-  return review.issues.map((claim, index) => {
-    const finding = {
-      id: '',
-      axis: 'contract_completeness' as const,
-      severity: 'HIGH' as const,
-      path: firstPath,
-      claim,
-      evidence: `Initial broad-review issue ${index + 1}`,
-      remediation: 'Address the issue identified by the standard review.',
-      confidence: 1,
-    };
-    return { ...finding, id: structuredFindingId(finding) };
-  });
+function initialBroadFindings(review: TaskReviewResult) {
+  return review.issues.map((issue) => ({
+    id: `initial-${createHash('sha256').update(issue).digest('hex').slice(0, 16)}`,
+    source: 'initial-review' as const,
+    issue,
+  }));
 }
 
 interface PackageJsonManifest {
@@ -602,7 +593,7 @@ export function createLocalValidationEngine(
                 reviewContext,
               }),
               executableContract: boundedReviewPacketText(config.contract),
-              initialFindings: initialBroadFindings(taskReview, config.diff),
+              initialFindings: initialBroadFindings(taskReview),
               validationSummary: boundedReviewPacketText({
                 lint: lintResult.status,
                 sast: sastResult.status,

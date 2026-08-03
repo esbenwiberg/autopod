@@ -17,17 +17,22 @@ describe('parseSynthesis', () => {
   it('persists source-backed accepted, rejected, and merged decisions', () => {
     const a = finding('a');
     const b = finding('b');
+    const c = finding('c', 'obsolete concern');
     const result = parseSynthesis(
       JSON.stringify({
         decisions: [
           { action: 'accept', sourceIds: ['a'], finding: a },
           { action: 'merge', sourceIds: ['b'], finding: b },
+          { action: 'reject', sourceIds: ['c'], reason: 'superseded by inspected evidence' },
         ],
       }),
-      [a, b],
+      [a, b, c],
     );
     expect(result.accepted).toEqual([a, b]);
     expect(result.merged[0]?.sourceIds).toEqual(['b']);
+    expect(result.rejected).toEqual([
+      { sourceIds: ['c'], reason: 'superseded by inspected evidence' },
+    ]);
   });
 
   it('rejects invented IDs, altered claims, paths, severities, and malformed output', () => {

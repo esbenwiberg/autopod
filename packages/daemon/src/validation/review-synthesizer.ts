@@ -1,24 +1,28 @@
-import type { StructuredReviewFinding, TaskReviewResult } from '@autopod/shared';
+import type {
+  ReviewFindingCandidate,
+  StructuredReviewFinding,
+  TaskReviewResult,
+} from '@autopod/shared';
 
 export interface SynthesisDecision {
   action: 'accept' | 'reject' | 'merge';
   sourceIds: string[];
   reason?: string;
-  finding?: StructuredReviewFinding;
+  finding?: ReviewFindingCandidate;
 }
 
 export interface SynthesisResult {
-  accepted: StructuredReviewFinding[];
+  accepted: ReviewFindingCandidate[];
   rejected: Array<{ sourceIds: string[]; reason: string }>;
   merged: Array<{ finding: StructuredReviewFinding; sourceIds: string[] }>;
 }
 
-export function reviewSynthesisPrompt(candidates: StructuredReviewFinding[]): string {
+export function reviewSynthesisPrompt(candidates: ReviewFindingCandidate[]): string {
   return `You are a review-finding synthesizer. Return JSON only: {"decisions":[{"action":"accept|reject|merge","sourceIds":["finding id"],"reason":"brief reason","finding":{...}}]}.
 Use only the candidate findings below. Every decision must cite one or more sourceIds. An accepted finding must exactly equal its one source; a merged finding may only use field values already present in one of its sources. Never invent a claim, path, severity, evidence, or remediation.\nCandidates:\n${JSON.stringify(candidates)}`;
 }
 
-function equalFinding(a: StructuredReviewFinding, b: StructuredReviewFinding): boolean {
+function equalFinding(a: ReviewFindingCandidate, b: ReviewFindingCandidate): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -40,7 +44,7 @@ function supportedMerge(
 /** Validates that synthesis is purely a source-backed consolidation, never a new review. */
 export function parseSynthesis(
   stdout: string,
-  candidates: StructuredReviewFinding[],
+  candidates: ReviewFindingCandidate[],
 ): SynthesisResult {
   const parsed: unknown = JSON.parse(stdout);
   if (
@@ -50,7 +54,7 @@ export function parseSynthesis(
   )
     throw new Error('invalid synthesis response');
   const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-  const accepted: StructuredReviewFinding[] = [];
+  const accepted: ReviewFindingCandidate[] = [];
   const rejected: SynthesisResult['rejected'] = [];
   const merged: SynthesisResult['merged'] = [];
   const used = new Set<string>();
@@ -62,7 +66,7 @@ export function parseSynthesis(
       throw new Error('invalid synthesis source IDs');
     const sources = sourceIds
       .map((id) => byId.get(id))
-      .filter((source): source is StructuredReviewFinding => source !== undefined);
+      .filter((source): source is ReviewFindingCandidate => source !== undefined);
     const action = decision.action;
     if (action === 'accept') {
       const source = sources[0];
@@ -70,7 +74,7 @@ export function parseSynthesis(
         sources.length !== 1 ||
         !source ||
         !decision.finding ||
-        !equalFinding(decision.finding as StructuredReviewFinding, source)
+        !equalFinding(decision.finding as ReviewFindingCandidate, source)
       )
         throw new Error('unsupported accepted finding');
       accepted.push(source);
@@ -79,9 +83,14 @@ export function parseSynthesis(
         throw new Error('invalid rejection');
       rejected.push({ sourceIds, reason: decision.reason });
     } else if (action === 'merge') {
+      const structuredSources = sources.filter(
+        (source): source is StructuredReviewFinding => !('source' in source),
+      );
       if (
         !decision.finding ||
-        !supportedMerge(decision.finding as StructuredReviewFinding, sources)
+        'source' in decision.finding ||
+        structuredSources.length !== sources.length ||
+        !supportedMerge(decision.finding as StructuredReviewFinding, structuredSources)
       )
         throw new Error('unsupported merged finding');
       merged.push({ finding: decision.finding as StructuredReviewFinding, sourceIds });
