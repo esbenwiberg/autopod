@@ -51,6 +51,7 @@ import {
   activeLedgerEntries,
   activeLedgerFindings,
   closurePrompt,
+  closureVerificationChunks,
   parseClosureVerification,
   reconcileReviewLedger,
 } from './review-ledger.js';
@@ -782,26 +783,39 @@ export function createLocalValidationEngine(
                 closure = { status: 'unavailable' as const, decisions: [], reason: repair.reason };
               } else {
                 try {
-                  const response = await runContainerReviewer({
-                    podId: config.podId,
-                    containerId: config.containerId,
-                    containerManager,
-                    profile: {
-                      modelProvider: config.reviewerProvider ?? 'anthropic',
-                      providerCredentials: config.reviewerProviderCredentials ?? null,
-                    },
-                    model: config.reviewerModel ?? 'auto',
-                    prompt: closurePrompt(priorActive, repair.diff ?? frozenDiff),
-                    ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
-                    timeout: config.reviewTimeout ?? 300_000,
-                    logger: log,
-                  });
-                  closureTokenUsage = response.tokenUsage;
-                  closure = parseClosureVerification(
-                    response.stdout.slice(0, 200_000),
-                    priorActive,
-                    repair.diff,
-                  );
+                  const decisions = [];
+                  for (const chunk of closureVerificationChunks(priorActive)) {
+                    const response = await runContainerReviewer({
+                      podId: config.podId,
+                      containerId: config.containerId,
+                      containerManager,
+                      profile: {
+                        modelProvider: config.reviewerProvider ?? 'anthropic',
+                        providerCredentials: config.reviewerProviderCredentials ?? null,
+                      },
+                      model: config.reviewerModel ?? 'auto',
+                      prompt: closurePrompt(chunk, repair.diff ?? frozenDiff),
+                      ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
+                      timeout: config.reviewTimeout ?? 300_000,
+                      logger: log,
+                    });
+                    closureTokenUsage = combineReviewTokenUsage(
+                      config.reviewerModel ?? 'auto',
+                      closureTokenUsage,
+                      response.tokenUsage,
+                    );
+                    const parsed = parseClosureVerification(
+                      response.stdout.slice(0, 200_000),
+                      chunk,
+                      repair.diff,
+                    );
+                    if (parsed.status !== 'completed') {
+                      closure = parsed;
+                      break;
+                    }
+                    decisions.push(...parsed.decisions);
+                  }
+                  closure ??= { status: 'completed' as const, decisions };
                 } catch (error) {
                   closure = {
                     status: 'unavailable' as const,

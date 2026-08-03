@@ -5,6 +5,7 @@ import {
   activeLedgerEntries,
   activeLedgerFindings,
   closurePrompt,
+  closureVerificationChunks,
   parseClosureVerification,
   reconcileReviewLedger,
 } from './review-ledger.js';
@@ -45,6 +46,19 @@ const states = (ledger: ReturnType<typeof reconcileReviewLedger>) =>
   );
 
 describe('reconcileReviewLedger', () => {
+  it('chunks every active finding for bounded closure verification', () => {
+    const prior = reconcileReviewLedger(
+      undefined,
+      Array.from({ length: 201 }, (_, index) => finding(`finding-${index}`)),
+      undefined,
+    );
+    const chunks = closureVerificationChunks(prior);
+    expect(chunks.map((chunk) => chunk.length)).toEqual([100, 100, 1]);
+    expect(new Set(chunks.flatMap((chunk) => chunk.map((entry) => entry.semanticId))).size).toBe(
+      201,
+    );
+  });
+
   it('preserves fixed history and derives regression deterministically across attempts', () => {
     const one = reconcileReviewLedger(undefined, [finding('A'), finding('B')], undefined);
     expect(states(one)).toEqual({ A: 'new', B: 'new' });

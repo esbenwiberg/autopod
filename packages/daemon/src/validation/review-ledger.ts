@@ -16,6 +16,16 @@ function closableEntries(prior: ReviewFindingLedgerEntry[]): ReviewFindingLedger
   return prior.filter((entry) => entry.state !== 'fixed').slice(0, MAX_CLOSURE_FINDINGS);
 }
 
+/** Keep every closure request bounded while ensuring no active finding is skipped. */
+export function closureVerificationChunks(
+  prior: ReviewFindingLedgerEntry[],
+): ReviewFindingLedgerEntry[][] {
+  const active = prior.filter((entry) => entry.state !== 'fixed');
+  return Array.from({ length: Math.ceil(active.length / MAX_CLOSURE_FINDINGS) }, (_, index) =>
+    active.slice(index * MAX_CLOSURE_FINDINGS, (index + 1) * MAX_CLOSURE_FINDINGS),
+  );
+}
+
 function boundedClosurePrior(prior: ReviewFindingLedgerEntry[]): string {
   const config = getPresetConfig('strict');
   // Previous findings originate in model output. Only carry the bounded,
