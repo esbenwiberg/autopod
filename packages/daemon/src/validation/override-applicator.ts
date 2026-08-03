@@ -24,7 +24,7 @@ export function applyOverrides(
   // Apply to task review issues
   if (patched.taskReview && patched.taskReview.status === 'fail') {
     patched.taskReview.issues = patched.taskReview.issues.filter(
-      (issue) => !isDismissed(dismissedIds, 'task_review', issue),
+      (issue) => !isTaskReviewIssueDismissed(dismissedIds, patched.taskReview, issue),
     );
 
     // Apply to requirements check
@@ -67,6 +67,26 @@ export function applyOverrides(
   patched.overall = computeOverall(patched);
 
   return patched;
+}
+
+function isTaskReviewIssueDismissed(
+  dismissedIds: Set<string>,
+  review: NonNullable<ValidationResult['taskReview']>,
+  issue: string,
+): boolean {
+  const canonical = review.reviewBatch?.ledger?.find((entry) => {
+    if (entry.state === 'fixed') return false;
+    const finding = entry.finding;
+    const rendered =
+      'source' in finding
+        ? finding.issue
+        : `[${finding.severity}] ${finding.path}${finding.line ? `:${finding.line}` : ''} — ${finding.claim}`;
+    return rendered === issue;
+  });
+  return (
+    (canonical !== undefined && dismissedIds.has(canonical.semanticId)) ||
+    isDismissed(dismissedIds, 'task_review', issue)
+  );
 }
 
 /**

@@ -10,6 +10,7 @@ import type {
   FactValidationResult,
   HealthResult,
   PageResult,
+  ReviewFindingCandidate,
   TaskReviewResult,
   ValidationInfrastructureFailure,
   ValidationOverride,
@@ -770,7 +771,19 @@ export function createLocalValidationEngine(
                 }
               }
             }
-            const ledger = reconcileReviewLedger(config.priorReviewBatch, batch.accepted, closure);
+            // First-gate findings remain blocking even if the synthesizer rejects
+            // them, so retain them in the durable history as well as accepted
+            // council findings. Otherwise a rejected first-gate finding could
+            // disappear before a later repair attempt can close or regress it.
+            const ledgerCurrent = new Map<string, ReviewFindingCandidate>();
+            for (const finding of [...batch.initialFindings, ...batch.accepted]) {
+              ledgerCurrent.set(finding.id, finding);
+            }
+            const ledger = reconcileReviewLedger(
+              config.priorReviewBatch,
+              [...ledgerCurrent.values()],
+              closure,
+            );
             batch.ledger = ledger;
             batch.repairDelta = {
               status: repair.status,

@@ -1,6 +1,11 @@
 import type { ReviewBatchResult, StructuredReviewFinding } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import { parseClosureVerification, reconcileReviewLedger } from './review-ledger.js';
+import {
+  activeLedgerEntries,
+  activeLedgerFindings,
+  parseClosureVerification,
+  reconcileReviewLedger,
+} from './review-ledger.js';
 
 const finding = (id: string): StructuredReviewFinding => ({
   id,
@@ -60,7 +65,10 @@ describe('reconcileReviewLedger', () => {
   });
   it('fails closed for absent closure evidence and seeds historical packets open', () => {
     const prior = batch([finding('A')]);
-    expect(reconcileReviewLedger(prior, [], undefined)[0]?.state).toBe('open');
+    const reconciled = reconcileReviewLedger(prior, [], undefined);
+    expect(reconciled[0]?.state).toBe('open');
+    expect(activeLedgerEntries(prior)).toHaveLength(1);
+    expect(activeLedgerFindings(reconciled)).toHaveLength(1);
   });
 
   it('rejects duplicate closure decisions', () => {
@@ -76,5 +84,12 @@ describe('reconcileReviewLedger', () => {
         prior,
       ).status,
     ).toBe('invalid');
+  });
+
+  it('fails closed for omitted, invented, and malformed closure decisions', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A'), finding('B')], undefined);
+    expect(parseClosureVerification('{"decisions":[{"semanticId":"A","fixed":false}]}', prior).status).toBe('invalid');
+    expect(parseClosureVerification('{"decisions":[{"semanticId":"A","fixed":false},{"semanticId":"X","fixed":false}]}', prior).status).toBe('invalid');
+    expect(parseClosureVerification('{"decisions":"not-an-array"}', prior).status).toBe('invalid');
   });
 });
