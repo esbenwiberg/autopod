@@ -40,3 +40,4 @@
 | `ADR-033` | ADR-033: Add Pi as an Autopod-native worker beside vendor runtimes | Accepted | Autopod already supervises Claude Code, Codex, and Copilot through a common runtime interface and exposes worker capabil |
 | `ADR-034` | ADR-034: Preserve provider continuity with immutable same-pod attempts | Accepted | A provider subscription or quota limit can interrupt useful work without invalidating the pod, |
 | `ADR-035` | ADR-035: Portable common-subset reasoning effort | Accepted | Claude Code, Codex, GitHub Copilot CLI, and Pi each expose a control for how much reasoning or |
+| `ADR-036` | ADR-036: Frozen review council synthesis is source-backed | Accepted | The standard full review remains the first gate. A failed standard review, or an explicitly deep full review, triggers a |

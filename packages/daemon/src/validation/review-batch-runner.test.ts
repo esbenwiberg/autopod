@@ -1,12 +1,18 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { structuredFindingId } from './finding-fingerprint.js';
 import { createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.js';
 
 const packet = () =>
   createFrozenReviewPacket({
-    diff: 'diff --git a/a.ts b/a.ts\n+++ b/a.ts\n',
+    diff: 'diff --git a/a.ts b/a.ts\n+++ b/a.ts\n+guard();\n',
     reviewedHead: 'abc',
-    task: 'task',
-    context: 'context',
+    task: 'bounded task summary',
+    context: 'bounded enriched codebase context',
+    executableContract: 'bounded executable contract',
+    initialFindings: [],
+    validationSummary: 'bounded validation summary',
+    factSummary: 'bounded fact summary',
     promptVersion: 'v1',
     schemaVersion: 'v1',
   });
@@ -24,17 +30,34 @@ const response = JSON.stringify({
 });
 
 describe('runReviewBatch', () => {
+  it('derives packet identity from its frozen diff instead of caller metadata', () => {
+    const frozen = createFrozenReviewPacket({
+      ...packet(),
+      diffHash: 'tampered',
+    } as never);
+    expect(frozen.diffHash).toBe(createHash('sha256').update(frozen.diff).digest('hex'));
+  });
+
   it('shares one frozen packet and limits concurrency to three', async () => {
     let active = 0;
     let max = 0;
     const ids: string[] = [];
+    const hashes: string[] = [];
+    const heads: string[] = [];
+    const prompts: string[] = [];
     const batch = await runReviewBatch({
-      packet: packet(),
+      packet: {
+        ...packet(),
+        initialFindings: [{ id: 'broad-1', source: 'initial-review', issue: 'broad blocker' }],
+      },
       model: 'test',
       execute: async (prompt) => {
         active++;
         max = Math.max(max, active);
         ids.push(prompt.match(/id=([^ ]+)/)?.[1] ?? '');
+        hashes.push(prompt.match(/diffHash=([^ ]+)/)?.[1] ?? '');
+        heads.push(prompt.match(/head=([^ ]+)/)?.[1] ?? '');
+        prompts.push(prompt);
         await Promise.resolve();
         active--;
         return { stdout: response };
@@ -42,6 +65,45 @@ describe('runReviewBatch', () => {
     });
     expect(max).toBeLessThanOrEqual(3);
     expect(new Set(ids)).toEqual(new Set([batch.id]));
+    expect(new Set(hashes)).toEqual(new Set([batch.diffHash]));
+    expect(new Set(heads)).toEqual(new Set([batch.reviewedHead]));
+    const frozenContent = prompts.map((prompt) => prompt.slice(prompt.indexOf('Task: ')));
+    expect(new Set(frozenContent).size).toBe(1);
+    expect(frozenContent[0]).toContain('Task: bounded task summary');
+    expect(frozenContent[0]).toContain('Contract: bounded executable contract');
+    expect(frozenContent[0]).toContain('Initial broad-review inputs: [{"id":"broad-1"');
+    expect(frozenContent[0]).toContain('Validation: bounded validation summary');
+    expect(frozenContent[0]).toContain('Facts: bounded fact summary');
+    expect(frozenContent[0]).toContain('Context: bounded enriched codebase context');
+    expect(frozenContent[0]).toContain('+guard();');
+    expect(prompts.map((prompt) => prompt.match(/You are the (.*?) reviewer/)?.[1]).sort()).toEqual(
+      [
+        'contract_completeness',
+        'lifecycle_reliability',
+        'persistence_reproducibility',
+        'security_authority',
+        'tests_integration',
+      ],
+    );
+    expect(prompts).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          'Check every stated contract requirement, boundary, and completeness gap.',
+        ),
+        expect.stringContaining(
+          'Check authentication, authorization, secrets, trust boundaries, and privilege escalation.',
+        ),
+        expect.stringContaining(
+          'Check state transitions, retries, failure handling, concurrency, and cleanup.',
+        ),
+        expect.stringContaining(
+          'Check durable data, migrations, determinism, replayability, and configuration.',
+        ),
+        expect.stringContaining(
+          'Check test coverage, integration behavior, executable validation, and realistic failure modes.',
+        ),
+      ]),
+    );
     expect(batch.axes).toHaveLength(5);
   });
 
@@ -75,5 +137,61 @@ describe('runReviewBatch', () => {
     expect(batch.synthesis).toBe('deterministic-fallback');
     expect(batch.candidates).toHaveLength(5);
     expect(batch.accepted).toHaveLength(5);
+  });
+
+  it('keeps the initial broad-review blocker when synthesis fails', async () => {
+    const initial = {
+      id: 'broad-1',
+      source: 'initial-review' as const,
+      issue: 'broad blocker',
+    };
+    const batch = await runReviewBatch({
+      packet: { ...packet(), initialFindings: [initial] },
+      model: 'test',
+      execute: async () => ({ stdout: response }),
+      synthesize: async () => ({ stdout: '{malformed' }),
+    });
+    expect(batch.synthesis).toBe('deterministic-fallback');
+    expect(batch.accepted.map((finding) => finding.id)).toContain('broad-1');
+  });
+
+  it('persists source-backed model accept and reject decisions', async () => {
+    const initial = {
+      id: 'broad-1',
+      source: 'initial-review' as const,
+      issue: 'broad blocker',
+    };
+    const candidateId = structuredFindingId({
+      axis: 'contract_completeness',
+      path: 'a.ts',
+      claim: 'missing authorization',
+    });
+    const batch = await runReviewBatch({
+      packet: { ...packet(), initialFindings: [initial] },
+      model: 'test',
+      execute: async (_prompt, label) => ({
+        stdout: label.includes('contract_completeness') ? response : '{"findings":[]}',
+      }),
+      synthesize: async () => ({
+        stdout: JSON.stringify({
+          decisions: [
+            { action: 'accept', sourceIds: ['broad-1'], finding: initial },
+            {
+              action: 'reject',
+              sourceIds: [candidateId],
+              reason: 'Duplicated by the broad review.',
+            },
+          ],
+        }),
+      }),
+    });
+    expect(batch.synthesis).toBe('model');
+    expect(batch.accepted).toEqual([initial]);
+    expect(batch.rejected).toEqual([
+      {
+        sourceIds: [candidateId],
+        reason: 'Duplicated by the broad review.',
+      },
+    ]);
   });
 });

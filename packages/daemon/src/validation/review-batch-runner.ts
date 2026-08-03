@@ -1,12 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type {
+  InitialReviewFinding,
   ReviewAxis,
   ReviewBatchResult,
+  ReviewFindingCandidate,
   StructuredReviewFinding,
   TaskReviewResult,
 } from '@autopod/shared';
 import { structuredFindingId } from './finding-fingerprint.js';
 import { filterOutOfDiffFindings } from './review-finding-filter.js';
+import { parseSynthesis, reviewSynthesisPrompt } from './review-synthesizer.js';
 
 export const REVIEW_AXES: ReviewAxis[] = [
   'contract_completeness',
@@ -23,6 +26,10 @@ export interface FrozenReviewPacket {
   reviewedHead: string;
   task: string;
   context: string;
+  executableContract?: string;
+  initialFindings: InitialReviewFinding[];
+  validationSummary?: string;
+  factSummary?: string;
   promptVersion: string;
   schemaVersion: string;
 }
@@ -31,6 +38,10 @@ export interface ReviewBatchRunnerOptions {
   packet: FrozenReviewPacket;
   model: string;
   execute: (
+    prompt: string,
+    label: string,
+  ) => Promise<{ stdout: string; tokenUsage?: TaskReviewResult['tokenUsage'] }>;
+  synthesize?: (
     prompt: string,
     label: string,
   ) => Promise<{ stdout: string; tokenUsage?: TaskReviewResult['tokenUsage'] }>;
@@ -46,10 +57,25 @@ export function createFrozenReviewPacket(
 }
 
 function axisPrompt(packet: FrozenReviewPacket, axis: ReviewAxis): string {
-  return `You are the ${axis} reviewer in a frozen review council. Read only; do not modify files.
+  const concerns: Record<ReviewAxis, string> = {
+    contract_completeness:
+      'Check every stated contract requirement, boundary, and completeness gap.',
+    security_authority:
+      'Check authentication, authorization, secrets, trust boundaries, and privilege escalation.',
+    lifecycle_reliability:
+      'Check state transitions, retries, failure handling, concurrency, and cleanup.',
+    persistence_reproducibility:
+      'Check durable data, migrations, determinism, replayability, and configuration.',
+    tests_integration:
+      'Check test coverage, integration behavior, executable validation, and realistic failure modes.',
+  };
+  return `You are the ${axis} reviewer in a frozen review council. ${concerns[axis]} Read only; do not modify files.
 PACKET id=${packet.id} diffHash=${packet.diffHash} head=${packet.reviewedHead} schema=${packet.schemaVersion}.
 Return JSON only: {"findings":[{"severity":"MEDIUM|HIGH|CRITICAL","path":"changed file","line":number?,"symbol":"string?","claim":"specific defect","evidence":"evidence","remediation":"action","confidence":0.0}]}
 Only cite changed files and only report supported issues. Task: ${packet.task}
+Contract: ${packet.executableContract ?? ''}
+Initial broad-review inputs: ${JSON.stringify(packet.initialFindings)}
+Validation: ${packet.validationSummary ?? ''}\nFacts: ${packet.factSummary ?? ''}
 Context: ${packet.context}
 Diff:
 ${packet.diff}`;
@@ -108,7 +134,7 @@ function parseCandidates(
   return candidates.filter((f) => allowed.has(`${f.path}: ${f.claim}`));
 }
 
-function dedupe(findings: StructuredReviewFinding[]): StructuredReviewFinding[] {
+function dedupe<T extends ReviewFindingCandidate>(findings: T[]): T[] {
   return [...new Map(findings.map((finding) => [finding.id, finding])).values()].sort((a, b) =>
     a.id.localeCompare(b.id),
   );
@@ -163,6 +189,25 @@ export async function runReviewBatch(
   };
   await Promise.all(Array.from({ length: 3 }, worker));
   const accepted = dedupe(candidates);
+  const allCandidates = dedupe([...options.packet.initialFindings, ...accepted]);
+  let synthesis: ReviewBatchResult['synthesis'] = 'deterministic-fallback';
+  let synthesized = {
+    accepted: allCandidates,
+    rejected: [] as ReviewBatchResult['rejected'],
+    merged: [] as ReviewBatchResult['merged'],
+  };
+  if (options.synthesize) {
+    try {
+      const prompt = reviewSynthesisPrompt(allCandidates);
+      if (prompt.length > 1_000_000) throw new Error('synthesis prompt exceeds bounded input');
+      const result = await options.synthesize(prompt, `${options.packet.id}-synthesis`);
+      tokenUsage.push(result.tokenUsage);
+      synthesized = parseSynthesis(result.stdout.slice(0, 1_000_000), allCandidates);
+      synthesis = 'model';
+    } catch {
+      synthesis = 'deterministic-fallback';
+    }
+  }
   return {
     id: options.packet.id,
     diffHash: options.packet.diffHash,
@@ -171,10 +216,12 @@ export async function runReviewBatch(
     schemaVersion: options.packet.schemaVersion,
     model: options.model,
     axes: runs.sort((a, b) => REVIEW_AXES.indexOf(a.axis) - REVIEW_AXES.indexOf(b.axis)),
-    candidates: dedupe(candidates),
-    accepted,
-    rejected: [],
-    synthesis: 'deterministic-fallback',
+    candidates: allCandidates,
+    initialFindings: options.packet.initialFindings,
+    accepted: dedupe(synthesized.accepted),
+    rejected: synthesized.rejected,
+    merged: synthesized.merged,
+    synthesis,
     durationMs: Date.now() - started,
     infrastructureUnavailable: runs.some((r) => r.status === 'unavailable'),
     tokenUsage: usage(tokenUsage),
@@ -182,7 +229,9 @@ export async function runReviewBatch(
 }
 
 export function reviewBatchIssues(batch: ReviewBatchResult): string[] {
-  return batch.accepted.map(
-    (f) => `[${f.severity}] ${f.path}${f.line ? `:${f.line}` : ''} — ${f.claim}`,
+  return batch.accepted.map((finding) =>
+    'source' in finding
+      ? finding.issue
+      : `[${finding.severity}] ${finding.path}${finding.line ? `:${finding.line}` : ''} — ${finding.claim}`,
   );
 }

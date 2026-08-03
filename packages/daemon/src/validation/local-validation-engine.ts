@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { access, mkdir, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -14,7 +15,13 @@ import type {
   ValidationOverride,
   ValidationResult,
 } from '@autopod/shared';
-import { AutopodError, computeCostWithCache } from '@autopod/shared';
+import {
+  AutopodError,
+  computeCostWithCache,
+  getPresetConfig,
+  sanitize,
+  sanitizeDeep,
+} from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
@@ -58,6 +65,40 @@ async function readReviewHead(
   } catch {
     return fallback ?? 'unavailable';
   }
+}
+
+function boundedReviewPacketText(value: unknown, limit = 40_000): string {
+  const config = getPresetConfig('strict');
+  return sanitize(JSON.stringify(sanitizeDeep(value, config)) ?? 'null', config).slice(0, limit);
+}
+
+function boundedReviewPacketString(value: string, limit: number): string {
+  return sanitize(value, getPresetConfig('strict')).slice(0, limit);
+}
+
+const MAX_INITIAL_REVIEW_FINDINGS = 100;
+const MAX_INITIAL_REVIEW_BYTES = 200_000;
+
+function initialBroadFindings(review: TaskReviewResult) {
+  const findings = [];
+  let bytes = 0;
+  for (const issue of review.issues) {
+    if (findings.length >= MAX_INITIAL_REVIEW_FINDINGS || bytes >= MAX_INITIAL_REVIEW_BYTES) break;
+    const sanitizedIssue = boundedReviewPacketString(issue, 8_000);
+    const remaining = MAX_INITIAL_REVIEW_BYTES - bytes;
+    const boundedIssue = sanitizedIssue.slice(0, remaining);
+    if (!boundedIssue) break;
+    findings.push({
+      id: `initial-${createHash('sha256')
+        .update(`${findings.length}:${boundedIssue}`)
+        .digest('hex')
+        .slice(0, 16)}`,
+      source: 'initial-review' as const,
+      issue: boundedIssue,
+    });
+    bytes += boundedIssue.length;
+  }
+  return findings;
 }
 
 interface PackageJsonManifest {
@@ -570,23 +611,51 @@ export function createLocalValidationEngine(
             (taskReview.status === 'fail' || config.reviewDepth === 'deep')
           ) {
             const reviewedHead = await readReviewHead(config.worktreePath, config.startCommitSha);
+            const frozenDiff = boundedReviewPacketString(config.diff, 1_000_000);
             const packet = createFrozenReviewPacket({
-              diff: config.diff,
+              // The identity must attest to the exact bounded, sanitized bytes every axis receives.
+              diff: frozenDiff,
               reviewedHead,
-              task: config.task,
-              context: JSON.stringify({
+              task: boundedReviewPacketString(config.task, 40_000),
+              context: boundedReviewPacketText({
                 plan: config.plan,
                 taskSummary: config.taskSummary,
                 reviewContext,
               }),
+              executableContract: boundedReviewPacketText(config.contract),
+              initialFindings: initialBroadFindings(taskReview),
+              validationSummary: boundedReviewPacketText({
+                lint: lintResult.status,
+                sast: sastResult.status,
+                build: buildResult.status,
+                test: testResult.status,
+                health: healthResult.status,
+                pages: pagesStatus,
+              }),
+              factSummary: boundedReviewPacketText(factValidation),
               promptVersion: 'review-council-v1',
-              schemaVersion: 'structured-finding-v1',
+              schemaVersion: 'structured-finding-v2',
             });
             const batch = await runReviewBatch({
               packet,
               model: config.reviewerModel ?? 'auto',
               readHead: () => readReviewHead(config.worktreePath, reviewedHead),
               execute: async (prompt) =>
+                runContainerReviewer({
+                  podId: config.podId,
+                  containerId: config.containerId,
+                  containerManager,
+                  profile: {
+                    modelProvider: config.reviewerProvider ?? 'anthropic',
+                    providerCredentials: config.reviewerProviderCredentials ?? null,
+                  },
+                  model: config.reviewerModel ?? 'auto',
+                  prompt,
+                  ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
+                  timeout: config.reviewTimeout ?? 300_000,
+                  logger: log,
+                }),
+              synthesize: async (prompt) =>
                 runContainerReviewer({
                   podId: config.podId,
                   containerId: config.containerId,
