@@ -130,6 +130,7 @@ const MAX_PERSISTED_FIRST_GATE_FINDINGS = 4_096;
 // deterministic blocking overflow marker rather than unbounded model output.
 const MAX_TASK_REVIEW_ISSUES = 4_096;
 const FIRST_GATE_OVERFLOW_PREFIX = '[REVIEW OVERFLOW]';
+const firstGateOverflowIssueArrays = new WeakSet<string[]>();
 
 function isFirstGateOverflowIssue(issue: string): boolean {
   return issue.startsWith(FIRST_GATE_OVERFLOW_PREFIX);
@@ -188,7 +189,8 @@ function initialBroadLedgerFindings(review: TaskReviewResult) {
   const findings = [];
   const seen = new Set<string>();
   for (const issue of review.issues) {
-    if (isFirstGateOverflowIssue(issue)) continue;
+    if (firstGateOverflowIssueArrays.has(review.issues) && isFirstGateOverflowIssue(issue))
+      continue;
     if (findings.length >= MAX_PERSISTED_FIRST_GATE_FINDINGS) break;
     const id = initialBroadFindingId(issue);
     if (seen.has(id)) continue;
@@ -836,7 +838,9 @@ export function createLocalValidationEngine(
             // them, so retain them in the durable history as well as accepted
             // council findings. Otherwise a rejected first-gate finding could
             // disappear before a later repair attempt can close or regress it.
-            const firstGateOverflow = taskReview.issues.find(isFirstGateOverflowIssue);
+            const firstGateOverflow = firstGateOverflowIssueArrays.has(taskReview.issues)
+              ? taskReview.issues.find(isFirstGateOverflowIssue)
+              : undefined;
             const ledgerCurrent = new Map<string, ReviewFindingCandidate>();
             for (const finding of [...initialBroadLedgerFindings(taskReview), ...batch.accepted]) {
               ledgerCurrent.set(finding.id, finding);
@@ -3735,7 +3739,7 @@ export function pickCachedPreSubmit(
     linesRemoved: scope.linesRemoved,
     startCommitSha: config.startCommitSha ?? null,
   });
-  if (!decision.reusable || !cache) return null;
+  if (!decision.reusable || !cache || cache.issues.length > MAX_TASK_REVIEW_ISSUES) return null;
   return {
     status: 'pass',
     reasoning: cache.reasoning,
@@ -3823,6 +3827,7 @@ export function parseReviewJson(raw: string): {
       normalizedIssues.push(
         `${FIRST_GATE_OVERFLOW_PREFIX} Reviewer returned ${parsed.issues.length} issues; the first ${MAX_TASK_REVIEW_ISSUES} are independently addressable and this bounded marker remains blocking until a fresh complete first gate succeeds.`,
       );
+      firstGateOverflowIssueArrays.add(normalizedIssues);
     }
     // If the model returned issues but every retained issue was un-renderable,
     // treat the response as malformed instead of silently dropping blockers.
