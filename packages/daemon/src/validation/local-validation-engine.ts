@@ -125,9 +125,9 @@ function boundedReviewPacketString(value: string, limit: number): string {
 const MAX_INITIAL_REVIEW_FINDINGS = 100;
 const MAX_INITIAL_REVIEW_BYTES = 200_000;
 const MAX_INITIAL_SEMANTIC_BYTES = 32_000;
-// Successful first-gate JSON must remain small enough to persist every finding
-// as an independently addressable ledger entry. Oversized output is malformed
-// and therefore fails review closed instead of collapsing identities.
+const MAX_PERSISTED_FIRST_GATE_FINDINGS = 4_096;
+// Retain at most this many durable first-gate entries. Any excess becomes one
+// deterministic blocking overflow marker rather than unbounded model output.
 const MAX_TASK_REVIEW_ISSUES = 4_096;
 
 function initialBroadFindingId(issue: string): string {
@@ -175,6 +175,7 @@ function initialBroadLedgerFindings(review: TaskReviewResult) {
   const findings = [];
   const seen = new Set<string>();
   for (const issue of review.issues) {
+    if (findings.length >= MAX_PERSISTED_FIRST_GATE_FINDINGS) break;
     const id = initialBroadFindingId(issue);
     if (seen.has(id)) continue;
     seen.add(id);
@@ -3714,7 +3715,9 @@ export function pickCachedPreSubmit(
   return {
     status: 'pass',
     reasoning: cache.reasoning,
-    issues: cache.issues,
+    issues: cache.issues
+      .map((issue) => boundedReviewPacketString(issue, MAX_INITIAL_SEMANTIC_BYTES))
+      .slice(0, MAX_TASK_REVIEW_ISSUES),
   };
 }
 
@@ -3765,7 +3768,6 @@ export function parseReviewJson(raw: string): {
     if (!['pass', 'fail', 'uncertain'].includes(parsed.status)) return null;
     if (typeof parsed.reasoning !== 'string') return null;
     if (!Array.isArray(parsed.issues)) return null;
-    if (parsed.issues.length > MAX_TASK_REVIEW_ISSUES) return null;
 
     const requirementsCheck = Array.isArray(parsed.requirementsCheck)
       ? parsed.requirementsCheck
@@ -3785,15 +3787,26 @@ export function parseReviewJson(raw: string): {
 
     const deviationsAssessment = parseDeviationsAssessment(parsed.deviationsAssessment);
 
+    const overflowed = parsed.issues.length > MAX_TASK_REVIEW_ISSUES;
     const normalizedIssues = (parsed.issues as unknown[])
+      .slice(0, overflowed ? MAX_TASK_REVIEW_ISSUES - 1 : MAX_TASK_REVIEW_ISSUES)
       .map(normalizeReviewIssue)
+      .map((issue) =>
+        issue === null ? null : boundedReviewPacketString(issue, MAX_INITIAL_SEMANTIC_BYTES),
+      )
       .filter((s): s is string => s !== null);
-    // If the model returned issues but every one was un-renderable, treat the
-    // response as malformed instead of silently dropping all flagged problems.
+    if (overflowed) {
+      normalizedIssues.push(
+        `[REVIEW OVERFLOW] Reviewer returned ${parsed.issues.length} issues; the first ${MAX_TASK_REVIEW_ISSUES - 1} are independently addressable and the bounded overflow marker remains blocking.`,
+      );
+    }
+    // If the model returned issues but every retained issue was un-renderable,
+    // treat the response as malformed instead of silently dropping blockers.
+    // Overflow always has the explicit, bounded marker above.
     if (parsed.issues.length > 0 && normalizedIssues.length === 0) return null;
 
     return {
-      status: parsed.status,
+      status: overflowed ? 'fail' : parsed.status,
       reasoning: parsed.reasoning,
       issues: normalizedIssues,
       requirementsCheck,

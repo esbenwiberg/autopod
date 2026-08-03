@@ -59,6 +59,29 @@ describe('reconcileReviewLedger', () => {
     );
   });
 
+  it('chunks by encoded record bytes without losing or truncating semantic IDs', () => {
+    const prior = reconcileReviewLedger(
+      undefined,
+      Array.from({ length: 12 }, (_, index) => ({
+        ...finding(`finding-${index}`),
+        evidence: '🦊'.repeat(2_000),
+      })),
+      undefined,
+    );
+    const chunks = closureVerificationChunks(prior);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.flatMap((chunk) => chunk.map((entry) => entry.semanticId))).toEqual(
+      prior.map((entry) => entry.semanticId),
+    );
+    for (const chunk of chunks) {
+      const prompt = closurePrompt(chunk, '+ meaningful repair line 1234567890');
+      expect(
+        Buffer.byteLength(prompt.match(/Known findings: (.*)\nRepair delta:/s)?.[1] ?? ''),
+      ).toBeLessThanOrEqual(40_000);
+      for (const entry of chunk) expect(prompt).toContain(entry.semanticId);
+    }
+  });
+
   it('preserves fixed history and derives regression deterministically across attempts', () => {
     const one = reconcileReviewLedger(undefined, [finding('A'), finding('B')], undefined);
     expect(states(one)).toEqual({ A: 'new', B: 'new' });

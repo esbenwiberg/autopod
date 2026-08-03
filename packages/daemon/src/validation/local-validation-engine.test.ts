@@ -10,8 +10,10 @@ import type {
   ValidationEngineConfig,
   ValidationPhaseCallbacks,
 } from '../interfaces/validation-engine.js';
+import { createValidationRepository } from '../pods/validation-repository.js';
 import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
+import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { runContainerReviewer } from './container-reviewer-runner.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import {
@@ -964,11 +966,15 @@ describe('parseReviewJson — issues normalization', () => {
     expect(parsed?.issues).toEqual([]);
   });
 
-  it('rejects oversized finding sets instead of collapsing durable identities', () => {
+  it('persists an oversized finding set as bounded independently addressable blockers', () => {
     const parsed = parseReviewJson(
       baseShape(Array.from({ length: 4_097 }, (_, index) => `blocker ${index}`)),
     );
-    expect(parsed).toBeNull();
+    expect(parsed?.status).toBe('fail');
+    expect(parsed?.issues).toHaveLength(4_096);
+    expect(parsed?.issues).toContain('blocker 4094');
+    expect(parsed?.issues).not.toContain('blocker 4095');
+    expect(parsed?.issues.at(-1)).toContain('[REVIEW OVERFLOW]');
   });
 });
 
@@ -1362,6 +1368,34 @@ describe('validate() — hasWebUi gating', () => {
       'initial-2e7d2c03a9507ae2': 'new',
     });
     expect(two.taskReview?.tokenUsage?.inputTokens).toBe(67);
+
+    // Persist the production-engine outputs through the real validation-history
+    // seam. Each stored attempt must keep its own immutable ledger snapshot.
+    const db = createTestDb();
+    insertTestProfile(db);
+    db.prepare(
+      `INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+       VALUES ('ledger-lifecycle', 'test-profile', 'test task', 'model', 'claude', 'main', 'user-1')`,
+    ).run();
+    const history = createValidationRepository(db);
+    history.insert('ledger-lifecycle', 1, { ...one, podId: 'ledger-lifecycle' });
+    history.insert('ledger-lifecycle', 2, { ...two, podId: 'ledger-lifecycle' });
+    history.insert('ledger-lifecycle', 3, { ...three, podId: 'ledger-lifecycle' });
+    const persisted = history.getForSession('ledger-lifecycle');
+    expect(persisted).toHaveLength(3);
+    const persistedStates = (index: number) =>
+      Object.fromEntries(
+        persisted[index]?.result.taskReview?.reviewBatch?.ledger?.map((entry) => [
+          entry.finding.id,
+          entry.state,
+        ]) ?? [],
+      );
+    expect(persistedStates(0)).toEqual(states(one));
+    expect(persistedStates(1)).toEqual(states(two));
+    expect(persistedStates(2)).toEqual(states(three));
+    expect(history.getLatestReviewBatchBefore('ledger-lifecycle', 4)?.id).toBe(
+      three.taskReview?.reviewBatch?.id,
+    );
     await fs.rm(repoPath, { recursive: true, force: true });
   });
 

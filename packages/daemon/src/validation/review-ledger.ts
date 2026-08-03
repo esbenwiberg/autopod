@@ -13,46 +13,74 @@ const MAX_CLOSURE_PRIOR_BYTES = 40_000;
 const MAX_CLOSURE_FIELD_BYTES = 2_000;
 
 function closableEntries(prior: ReviewFindingLedgerEntry[]): ReviewFindingLedgerEntry[] {
-  return prior.filter((entry) => entry.state !== 'fixed').slice(0, MAX_CLOSURE_FINDINGS);
+  return prior.filter((entry) => entry.state !== 'fixed');
+}
+
+function boundedField(value: unknown, limit = MAX_CLOSURE_FIELD_BYTES): string {
+  return sanitize(String(value ?? ''), getPresetConfig('strict'))
+    .replace(/ignore\s+(?:all\s+)?previous\s+instructions/gi, '[INSTRUCTION_REDACTED]')
+    .slice(0, limit);
+}
+
+/**
+ * Project one complete, independently addressable finding. The semantic ID is
+ * never truncated: closure responses must be checked against the exact ID that
+ * is persisted in the ledger.
+ */
+function closureRecord(entry: ReviewFindingLedgerEntry): Record<string, unknown> {
+  return {
+    semanticId: entry.semanticId,
+    state: entry.state,
+    source:
+      'source' in entry.finding
+        ? { issue: boundedField(entry.finding.issue) }
+        : {
+            path: boundedField(entry.finding.path, 1_000),
+            ...(entry.finding.line !== undefined ? { line: entry.finding.line } : {}),
+            ...(entry.finding.symbol ? { symbol: boundedField(entry.finding.symbol, 1_000) } : {}),
+            claim: boundedField(entry.finding.claim),
+            evidence: boundedField(entry.finding.evidence),
+          },
+    priorSourceIds: entry.priorSourceIds.slice(0, MAX_CLOSURE_SOURCE_IDS),
+    currentSourceIds: entry.currentSourceIds.slice(0, MAX_CLOSURE_SOURCE_IDS),
+  };
+}
+
+function closureRecordBytes(entry: ReviewFindingLedgerEntry): number {
+  return Buffer.byteLength(JSON.stringify(closureRecord(entry)), 'utf8');
 }
 
 /** Keep every closure request bounded while ensuring no active finding is skipped. */
 export function closureVerificationChunks(
   prior: ReviewFindingLedgerEntry[],
 ): ReviewFindingLedgerEntry[][] {
-  const active = prior.filter((entry) => entry.state !== 'fixed');
-  return Array.from({ length: Math.ceil(active.length / MAX_CLOSURE_FINDINGS) }, (_, index) =>
-    active.slice(index * MAX_CLOSURE_FINDINGS, (index + 1) * MAX_CLOSURE_FINDINGS),
-  );
+  const chunks: ReviewFindingLedgerEntry[][] = [];
+  for (const entry of closableEntries(prior)) {
+    const current = chunks.at(-1);
+    // Account for JSON commas and enclosing brackets. A single structurally
+    // bounded record always fits; records are never string-sliced to fit.
+    const currentBytes = current
+      ? Buffer.byteLength(JSON.stringify(current.map(closureRecord)), 'utf8')
+      : 2;
+    const nextBytes = currentBytes + closureRecordBytes(entry) + (current?.length ? 1 : 0);
+    if (
+      !current ||
+      current.length >= MAX_CLOSURE_FINDINGS ||
+      (current.length > 0 && nextBytes > MAX_CLOSURE_PRIOR_BYTES)
+    ) {
+      chunks.push([entry]);
+    } else {
+      current.push(entry);
+    }
+  }
+  return chunks;
 }
 
 function boundedClosurePrior(prior: ReviewFindingLedgerEntry[]): string {
-  const config = getPresetConfig('strict');
-  // Previous findings originate in model output. Only carry the bounded,
-  // sanitized source locator needed to relate a repair excerpt to its finding;
-  // never replay remediation or arbitrary nested reviewer content.
-  const id = (value: string) => sanitize(value, config).slice(0, 256);
-  const field = (value: unknown, limit = MAX_CLOSURE_FIELD_BYTES) =>
-    sanitize(String(value ?? ''), config)
-      .replace(/ignore\s+(?:all\s+)?previous\s+instructions/gi, '[INSTRUCTION_REDACTED]')
-      .slice(0, limit);
-  const projected = closableEntries(prior).map((entry) => ({
-    semanticId: id(entry.semanticId),
-    state: entry.state,
-    source:
-      'source' in entry.finding
-        ? { issue: field(entry.finding.issue) }
-        : {
-            path: field(entry.finding.path, 1_000),
-            ...(entry.finding.line !== undefined ? { line: entry.finding.line } : {}),
-            ...(entry.finding.symbol ? { symbol: field(entry.finding.symbol, 1_000) } : {}),
-            claim: field(entry.finding.claim),
-            evidence: field(entry.finding.evidence),
-          },
-    priorSourceIds: entry.priorSourceIds.slice(0, MAX_CLOSURE_SOURCE_IDS).map(id),
-    currentSourceIds: entry.currentSourceIds.slice(0, MAX_CLOSURE_SOURCE_IDS).map(id),
-  }));
-  return JSON.stringify(projected).slice(0, MAX_CLOSURE_PRIOR_BYTES);
+  const serialized = JSON.stringify(closableEntries(prior).map(closureRecord));
+  if (Buffer.byteLength(serialized, 'utf8') > MAX_CLOSURE_PRIOR_BYTES)
+    throw new Error('closure finding chunk exceeds bounded request size');
+  return serialized;
 }
 
 function sourceIds(finding: ReviewFindingCandidate): string[] {
@@ -171,9 +199,7 @@ export function parseClosureVerification(
     const raw =
       parsed && typeof parsed === 'object' ? (parsed as { decisions?: unknown }).decisions : null;
     if (!Array.isArray(raw)) throw new Error('missing decisions');
-    const expected = closableEntries(prior)
-      .map((entry) => entry.semanticId)
-      .sort();
+    const expected = prior.map((entry) => entry.semanticId).sort();
     const decisions = raw.map((value) => {
       if (!value || typeof value !== 'object') throw new Error('malformed decision');
       const d = value as Record<string, unknown>;
