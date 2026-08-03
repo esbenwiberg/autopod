@@ -22,9 +22,17 @@ function equalFinding(a: StructuredReviewFinding, b: StructuredReviewFinding): b
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-function supportedMerge(finding: StructuredReviewFinding, sources: StructuredReviewFinding[]): boolean {
+function supportedMerge(
+  finding: StructuredReviewFinding,
+  sources: StructuredReviewFinding[],
+): boolean {
   const fields: Array<keyof StructuredReviewFinding> = [
-    'axis', 'severity', 'path', 'claim', 'evidence', 'remediation',
+    'axis',
+    'severity',
+    'path',
+    'claim',
+    'evidence',
+    'remediation',
   ];
   return fields.every((field) => sources.some((source) => source[field] === finding[field]));
 }
@@ -35,7 +43,11 @@ export function parseSynthesis(
   candidates: StructuredReviewFinding[],
 ): SynthesisResult {
   const parsed: unknown = JSON.parse(stdout);
-  if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as { decisions?: unknown }).decisions))
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    !Array.isArray((parsed as { decisions?: unknown }).decisions)
+  )
     throw new Error('invalid synthesis response');
   const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
   const accepted: StructuredReviewFinding[] = [];
@@ -48,17 +60,29 @@ export function parseSynthesis(
     const sourceIds = Array.isArray(decision.sourceIds) ? decision.sourceIds.map(String) : [];
     if (!sourceIds.length || sourceIds.some((id) => !byId.has(id) || used.has(id)))
       throw new Error('invalid synthesis source IDs');
-    const sources = sourceIds.map((id) => byId.get(id)!);
+    const sources = sourceIds
+      .map((id) => byId.get(id))
+      .filter((source): source is StructuredReviewFinding => source !== undefined);
     const action = decision.action;
     if (action === 'accept') {
-      if (sources.length !== 1 || !decision.finding || !equalFinding(decision.finding as StructuredReviewFinding, sources[0]!))
+      const source = sources[0];
+      if (
+        sources.length !== 1 ||
+        !source ||
+        !decision.finding ||
+        !equalFinding(decision.finding as StructuredReviewFinding, source)
+      )
         throw new Error('unsupported accepted finding');
-      accepted.push(sources[0]!);
+      accepted.push(source);
     } else if (action === 'reject') {
-      if (typeof decision.reason !== 'string' || !decision.reason) throw new Error('invalid rejection');
+      if (typeof decision.reason !== 'string' || !decision.reason)
+        throw new Error('invalid rejection');
       rejected.push({ sourceIds, reason: decision.reason });
     } else if (action === 'merge') {
-      if (!decision.finding || !supportedMerge(decision.finding as StructuredReviewFinding, sources))
+      if (
+        !decision.finding ||
+        !supportedMerge(decision.finding as StructuredReviewFinding, sources)
+      )
         throw new Error('unsupported merged finding');
       merged.push({ finding: decision.finding as StructuredReviewFinding, sourceIds });
       accepted.push(decision.finding as StructuredReviewFinding);

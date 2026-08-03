@@ -39,7 +39,10 @@ export interface ReviewBatchRunnerOptions {
     prompt: string,
     label: string,
   ) => Promise<{ stdout: string; tokenUsage?: TaskReviewResult['tokenUsage'] }>;
-  synthesize?: (prompt: string, label: string) => Promise<{ stdout: string; tokenUsage?: TaskReviewResult['tokenUsage'] }>;
+  synthesize?: (
+    prompt: string,
+    label: string,
+  ) => Promise<{ stdout: string; tokenUsage?: TaskReviewResult['tokenUsage'] }>;
   /** Read HEAD immediately before each call; prevents a batch from mixing commits. */
   readHead?: () => Promise<string>;
 }
@@ -53,11 +56,16 @@ export function createFrozenReviewPacket(
 
 function axisPrompt(packet: FrozenReviewPacket, axis: ReviewAxis): string {
   const concerns: Record<ReviewAxis, string> = {
-    contract_completeness: 'Check every stated contract requirement, boundary, and completeness gap.',
-    security_authority: 'Check authentication, authorization, secrets, trust boundaries, and privilege escalation.',
-    lifecycle_reliability: 'Check state transitions, retries, failure handling, concurrency, and cleanup.',
-    persistence_reproducibility: 'Check durable data, migrations, determinism, replayability, and configuration.',
-    tests_integration: 'Check test coverage, integration behavior, executable validation, and realistic failure modes.',
+    contract_completeness:
+      'Check every stated contract requirement, boundary, and completeness gap.',
+    security_authority:
+      'Check authentication, authorization, secrets, trust boundaries, and privilege escalation.',
+    lifecycle_reliability:
+      'Check state transitions, retries, failure handling, concurrency, and cleanup.',
+    persistence_reproducibility:
+      'Check durable data, migrations, determinism, replayability, and configuration.',
+    tests_integration:
+      'Check test coverage, integration behavior, executable validation, and realistic failure modes.',
   };
   return `You are the ${axis} reviewer in a frozen review council. ${concerns[axis]} Read only; do not modify files.
 PACKET id=${packet.id} diffHash=${packet.diffHash} head=${packet.reviewedHead} schema=${packet.schemaVersion}.
@@ -181,10 +189,17 @@ export async function runReviewBatch(
   const accepted = dedupe(candidates);
   const allCandidates = dedupe([...options.packet.initialFindings, ...accepted]);
   let synthesis: ReviewBatchResult['synthesis'] = 'deterministic-fallback';
-  let synthesized = { accepted: allCandidates, rejected: [] as ReviewBatchResult['rejected'], merged: [] as ReviewBatchResult['merged'] };
+  let synthesized = {
+    accepted: allCandidates,
+    rejected: [] as ReviewBatchResult['rejected'],
+    merged: [] as ReviewBatchResult['merged'],
+  };
   if (options.synthesize) {
     try {
-      const result = await options.synthesize(reviewSynthesisPrompt(allCandidates), `${options.packet.id}-synthesis`);
+      const result = await options.synthesize(
+        reviewSynthesisPrompt(allCandidates),
+        `${options.packet.id}-synthesis`,
+      );
       tokenUsage.push(result.tokenUsage);
       synthesized = parseSynthesis(result.stdout.slice(0, 1_000_000), allCandidates);
       synthesis = 'model';

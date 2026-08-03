@@ -32,6 +32,7 @@ import {
   ContainerReviewerUnavailableError,
   runContainerReviewer,
 } from './container-reviewer-runner.js';
+import { structuredFindingId } from './finding-fingerprint.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 import { runAgenticReview } from './review-agentic-runner.js';
@@ -44,7 +45,6 @@ import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
 import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
 import { applyDiffFilterToParsed } from './review-finding-filter.js';
 import { runToolUseReview } from './review-tool-runner.js';
-import { structuredFindingId } from './finding-fingerprint.js';
 
 const execFileAsync = promisify(execFile);
 

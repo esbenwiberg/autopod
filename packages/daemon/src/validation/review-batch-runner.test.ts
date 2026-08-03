@@ -54,7 +54,9 @@ describe('runReviewBatch', () => {
     expect(new Set(prompts.map((prompt) => prompt.match(/Context: (.*)/)?.[1]))).toEqual(
       new Set(['context']),
     );
-    expect(new Set(prompts.map((prompt) => prompt.match(/You are the (.*?) reviewer/)?.[1])).size).toBe(5);
+    expect(
+      new Set(prompts.map((prompt) => prompt.match(/You are the (.*?) reviewer/)?.[1])).size,
+    ).toBe(5);
     expect(batch.axes).toHaveLength(5);
   });
 
@@ -88,5 +90,26 @@ describe('runReviewBatch', () => {
     expect(batch.synthesis).toBe('deterministic-fallback');
     expect(batch.candidates).toHaveLength(5);
     expect(batch.accepted).toHaveLength(5);
+  });
+
+  it('keeps the initial broad-review blocker when synthesis fails', async () => {
+    const initial = {
+      id: 'broad-1',
+      axis: 'contract_completeness' as const,
+      severity: 'HIGH' as const,
+      path: 'a.ts',
+      claim: 'broad blocker',
+      evidence: 'first gate',
+      remediation: 'fix it',
+      confidence: 1,
+    };
+    const batch = await runReviewBatch({
+      packet: { ...packet(), initialFindings: [initial] },
+      model: 'test',
+      execute: async () => ({ stdout: response }),
+      synthesize: async () => ({ stdout: '{malformed' }),
+    });
+    expect(batch.synthesis).toBe('deterministic-fallback');
+    expect(batch.accepted.map((finding) => finding.id)).toContain('broad-1');
   });
 });
