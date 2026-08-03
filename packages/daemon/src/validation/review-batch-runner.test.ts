@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { structuredFindingId } from './finding-fingerprint.js';
 import { createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.js';
@@ -26,6 +27,14 @@ const response = JSON.stringify({
 });
 
 describe('runReviewBatch', () => {
+  it('derives packet identity from its frozen diff instead of caller metadata', () => {
+    const frozen = createFrozenReviewPacket({
+      ...packet(),
+      diffHash: 'tampered',
+    } as never);
+    expect(frozen.diffHash).toBe(createHash('sha256').update(frozen.diff).digest('hex'));
+  });
+
   it('shares one frozen packet and limits concurrency to three', async () => {
     let active = 0;
     let max = 0;

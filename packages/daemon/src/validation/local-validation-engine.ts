@@ -69,15 +69,29 @@ function boundedReviewPacketString(value: string, limit: number): string {
   return sanitize(value, getPresetConfig('strict')).slice(0, limit);
 }
 
+const MAX_INITIAL_REVIEW_FINDINGS = 100;
+const MAX_INITIAL_REVIEW_BYTES = 200_000;
+
 function initialBroadFindings(review: TaskReviewResult) {
-  return review.issues.map((issue) => {
+  const findings = [];
+  let bytes = 0;
+  for (const issue of review.issues) {
+    if (findings.length >= MAX_INITIAL_REVIEW_FINDINGS || bytes >= MAX_INITIAL_REVIEW_BYTES) break;
     const sanitizedIssue = boundedReviewPacketString(issue, 8_000);
-    return {
-      id: `initial-${createHash('sha256').update(sanitizedIssue).digest('hex').slice(0, 16)}`,
+    const remaining = MAX_INITIAL_REVIEW_BYTES - bytes;
+    const boundedIssue = sanitizedIssue.slice(0, remaining);
+    if (!boundedIssue) break;
+    findings.push({
+      id: `initial-${createHash('sha256')
+        .update(`${findings.length}:${boundedIssue}`)
+        .digest('hex')
+        .slice(0, 16)}`,
       source: 'initial-review' as const,
-      issue: sanitizedIssue,
-    };
-  });
+      issue: boundedIssue,
+    });
+    bytes += boundedIssue.length;
+  }
+  return findings;
 }
 
 interface PackageJsonManifest {
@@ -594,7 +608,6 @@ export function createLocalValidationEngine(
             const packet = createFrozenReviewPacket({
               // The identity must attest to the exact bounded, sanitized bytes every axis receives.
               diff: frozenDiff,
-              diffHash: hashDiff(frozenDiff),
               reviewedHead,
               task: boundedReviewPacketString(config.task, 40_000),
               context: boundedReviewPacketText({
