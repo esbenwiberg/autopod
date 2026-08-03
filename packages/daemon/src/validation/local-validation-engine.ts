@@ -14,7 +14,7 @@ import type {
   ValidationOverride,
   ValidationResult,
 } from '@autopod/shared';
-import { AutopodError, computeCostWithCache } from '@autopod/shared';
+import { AutopodError, computeCostWithCache, getPresetConfig, sanitize } from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
@@ -62,7 +62,7 @@ async function readReviewHead(
 }
 
 function boundedReviewPacketText(value: unknown, limit = 40_000): string {
-  return JSON.stringify(value).slice(0, limit);
+  return sanitize(JSON.stringify(value), getPresetConfig('strict')).slice(0, limit);
 }
 
 function initialBroadFindings(review: TaskReviewResult, diff: string) {
