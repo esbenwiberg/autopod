@@ -1094,7 +1094,7 @@ describe('validate() — hasWebUi gating', () => {
       stdout: JSON.stringify({
         status: 'fail',
         reasoning: 'many blockers',
-        issues: Array.from({ length: 101 }, (_, index) => `blocker ${index}`),
+        issues: Array.from({ length: 1_001 }, (_, index) => `blocker ${index}`),
       }),
     });
     mockCouncil();
@@ -1108,8 +1108,13 @@ describe('validate() — hasWebUi gating', () => {
       }),
     );
     expect(result.taskReview?.reviewBatch?.initialFindings).toHaveLength(100);
-    expect(result.taskReview?.reviewBatch?.ledger).toHaveLength(101);
-    expect(result.taskReview?.issues).toContain('blocker 100');
+    expect(result.taskReview?.reviewBatch?.ledger).toHaveLength(1_001);
+    expect(result.taskReview?.reviewBatch?.ledger).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ finding: expect.objectContaining({ issue: 'blocker 1000' }) }),
+      ]),
+    );
+    expect(result.taskReview?.issues).toContain('blocker 1000');
   });
 
   it('structurally redacts arbitrary nested credentials from frozen packet context', async () => {

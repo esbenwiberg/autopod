@@ -74,6 +74,11 @@ function isTaskReviewIssueDismissed(
   review: NonNullable<ValidationResult['taskReview']>,
   issue: string,
 ): boolean {
+  // Overrides persisted before council ledgers existed use the rendered issue's
+  // task_review fingerprint. Keep accepting that identity after canonical
+  // semantic IDs become available for the same issue.
+  if (isDismissed(dismissedIds, 'task_review', issue)) return true;
+
   const canonical = review.reviewBatch?.ledger?.filter((entry) => {
     if (entry.state === 'fixed') return false;
     const finding = entry.finding;
@@ -88,7 +93,7 @@ function isTaskReviewIssueDismissed(
   // semantic finding has a human dismissal.
   if (canonical && canonical.length > 0)
     return canonical.every((entry) => dismissedIds.has(entry.semanticId));
-  return isDismissed(dismissedIds, 'task_review', issue);
+  return false;
 }
 
 /**

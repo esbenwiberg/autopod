@@ -207,6 +207,61 @@ describe('applyOverrides', () => {
     expect(patched.overall).toBe('pass');
   });
 
+  it('keeps legacy task-review fingerprint dismissals compatible with council ledgers', () => {
+    const issue = '[HIGH] a.ts:4 — Missing authorization check';
+    const result = makeBaseResult({
+      taskReview: {
+        status: 'fail',
+        reasoning: 'Council blocker',
+        issues: [issue],
+        model: 'sonnet',
+        screenshots: [],
+        diff: 'd',
+        reviewBatch: {
+          id: 'batch',
+          diffHash: 'diff',
+          reviewedHead: 'head',
+          promptVersion: 'v1',
+          schemaVersion: 'v2',
+          model: 'sonnet',
+          axes: [],
+          candidates: [],
+          initialFindings: [],
+          accepted: [],
+          rejected: [],
+          merged: [],
+          synthesis: 'model',
+          durationMs: 1,
+          ledger: [
+            {
+              semanticId: 'review:canonical-council-id',
+              state: 'open',
+              priorSourceIds: ['source-a'],
+              currentSourceIds: ['source-a'],
+              finding: {
+                id: 'source-a',
+                axis: 'security_authority',
+                severity: 'HIGH',
+                path: 'a.ts',
+                line: 4,
+                claim: 'Missing authorization check',
+                evidence: 'handler accepts any actor',
+                remediation: 'authorize actor',
+                confidence: 1,
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const patched = applyOverrides(result, [makeDismiss('task_review', issue)]);
+
+    expect(patched.taskReview?.issues).toEqual([]);
+    expect(patched.taskReview?.status).toBe('pass');
+    expect(patched.overall).toBe('pass');
+  });
+
   it('partially dismisses task review issues', () => {
     const result = makeBaseResult({
       taskReview: {
