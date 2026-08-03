@@ -5,8 +5,8 @@ import type {
   StructuredReviewFinding,
   TaskReviewResult,
 } from '@autopod/shared';
-import { filterOutOfDiffFindings } from './review-finding-filter.js';
 import { structuredFindingId } from './finding-fingerprint.js';
+import { filterOutOfDiffFindings } from './review-finding-filter.js';
 
 export const REVIEW_AXES: ReviewAxis[] = [
   'contract_completeness',
@@ -46,12 +46,13 @@ export function createFrozenReviewPacket(
 }
 
 function axisPrompt(packet: FrozenReviewPacket, axis: ReviewAxis): string {
-  return (
-    `You are the ${axis} reviewer in a frozen review council. Read only; do not modify files.\n` +
-    `PACKET id=${packet.id} diffHash=${packet.diffHash} head=${packet.reviewedHead} schema=${packet.schemaVersion}.\n` +
-    `Return JSON only: {"findings":[{"severity":"MEDIUM|HIGH|CRITICAL","path":"changed file","line":number?,"symbol":"string?","claim":"specific defect","evidence":"evidence","remediation":"action","confidence":0.0}]}\n` +
-    `Only cite changed files and only report supported issues. Task: ${packet.task}\nContext: ${packet.context}\nDiff:\n${packet.diff}`
-  );
+  return `You are the ${axis} reviewer in a frozen review council. Read only; do not modify files.
+PACKET id=${packet.id} diffHash=${packet.diffHash} head=${packet.reviewedHead} schema=${packet.schemaVersion}.
+Return JSON only: {"findings":[{"severity":"MEDIUM|HIGH|CRITICAL","path":"changed file","line":number?,"symbol":"string?","claim":"specific defect","evidence":"evidence","remediation":"action","confidence":0.0}]}
+Only cite changed files and only report supported issues. Task: ${packet.task}
+Context: ${packet.context}
+Diff:
+${packet.diff}`;
 }
 
 function parseCandidates(
