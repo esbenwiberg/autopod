@@ -191,6 +191,53 @@ export interface TaskReviewResult {
     cacheCreationInputTokens?: number;
     costUsd?: number;
   };
+  /** Optional frozen multi-axis review metadata. Kept in validation JSON for compatibility. */
+  reviewBatch?: ReviewBatchResult;
+}
+
+export type ReviewAxis =
+  | 'contract_completeness'
+  | 'security_authority'
+  | 'lifecycle_reliability'
+  | 'persistence_reproducibility'
+  | 'tests_integration';
+
+export interface StructuredReviewFinding {
+  id: string;
+  axis: ReviewAxis;
+  severity: 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  path: string;
+  line?: number;
+  symbol?: string;
+  claim: string;
+  evidence: string;
+  remediation: string;
+  confidence: number;
+  state?: 'new' | 'fixed' | 'open' | 'regressed';
+}
+
+export interface ReviewAxisRun {
+  axis: ReviewAxis;
+  status: 'completed' | 'unavailable';
+  attempts: number;
+  error?: string;
+}
+
+export interface ReviewBatchResult {
+  id: string;
+  diffHash: string;
+  reviewedHead: string;
+  promptVersion: string;
+  schemaVersion: string;
+  model: string;
+  axes: ReviewAxisRun[];
+  candidates: StructuredReviewFinding[];
+  accepted: StructuredReviewFinding[];
+  rejected: Array<{ sourceIds: string[]; reason: string }>;
+  synthesis: 'model' | 'deterministic-fallback' | 'unavailable';
+  durationMs: number;
+  infrastructureUnavailable?: boolean;
+  tokenUsage?: TaskReviewResult['tokenUsage'];
 }
 
 export interface AdvisoryBrowserQaObservation {

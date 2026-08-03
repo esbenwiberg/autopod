@@ -6,6 +6,21 @@ import {
   findingId,
   fingerprintText,
 } from './finding-fingerprint.js';
+import { structuredFindingId } from './finding-fingerprint.js';
+
+describe('structuredFindingId', () => {
+  it('is stable when reviewer evidence wording changes', () => {
+    const base = {
+      axis: 'security_authority' as const,
+      path: 'src/auth.ts',
+      symbol: 'authorize',
+      claim: 'Missing authorization check',
+    };
+    expect(structuredFindingId(base)).toBe(
+      structuredFindingId({ ...base, claim: 'missing AUTHORIZATION check!' }),
+    );
+  });
+});
 
 // ── fingerprintText ──────────────────────────────────────────────────────────
 
