@@ -3,6 +3,7 @@ import type {
   StructuredReviewFinding,
   TaskReviewResult,
 } from '@autopod/shared';
+import { structuredFindingId } from './finding-fingerprint.js';
 
 export interface SynthesisDecision {
   action: 'accept' | 'reject' | 'merge';
@@ -95,8 +96,15 @@ export function parseSynthesis(
         !supportedMerge(mergedFinding as StructuredReviewFinding, structuredSources)
       )
         throw new Error('unsupported merged finding');
-      merged.push({ finding: mergedFinding as StructuredReviewFinding, sourceIds });
-      accepted.push(mergedFinding as StructuredReviewFinding);
+      // IDs are provenance identifiers, not model-controlled content. Derive the
+      // merged ID after validating its source-backed fields so it cannot collide
+      // with an unrelated candidate.
+      const normalizedFinding: StructuredReviewFinding = {
+        ...(mergedFinding as StructuredReviewFinding),
+        id: structuredFindingId(mergedFinding as StructuredReviewFinding),
+      };
+      merged.push({ finding: normalizedFinding, sourceIds });
+      accepted.push(normalizedFinding);
     } else throw new Error('invalid synthesis action');
     sourceIds.forEach((id) => used.add(id));
   }
