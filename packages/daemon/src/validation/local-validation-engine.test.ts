@@ -975,6 +975,14 @@ describe('parseReviewJson — issues normalization', () => {
     expect(parsed?.issues).toContain('blocker 4095');
     expect(parsed?.issues.at(-1)).toContain('[REVIEW OVERFLOW]');
   });
+
+  it('counts only renderable findings toward the supported cap', () => {
+    const parsed = parseReviewJson(
+      baseShape([...Array.from({ length: 4_096 }, () => ({})), 'valid A', 'valid B']),
+    );
+    expect(parsed?.issues).toEqual(['valid A', 'valid B']);
+    expect(parsed?.firstGateOverflow).toBeUndefined();
+  });
 });
 
 describe('validate() — hasWebUi gating', () => {
@@ -1099,6 +1107,13 @@ describe('validate() — hasWebUi gating', () => {
     const truncated = initialBroadFindings({ issues: [...prefix, target] } as never).at(-1);
     expect(truncated?.issue.length).toBeLessThan(first?.issue.length ?? 0);
     expect(truncated?.id).toBe(first?.id);
+  });
+
+  it('keeps distinct identities when long findings share bounded display text', () => {
+    const prefix = 'shared semantic prefix '.padEnd(32_000, 'x');
+    const findings = initialBroadFindings({ issues: [`${prefix} A`, `${prefix} B`] } as never);
+    expect(findings[0]?.issue).toBe(findings[1]?.issue);
+    expect(findings[0]?.id).not.toBe(findings[1]?.id);
   });
 
   it('retains first-gate findings beyond the frozen packet limit in the ledger', async () => {

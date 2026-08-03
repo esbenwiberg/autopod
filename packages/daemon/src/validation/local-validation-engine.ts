@@ -140,7 +140,7 @@ function initialBroadFindingId(issue: string): string {
   // consumed by preceding findings. Never derive semantic identity from text
   // after aggregate packet truncation. Keep the established normalization so
   // existing initial-review override and ledger identities continue to match.
-  const normalized = boundedReviewPacketString(issue, MAX_INITIAL_SEMANTIC_BYTES)
+  const normalized = sanitize(issue, getPresetConfig('strict'))
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, ' ')
@@ -3813,17 +3813,20 @@ export function parseReviewJson(raw: string): {
 
     const deviationsAssessment = parseDeviationsAssessment(parsed.deviationsAssessment);
 
-    const overflowed = parsed.issues.length > MAX_TASK_REVIEW_ISSUES;
-    const normalizedIssues = (parsed.issues as unknown[])
-      .slice(0, MAX_TASK_REVIEW_ISSUES)
-      .map(normalizeReviewIssue)
-      .map((issue) =>
-        issue === null ? null : boundedReviewPacketString(issue, MAX_INITIAL_SEMANTIC_BYTES),
-      )
-      .filter((s): s is string => s !== null);
+    const normalizedIssues: string[] = [];
+    let validIssueCount = 0;
+    for (const rawIssue of parsed.issues as unknown[]) {
+      const issue = normalizeReviewIssue(rawIssue);
+      if (issue === null) continue;
+      validIssueCount++;
+      if (normalizedIssues.length < MAX_TASK_REVIEW_ISSUES) {
+        normalizedIssues.push(boundedReviewPacketString(issue, MAX_INITIAL_SEMANTIC_BYTES));
+      }
+    }
+    const overflowed = validIssueCount > MAX_TASK_REVIEW_ISSUES;
     if (overflowed) {
       normalizedIssues.push(
-        `${FIRST_GATE_OVERFLOW_PREFIX} Reviewer returned ${parsed.issues.length} issues; the first ${MAX_TASK_REVIEW_ISSUES} are independently addressable and this bounded marker remains blocking until a fresh complete first gate succeeds.`,
+        `${FIRST_GATE_OVERFLOW_PREFIX} Reviewer returned ${validIssueCount} valid issues; the first ${MAX_TASK_REVIEW_ISSUES} are independently addressable and this bounded marker remains blocking until a fresh complete first gate succeeds.`,
       );
     }
     // If the model returned issues but every retained issue was un-renderable,
@@ -3840,7 +3843,7 @@ export function parseReviewJson(raw: string): {
       ...(overflowed
         ? {
             firstGateOverflow: {
-              reportedCount: parsed.issues.length,
+              reportedCount: validIssueCount,
               retainedFindingCount: MAX_TASK_REVIEW_ISSUES,
             },
           }
