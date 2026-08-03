@@ -37,6 +37,64 @@ function makeDismiss(
 // ── applyOverrides ───────────────────────────────────────────────────────────
 
 describe('applyOverrides', () => {
+  it('keeps a shared rendered issue until every canonical finding is dismissed', () => {
+    const result = makeBaseResult({
+      taskReview: {
+        status: 'fail',
+        reasoning: 'blocked',
+        issues: ['[HIGH] a.ts:1 — same claim'],
+        reviewBatch: {
+          ledger: [
+            {
+              semanticId: 'review:one',
+              state: 'open',
+              finding: {
+                id: 'one',
+                axis: 'tests_integration',
+                severity: 'HIGH',
+                path: 'a.ts',
+                line: 1,
+                claim: 'same claim',
+                evidence: 'e',
+                remediation: 'r',
+                confidence: 1,
+              },
+              priorSourceIds: [],
+              currentSourceIds: ['one'],
+            },
+            {
+              semanticId: 'review:two',
+              state: 'open',
+              finding: {
+                id: 'two',
+                axis: 'tests_integration',
+                severity: 'HIGH',
+                path: 'a.ts',
+                line: 1,
+                claim: 'same claim',
+                evidence: 'e',
+                remediation: 'r',
+                confidence: 1,
+              },
+              priorSourceIds: [],
+              currentSourceIds: ['two'],
+            },
+          ],
+        },
+      },
+    });
+    expect(
+      applyOverrides(result, [
+        { findingId: 'review:one', action: 'dismiss', description: 'same claim' },
+      ]).taskReview?.issues,
+    ).toEqual(['[HIGH] a.ts:1 — same claim']);
+    expect(
+      applyOverrides(result, [
+        { findingId: 'review:one', action: 'dismiss', description: 'same claim' },
+        { findingId: 'review:two', action: 'dismiss', description: 'same claim' },
+      ]).taskReview?.issues,
+    ).toEqual([]);
+  });
   it('returns result unchanged when no overrides', () => {
     const result = makeBaseResult();
     expect(applyOverrides(result, [])).toEqual(result);

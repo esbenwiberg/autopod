@@ -1078,7 +1078,7 @@ describe('validate() — hasWebUi gating', () => {
   });
 
   it('keeps initial semantic IDs stable when aggregate truncation changes stored text', () => {
-    const target = `target blocker ${'x'.repeat(16_000)}`;
+    const target = `target blocker ${'x'.repeat(200)}`;
     const prefix = [
       ...Array.from({ length: 24 }, (_, index) => `${index}-${'p'.repeat(8_000)}`),
       `tail-${'q'.repeat(7_945)}`,
@@ -1087,6 +1087,29 @@ describe('validate() — hasWebUi gating', () => {
     const truncated = initialBroadFindings({ issues: [...prefix, target] } as never).at(-1);
     expect(truncated?.issue.length).toBeLessThan(first?.issue.length ?? 0);
     expect(truncated?.id).toBe(first?.id);
+  });
+
+  it('retains first-gate findings beyond the frozen packet limit in the ledger', async () => {
+    vi.mocked(runClaudeCli).mockResolvedValue({
+      stdout: JSON.stringify({
+        status: 'fail',
+        reasoning: 'many blockers',
+        issues: Array.from({ length: 101 }, (_, index) => `blocker ${index}`),
+      }),
+    });
+    mockCouncil();
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: changedDiff,
+        validationSuite: 'full',
+        startCommand: '',
+        smokePages: [],
+      }),
+    );
+    expect(result.taskReview?.reviewBatch?.initialFindings).toHaveLength(100);
+    expect(result.taskReview?.reviewBatch?.ledger).toHaveLength(101);
+    expect(result.taskReview?.issues).toContain('blocker 100');
   });
 
   it('structurally redacts arbitrary nested credentials from frozen packet context', async () => {

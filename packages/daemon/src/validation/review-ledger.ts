@@ -10,6 +10,7 @@ import { structuredFindingId } from './finding-fingerprint.js';
 const MAX_CLOSURE_FINDINGS = 100;
 const MAX_CLOSURE_SOURCE_IDS = 100;
 const MAX_CLOSURE_PRIOR_BYTES = 40_000;
+const MAX_CLOSURE_FIELD_BYTES = 2_000;
 
 function closableEntries(prior: ReviewFindingLedgerEntry[]): ReviewFindingLedgerEntry[] {
   return prior.filter((entry) => entry.state !== 'fixed').slice(0, MAX_CLOSURE_FINDINGS);
@@ -17,13 +18,27 @@ function closableEntries(prior: ReviewFindingLedgerEntry[]): ReviewFindingLedger
 
 function boundedClosurePrior(prior: ReviewFindingLedgerEntry[]): string {
   const config = getPresetConfig('strict');
-  // Previous findings originate in model output. Do not replay their prose to a
-  // later model: closure is proven only against immutable current repair bytes.
-  // IDs are sufficient to require a complete, non-invented decision set.
+  // Previous findings originate in model output. Only carry the bounded,
+  // sanitized source locator needed to relate a repair excerpt to its finding;
+  // never replay remediation or arbitrary nested reviewer content.
   const id = (value: string) => sanitize(value, config).slice(0, 256);
+  const field = (value: unknown, limit = MAX_CLOSURE_FIELD_BYTES) =>
+    sanitize(String(value ?? ''), config)
+      .replace(/ignore\s+(?:all\s+)?previous\s+instructions/gi, '[INSTRUCTION_REDACTED]')
+      .slice(0, limit);
   const projected = closableEntries(prior).map((entry) => ({
     semanticId: id(entry.semanticId),
     state: entry.state,
+    source:
+      'source' in entry.finding
+        ? { issue: field(entry.finding.issue) }
+        : {
+            path: field(entry.finding.path, 1_000),
+            ...(entry.finding.line !== undefined ? { line: entry.finding.line } : {}),
+            ...(entry.finding.symbol ? { symbol: field(entry.finding.symbol, 1_000) } : {}),
+            claim: field(entry.finding.claim),
+            evidence: field(entry.finding.evidence),
+          },
     priorSourceIds: entry.priorSourceIds.slice(0, MAX_CLOSURE_SOURCE_IDS).map(id),
     currentSourceIds: entry.currentSourceIds.slice(0, MAX_CLOSURE_SOURCE_IDS).map(id),
   }));

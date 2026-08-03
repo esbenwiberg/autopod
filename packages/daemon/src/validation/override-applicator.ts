@@ -74,7 +74,7 @@ function isTaskReviewIssueDismissed(
   review: NonNullable<ValidationResult['taskReview']>,
   issue: string,
 ): boolean {
-  const canonical = review.reviewBatch?.ledger?.find((entry) => {
+  const canonical = review.reviewBatch?.ledger?.filter((entry) => {
     if (entry.state === 'fixed') return false;
     const finding = entry.finding;
     const rendered =
@@ -83,10 +83,12 @@ function isTaskReviewIssueDismissed(
         : `[${finding.severity}] ${finding.path}${finding.line ? `:${finding.line}` : ''} — ${finding.claim}`;
     return rendered === issue;
   });
-  return (
-    (canonical !== undefined && dismissedIds.has(canonical.semanticId)) ||
-    isDismissed(dismissedIds, 'task_review', issue)
-  );
+  // A rendered issue can represent multiple semantic council findings. It is
+  // safe to remove that single rendered line only after every represented
+  // semantic finding has a human dismissal.
+  if (canonical && canonical.length > 0)
+    return canonical.every((entry) => dismissedIds.has(entry.semanticId));
+  return isDismissed(dismissedIds, 'task_review', issue);
 }
 
 /**

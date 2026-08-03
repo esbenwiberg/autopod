@@ -124,6 +124,7 @@ function boundedReviewPacketString(value: string, limit: number): string {
 const MAX_INITIAL_REVIEW_FINDINGS = 100;
 const MAX_INITIAL_REVIEW_BYTES = 200_000;
 const MAX_INITIAL_SEMANTIC_BYTES = 32_000;
+const MAX_LEDGER_INITIAL_REVIEW_FINDINGS = 1_000;
 
 function initialBroadFindingId(issue: string): string {
   // This deliberately has a fixed per-issue bound, independent of packet space
@@ -158,6 +159,40 @@ export function initialBroadFindings(review: TaskReviewResult) {
       issue: boundedIssue,
     });
     bytes += boundedIssue.length;
+  }
+  return findings;
+}
+
+/**
+ * The frozen packet is deliberately small, but first-gate blockers may not be
+ * dropped from durable history merely because they did not fit in that packet.
+ */
+function initialBroadLedgerFindings(review: TaskReviewResult) {
+  const findings = [];
+  const seen = new Set<string>();
+  for (const issue of review.issues) {
+    if (findings.length >= MAX_LEDGER_INITIAL_REVIEW_FINDINGS) break;
+    const id = initialBroadFindingId(issue);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    findings.push({
+      id,
+      source: 'initial-review' as const,
+      issue: boundedReviewPacketString(issue, 8_000),
+    });
+  }
+  if (review.issues.length > MAX_LEDGER_INITIAL_REVIEW_FINDINGS) {
+    const omittedIds = review.issues
+      .slice(MAX_LEDGER_INITIAL_REVIEW_FINDINGS)
+      .map(initialBroadFindingId)
+      .sort()
+      .join('\n');
+    findings.push({
+      id: `initial-overflow-${createHash('sha256').update(omittedIds).digest('hex').slice(0, 16)}`,
+      source: 'initial-review' as const,
+      issue:
+        'First-gate review reported additional bounded findings outside the durable ledger limit.',
+    });
   }
   return findings;
 }
@@ -784,7 +819,7 @@ export function createLocalValidationEngine(
             // council findings. Otherwise a rejected first-gate finding could
             // disappear before a later repair attempt can close or regress it.
             const ledgerCurrent = new Map<string, ReviewFindingCandidate>();
-            for (const finding of [...batch.initialFindings, ...batch.accepted]) {
+            for (const finding of [...initialBroadLedgerFindings(taskReview), ...batch.accepted]) {
               ledgerCurrent.set(finding.id, finding);
             }
             const ledger = reconcileReviewLedger(
