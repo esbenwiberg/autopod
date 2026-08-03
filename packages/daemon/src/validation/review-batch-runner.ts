@@ -7,7 +7,7 @@ import type {
   StructuredReviewFinding,
   TaskReviewResult,
 } from '@autopod/shared';
-import { structuredFindingId } from './finding-fingerprint.js';
+import { structuredFindingSourceId } from './finding-fingerprint.js';
 import { filterOutOfDiffFindings } from './review-finding-filter.js';
 import { parseSynthesis, reviewSynthesisPrompt } from './review-synthesizer.js';
 
@@ -122,7 +122,7 @@ function parseCandidates(
       remediation: String(f.remediation),
       confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0.5,
     };
-    finding.id = structuredFindingId(finding);
+    finding.id = structuredFindingSourceId(finding);
     candidates.push(finding);
   }
   const allowed = new Set(

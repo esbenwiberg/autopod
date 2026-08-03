@@ -1,5 +1,6 @@
 import type { ReviewBatchResult, StructuredReviewFinding } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
+import { structuredFindingId } from './finding-fingerprint.js';
 import {
   activeLedgerEntries,
   activeLedgerFindings,
@@ -34,35 +35,34 @@ const batch = (accepted: StructuredReviewFinding[]): ReviewBatchResult => ({
   synthesis: 'model',
   durationMs: 1,
 });
+const semantic = (id: string) => structuredFindingId(finding(id));
+const states = (ledger: ReturnType<typeof reconcileReviewLedger>) =>
+  Object.fromEntries(
+    ledger.map((entry) => [
+      'source' in entry.finding ? entry.finding.issue : entry.finding.claim,
+      entry.state,
+    ]),
+  );
 
 describe('reconcileReviewLedger', () => {
   it('preserves fixed history and derives regression deterministically across attempts', () => {
     const one = reconcileReviewLedger(undefined, [finding('A'), finding('B')], undefined);
-    expect(one.map((e) => [e.semanticId, e.state])).toEqual([
-      ['A', 'new'],
-      ['B', 'new'],
-    ]);
+    expect(states(one)).toEqual({ A: 'new', B: 'new' });
     const two = reconcileReviewLedger({ ...batch([]), ledger: one }, [finding('B'), finding('C')], {
       status: 'completed',
-      decisions: [{ semanticId: 'A', fixed: true, evidence: 'current frozen diff proves repair' }],
+      decisions: [
+        { semanticId: semantic('A'), fixed: true, evidence: 'current frozen diff proves repair' },
+      ],
     });
-    expect(two.map((e) => [e.semanticId, e.state])).toEqual([
-      ['A', 'fixed'],
-      ['B', 'open'],
-      ['C', 'new'],
-    ]);
+    expect(states(two)).toEqual({ A: 'fixed', B: 'open', C: 'new' });
     const three = reconcileReviewLedger({ ...batch([]), ledger: two }, [finding('A')], {
       status: 'completed',
       decisions: [
-        { semanticId: 'B', fixed: true, evidence: 'proof' },
-        { semanticId: 'C', fixed: true, evidence: 'proof' },
+        { semanticId: semantic('B'), fixed: true, evidence: 'proof' },
+        { semanticId: semantic('C'), fixed: true, evidence: 'proof' },
       ],
     });
-    expect(three.map((e) => [e.semanticId, e.state])).toEqual([
-      ['A', 'regressed'],
-      ['B', 'fixed'],
-      ['C', 'fixed'],
-    ]);
+    expect(states(three)).toEqual({ A: 'regressed', B: 'fixed', C: 'fixed' });
   });
   it('fails closed for absent closure evidence and seeds historical packets open', () => {
     const prior = batch([finding('A')]);
@@ -78,8 +78,8 @@ describe('reconcileReviewLedger', () => {
       parseClosureVerification(
         JSON.stringify({
           decisions: [
-            { semanticId: 'A', fixed: false },
-            { semanticId: 'A', fixed: true, evidence: 'invented duplicate' },
+            { semanticId: semantic('A'), fixed: false },
+            { semanticId: semantic('A'), fixed: true, evidence: 'invented duplicate' },
           ],
         }),
         prior,
@@ -92,7 +92,7 @@ describe('reconcileReviewLedger', () => {
     expect(
       parseClosureVerification(
         JSON.stringify({
-          decisions: [{ semanticId: 'A', fixed: true, evidence: 'invented proof' }],
+          decisions: [{ semanticId: semantic('A'), fixed: true, evidence: 'invented proof' }],
         }),
         prior,
         '+ actual repair excerpt',

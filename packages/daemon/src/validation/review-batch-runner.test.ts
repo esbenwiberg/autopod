@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { structuredFindingId } from './finding-fingerprint.js';
+import { structuredFindingSourceId } from './finding-fingerprint.js';
 import { createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.js';
 
 const packet = () =>
@@ -128,15 +128,15 @@ describe('runReviewBatch', () => {
     });
   });
 
-  it('deduplicates the same semantic finding reported by multiple axes', async () => {
+  it('retains distinct cross-axis sources for the same semantic finding', async () => {
     const batch = await runReviewBatch({
       packet: packet(),
       model: 'test',
       execute: async () => ({ stdout: response }),
     });
     expect(batch.synthesis).toBe('deterministic-fallback');
-    expect(batch.candidates).toHaveLength(1);
-    expect(batch.accepted).toHaveLength(1);
+    expect(batch.candidates).toHaveLength(5);
+    expect(batch.accepted).toHaveLength(5);
   });
 
   it('keeps the initial broad-review blocker when synthesis fails', async () => {
@@ -161,7 +161,7 @@ describe('runReviewBatch', () => {
       source: 'initial-review' as const,
       issue: 'broad blocker',
     };
-    const candidateId = structuredFindingId({
+    const candidateId = structuredFindingSourceId({
       axis: 'contract_completeness',
       path: 'a.ts',
       claim: 'missing authorization',

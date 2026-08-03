@@ -5,6 +5,7 @@ import type {
   ReviewFindingLedgerEntry,
 } from '@autopod/shared';
 import { getPresetConfig, sanitize, sanitizeDeep } from '@autopod/shared';
+import { structuredFindingId } from './finding-fingerprint.js';
 
 const MAX_CLOSURE_FINDINGS = 100;
 const MAX_CLOSURE_FINDING_BYTES = 8_000;
@@ -56,17 +57,29 @@ function sourceIds(finding: ReviewFindingCandidate): string[] {
   return [finding.id];
 }
 
+function semanticId(finding: ReviewFindingCandidate): string {
+  return 'source' in finding ? finding.id : structuredFindingId(finding);
+}
+
 /** Old packets did not retain a ledger; their accepted findings are active conservatively. */
 export function seedReviewLedger(batch: ReviewBatchResult | undefined): ReviewFindingLedgerEntry[] {
   if (!batch) return [];
   if (batch.ledger) return batch.ledger;
-  return batch.accepted.map((finding) => ({
-    semanticId: finding.id,
-    finding,
-    state: 'open' as const,
-    priorSourceIds: sourceIds(finding),
-    currentSourceIds: sourceIds(finding),
-  }));
+  const seeded = new Map<string, ReviewFindingLedgerEntry>();
+  for (const finding of batch.accepted) {
+    const id = semanticId(finding);
+    const existing = seeded.get(id);
+    if (existing) existing.currentSourceIds.push(finding.id);
+    else
+      seeded.set(id, {
+        semanticId: id,
+        finding,
+        state: 'open',
+        priorSourceIds: [],
+        currentSourceIds: sourceIds(finding),
+      });
+  }
+  return [...seeded.values()];
 }
 
 export function activeLedgerEntries(
@@ -85,7 +98,13 @@ export function reconcileReviewLedger(
   closure: ReviewClosureVerification | undefined,
 ): ReviewFindingLedgerEntry[] {
   const prior = seedReviewLedger(priorBatch);
-  const currentById = new Map(current.map((finding) => [finding.id, finding]));
+  const currentById = new Map<string, { finding: ReviewFindingCandidate; sourceIds: string[] }>();
+  for (const finding of current) {
+    const id = semanticId(finding);
+    const existing = currentById.get(id);
+    if (existing) existing.sourceIds.push(finding.id);
+    else currentById.set(id, { finding, sourceIds: sourceIds(finding) });
+  }
   const decisions = new Map(
     closure?.status === 'completed'
       ? closure.decisions.map((decision) => [decision.semanticId, decision])
@@ -97,10 +116,10 @@ export function reconcileReviewLedger(
     if (now) {
       out.push({
         ...entry,
-        finding: now,
+        finding: now.finding,
         state: entry.state === 'fixed' ? 'regressed' : 'open',
         priorSourceIds: entry.currentSourceIds,
-        currentSourceIds: sourceIds(now),
+        currentSourceIds: [...new Set(now.sourceIds)].sort(),
       });
       currentById.delete(entry.semanticId);
       continue;
@@ -119,13 +138,13 @@ export function reconcileReviewLedger(
       ...(fixed ? { closureEvidence: decision.evidence?.slice(0, 8_000) } : {}),
     });
   }
-  for (const finding of currentById.values()) {
+  for (const [id, currentFinding] of currentById) {
     out.push({
-      semanticId: finding.id,
-      finding,
+      semanticId: id,
+      finding: currentFinding.finding,
       state: 'new',
       priorSourceIds: [],
-      currentSourceIds: sourceIds(finding),
+      currentSourceIds: [...new Set(currentFinding.sourceIds)].sort(),
     });
   }
   return out.sort((a, b) => a.semanticId.localeCompare(b.semanticId));

@@ -34,6 +34,13 @@ export function structuredFindingId(
   return `review:${fingerprintText([finding.path, finding.symbol ?? '', finding.claim].join(' '))}`;
 }
 
+/** Source/provenance identity remains axis-specific even when semantic identity is shared. */
+export function structuredFindingSourceId(
+  finding: Pick<StructuredReviewFinding, 'axis' | 'path' | 'symbol' | 'claim'>,
+): string {
+  return `review-source:${fingerprintText([finding.axis, finding.path, finding.symbol ?? '', finding.claim].join(' '))}`;
+}
+
 /**
  * Walks a ValidationResult and extracts all failed findings as ValidationFinding objects.
  * Only extracts from reviewable checks (required facts, task review, requirements check) —
