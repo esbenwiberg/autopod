@@ -29,7 +29,9 @@ export function findingId(source: ValidationFinding['source'], text: string): st
 export function structuredFindingId(
   finding: Pick<StructuredReviewFinding, 'axis' | 'path' | 'symbol' | 'claim'>,
 ): string {
-  return `review:${fingerprintText([finding.axis, finding.path, finding.symbol ?? '', finding.claim].join(' '))}`;
+  // Axes are independent reviewer provenance, not semantic identity: the same
+  // defect can legitimately be reported by different axes on later attempts.
+  return `review:${fingerprintText([finding.path, finding.symbol ?? '', finding.claim].join(' '))}`;
 }
 
 /**

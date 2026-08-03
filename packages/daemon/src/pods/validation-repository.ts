@@ -1,4 +1,4 @@
-import type { ValidationResult } from '@autopod/shared';
+import type { ReviewBatchResult, ValidationResult } from '@autopod/shared';
 import { generateId } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
@@ -15,6 +15,7 @@ export interface ValidationRepository {
   updateResult(podId: string, attempt: number, result: ValidationResult): boolean;
   getForSession(podId: string): StoredValidation[];
   getLatestBefore(podId: string, attempt: number): StoredValidation | null;
+  getLatestReviewBatchBefore(podId: string, attempt: number): ReviewBatchResult | undefined;
 }
 
 function rowToStoredValidation(row: Record<string, unknown>): StoredValidation {
@@ -70,6 +71,17 @@ export function createValidationRepository(db: Database.Database): ValidationRep
         )
         .get(podId, attempt) as Record<string, unknown> | undefined;
       return row ? rowToStoredValidation(row) : null;
+    },
+
+    getLatestReviewBatchBefore(podId: string, attempt: number): ReviewBatchResult | undefined {
+      const rows = db
+        .prepare('SELECT * FROM validations WHERE pod_id = ? AND attempt < ? ORDER BY attempt DESC')
+        .all(podId, attempt) as Record<string, unknown>[];
+      for (const row of rows) {
+        const batch = rowToStoredValidation(row).result.taskReview?.reviewBatch;
+        if (batch) return batch;
+      }
+      return undefined;
     },
   };
 }
