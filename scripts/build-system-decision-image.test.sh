@@ -5,6 +5,10 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
+dockerfile="$repo_root/templates/system/Dockerfile.decision"
+grep -q 'mkdir -p /run/autopod /tmp/system-decision /home/autopod/.claude /home/autopod/.codex /home/autopod/.pi/agent' "$dockerfile"
+grep -q 'chown -R autopod:autopod /run/autopod /tmp/system-decision /home/autopod/.claude /home/autopod/.codex /home/autopod/.pi' "$dockerfile"
+
 mkdir -p "$tmp_dir/bin"
 cat > "$tmp_dir/bin/docker" <<'EOF'
 #!/usr/bin/env bash

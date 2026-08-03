@@ -13,8 +13,8 @@ RUN apt-get update \
 RUN userdel --remove node 2>/dev/null; groupdel node 2>/dev/null; \
     groupadd --gid 1000 autopod && \
     useradd --uid 1000 --gid autopod --shell /bin/sh --create-home autopod \
-    && mkdir -p /run/autopod /tmp/system-decision \
-    && chown -R autopod:autopod /run/autopod /tmp/system-decision
+    && mkdir -p /run/autopod /tmp/system-decision /home/autopod/.claude /home/autopod/.codex /home/autopod/.pi/agent \
+    && chown -R autopod:autopod /run/autopod /tmp/system-decision /home/autopod/.claude /home/autopod/.codex /home/autopod/.pi
 
 RUN npm install -g \
       "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
