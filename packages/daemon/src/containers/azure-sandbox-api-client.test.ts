@@ -893,6 +893,46 @@ describe('AzureSandboxApiClient', () => {
     expect(requests[1]?.url).toContain('/sandboxes/sbx-1/files');
   });
 
+  it('retries a transient data-plane GET 503', async () => {
+    const { client, requests } = makeClient(
+      [
+        { status: 503, rawText: 'upstream connect error' },
+        { status: 200, rawText: 'file-after-retry' },
+      ],
+      { retry: { maxDelayMs: 0 } },
+    );
+
+    const read = await client.readFile('sbx-1', '/workspace/file.ts');
+
+    expect(read.toString('utf-8')).toBe('file-after-retry');
+    expect(requests).toHaveLength(2);
+    expect(requests.every((request) => request.init?.method === 'GET')).toBe(true);
+  });
+
+  it('stops retrying transient data-plane GET 503 after the configured budget', async () => {
+    const unavailable = () => ({ status: 503, rawText: 'connection termination' });
+    const { client, requests } = makeClient([unavailable(), unavailable(), unavailable()], {
+      retry: { maxAttempts: 3, maxDelayMs: 0 },
+    });
+
+    await expect(client.readFile('sbx-1', '/workspace/file.ts')).rejects.toThrow(/503/);
+
+    expect(requests).toHaveLength(3);
+  });
+
+  it('does not retry a data-plane write after 503', async () => {
+    const { client, requests } = makeClient([{ status: 503, rawText: 'connection termination' }], {
+      retry: { maxDelayMs: 0 },
+    });
+
+    await expect(
+      client.writeFile('sbx-1', '/workspace/file.ts', Buffer.from('content')),
+    ).rejects.toThrow(/503/);
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.init?.method).toBe('PUT');
+  });
+
   it('honors the Retry-After header when the body has no retryAfterSeconds', async () => {
     const { client, requests } = makeClient(
       [

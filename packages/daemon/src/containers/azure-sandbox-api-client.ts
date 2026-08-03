@@ -1220,6 +1220,36 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         continue;
       }
 
+      // File sync reads fan out to one data-plane GET per directory entry. Azure's
+      // preview gateway can terminate one of those connections with 502/503/504;
+      // retry only reads so a recovered request cannot duplicate a write or exec.
+      if (
+        plane === 'data' &&
+        method === 'GET' &&
+        [502, 503, 504].includes(response.status) &&
+        attempt < this.retryMaxAttempts
+      ) {
+        const waitMs = Math.min(
+          await retryAfterMs(response, attempt, this.retryBaseDelayMs),
+          this.retryMaxDelayMs,
+        );
+        this.logger.warn(
+          {
+            plane,
+            method,
+            url,
+            status: response.status,
+            attempt,
+            maxAttempts: this.retryMaxAttempts,
+            waitMs,
+            ...safeAzureResponseDiagnostics(response),
+          },
+          'Azure Sandboxes data-plane GET gateway failure — backing off and retrying',
+        );
+        await sleep(waitMs);
+        continue;
+      }
+
       if (!okStatuses.includes(response.status)) {
         await throwAzureHttpError(response, method, url);
       }
@@ -1578,9 +1608,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * How long to wait before retrying a 429. Prefer the platform's own signal — the
- * `Retry-After` header (seconds or HTTP-date) or the body's `retryAfterSeconds`
- * — and fall back to exponential backoff. The caller clamps the result to a cap.
+ * How long to wait before retrying a transient response. Prefer the platform's own
+ * `Retry-After` header (seconds or HTTP-date) or body's `retryAfterSeconds`, then
+ * fall back to exponential backoff. The caller clamps the result to a cap.
  */
 async function retryAfterMs(response: Response, attempt: number, baseMs: number): Promise<number> {
   const header = response.headers.get('retry-after');
