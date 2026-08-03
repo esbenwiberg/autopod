@@ -828,7 +828,13 @@ export function createLocalValidationEngine(
             // them, so retain them in the durable history as well as accepted
             // council findings. Otherwise a rejected first-gate finding could
             // disappear before a later repair attempt can close or regress it.
-            const firstGateOverflow = taskReview.firstGateOverflow;
+            // A genuinely clean, complete first gate supersedes historical
+            // overflow. Any other result carries the bounded blocker forward.
+            const firstGateOverflow =
+              taskReview.firstGateOverflow ??
+              (taskReview.status === 'pass' && taskReview.issues.length === 0
+                ? undefined
+                : config.priorReviewBatch?.firstGateOverflow);
             const ledgerCurrent = new Map<string, ReviewFindingCandidate>();
             for (const finding of [...initialBroadLedgerFindings(taskReview), ...batch.accepted]) {
               ledgerCurrent.set(finding.id, finding);

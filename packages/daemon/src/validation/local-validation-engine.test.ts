@@ -1281,7 +1281,7 @@ describe('validate() — hasWebUi gating', () => {
             return JSON.stringify({
               decisions: records.map((record) => ({
                 semanticId: record.semanticId,
-                fixed: closureAttempt === 1 ? record.source.issue === 'A' : true,
+                fixed: closureAttempt === 1 ? record.source.issue === 'A' : closureAttempt === 2,
                 ...(closureAttempt === 1 && record.source.issue === 'A'
                   ? { evidence: '+repair A marker abcdefghijklmnop' }
                   : closureAttempt === 2
@@ -1297,7 +1297,7 @@ describe('validate() — hasWebUi gating', () => {
           : JSON.stringify({ findings: [] }),
       tokenUsage: { inputTokens: prompt.includes('closure verifier') ? 7 : 10, outputTokens: 2 },
     }));
-    const attempts = [['A', 'B'], ['B', 'C'], ['A']];
+    const attempts = [['A', 'B'], ['B', 'C'], ['A'], []];
     vi.mocked(runClaudeCli).mockImplementation(async () => ({
       stdout: JSON.stringify({ status: 'fail', reasoning: 'blocked', issues: attempts.shift() }),
     }));
@@ -1382,10 +1382,25 @@ describe('validate() — hasWebUi gating', () => {
     });
     expect(two.taskReview?.tokenUsage?.inputTokens).toBe(67);
 
+    await fs.appendFile(path.join(repoPath, 'repair.txt'), 'clean gate follow-up\n');
+    await git('add', 'repair.txt');
+    await git('commit', '-m', 'clean first gate follow-up');
+    const four = await engine.validate(
+      baseConfig({
+        ...common,
+        attempt: 4,
+        priorReviewBatch: history.getLatestReviewBatchBefore('ledger-lifecycle', 4),
+      }),
+    );
+    history.insert('ledger-lifecycle', 4, { ...four, podId: 'ledger-lifecycle' });
+    expect(four.taskReview?.reviewBatch?.closureVerification?.status).toBe('completed');
+    expect(four.taskReview?.issues).toEqual(['A']);
+    expect(four.taskReview?.status).toBe('fail');
+
     // Persist the production-engine outputs through the real validation-history
     // seam. Each stored attempt must keep its own immutable ledger snapshot.
     const persisted = history.getForSession('ledger-lifecycle');
-    expect(persisted).toHaveLength(3);
+    expect(persisted).toHaveLength(4);
     const persistedStates = (index: number) =>
       Object.fromEntries(
         persisted[index]?.result.taskReview?.reviewBatch?.ledger?.map((entry) => [
@@ -1396,8 +1411,8 @@ describe('validate() — hasWebUi gating', () => {
     expect(persistedStates(0)).toEqual(states(one));
     expect(persistedStates(1)).toEqual(states(two));
     expect(persistedStates(2)).toEqual(states(three));
-    expect(history.getLatestReviewBatchBefore('ledger-lifecycle', 4)?.id).toBe(
-      three.taskReview?.reviewBatch?.id,
+    expect(history.getLatestReviewBatchBefore('ledger-lifecycle', 5)?.id).toBe(
+      four.taskReview?.reviewBatch?.id,
     );
     await fs.rm(repoPath, { recursive: true, force: true });
   });

@@ -9,7 +9,7 @@ import { getPresetConfig, sanitize } from '@autopod/shared';
 import { structuredFindingId } from './finding-fingerprint.js';
 
 const MAX_CLOSURE_FINDINGS = 100;
-const MAX_CLOSURE_SOURCE_IDS = 100;
+const MAX_CLOSURE_SOURCE_IDS = 16;
 const MAX_CLOSURE_PRIOR_BYTES = 40_000;
 const MAX_CLOSURE_FIELD_BYTES = 2_000;
 const MAX_CLOSURE_ID_BYTES = 256;
@@ -35,9 +35,19 @@ function closableEntries(prior: ReviewFindingLedgerEntry[]): ReviewFindingLedger
 }
 
 function boundedField(value: unknown, limit = MAX_CLOSURE_FIELD_BYTES): string {
-  return sanitize(String(value ?? ''), getPresetConfig('strict'))
-    .replace(/ignore\s+(?:all\s+)?previous\s+instructions/gi, '[INSTRUCTION_REDACTED]')
-    .slice(0, limit);
+  const sanitized = sanitize(String(value ?? ''), getPresetConfig('strict')).replace(
+    /ignore\s+(?:all\s+)?previous\s+instructions/gi,
+    '[INSTRUCTION_REDACTED]',
+  );
+  let bounded = '';
+  let bytes = 0;
+  for (const character of sanitized) {
+    const characterBytes = Buffer.byteLength(character, 'utf8');
+    if (bytes + characterBytes > limit) break;
+    bounded += character;
+    bytes += characterBytes;
+  }
+  return bounded;
 }
 
 /**

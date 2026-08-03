@@ -88,8 +88,11 @@ describe('reconcileReviewLedger', () => {
     const entry = prior[0];
     if (!entry) throw new Error('expected prior ledger entry');
     entry.semanticId = rawId;
-    entry.priorSourceIds = [rawId];
-    entry.currentSourceIds = [rawId];
+    entry.priorSourceIds = Array.from({ length: 100 }, (_, index) => `${rawId}-${index}`);
+    entry.currentSourceIds = Array.from({ length: 100 }, (_, index) => `${rawId}-${index}`);
+    if ('source' in entry.finding) throw new Error('expected structured finding');
+    entry.finding.claim = '🦊'.repeat(10_000);
+    entry.finding.evidence = '🦊'.repeat(10_000);
     const [chunk] = closureVerificationChunks(prior);
     expect(chunk).toHaveLength(1);
     expect(chunk?.[0]?.semanticId).toMatch(/^bounded-[a-f0-9]{64}$/);
