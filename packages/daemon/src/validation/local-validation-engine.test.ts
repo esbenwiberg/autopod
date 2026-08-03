@@ -1060,6 +1060,13 @@ describe('validate() — hasWebUi gating', () => {
     );
     expect(result.taskReview?.status).toBe('fail');
     expect(result.taskReview?.issues).toContain('real blocker');
+    expect(result.taskReview?.reviewBatch?.initialFindings).toHaveLength(1);
+    expect(result.taskReview?.reviewBatch?.initialFindings[0]).toMatchObject({
+      source: 'initial-review',
+      issue: 'real blocker',
+    });
+    expect(result.taskReview?.reviewBatch?.initialFindings[0]).not.toHaveProperty('path');
+    expect(result.taskReview?.reviewBatch?.initialFindings[0]).not.toHaveProperty('severity');
     expect(runContainerReviewer).toHaveBeenCalledTimes(6);
     expect(
       vi
@@ -1116,6 +1123,7 @@ describe('validate() — hasWebUi gating', () => {
       }),
     );
     expect(nonFull.taskReview?.reviewBatch).toBeUndefined();
+    expect(nonFull.taskReview).toMatchObject({ status: 'fail', issues: ['blocker'] });
     expect(runContainerReviewer).not.toHaveBeenCalled();
   });
 

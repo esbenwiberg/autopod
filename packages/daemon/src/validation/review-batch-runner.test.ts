@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { structuredFindingId } from './finding-fingerprint.js';
 import { createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.js';
 
 const packet = () =>
@@ -106,5 +107,45 @@ describe('runReviewBatch', () => {
     });
     expect(batch.synthesis).toBe('deterministic-fallback');
     expect(batch.accepted.map((finding) => finding.id)).toContain('broad-1');
+  });
+
+  it('persists source-backed model accept and reject decisions', async () => {
+    const initial = {
+      id: 'broad-1',
+      source: 'initial-review' as const,
+      issue: 'broad blocker',
+    };
+    const candidateId = structuredFindingId({
+      axis: 'contract_completeness',
+      path: 'a.ts',
+      claim: 'missing authorization',
+    });
+    const batch = await runReviewBatch({
+      packet: { ...packet(), initialFindings: [initial] },
+      model: 'test',
+      execute: async (_prompt, label) => ({
+        stdout: label.includes('contract_completeness') ? response : '{"findings":[]}',
+      }),
+      synthesize: async () => ({
+        stdout: JSON.stringify({
+          decisions: [
+            { action: 'accept', sourceIds: ['broad-1'], finding: initial },
+            {
+              action: 'reject',
+              sourceIds: [candidateId],
+              reason: 'Duplicated by the broad review.',
+            },
+          ],
+        }),
+      }),
+    });
+    expect(batch.synthesis).toBe('model');
+    expect(batch.accepted).toEqual([initial]);
+    expect(batch.rejected).toEqual([
+      {
+        sourceIds: [candidateId],
+        reason: 'Duplicated by the broad review.',
+      },
+    ]);
   });
 });
