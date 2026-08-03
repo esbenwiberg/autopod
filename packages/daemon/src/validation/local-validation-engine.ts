@@ -44,6 +44,7 @@ import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
 import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
 import { applyDiffFilterToParsed } from './review-finding-filter.js';
 import { runToolUseReview } from './review-tool-runner.js';
+import { structuredFindingId } from './finding-fingerprint.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -58,6 +59,27 @@ async function readReviewHead(
   } catch {
     return fallback ?? 'unavailable';
   }
+}
+
+function boundedReviewPacketText(value: unknown, limit = 40_000): string {
+  return JSON.stringify(value).slice(0, limit);
+}
+
+function initialBroadFindings(review: TaskReviewResult, diff: string) {
+  const firstPath = diff.match(/^\+\+\+ b\/(.+)$/m)?.[1] ?? 'review';
+  return review.issues.map((claim, index) => {
+    const finding = {
+      id: '',
+      axis: 'contract_completeness' as const,
+      severity: 'HIGH' as const,
+      path: firstPath,
+      claim,
+      evidence: `Initial broad-review issue ${index + 1}`,
+      remediation: 'Address the issue identified by the standard review.',
+      confidence: 1,
+    };
+    return { ...finding, id: structuredFindingId(finding) };
+  });
 }
 
 interface PackageJsonManifest {
@@ -574,19 +596,45 @@ export function createLocalValidationEngine(
               diff: config.diff,
               reviewedHead,
               task: config.task,
-              context: JSON.stringify({
+              context: boundedReviewPacketText({
                 plan: config.plan,
                 taskSummary: config.taskSummary,
                 reviewContext,
               }),
+              executableContract: boundedReviewPacketText(config.contract),
+              initialFindings: initialBroadFindings(taskReview, config.diff),
+              validationSummary: boundedReviewPacketText({
+                lint: lintResult.status,
+                sast: sastResult.status,
+                build: buildResult.status,
+                test: testResult.status,
+                health: healthResult.status,
+                pages: pagesStatus,
+              }),
+              factSummary: boundedReviewPacketText(factValidation),
               promptVersion: 'review-council-v1',
-              schemaVersion: 'structured-finding-v1',
+              schemaVersion: 'structured-finding-v2',
             });
             const batch = await runReviewBatch({
               packet,
               model: config.reviewerModel ?? 'auto',
               readHead: () => readReviewHead(config.worktreePath, reviewedHead),
               execute: async (prompt) =>
+                runContainerReviewer({
+                  podId: config.podId,
+                  containerId: config.containerId,
+                  containerManager,
+                  profile: {
+                    modelProvider: config.reviewerProvider ?? 'anthropic',
+                    providerCredentials: config.reviewerProviderCredentials ?? null,
+                  },
+                  model: config.reviewerModel ?? 'auto',
+                  prompt,
+                  ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
+                  timeout: config.reviewTimeout ?? 300_000,
+                  logger: log,
+                }),
+              synthesize: async (prompt, label) =>
                 runContainerReviewer({
                   podId: config.podId,
                   containerId: config.containerId,

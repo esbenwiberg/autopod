@@ -7,6 +7,7 @@ const packet = () =>
     reviewedHead: 'abc',
     task: 'task',
     context: 'context',
+    initialFindings: [],
     promptVersion: 'v1',
     schemaVersion: 'v1',
   });
@@ -28,6 +29,9 @@ describe('runReviewBatch', () => {
     let active = 0;
     let max = 0;
     const ids: string[] = [];
+    const hashes: string[] = [];
+    const heads: string[] = [];
+    const prompts: string[] = [];
     const batch = await runReviewBatch({
       packet: packet(),
       model: 'test',
@@ -35,6 +39,9 @@ describe('runReviewBatch', () => {
         active++;
         max = Math.max(max, active);
         ids.push(prompt.match(/id=([^ ]+)/)?.[1] ?? '');
+        hashes.push(prompt.match(/diffHash=([^ ]+)/)?.[1] ?? '');
+        heads.push(prompt.match(/head=([^ ]+)/)?.[1] ?? '');
+        prompts.push(prompt);
         await Promise.resolve();
         active--;
         return { stdout: response };
@@ -42,6 +49,12 @@ describe('runReviewBatch', () => {
     });
     expect(max).toBeLessThanOrEqual(3);
     expect(new Set(ids)).toEqual(new Set([batch.id]));
+    expect(new Set(hashes)).toEqual(new Set([batch.diffHash]));
+    expect(new Set(heads)).toEqual(new Set([batch.reviewedHead]));
+    expect(new Set(prompts.map((prompt) => prompt.match(/Context: (.*)/)?.[1]))).toEqual(
+      new Set(['context']),
+    );
+    expect(new Set(prompts.map((prompt) => prompt.match(/You are the (.*?) reviewer/)?.[1])).size).toBe(5);
     expect(batch.axes).toHaveLength(5);
   });
 

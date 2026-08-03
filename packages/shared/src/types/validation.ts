@@ -232,8 +232,11 @@ export interface ReviewBatchResult {
   model: string;
   axes: ReviewAxisRun[];
   candidates: StructuredReviewFinding[];
+  /** Source-addressable findings produced by the standard first-gate review. */
+  initialFindings: StructuredReviewFinding[];
   accepted: StructuredReviewFinding[];
   rejected: Array<{ sourceIds: string[]; reason: string }>;
+  merged: Array<{ finding: StructuredReviewFinding; sourceIds: string[] }>;
   synthesis: 'model' | 'deterministic-fallback' | 'unavailable';
   durationMs: number;
   infrastructureUnavailable?: boolean;
