@@ -19,6 +19,7 @@ import {
   buildReviewPrompt,
   createLocalValidationEngine,
   enforceRequirementsStatus,
+  initialBroadFindings,
   normalizeReviewIssue,
   parseReviewJson,
   parseWarningCount,
@@ -1076,6 +1077,18 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.taskReview?.tokenUsage).toMatchObject({ inputTokens: 160, outputTokens: 32 });
   });
 
+  it('keeps initial semantic IDs stable when aggregate truncation changes stored text', () => {
+    const target = `target blocker ${'x'.repeat(200)}`;
+    const prefix = [
+      ...Array.from({ length: 24 }, (_, index) => `${index}-${'p'.repeat(8_000)}`),
+      `tail-${'q'.repeat(7_945)}`,
+    ];
+    const first = initialBroadFindings({ issues: [target] } as never)[0];
+    const truncated = initialBroadFindings({ issues: [...prefix, target] } as never).at(-1);
+    expect(truncated?.issue.length).toBeLessThan(first?.issue.length ?? 0);
+    expect(truncated?.id).toBe(first?.id);
+  });
+
   it('structurally redacts arbitrary nested credentials from frozen packet context', async () => {
     vi.mocked(runClaudeCli).mockResolvedValue({
       stdout: JSON.stringify({ status: 'fail', reasoning: 'blocked', issues: ['real blocker'] }),
@@ -1206,6 +1219,105 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.taskReview?.reviewBatch?.closureVerification?.status).toBe('unavailable');
     expect(result.taskReview?.reviewBatch?.ledger?.[0]?.state).toBe('open');
     expect(result.overall).toBe('fail');
+  });
+
+  it('persists the A/B/C lifecycle through three engine attempts with committed repair deltas', async () => {
+    const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-review-ledger-'));
+    const git = (...args: string[]) => promisify(execFile)('git', args, { cwd: repoPath });
+    await git('init');
+    await git('config', 'user.email', 'test@example.invalid');
+    await git('config', 'user.name', 'Autopod Test');
+    await fs.writeFile(path.join(repoPath, 'repair.txt'), 'base\n');
+    await git('add', 'repair.txt');
+    await git('commit', '-m', 'base');
+    const closureOutputs = [
+      {
+        decisions: [
+          {
+            semanticId: 'initial-ca978112ca1bbdca',
+            fixed: true,
+            evidence: '+repair A marker abcdefghijklmnop',
+          },
+          { semanticId: 'initial-3e23e8160039594a', fixed: false },
+        ],
+      },
+      {
+        decisions: [
+          {
+            semanticId: 'initial-3e23e8160039594a',
+            fixed: true,
+            evidence: '+repair B marker abcdefghijklmnop',
+          },
+          {
+            semanticId: 'initial-2e7d2c03a9507ae2',
+            fixed: true,
+            evidence: '+repair C marker abcdefghijklmnop',
+          },
+        ],
+      },
+    ];
+    vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt }) => ({
+      stdout: prompt.includes('closure verifier')
+        ? JSON.stringify(closureOutputs.shift())
+        : prompt.includes('synthesizer')
+          ? '{malformed'
+          : JSON.stringify({ findings: [] }),
+      tokenUsage: { inputTokens: prompt.includes('closure verifier') ? 7 : 10, outputTokens: 2 },
+    }));
+    const attempts = [['A', 'B'], ['B', 'C'], ['A']];
+    vi.mocked(runClaudeCli).mockImplementation(async () => ({
+      stdout: JSON.stringify({ status: 'fail', reasoning: 'blocked', issues: attempts.shift() }),
+    }));
+    const engine = createLocalValidationEngine(stubContainerManager());
+    const common = {
+      reviewerModel: 'claude-sonnet-4-6',
+      diff: changedDiff,
+      validationSuite: 'full' as const,
+      startCommand: '',
+      smokePages: [],
+      worktreePath: repoPath,
+    };
+    const one = await engine.validate(baseConfig(common));
+    await fs.writeFile(
+      path.join(repoPath, 'repair.txt'),
+      'base\nrepair A marker abcdefghijklmnop\n',
+    );
+    await git('add', 'repair.txt');
+    await git('commit', '-m', 'repair A');
+    const two = await engine.validate(
+      baseConfig({ ...common, attempt: 2, priorReviewBatch: one.taskReview?.reviewBatch }),
+    );
+    expect(two.taskReview?.reviewBatch?.closureVerification?.status).toBe('completed');
+    await fs.writeFile(
+      path.join(repoPath, 'repair.txt'),
+      'base\nrepair A marker abcdefghijklmnop\nrepair B marker abcdefghijklmnop\nrepair C marker abcdefghijklmnop\n',
+    );
+    await git('add', 'repair.txt');
+    await git('commit', '-m', 'repair B C');
+    const three = await engine.validate(
+      baseConfig({ ...common, attempt: 3, priorReviewBatch: two.taskReview?.reviewBatch }),
+    );
+    const states = (result: typeof one) =>
+      Object.fromEntries(
+        result.taskReview?.reviewBatch?.ledger?.map((entry) => [entry.finding.id, entry.state]) ??
+          [],
+      );
+    expect(states(one)).toEqual({
+      'initial-ca978112ca1bbdca': 'new',
+      'initial-3e23e8160039594a': 'new',
+    });
+    expect(states(two)).toEqual({
+      'initial-ca978112ca1bbdca': 'fixed',
+      'initial-3e23e8160039594a': 'open',
+      'initial-2e7d2c03a9507ae2': 'new',
+    });
+    expect(states(three)).toEqual({
+      'initial-ca978112ca1bbdca': 'regressed',
+      'initial-3e23e8160039594a': 'fixed',
+      'initial-2e7d2c03a9507ae2': 'fixed',
+    });
+    expect(two.taskReview?.tokenUsage?.inputTokens).toBe(67);
+    await fs.rm(repoPath, { recursive: true, force: true });
   });
 
   function commandTrackingContainerManager(

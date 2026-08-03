@@ -124,19 +124,16 @@ function boundedReviewPacketString(value: string, limit: number): string {
 const MAX_INITIAL_REVIEW_FINDINGS = 100;
 const MAX_INITIAL_REVIEW_BYTES = 200_000;
 
-function initialBroadFindings(review: TaskReviewResult) {
+export function initialBroadFindings(review: TaskReviewResult) {
   const findings = [];
   const seen = new Set<string>();
   let bytes = 0;
   for (const issue of review.issues) {
     if (findings.length >= MAX_INITIAL_REVIEW_FINDINGS || bytes >= MAX_INITIAL_REVIEW_BYTES) break;
     const sanitizedIssue = boundedReviewPacketString(issue, 8_000);
-    const remaining = MAX_INITIAL_REVIEW_BYTES - bytes;
-    const boundedIssue = sanitizedIssue.slice(0, remaining);
-    if (!boundedIssue) break;
     const id = `initial-${createHash('sha256')
       .update(
-        boundedIssue
+        sanitizedIssue
           .toLowerCase()
           .replace(/[^a-z0-9\s]/g, '')
           .replace(/\s+/g, ' ')
@@ -145,6 +142,9 @@ function initialBroadFindings(review: TaskReviewResult) {
       .digest('hex')
       .slice(0, 16)}`;
     if (seen.has(id)) continue;
+    const remaining = MAX_INITIAL_REVIEW_BYTES - bytes;
+    const boundedIssue = sanitizedIssue.slice(0, remaining);
+    if (!boundedIssue) break;
     seen.add(id);
     findings.push({
       // Identity is semantic: attempts and issue order must not change it.
@@ -736,6 +736,7 @@ export function createLocalValidationEngine(
               reviewedHead,
             );
             let closure = undefined;
+            let closureTokenUsage: TaskReviewResult['tokenUsage'];
             if (priorActive.length > 0) {
               if (repair.status !== 'available') {
                 closure = { status: 'unavailable' as const, decisions: [], reason: repair.reason };
@@ -755,6 +756,7 @@ export function createLocalValidationEngine(
                     timeout: config.reviewTimeout ?? 300_000,
                     logger: log,
                   });
+                  closureTokenUsage = response.tokenUsage;
                   closure = parseClosureVerification(
                     response.stdout.slice(0, 200_000),
                     priorActive,
@@ -821,6 +823,7 @@ export function createLocalValidationEngine(
                 config.reviewerModel ?? 'auto',
                 reviewRun.tokenUsage,
                 batch.tokenUsage,
+                closureTokenUsage,
               ),
             };
             reviewTokenUsage = taskReview?.tokenUsage;
