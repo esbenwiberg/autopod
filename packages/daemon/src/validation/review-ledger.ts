@@ -118,6 +118,8 @@ export function parseClosureVerification(
         ...(typeof d.evidence === 'string' ? { evidence: d.evidence.slice(0, 8_000) } : {}),
       };
     });
+    if (new Set(decisions.map((decision) => decision.semanticId)).size !== decisions.length)
+      throw new Error('duplicate closure finding ID');
     if (
       decisions
         .map((d) => d.semanticId)

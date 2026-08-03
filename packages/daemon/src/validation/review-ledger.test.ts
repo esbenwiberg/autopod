@@ -1,6 +1,6 @@
 import type { ReviewBatchResult, StructuredReviewFinding } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import { reconcileReviewLedger } from './review-ledger.js';
+import { parseClosureVerification, reconcileReviewLedger } from './review-ledger.js';
 
 const finding = (id: string): StructuredReviewFinding => ({
   id,
@@ -61,5 +61,20 @@ describe('reconcileReviewLedger', () => {
   it('fails closed for absent closure evidence and seeds historical packets open', () => {
     const prior = batch([finding('A')]);
     expect(reconcileReviewLedger(prior, [], undefined)[0]?.state).toBe('open');
+  });
+
+  it('rejects duplicate closure decisions', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A')], undefined);
+    expect(
+      parseClosureVerification(
+        JSON.stringify({
+          decisions: [
+            { semanticId: 'A', fixed: false },
+            { semanticId: 'A', fixed: true, evidence: 'invented duplicate' },
+          ],
+        }),
+        prior,
+      ).status,
+    ).toBe('invalid');
   });
 });
