@@ -129,6 +129,19 @@ const MAX_PERSISTED_FIRST_GATE_FINDINGS = 4_096;
 // Retain at most this many durable first-gate entries. Any excess becomes one
 // deterministic blocking overflow marker rather than unbounded model output.
 const MAX_TASK_REVIEW_ISSUES = 4_096;
+const FIRST_GATE_OVERFLOW_PREFIX = '[REVIEW OVERFLOW]';
+
+function isFirstGateOverflowIssue(issue: string): boolean {
+  return issue.startsWith(FIRST_GATE_OVERFLOW_PREFIX);
+}
+
+function firstGateOverflowCount(issue: string): number {
+  const reported = /Reviewer returned (\d+) issues/.exec(issue)?.[1];
+  const count = reported ? Number.parseInt(reported, 10) : Number.NaN;
+  return Number.isSafeInteger(count) && count > MAX_TASK_REVIEW_ISSUES
+    ? count
+    : MAX_TASK_REVIEW_ISSUES + 1;
+}
 
 function initialBroadFindingId(issue: string): string {
   // This deliberately has a fixed per-issue bound, independent of packet space
@@ -175,6 +188,7 @@ function initialBroadLedgerFindings(review: TaskReviewResult) {
   const findings = [];
   const seen = new Set<string>();
   for (const issue of review.issues) {
+    if (isFirstGateOverflowIssue(issue)) continue;
     if (findings.length >= MAX_PERSISTED_FIRST_GATE_FINDINGS) break;
     const id = initialBroadFindingId(issue);
     if (seen.has(id)) continue;
@@ -822,6 +836,7 @@ export function createLocalValidationEngine(
             // them, so retain them in the durable history as well as accepted
             // council findings. Otherwise a rejected first-gate finding could
             // disappear before a later repair attempt can close or regress it.
+            const firstGateOverflow = taskReview.issues.find(isFirstGateOverflowIssue);
             const ledgerCurrent = new Map<string, ReviewFindingCandidate>();
             for (const finding of [...initialBroadLedgerFindings(taskReview), ...batch.accepted]) {
               ledgerCurrent.set(finding.id, finding);
@@ -832,6 +847,12 @@ export function createLocalValidationEngine(
               closure,
             );
             batch.ledger = ledger;
+            if (firstGateOverflow) {
+              batch.firstGateOverflow = {
+                reportedCount: firstGateOverflowCount(firstGateOverflow),
+                retainedFindingCount: MAX_PERSISTED_FIRST_GATE_FINDINGS,
+              };
+            }
             batch.repairDelta = {
               status: repair.status,
               fromHead: repair.fromHead,
@@ -850,12 +871,15 @@ export function createLocalValidationEngine(
             // Once the council runs, its canonical active ledger is the sole
             // flattened issue source. The immutable first-gate status still
             // fails the attempt even when its bounded packet omitted an issue.
-            const issues = [...new Set(ledgerIssues)];
+            const issues = [
+              ...new Set([...ledgerIssues, ...(firstGateOverflow ? [firstGateOverflow] : [])]),
+            ];
             taskReview = {
               ...taskReview,
               status:
                 taskReview.status === 'fail' ||
                 batch.infrastructureUnavailable ||
+                batch.firstGateOverflow !== undefined ||
                 issues.length > 0 ||
                 closure?.status === 'invalid' ||
                 closure?.status === 'unavailable'
@@ -3789,7 +3813,7 @@ export function parseReviewJson(raw: string): {
 
     const overflowed = parsed.issues.length > MAX_TASK_REVIEW_ISSUES;
     const normalizedIssues = (parsed.issues as unknown[])
-      .slice(0, overflowed ? MAX_TASK_REVIEW_ISSUES - 1 : MAX_TASK_REVIEW_ISSUES)
+      .slice(0, MAX_TASK_REVIEW_ISSUES)
       .map(normalizeReviewIssue)
       .map((issue) =>
         issue === null ? null : boundedReviewPacketString(issue, MAX_INITIAL_SEMANTIC_BYTES),
@@ -3797,7 +3821,7 @@ export function parseReviewJson(raw: string): {
       .filter((s): s is string => s !== null);
     if (overflowed) {
       normalizedIssues.push(
-        `[REVIEW OVERFLOW] Reviewer returned ${parsed.issues.length} issues; the first ${MAX_TASK_REVIEW_ISSUES - 1} are independently addressable and the bounded overflow marker remains blocking.`,
+        `${FIRST_GATE_OVERFLOW_PREFIX} Reviewer returned ${parsed.issues.length} issues; the first ${MAX_TASK_REVIEW_ISSUES} are independently addressable and this bounded marker remains blocking until a fresh complete first gate succeeds.`,
       );
     }
     // If the model returned issues but every retained issue was un-renderable,

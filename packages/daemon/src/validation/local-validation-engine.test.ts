@@ -971,9 +971,8 @@ describe('parseReviewJson — issues normalization', () => {
       baseShape(Array.from({ length: 4_097 }, (_, index) => `blocker ${index}`)),
     );
     expect(parsed?.status).toBe('fail');
-    expect(parsed?.issues).toHaveLength(4_096);
-    expect(parsed?.issues).toContain('blocker 4094');
-    expect(parsed?.issues).not.toContain('blocker 4095');
+    expect(parsed?.issues).toHaveLength(4_097);
+    expect(parsed?.issues).toContain('blocker 4095');
     expect(parsed?.issues.at(-1)).toContain('[REVIEW OVERFLOW]');
   });
 });
