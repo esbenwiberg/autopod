@@ -125,6 +125,10 @@ function boundedReviewPacketString(value: string, limit: number): string {
 const MAX_INITIAL_REVIEW_FINDINGS = 100;
 const MAX_INITIAL_REVIEW_BYTES = 200_000;
 const MAX_INITIAL_SEMANTIC_BYTES = 32_000;
+// Successful first-gate JSON must remain small enough to persist every finding
+// as an independently addressable ledger entry. Oversized output is malformed
+// and therefore fails review closed instead of collapsing identities.
+const MAX_TASK_REVIEW_ISSUES = 4_096;
 
 function initialBroadFindingId(issue: string): string {
   // This deliberately has a fixed per-issue bound, independent of packet space
@@ -3761,6 +3765,7 @@ export function parseReviewJson(raw: string): {
     if (!['pass', 'fail', 'uncertain'].includes(parsed.status)) return null;
     if (typeof parsed.reasoning !== 'string') return null;
     if (!Array.isArray(parsed.issues)) return null;
+    if (parsed.issues.length > MAX_TASK_REVIEW_ISSUES) return null;
 
     const requirementsCheck = Array.isArray(parsed.requirementsCheck)
       ? parsed.requirementsCheck

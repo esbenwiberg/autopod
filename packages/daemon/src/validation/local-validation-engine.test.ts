@@ -963,6 +963,13 @@ describe('parseReviewJson — issues normalization', () => {
     const parsed = parseReviewJson(baseShape([]));
     expect(parsed?.issues).toEqual([]);
   });
+
+  it('rejects oversized finding sets instead of collapsing durable identities', () => {
+    const parsed = parseReviewJson(
+      baseShape(Array.from({ length: 4_097 }, (_, index) => `blocker ${index}`)),
+    );
+    expect(parsed).toBeNull();
+  });
 });
 
 describe('validate() — hasWebUi gating', () => {
