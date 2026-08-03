@@ -602,10 +602,15 @@ export function createLocalValidationEngine(
                   logger: log,
                 }),
             });
-            const issues = reviewBatchIssues(batch);
+            // The council consolidates additional evidence; it never erases a
+            // blocking first-gate verdict merely because no axis reproduced it.
+            const issues = [...new Set([...taskReview.issues, ...reviewBatchIssues(batch)])];
             taskReview = {
               ...taskReview,
-              status: batch.infrastructureUnavailable || issues.length > 0 ? 'fail' : 'pass',
+              status:
+                taskReview.status === 'fail' || batch.infrastructureUnavailable || issues.length > 0
+                  ? 'fail'
+                  : 'pass',
               reasoning: batch.infrastructureUnavailable
                 ? 'Frozen review council unavailable: one or more required axes failed.'
                 : taskReview.reasoning,
