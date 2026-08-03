@@ -758,6 +758,7 @@ export function createLocalValidationEngine(
                   closure = parseClosureVerification(
                     response.stdout.slice(0, 200_000),
                     priorActive,
+                    repair.diff,
                   );
                 } catch (error) {
                   closure = {

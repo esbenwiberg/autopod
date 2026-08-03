@@ -89,12 +89,13 @@ export function activeLedgerFindings(ledger: ReviewFindingLedgerEntry[]): Review
 }
 
 export function closurePrompt(prior: ReviewFindingLedgerEntry[], repairDelta: string): string {
-  return `You are a read-only repair closure verifier. Return JSON only: {"decisions":[{"semanticId":"known id","fixed":true|false,"evidence":"frozen source-backed proof"}]}. Return exactly one decision for every known active finding and no others. A finding is fixed only when the supplied repair delta and frozen evidence prove it. Known findings: ${JSON.stringify(prior.filter((e) => e.state !== 'fixed'))}\nRepair delta:\n${repairDelta}`;
+  return `You are a read-only repair closure verifier. Return JSON only: {"decisions":[{"semanticId":"known id","fixed":true|false,"evidence":"exact quoted excerpt from repair delta"}]}. Return exactly one decision for every known active finding and no others. A finding is fixed only when the supplied repair delta proves it. For fixed=true, evidence must be a non-empty verbatim excerpt from the repair delta; do not paraphrase or invent it. Known findings: ${JSON.stringify(prior.filter((e) => e.state !== 'fixed'))}\nRepair delta:\n${repairDelta}`;
 }
 
 export function parseClosureVerification(
   stdout: string,
   prior: ReviewFindingLedgerEntry[],
+  frozenEvidence?: string,
 ): ReviewClosureVerification {
   try {
     const parsed: unknown = JSON.parse(stdout);
@@ -110,8 +111,15 @@ export function parseClosureVerification(
       const d = value as Record<string, unknown>;
       if (typeof d.semanticId !== 'string' || typeof d.fixed !== 'boolean')
         throw new Error('malformed decision');
-      if (d.fixed && (typeof d.evidence !== 'string' || !d.evidence.trim()))
-        throw new Error('missing evidence');
+      if (d.fixed) {
+        if (typeof d.evidence !== 'string' || !d.evidence.trim())
+          throw new Error('missing evidence');
+        // The engine supplies the bounded frozen repair delta. A fixed verdict is
+        // valid only when its persisted proof is a direct source reference into
+        // those immutable bytes, never an unsupported model assertion.
+        if (frozenEvidence !== undefined && !frozenEvidence.includes(d.evidence.trim()))
+          throw new Error('closure evidence is not present in frozen repair delta');
+      }
       return {
         semanticId: d.semanticId,
         fixed: d.fixed,

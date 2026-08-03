@@ -86,6 +86,19 @@ describe('reconcileReviewLedger', () => {
     ).toBe('invalid');
   });
 
+  it('rejects fixed proof that is not present in the frozen repair delta', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A')], undefined);
+    expect(
+      parseClosureVerification(
+        JSON.stringify({
+          decisions: [{ semanticId: 'A', fixed: true, evidence: 'invented proof' }],
+        }),
+        prior,
+        '+ actual repair excerpt',
+      ).status,
+    ).toBe('invalid');
+  });
+
   it('fails closed for omitted, invented, and malformed closure decisions', () => {
     const prior = reconcileReviewLedger(undefined, [finding('A'), finding('B')], undefined);
     expect(
