@@ -128,15 +128,15 @@ describe('runReviewBatch', () => {
     });
   });
 
-  it('keeps a deterministic union when candidates overlap', async () => {
+  it('deduplicates the same semantic finding reported by multiple axes', async () => {
     const batch = await runReviewBatch({
       packet: packet(),
       model: 'test',
       execute: async () => ({ stdout: response }),
     });
     expect(batch.synthesis).toBe('deterministic-fallback');
-    expect(batch.candidates).toHaveLength(5);
-    expect(batch.accepted).toHaveLength(5);
+    expect(batch.candidates).toHaveLength(1);
+    expect(batch.accepted).toHaveLength(1);
   });
 
   it('keeps the initial broad-review blocker when synthesis fails', async () => {

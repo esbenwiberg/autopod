@@ -20,6 +20,18 @@ describe('structuredFindingId', () => {
       structuredFindingId({ ...base, claim: 'missing AUTHORIZATION check!' }),
     );
   });
+
+  it('is stable when a different council axis reports the same issue', () => {
+    const base = {
+      axis: 'security_authority' as const,
+      path: 'src/auth.ts',
+      symbol: 'authorize',
+      claim: 'Missing authorization check',
+    };
+    expect(structuredFindingId(base)).toBe(
+      structuredFindingId({ ...base, axis: 'lifecycle_reliability' }),
+    );
+  });
 });
 
 // ── fingerprintText ──────────────────────────────────────────────────────────
