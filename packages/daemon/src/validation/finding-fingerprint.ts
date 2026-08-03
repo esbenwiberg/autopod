@@ -67,21 +67,37 @@ export function extractFindings(result: ValidationResult): ValidationFinding[] {
   if (result.taskReview && result.taskReview.status === 'fail') {
     const council =
       result.taskReview.reviewBatch?.ledger?.filter((entry) => entry.state !== 'fixed') ?? [];
+    const councilByDescription = new Map<string, typeof council>();
+    for (const entry of council) {
+      const finding = entry.finding;
+      const description =
+        'source' in finding
+          ? finding.issue
+          : `[${finding.severity}] ${finding.path}${finding.line ? `:${finding.line}` : ''} — ${finding.claim}`;
+      const matching = councilByDescription.get(description) ?? [];
+      matching.push(entry);
+      councilByDescription.set(description, matching);
+    }
+    const emittedCouncilIds = new Set<string>();
     for (const issue of result.taskReview.issues) {
-      const canonical = council.find((entry) => {
-        const finding = entry.finding;
-        return (
-          ('source' in finding
-            ? finding.issue
-            : `[${finding.severity}] ${finding.path}${finding.line ? `:${finding.line}` : ''} — ${finding.claim}`) ===
-          issue
-        );
-      });
-      findings.push({
-        id: canonical?.semanticId ?? findingId('task_review', issue),
-        source: 'task_review',
-        description: issue,
-      });
+      const canonical = councilByDescription.get(issue);
+      if (canonical && canonical.length > 0) {
+        for (const entry of canonical) {
+          if (emittedCouncilIds.has(entry.semanticId)) continue;
+          emittedCouncilIds.add(entry.semanticId);
+          findings.push({
+            id: entry.semanticId,
+            source: 'task_review',
+            description: issue,
+          });
+        }
+      } else {
+        findings.push({
+          id: findingId('task_review', issue),
+          source: 'task_review',
+          description: issue,
+        });
+      }
     }
   }
 
