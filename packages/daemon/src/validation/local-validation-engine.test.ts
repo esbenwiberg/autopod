@@ -1169,6 +1169,45 @@ describe('validate() — hasWebUi gating', () => {
     expect(runContainerReviewer).not.toHaveBeenCalled();
   });
 
+  it('runs the council after a clean gate for prior blockers and fails closed without a delta', async () => {
+    vi.mocked(runClaudeCli).mockResolvedValue({
+      stdout: JSON.stringify({ status: 'pass', reasoning: 'clean', issues: [] }),
+    });
+    mockCouncil();
+    const priorReviewBatch = {
+      id: 'prior',
+      diffHash: 'd',
+      reviewedHead: 'unavailable',
+      promptVersion: 'p',
+      schemaVersion: 's',
+      model: 'm',
+      axes: [],
+      candidates: [],
+      initialFindings: [],
+      accepted: [{ id: 'initial-a', source: 'initial-review' as const, issue: 'A' }],
+      rejected: [],
+      merged: [],
+      synthesis: 'model' as const,
+      durationMs: 1,
+    };
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: changedDiff,
+        validationSuite: 'full',
+        reviewDepth: 'standard',
+        startCommand: '',
+        smokePages: [],
+        priorReviewBatch,
+      }),
+    );
+    expect(runContainerReviewer).toHaveBeenCalledTimes(6);
+    expect(result.taskReview?.reviewBatch?.repairDelta?.status).toBe('unavailable');
+    expect(result.taskReview?.reviewBatch?.closureVerification?.status).toBe('unavailable');
+    expect(result.taskReview?.reviewBatch?.ledger?.[0]?.state).toBe('open');
+    expect(result.overall).toBe('fail');
+  });
+
   function commandTrackingContainerManager(
     options: {
       setupExitCode?: number;

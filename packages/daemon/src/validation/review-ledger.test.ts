@@ -88,8 +88,15 @@ describe('reconcileReviewLedger', () => {
 
   it('fails closed for omitted, invented, and malformed closure decisions', () => {
     const prior = reconcileReviewLedger(undefined, [finding('A'), finding('B')], undefined);
-    expect(parseClosureVerification('{"decisions":[{"semanticId":"A","fixed":false}]}', prior).status).toBe('invalid');
-    expect(parseClosureVerification('{"decisions":[{"semanticId":"A","fixed":false},{"semanticId":"X","fixed":false}]}', prior).status).toBe('invalid');
+    expect(
+      parseClosureVerification('{"decisions":[{"semanticId":"A","fixed":false}]}', prior).status,
+    ).toBe('invalid');
+    expect(
+      parseClosureVerification(
+        '{"decisions":[{"semanticId":"A","fixed":false},{"semanticId":"X","fixed":false}]}',
+        prior,
+      ).status,
+    ).toBe('invalid');
     expect(parseClosureVerification('{"decisions":"not-an-array"}', prior).status).toBe('invalid');
   });
 });
