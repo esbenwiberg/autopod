@@ -803,7 +803,10 @@ export function createLocalValidationEngine(
                 ? finding.issue
                 : `[${finding.severity}] ${finding.path}${finding.line ? `:${finding.line}` : ''} — ${finding.claim}`,
             );
-            const issues = [...new Set([...taskReview.issues, ...ledgerIssues])];
+            // Once the council runs, its canonical active ledger is the sole
+            // flattened issue source. The immutable first-gate status still
+            // fails the attempt even when its bounded packet omitted an issue.
+            const issues = [...new Set(ledgerIssues)];
             taskReview = {
               ...taskReview,
               status:

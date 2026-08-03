@@ -11,42 +11,43 @@ const MAX_CLOSURE_FINDINGS = 100;
 const MAX_CLOSURE_FINDING_BYTES = 8_000;
 const MAX_CLOSURE_PRIOR_BYTES = 120_000;
 
+function closableEntries(prior: ReviewFindingLedgerEntry[]): ReviewFindingLedgerEntry[] {
+  return prior.filter((entry) => entry.state !== 'fixed').slice(0, MAX_CLOSURE_FINDINGS);
+}
+
 function boundedClosurePrior(prior: ReviewFindingLedgerEntry[]): string {
   const config = getPresetConfig('strict');
   const field = (value: unknown, limit = MAX_CLOSURE_FINDING_BYTES) =>
     sanitize(String(value ?? ''), config)
       .replace(/ignore\s+(?:all\s+)?previous\s+instructions/gi, '[INSTRUCTION_REDACTED]')
       .slice(0, limit);
-  const projected = prior
-    .filter((entry) => entry.state !== 'fixed')
-    .slice(0, MAX_CLOSURE_FINDINGS)
-    .map((entry) => ({
-      semanticId: sanitize(entry.semanticId, config).slice(0, 256),
-      state: entry.state,
-      finding:
-        'source' in entry.finding
-          ? {
-              id: field(entry.finding.id, 256),
-              source: 'initial-review',
-              issue: field(entry.finding.issue),
-            }
-          : {
-              id: field(entry.finding.id, 256),
-              axis: entry.finding.axis,
-              severity: entry.finding.severity,
-              path: field(entry.finding.path, 2_000),
-              symbol: field(entry.finding.symbol, 1_000),
-              claim: field(entry.finding.claim),
-              evidence: field(entry.finding.evidence),
-              remediation: field(entry.finding.remediation),
-            },
-      priorSourceIds: entry.priorSourceIds
-        .slice(0, 100)
-        .map((id) => sanitize(id, config).slice(0, 256)),
-      currentSourceIds: entry.currentSourceIds
-        .slice(0, 100)
-        .map((id) => sanitize(id, config).slice(0, 256)),
-    }));
+  const projected = closableEntries(prior).map((entry) => ({
+    semanticId: sanitize(entry.semanticId, config).slice(0, 256),
+    state: entry.state,
+    finding:
+      'source' in entry.finding
+        ? {
+            id: field(entry.finding.id, 256),
+            source: 'initial-review',
+            issue: field(entry.finding.issue),
+          }
+        : {
+            id: field(entry.finding.id, 256),
+            axis: entry.finding.axis,
+            severity: entry.finding.severity,
+            path: field(entry.finding.path, 2_000),
+            symbol: field(entry.finding.symbol, 1_000),
+            claim: field(entry.finding.claim),
+            evidence: field(entry.finding.evidence),
+            remediation: field(entry.finding.remediation),
+          },
+    priorSourceIds: entry.priorSourceIds
+      .slice(0, 100)
+      .map((id) => sanitize(id, config).slice(0, 256)),
+    currentSourceIds: entry.currentSourceIds
+      .slice(0, 100)
+      .map((id) => sanitize(id, config).slice(0, 256)),
+  }));
   return sanitize(JSON.stringify(sanitizeDeep(projected, config)), config).slice(
     0,
     MAX_CLOSURE_PRIOR_BYTES,
@@ -169,8 +170,7 @@ export function parseClosureVerification(
     const raw =
       parsed && typeof parsed === 'object' ? (parsed as { decisions?: unknown }).decisions : null;
     if (!Array.isArray(raw)) throw new Error('missing decisions');
-    const expected = prior
-      .filter((entry) => entry.state !== 'fixed')
+    const expected = closableEntries(prior)
       .map((entry) => entry.semanticId)
       .sort();
     const decisions = raw.map((value) => {
@@ -187,10 +187,14 @@ export function parseClosureVerification(
         if (frozenEvidence !== undefined && !frozenEvidence.includes(d.evidence.trim()))
           throw new Error('closure evidence is not present in frozen repair delta');
       }
+      const safeEvidence =
+        typeof d.evidence === 'string'
+          ? sanitize(d.evidence, getPresetConfig('strict')).slice(0, 8_000)
+          : undefined;
       return {
         semanticId: d.semanticId,
         fixed: d.fixed,
-        ...(typeof d.evidence === 'string' ? { evidence: d.evidence.slice(0, 8_000) } : {}),
+        ...(safeEvidence !== undefined ? { evidence: safeEvidence } : {}),
       };
     });
     if (new Set(decisions.map((decision) => decision.semanticId)).size !== decisions.length)
