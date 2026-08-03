@@ -1,4 +1,5 @@
 import { computeCostWithCache } from '@autopod/shared';
+import { randomUUID } from 'node:crypto';
 import type {
   ContainerManager,
   ExecOptions,
@@ -56,7 +57,7 @@ const SHIM_PATH = '/run/autopod/agent-shim.sh';
 export async function runCodexReview(
   config: CodexReviewConfig,
 ): Promise<{ stdout: string; tokenUsage?: CodexReviewTokenUsage }> {
-  const suffix = `${safePathPart(config.podId)}-${config.attempt ?? 0}-${Date.now()}`;
+  const suffix = `${safePathPart(config.podId)}-${config.attempt ?? 0}-${Date.now()}-${randomUUID()}`;
   const promptPath = `/tmp/autopod-codex-review-${suffix}.prompt`;
   const outputPath = `/tmp/autopod-codex-review-${suffix}.out`;
   const logPath = `/tmp/autopod-codex-review-${suffix}.log`;

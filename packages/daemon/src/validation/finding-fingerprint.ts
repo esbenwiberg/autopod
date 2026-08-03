@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ValidationFinding, ValidationResult } from '@autopod/shared';
+import type { StructuredReviewFinding } from '@autopod/shared';
 
 /**
  * Normalizes text and produces a stable 12-hex-char fingerprint.
@@ -22,6 +23,13 @@ export function findingId(source: ValidationFinding['source'], text: string): st
   const prefix =
     source === 'fact_validation' ? 'fact' : source === 'task_review' ? 'review' : 'req';
   return `${prefix}:${fingerprintText(text)}`;
+}
+
+/** Stable identity for council findings: wording/evidence may evolve without changing the issue. */
+export function structuredFindingId(
+  finding: Pick<StructuredReviewFinding, 'axis' | 'path' | 'symbol' | 'claim'>,
+): string {
+  return `review:${fingerprintText([finding.axis, finding.path, finding.symbol ?? '', finding.claim].join(' '))}`;
 }
 
 /**

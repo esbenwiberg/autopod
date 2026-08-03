@@ -38,9 +38,27 @@ import { runAgenticReview } from './review-agentic-runner.js';
 import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
 import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
 import { applyDiffFilterToParsed } from './review-finding-filter.js';
+import {
+  createFrozenReviewPacket,
+  reviewBatchIssues,
+  runReviewBatch,
+} from './review-batch-runner.js';
 import { runToolUseReview } from './review-tool-runner.js';
 
 const execFileAsync = promisify(execFile);
+
+async function readReviewHead(
+  worktreePath: string | undefined,
+  fallback: string | undefined,
+): Promise<string> {
+  if (!worktreePath) return fallback ?? 'unavailable';
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath });
+    return stdout.trim();
+  } catch {
+    return fallback ?? 'unavailable';
+  }
+}
 
 interface PackageJsonManifest {
   scripts?: Record<string, string>;
@@ -544,6 +562,63 @@ export function createLocalValidationEngine(
           taskReview = reviewRun.result;
           reviewTokenUsage = reviewRun.tokenUsage;
           reviewSkipReason = reviewRun.skipReason;
+          // A normal full-suite review remains the first gate. Only a failed gate,
+          // or explicit deep review, pays for the isolated council.
+          if (
+            taskReview &&
+            config.validationSuite === 'full' &&
+            (taskReview.status === 'fail' || config.reviewDepth === 'deep')
+          ) {
+            const reviewedHead = await readReviewHead(config.worktreePath, config.startCommitSha);
+            const packet = createFrozenReviewPacket({
+              diff: config.diff,
+              reviewedHead,
+              task: config.task,
+              context: JSON.stringify({
+                plan: config.plan,
+                taskSummary: config.taskSummary,
+                reviewContext,
+              }),
+              promptVersion: 'review-council-v1',
+              schemaVersion: 'structured-finding-v1',
+            });
+            const batch = await runReviewBatch({
+              packet,
+              model: config.reviewerModel ?? 'auto',
+              readHead: () => readReviewHead(config.worktreePath, reviewedHead),
+              execute: async (prompt) =>
+                runContainerReviewer({
+                  podId: config.podId,
+                  containerId: config.containerId,
+                  containerManager,
+                  profile: {
+                    modelProvider: config.reviewerProvider ?? 'anthropic',
+                    providerCredentials: config.reviewerProviderCredentials ?? null,
+                  },
+                  model: config.reviewerModel ?? 'auto',
+                  prompt,
+                  ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
+                  timeout: config.reviewTimeout ?? 300_000,
+                  logger: log,
+                }),
+            });
+            const issues = reviewBatchIssues(batch);
+            taskReview = {
+              ...taskReview,
+              status: batch.infrastructureUnavailable || issues.length > 0 ? 'fail' : 'pass',
+              reasoning: batch.infrastructureUnavailable
+                ? 'Frozen review council unavailable: one or more required axes failed.'
+                : taskReview.reasoning,
+              issues,
+              reviewBatch: batch,
+              tokenUsage: combineReviewTokenUsage(
+                config.reviewerModel ?? 'auto',
+                reviewRun.tokenUsage,
+                batch.tokenUsage,
+              ),
+            };
+            reviewTokenUsage = taskReview?.tokenUsage;
+          }
           if (taskReview === null && reviewRun.skipReason) {
             reviewSkipKind = classifyReviewSkipKind(reviewRun.skipReason);
           }

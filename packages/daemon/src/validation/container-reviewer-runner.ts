@@ -1,4 +1,5 @@
 import type { Readable } from 'node:stream';
+import { randomUUID } from 'node:crypto';
 import type { ModelProvider, Profile } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
@@ -103,7 +104,7 @@ export function resolveContainerReviewer(
 async function runClaudeContainerReview(
   config: ContainerReviewerRunnerConfig & { containerId: string },
 ): Promise<{ stdout: string }> {
-  const suffix = `${safePathPart(config.podId)}-${Date.now()}`;
+  const suffix = `${safePathPart(config.podId)}-${Date.now()}-${randomUUID()}`;
   const promptPath = `/tmp/autopod-claude-review-${suffix}.prompt`;
   const outputPath = `/tmp/autopod-claude-review-${suffix}.out`;
   const logPath = `/tmp/autopod-claude-review-${suffix}.log`;
