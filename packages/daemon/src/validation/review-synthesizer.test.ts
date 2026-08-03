@@ -1,6 +1,6 @@
 import type { StructuredReviewFinding } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import { structuredFindingId } from './finding-fingerprint.js';
+import { structuredFindingSourceId } from './finding-fingerprint.js';
 import { parseSynthesis } from './review-synthesizer.js';
 
 const finding = (id: string, claim = 'missing guard'): StructuredReviewFinding => ({
@@ -29,9 +29,9 @@ describe('parseSynthesis', () => {
       }),
       [a, b, c],
     );
-    expect(result.accepted).toEqual([a, { ...b, id: structuredFindingId(b) }]);
+    expect(result.accepted).toEqual([a, { ...b, id: structuredFindingSourceId(b) }]);
     expect(result.merged[0]?.sourceIds).toEqual(['b']);
-    expect(result.merged[0]?.finding.id).toBe(structuredFindingId(b));
+    expect(result.merged[0]?.finding.id).toBe(structuredFindingSourceId(b));
     expect(result.rejected).toEqual([
       { sourceIds: ['c'], reason: 'superseded by inspected evidence' },
     ]);
@@ -49,7 +49,7 @@ describe('parseSynthesis', () => {
       }),
       [a, unrelated],
     );
-    expect(result.accepted[0]?.id).toBe(structuredFindingId(a));
+    expect(result.accepted[0]?.id).toBe(structuredFindingSourceId(a));
     expect(result.accepted[0]?.id).not.toBe(unrelated.id);
   });
 

@@ -250,6 +250,35 @@ export interface ReviewBatchResult {
   durationMs: number;
   infrastructureUnavailable?: boolean;
   tokenUsage?: TaskReviewResult['tokenUsage'];
+  /** Cross-attempt finding history. Optional so historical validation JSON stays readable. */
+  ledger?: ReviewFindingLedgerEntry[];
+  /** Whether the repair delta was trustworthy enough to support closure decisions. */
+  repairDelta?: ReviewRepairDelta;
+  /** Fail-closed closure verification metadata for the prior active findings. */
+  closureVerification?: ReviewClosureVerification;
+}
+
+export interface ReviewFindingLedgerEntry {
+  semanticId: string;
+  finding: ReviewFindingCandidate;
+  state: 'new' | 'open' | 'fixed' | 'regressed';
+  priorSourceIds: string[];
+  currentSourceIds: string[];
+  closureEvidence?: string;
+}
+
+export interface ReviewRepairDelta {
+  status: 'available' | 'unavailable';
+  fromHead: string;
+  toHead: string;
+  diffHash?: string;
+  reason?: string;
+}
+
+export interface ReviewClosureVerification {
+  status: 'completed' | 'unavailable' | 'invalid';
+  decisions: Array<{ semanticId: string; fixed: boolean; evidence?: string }>;
+  reason?: string;
 }
 
 export interface AdvisoryBrowserQaObservation {

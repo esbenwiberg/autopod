@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { structuredFindingId } from './finding-fingerprint.js';
+import { structuredFindingSourceId } from './finding-fingerprint.js';
 import { createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.js';
 
 const packet = () =>
@@ -128,7 +128,7 @@ describe('runReviewBatch', () => {
     });
   });
 
-  it('keeps a deterministic union when candidates overlap', async () => {
+  it('retains distinct cross-axis sources for the same semantic finding', async () => {
     const batch = await runReviewBatch({
       packet: packet(),
       model: 'test',
@@ -161,7 +161,7 @@ describe('runReviewBatch', () => {
       source: 'initial-review' as const,
       issue: 'broad blocker',
     };
-    const candidateId = structuredFindingId({
+    const candidateId = structuredFindingSourceId({
       axis: 'contract_completeness',
       path: 'a.ts',
       claim: 'missing authorization',

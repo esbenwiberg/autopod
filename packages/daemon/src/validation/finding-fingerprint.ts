@@ -29,7 +29,16 @@ export function findingId(source: ValidationFinding['source'], text: string): st
 export function structuredFindingId(
   finding: Pick<StructuredReviewFinding, 'axis' | 'path' | 'symbol' | 'claim'>,
 ): string {
-  return `review:${fingerprintText([finding.axis, finding.path, finding.symbol ?? '', finding.claim].join(' '))}`;
+  // Axes are independent reviewer provenance, not semantic identity: the same
+  // defect can legitimately be reported by different axes on later attempts.
+  return `review:${fingerprintText([finding.path, finding.symbol ?? '', finding.claim].join(' '))}`;
+}
+
+/** Source/provenance identity remains axis-specific even when semantic identity is shared. */
+export function structuredFindingSourceId(
+  finding: Pick<StructuredReviewFinding, 'axis' | 'path' | 'symbol' | 'claim'>,
+): string {
+  return `review-source:${fingerprintText([finding.axis, finding.path, finding.symbol ?? '', finding.claim].join(' '))}`;
 }
 
 /**
@@ -56,12 +65,39 @@ export function extractFindings(result: ValidationResult): ValidationFinding[] {
 
   // Task review issues
   if (result.taskReview && result.taskReview.status === 'fail') {
+    const council =
+      result.taskReview.reviewBatch?.ledger?.filter((entry) => entry.state !== 'fixed') ?? [];
+    const councilByDescription = new Map<string, typeof council>();
+    for (const entry of council) {
+      const finding = entry.finding;
+      const description =
+        'source' in finding
+          ? finding.issue
+          : `[${finding.severity}] ${finding.path}${finding.line ? `:${finding.line}` : ''} — ${finding.claim}`;
+      const matching = councilByDescription.get(description) ?? [];
+      matching.push(entry);
+      councilByDescription.set(description, matching);
+    }
+    const emittedCouncilIds = new Set<string>();
     for (const issue of result.taskReview.issues) {
-      findings.push({
-        id: findingId('task_review', issue),
-        source: 'task_review',
-        description: issue,
-      });
+      const canonical = councilByDescription.get(issue);
+      if (canonical && canonical.length > 0) {
+        for (const entry of canonical) {
+          if (emittedCouncilIds.has(entry.semanticId)) continue;
+          emittedCouncilIds.add(entry.semanticId);
+          findings.push({
+            id: entry.semanticId,
+            source: 'task_review',
+            description: issue,
+          });
+        }
+      } else {
+        findings.push({
+          id: findingId('task_review', issue),
+          source: 'task_review',
+          description: issue,
+        });
+      }
     }
   }
 

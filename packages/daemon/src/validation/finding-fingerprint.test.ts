@@ -20,6 +20,18 @@ describe('structuredFindingId', () => {
       structuredFindingId({ ...base, claim: 'missing AUTHORIZATION check!' }),
     );
   });
+
+  it('is stable when a different council axis reports the same issue', () => {
+    const base = {
+      axis: 'security_authority' as const,
+      path: 'src/auth.ts',
+      symbol: 'authorize',
+      claim: 'Missing authorization check',
+    };
+    expect(structuredFindingId(base)).toBe(
+      structuredFindingId({ ...base, axis: 'lifecycle_reliability' }),
+    );
+  });
 });
 
 // ── fingerprintText ──────────────────────────────────────────────────────────
@@ -147,6 +159,68 @@ describe('extractFindings', () => {
     expect(findings[0]?.source).toBe('task_review');
     expect(findings[0]?.description).toBe('Missing error handling in API route');
     expect(findings[1]?.description).toBe('No tests for new function');
+  });
+
+  it('retains every canonical ID when ledger findings render the same issue', () => {
+    const issue = '[HIGH] src/auth.ts:4 — Missing authorization check';
+    const structured = {
+      id: 'source-a',
+      axis: 'security_authority' as const,
+      severity: 'HIGH' as const,
+      path: 'src/auth.ts',
+      line: 4,
+      claim: 'Missing authorization check',
+      evidence: 'handler accepts any actor',
+      remediation: 'authorize actor',
+      confidence: 1,
+    };
+    const result = makeBaseResult({
+      taskReview: {
+        status: 'fail',
+        reasoning: 'Issues found',
+        issues: [issue],
+        model: 'sonnet',
+        screenshots: [],
+        diff: 'some diff',
+        reviewBatch: {
+          id: 'batch',
+          diffHash: 'diff',
+          reviewedHead: 'head',
+          promptVersion: 'v1',
+          schemaVersion: 'v2',
+          model: 'sonnet',
+          axes: [],
+          candidates: [],
+          initialFindings: [],
+          accepted: [],
+          rejected: [],
+          merged: [],
+          synthesis: 'model',
+          durationMs: 1,
+          ledger: [
+            {
+              semanticId: 'review:canonical-a',
+              finding: structured,
+              state: 'open',
+              priorSourceIds: [],
+              currentSourceIds: ['source-a'],
+            },
+            {
+              semanticId: 'review:canonical-b',
+              finding: { ...structured, id: 'source-b' },
+              state: 'regressed',
+              priorSourceIds: ['source-b-old'],
+              currentSourceIds: ['source-b'],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(extractFindings(result)).toEqual([
+      { id: 'review:canonical-a', source: 'task_review', description: issue },
+      { id: 'review:canonical-b', source: 'task_review', description: issue },
+    ]);
   });
 
   it('skips task review issues when status is not fail', () => {

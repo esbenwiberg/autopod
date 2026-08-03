@@ -12028,6 +12028,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           extraExecEnv: validationExecEnv,
           preSubmitReview: pod.preSubmitReview ?? undefined,
           skipPhases: getPodValidationSkipPhases(profile, s1),
+          priorReviewBatch: validationRepo?.getLatestReviewBatchBefore(podId, attempt),
         };
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;

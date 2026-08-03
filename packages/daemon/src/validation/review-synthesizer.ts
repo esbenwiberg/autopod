@@ -4,7 +4,7 @@ import type {
   StructuredReviewFinding,
   TaskReviewResult,
 } from '@autopod/shared';
-import { structuredFindingId } from './finding-fingerprint.js';
+import { structuredFindingSourceId } from './finding-fingerprint.js';
 
 export interface SynthesisDecision {
   action: 'accept' | 'reject' | 'merge';
@@ -102,7 +102,7 @@ export function parseSynthesis(
       // with an unrelated candidate.
       const normalizedFinding: StructuredReviewFinding = {
         ...(mergedFinding as StructuredReviewFinding),
-        id: structuredFindingId(mergedFinding as StructuredReviewFinding),
+        id: structuredFindingSourceId(mergedFinding as StructuredReviewFinding),
       };
       merged.push({ finding: normalizedFinding, sourceIds });
       accepted.push(normalizedFinding);

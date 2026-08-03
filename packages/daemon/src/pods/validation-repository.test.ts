@@ -49,6 +49,45 @@ function makeResult(podId: string, attempt: number): ValidationResult {
 }
 
 describe('ValidationRepository', () => {
+  it('finds the latest prior review batch across intervening no-review attempts', () => {
+    const db = setupDb();
+    db.prepare(
+      `INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+       VALUES ('sess-ledger', 'test-profile', 'test task', 'opus', 'claude', 'main', 'user-1')`,
+    ).run();
+    const repo = createValidationRepository(db);
+    const reviewed = makeResult('sess-ledger', 1);
+    reviewed.taskReview = {
+      status: 'fail',
+      reasoning: 'blocked',
+      issues: ['A'],
+      model: 'sonnet',
+      screenshots: [],
+      diff: 'diff',
+      reviewBatch: {
+        id: 'batch-1',
+        diffHash: 'hash',
+        reviewedHead: 'head-1',
+        promptVersion: 'v1',
+        schemaVersion: 'v2',
+        model: 'sonnet',
+        axes: [],
+        candidates: [],
+        initialFindings: [],
+        accepted: [],
+        rejected: [],
+        merged: [],
+        synthesis: 'model',
+        durationMs: 1,
+      },
+    };
+    repo.insert('sess-ledger', 1, reviewed);
+    repo.insert('sess-ledger', 2, makeResult('sess-ledger', 2));
+
+    expect(repo.getLatestReviewBatchBefore('sess-ledger', 3)?.id).toBe('batch-1');
+    expect(repo.getLatestReviewBatchBefore('sess-ledger', 1)).toBeUndefined();
+  });
+
   it('should insert and retrieve validation attempts', () => {
     const db = setupDb();
 
