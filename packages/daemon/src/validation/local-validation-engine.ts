@@ -590,9 +590,11 @@ export function createLocalValidationEngine(
             (taskReview.status === 'fail' || config.reviewDepth === 'deep')
           ) {
             const reviewedHead = await readReviewHead(config.worktreePath, config.startCommitSha);
+            const frozenDiff = boundedReviewPacketString(config.diff, 1_000_000);
             const packet = createFrozenReviewPacket({
-              diff: boundedReviewPacketString(config.diff, 1_000_000),
-              diffHash: hashDiff(config.diff),
+              // The identity must attest to the exact bounded, sanitized bytes every axis receives.
+              diff: frozenDiff,
+              diffHash: hashDiff(frozenDiff),
               reviewedHead,
               task: boundedReviewPacketString(config.task, 40_000),
               context: boundedReviewPacketText({
