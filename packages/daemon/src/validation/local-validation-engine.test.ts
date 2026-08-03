@@ -1076,6 +1076,48 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.taskReview?.tokenUsage).toMatchObject({ inputTokens: 160, outputTokens: 32 });
   });
 
+  it('structurally redacts arbitrary nested credentials from frozen packet context', async () => {
+    vi.mocked(runClaudeCli).mockResolvedValue({
+      stdout: JSON.stringify({ status: 'fail', reasoning: 'blocked', issues: ['real blocker'] }),
+    });
+    mockCouncil();
+    await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: changedDiff,
+        validationSuite: 'full',
+        startCommand: '',
+        smokePages: [],
+        plan: {
+          summary: 'safe plan',
+          steps: ['safe step'],
+          nested: { token: 'opaque-plan-credential' },
+        } as never,
+        taskSummary: {
+          actualSummary: 'safe summary',
+          deviations: [],
+          metadata: {
+            secret: 'opaque-summary-credential',
+            nested: { password: 'opaque-password-credential' },
+          },
+        } as never,
+      }),
+    );
+    const axisPrompts = vi
+      .mocked(runContainerReviewer)
+      .mock.calls.map(([config]) => config.prompt)
+      .filter((prompt) => !prompt.includes('synthesizer'));
+    expect(axisPrompts).toHaveLength(5);
+    for (const prompt of axisPrompts) {
+      expect(prompt).toContain('safe plan');
+      expect(prompt).toContain('safe summary');
+      expect(prompt).toContain('[REDACTED]');
+      expect(prompt).not.toContain('opaque-plan-credential');
+      expect(prompt).not.toContain('opaque-summary-credential');
+      expect(prompt).not.toContain('opaque-password-credential');
+    }
+  });
+
   it('runs only deep full reviews through the council after a clean first gate', async () => {
     vi.mocked(runClaudeCli).mockResolvedValue({
       stdout: JSON.stringify({ status: 'pass', reasoning: 'clean', issues: [] }),
