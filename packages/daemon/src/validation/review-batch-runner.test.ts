@@ -5,11 +5,14 @@ import { createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.
 
 const packet = () =>
   createFrozenReviewPacket({
-    diff: 'diff --git a/a.ts b/a.ts\n+++ b/a.ts\n',
+    diff: 'diff --git a/a.ts b/a.ts\n+++ b/a.ts\n+guard();\n',
     reviewedHead: 'abc',
-    task: 'task',
-    context: 'context',
+    task: 'bounded task summary',
+    context: 'bounded enriched codebase context',
+    executableContract: 'bounded executable contract',
     initialFindings: [],
+    validationSummary: 'bounded validation summary',
+    factSummary: 'bounded fact summary',
     promptVersion: 'v1',
     schemaVersion: 'v1',
   });
@@ -43,7 +46,10 @@ describe('runReviewBatch', () => {
     const heads: string[] = [];
     const prompts: string[] = [];
     const batch = await runReviewBatch({
-      packet: packet(),
+      packet: {
+        ...packet(),
+        initialFindings: [{ id: 'broad-1', source: 'initial-review', issue: 'broad blocker' }],
+      },
       model: 'test',
       execute: async (prompt) => {
         active++;
@@ -61,12 +67,43 @@ describe('runReviewBatch', () => {
     expect(new Set(ids)).toEqual(new Set([batch.id]));
     expect(new Set(hashes)).toEqual(new Set([batch.diffHash]));
     expect(new Set(heads)).toEqual(new Set([batch.reviewedHead]));
-    expect(new Set(prompts.map((prompt) => prompt.match(/Context: (.*)/)?.[1]))).toEqual(
-      new Set(['context']),
+    const frozenContent = prompts.map((prompt) => prompt.slice(prompt.indexOf('Task: ')));
+    expect(new Set(frozenContent).size).toBe(1);
+    expect(frozenContent[0]).toContain('Task: bounded task summary');
+    expect(frozenContent[0]).toContain('Contract: bounded executable contract');
+    expect(frozenContent[0]).toContain('Initial broad-review inputs: [{"id":"broad-1"');
+    expect(frozenContent[0]).toContain('Validation: bounded validation summary');
+    expect(frozenContent[0]).toContain('Facts: bounded fact summary');
+    expect(frozenContent[0]).toContain('Context: bounded enriched codebase context');
+    expect(frozenContent[0]).toContain('+guard();');
+    expect(prompts.map((prompt) => prompt.match(/You are the (.*?) reviewer/)?.[1]).sort()).toEqual(
+      [
+        'contract_completeness',
+        'lifecycle_reliability',
+        'persistence_reproducibility',
+        'security_authority',
+        'tests_integration',
+      ],
     );
-    expect(
-      new Set(prompts.map((prompt) => prompt.match(/You are the (.*?) reviewer/)?.[1])).size,
-    ).toBe(5);
+    expect(prompts).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          'Check every stated contract requirement, boundary, and completeness gap.',
+        ),
+        expect.stringContaining(
+          'Check authentication, authorization, secrets, trust boundaries, and privilege escalation.',
+        ),
+        expect.stringContaining(
+          'Check state transitions, retries, failure handling, concurrency, and cleanup.',
+        ),
+        expect.stringContaining(
+          'Check durable data, migrations, determinism, replayability, and configuration.',
+        ),
+        expect.stringContaining(
+          'Check test coverage, integration behavior, executable validation, and realistic failure modes.',
+        ),
+      ]),
+    );
     expect(batch.axes).toHaveLength(5);
   });
 
