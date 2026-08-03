@@ -1110,7 +1110,7 @@ describe('validate() — hasWebUi gating', () => {
       baseConfig({
         reviewerModel: 'claude-sonnet-4-6',
         diff: changedDiff,
-        validationSuite: 'build',
+        validationSuite: 'deterministic',
         startCommand: '',
         smokePages: [],
       }),

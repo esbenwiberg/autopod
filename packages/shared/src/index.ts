@@ -242,6 +242,8 @@ export type {
   TaskReviewResult,
   ReviewAxis,
   StructuredReviewFinding,
+  InitialReviewFinding,
+  ReviewFindingCandidate,
   ReviewAxisRun,
   ReviewBatchResult,
   AdvisoryBrowserQaObservation,

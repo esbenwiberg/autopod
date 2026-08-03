@@ -633,7 +633,7 @@ export function createLocalValidationEngine(
                   timeout: config.reviewTimeout ?? 300_000,
                   logger: log,
                 }),
-              synthesize: async (prompt, label) =>
+              synthesize: async (prompt) =>
                 runContainerReviewer({
                   podId: config.podId,
                   containerId: config.containerId,

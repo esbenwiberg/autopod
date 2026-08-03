@@ -86,15 +86,17 @@ export function parseSynthesis(
       const structuredSources = sources.filter(
         (source): source is StructuredReviewFinding => !('source' in source),
       );
+      const mergedFinding = decision.finding;
       if (
-        !decision.finding ||
-        'source' in decision.finding ||
+        !mergedFinding ||
+        typeof mergedFinding !== 'object' ||
+        'source' in mergedFinding ||
         structuredSources.length !== sources.length ||
-        !supportedMerge(decision.finding as StructuredReviewFinding, structuredSources)
+        !supportedMerge(mergedFinding as StructuredReviewFinding, structuredSources)
       )
         throw new Error('unsupported merged finding');
-      merged.push({ finding: decision.finding as StructuredReviewFinding, sourceIds });
-      accepted.push(decision.finding as StructuredReviewFinding);
+      merged.push({ finding: mergedFinding as StructuredReviewFinding, sourceIds });
+      accepted.push(mergedFinding as StructuredReviewFinding);
     } else throw new Error('invalid synthesis action');
     sourceIds.forEach((id) => used.add(id));
   }
