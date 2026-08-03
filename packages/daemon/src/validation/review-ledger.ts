@@ -16,7 +16,7 @@ const MAX_CLOSURE_ID_BYTES = 256;
 
 function boundedIdentifier(value: string): string {
   const sanitized = sanitize(value, getPresetConfig('strict'));
-  return Buffer.byteLength(sanitized, 'utf8') <= MAX_CLOSURE_ID_BYTES
+  return sanitized === value && Buffer.byteLength(sanitized, 'utf8') <= MAX_CLOSURE_ID_BYTES
     ? sanitized
     : `bounded-${createHash('sha256').update(value).digest('hex')}`;
 }

@@ -2698,6 +2698,35 @@ human_review: []
     expect(runAgenticReview).toHaveBeenCalledTimes(1);
   });
 
+  it('retains structured overflow when Tier 3 falls back to Tier 2', async () => {
+    const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-overflow-fallback-'));
+    vi.mocked(runClaudeCli).mockResolvedValueOnce({
+      stdout: JSON.stringify({ status: 'uncertain', reasoning: 'tier 1', issues: [] }),
+    });
+    vi.mocked(runToolUseReview).mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        status: 'uncertain',
+        reasoning: 'overflow in tier 2',
+        issues: Array.from({ length: 4_097 }, (_, index) => `finding ${index}`),
+      }),
+    });
+    vi.mocked(runAgenticReview).mockResolvedValueOnce({ stdout: 'malformed' });
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        reviewDepth: 'deep',
+        validationSuite: 'deterministic',
+        worktreePath,
+        diff: changedDiff,
+      }),
+    );
+    expect(result.taskReview?.firstGateOverflow).toEqual({
+      reportedCount: 4_097,
+      retainedFindingCount: 4_096,
+    });
+    expect(result.taskReview?.status).toBe('fail');
+  });
+
   it('runs Max full-validation Review through the live container Claude reviewer', async () => {
     const reviewerExecEnv = {
       CLAUDE_CODE_OAUTH_TOKEN_FILE: '/run/autopod/claude-code-oauth-token',

@@ -116,6 +116,20 @@ describe('reconcileReviewLedger', () => {
     ).toBe('completed');
   });
 
+  it('keeps distinct identifiers that sanitize to the same redaction', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A'), finding('B')], undefined);
+    const first = prior[0];
+    const second = prior[1];
+    if (!first || !second) throw new Error('expected two ledger entries');
+    first.semanticId = `gh${'p_'}${'a'.repeat(36)}`;
+    second.semanticId = `gh${'p_'}${'b'.repeat(36)}`;
+    const ids = closureVerificationChunks(prior)
+      .flat()
+      .map((entry) => entry.semanticId);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids.every((id) => /^bounded-[a-f0-9]{64}$/.test(id))).toBe(true);
+  });
+
   it('preserves fixed history and derives regression deterministically across attempts', () => {
     const one = reconcileReviewLedger(undefined, [finding('A'), finding('B')], undefined);
     expect(states(one)).toEqual({ A: 'new', B: 'new' });

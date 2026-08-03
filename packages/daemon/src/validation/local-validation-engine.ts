@@ -3485,6 +3485,7 @@ async function runTaskReview(
           status: bestParsed.status,
           reasoning: bestParsed.reasoning,
           issues: bestParsed.issues,
+          firstGateOverflow: bestParsed.firstGateOverflow,
           model: config.reviewerModel,
           screenshots: [],
           diff: config.diff,
