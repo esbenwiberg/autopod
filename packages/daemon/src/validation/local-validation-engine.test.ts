@@ -1055,7 +1055,7 @@ describe('validate() — hasWebUi gating', () => {
         validationSuite: 'full',
         startCommand: '',
         smokePages: [],
-        task: 'test task ghp_abcdefghijklmnopqrstuvwxyz1234567890',
+        task: `test task ${['gh', 'p_', 'abcdefghijklmnopqrstuvwxyz1234567890'].join('')}`,
       }),
     );
     expect(result.taskReview?.status).toBe('fail');
