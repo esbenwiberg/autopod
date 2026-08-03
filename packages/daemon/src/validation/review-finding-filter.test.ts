@@ -174,6 +174,23 @@ describe('filterOutOfDiffFindings', () => {
 });
 
 describe('applyDiffFilterToParsed', () => {
+  it('preserves structured first-gate overflow when replacing the issues array', () => {
+    const overflow = { reportedCount: 4_097, retainedFindingCount: 4_096 };
+    const result = applyDiffFilterToParsed(
+      {
+        status: 'fail',
+        reasoning: 'overflow',
+        issues: ['outside.ts: existing issue', '[REVIEW OVERFLOW]'],
+        firstGateOverflow: overflow,
+      },
+      DIFF_TWO_FILES,
+      undefined,
+      1,
+    );
+    expect(result?.firstGateOverflow).toEqual(overflow);
+    expect(result?.issues).toEqual(['[REVIEW OVERFLOW]']);
+    expect(result?.status).toBe('fail');
+  });
   const baseLog = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
   function freshLog() {

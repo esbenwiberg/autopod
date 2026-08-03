@@ -82,6 +82,30 @@ describe('reconcileReviewLedger', () => {
     }
   });
 
+  it('canonicalizes oversized legacy semantic and source IDs before chunk validation', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A')], undefined);
+    const rawId = `legacy-${'sensitive'.repeat(10_000)}`;
+    const entry = prior[0];
+    if (!entry) throw new Error('expected prior ledger entry');
+    entry.semanticId = rawId;
+    entry.priorSourceIds = [rawId];
+    entry.currentSourceIds = [rawId];
+    const [chunk] = closureVerificationChunks(prior);
+    expect(chunk).toHaveLength(1);
+    expect(chunk?.[0]?.semanticId).toMatch(/^bounded-[a-f0-9]{64}$/);
+    const prompt = closurePrompt(chunk ?? [], '+ meaningful repair line 1234567890');
+    expect(Buffer.byteLength(prompt)).toBeLessThan(42_000);
+    expect(prompt).not.toContain(rawId);
+    expect(
+      parseClosureVerification(
+        JSON.stringify({
+          decisions: [{ semanticId: chunk?.[0]?.semanticId, fixed: false }],
+        }),
+        chunk ?? [],
+      ).status,
+    ).toBe('completed');
+  });
+
   it('preserves fixed history and derives regression deterministically across attempts', () => {
     const one = reconcileReviewLedger(undefined, [finding('A'), finding('B')], undefined);
     expect(states(one)).toEqual({ A: 'new', B: 'new' });

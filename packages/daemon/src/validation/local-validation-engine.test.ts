@@ -1270,35 +1270,28 @@ describe('validate() — hasWebUi gating', () => {
     await fs.writeFile(path.join(repoPath, 'repair.txt'), 'base\n');
     await git('add', 'repair.txt');
     await git('commit', '-m', 'base');
-    const closureOutputs = [
-      {
-        decisions: [
-          {
-            semanticId: 'initial-ca978112ca1bbdca',
-            fixed: true,
-            evidence: '+repair A marker abcdefghijklmnop',
-          },
-          { semanticId: 'initial-3e23e8160039594a', fixed: false },
-        ],
-      },
-      {
-        decisions: [
-          {
-            semanticId: 'initial-3e23e8160039594a',
-            fixed: true,
-            evidence: '+repair B marker abcdefghijklmnop',
-          },
-          {
-            semanticId: 'initial-2e7d2c03a9507ae2',
-            fixed: true,
-            evidence: '+repair C marker abcdefghijklmnop',
-          },
-        ],
-      },
-    ];
+    let closureAttempt = 0;
     vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt }) => ({
       stdout: prompt.includes('closure verifier')
-        ? JSON.stringify(closureOutputs.shift())
+        ? (() => {
+            closureAttempt++;
+            const records = JSON.parse(
+              prompt.match(/Known findings: (.*)\nRepair delta:/s)?.[1] ?? '[]',
+            ) as Array<{ semanticId: string; source: { issue?: string } }>;
+            return JSON.stringify({
+              decisions: records.map((record) => ({
+                semanticId: record.semanticId,
+                fixed: closureAttempt === 1 ? record.source.issue === 'A' : true,
+                ...(closureAttempt === 1 && record.source.issue === 'A'
+                  ? { evidence: '+repair A marker abcdefghijklmnop' }
+                  : closureAttempt === 2
+                    ? {
+                        evidence: `+repair ${record.source.issue} marker abcdefghijklmnop`,
+                      }
+                    : {}),
+              })),
+            });
+          })()
         : prompt.includes('synthesizer')
           ? '{malformed'
           : JSON.stringify({ findings: [] }),
@@ -1317,7 +1310,15 @@ describe('validate() — hasWebUi gating', () => {
       smokePages: [],
       worktreePath: repoPath,
     };
+    const db = createTestDb();
+    insertTestProfile(db);
+    db.prepare(
+      `INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+       VALUES ('ledger-lifecycle', 'test-profile', 'test task', 'model', 'claude', 'main', 'user-1')`,
+    ).run();
+    const history = createValidationRepository(db);
     const one = await engine.validate(baseConfig(common));
+    history.insert('ledger-lifecycle', 1, { ...one, podId: 'ledger-lifecycle' });
     await fs.writeFile(
       path.join(repoPath, 'repair.txt'),
       'base\nrepair A marker abcdefghijklmnop\n',
@@ -1325,9 +1326,17 @@ describe('validate() — hasWebUi gating', () => {
     await git('add', 'repair.txt');
     await git('commit', '-m', 'repair A');
     const two = await engine.validate(
-      baseConfig({ ...common, attempt: 2, priorReviewBatch: one.taskReview?.reviewBatch }),
+      baseConfig({
+        ...common,
+        attempt: 2,
+        priorReviewBatch: history.getLatestReviewBatchBefore('ledger-lifecycle', 2),
+      }),
     );
-    expect(two.taskReview?.reviewBatch?.closureVerification?.status).toBe('completed');
+    history.insert('ledger-lifecycle', 2, { ...two, podId: 'ledger-lifecycle' });
+    expect(
+      two.taskReview?.reviewBatch?.closureVerification?.status,
+      two.taskReview?.reviewBatch?.closureVerification?.reason,
+    ).toBe('completed');
     await fs.writeFile(
       path.join(repoPath, 'repair.txt'),
       'base\nrepair A marker abcdefghijklmnop\nrepair B marker abcdefghijklmnop\nrepair C marker abcdefghijklmnop\n',
@@ -1335,8 +1344,13 @@ describe('validate() — hasWebUi gating', () => {
     await git('add', 'repair.txt');
     await git('commit', '-m', 'repair B C');
     const three = await engine.validate(
-      baseConfig({ ...common, attempt: 3, priorReviewBatch: two.taskReview?.reviewBatch }),
+      baseConfig({
+        ...common,
+        attempt: 3,
+        priorReviewBatch: history.getLatestReviewBatchBefore('ledger-lifecycle', 3),
+      }),
     );
+    history.insert('ledger-lifecycle', 3, { ...three, podId: 'ledger-lifecycle' });
     const states = (result: typeof one) =>
       Object.fromEntries(
         result.taskReview?.reviewBatch?.ledger?.map((entry) => [entry.finding.id, entry.state]) ??
@@ -1370,16 +1384,6 @@ describe('validate() — hasWebUi gating', () => {
 
     // Persist the production-engine outputs through the real validation-history
     // seam. Each stored attempt must keep its own immutable ledger snapshot.
-    const db = createTestDb();
-    insertTestProfile(db);
-    db.prepare(
-      `INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
-       VALUES ('ledger-lifecycle', 'test-profile', 'test task', 'model', 'claude', 'main', 'user-1')`,
-    ).run();
-    const history = createValidationRepository(db);
-    history.insert('ledger-lifecycle', 1, { ...one, podId: 'ledger-lifecycle' });
-    history.insert('ledger-lifecycle', 2, { ...two, podId: 'ledger-lifecycle' });
-    history.insert('ledger-lifecycle', 3, { ...three, podId: 'ledger-lifecycle' });
     const persisted = history.getForSession('ledger-lifecycle');
     expect(persisted).toHaveLength(3);
     const persistedStates = (index: number) =>

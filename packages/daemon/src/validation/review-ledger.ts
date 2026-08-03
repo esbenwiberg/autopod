@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type {
   ReviewBatchResult,
   ReviewClosureVerification,
@@ -11,9 +12,26 @@ const MAX_CLOSURE_FINDINGS = 100;
 const MAX_CLOSURE_SOURCE_IDS = 100;
 const MAX_CLOSURE_PRIOR_BYTES = 40_000;
 const MAX_CLOSURE_FIELD_BYTES = 2_000;
+const MAX_CLOSURE_ID_BYTES = 256;
+
+function boundedIdentifier(value: string): string {
+  const sanitized = sanitize(value, getPresetConfig('strict'));
+  return Buffer.byteLength(sanitized, 'utf8') <= MAX_CLOSURE_ID_BYTES
+    ? sanitized
+    : `bounded-${createHash('sha256').update(value).digest('hex')}`;
+}
+
+function boundedLedgerEntry(entry: ReviewFindingLedgerEntry): ReviewFindingLedgerEntry {
+  return {
+    ...entry,
+    semanticId: boundedIdentifier(entry.semanticId),
+    priorSourceIds: entry.priorSourceIds.map(boundedIdentifier),
+    currentSourceIds: entry.currentSourceIds.map(boundedIdentifier),
+  };
+}
 
 function closableEntries(prior: ReviewFindingLedgerEntry[]): ReviewFindingLedgerEntry[] {
-  return prior.filter((entry) => entry.state !== 'fixed');
+  return prior.filter((entry) => entry.state !== 'fixed').map(boundedLedgerEntry);
 }
 
 function boundedField(value: unknown, limit = MAX_CLOSURE_FIELD_BYTES): string {
@@ -29,7 +47,7 @@ function boundedField(value: unknown, limit = MAX_CLOSURE_FIELD_BYTES): string {
  */
 function closureRecord(entry: ReviewFindingLedgerEntry): Record<string, unknown> {
   return {
-    semanticId: entry.semanticId,
+    semanticId: boundedIdentifier(entry.semanticId),
     state: entry.state,
     source:
       'source' in entry.finding
@@ -41,8 +59,10 @@ function closureRecord(entry: ReviewFindingLedgerEntry): Record<string, unknown>
             claim: boundedField(entry.finding.claim),
             evidence: boundedField(entry.finding.evidence),
           },
-    priorSourceIds: entry.priorSourceIds.slice(0, MAX_CLOSURE_SOURCE_IDS),
-    currentSourceIds: entry.currentSourceIds.slice(0, MAX_CLOSURE_SOURCE_IDS),
+    priorSourceIds: entry.priorSourceIds.slice(0, MAX_CLOSURE_SOURCE_IDS).map(boundedIdentifier),
+    currentSourceIds: entry.currentSourceIds
+      .slice(0, MAX_CLOSURE_SOURCE_IDS)
+      .map(boundedIdentifier),
   };
 }
 
@@ -84,17 +104,17 @@ function boundedClosurePrior(prior: ReviewFindingLedgerEntry[]): string {
 }
 
 function sourceIds(finding: ReviewFindingCandidate): string[] {
-  return [finding.id];
+  return [boundedIdentifier(finding.id)];
 }
 
 function semanticId(finding: ReviewFindingCandidate): string {
-  return 'source' in finding ? finding.id : structuredFindingId(finding);
+  return boundedIdentifier('source' in finding ? finding.id : structuredFindingId(finding));
 }
 
 /** Old packets did not retain a ledger; their accepted findings are active conservatively. */
 export function seedReviewLedger(batch: ReviewBatchResult | undefined): ReviewFindingLedgerEntry[] {
   if (!batch) return [];
-  if (batch.ledger) return batch.ledger;
+  if (batch.ledger) return batch.ledger.map(boundedLedgerEntry);
   const seeded = new Map<string, ReviewFindingLedgerEntry>();
   for (const finding of batch.accepted) {
     const id = semanticId(finding);

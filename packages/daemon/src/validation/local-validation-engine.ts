@@ -130,18 +130,9 @@ const MAX_PERSISTED_FIRST_GATE_FINDINGS = 4_096;
 // deterministic blocking overflow marker rather than unbounded model output.
 const MAX_TASK_REVIEW_ISSUES = 4_096;
 const FIRST_GATE_OVERFLOW_PREFIX = '[REVIEW OVERFLOW]';
-const firstGateOverflowIssueArrays = new WeakSet<string[]>();
 
 function isFirstGateOverflowIssue(issue: string): boolean {
   return issue.startsWith(FIRST_GATE_OVERFLOW_PREFIX);
-}
-
-function firstGateOverflowCount(issue: string): number {
-  const reported = /Reviewer returned (\d+) issues/.exec(issue)?.[1];
-  const count = reported ? Number.parseInt(reported, 10) : Number.NaN;
-  return Number.isSafeInteger(count) && count > MAX_TASK_REVIEW_ISSUES
-    ? count
-    : MAX_TASK_REVIEW_ISSUES + 1;
 }
 
 function initialBroadFindingId(issue: string): string {
@@ -189,8 +180,7 @@ function initialBroadLedgerFindings(review: TaskReviewResult) {
   const findings = [];
   const seen = new Set<string>();
   for (const issue of review.issues) {
-    if (firstGateOverflowIssueArrays.has(review.issues) && isFirstGateOverflowIssue(issue))
-      continue;
+    if (review.firstGateOverflow && isFirstGateOverflowIssue(issue)) continue;
     if (findings.length >= MAX_PERSISTED_FIRST_GATE_FINDINGS) break;
     const id = initialBroadFindingId(issue);
     if (seen.has(id)) continue;
@@ -838,9 +828,7 @@ export function createLocalValidationEngine(
             // them, so retain them in the durable history as well as accepted
             // council findings. Otherwise a rejected first-gate finding could
             // disappear before a later repair attempt can close or regress it.
-            const firstGateOverflow = firstGateOverflowIssueArrays.has(taskReview.issues)
-              ? taskReview.issues.find(isFirstGateOverflowIssue)
-              : undefined;
+            const firstGateOverflow = taskReview.firstGateOverflow;
             const ledgerCurrent = new Map<string, ReviewFindingCandidate>();
             for (const finding of [...initialBroadLedgerFindings(taskReview), ...batch.accepted]) {
               ledgerCurrent.set(finding.id, finding);
@@ -851,12 +839,7 @@ export function createLocalValidationEngine(
               closure,
             );
             batch.ledger = ledger;
-            if (firstGateOverflow) {
-              batch.firstGateOverflow = {
-                reportedCount: firstGateOverflowCount(firstGateOverflow),
-                retainedFindingCount: MAX_PERSISTED_FIRST_GATE_FINDINGS,
-              };
-            }
+            if (firstGateOverflow) batch.firstGateOverflow = firstGateOverflow;
             batch.repairDelta = {
               status: repair.status,
               fromHead: repair.fromHead,
@@ -876,7 +859,10 @@ export function createLocalValidationEngine(
             // flattened issue source. The immutable first-gate status still
             // fails the attempt even when its bounded packet omitted an issue.
             const issues = [
-              ...new Set([...ledgerIssues, ...(firstGateOverflow ? [firstGateOverflow] : [])]),
+              ...new Set([
+                ...ledgerIssues,
+                ...(firstGateOverflow ? [FIRST_GATE_OVERFLOW_PREFIX] : []),
+              ]),
             ];
             taskReview = {
               ...taskReview,
@@ -3346,6 +3332,7 @@ async function runTaskReview(
           status: tier1Parsed.status,
           reasoning: tier1Parsed.reasoning,
           issues: tier1Parsed.issues,
+          firstGateOverflow: tier1Parsed.firstGateOverflow,
           model: config.reviewerModel,
           screenshots: [],
           diff: config.diff,
@@ -3365,6 +3352,7 @@ async function runTaskReview(
             status: tier1Parsed.status,
             reasoning: tier1Parsed.reasoning,
             issues: tier1Parsed.issues,
+            firstGateOverflow: tier1Parsed.firstGateOverflow,
             model: config.reviewerModel,
             screenshots: [],
             diff: config.diff,
@@ -3418,6 +3406,7 @@ async function runTaskReview(
             status: tier2Parsed.status,
             reasoning: `[Tier 2 tool-use review] ${tier2Parsed.reasoning}`,
             issues: tier2Parsed.issues,
+            firstGateOverflow: tier2Parsed.firstGateOverflow,
             model: config.reviewerModel,
             screenshots: [],
             diff: config.diff,
@@ -3460,6 +3449,7 @@ async function runTaskReview(
                 status: tier3Parsed.status,
                 reasoning: `[Tier 3 agentic review] ${tier3Parsed.reasoning}`,
                 issues: tier3Parsed.issues,
+                firstGateOverflow: tier3Parsed.firstGateOverflow,
                 model: config.reviewerModel,
                 screenshots: [],
                 diff: config.diff,
@@ -3513,6 +3503,7 @@ async function runTaskReview(
           status: tier1Parsed.status,
           reasoning: tier1Parsed.reasoning,
           issues: tier1Parsed.issues,
+          firstGateOverflow: tier1Parsed.firstGateOverflow,
           model: config.reviewerModel,
           screenshots: [],
           diff: config.diff,
@@ -3775,6 +3766,7 @@ export function parseReviewJson(raw: string): {
   issues: string[];
   requirementsCheck?: Array<{ criterion: string; met: boolean; note?: string }>;
   deviationsAssessment?: DeviationsAssessment;
+  firstGateOverflow?: { reportedCount: number; retainedFindingCount: number };
 } | null {
   // Strip markdown code fences if present
   let cleaned = raw
@@ -3827,7 +3819,6 @@ export function parseReviewJson(raw: string): {
       normalizedIssues.push(
         `${FIRST_GATE_OVERFLOW_PREFIX} Reviewer returned ${parsed.issues.length} issues; the first ${MAX_TASK_REVIEW_ISSUES} are independently addressable and this bounded marker remains blocking until a fresh complete first gate succeeds.`,
       );
-      firstGateOverflowIssueArrays.add(normalizedIssues);
     }
     // If the model returned issues but every retained issue was un-renderable,
     // treat the response as malformed instead of silently dropping blockers.
@@ -3840,6 +3831,14 @@ export function parseReviewJson(raw: string): {
       issues: normalizedIssues,
       requirementsCheck,
       deviationsAssessment,
+      ...(overflowed
+        ? {
+            firstGateOverflow: {
+              reportedCount: parsed.issues.length,
+              retainedFindingCount: MAX_TASK_REVIEW_ISSUES,
+            },
+          }
+        : {}),
     };
   } catch {
     return null;

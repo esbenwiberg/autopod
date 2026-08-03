@@ -200,6 +200,7 @@ export interface ParsedReviewLike {
   status: 'pass' | 'fail' | 'uncertain';
   reasoning: string;
   issues: string[];
+  firstGateOverflow?: { reportedCount: number; retainedFindingCount: number };
   requirementsCheck?: Array<{ criterion: string; met: boolean; note?: string }>;
   deviationsAssessment?: {
     disclosedDeviations: Array<{

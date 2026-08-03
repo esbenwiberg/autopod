@@ -193,6 +193,8 @@ export interface TaskReviewResult {
   };
   /** Optional frozen multi-axis review metadata. Kept in validation JSON for compatibility. */
   reviewBatch?: ReviewBatchResult;
+  /** Structured first-gate overflow state; never inferred from model issue text. */
+  firstGateOverflow?: { reportedCount: number; retainedFindingCount: number };
 }
 
 export type ReviewAxis =
