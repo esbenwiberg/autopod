@@ -53,6 +53,25 @@ describe('parseSynthesis', () => {
     expect(result.accepted[0]?.id).not.toBe(unrelated.id);
   });
 
+  it('accepts a source-identical finding regardless of JSON field order', () => {
+    const a = finding('a');
+    const reordered = {
+      confidence: a.confidence,
+      remediation: a.remediation,
+      evidence: a.evidence,
+      claim: a.claim,
+      path: a.path,
+      severity: a.severity,
+      axis: a.axis,
+      id: a.id,
+    };
+    const result = parseSynthesis(
+      JSON.stringify({ decisions: [{ action: 'accept', sourceIds: ['a'], finding: reordered }] }),
+      [a],
+    );
+    expect(result.accepted).toEqual([a]);
+  });
+
   it('rejects invented IDs, altered claims, paths, severities, and malformed output', () => {
     const a = finding('a');
     for (const response of [

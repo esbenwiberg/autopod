@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type {
   ReviewFindingCandidate,
   StructuredReviewFinding,
@@ -24,7 +25,7 @@ Use only the candidate findings below. Every decision must cite one or more sour
 }
 
 function equalFinding(a: ReviewFindingCandidate, b: ReviewFindingCandidate): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return isDeepStrictEqual(a, b);
 }
 
 function supportedMerge(
