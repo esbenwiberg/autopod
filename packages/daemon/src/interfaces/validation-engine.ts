@@ -124,6 +124,8 @@ export interface ValidationEngineConfig {
   skipPhases?: ValidationPhase[];
   /** Most recent completed review batch for this pod, never the in-progress attempt. */
   priorReviewBatch?: ReviewBatchResult;
+  /** Run a fresh AI review while preserving deterministic evidence from the caller. */
+  reviewOnly?: boolean;
 }
 
 export interface ValidationPhaseCallbacks {
