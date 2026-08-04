@@ -1,0 +1,60 @@
+contract_version: 1
+title: "Present degraded councils and verified fixed findings clearly"
+depends_on:
+  - 02-canonical-synthesis-and-ledger
+scenarios:
+  - id: healthy-desktop-council-hides-first-gate-raw-records
+    given:
+      - "a new batch explicitly reports healthy quality and canonical structured ledger findings"
+    when:
+      - "Desktop builds and renders the Review Council model"
+    then:
+      - "only canonical structured findings are shown"
+      - "no Initial Review or First-gate fallback section appears"
+      - "lifecycle counts match the visible canonical model"
+  - id: degraded-desktop-council-shows-fallback-and-real-failure
+    given:
+      - "a batch is degraded by invalid response, timeout, provider failure, runner failure, HEAD drift, synthesis failure, or unmatched initial finding"
+    when:
+      - "Desktop renders the council"
+    then:
+      - "a degradation banner is visible"
+      - "the typed cause is described accurately instead of generic infrastructure copy"
+      - "unmatched initial blockers appear under First-gate fallback"
+      - "historical batches without new fields remain conservatively readable"
+  - id: fixed-findings-are-unmistakably-verified
+    given:
+      - "the lifecycle contains active and fixed findings"
+    when:
+      - "the operator selects All or Fixed"
+    then:
+      - "All shows Needs attention before a separate collapsed Fixed in this revision section"
+      - "Fixed shows complete fixed cards"
+      - "fixed cards use a green check, prominent FIXED text, neutral Was severity, and verification metadata when available"
+      - "fixed state is conveyed without relying on color and fixed cards do not offer Dismiss"
+  - id: regressed-rejected-and-dismissed-remain-distinct
+    given:
+      - "the council includes regressed, rejected, dismissed, and fixed lifecycle outcomes"
+    when:
+      - "Desktop renders lifecycle state"
+    then:
+      - "regressed is an active red warning"
+      - "rejected remains a synthesis decision"
+      - "dismissed remains a human override"
+      - "none is presented as verified fixed"
+required_facts: []
+human_review:
+  - id: review-desktop-council-states
+    covers:
+      - healthy-desktop-council-hides-first-gate-raw-records
+      - degraded-desktop-council-shows-fallback-and-real-failure
+      - fixed-findings-are-unmistakably-verified
+      - regressed-rejected-and-dismissed-remain-distinct
+    criterion: >-
+      On a macOS/Xcode-capable machine, verify healthy and degraded council
+      layouts, each typed axis failure label, first-gate fallback visibility,
+      active/fixed separation in All, full Fixed cards, historical compatibility,
+      and accessibility without relying on color.
+    reason: >-
+      Autopod-self facts execute in a Linux pod, while SwiftUI/AppKit rendering
+      and native Desktop interaction require macOS and Xcode.

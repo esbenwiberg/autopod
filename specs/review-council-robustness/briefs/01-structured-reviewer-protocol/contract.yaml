@@ -1,0 +1,67 @@
+contract_version: 1
+title: "Enforce structured reviewer responses and typed failures"
+scenarios:
+  - id: axis-output-is-strictly-validated
+    given:
+      - "an axis reviewer returns output through a supported Claude or Codex container path"
+    when:
+      - "the daemon unwraps and validates the response"
+    then:
+      - "plain JSON, known CLI envelopes, and one harmless JSON fence can produce the same valid axis result"
+      - "unknown fields, missing required fields, invalid enums, invalid bounds, excessive findings, and oversized output are rejected"
+      - "finding IDs remain daemon-derived and out-of-diff findings remain excluded"
+  - id: invalid-axis-output-is-recovered-safely
+    given:
+      - "the first axis attempt returns malformed or schema-invalid output"
+    when:
+      - "the axis is retried"
+    then:
+      - "the same frozen packet and reviewed HEAD are used"
+      - "the retry receives a stable validation error code"
+      - "the malformed output is not included in the retry prompt or persisted diagnostic"
+      - "a valid second response completes the axis on attempt two"
+  - id: exhausted-review-failure-is-typed-and-blocking
+    given:
+      - "an axis exhausts two attempts or encounters a timeout, provider failure, runner failure, or HEAD drift"
+    when:
+      - "the review batch records the outcome"
+    then:
+      - "invalid-response, timeout, provider-unavailable, runner-failed, and head-changed remain distinguishable"
+      - "diagnostics are bounded and operator-safe"
+      - "the axis is unavailable and the review cannot pass"
+  - id: native-schema-constraint-is-used-when-supported
+    given:
+      - "the pinned Claude or Codex CLI advertises structured output support"
+    when:
+      - "the container reviewer runs an axis contract"
+    then:
+      - "the provider-native schema mechanism is used"
+      - "local strict validation still runs after provider output"
+      - "temporary schema and output artifacts are cleaned up"
+required_facts:
+  - id: fact-structured-review-contract
+    proves:
+      - axis-output-is-strictly-validated
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/review-structured-output.test.ts
+      change: create
+    command: npx pnpm --filter @autopod/daemon test -- review-structured-output.test.ts
+  - id: fact-review-recovery-and-classification
+    proves:
+      - invalid-axis-output-is-recovered-safely
+      - exhausted-review-failure-is-typed-and-blocking
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/review-batch-runner.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- review-batch-runner.test.ts
+  - id: fact-provider-schema-wiring
+    proves:
+      - native-schema-constraint-is-used-when-supported
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/container-reviewer-runner.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- container-reviewer-runner.test.ts review-codex-runner.test.ts
+human_review: []

@@ -1,0 +1,71 @@
+contract_version: 1
+title: "Canonicalize council findings and lifecycle provenance"
+depends_on:
+  - 01-structured-reviewer-protocol
+scenarios:
+  - id: healthy-council-has-only-canonical-findings
+    given:
+      - "all five axes and synthesis return valid output against one frozen HEAD"
+      - "an initial finding is represented by at least one structured axis finding"
+    when:
+      - "synthesis and ledger reconciliation complete"
+    then:
+      - "the batch quality is healthy"
+      - "one structured canonical finding carries both initial and structured source provenance"
+      - "no standalone initial finding is inserted into the active ledger"
+  - id: unmatched-initial-finding-degrades-fail-closed
+    given:
+      - "a first-gate finding has no safe structured canonical representation or synthesis is unavailable"
+    when:
+      - "the batch is finalized"
+    then:
+      - "the batch quality is degraded with a bounded reason"
+      - "the initial finding remains an active first-gate fallback blocker"
+      - "the task review cannot pass"
+  - id: ledger-migrates-raw-provenance-to-canonical-identity
+    given:
+      - "a prior degraded attempt tracked a raw initial finding"
+      - "a later healthy attempt canonicalizes it into a structured finding carrying the initial source ID"
+    when:
+      - "the lifecycle ledger reconciles the attempts"
+    then:
+      - "one continuing lifecycle entry remains"
+      - "the finding does not appear as both fixed and new"
+      - "ambiguous provenance overlap never merges unrelated findings"
+  - id: fixed-resolution-is-durable-and-regression-safe
+    given:
+      - "closure verification addresses an exact active semantic ID"
+    when:
+      - "fixed is true with evidence present verbatim in the frozen repair delta"
+    then:
+      - "the ledger stores reviewed HEAD, repair diff hash when available, and bounded evidence"
+      - "missing or invented evidence cannot mark the finding fixed"
+      - "a later reappearance marks the finding regressed and removes current fixed presentation metadata"
+required_facts:
+  - id: fact-canonical-synthesis
+    proves:
+      - healthy-council-has-only-canonical-findings
+      - unmatched-initial-finding-degrades-fail-closed
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/review-synthesizer.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- review-synthesizer.test.ts review-batch-runner.test.ts
+  - id: fact-provenance-ledger
+    proves:
+      - ledger-migrates-raw-provenance-to-canonical-identity
+      - fixed-resolution-is-durable-and-regression-safe
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/review-ledger.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- review-ledger.test.ts
+  - id: fact-local-validation-fails-closed
+    proves:
+      - unmatched-initial-finding-degrades-fail-closed
+    kind: unit-test
+    artifact:
+      path: packages/daemon/src/validation/local-validation-engine.test.ts
+      change: update
+    command: npx pnpm --filter @autopod/daemon test -- local-validation-engine.test.ts -t "review council"
+human_review: []
