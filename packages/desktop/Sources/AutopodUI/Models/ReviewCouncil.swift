@@ -13,12 +13,13 @@ public struct ReviewCouncil: Sendable {
   public let axes: [ReviewAxisRunResponse]; public let synthesis: String; public let durationMs: Int; public let tokenUsage: ReviewTokenUsageResponse?
   public let infrastructureUnavailable: Bool; public let overflow: FirstGateOverflowResponse?; public let findings: [Finding]
   public let initialFindings: [InitialReviewFindingResponse]; public let rejected: [ReviewSynthesisRejectionResponse]; public let merged: [ReviewSynthesisMergeResponse]
+  public let acceptedCount: Int
   public let repairDelta: ReviewRepairDeltaResponse?; public let closureVerification: ReviewClosureVerificationResponse?
 
-  public init(_ batch: ReviewBatchResponse) {
+  public init(_ batch: ReviewBatchResponse, overflow taskOverflow: FirstGateOverflowResponse? = nil) {
     id = batch.id; diffHash = batch.diffHash; reviewedHead = batch.reviewedHead; promptVersion = batch.promptVersion; schemaVersion = batch.schemaVersion; model = batch.model
     axes = batch.axes; synthesis = batch.synthesis; durationMs = batch.durationMs; tokenUsage = batch.tokenUsage; infrastructureUnavailable = batch.infrastructureUnavailable ?? false
-    overflow = batch.firstGateOverflow; initialFindings = batch.initialFindings; rejected = batch.rejected; merged = batch.merged; repairDelta = batch.repairDelta; closureVerification = batch.closureVerification
+    overflow = taskOverflow ?? batch.firstGateOverflow; initialFindings = batch.initialFindings; rejected = batch.rejected; merged = batch.merged; acceptedCount = batch.accepted.count; repairDelta = batch.repairDelta; closureVerification = batch.closureVerification
     let records = batch.ledger.map { $0.map { ($0.semanticId, $0.finding, $0.state, $0.currentSourceIds, $0.closureEvidence) } }
       ?? batch.accepted.map { (Self.candidateId($0), $0, "open", [Self.candidateId($0)], nil) }
     findings = records.map { semanticId, candidate, state, sourceIds, closureEvidence in

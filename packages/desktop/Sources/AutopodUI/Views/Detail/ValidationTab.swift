@@ -249,7 +249,7 @@ public struct ValidationTab: View {
       lintOutput: lintOutput,
       sastOutput: sastOutput,
       reviewIssues: response.taskReview?.issues,
-      reviewCouncil: response.taskReview?.reviewBatch.map(ReviewCouncil.init),
+      reviewCouncil: response.taskReview?.reviewBatch.map { ReviewCouncil($0, overflow: response.taskReview?.firstGateOverflow) },
       reviewReasoning: response.taskReview?.reasoning,
       reviewSkipReason: response.reviewSkipReason,
       reviewSkipKind: response.reviewSkipKind,
