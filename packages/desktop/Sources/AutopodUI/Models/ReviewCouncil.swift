@@ -44,7 +44,7 @@ public struct ReviewCouncil: Sendable {
   public var lifecycleCounts: [Filter: Int] {
     [.open: findings(filter: .open).count, .fixed: findings(filter: .fixed).count,
      .regressed: findings(filter: .regressed).count, .rejected: rejected.count,
-     .all: findings.count]
+     .all: findings.count + rejected.count]
   }
   public func findings(filter: Filter) -> [Finding] { findings(filter: filter.rawValue) }
   public func findings(filter: String) -> [Finding] {

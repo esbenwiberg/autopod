@@ -8,7 +8,7 @@ import Testing
   {"status":"fail","reasoning":"broad","issues":["legacy"],"model":"m","screenshots":[],"diff":"","tokenUsage":{"inputTokens":12,"outputTokens":4,"costUsd":0.03},"firstGateOverflow":{"reportedCount":9,"retainedFindingCount":2},"reviewBatch":{"id":"packet","diffHash":"abcdef123456","reviewedHead":"head","promptVersion":"p2","schemaVersion":"s2","model":"m","axes":[{"axis":"security_authority","status":"unavailable","attempts":2,"error":"Network unavailable"},{"axis":"contract_completeness","status":"completed","attempts":1}],"candidates":[{"id":"initial-1","source":"initial-review","issue":"raw"},{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","line":4,"symbol":"run","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9}],"initialFindings":[{"id":"initial-1","source":"initial-review","issue":"raw"}],"accepted":[{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9}],"rejected":[{"sourceIds":["x"],"reason":"duplicate"}],"merged":[{"finding":{"id":"s2","axis":"tests_integration","severity":"MEDIUM","path":"b.swift","claim":"merged","evidence":"e","remediation":"r","confidence":0.5},"sourceIds":["a","b"]}],"synthesis":"model","durationMs":1200,"tokenUsage":{"inputTokens":10,"outputTokens":5,"cachedInputTokens":2,"cacheCreationInputTokens":1,"costUsd":0.02},"ledger":[{"semanticId":"review:one","finding":{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9},"state":"new","priorSourceIds":[],"currentSourceIds":["s1"]},{"semanticId":"review:two","finding":{"id":"initial-1","source":"initial-review","issue":"raw"},"state":"fixed","priorSourceIds":["initial-1"],"currentSourceIds":[],"closureEvidence":"verified"}],"repairDelta":{"status":"available","fromHead":"a","toHead":"b","diffHash":"d"},"closureVerification":{"status":"completed","decisions":[{"semanticId":"review:two","fixed":true,"evidence":"verified"}]}}}
   """.data(using: .utf8)!
   let review = try JSONDecoder().decode(TaskReviewResponse.self, from: data)
-  let council = try #require(review.reviewBatch.map(ReviewCouncil.init))
+  let council = try #require(reviewCouncil(from: review))
   #expect(council.activeCount == 1)
   #expect(council.findings(filter: "open").map(\.id) == ["review:one"])
   #expect(council.findings(filter: "fixed").first?.closureEvidence == "verified")
@@ -73,6 +73,7 @@ import Testing
   #expect(council.lifecycleCounts[.fixed] == 1)
   #expect(council.lifecycleCounts[.regressed] == 1)
   #expect(council.lifecycleCounts[.rejected] == 1)
+  #expect(council.lifecycleCounts[.all] == 5)
   #expect(council.findings(filter: .all).map(\.id) == ["review:a", "review:b", "review:z", "review:c"])
   #expect(council.groups(filter: .all).map(\.axis) == ["contract_completeness", "security_authority", nil])
   let available = [

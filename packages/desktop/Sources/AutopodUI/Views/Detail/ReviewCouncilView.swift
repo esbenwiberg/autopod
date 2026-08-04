@@ -11,8 +11,13 @@ struct ReviewCouncilView: View {
     VStack(alignment: .leading, spacing: 12) {
       summary
       if let overflow = council.overflow { Label("First gate retained \(overflow.retainedFindingCount) of \(overflow.reportedCount) findings. Review is fail-closed.", systemImage: "exclamationmark.octagon.fill").font(.caption.weight(.semibold)).foregroundStyle(.red).padding(10).background(.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8)).accessibilityLabel("First gate overflow; review is fail-closed") }
-      Picker("Finding lifecycle", selection: $filter) { Text("Open \(count(.open))").tag(ReviewCouncil.Filter.open); Text("Fixed \(count(.fixed))").tag(ReviewCouncil.Filter.fixed); Text("Regressed \(count(.regressed))").tag(ReviewCouncil.Filter.regressed); Text("Rejected \(council.rejected.count)").tag(ReviewCouncil.Filter.rejected); Text("All \(council.findings.count)").tag(ReviewCouncil.Filter.all) }.pickerStyle(.segmented)
-      if filter == .rejected { provenanceDecisions } else { findings }
+      Picker("Finding lifecycle", selection: $filter) { Text("Open \(count(.open))").tag(ReviewCouncil.Filter.open); Text("Fixed \(count(.fixed))").tag(ReviewCouncil.Filter.fixed); Text("Regressed \(count(.regressed))").tag(ReviewCouncil.Filter.regressed); Text("Rejected \(count(.rejected))").tag(ReviewCouncil.Filter.rejected); Text("All \(count(.all))").tag(ReviewCouncil.Filter.all) }.pickerStyle(.segmented)
+      if filter == .rejected {
+        provenanceDecisions
+      } else {
+        findings
+        if filter == .all, !council.rejected.isEmpty { provenanceDecisions }
+      }
       provenance
     }
   }
