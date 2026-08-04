@@ -1000,10 +1000,7 @@ describe('parseReviewJson — issues normalization', () => {
       ]),
     );
     expect(parsed?.status).toBe('fail');
-    expect(parsed?.issues).toEqual([
-      'duplicate A',
-      expect.stringContaining('[REVIEW OVERFLOW]'),
-    ]);
+    expect(parsed?.issues).toEqual(['duplicate A', expect.stringContaining('[REVIEW OVERFLOW]')]);
     expect(parsed?.firstGateOverflow).toEqual({
       reportedCount: 4_097,
       retainedFindingCount: 4_096,
