@@ -1361,9 +1361,16 @@ describe('validate() — hasWebUi gating', () => {
       tokenUsage: { inputTokens: prompt.includes('closure verifier') ? 7 : 10, outputTokens: 2 },
     }));
     const attempts = [['A', 'B'], ['B', 'C'], ['A'], []];
-    vi.mocked(runClaudeCli).mockImplementation(async () => ({
-      stdout: JSON.stringify({ status: 'fail', reasoning: 'blocked', issues: attempts.shift() }),
-    }));
+    vi.mocked(runClaudeCli).mockImplementation(async () => {
+      const issues = attempts.shift() ?? [];
+      return {
+        stdout: JSON.stringify({
+          status: issues.length === 0 ? 'pass' : 'fail',
+          reasoning: issues.length === 0 ? 'clean standard first gate' : 'blocked',
+          issues,
+        }),
+      };
+    });
     const engine = createLocalValidationEngine(stubContainerManager());
     const common = {
       reviewerModel: 'claude-sonnet-4-6',
@@ -1456,6 +1463,7 @@ describe('validate() — hasWebUi gating', () => {
       }),
     );
     history.insert('ledger-lifecycle', 4, { ...four, podId: 'ledger-lifecycle' });
+    expect(closureAttempt).toBe(3);
     expect(four.taskReview?.reviewBatch?.closureVerification?.status).toBe('completed');
     expect(four.taskReview?.issues).toEqual(['A']);
     expect(four.taskReview?.status).toBe('fail');
