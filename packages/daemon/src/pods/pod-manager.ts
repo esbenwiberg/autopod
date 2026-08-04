@@ -157,6 +157,7 @@ import { DeletionGuardError, GitCredentialError } from '../worktrees/local-workt
 import { MergeQueue } from '../worktrees/merge-queue.js';
 import { transferCommitToContainer } from '../worktrees/sandbox-reconcile.js';
 import {
+  type SandboxWorkspaceCheckpointArgs,
   type WorkspaceCheckpointResult,
   checkpointSandboxWorkspace,
 } from '../worktrees/sandbox-workspace-checkpoint.js';
@@ -1387,6 +1388,10 @@ export interface PodManagerDependencies {
   hostScreenshotDir?: (podId: string) => string;
   /** Test hook for shrinking review infrastructure retry delays. */
   reviewInfrastructureRetryBackoffMs?: readonly number[];
+  /** Test seam for the sandbox checkpoint transport. Production uses the Git-native primitive. */
+  sandboxWorkspaceCheckpoint?: (
+    args: SandboxWorkspaceCheckpointArgs,
+  ) => Promise<WorkspaceCheckpointResult>;
   /** Bounded run-level retries for typed validation infrastructure failures. */
   validationInfrastructureRetryBackoffMs?: readonly number[];
   /** Safety events repository for writing per-pattern detection rows. */
@@ -4802,7 +4807,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
     const existing = sandboxCheckpointRuns.get(pod.id);
     if (existing) return existing;
-    const run = checkpointSandboxWorkspace({
+    const run = (deps.sandboxWorkspaceCheckpoint ?? checkpointSandboxWorkspace)({
       containerManager: containerManagerFactory.get('sandbox'),
       containerId: pod.containerId,
       podId: pod.id,

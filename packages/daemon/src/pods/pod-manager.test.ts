@@ -841,6 +841,20 @@ function createTestContext(
     enqueueSession: (id) => enqueuedSessions.push(id),
     mcpBaseUrl: 'http://localhost:8080',
     daemonConfig: { mcpServers: [], claudeMdSections: [] },
+    sandboxWorkspaceCheckpoint: vi.fn(async ({ podId, sequence }) => ({
+      sequence,
+      sourceHead: 'a'.repeat(40),
+      sourceTree: 'b'.repeat(40),
+      snapshotCommit: 'c'.repeat(40),
+      snapshotTree: 'd'.repeat(40),
+      transferVerified: true,
+      bundleVerified: true,
+      hostImported: true,
+      lineageVerified: true,
+      promoted: true,
+      materialized: true,
+      quarantineRef: `refs/autopod-quarantine/${podId}/${sequence}`,
+    })),
     logger,
   };
 
@@ -871,6 +885,26 @@ describe('PodManager', () => {
         executionTarget: 'sandbox',
         warmImageTag: 'registry.azurecr.io/test:latest',
       });
+      ctx.deps.sandboxWorkspaceCheckpoint = vi.fn(async () => ({
+        sequence: 1,
+        sourceHead: '',
+        sourceTree: '',
+        snapshotCommit: '',
+        snapshotTree: '',
+        transferVerified: false,
+        bundleVerified: false,
+        hostImported: false,
+        lineageVerified: false,
+        promoted: false,
+        materialized: false,
+        quarantineRef: '',
+        error: {
+          phase: 'transfer',
+          code: 'TRANSFER_FAILED',
+          retryable: true,
+          message: 'unavailable',
+        },
+      }));
       const manager = createPodManager(ctx.deps);
       const pod = manager.createSession(
         { profileName: 'test-profile', task: 'checkpoint' },
@@ -895,6 +929,26 @@ describe('PodManager', () => {
         executionTarget: 'sandbox',
         warmImageTag: 'registry.azurecr.io/test:latest',
       });
+      ctx.deps.sandboxWorkspaceCheckpoint = vi.fn(async () => ({
+        sequence: 1,
+        sourceHead: 'a'.repeat(40),
+        sourceTree: 'b'.repeat(40),
+        snapshotCommit: 'c'.repeat(40),
+        snapshotTree: 'd'.repeat(40),
+        transferVerified: true,
+        bundleVerified: true,
+        hostImported: true,
+        lineageVerified: true,
+        promoted: true,
+        materialized: false,
+        quarantineRef: 'refs/autopod-quarantine/test/1',
+        error: {
+          phase: 'materialize',
+          code: 'MATERIALIZATION_FAILED',
+          retryable: false,
+          message: 'failed',
+        },
+      }));
       const manager = createPodManager(ctx.deps);
       const pod = manager.createSession(
         { profileName: 'test-profile', task: 'checkpoint' },
@@ -7024,7 +7078,7 @@ describe('PodManager', () => {
       expect(messages).not.toContain('Collecting synced fact evidence…');
     });
 
-    it('surfaces degraded post-validation sync and evidence collection work', async () => {
+    it('collects synced evidence after a verified post-validation checkpoint', async () => {
       const ctx = createTestContext(
         {
           overall: 'fail',
@@ -7128,14 +7182,14 @@ describe('PodManager', () => {
 
       expect(messages).toContain('Collecting validation screenshots…');
       expect(messages).not.toContain('Collecting host fact evidence…');
-      expect(messages).not.toContain('Collecting synced fact evidence…');
-      expect(messages).toContain('Collecting available fact evidence after degraded sync…');
-      expect(syncFailed).toBeGreaterThan(syncStarted);
-      expect(resultHandled).toBeGreaterThan(syncFailed);
+      expect(messages).toContain('Collecting synced fact evidence…');
+      expect(messages).not.toContain('Collecting available fact evidence after degraded sync…');
+      expect(syncFailed).toBe(-1);
+      expect(resultHandled).toBeGreaterThan(syncStarted);
       expect(messages.indexOf('Stopping post-validation container…')).toBeGreaterThan(
         resultHandled,
       );
-      expect(messages.some((message) => message.startsWith('Workspace sync complete'))).toBe(false);
+      expect(messages.some((message) => message.startsWith('Workspace sync complete'))).toBe(true);
     });
 
     it('passes the effective advisory browser QA setting to validation', async () => {
@@ -9786,10 +9840,10 @@ describe('PodManager', () => {
       await manager.triggerValidation(pod.id, { force: true });
 
       expect(ctx.containerManager.getStatus).toHaveBeenCalledWith('sandbox-preserve');
-      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalled();
-      expect(
-        ctx.containerManager.extractDirectoryFromContainer.mock.invocationCallOrder[0],
-      ).toBeLessThan(
+      const checkpoint = ctx.deps.sandboxWorkspaceCheckpoint;
+      if (!checkpoint) throw new Error('checkpoint test seam missing');
+      expect(checkpoint).toHaveBeenCalled();
+      expect(vi.mocked(checkpoint).mock.invocationCallOrder[0]).toBeLessThan(
         ctx.containerManager.kill.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
       );
       expect(ctx.containerManager.kill).toHaveBeenCalledWith('sandbox-preserve');
@@ -11453,7 +11507,7 @@ describe('PodManager', () => {
       expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
     });
 
-    it('uses sandbox extraction for sync-back instead of the uploaded /mnt/worktree snapshot', async () => {
+    it('uses a verified checkpoint instead of recursive sandbox source extraction', async () => {
       const ctx = createTestContext(
         { overall: 'pass' },
         {
@@ -11479,17 +11533,8 @@ describe('PodManager', () => {
         return String(cmd[2]).includes('/mnt/worktree/.autopod-sync-');
       });
       expect(syncScriptCall).toBeUndefined();
-      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledWith(
-        'ctr-1',
-        '/workspace',
-        '/tmp/wt',
-        expect.arrayContaining(['.git', 'node_modules']),
-      );
-      expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledWith(
-        'ctr-1',
-        '/workspace/.git',
-        expect.stringContaining('autopod-git-'),
-      );
+      expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalled();
+      expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
     });
 
     it('starts a daemon host-port preview proxy for sandbox pods', async () => {
@@ -13832,12 +13877,13 @@ describe('worker startup diagnostics', () => {
 
     await manager.preserveWorkspace(pod.id, 'fatal agent exit');
 
-    expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledWith(
-      'sandbox-failed',
-      '/workspace',
-      '/tmp/worktrees/sandbox-failed',
-      expect.any(Array),
+    expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        containerId: 'sandbox-failed',
+        worktreePath: '/tmp/worktrees/sandbox-failed',
+      }),
     );
+    expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
     expect(ctx.containerManager.kill).not.toHaveBeenCalledWith('sandbox-failed');
   });
 

@@ -48,13 +48,17 @@ function empty(sequence: number, message: string, phase = 'capture'): WorkspaceC
  * quarantine ref before atomically updating the linked worktree branch. The
  * sandbox bundle is the only source bytes read by this routine.
  */
-export async function checkpointSandboxWorkspace(args: {
+export interface SandboxWorkspaceCheckpointArgs {
   containerManager: ContainerManager;
   containerId: string;
   podId: string;
   worktreePath: string;
   sequence: number;
-}): Promise<WorkspaceCheckpointResult> {
+}
+
+export async function checkpointSandboxWorkspace(
+  args: SandboxWorkspaceCheckpointArgs,
+): Promise<WorkspaceCheckpointResult> {
   const { containerManager: cm, containerId, podId, worktreePath, sequence } = args;
   const token = podId.replace(/[^A-Za-z0-9_-]/g, '_');
   const remoteBundle = `/tmp/.autopod-checkpoint-${token}-${sequence}.bundle`;
