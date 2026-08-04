@@ -87,4 +87,6 @@ import Testing
   progress.markCompleted(.review, result: ValidationPhaseResult(from: raw))
   #expect(progress.reviewDetail?.council?.id == "live-packet")
   #expect(progress.review.status == .failed)
+  #expect(validationShouldDisplayLiveProgress(podStatus: .complete, progress: progress, hasPersistedReviewCouncil: false))
+  #expect(!validationShouldDisplayLiveProgress(podStatus: .complete, progress: progress, hasPersistedReviewCouncil: true))
 }

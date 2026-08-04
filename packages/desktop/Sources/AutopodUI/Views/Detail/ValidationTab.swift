@@ -52,6 +52,19 @@ public func legacyReviewPresentation(
   )
 }
 
+/// Retain a completed streamed council until the persisted validation snapshot catches up.
+public func validationShouldDisplayLiveProgress(
+  podStatus: PodStatus,
+  progress: ValidationProgress,
+  hasPersistedReviewCouncil: Bool
+) -> Bool {
+  guard !hasPersistedReviewCouncil else { return false }
+  return podStatus == .validating
+    || progress.hasRunningPhase
+    || progress.advisoryDetail != nil
+    || progress.reviewDetail?.council != nil
+}
+
 /// Validation tab — shows live per-phase progress chips + a detail panel for the selected phase.
 ///
 /// Data priority:
@@ -119,7 +132,11 @@ public struct ValidationTab: View {
 
   private var progress: ValidationProgress? {
     guard let liveProgress else { return nil }
-    if pod.status == .validating || liveProgress.hasRunningPhase || liveProgress.advisoryDetail != nil {
+    if validationShouldDisplayLiveProgress(
+      podStatus: pod.status,
+      progress: liveProgress,
+      hasPersistedReviewCouncil: checks?.reviewCouncil != nil
+    ) {
       return liveProgress
     }
     return nil
