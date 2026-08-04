@@ -138,7 +138,7 @@ describe('runPreSubmitReview', () => {
     expect(result.model).toBe('gpt-5');
     expect(commands.some((cmd) => cmd.includes('codex exec'))).toBe(true);
     expect(commands.some((cmd) => cmd.includes("--model 'gpt-5'"))).toBe(true);
-    expect(timeouts).toEqual([300_000]);
+    expect(timeouts).toEqual([300_000, 5_000]);
     expect(result.tokenUsage).toEqual({
       inputTokens: 20_000,
       cachedInputTokens: 12_000,
