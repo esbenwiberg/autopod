@@ -71,6 +71,6 @@ if PATH="$tmp/bin:$PATH" HOME="$tmp/home" DEPLOY_TEST_AZ_COUNT="$tmp/az-count" \
   echo 'deployment unexpectedly passed despite a pod at the final restart gate' >&2
   exit 1
 fi
-rg -q '1 active pod\(s\) at final restart gate — refusing deployment' "$tmp/out"
+grep -qF '1 active pod(s) at final restart gate — refusing deployment' "$tmp/out"
 [ "$(cat "$tmp/az-count")" = 4 ]
 [ ! -e "$tmp/restarted" ]
