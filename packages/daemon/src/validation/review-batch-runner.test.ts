@@ -105,6 +105,7 @@ describe('runReviewBatch', () => {
       ]),
     );
     expect(batch.axes).toHaveLength(5);
+    expect(batch.axes.every((axis) => axis.durationMs !== undefined)).toBe(true);
   });
 
   it('retries one failed axis and fails closed when it remains unavailable', async () => {

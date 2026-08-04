@@ -5,7 +5,7 @@ import Testing
 
 @Test func reviewCouncilDecodesAndPresentsLedgerLifecycle() throws {
   let data = """
-  {"status":"fail","reasoning":"broad","issues":["legacy"],"model":"m","screenshots":[],"diff":"","tokenUsage":{"inputTokens":12,"outputTokens":4,"costUsd":0.03},"firstGateOverflow":{"reportedCount":9,"retainedFindingCount":2},"reviewBatch":{"id":"packet","diffHash":"abcdef123456","reviewedHead":"head","promptVersion":"p2","schemaVersion":"s2","model":"m","axes":[{"axis":"security_authority","status":"unavailable","attempts":2,"error":"Network unavailable"},{"axis":"contract_completeness","status":"completed","attempts":1}],"candidates":[{"id":"initial-1","source":"initial-review","issue":"raw"},{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","line":4,"symbol":"run","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9}],"initialFindings":[{"id":"initial-1","source":"initial-review","issue":"raw"}],"accepted":[{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9}],"rejected":[{"sourceIds":["x"],"reason":"duplicate"}],"merged":[{"finding":{"id":"s2","axis":"tests_integration","severity":"MEDIUM","path":"b.swift","claim":"merged","evidence":"e","remediation":"r","confidence":0.5},"sourceIds":["a","b"]}],"synthesis":"model","durationMs":1200,"tokenUsage":{"inputTokens":10,"outputTokens":5,"cachedInputTokens":2,"cacheCreationInputTokens":1,"costUsd":0.02},"ledger":[{"semanticId":"review:one","finding":{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9},"state":"new","priorSourceIds":[],"currentSourceIds":["s1"]},{"semanticId":"review:two","finding":{"id":"initial-1","source":"initial-review","issue":"raw"},"state":"fixed","priorSourceIds":["initial-1"],"currentSourceIds":[],"closureEvidence":"verified"}],"repairDelta":{"status":"available","fromHead":"a","toHead":"b","diffHash":"d"},"closureVerification":{"status":"completed","decisions":[{"semanticId":"review:two","fixed":true,"evidence":"verified"}]}}}
+  {"status":"fail","reasoning":"broad","issues":["legacy"],"model":"m","screenshots":[],"diff":"","tokenUsage":{"inputTokens":12,"outputTokens":4,"costUsd":0.03},"firstGateOverflow":{"reportedCount":9,"retainedFindingCount":2},"reviewBatch":{"id":"packet","diffHash":"abcdef123456","reviewedHead":"head","promptVersion":"p2","schemaVersion":"s2","model":"m","axes":[{"axis":"security_authority","status":"unavailable","attempts":2,"durationMs":400,"error":"Network unavailable"},{"axis":"contract_completeness","status":"completed","attempts":1,"durationMs":200}],"candidates":[{"id":"initial-1","source":"initial-review","issue":"raw"},{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","line":4,"symbol":"run","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9}],"initialFindings":[{"id":"initial-1","source":"initial-review","issue":"raw"}],"accepted":[{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9}],"rejected":[{"sourceIds":["x"],"reason":"duplicate"}],"merged":[{"finding":{"id":"s2","axis":"tests_integration","severity":"MEDIUM","path":"b.swift","claim":"merged","evidence":"e","remediation":"r","confidence":0.5},"sourceIds":["a","b"]}],"synthesis":"model","durationMs":1200,"tokenUsage":{"inputTokens":10,"outputTokens":5,"cachedInputTokens":2,"cacheCreationInputTokens":1,"costUsd":0.02},"ledger":[{"semanticId":"review:one","finding":{"id":"s1","axis":"security_authority","severity":"HIGH","path":"a.swift","claim":"same text","evidence":"proof","remediation":"fix","confidence":0.9},"state":"new","priorSourceIds":[],"currentSourceIds":["s1"]},{"semanticId":"review:two","finding":{"id":"initial-1","source":"initial-review","issue":"raw"},"state":"fixed","priorSourceIds":["initial-1"],"currentSourceIds":[],"closureEvidence":"verified"}],"repairDelta":{"status":"available","fromHead":"a","toHead":"b","diffHash":"d"},"closureVerification":{"status":"completed","decisions":[{"semanticId":"review:two","fixed":true,"evidence":"verified"}]}}}
   """.data(using: .utf8)!
   let review = try JSONDecoder().decode(TaskReviewResponse.self, from: data)
   let council = try #require(reviewCouncil(from: review))
@@ -14,6 +14,7 @@ import Testing
   #expect(council.findings(filter: "fixed").first?.closureEvidence == "verified")
   #expect(council.overflow?.reportedCount == 9)
   #expect(review.reviewBatch?.candidates.count == 2)
+  #expect(review.reviewBatch?.axes.first?.durationMs == 400)
   #expect(council.rejected.first?.sourceIds == ["x"])
   #expect(council.merged.first?.sourceIds == ["a", "b"])
   #expect(council.repairDelta?.diffHash == "d")
@@ -49,6 +50,22 @@ import Testing
   #expect(try JSONDecoder().decode(TaskReviewResponse.self, from: data).reviewBatch == nil)
   #expect(reviewCouncil(from: try JSONDecoder().decode(TaskReviewResponse.self, from: data)) == nil)
   #expect(reviewPresentationMode(council: nil) == .legacy)
+}
+
+@Test func legacyReviewPresentationKeepsExistingReasoningAndFindings() {
+  let fallback = [ValidationFindingResponse(id: "review:one", source: "task_review", description: "[HIGH] a.swift:4 — legacy finding", reasoning: nil)]
+  let fallbackPresentation = legacyReviewPresentation(council: nil, issues: [], fallbackFindings: fallback, reasoning: "legacy reasoning")
+  #expect(fallbackPresentation?.issues == ["[HIGH] a.swift:4 — legacy finding"])
+  #expect(fallbackPresentation?.showsFindings == true)
+  #expect(fallbackPresentation?.showsReasoning == false)
+
+  let reasoningPresentation = legacyReviewPresentation(council: nil, issues: [], fallbackFindings: [], reasoning: "legacy reasoning")
+  #expect(reasoningPresentation?.showsReasoning == true)
+  #expect(reasoningPresentation?.reasoning == "legacy reasoning")
+
+  let explicitPresentation = legacyReviewPresentation(council: nil, issues: ["saved legacy issue"], fallbackFindings: fallback, reasoning: nil)
+  #expect(explicitPresentation?.issues == ["saved legacy issue"])
+  #expect(legacyReviewPresentation(council: ReviewCouncil(ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [], initialFindings: [], accepted: [], rejected: [], merged: [], synthesis: "model", durationMs: 1, infrastructureUnavailable: nil, tokenUsage: nil, ledger: nil, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)), issues: [], fallbackFindings: fallback, reasoning: "legacy") == nil)
 }
 
 @Test func deterministicUnavailableBatchDecodesSafely() throws {

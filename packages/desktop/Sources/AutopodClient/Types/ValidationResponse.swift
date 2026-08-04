@@ -296,6 +296,7 @@ public struct ReviewAxisRunResponse: Codable, Sendable {
   public let axis: String
   public let status: String
   public let attempts: Int
+  public let durationMs: Int?
   public let error: String?
 }
 public struct ReviewSynthesisRejectionResponse: Codable, Sendable { public let sourceIds: [String]; public let reason: String }

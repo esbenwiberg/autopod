@@ -29,6 +29,29 @@ public func validationHistoryReviewCouncil(_ response: ValidationResponse) -> Re
   reviewCouncil(from: response.taskReview)
 }
 
+/// The immutable inputs rendered by ValidationTab's established legacy Review branch.
+/// Keeping this selection outside the view makes the no-council compatibility path testable.
+public struct LegacyReviewPresentation: Sendable, Equatable {
+  public let reasoning: String?
+  public let issues: [String]
+
+  public var showsReasoning: Bool { issues.isEmpty && !(reasoning ?? "").isEmpty }
+  public var showsFindings: Bool { !issues.isEmpty }
+}
+
+public func legacyReviewPresentation(
+  council: ReviewCouncil?,
+  issues: [String],
+  fallbackFindings: [ValidationFindingResponse],
+  reasoning: String?
+) -> LegacyReviewPresentation? {
+  guard council == nil else { return nil }
+  return LegacyReviewPresentation(
+    reasoning: reasoning,
+    issues: issues.isEmpty ? fallbackFindings.map(\.description) : issues
+  )
+}
+
 /// Validation tab — shows live per-phase progress chips + a detail panel for the selected phase.
 ///
 /// Data priority:
@@ -1760,10 +1783,13 @@ public struct ValidationTab: View {
     let screenshots: [ScreenshotRef] = detail?.screenshots ?? displayedChecks?.taskReviewScreenshots ?? []
     let council = displayedReviewCouncil
     let broadReviewIssues = distinctBroadReviewIssues(issues, council: council)
-    let issueTexts = issues.isEmpty
-      ? displayedChecks?.reviewFindings?.map(\.description) ?? []
-      : issues
-    let findingItems = reviewFindingItems(from: issueTexts)
+    let legacyPresentation = legacyReviewPresentation(
+      council: council,
+      issues: issues,
+      fallbackFindings: displayedChecks?.reviewFindings ?? [],
+      reasoning: reasoning
+    )
+    let findingItems = reviewFindingItems(from: legacyPresentation?.issues ?? [])
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(
@@ -1809,7 +1835,7 @@ public struct ValidationTab: View {
           .font(.caption)
         }
       } else {
-      if findingItems.isEmpty, let reasoning, !reasoning.isEmpty {
+      if legacyPresentation?.showsReasoning == true, let reasoning = legacyPresentation?.reasoning {
         Text(reasoning)
           .font(.caption)
           .foregroundStyle(.secondary)
