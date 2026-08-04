@@ -40,7 +40,12 @@ public struct ReviewCouncil: Sendable {
       }
     }
   }
-  private static func candidateId(_ candidate: ReviewFindingCandidateResponse) -> String { switch candidate { case .initial(let item): item.id; case .structured(let item): item.id } }
+  private static func candidateId(_ candidate: ReviewFindingCandidateResponse) -> String {
+    switch candidate {
+    case .initial(let item): return item.id
+    case .structured(let item): return item.id
+    }
+  }
   public var activeCount: Int { findings.filter { $0.lifecycle == "new" || $0.lifecycle == "open" || $0.lifecycle == "regressed" }.count }
   public var lifecycleCounts: [Filter: Int] {
     [.open: findings(filter: .open).count, .fixed: findings(filter: .fixed).count,
