@@ -8,6 +8,7 @@ import {
   closureVerificationChunks,
   parseClosureVerification,
   reconcileReviewLedger,
+  seedReviewLedger,
 } from './review-ledger.js';
 
 const finding = (id: string): StructuredReviewFinding => ({
@@ -128,6 +129,36 @@ describe('reconcileReviewLedger', () => {
       .map((entry) => entry.semanticId);
     expect(new Set(ids).size).toBe(2);
     expect(ids.every((id) => /^bounded-[a-f0-9]{64}$/.test(id))).toBe(true);
+  });
+
+  it('keeps bounded legacy IDs stable across closure and persisted attempts', () => {
+    const original = reconcileReviewLedger(undefined, [finding('A')], undefined);
+    const entry = original[0];
+    if (!entry) throw new Error('expected a ledger entry');
+    entry.semanticId = 'legacy reviewer controlled identifier';
+    const priorBatch = { ...batch([]), ledger: original };
+
+    const [chunk] = closureVerificationChunks(seedReviewLedger(priorBatch));
+    const boundedId = chunk?.[0]?.semanticId;
+    expect(boundedId).toMatch(/^bounded-[a-f0-9]{64}$/);
+    const closure = parseClosureVerification(
+      JSON.stringify({
+        decisions: [
+          {
+            semanticId: boundedId,
+            fixed: true,
+            evidence: '+ trusted repair evidence abcdefghijklmnop',
+          },
+        ],
+      }),
+      chunk ?? [],
+      '+ trusted repair evidence abcdefghijklmnop',
+    );
+    expect(closure.status).toBe('completed');
+
+    const reconciled = reconcileReviewLedger(priorBatch, [], closure);
+    expect(reconciled[0]).toMatchObject({ semanticId: boundedId, state: 'fixed' });
+    expect(seedReviewLedger({ ...batch([]), ledger: reconciled })[0]?.semanticId).toBe(boundedId);
   });
 
   it('preserves fixed history and derives regression deterministically across attempts', () => {

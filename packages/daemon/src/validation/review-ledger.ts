@@ -20,9 +20,10 @@ function boundedIdentifier(value: string): string {
   // from the immutable ledger entry it is meant to address. Accept only the
   // deliberately narrow identifier alphabet; replace every other value with a
   // deterministic opaque ID rather than retaining untrusted text.
-  const safeInternalId = /^(?:initial-|review:|review-source:|fact:|req:)[a-f0-9]{12,16}$/.test(
-    value,
-  );
+  const safeInternalId =
+    /^(?:(?:initial-|review:|review-source:|fact:|req:)[a-f0-9]{12,16}|bounded-[a-f0-9]{64})$/.test(
+      value,
+    );
   return Buffer.byteLength(value, 'utf8') <= MAX_CLOSURE_ID_BYTES && safeInternalId
     ? value
     : `bounded-${createHash('sha256').update(value).digest('hex')}`;
