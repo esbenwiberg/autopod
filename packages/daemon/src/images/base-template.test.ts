@@ -13,6 +13,7 @@ const execFileAsync = promisify(execFile);
 const playwrightBaseTemplates = [
   'Dockerfile.node22-pw',
   'Dockerfile.node22-pw-pg',
+  'Dockerfile.node24-pw',
   'Dockerfile.go124-pw',
   'Dockerfile.python-node-pg',
   'Dockerfile.dotnet10',
@@ -28,6 +29,8 @@ const workerBaseTemplates = [
   'Dockerfile.node22',
   'Dockerfile.node22-pw',
   'Dockerfile.node22-pw-pg',
+  'Dockerfile.node24',
+  'Dockerfile.node24-pw',
   'Dockerfile.python-node',
   'Dockerfile.python-node-pg',
   'Dockerfile.python312',

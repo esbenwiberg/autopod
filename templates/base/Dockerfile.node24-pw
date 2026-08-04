@@ -1,0 +1,87 @@
+FROM node:24-slim
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    gnupg \
+    locales \
+    iptables haproxy socat \
+    sqlite3 \
+    ripgrep \
+    tmux \
+    python3 build-essential \
+    && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
+    && locale-gen \
+    && rm -rf /var/lib/apt/lists/*
+
+# Glow — terminal markdown viewer from Charm
+RUN mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" > /etc/apt/sources.list.d/charm.list \
+    && apt-get update && apt-get install -y --no-install-recommends glow \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8
+
+# Create non-root user — remove the default node user (uid 1000) first
+RUN userdel --remove node 2>/dev/null; groupdel node 2>/dev/null; \
+    groupadd --gid 1000 autopod && \
+    useradd --uid 1000 --gid autopod --shell /bin/bash --create-home autopod
+
+# Global tools
+RUN npm install -g pnpm@9
+
+# Agent CLIs
+RUN npm install -g @anthropic-ai/claude-code @openai/codex@0.144.4 @github/copilot @earendil-works/pi-coding-agent@0.80.6
+
+# Trusted Autopod Pi worker extension
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml /opt/autopod/
+COPY tsconfig.base.json /opt/autopod/tsconfig.base.json
+COPY packages/pi-worker/package.json /opt/autopod/packages/pi-worker/package.json
+COPY packages/pi-worker/tsconfig.json /opt/autopod/packages/pi-worker/tsconfig.json
+COPY packages/pi-worker/src /opt/autopod/packages/pi-worker/src
+RUN cd /opt/autopod \
+    && pnpm --filter @autopod/pi-worker install --frozen-lockfile \
+    && pnpm --filter @autopod/pi-worker build \
+    && cd /opt/autopod/packages/pi-worker \
+    && npm install -g . \
+    && command -v pi \
+    && test -f "$(npm root -g)/@autopod/pi-worker/dist/index.js" \
+    && rm -rf node_modules /root/.npm
+
+# Pre-install Playwright + Chromium with all system dependencies.
+# `playwright install --with-deps` installs the complete set of OS packages
+# that Chromium needs — don't hand-pick them, Playwright knows best.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN npm install -g playwright && \
+    playwright install --with-deps chromium && \
+    chmod -R 755 /opt/pw-browsers
+
+# Working directory
+WORKDIR /workspace
+RUN chown autopod:autopod /workspace
+
+USER autopod
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+# Allow bare imports of globally installed packages (e.g. playwright in validation scripts).
+# This image is FROM node:24-slim, whose npm global prefix is /usr/local — globals live in
+# /usr/local/lib/node_modules (NOT /usr/lib, which is where the NodeSource-based go124-pw image
+# puts them). Pointing NODE_PATH at /usr/lib here would make bare require() of globals (and the
+# playwright launch check below) fail.
+ENV NODE_PATH=/usr/local/lib/node_modules
+# Turborepo cache dir — /workspace/.turbo may not be writable depending on how
+# the worktree is mounted, so use /tmp which is always writable.
+ENV TURBO_CACHE_DIR=/tmp/.turbo
+# Point node-gyp at local Node headers so native addon rebuilds work offline
+# (critical for deny-all network policy containers).
+ENV npm_config_nodedir=/usr/local
+# Write nodedir to user npmrc so node-gyp finds it regardless of env propagation
+RUN echo "nodedir=/usr/local" >> /home/autopod/.npmrc
+# Fail base-image builds when the cached Playwright browser cannot launch as the runtime user.
+RUN node -e "const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); await browser.close(); })().catch((err) => { console.error(err); process.exit(1); });"
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:${PORT:-3000}/health || exit 1

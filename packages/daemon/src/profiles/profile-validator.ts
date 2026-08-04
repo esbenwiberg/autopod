@@ -16,6 +16,8 @@ const VALID_TEMPLATES: StackTemplate[] = [
   'node22',
   'node22-pw',
   'node22-pw-pg',
+  'node24',
+  'node24-pw',
   'dotnet9',
   'dotnet10',
   'dotnet10-go',
