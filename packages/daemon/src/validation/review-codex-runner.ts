@@ -195,15 +195,20 @@ async function collectStreamingExec(
   if (!timeout) return completed;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<never>((_resolve, reject) => {
+  const timedOut = new Promise<'timeout'>((resolve) => {
     timer = setTimeout(() => {
-      void handle.kill().catch(() => {});
-      reject(new Error(`container review timed out after ${timeout}ms`));
+      resolve('timeout');
     }, timeout);
   });
 
   try {
-    return await Promise.race([completed, timedOut]);
+    const outcome = await Promise.race([completed, timedOut]);
+    if (outcome === 'timeout') {
+      // Do not start a retry until the remote exec has received termination.
+      await handle.kill();
+      throw new Error(`container review timed out after ${timeout}ms`);
+    }
+    return outcome;
   } finally {
     if (timer) clearTimeout(timer);
   }

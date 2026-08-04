@@ -12340,6 +12340,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               // skip-validation update instead of continuing with stale s2.
               s2 = podRepo.getOrThrow(podId);
               if (isTerminalState(s2.status) || s2.status === 'killing') return;
+              if (
+                hoistedResult &&
+                isReviewInfrastructureOnlyFailure(hoistedResult) &&
+                !s2.skipValidation
+              ) {
+                emitActivityStatus(
+                  podId,
+                  `${reviewInfrastructureFailureLabel(hoistedResult)} during deeper review — moving to review required`,
+                );
+                await parkOnReviewInfrastructureFailure(s2);
+                return;
+              }
 
               if (hoistedResult && hoistedResult.overall === 'pass') {
                 // Deeper review resolved the false positives — use the hoisted result

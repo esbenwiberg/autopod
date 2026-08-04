@@ -180,8 +180,7 @@ export async function runReviewBatch(
       const axisStarted = Date.now();
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          const timeoutMs = remaining();
-          if (timeoutMs <= 0) throw new Error('frozen review council deadline exceeded');
+          if (remaining() <= 0) throw new Error('frozen review council deadline exceeded');
           options.onProgress?.({
             axis,
             attempt,
@@ -190,6 +189,10 @@ export async function runReviewBatch(
           });
           if (options.readHead && (await options.readHead()) !== options.packet.reviewedHead)
             throw new Error('reviewed HEAD changed during frozen batch');
+          // Head validation can itself consume wall-clock budget. Recompute
+          // immediately before the remotely timed reviewer call.
+          const timeoutMs = remaining();
+          if (timeoutMs <= 0) throw new Error('frozen review council deadline exceeded');
           const result = await options.execute(
             axisPrompt(options.packet, axis),
             `${options.packet.id}-${axis}-${attempt}`,
