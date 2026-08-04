@@ -82,11 +82,13 @@ import Testing
 @Test func validationProgressPropagatesLiveReviewCouncil() throws {
   var progress = ValidationProgress.initial(attempt: 2)
   let raw = try JSONDecoder().decode(RawSystemEvent.self, from: """
-  {"type":"pod.validation_phase_completed","timestamp":"2026-08-04T00:00:00Z","podId":"lonely-panther","phase":"review","phaseStatus":"fail","reviewResult":{"status":"fail","reasoning":"x","issues":[],"model":"m","screenshots":[],"diff":"","reviewBatch":{"id":"live-packet","diffHash":"d","reviewedHead":"h","promptVersion":"p","schemaVersion":"s","model":"m","axes":[],"candidates":[],"initialFindings":[],"accepted":[],"rejected":[],"merged":[],"synthesis":"model","durationMs":5}}}
+  {"type":"pod.validation_phase_completed","timestamp":"2026-08-04T00:00:00Z","podId":"lonely-panther","phase":"review","phaseStatus":"fail","reviewResult":{"status":"fail","reasoning":"x","issues":[],"model":"m","screenshots":[],"diff":"","reviewBatch":{"id":"live-packet","diffHash":"d","reviewedHead":"h","promptVersion":"p","schemaVersion":"s","model":"m","axes":[{"axis":"security_authority","status":"unavailable","attempts":1,"error":"Network unavailable"}],"candidates":[],"initialFindings":[],"accepted":[],"rejected":[],"merged":[],"synthesis":"model","durationMs":5,"infrastructureUnavailable":true}}}
   """.data(using: .utf8)!)
   progress.markCompleted(.review, result: ValidationPhaseResult(from: raw))
   #expect(progress.reviewDetail?.council?.id == "live-packet")
   #expect(progress.review.status == .failed)
+  #expect(reviewPhasePresentation(status: progress.review.status, council: progress.reviewDetail?.council).status == .failed)
+  #expect(progress.reviewDetail?.council?.axes.first?.error == "Network unavailable")
   #expect(validationShouldDisplayLiveProgress(podStatus: .complete, progress: progress, hasPersistedReviewCouncil: false))
   #expect(!validationShouldDisplayLiveProgress(podStatus: .complete, progress: progress, hasPersistedReviewCouncil: true))
 }

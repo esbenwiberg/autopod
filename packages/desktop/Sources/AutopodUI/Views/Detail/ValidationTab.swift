@@ -29,6 +29,24 @@ public func validationHistoryReviewCouncil(_ response: ValidationResponse) -> Re
   reviewCouncil(from: response.taskReview)
 }
 
+/// The Review verdict and Council availability are separate signals: unavailable axes must not
+/// downgrade a completed failed review to skipped.
+public struct ReviewPhasePresentation: Sendable, Equatable {
+  public let status: PhaseStatus
+  public let councilUnavailableReason: String?
+}
+
+public func reviewPhasePresentation(
+  status: PhaseStatus,
+  council: ReviewCouncil?
+) -> ReviewPhasePresentation {
+  ReviewPhasePresentation(
+    status: status,
+    councilUnavailableReason: council?.infrastructureUnavailable == true
+      ? "infrastructure unavailable" : nil
+  )
+}
+
 /// The immutable inputs rendered by ValidationTab's established legacy Review branch.
 /// Keeping this selection outside the view makes the no-council compatibility path testable.
 public struct LegacyReviewPresentation: Sendable, Equatable {
@@ -439,10 +457,6 @@ public struct ValidationTab: View {
   }
 
   private func phaseState(_ phase: ValidationPhase) -> ValidationPhaseState {
-    if phase == .review, displayedReviewCouncil?.infrastructureUnavailable == true,
-       progress?.review.status != .running {
-      return ValidationPhaseState(status: .skipped)
-    }
     progress?.state(for: phase) ?? ValidationPhaseState(status: phaseStatus(phase))
   }
 
@@ -464,10 +478,10 @@ public struct ValidationTab: View {
         }
         return nil
       case .review:
-        if displayedReviewCouncil?.infrastructureUnavailable == true {
-          return "infrastructure unavailable"
-        }
-        return nil
+        return reviewPhasePresentation(
+          status: phaseStatus(phase),
+          council: displayedReviewCouncil
+        ).councilUnavailableReason
       default:
         if let dur = p.state(for: phase).duration {
           return formatDuration(dur)
@@ -488,8 +502,10 @@ public struct ValidationTab: View {
         }
         return nil
       case .review:
-        return displayedReviewCouncil?.infrastructureUnavailable == true
-          ? "infrastructure unavailable" : nil
+        return reviewPhasePresentation(
+          status: phaseStatus(phase),
+          council: displayedReviewCouncil
+        ).councilUnavailableReason
       case .setup:
         return nil
       default:
@@ -1799,6 +1815,7 @@ public struct ValidationTab: View {
     let reqs: [RequirementCheckDetail]? = detail?.requirementsCheck ?? displayedChecks?.requirementsCheck
     let screenshots: [ScreenshotRef] = detail?.screenshots ?? displayedChecks?.taskReviewScreenshots ?? []
     let council = displayedReviewCouncil
+    let presentation = reviewPhasePresentation(status: status, council: council)
     let broadReviewIssues = distinctBroadReviewIssues(issues, council: council)
     let legacyPresentation = legacyReviewPresentation(
       council: council,
@@ -1810,10 +1827,10 @@ public struct ValidationTab: View {
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(
-        status: council?.infrastructureUnavailable == true ? .skipped : status,
+        status: presentation.status,
         passLabel: detail?.status == "uncertain" ? "Review uncertain — treated as pass" : "AI review passed",
         failLabel: "Review flagged issues",
-        skipLabel: council?.infrastructureUnavailable == true
+        skipLabel: presentation.councilUnavailableReason != nil
           ? "Review Council infrastructure unavailable"
           : reviewSkipLabel(kind: skipKind, reason: skipReason)
       )
