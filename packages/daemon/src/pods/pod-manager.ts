@@ -144,6 +144,7 @@ import type { PiRuntime } from '../runtimes/pi-runtime.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
+import { publishScreenshotArtifacts } from '../validation/screenshot-artifacts.js';
 import {
   buildGitHubImageUrl,
   collectFactScreenshots,
@@ -12430,16 +12431,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           let prUrl: string | null = s2.prUrl ?? null;
           const prManager = prManagerFactory ? prManagerFactory(profile) : null;
           if (prManager && s2.worktreePath && s2.options?.output !== 'branch') {
-            // Commit screenshots to the branch so they're visible in the PR
-            try {
-              await worktreeManager.commitFiles(
-                s2.worktreePath,
-                ['.autopod/screenshots'],
-                'chore: add validation screenshots',
-              );
-            } catch (err) {
-              logger.warn({ err, podId }, 'Failed to commit screenshots');
-            }
+            // Publish screenshots to their own ref so the PR body can embed them
+            // without the reviewed branch carrying a file the agent never wrote.
+            // ADO pods skip this entirely — they upload PR attachments instead.
+            const screenshotBranch =
+              profile.prProvider === 'ado'
+                ? null
+                : await publishScreenshotArtifacts({
+                    worktreeManager,
+                    logger,
+                    podId,
+                    worktreePath: s2.worktreePath,
+                    pat: await resolveGitCredential(profile),
+                  });
 
             // Push branch so `gh pr create --head` can reference it. If sync-back failed
             // earlier in this validation run, tighten the deletion guard so a ghost
@@ -12504,21 +12508,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             }
 
             // Build screenshot refs for the PR body, provider-aware.
-            // GitHub: embed raw GitHub URLs (committed screenshots on the branch).
+            // GitHub: embed raw GitHub URLs against the artifact ref. Requires the
+            //         ref to exist — screenshotBranch is null when the push failed,
+            //         and linking to a missing ref would only render broken images.
             // ADO: pass stored on-disk refs so AdoPrManager can upload them as
             //      PR attachments and embed the returned attachment URLs instead
             //      of GitHub URLs that would 404 on ADO reviewers.
             const isAdoPod = profile.prProvider === 'ado';
             const repoUrlForScreenshots = profile.repoUrl;
             const screenshotRefs =
-              !isAdoPod && repoUrlForScreenshots
+              !isAdoPod && repoUrlForScreenshots && screenshotBranch
                 ? result.smoke.pages
                     .filter((p) => p.screenshotPath)
                     .map((p) => ({
                       pagePath: p.path,
                       imageUrl: buildGitHubImageUrl(
                         repoUrlForScreenshots,
-                        s2.branch,
+                        screenshotBranch,
                         p.screenshotPath.replace(/^\/workspace\//, ''),
                       ),
                     }))
@@ -13103,14 +13109,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           let prUrl: string | null = s2.prUrl ?? null;
           const prManager = prManagerFactory ? prManagerFactory(profile) : null;
           if (prManager && s2.worktreePath && s2.options?.output !== 'branch') {
-            try {
-              await worktreeManager.commitFiles(
-                s2.worktreePath,
-                ['.autopod/screenshots'],
-                'chore: add validation screenshots',
-              );
-            } catch (err) {
-              logger.warn({ err, podId }, 'Failed to commit screenshots');
+            // Same artifact ref as the validation-pass path — never the reviewed
+            // branch. This path builds no PR body, so the ref is simply where a
+            // reviewer can find the screenshots.
+            if (profile.prProvider !== 'ado') {
+              await publishScreenshotArtifacts({
+                worktreeManager,
+                logger,
+                podId,
+                worktreePath: s2.worktreePath,
+                pat: await resolveGitCredential(profile),
+              });
             }
 
             try {

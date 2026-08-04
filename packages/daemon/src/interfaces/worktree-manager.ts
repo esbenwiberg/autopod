@@ -143,6 +143,17 @@ export interface WorktreeResult {
   startCommitSha: string;
 }
 
+export interface PushArtifactBranchConfig {
+  worktreePath: string;
+  /** Worktree-relative paths to publish. Ignored files are staged anyway. */
+  paths: string[];
+  /** Full branch name to force-push, e.g. `autopod/screenshots/<podId>`. */
+  branch: string;
+  commitMessage: string;
+  /** Explicit PAT — the in-memory cache may be cold after a daemon restart. */
+  pat?: string;
+}
+
 export interface WorktreeManager {
   create(config: WorktreeCreateConfig): Promise<WorktreeResult>;
   /** Install daemon-managed commit exclusions. Throws when protection cannot be proven. */
@@ -170,6 +181,12 @@ export interface WorktreeManager {
   getBranchDiff?(config: BranchDiffConfig): Promise<string>;
   /** Stage and commit specific paths (e.g. screenshot artifacts). No-op if nothing to commit. */
   commitFiles(worktreePath: string, paths: string[], message: string): Promise<void>;
+  /**
+   * Publish daemon-generated artifacts to a dedicated ref without touching the
+   * pod's branch, index or HEAD. Resolves true when the ref was pushed and the
+   * files are fetchable from it.
+   */
+  pushArtifactBranch?(config: PushArtifactBranchConfig): Promise<boolean>;
   /** Stage all changes and commit. Returns true if a commit was created, false if working tree was clean. */
   commitPendingChanges(
     worktreePath: string,

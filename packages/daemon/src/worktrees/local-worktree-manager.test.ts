@@ -27,13 +27,17 @@ function fakeGitHubAuth(token = 'daemon-gh-token'): DaemonGitHubAuth {
 // Hoist mock fns so they're available inside vi.mock factories
 // ---------------------------------------------------------------------------
 
-const { execFileMock, fsMkdirMock, fsRmMock, fsReadFileMock, fsWriteFileMock } = vi.hoisted(() => ({
-  execFileMock: vi.fn(),
-  fsMkdirMock: vi.fn().mockResolvedValue(undefined),
-  fsRmMock: vi.fn().mockResolvedValue(undefined),
-  fsReadFileMock: vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
-  fsWriteFileMock: vi.fn().mockResolvedValue(undefined),
-}));
+const { execFileMock, fsMkdirMock, fsMkdtempMock, fsRmMock, fsReadFileMock, fsWriteFileMock } =
+  vi.hoisted(() => ({
+    execFileMock: vi.fn(),
+    fsMkdirMock: vi.fn().mockResolvedValue(undefined),
+    fsMkdtempMock: vi.fn().mockResolvedValue('/tmp/autopod-artifact-xyz'),
+    fsRmMock: vi.fn().mockResolvedValue(undefined),
+    fsReadFileMock: vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
+    fsWriteFileMock: vi.fn().mockResolvedValue(undefined),
+  }));
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -44,12 +48,14 @@ vi.mock('node:fs/promises', async () => {
   return {
     default: {
       mkdir: fsMkdirMock,
+      mkdtemp: fsMkdtempMock,
       rm: fsRmMock,
       access: vi.fn().mockResolvedValue(undefined),
       readFile: fsReadFileMock,
       writeFile: fsWriteFileMock,
     },
     mkdir: fsMkdirMock,
+    mkdtemp: fsMkdtempMock,
     rm: fsRmMock,
     access: vi.fn().mockResolvedValue(undefined),
     readFile: fsReadFileMock,
@@ -1556,6 +1562,130 @@ describe('LocalWorktreeManager', () => {
         c[1]?.join(' ').includes('commit'),
       );
       expect(commitCalls).toHaveLength(0);
+    });
+  });
+
+  describe('pushArtifactBranch', () => {
+    const baseConfig = {
+      worktreePath: '/tmp/worktree',
+      paths: ['.autopod/screenshots'],
+      branch: 'autopod/screenshots/abc12345',
+      commitMessage: 'chore: validation screenshots for pod abc12345',
+      pat: 'ghp_test',
+    };
+
+    function setupHappyPath() {
+      setupExecFileMock({
+        'rev-parse --git-common-dir': { stdout: '/tmp/bare-repo.git\n' },
+        'remote get-url origin': { stdout: 'https://github.com/org/repo.git\n' },
+        'read-tree --empty': { stdout: '' },
+        add: { stdout: '' },
+        'ls-files': { stdout: '.autopod/screenshots/root.png\n' },
+        'write-tree': { stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' },
+        'commit-tree': { stdout: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n' },
+        push: { stdout: '' },
+      });
+    }
+
+    function gitCalls(): string[] {
+      return execFileMock.mock.calls.map((c: string[][]) => c[1]?.join(' ') ?? '');
+    }
+
+    function envFor(fragment: string): Record<string, string> | undefined {
+      const call = execFileMock.mock.calls.find((c: unknown[]) =>
+        (c[1] as string[] | undefined)?.join(' ').includes(fragment),
+      );
+      return (call?.[2] as { env?: Record<string, string> } | undefined)?.env;
+    }
+
+    it('is a no-op when there are no paths', async () => {
+      expect(await manager.pushArtifactBranch({ ...baseConfig, paths: [] })).toBe(false);
+      expect(execFileMock).not.toHaveBeenCalled();
+    });
+
+    it('pushes the artifact commit to the requested ref', async () => {
+      setupHappyPath();
+      expect(await manager.pushArtifactBranch(baseConfig)).toBe(true);
+
+      const push = gitCalls().find((c) => c.startsWith('push'));
+      expect(push).toContain('--force');
+      // The commit-tree sha is pushed, never HEAD — HEAD is the agent's work.
+      expect(push).toContain(
+        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:refs/heads/autopod/screenshots/abc12345',
+      );
+      expect(push).not.toContain('HEAD');
+    });
+
+    it('builds the tree in a throwaway index outside the worktree', async () => {
+      setupHappyPath();
+      await manager.pushArtifactBranch(baseConfig);
+
+      // A shared index would leave the pod's staged state altered, so a later
+      // auto-commit would sweep the screenshots onto the reviewed branch anyway.
+      const indexFile = envFor('write-tree')?.GIT_INDEX_FILE;
+      expect(indexFile).toBe('/tmp/autopod-artifact-xyz/index');
+      expect(indexFile).not.toContain('/tmp/worktree');
+      expect(fsRmMock).toHaveBeenCalledWith(
+        '/tmp/autopod-artifact-xyz',
+        expect.objectContaining({ recursive: true }),
+      );
+    });
+
+    it('never mutates the pod branch, index or HEAD', async () => {
+      setupHappyPath();
+      await manager.pushArtifactBranch(baseConfig);
+
+      const calls = gitCalls();
+      expect(calls.some((c) => c.startsWith('commit '))).toBe(false);
+      expect(calls.some((c) => c.includes('checkout'))).toBe(false);
+      expect(calls.some((c) => c.includes('update-ref'))).toBe(false);
+      expect(calls.some((c) => c.includes('reset'))).toBe(false);
+    });
+
+    it('commits with an explicit identity so a host without git config still works', async () => {
+      setupHappyPath();
+      await manager.pushArtifactBranch(baseConfig);
+      expect(envFor('commit-tree')?.GIT_COMMITTER_EMAIL).toBe('autopod@autopod.local');
+    });
+
+    it('force-adds so daemon-managed excludes cannot silently drop the screenshots', async () => {
+      setupHappyPath();
+      await manager.pushArtifactBranch(baseConfig);
+      const add = gitCalls().find((c) => c.startsWith('add'));
+      expect(add).toBe('add --force -- .autopod/screenshots');
+    });
+
+    it('does not publish an empty ref when nothing was collected', async () => {
+      setupExecFileMock({
+        'rev-parse --git-common-dir': { stdout: '/tmp/bare-repo.git\n' },
+        'remote get-url origin': { stdout: 'https://github.com/org/repo.git\n' },
+        'read-tree --empty': { stdout: '' },
+        add: { stdout: '' },
+        'ls-files': { stdout: '\n' },
+      });
+
+      expect(await manager.pushArtifactBranch(baseConfig)).toBe(false);
+      expect(gitCalls().some((c) => c.startsWith('push'))).toBe(false);
+    });
+
+    it('reports failure instead of throwing — screenshots are never a gate', async () => {
+      setupExecFileMock({
+        'rev-parse --git-common-dir': { stdout: '/tmp/bare-repo.git\n' },
+        'remote get-url origin': { stdout: 'https://github.com/org/repo.git\n' },
+        'read-tree --empty': { stdout: '' },
+        add: { stdout: '' },
+        'ls-files': { stdout: '.autopod/screenshots/root.png\n' },
+        'write-tree': { stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' },
+        'commit-tree': { stdout: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n' },
+        push: { error: new Error('remote rejected'), stderr: 'protected branch' },
+      });
+
+      expect(await manager.pushArtifactBranch(baseConfig)).toBe(false);
+      // Temp dir still cleaned up on the failure path.
+      expect(fsRmMock).toHaveBeenCalledWith(
+        '/tmp/autopod-artifact-xyz',
+        expect.objectContaining({ recursive: true }),
+      );
     });
   });
 
