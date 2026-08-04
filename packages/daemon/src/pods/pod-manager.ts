@@ -12331,7 +12331,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
                 }
                 // Persist the second opinion even when it remains blocking.
                 podRepo.update(podId, { lastValidationResult: hoistedResult });
-                validationRepo?.insert(podId, attempt, hoistedResult);
+                // The first pass for this attempt is already recorded. Replace
+                // it so prior-batch lookup remains deterministic by attempt.
+                validationRepo?.updateResult(podId, attempt, hoistedResult);
               } catch (err) {
                 logger.warn({ err, podId }, 'Auto-hoist deeper review failed');
               }

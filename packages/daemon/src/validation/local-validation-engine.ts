@@ -3632,6 +3632,7 @@ async function runTaskReview(
 function isReviewInfrastructureFailure(
   reviewRun: Awaited<ReturnType<typeof runTaskReview>>,
 ): boolean {
+  if (reviewRun.result?.reviewBatch?.infrastructureUnavailable) return true;
   if (reviewRun.result !== null || !reviewRun.skipReason) return false;
   return (
     reviewRun.skipReason.startsWith('Review timed out:') ||
