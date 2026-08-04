@@ -82,11 +82,6 @@ function isTaskReviewIssueDismissed(
     issue.startsWith('[REVIEW OVERFLOW]')
   )
     return false;
-  // Overrides persisted before council ledgers existed use the rendered issue's
-  // task_review fingerprint. Keep accepting that identity after canonical
-  // semantic IDs become available for the same issue.
-  if (isDismissed(dismissedIds, 'task_review', issue)) return true;
-
   const canonical = review.reviewBatch?.ledger?.filter((entry) => {
     if (entry.state === 'fixed') return false;
     const finding = entry.finding;
@@ -99,9 +94,15 @@ function isTaskReviewIssueDismissed(
   // A rendered issue can represent multiple semantic council findings. It is
   // safe to remove that single rendered line only after every represented
   // semantic finding has a human dismissal.
-  if (canonical && canonical.length > 0)
-    return canonical.every((entry) => dismissedIds.has(entry.semanticId));
-  return false;
+  if (canonical && canonical.length > 0) {
+    if (canonical.every((entry) => dismissedIds.has(entry.semanticId))) return true;
+    // A legacy rendered-text override can safely stand in for a canonical ID
+    // only when that rendered line represents exactly one active finding.
+    return canonical.length === 1 && isDismissed(dismissedIds, 'task_review', issue);
+  }
+  // Packets persisted before canonical ledgers existed retain their historical
+  // task_review fingerprint behavior.
+  return isDismissed(dismissedIds, 'task_review', issue);
 }
 
 /**

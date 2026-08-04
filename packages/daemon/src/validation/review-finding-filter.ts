@@ -201,7 +201,13 @@ export interface ParsedReviewLike {
   reasoning: string;
   issues: string[];
   firstGateOverflow?: { reportedCount: number; retainedFindingCount: number };
-  firstGateFindings?: Array<{ id: string; source: 'initial-review'; issue: string }>;
+  firstGateFindings?: Array<{
+    id: string;
+    source: 'initial-review';
+    issue: string;
+    /** Unpersisted source text used only for deterministic diff filtering. */
+    filterIssue?: string;
+  }>;
   requirementsCheck?: Array<{ criterion: string; met: boolean; note?: string }>;
   deviationsAssessment?: {
     disclosedDeviations: Array<{
@@ -227,7 +233,33 @@ export function applyDiffFilterToParsed<T extends ParsedReviewLike>(
 ): T | null {
   if (!parsed) return parsed;
 
-  const filtered = filterOutOfDiffFindings(parsed.issues, diff);
+  let filtered: FilterResult;
+  let filteredFirstGateFindings = parsed.firstGateFindings;
+  if (parsed.firstGateFindings) {
+    filteredFirstGateFindings = [];
+    const droppedExamples: string[] = [];
+    let droppedCount = 0;
+    for (const finding of parsed.firstGateFindings) {
+      const findingResult = filterOutOfDiffFindings([finding.filterIssue ?? finding.issue], diff);
+      if (findingResult.droppedCount === 0) filteredFirstGateFindings.push(finding);
+      else {
+        droppedCount++;
+        if (droppedExamples.length < 5) droppedExamples.push(finding.issue);
+      }
+    }
+    const trailingIssues = parsed.issues.slice(parsed.firstGateFindings.length);
+    const trailingResult = filterOutOfDiffFindings(trailingIssues, diff);
+    filtered = {
+      issues: [
+        ...filteredFirstGateFindings.map((finding) => finding.issue),
+        ...trailingResult.issues,
+      ],
+      droppedCount: droppedCount + trailingResult.droppedCount,
+      droppedExamples: [...droppedExamples, ...trailingResult.droppedExamples].slice(0, 5),
+    };
+  } else {
+    filtered = filterOutOfDiffFindings(parsed.issues, diff);
+  }
   if (filtered.droppedCount === 0) return parsed;
 
   log?.warn(
@@ -245,17 +277,10 @@ export function applyDiffFilterToParsed<T extends ParsedReviewLike>(
   const shouldFlipStatus =
     parsed.status === 'fail' && filtered.issues.length === 0 && reqsAllMet && noUndisclosed;
 
-  const keptIssues = new Set(filtered.issues);
   return {
     ...parsed,
     issues: filtered.issues,
-    ...(parsed.firstGateFindings
-      ? {
-          firstGateFindings: parsed.firstGateFindings.filter((finding) =>
-            keptIssues.has(finding.issue),
-          ),
-        }
-      : {}),
+    ...(filteredFirstGateFindings ? { firstGateFindings: filteredFirstGateFindings } : {}),
     status: shouldFlipStatus ? 'pass' : parsed.status,
     reasoning: shouldFlipStatus
       ? `${parsed.reasoning} [auto-pass: all flagged findings cited code outside the diff and were discarded]`

@@ -13,6 +13,7 @@ const MAX_CLOSURE_SOURCE_IDS = 16;
 const MAX_CLOSURE_PRIOR_BYTES = 40_000;
 const MAX_CLOSURE_FIELD_BYTES = 4_000;
 const MAX_CLOSURE_ID_BYTES = 256;
+const MAX_CLOSURE_RESPONSE_BYTES = 1_000_000;
 
 function boundedIdentifier(value: string): string {
   // IDs are protocol keys, not prose. Sanitizing an otherwise valid semantic
@@ -255,6 +256,8 @@ export function parseClosureVerification(
   frozenEvidence?: string,
 ): ReviewClosureVerification {
   try {
+    if (Buffer.byteLength(stdout, 'utf8') > MAX_CLOSURE_RESPONSE_BYTES)
+      throw new Error('closure response exceeds bounded output size');
     const parsed: unknown = JSON.parse(stdout);
     const raw =
       parsed && typeof parsed === 'object' ? (parsed as { decisions?: unknown }).decisions : null;

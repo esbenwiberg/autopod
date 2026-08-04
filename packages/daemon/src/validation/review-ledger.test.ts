@@ -248,4 +248,16 @@ describe('reconcileReviewLedger', () => {
     ).toBe('invalid');
     expect(parseClosureVerification('{"decisions":"not-an-array"}', prior).status).toBe('invalid');
   });
+
+  it('parses complete bounded closure JSON without slicing protocol records', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A')], undefined);
+    const response = JSON.stringify({
+      padding: 'x'.repeat(250_000),
+      decisions: [{ semanticId: semantic('A'), fixed: false }],
+    });
+    expect(parseClosureVerification(response, prior).status).toBe('completed');
+    expect(parseClosureVerification(`${response}${' '.repeat(800_000)}`, prior).status).toBe(
+      'invalid',
+    );
+  });
 });

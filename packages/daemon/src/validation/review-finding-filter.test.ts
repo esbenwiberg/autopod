@@ -249,6 +249,34 @@ describe('applyDiffFilterToParsed', () => {
     );
   });
 
+  it('filters identical bounded text by each canonical finding source', () => {
+    const boundedIssue = '[HIGH] bounded finding detail';
+    const parsed: ParsedReviewLike = {
+      status: 'fail',
+      reasoning: 'two distinct findings',
+      issues: [boundedIssue, boundedIssue],
+      firstGateFindings: [
+        {
+          id: 'initial-aaaaaaaaaaaaaaaa',
+          source: 'initial-review',
+          issue: boundedIssue,
+          filterIssue: '[HIGH] Frameworks/PF.Graph/GraphRequests.cs:110 broken',
+        },
+        {
+          id: 'initial-bbbbbbbbbbbbbbbb',
+          source: 'initial-review',
+          issue: boundedIssue,
+          filterIssue: '[HIGH] Client/package-lock.json integrity broken',
+        },
+      ],
+    };
+    const result = applyDiffFilterToParsed(parsed, DIFF_TWO_FILES, undefined, 1);
+    expect(result?.issues).toEqual([boundedIssue]);
+    expect(result?.firstGateFindings?.map((finding) => finding.id)).toEqual([
+      'initial-bbbbbbbbbbbbbbbb',
+    ]);
+  });
+
   it('flips fail→pass when filtering removes every reason to fail', () => {
     const parsed: ParsedReviewLike = {
       status: 'fail',

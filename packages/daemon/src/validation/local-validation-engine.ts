@@ -167,6 +167,14 @@ function initialBroadFindingId(issue: string): string {
   return `initial-${createHash('sha256').update(normalized).digest('hex').slice(0, 16)}`;
 }
 
+function persistedFirstGateFindings(
+  findings:
+    | Array<{ id: string; source: 'initial-review'; issue: string; filterIssue?: string }>
+    | undefined,
+): TaskReviewResult['firstGateFindings'] {
+  return findings?.map(({ id, source, issue }) => ({ id, source, issue }));
+}
+
 export function initialBroadFindings(review: TaskReviewResult) {
   const findings = [];
   const seen = new Set<string>();
@@ -827,11 +835,7 @@ export function createLocalValidationEngine(
                       closureTokenUsage,
                       response.tokenUsage,
                     );
-                    const parsed = parseClosureVerification(
-                      response.stdout.slice(0, 200_000),
-                      chunk,
-                      repair.diff,
-                    );
+                    const parsed = parseClosureVerification(response.stdout, chunk, repair.diff);
                     if (parsed.status !== 'completed') {
                       closure = parsed;
                       break;
@@ -3365,7 +3369,7 @@ async function runTaskReview(
           status: tier1Parsed.status,
           reasoning: tier1Parsed.reasoning,
           issues: tier1Parsed.issues,
-          firstGateFindings: tier1Parsed.firstGateFindings,
+          firstGateFindings: persistedFirstGateFindings(tier1Parsed.firstGateFindings),
           firstGateOverflow: tier1Parsed.firstGateOverflow,
           model: config.reviewerModel,
           screenshots: [],
@@ -3386,7 +3390,7 @@ async function runTaskReview(
             status: tier1Parsed.status,
             reasoning: tier1Parsed.reasoning,
             issues: tier1Parsed.issues,
-            firstGateFindings: tier1Parsed.firstGateFindings,
+            firstGateFindings: persistedFirstGateFindings(tier1Parsed.firstGateFindings),
             firstGateOverflow: tier1Parsed.firstGateOverflow,
             model: config.reviewerModel,
             screenshots: [],
@@ -3441,7 +3445,7 @@ async function runTaskReview(
             status: tier2Parsed.status,
             reasoning: `[Tier 2 tool-use review] ${tier2Parsed.reasoning}`,
             issues: tier2Parsed.issues,
-            firstGateFindings: tier2Parsed.firstGateFindings,
+            firstGateFindings: persistedFirstGateFindings(tier2Parsed.firstGateFindings),
             firstGateOverflow: tier2Parsed.firstGateOverflow,
             model: config.reviewerModel,
             screenshots: [],
@@ -3485,7 +3489,7 @@ async function runTaskReview(
                 status: tier3Parsed.status,
                 reasoning: `[Tier 3 agentic review] ${tier3Parsed.reasoning}`,
                 issues: tier3Parsed.issues,
-                firstGateFindings: tier3Parsed.firstGateFindings,
+                firstGateFindings: persistedFirstGateFindings(tier3Parsed.firstGateFindings),
                 firstGateOverflow: tier3Parsed.firstGateOverflow,
                 model: config.reviewerModel,
                 screenshots: [],
@@ -3516,7 +3520,7 @@ async function runTaskReview(
           status: bestParsed.status,
           reasoning: bestParsed.reasoning,
           issues: bestParsed.issues,
-          firstGateFindings: bestParsed.firstGateFindings,
+          firstGateFindings: persistedFirstGateFindings(bestParsed.firstGateFindings),
           firstGateOverflow: bestParsed.firstGateOverflow,
           model: config.reviewerModel,
           screenshots: [],
@@ -3542,7 +3546,7 @@ async function runTaskReview(
           status: tier1Parsed.status,
           reasoning: tier1Parsed.reasoning,
           issues: tier1Parsed.issues,
-          firstGateFindings: tier1Parsed.firstGateFindings,
+          firstGateFindings: persistedFirstGateFindings(tier1Parsed.firstGateFindings),
           firstGateOverflow: tier1Parsed.firstGateOverflow,
           model: config.reviewerModel,
           screenshots: [],
@@ -3807,7 +3811,12 @@ export function parseReviewJson(raw: string): {
   requirementsCheck?: Array<{ criterion: string; met: boolean; note?: string }>;
   deviationsAssessment?: DeviationsAssessment;
   firstGateOverflow?: { reportedCount: number; retainedFindingCount: number };
-  firstGateFindings?: Array<{ id: string; source: 'initial-review'; issue: string }>;
+  firstGateFindings?: Array<{
+    id: string;
+    source: 'initial-review';
+    issue: string;
+    filterIssue?: string;
+  }>;
 } | null {
   // Strip markdown code fences if present
   let cleaned = raw
@@ -3849,7 +3858,12 @@ export function parseReviewJson(raw: string): {
     const deviationsAssessment = parseDeviationsAssessment(parsed.deviationsAssessment);
 
     const normalizedIssues: string[] = [];
-    const firstGateFindings: Array<{ id: string; source: 'initial-review'; issue: string }> = [];
+    const firstGateFindings: Array<{
+      id: string;
+      source: 'initial-review';
+      issue: string;
+      filterIssue: string;
+    }> = [];
     const seenFindingIds = new Set<string>();
     const findingIdByIssue = new Map<string, string>();
     for (const rawIssue of parsed.issues as unknown[]) {
@@ -3865,7 +3879,12 @@ export function parseReviewJson(raw: string): {
       if (normalizedIssues.length < MAX_TASK_REVIEW_ISSUES) {
         const boundedIssue = boundedReviewPacketString(issue, MAX_INITIAL_SEMANTIC_BYTES);
         normalizedIssues.push(boundedIssue);
-        firstGateFindings.push({ id: findingId, source: 'initial-review', issue: boundedIssue });
+        firstGateFindings.push({
+          id: findingId,
+          source: 'initial-review',
+          issue: boundedIssue,
+          filterIssue: issue,
+        });
       }
     }
     const overflowed = seenFindingIds.size > MAX_TASK_REVIEW_ISSUES;

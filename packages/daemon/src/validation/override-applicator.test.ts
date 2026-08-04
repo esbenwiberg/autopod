@@ -95,6 +95,39 @@ describe('applyOverrides', () => {
       ]).taskReview?.issues,
     ).toEqual([]);
   });
+
+  it('does not let one legacy fingerprint dismiss multiple canonical findings', () => {
+    const issue = '[HIGH] a.ts:1 — same claim';
+    const result = makeBaseResult({
+      taskReview: {
+        status: 'fail',
+        reasoning: 'blocked',
+        issues: [issue],
+        reviewBatch: {
+          ledger: ['one', 'two'].map((id) => ({
+            semanticId: `review:${id}`,
+            state: 'open' as const,
+            finding: {
+              id,
+              axis: 'tests_integration' as const,
+              severity: 'HIGH' as const,
+              path: 'a.ts',
+              line: 1,
+              claim: 'same claim',
+              evidence: 'e',
+              remediation: 'r',
+              confidence: 1,
+            },
+            priorSourceIds: [],
+            currentSourceIds: [id],
+          })),
+        },
+      },
+    });
+    expect(applyOverrides(result, [makeDismiss('task_review', issue)]).taskReview?.issues).toEqual([
+      issue,
+    ]);
+  });
   it('returns result unchanged when no overrides', () => {
     const result = makeBaseResult();
     expect(applyOverrides(result, [])).toEqual(result);

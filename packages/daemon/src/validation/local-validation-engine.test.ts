@@ -1135,6 +1135,35 @@ describe('validate() — hasWebUi gating', () => {
     expect(findings[0]?.id).not.toBe(findings[1]?.id);
   });
 
+  it('carries distinct long first-gate IDs through the production review ledger', async () => {
+    const prefix = 'shared semantic prefix '.padEnd(32_000, 'x');
+    vi.mocked(runClaudeCli).mockResolvedValue({
+      stdout: JSON.stringify({
+        status: 'fail',
+        reasoning: 'two blockers',
+        issues: [`${prefix} A`, `${prefix} B`],
+      }),
+    });
+    mockCouncil();
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: changedDiff,
+        validationSuite: 'full',
+        startCommand: '',
+        smokePages: [],
+      }),
+    );
+    expect(result.taskReview?.firstGateFindings?.[0]?.issue).toBe(
+      result.taskReview?.firstGateFindings?.[1]?.issue,
+    );
+    expect(new Set(result.taskReview?.firstGateFindings?.map((finding) => finding.id)).size).toBe(
+      2,
+    );
+    expect(result.taskReview?.reviewBatch?.ledger).toHaveLength(2);
+    expect(result.taskReview?.firstGateFindings?.[0]).not.toHaveProperty('filterIssue');
+  }, 15_000);
+
   it('retains first-gate findings beyond the frozen packet limit in the ledger', async () => {
     vi.mocked(runClaudeCli).mockResolvedValue({
       stdout: JSON.stringify({
