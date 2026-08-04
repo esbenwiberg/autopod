@@ -28,6 +28,7 @@ import type {
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
 import type { SandboxPortAuth } from './sandbox-api-client.js';
 import {
+  SANDBOX_TIER_MEMORY_BYTES,
   type SandboxApiClient,
   type SandboxExecOptions,
   type SandboxRegistryCredentials,
@@ -145,6 +146,21 @@ export class SandboxContainerManager implements ContainerManager {
     assertRegistryQualifiedImage(config.image);
 
     const tier = pickSandboxTier(config.memoryBytes, this.defaultTier);
+    const grantedMemoryBytes = SANDBOX_TIER_MEMORY_BYTES[tier];
+    // The platform's largest tier is 4 GB, so any bigger request is silently
+    // downgraded. Say so out loud — a clamped ceiling shows up much later as an
+    // allocation failure inside the agent's toolchain, and looks like a code bug.
+    if (config.memoryBytes && config.memoryBytes > grantedMemoryBytes) {
+      this.logger.warn(
+        {
+          podId: config.podId,
+          requestedMemoryGb: config.memoryBytes / 1024 ** 3,
+          grantedMemoryGb: grantedMemoryBytes / 1024 ** 3,
+          tier,
+        },
+        'Requested container memory exceeds the largest sandbox tier — clamped. Memory-hungry tooling may fail; use the docker execution target if it needs more.',
+      );
+    }
     const egressPolicy = egressPolicyForMode(config.networkPolicyMode, config.allowedHosts ?? []);
 
     const sandboxId = await this.client.createSandbox({

@@ -423,6 +423,32 @@ describe('SandboxContainerManager', () => {
       expect(client.created[0]?.tier).toBe('M');
     });
 
+    it('warns when the request exceeds the largest tier instead of clamping silently', async () => {
+      const client = new FakeSandboxApiClient();
+      const warn = vi.fn();
+      const loudLogger = { ...logger, warn } as unknown as typeof logger;
+      await new SandboxContainerManager(client, loudLogger).spawn({
+        ...baseConfig,
+        memoryBytes: 10 * 1024 * 1024 * 1024,
+      });
+      expect(client.created[0]?.tier).toBe('L');
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({ requestedMemoryGb: 10, grantedMemoryGb: 4, tier: 'L' }),
+        expect.stringContaining('exceeds the largest sandbox tier'),
+      );
+    });
+
+    it('does not warn when the request fits inside a tier', async () => {
+      const client = new FakeSandboxApiClient();
+      const warn = vi.fn();
+      const loudLogger = { ...logger, warn } as unknown as typeof logger;
+      await new SandboxContainerManager(client, loudLogger).spawn({
+        ...baseConfig,
+        memoryBytes: 2 * 1024 * 1024 * 1024,
+      });
+      expect(warn).not.toHaveBeenCalled();
+    });
+
     it('maps network policy + allowed hosts to an egress policy', async () => {
       const client = new FakeSandboxApiClient();
       await new SandboxContainerManager(client, logger).spawn({

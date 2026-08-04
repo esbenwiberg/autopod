@@ -1,11 +1,13 @@
 import type {
   ActionDefinition,
+  ExecutionTarget,
   InjectedMcpServer,
   InjectedSkill,
   Pod,
   Profile,
 } from '@autopod/shared';
 import { PROVIDER_FAILOVER_HANDOFF_CONTAINER_PATH } from '@autopod/shared';
+import { resolveContainerMemory } from '../containers/container-memory.js';
 import type { RelevantMemory } from './memory-selector.js';
 import { hasPendingProviderContinuation } from './recovery-context.js';
 import type { ResolvedSection } from './section-resolver.js';
@@ -177,7 +179,12 @@ export function generateSystemInstructions(
   generateCodeNavigationRules(lines, options?.injectedMcpServers ?? []);
 
   // Operating Environment section (adapts to profile config)
-  generateOperatingEnvironment(lines, profile, options?.availableActions ?? []);
+  generateOperatingEnvironment(
+    lines,
+    profile,
+    options?.availableActions ?? [],
+    pod.executionTarget,
+  );
 
   // MCP Servers section
   lines.push('## MCP Servers');
@@ -761,11 +768,36 @@ function generateOperatingEnvironment(
   lines: string[],
   profile: Profile,
   availableActions: ActionDefinition[],
+  executionTarget: ExecutionTarget,
 ): void {
   lines.push('## Operating Environment');
   lines.push('');
   lines.push('You are running inside an Autopod sandbox container with restricted access.');
   lines.push('');
+
+  // Resource section — state the RAM ceiling up front. Without it, an agent that
+  // hits a native allocation failure in its own toolchain has no way to tell an
+  // environment ceiling from a bug in its change, and burns a human escalation
+  // rediscovering a documented platform limit.
+  const memory = resolveContainerMemory(profile.containerMemoryGb, executionTarget);
+  if (memory.grantedGb !== null) {
+    lines.push('### Resources');
+    lines.push(`- Container memory limit: **${memory.grantedGb} GB**. This is a hard ceiling.`);
+    if (executionTarget === 'sandbox') {
+      lines.push(
+        `- ${memory.grantedGb} GB is the largest tier this execution target offers; it cannot be raised from inside the container or by the profile.`,
+      );
+    }
+    if (memory.clamped) {
+      lines.push(
+        `- The profile asked for ${memory.requestedGb} GB, but this target caps at ${memory.grantedGb} GB. Do not trust the profile's number.`,
+      );
+    }
+    lines.push(
+      '- If a tool dies with a native memory/allocation error (`Array buffer allocation failed`, `ENOMEM`, OOM kill, `Killed`), treat it as an environment blocker, not a defect in your change. Do not rewrite working code, downgrade dependencies, or edit tool configs to dodge it — verify the failure is independent of your diff, then report it via `report_blocker` and continue with the remaining checks.',
+    );
+    lines.push('');
+  }
 
   // Network section
   lines.push('### Network');
