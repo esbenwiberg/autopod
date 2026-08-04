@@ -249,6 +249,7 @@ public struct ValidationTab: View {
       lintOutput: lintOutput,
       sastOutput: sastOutput,
       reviewIssues: response.taskReview?.issues,
+      reviewCouncil: response.taskReview?.reviewBatch.map(ReviewCouncil.init),
       reviewReasoning: response.taskReview?.reasoning,
       reviewSkipReason: response.reviewSkipReason,
       reviewSkipKind: response.reviewSkipKind,
@@ -792,7 +793,10 @@ public struct ValidationTab: View {
     let passedFacts = factChecks.filter(\.passed).count
     let failedFacts = factChecks.filter { !$0.passed }.count
     let totalFacts = contract?.requiredFacts.count ?? factChecks.count
-    let reviewIssueCount = progress?.reviewDetail?.issues.count ?? displayedChecks?.reviewIssues?.count ?? 0
+    let reviewIssueCount = progress?.reviewDetail?.council?.activeCount
+      ?? displayedChecks?.reviewCouncil?.activeCount
+      ?? progress?.reviewDetail?.issues.count
+      ?? displayedChecks?.reviewIssues?.count ?? 0
 
     VStack(alignment: .leading, spacing: 12) {
       HStack(alignment: .top, spacing: 12) {
@@ -1733,6 +1737,7 @@ public struct ValidationTab: View {
     let skipKind: String? = displayedChecks?.reviewSkipKind
     let reqs: [RequirementCheckDetail]? = detail?.requirementsCheck ?? displayedChecks?.requirementsCheck
     let screenshots: [ScreenshotRef] = detail?.screenshots ?? displayedChecks?.taskReviewScreenshots ?? []
+    let council = detail?.council ?? displayedChecks?.reviewCouncil
     let issueTexts = issues.isEmpty
       ? displayedChecks?.reviewFindings?.map(\.description) ?? []
       : issues
@@ -1745,6 +1750,41 @@ public struct ValidationTab: View {
         failLabel: "Review flagged issues",
         skipLabel: reviewSkipLabel(kind: skipKind, reason: skipReason)
       )
+      if let council {
+        ReviewCouncilView(
+          council: council,
+          dismissedIds: dismissedFindingIds.union(displayedChecks?.dismissedFindingIds ?? []),
+          dismissableIds: Set(displayedChecks?.reviewFindings?.map(\.id) ?? [])
+        ) { finding in
+          // Backend overrides are keyed by canonical semantic ID, never candidate source IDs.
+          overrideAction = "dismiss"; overrideReason = ""; overrideGuidance = ""
+          overridePopoverFindingId = finding.id
+        }
+        .id(council.id)
+        .popover(isPresented: Binding(
+          get: { overridePopoverFindingId != nil },
+          set: { if !$0 { overridePopoverFindingId = nil } }
+        )) {
+          if let id = overridePopoverFindingId {
+            overridePopover(
+              findingId: id,
+              description: displayedChecks?.reviewFindings?.first(where: { $0.id == id })?.description
+                ?? council.findings.first(where: { $0.id == id })?.claim ?? id
+            )
+          }
+        }
+        if !issues.isEmpty || !(reasoning ?? "").isEmpty {
+          DisclosureGroup("Initial broad review") {
+            if let reasoning, !reasoning.isEmpty {
+              Text(reasoning).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            ForEach(Array(issues.enumerated()), id: \.offset) { _, issue in
+              Text(issue).font(.caption).textSelection(.enabled)
+            }
+          }
+          .font(.caption)
+        }
+      } else {
       if findingItems.isEmpty, let reasoning, !reasoning.isEmpty {
         Text(reasoning)
           .font(.caption)
@@ -1760,6 +1800,7 @@ public struct ValidationTab: View {
             reviewFindingRow(item)
           }
         }
+      }
       }
       if let reqs, !reqs.isEmpty {
         VStack(alignment: .leading, spacing: 6) {
