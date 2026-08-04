@@ -1760,11 +1760,11 @@ public struct ValidationTab: View {
         ReviewCouncilView(
           council: council,
           dismissedIds: dismissedFindingIds.union(displayedChecks?.dismissedFindingIds ?? []),
-          dismissableIds: Set(displayedChecks?.reviewFindings?.map(\.id) ?? [])
-        ) { finding in
+          availableFindings: displayedChecks?.reviewFindings ?? []
+        ) { _, overrideFinding in
           // Backend overrides are keyed by canonical semantic ID, never candidate source IDs.
           overrideAction = "dismiss"; overrideReason = ""; overrideGuidance = ""
-          overridePopoverFindingId = finding.id
+          overridePopoverFindingId = overrideFinding.id
         }
         .id(council.id)
         .popover(isPresented: Binding(

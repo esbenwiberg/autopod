@@ -18,6 +18,7 @@ public struct ReviewCouncil: Sendable {
   public let id: String; public let diffHash: String; public let reviewedHead: String; public let promptVersion: String; public let schemaVersion: String; public let model: String
   public let axes: [ReviewAxisRunResponse]; public let synthesis: String; public let durationMs: Int; public let tokenUsage: ReviewTokenUsageResponse?
   public let infrastructureUnavailable: Bool; public let overflow: FirstGateOverflowResponse?; public let findings: [Finding]
+  public let hasLedger: Bool
   public let initialFindings: [InitialReviewFindingResponse]; public let rejected: [ReviewSynthesisRejectionResponse]; public let merged: [ReviewSynthesisMergeResponse]
   public let acceptedCount: Int
   public let repairDelta: ReviewRepairDeltaResponse?; public let closureVerification: ReviewClosureVerificationResponse?
@@ -29,7 +30,7 @@ public struct ReviewCouncil: Sendable {
   ) {
     id = batch.id; diffHash = batch.diffHash; reviewedHead = batch.reviewedHead; promptVersion = batch.promptVersion; schemaVersion = batch.schemaVersion; model = batch.model
     axes = batch.axes; synthesis = batch.synthesis; durationMs = batch.durationMs; tokenUsage = taskTokenUsage ?? batch.tokenUsage; infrastructureUnavailable = batch.infrastructureUnavailable ?? false
-    overflow = taskOverflow ?? batch.firstGateOverflow; initialFindings = batch.initialFindings; rejected = batch.rejected; merged = batch.merged; acceptedCount = batch.accepted.count; repairDelta = batch.repairDelta; closureVerification = batch.closureVerification
+    overflow = taskOverflow ?? batch.firstGateOverflow; hasLedger = batch.ledger != nil; initialFindings = batch.initialFindings; rejected = batch.rejected; merged = batch.merged; acceptedCount = batch.accepted.count; repairDelta = batch.repairDelta; closureVerification = batch.closureVerification
     let records = batch.ledger.map { $0.map { ($0.semanticId, $0.finding, $0.state, $0.currentSourceIds, $0.closureEvidence) } }
       ?? batch.accepted.map { (Self.candidateId($0), $0, "open", [Self.candidateId($0)], nil) }
     findings = records.map { semanticId, candidate, state, sourceIds, closureEvidence in
@@ -69,6 +70,12 @@ public struct ReviewCouncil: Sendable {
   public func canonicalDismissFinding(for semanticId: String, in available: [ValidationFindingResponse]) -> ValidationFindingResponse? {
     guard overflow == nil else { return nil }
     return available.first { $0.id == semanticId }
+  }
+  public func canonicalDismissFinding(for finding: Finding, in available: [ValidationFindingResponse]) -> ValidationFindingResponse? {
+    guard overflow == nil else { return nil }
+    if let exact = available.first(where: { $0.id == finding.id }) { return exact }
+    guard !hasLedger else { return nil }
+    return available.first { $0.description == finding.legacyIssue || $0.description == finding.claim }
   }
 }
 

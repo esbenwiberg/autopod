@@ -29,6 +29,9 @@ import Testing
   let council = ReviewCouncil(batch)
   #expect(council.findings(filter: "open").map(\.id) == ["semantic"])
   #expect(council.infrastructureUnavailable)
+  let legacy = ValidationFindingResponse(id: "review:fingerprint", source: "task_review", description: "[MEDIUM] x — claim", reasoning: nil)
+  let displayed = try #require(council.findings.first)
+  #expect(council.canonicalDismissFinding(for: displayed, in: [legacy])?.id == "review:fingerprint")
 }
 
 @Test func reviewCouncilFallsBackToBatchTokenUsage() throws {
@@ -81,6 +84,8 @@ import Testing
     ValidationFindingResponse(id: "review:z", source: "task_review", description: "duplicate", reasoning: nil),
   ]
   #expect(council.canonicalDismissFinding(for: "review:z", in: available)?.id == "review:z")
+  let duplicateTextFinding = try #require(council.findings.first { $0.id == "review:z" })
+  #expect(council.canonicalDismissFinding(for: duplicateTextFinding, in: available)?.id == "review:z")
   #expect(reviewPresentationMode(council: council) == .council)
   #expect(distinctBroadReviewIssues(["duplicate", "[MEDIUM] x.swift:3 — duplicate", "broad context"], council: council) == ["broad context"])
   #expect(distinctBroadReviewIssues(["duplicate"], council: nil) == ["duplicate"])
