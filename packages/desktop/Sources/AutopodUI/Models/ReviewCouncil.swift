@@ -75,7 +75,8 @@ public struct ReviewCouncil: Sendable {
     guard overflow == nil else { return nil }
     if let exact = available.first(where: { $0.id == finding.id }) { return exact }
     guard !hasLedger else { return nil }
-    return available.first { $0.description == finding.legacyIssue || $0.description == finding.claim }
+    let matches = available.filter { $0.description == finding.legacyIssue || $0.description == finding.claim }
+    return matches.count == 1 ? matches[0] : nil
   }
 }
 

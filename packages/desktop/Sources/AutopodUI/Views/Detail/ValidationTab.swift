@@ -110,6 +110,10 @@ public struct ValidationTab: View {
     displayedChecks?.advisoryQa ?? liveProgress?.advisoryDetail
   }
 
+  private var displayedReviewCouncil: ReviewCouncil? {
+    progress?.reviewDetail?.council ?? displayedChecks?.reviewCouncil
+  }
+
   private var selectedHistory: StoredValidationResponse? {
     guard let attempt = Int(selectedHistoryKey) else { return nil }
     return validationHistory.first { $0.attempt == attempt }
@@ -395,6 +399,10 @@ public struct ValidationTab: View {
   }
 
   private func phaseState(_ phase: ValidationPhase) -> ValidationPhaseState {
+    if phase == .review, displayedReviewCouncil?.infrastructureUnavailable == true,
+       progress?.review.status != .running {
+      return ValidationPhaseState(status: .skipped)
+    }
     progress?.state(for: phase) ?? ValidationPhaseState(status: phaseStatus(phase))
   }
 
@@ -413,6 +421,11 @@ public struct ValidationTab: View {
         if p.advisory.status == .running { return "running…" }
         if let advisory = displayedAdvisoryQa {
           return advisoryChipSubLabel(advisory)
+        }
+        return nil
+      case .review:
+        if displayedReviewCouncil?.infrastructureUnavailable == true {
+          return "infrastructure unavailable"
         }
         return nil
       default:
@@ -434,6 +447,9 @@ public struct ValidationTab: View {
           return advisoryChipSubLabel(advisory)
         }
         return nil
+      case .review:
+        return displayedReviewCouncil?.infrastructureUnavailable == true
+          ? "infrastructure unavailable" : nil
       case .setup:
         return nil
       default:
@@ -1742,7 +1758,7 @@ public struct ValidationTab: View {
     let skipKind: String? = displayedChecks?.reviewSkipKind
     let reqs: [RequirementCheckDetail]? = detail?.requirementsCheck ?? displayedChecks?.requirementsCheck
     let screenshots: [ScreenshotRef] = detail?.screenshots ?? displayedChecks?.taskReviewScreenshots ?? []
-    let council = detail?.council ?? displayedChecks?.reviewCouncil
+    let council = displayedReviewCouncil
     let broadReviewIssues = distinctBroadReviewIssues(issues, council: council)
     let issueTexts = issues.isEmpty
       ? displayedChecks?.reviewFindings?.map(\.description) ?? []
@@ -1751,10 +1767,12 @@ public struct ValidationTab: View {
 
     VStack(alignment: .leading, spacing: 12) {
       phaseStatusRow(
-        status: status,
+        status: council?.infrastructureUnavailable == true ? .skipped : status,
         passLabel: detail?.status == "uncertain" ? "Review uncertain — treated as pass" : "AI review passed",
         failLabel: "Review flagged issues",
-        skipLabel: reviewSkipLabel(kind: skipKind, reason: skipReason)
+        skipLabel: council?.infrastructureUnavailable == true
+          ? "Review Council infrastructure unavailable"
+          : reviewSkipLabel(kind: skipKind, reason: skipReason)
       )
       if let council {
         ReviewCouncilView(

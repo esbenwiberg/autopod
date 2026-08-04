@@ -32,6 +32,8 @@ import Testing
   let legacy = ValidationFindingResponse(id: "review:fingerprint", source: "task_review", description: "[MEDIUM] x — claim", reasoning: nil)
   let displayed = try #require(council.findings.first)
   #expect(council.canonicalDismissFinding(for: displayed, in: [legacy])?.id == "review:fingerprint")
+  let ambiguous = ValidationFindingResponse(id: "review:other", source: "task_review", description: legacy.description, reasoning: nil)
+  #expect(council.canonicalDismissFinding(for: displayed, in: [legacy, ambiguous]) == nil)
 }
 
 @Test func reviewCouncilFallsBackToBatchTokenUsage() throws {
