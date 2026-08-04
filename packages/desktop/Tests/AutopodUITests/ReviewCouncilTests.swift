@@ -79,7 +79,7 @@ import Testing
 }
 
 @Test func legacyReviewDecodesWithoutCouncil() throws {
-  let data = """{"status":"pass","reasoning":"ok","issues":[],"model":"m","screenshots":[],"diff":""}""".data(using: .utf8)!
+  let data = #"{"status":"pass","reasoning":"ok","issues":[],"model":"m","screenshots":[],"diff":""}"#.data(using: .utf8)!
   #expect(try JSONDecoder().decode(TaskReviewResponse.self, from: data).reviewBatch == nil)
   #expect(reviewCouncil(from: try JSONDecoder().decode(TaskReviewResponse.self, from: data)) == nil)
   #expect(reviewPresentationMode(council: nil) == .legacy)

@@ -482,7 +482,7 @@ public struct ValidationTab: View {
       )
       return ValidationPhaseState(status: presentation.status, duration: progress?.review.duration)
     }
-    progress?.state(for: phase) ?? ValidationPhaseState(status: phaseStatus(phase))
+    return progress?.state(for: phase) ?? ValidationPhaseState(status: phaseStatus(phase))
   }
 
   private func chipSubLabel(_ phase: ValidationPhase) -> String? {
