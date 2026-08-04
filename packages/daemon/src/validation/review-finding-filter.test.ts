@@ -174,6 +174,23 @@ describe('filterOutOfDiffFindings', () => {
 });
 
 describe('applyDiffFilterToParsed', () => {
+  it('preserves structured first-gate overflow when replacing the issues array', () => {
+    const overflow = { reportedCount: 4_097, retainedFindingCount: 4_096 };
+    const result = applyDiffFilterToParsed(
+      {
+        status: 'fail',
+        reasoning: 'overflow',
+        issues: ['outside.ts: existing issue', '[REVIEW OVERFLOW]'],
+        firstGateOverflow: overflow,
+      },
+      DIFF_TWO_FILES,
+      undefined,
+      1,
+    );
+    expect(result?.firstGateOverflow).toEqual(overflow);
+    expect(result?.issues).toEqual(['[REVIEW OVERFLOW]']);
+    expect(result?.status).toBe('fail');
+  });
   const baseLog = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
   function freshLog() {
@@ -205,16 +222,59 @@ describe('applyDiffFilterToParsed', () => {
         '[HIGH] Frameworks/PF.Graph/GraphRequests.cs:110 broken',
         '[MEDIUM] package-lock.json SHA-1 downgrade',
       ],
+      firstGateFindings: [
+        {
+          id: 'initial-aaaaaaaaaaaaaaaa',
+          source: 'initial-review',
+          issue: '[HIGH] Frameworks/PF.Graph/GraphRequests.cs:110 broken',
+        },
+        {
+          id: 'initial-bbbbbbbbbbbbbbbb',
+          source: 'initial-review',
+          issue: '[MEDIUM] package-lock.json SHA-1 downgrade',
+        },
+      ],
     };
     const log = freshLog();
     // biome-ignore lint/suspicious/noExplicitAny: test logger shim
     const result = applyDiffFilterToParsed(parsed, DIFF_TWO_FILES, log as any, 3);
     expect(result?.issues).toEqual(['[MEDIUM] package-lock.json SHA-1 downgrade']);
+    expect(result?.firstGateFindings?.map((finding) => finding.id)).toEqual([
+      'initial-bbbbbbbbbbbbbbbb',
+    ]);
     expect(result?.status).toBe('fail');
     expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ tier: 3, droppedCount: 1 }),
       expect.any(String),
     );
+  });
+
+  it('filters identical bounded text by each canonical finding source', () => {
+    const boundedIssue = '[HIGH] bounded finding detail';
+    const parsed: ParsedReviewLike = {
+      status: 'fail',
+      reasoning: 'two distinct findings',
+      issues: [boundedIssue, boundedIssue],
+      firstGateFindings: [
+        {
+          id: 'initial-aaaaaaaaaaaaaaaa',
+          source: 'initial-review',
+          issue: boundedIssue,
+          filterIssue: '[HIGH] Frameworks/PF.Graph/GraphRequests.cs:110 broken',
+        },
+        {
+          id: 'initial-bbbbbbbbbbbbbbbb',
+          source: 'initial-review',
+          issue: boundedIssue,
+          filterIssue: '[HIGH] Client/package-lock.json integrity broken',
+        },
+      ],
+    };
+    const result = applyDiffFilterToParsed(parsed, DIFF_TWO_FILES, undefined, 1);
+    expect(result?.issues).toEqual([boundedIssue]);
+    expect(result?.firstGateFindings?.map((finding) => finding.id)).toEqual([
+      'initial-bbbbbbbbbbbbbbbb',
+    ]);
   });
 
   it('flips fail→pass when filtering removes every reason to fail', () => {

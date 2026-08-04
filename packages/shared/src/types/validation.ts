@@ -193,6 +193,10 @@ export interface TaskReviewResult {
   };
   /** Optional frozen multi-axis review metadata. Kept in validation JSON for compatibility. */
   reviewBatch?: ReviewBatchResult;
+  /** Structured first-gate overflow state; never inferred from model issue text. */
+  firstGateOverflow?: { reportedCount: number; retainedFindingCount: number };
+  /** Canonical identities paired with bounded first-gate issue text. */
+  firstGateFindings?: InitialReviewFinding[];
 }
 
 export type ReviewAxis =
@@ -256,6 +260,8 @@ export interface ReviewBatchResult {
   repairDelta?: ReviewRepairDelta;
   /** Fail-closed closure verification metadata for the prior active findings. */
   closureVerification?: ReviewClosureVerification;
+  /** Bounded marker that the first gate reported findings beyond the retained identity cap. */
+  firstGateOverflow?: { reportedCount: number; retainedFindingCount: number };
 }
 
 export interface ReviewFindingLedgerEntry {

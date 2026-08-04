@@ -50,6 +50,7 @@ import { applyDiffFilterToParsed } from './review-finding-filter.js';
 import {
   activeLedgerEntries,
   activeLedgerFindings,
+  boundedClosureRepairDelta,
   closurePrompt,
   closureVerificationChunks,
   parseClosureVerification,
@@ -115,27 +116,55 @@ async function readRepairDelta(
 
 function boundedReviewPacketText(value: unknown, limit = 40_000): string {
   const config = getPresetConfig('strict');
-  return sanitize(JSON.stringify(sanitizeDeep(value, config)) ?? 'null', config).slice(0, limit);
+  return boundedReviewPacketString(JSON.stringify(sanitizeDeep(value, config)) ?? 'null', limit);
 }
 
 function boundedReviewPacketString(value: string, limit: number): string {
-  return sanitize(value, getPresetConfig('strict')).slice(0, limit);
+  return truncateUtf8(sanitize(value, getPresetConfig('strict')), limit);
+}
+
+function truncateUtf8(value: string, limit: number): string {
+  if (Buffer.byteLength(value, 'utf8') <= limit) return value;
+  let lower = 0;
+  let upper = value.length;
+  while (lower < upper) {
+    const midpoint = Math.ceil((lower + upper) / 2);
+    if (Buffer.byteLength(value.slice(0, midpoint), 'utf8') <= limit) lower = midpoint;
+    else upper = midpoint - 1;
+  }
+  // Do not return a dangling UTF-16 surrogate if the byte boundary bisected a
+  // code point. This only operates on a field, never a serialized record or ID.
+  const end = lower > 0 && /[\uD800-\uDBFF]/.test(value[lower - 1] ?? '') ? lower - 1 : lower;
+  return value.slice(0, end);
 }
 
 const MAX_INITIAL_REVIEW_FINDINGS = 100;
 const MAX_INITIAL_REVIEW_BYTES = 200_000;
 const MAX_INITIAL_SEMANTIC_BYTES = 32_000;
-// Successful first-gate JSON must remain small enough to persist every finding
-// as an independently addressable ledger entry. Oversized output is malformed
-// and therefore fails review closed instead of collapsing identities.
+const MAX_PERSISTED_FIRST_GATE_FINDINGS = 4_096;
+// Bound work on adversarial arrays separately from the supported unique-finding
+// capacity. Entries beyond this scan window are never treated as reviewed: the
+// packet receives the same durable, blocking overflow provenance.
+const MAX_FIRST_GATE_INPUT_ENTRIES = MAX_PERSISTED_FIRST_GATE_FINDINGS * 2;
+// Retain at most this many durable first-gate entries. Any excess becomes one
+// deterministic blocking overflow marker rather than unbounded model output.
 const MAX_TASK_REVIEW_ISSUES = 4_096;
+const FIRST_GATE_OVERFLOW_PREFIX = '[REVIEW OVERFLOW]';
+
+function isFirstGateOverflowIssue(issue: string): boolean {
+  return issue.startsWith(FIRST_GATE_OVERFLOW_PREFIX);
+}
 
 function initialBroadFindingId(issue: string): string {
   // This deliberately has a fixed per-issue bound, independent of packet space
   // consumed by preceding findings. Never derive semantic identity from text
   // after aggregate packet truncation. Keep the established normalization so
   // existing initial-review override and ledger identities continue to match.
-  const normalized = boundedReviewPacketString(issue, MAX_INITIAL_SEMANTIC_BYTES)
+  // Identity is a one-way digest and never persists model text, so it can use
+  // the complete original issue without routing large or sensitive content
+  // through the expensive text sanitizer. The separately persisted display
+  // field is always structurally sanitized and byte-bounded below.
+  const normalized = issue
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, ' ')
@@ -143,17 +172,29 @@ function initialBroadFindingId(issue: string): string {
   return `initial-${createHash('sha256').update(normalized).digest('hex').slice(0, 16)}`;
 }
 
+function persistedFirstGateFindings(
+  findings:
+    | Array<{ id: string; source: 'initial-review'; issue: string; filterIssue?: string }>
+    | undefined,
+): TaskReviewResult['firstGateFindings'] {
+  return findings?.map(({ id, source, issue }) => ({ id, source, issue }));
+}
+
 export function initialBroadFindings(review: TaskReviewResult) {
   const findings = [];
   const seen = new Set<string>();
   let bytes = 0;
-  for (const issue of review.issues) {
+  const sources =
+    review.firstGateFindings ??
+    review.issues.map((issue) => ({ id: initialBroadFindingId(issue), issue }));
+  for (const source of sources) {
+    const { issue } = source;
     if (findings.length >= MAX_INITIAL_REVIEW_FINDINGS || bytes >= MAX_INITIAL_REVIEW_BYTES) break;
     const sanitizedIssue = boundedReviewPacketString(issue, 8_000);
-    const id = initialBroadFindingId(issue);
+    const id = source.id;
     if (seen.has(id)) continue;
     const remaining = MAX_INITIAL_REVIEW_BYTES - bytes;
-    const boundedIssue = sanitizedIssue.slice(0, remaining);
+    const boundedIssue = truncateUtf8(sanitizedIssue, remaining);
     if (!boundedIssue) break;
     seen.add(id);
     findings.push({
@@ -162,7 +203,7 @@ export function initialBroadFindings(review: TaskReviewResult) {
       source: 'initial-review' as const,
       issue: boundedIssue,
     });
-    bytes += boundedIssue.length;
+    bytes += Buffer.byteLength(boundedIssue, 'utf8');
   }
   return findings;
 }
@@ -174,8 +215,14 @@ export function initialBroadFindings(review: TaskReviewResult) {
 function initialBroadLedgerFindings(review: TaskReviewResult) {
   const findings = [];
   const seen = new Set<string>();
-  for (const issue of review.issues) {
-    const id = initialBroadFindingId(issue);
+  const sources =
+    review.firstGateFindings ??
+    review.issues.map((issue) => ({ id: initialBroadFindingId(issue), issue }));
+  for (const source of sources) {
+    const { issue } = source;
+    if (review.firstGateOverflow && isFirstGateOverflowIssue(issue)) continue;
+    if (findings.length >= MAX_PERSISTED_FIRST_GATE_FINDINGS) break;
+    const id = source.id;
     if (seen.has(id)) continue;
     seen.add(id);
     findings.push({
@@ -773,6 +820,7 @@ export function createLocalValidationEngine(
               } else {
                 try {
                   const decisions = [];
+                  const frozenClosureDelta = boundedClosureRepairDelta(repair.diff ?? frozenDiff);
                   for (const chunk of closureVerificationChunks(priorActive)) {
                     const response = await runContainerReviewer({
                       podId: config.podId,
@@ -783,7 +831,7 @@ export function createLocalValidationEngine(
                         providerCredentials: config.reviewerProviderCredentials ?? null,
                       },
                       model: config.reviewerModel ?? 'auto',
-                      prompt: closurePrompt(chunk, repair.diff ?? frozenDiff),
+                      prompt: closurePrompt(chunk, frozenClosureDelta),
                       ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
                       timeout: config.reviewTimeout ?? 300_000,
                       logger: log,
@@ -794,9 +842,9 @@ export function createLocalValidationEngine(
                       response.tokenUsage,
                     );
                     const parsed = parseClosureVerification(
-                      response.stdout.slice(0, 200_000),
+                      response.stdout,
                       chunk,
-                      repair.diff,
+                      frozenClosureDelta,
                     );
                     if (parsed.status !== 'completed') {
                       closure = parsed;
@@ -821,6 +869,13 @@ export function createLocalValidationEngine(
             // them, so retain them in the durable history as well as accepted
             // council findings. Otherwise a rejected first-gate finding could
             // disappear before a later repair attempt can close or regress it.
+            // A genuinely clean, complete first gate supersedes historical
+            // overflow. Any other result carries the bounded blocker forward.
+            const firstGateOverflow =
+              taskReview.firstGateOverflow ??
+              (taskReview.status === 'pass' && taskReview.issues.length === 0
+                ? undefined
+                : config.priorReviewBatch?.firstGateOverflow);
             const ledgerCurrent = new Map<string, ReviewFindingCandidate>();
             for (const finding of [...initialBroadLedgerFindings(taskReview), ...batch.accepted]) {
               ledgerCurrent.set(finding.id, finding);
@@ -831,6 +886,7 @@ export function createLocalValidationEngine(
               closure,
             );
             batch.ledger = ledger;
+            if (firstGateOverflow) batch.firstGateOverflow = firstGateOverflow;
             batch.repairDelta = {
               status: repair.status,
               fromHead: repair.fromHead,
@@ -849,12 +905,18 @@ export function createLocalValidationEngine(
             // Once the council runs, its canonical active ledger is the sole
             // flattened issue source. The immutable first-gate status still
             // fails the attempt even when its bounded packet omitted an issue.
-            const issues = [...new Set(ledgerIssues)];
+            const issues = [
+              ...new Set([
+                ...ledgerIssues,
+                ...(firstGateOverflow ? [FIRST_GATE_OVERFLOW_PREFIX] : []),
+              ]),
+            ];
             taskReview = {
               ...taskReview,
               status:
                 taskReview.status === 'fail' ||
                 batch.infrastructureUnavailable ||
+                batch.firstGateOverflow !== undefined ||
                 issues.length > 0 ||
                 closure?.status === 'invalid' ||
                 closure?.status === 'unavailable'
@@ -3317,6 +3379,8 @@ async function runTaskReview(
           status: tier1Parsed.status,
           reasoning: tier1Parsed.reasoning,
           issues: tier1Parsed.issues,
+          firstGateFindings: persistedFirstGateFindings(tier1Parsed.firstGateFindings),
+          firstGateOverflow: tier1Parsed.firstGateOverflow,
           model: config.reviewerModel,
           screenshots: [],
           diff: config.diff,
@@ -3336,6 +3400,8 @@ async function runTaskReview(
             status: tier1Parsed.status,
             reasoning: tier1Parsed.reasoning,
             issues: tier1Parsed.issues,
+            firstGateFindings: persistedFirstGateFindings(tier1Parsed.firstGateFindings),
+            firstGateOverflow: tier1Parsed.firstGateOverflow,
             model: config.reviewerModel,
             screenshots: [],
             diff: config.diff,
@@ -3389,6 +3455,8 @@ async function runTaskReview(
             status: tier2Parsed.status,
             reasoning: `[Tier 2 tool-use review] ${tier2Parsed.reasoning}`,
             issues: tier2Parsed.issues,
+            firstGateFindings: persistedFirstGateFindings(tier2Parsed.firstGateFindings),
+            firstGateOverflow: tier2Parsed.firstGateOverflow,
             model: config.reviewerModel,
             screenshots: [],
             diff: config.diff,
@@ -3431,6 +3499,8 @@ async function runTaskReview(
                 status: tier3Parsed.status,
                 reasoning: `[Tier 3 agentic review] ${tier3Parsed.reasoning}`,
                 issues: tier3Parsed.issues,
+                firstGateFindings: persistedFirstGateFindings(tier3Parsed.firstGateFindings),
+                firstGateOverflow: tier3Parsed.firstGateOverflow,
                 model: config.reviewerModel,
                 screenshots: [],
                 diff: config.diff,
@@ -3460,6 +3530,8 @@ async function runTaskReview(
           status: bestParsed.status,
           reasoning: bestParsed.reasoning,
           issues: bestParsed.issues,
+          firstGateFindings: persistedFirstGateFindings(bestParsed.firstGateFindings),
+          firstGateOverflow: bestParsed.firstGateOverflow,
           model: config.reviewerModel,
           screenshots: [],
           diff: config.diff,
@@ -3484,6 +3556,8 @@ async function runTaskReview(
           status: tier1Parsed.status,
           reasoning: tier1Parsed.reasoning,
           issues: tier1Parsed.issues,
+          firstGateFindings: persistedFirstGateFindings(tier1Parsed.firstGateFindings),
+          firstGateOverflow: tier1Parsed.firstGateOverflow,
           model: config.reviewerModel,
           screenshots: [],
           diff: config.diff,
@@ -3744,6 +3818,13 @@ export function parseReviewJson(raw: string): {
   issues: string[];
   requirementsCheck?: Array<{ criterion: string; met: boolean; note?: string }>;
   deviationsAssessment?: DeviationsAssessment;
+  firstGateOverflow?: { reportedCount: number; retainedFindingCount: number };
+  firstGateFindings?: Array<{
+    id: string;
+    source: 'initial-review';
+    issue: string;
+    filterIssue?: string;
+  }>;
 } | null {
   // Strip markdown code fences if present
   let cleaned = raw
@@ -3765,7 +3846,6 @@ export function parseReviewJson(raw: string): {
     if (!['pass', 'fail', 'uncertain'].includes(parsed.status)) return null;
     if (typeof parsed.reasoning !== 'string') return null;
     if (!Array.isArray(parsed.issues)) return null;
-    if (parsed.issues.length > MAX_TASK_REVIEW_ISSUES) return null;
 
     const requirementsCheck = Array.isArray(parsed.requirementsCheck)
       ? parsed.requirementsCheck
@@ -3785,19 +3865,64 @@ export function parseReviewJson(raw: string): {
 
     const deviationsAssessment = parseDeviationsAssessment(parsed.deviationsAssessment);
 
-    const normalizedIssues = (parsed.issues as unknown[])
-      .map(normalizeReviewIssue)
-      .filter((s): s is string => s !== null);
-    // If the model returned issues but every one was un-renderable, treat the
-    // response as malformed instead of silently dropping all flagged problems.
+    const normalizedIssues: string[] = [];
+    const firstGateFindings: Array<{
+      id: string;
+      source: 'initial-review';
+      issue: string;
+      filterIssue: string;
+    }> = [];
+    const seenFindingIds = new Set<string>();
+    const inputOverflowed = parsed.issues.length > MAX_FIRST_GATE_INPUT_ENTRIES;
+    for (const rawIssue of (parsed.issues as unknown[]).slice(0, MAX_FIRST_GATE_INPUT_ENTRIES)) {
+      const issue = normalizeReviewIssue(rawIssue);
+      if (issue === null) continue;
+      // Count supported first-gate findings by semantic identity, not raw
+      // model entries. Repeated wording must not consume the addressable cap
+      // and hide a distinct finding that appears later in the response.
+      const findingId = initialBroadFindingId(issue);
+      if (seenFindingIds.has(findingId)) continue;
+      seenFindingIds.add(findingId);
+      if (normalizedIssues.length < MAX_TASK_REVIEW_ISSUES) {
+        const boundedIssue = boundedReviewPacketString(issue, MAX_INITIAL_SEMANTIC_BYTES);
+        normalizedIssues.push(boundedIssue);
+        firstGateFindings.push({
+          id: findingId,
+          source: 'initial-review',
+          issue: boundedIssue,
+          filterIssue: issue,
+        });
+      }
+    }
+    const overflowed = inputOverflowed || seenFindingIds.size > MAX_TASK_REVIEW_ISSUES;
+    const reportedCount = inputOverflowed
+      ? Math.max(MAX_TASK_REVIEW_ISSUES + 1, seenFindingIds.size)
+      : seenFindingIds.size;
+    if (overflowed) {
+      normalizedIssues.push(
+        `${FIRST_GATE_OVERFLOW_PREFIX} Reviewer output exceeded the supported bounded input or finding capacity; ${Math.min(seenFindingIds.size, MAX_TASK_REVIEW_ISSUES)} findings are independently addressable and this marker remains blocking until a fresh complete first gate succeeds.`,
+      );
+    }
+    // If the model returned issues but every retained issue was un-renderable,
+    // treat the response as malformed instead of silently dropping blockers.
+    // Overflow always has the explicit, bounded marker above.
     if (parsed.issues.length > 0 && normalizedIssues.length === 0) return null;
 
     return {
-      status: parsed.status,
+      status: overflowed ? 'fail' : parsed.status,
       reasoning: parsed.reasoning,
       issues: normalizedIssues,
+      firstGateFindings,
       requirementsCheck,
       deviationsAssessment,
+      ...(overflowed
+        ? {
+            firstGateOverflow: {
+              reportedCount,
+              retainedFindingCount: MAX_TASK_REVIEW_ISSUES,
+            },
+          }
+        : {}),
     };
   } catch {
     return null;

@@ -4,10 +4,12 @@ import { structuredFindingId } from './finding-fingerprint.js';
 import {
   activeLedgerEntries,
   activeLedgerFindings,
+  boundedClosureRepairDelta,
   closurePrompt,
   closureVerificationChunks,
   parseClosureVerification,
   reconcileReviewLedger,
+  seedReviewLedger,
 } from './review-ledger.js';
 
 const finding = (id: string): StructuredReviewFinding => ({
@@ -57,6 +59,107 @@ describe('reconcileReviewLedger', () => {
     expect(new Set(chunks.flatMap((chunk) => chunk.map((entry) => entry.semanticId))).size).toBe(
       201,
     );
+  });
+
+  it('chunks by encoded record bytes without losing or truncating semantic IDs', () => {
+    const prior = reconcileReviewLedger(
+      undefined,
+      Array.from({ length: 12 }, (_, index) => ({
+        ...finding(`finding-${index}`),
+        evidence: '🦊'.repeat(2_000),
+      })),
+      undefined,
+    );
+    const chunks = closureVerificationChunks(prior);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.flatMap((chunk) => chunk.map((entry) => entry.semanticId))).toEqual(
+      prior.map((entry) => entry.semanticId),
+    );
+    for (const chunk of chunks) {
+      const prompt = closurePrompt(chunk, '+ meaningful repair line 1234567890');
+      expect(
+        Buffer.byteLength(prompt.match(/Known findings: (.*)\nRepair delta:/s)?.[1] ?? ''),
+      ).toBeLessThanOrEqual(40_000);
+      for (const entry of chunk) expect(prompt).toContain(entry.semanticId);
+    }
+  });
+
+  it('canonicalizes oversized legacy semantic and source IDs before chunk validation', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A')], undefined);
+    const rawId = `legacy-${'sensitive'.repeat(10_000)}`;
+    const entry = prior[0];
+    if (!entry) throw new Error('expected prior ledger entry');
+    entry.semanticId = rawId;
+    entry.priorSourceIds = Array.from({ length: 100 }, (_, index) => `${rawId}-${index}`);
+    entry.currentSourceIds = Array.from({ length: 100 }, (_, index) => `${rawId}-${index}`);
+    if ('source' in entry.finding) throw new Error('expected structured finding');
+    entry.finding.claim = '🦊'.repeat(10_000);
+    entry.finding.evidence = '🦊'.repeat(10_000);
+    const [chunk] = closureVerificationChunks(prior);
+    expect(chunk).toHaveLength(1);
+    expect(chunk?.[0]?.semanticId).toMatch(/^bounded-[a-f0-9]{64}$/);
+    const prompt = closurePrompt(chunk ?? [], '+ meaningful repair line 1234567890');
+    expect(Buffer.byteLength(prompt)).toBeLessThan(42_000);
+    expect(prompt).not.toContain(rawId);
+    expect(chunk?.[0]?.priorSourceIds).toHaveLength(16);
+    expect(chunk?.[0]?.currentSourceIds).toHaveLength(16);
+    const boundedFinding = chunk?.[0]?.finding;
+    if (!boundedFinding || 'source' in boundedFinding)
+      throw new Error('expected bounded structured finding');
+    expect(Buffer.byteLength(boundedFinding.claim)).toBeLessThanOrEqual(8_000);
+    expect(Buffer.byteLength(boundedFinding.evidence)).toBeLessThanOrEqual(8_000);
+    expect(
+      parseClosureVerification(
+        JSON.stringify({
+          decisions: [{ semanticId: chunk?.[0]?.semanticId, fixed: false }],
+        }),
+        chunk ?? [],
+      ).status,
+    ).toBe('completed');
+  });
+
+  it('keeps distinct identifiers that sanitize to the same redaction', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A'), finding('B')], undefined);
+    const first = prior[0];
+    const second = prior[1];
+    if (!first || !second) throw new Error('expected two ledger entries');
+    first.semanticId = `gh${'p_'}${'a'.repeat(36)}`;
+    second.semanticId = `gh${'p_'}${'b'.repeat(36)}`;
+    const ids = closureVerificationChunks(prior)
+      .flat()
+      .map((entry) => entry.semanticId);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids.every((id) => /^bounded-[a-f0-9]{64}$/.test(id))).toBe(true);
+  });
+
+  it('keeps bounded legacy IDs stable across closure and persisted attempts', () => {
+    const original = reconcileReviewLedger(undefined, [finding('A')], undefined);
+    const entry = original[0];
+    if (!entry) throw new Error('expected a ledger entry');
+    entry.semanticId = 'legacy reviewer controlled identifier';
+    const priorBatch = { ...batch([]), ledger: original };
+
+    const [chunk] = closureVerificationChunks(seedReviewLedger(priorBatch));
+    const boundedId = chunk?.[0]?.semanticId;
+    expect(boundedId).toMatch(/^bounded-[a-f0-9]{64}$/);
+    const closure = parseClosureVerification(
+      JSON.stringify({
+        decisions: [
+          {
+            semanticId: boundedId,
+            fixed: true,
+            evidence: '+ trusted repair evidence abcdefghijklmnop',
+          },
+        ],
+      }),
+      chunk ?? [],
+      '+ trusted repair evidence abcdefghijklmnop',
+    );
+    expect(closure.status).toBe('completed');
+
+    const reconciled = reconcileReviewLedger(priorBatch, [], closure);
+    expect(reconciled[0]).toMatchObject({ semanticId: boundedId, state: 'fixed' });
+    expect(seedReviewLedger({ ...batch([]), ledger: reconciled })[0]?.semanticId).toBe(boundedId);
   });
 
   it('preserves fixed history and derives regression deterministically across attempts', () => {
@@ -145,5 +248,40 @@ describe('reconcileReviewLedger', () => {
       ).status,
     ).toBe('invalid');
     expect(parseClosureVerification('{"decisions":"not-an-array"}', prior).status).toBe('invalid');
+  });
+
+  it('parses complete bounded closure JSON without slicing protocol records', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A')], undefined);
+    const response = JSON.stringify({
+      padding: 'x'.repeat(250_000),
+      decisions: [{ semanticId: semantic('A'), fixed: false }],
+    });
+    expect(parseClosureVerification(response, prior).status).toBe('completed');
+    expect(parseClosureVerification(`${response}${' '.repeat(800_000)}`, prior).status).toBe(
+      'invalid',
+    );
+  });
+
+  it('validates evidence against the exact frozen delta supplied to the prompt', () => {
+    const prior = reconcileReviewLedger(undefined, [finding('A')], undefined);
+    const rawDelta = `+ trusted visible repair abcdefghijklmnop\n${'🦊'.repeat(250_000)}\n+ outside frozen repair abcdefghijklmnop`;
+    const frozenDelta = boundedClosureRepairDelta(rawDelta);
+    expect(Buffer.byteLength(frozenDelta, 'utf8')).toBeLessThanOrEqual(1_000_000);
+    expect(frozenDelta).not.toContain('+ outside frozen repair');
+    expect(
+      parseClosureVerification(
+        JSON.stringify({
+          decisions: [
+            {
+              semanticId: semantic('A'),
+              fixed: true,
+              evidence: '+ outside frozen repair abcdefghijklmnop',
+            },
+          ],
+        }),
+        prior,
+        frozenDelta,
+      ).status,
+    ).toBe('invalid');
   });
 });

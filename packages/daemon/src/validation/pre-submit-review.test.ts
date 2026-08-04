@@ -420,4 +420,18 @@ describe('pickCachedPreSubmit (Tier 1 cache hit logic)', () => {
       }),
     ).toBeNull();
   });
+
+  it('reuses matching cached issues without changing their count or text', () => {
+    const diff = 'diff body unchanged';
+    const issues = Array.from({ length: 4_097 }, (_, index) => `cached issue ${index}`);
+    const cache = {
+      status: 'pass',
+      diffHash: hashDiff(diff),
+      reasoning: 'matching prior pre-submit result',
+      issues,
+      model: 'sonnet',
+      checkedAt: new Date().toISOString(),
+    };
+    expect(pickCachedPreSubmit(makeConfig(diff, cache))?.issues).toEqual(issues);
+  });
 });

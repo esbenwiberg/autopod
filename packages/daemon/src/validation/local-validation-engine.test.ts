@@ -10,8 +10,10 @@ import type {
   ValidationEngineConfig,
   ValidationPhaseCallbacks,
 } from '../interfaces/validation-engine.js';
+import { createValidationRepository } from '../pods/validation-repository.js';
 import { createProviderAnthropicClient } from '../providers/llm-client.js';
 import { runClaudeCli } from '../runtimes/run-claude-cli.js';
+import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { runContainerReviewer } from './container-reviewer-runner.js';
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import {
@@ -964,11 +966,56 @@ describe('parseReviewJson — issues normalization', () => {
     expect(parsed?.issues).toEqual([]);
   });
 
-  it('rejects oversized finding sets instead of collapsing durable identities', () => {
+  it('persists an oversized finding set as bounded independently addressable blockers', () => {
     const parsed = parseReviewJson(
       baseShape(Array.from({ length: 4_097 }, (_, index) => `blocker ${index}`)),
     );
-    expect(parsed).toBeNull();
+    expect(parsed?.status).toBe('fail');
+    expect(parsed?.issues).toHaveLength(4_097);
+    expect(parsed?.issues).toContain('blocker 4095');
+    expect(parsed?.issues.at(-1)).toContain('[REVIEW OVERFLOW]');
+  });
+
+  it('counts only renderable findings toward the supported cap', () => {
+    const parsed = parseReviewJson(
+      baseShape([...Array.from({ length: 4_096 }, () => ({})), 'valid A', 'valid B']),
+    );
+    expect(parsed?.issues).toEqual(['valid A', 'valid B']);
+    expect(parsed?.firstGateOverflow).toBeUndefined();
+  });
+
+  it('does not let duplicate first-gate entries consume distinct finding capacity', () => {
+    const parsed = parseReviewJson(
+      baseShape([...Array.from({ length: 4_096 }, () => 'duplicate A'), 'distinct B']),
+    );
+    expect(parsed?.issues).toEqual(['duplicate A', 'distinct B']);
+    expect(parsed?.firstGateOverflow).toBeUndefined();
+  });
+
+  it('fails closed without scanning an unbounded first-gate issue array', () => {
+    const parsed = parseReviewJson(
+      baseShape([
+        ...Array.from({ length: 8_192 }, () => 'duplicate A'),
+        'unscanned distinct blocker',
+      ]),
+    );
+    expect(parsed?.status).toBe('fail');
+    expect(parsed?.issues).toEqual(['duplicate A', expect.stringContaining('[REVIEW OVERFLOW]')]);
+    expect(parsed?.firstGateOverflow).toEqual({
+      reportedCount: 4_097,
+      retainedFindingCount: 4_096,
+    });
+  });
+
+  it('preserves distinct canonical IDs when bounded issue text is identical', () => {
+    const prefix = `shared semantic prefix ${'🦊'.repeat(8_000)}`;
+    const parsed = parseReviewJson(baseShape([`${prefix} A`, `${prefix} B`]));
+    expect(parsed?.issues[0]).toBe(parsed?.issues[1]);
+    expect(parsed?.firstGateFindings?.map((finding) => finding.id)).toHaveLength(2);
+    expect(new Set(parsed?.firstGateFindings?.map((finding) => finding.id)).size).toBe(2);
+    expect(initialBroadFindings(parsed as never).map((finding) => finding.id)).toEqual(
+      parsed?.firstGateFindings?.map((finding) => finding.id),
+    );
   });
 });
 
@@ -1095,6 +1142,42 @@ describe('validate() — hasWebUi gating', () => {
     expect(truncated?.issue.length).toBeLessThan(first?.issue.length ?? 0);
     expect(truncated?.id).toBe(first?.id);
   });
+
+  it('keeps distinct identities when long findings share bounded display text', () => {
+    const prefix = `shared semantic prefix ${'🦊'.repeat(8_000)}`;
+    const findings = initialBroadFindings({ issues: [`${prefix} A`, `${prefix} B`] } as never);
+    expect(findings[0]?.issue).toBe(findings[1]?.issue);
+    expect(findings[0]?.id).not.toBe(findings[1]?.id);
+  });
+
+  it('carries distinct long first-gate IDs through the production review ledger', async () => {
+    const prefix = `shared semantic prefix ${'🦊'.repeat(8_000)}`;
+    vi.mocked(runClaudeCli).mockResolvedValue({
+      stdout: JSON.stringify({
+        status: 'fail',
+        reasoning: 'two blockers',
+        issues: [`${prefix} A`, `${prefix} B`],
+      }),
+    });
+    mockCouncil();
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: changedDiff,
+        validationSuite: 'full',
+        startCommand: '',
+        smokePages: [],
+      }),
+    );
+    expect(result.taskReview?.firstGateFindings?.[0]?.issue).toBe(
+      result.taskReview?.firstGateFindings?.[1]?.issue,
+    );
+    expect(new Set(result.taskReview?.firstGateFindings?.map((finding) => finding.id)).size).toBe(
+      2,
+    );
+    expect(result.taskReview?.reviewBatch?.ledger).toHaveLength(2);
+    expect(result.taskReview?.firstGateFindings?.[0]).not.toHaveProperty('filterIssue');
+  }, 15_000);
 
   it('retains first-gate findings beyond the frozen packet limit in the ledger', async () => {
     vi.mocked(runClaudeCli).mockResolvedValue({
@@ -1265,44 +1348,44 @@ describe('validate() — hasWebUi gating', () => {
     await fs.writeFile(path.join(repoPath, 'repair.txt'), 'base\n');
     await git('add', 'repair.txt');
     await git('commit', '-m', 'base');
-    const closureOutputs = [
-      {
-        decisions: [
-          {
-            semanticId: 'initial-ca978112ca1bbdca',
-            fixed: true,
-            evidence: '+repair A marker abcdefghijklmnop',
-          },
-          { semanticId: 'initial-3e23e8160039594a', fixed: false },
-        ],
-      },
-      {
-        decisions: [
-          {
-            semanticId: 'initial-3e23e8160039594a',
-            fixed: true,
-            evidence: '+repair B marker abcdefghijklmnop',
-          },
-          {
-            semanticId: 'initial-2e7d2c03a9507ae2',
-            fixed: true,
-            evidence: '+repair C marker abcdefghijklmnop',
-          },
-        ],
-      },
-    ];
+    let closureAttempt = 0;
     vi.mocked(runContainerReviewer).mockImplementation(async ({ prompt }) => ({
       stdout: prompt.includes('closure verifier')
-        ? JSON.stringify(closureOutputs.shift())
+        ? (() => {
+            closureAttempt++;
+            const records = JSON.parse(
+              prompt.match(/Known findings: (.*)\nRepair delta:/s)?.[1] ?? '[]',
+            ) as Array<{ semanticId: string; source: { issue?: string } }>;
+            return JSON.stringify({
+              decisions: records.map((record) => ({
+                semanticId: record.semanticId,
+                fixed: closureAttempt === 1 ? record.source.issue === 'A' : closureAttempt === 2,
+                ...(closureAttempt === 1 && record.source.issue === 'A'
+                  ? { evidence: '+repair A marker abcdefghijklmnop' }
+                  : closureAttempt === 2
+                    ? {
+                        evidence: `+repair ${record.source.issue} marker abcdefghijklmnop`,
+                      }
+                    : {}),
+              })),
+            });
+          })()
         : prompt.includes('synthesizer')
           ? '{malformed'
           : JSON.stringify({ findings: [] }),
       tokenUsage: { inputTokens: prompt.includes('closure verifier') ? 7 : 10, outputTokens: 2 },
     }));
-    const attempts = [['A', 'B'], ['B', 'C'], ['A']];
-    vi.mocked(runClaudeCli).mockImplementation(async () => ({
-      stdout: JSON.stringify({ status: 'fail', reasoning: 'blocked', issues: attempts.shift() }),
-    }));
+    const attempts = [['A', 'B'], ['B', 'C'], ['A'], []];
+    vi.mocked(runClaudeCli).mockImplementation(async () => {
+      const issues = attempts.shift() ?? [];
+      return {
+        stdout: JSON.stringify({
+          status: issues.length === 0 ? 'pass' : 'fail',
+          reasoning: issues.length === 0 ? 'clean standard first gate' : 'blocked',
+          issues,
+        }),
+      };
+    });
     const engine = createLocalValidationEngine(stubContainerManager());
     const common = {
       reviewerModel: 'claude-sonnet-4-6',
@@ -1312,7 +1395,15 @@ describe('validate() — hasWebUi gating', () => {
       smokePages: [],
       worktreePath: repoPath,
     };
+    const db = createTestDb();
+    insertTestProfile(db);
+    db.prepare(
+      `INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+       VALUES ('ledger-lifecycle', 'test-profile', 'test task', 'model', 'claude', 'main', 'user-1')`,
+    ).run();
+    const history = createValidationRepository(db);
     const one = await engine.validate(baseConfig(common));
+    history.insert('ledger-lifecycle', 1, { ...one, podId: 'ledger-lifecycle' });
     await fs.writeFile(
       path.join(repoPath, 'repair.txt'),
       'base\nrepair A marker abcdefghijklmnop\n',
@@ -1320,9 +1411,17 @@ describe('validate() — hasWebUi gating', () => {
     await git('add', 'repair.txt');
     await git('commit', '-m', 'repair A');
     const two = await engine.validate(
-      baseConfig({ ...common, attempt: 2, priorReviewBatch: one.taskReview?.reviewBatch }),
+      baseConfig({
+        ...common,
+        attempt: 2,
+        priorReviewBatch: history.getLatestReviewBatchBefore('ledger-lifecycle', 2),
+      }),
     );
-    expect(two.taskReview?.reviewBatch?.closureVerification?.status).toBe('completed');
+    history.insert('ledger-lifecycle', 2, { ...two, podId: 'ledger-lifecycle' });
+    expect(
+      two.taskReview?.reviewBatch?.closureVerification?.status,
+      two.taskReview?.reviewBatch?.closureVerification?.reason,
+    ).toBe('completed');
     await fs.writeFile(
       path.join(repoPath, 'repair.txt'),
       'base\nrepair A marker abcdefghijklmnop\nrepair B marker abcdefghijklmnop\nrepair C marker abcdefghijklmnop\n',
@@ -1330,8 +1429,13 @@ describe('validate() — hasWebUi gating', () => {
     await git('add', 'repair.txt');
     await git('commit', '-m', 'repair B C');
     const three = await engine.validate(
-      baseConfig({ ...common, attempt: 3, priorReviewBatch: two.taskReview?.reviewBatch }),
+      baseConfig({
+        ...common,
+        attempt: 3,
+        priorReviewBatch: history.getLatestReviewBatchBefore('ledger-lifecycle', 3),
+      }),
     );
+    history.insert('ledger-lifecycle', 3, { ...three, podId: 'ledger-lifecycle' });
     const states = (result: typeof one) =>
       Object.fromEntries(
         result.taskReview?.reviewBatch?.ledger?.map((entry) => [entry.finding.id, entry.state]) ??
@@ -1362,6 +1466,101 @@ describe('validate() — hasWebUi gating', () => {
       'initial-2e7d2c03a9507ae2': 'new',
     });
     expect(two.taskReview?.tokenUsage?.inputTokens).toBe(67);
+
+    await fs.appendFile(path.join(repoPath, 'repair.txt'), 'clean gate follow-up\n');
+    await git('add', 'repair.txt');
+    await git('commit', '-m', 'clean first gate follow-up');
+    const four = await engine.validate(
+      baseConfig({
+        ...common,
+        attempt: 4,
+        priorReviewBatch: history.getLatestReviewBatchBefore('ledger-lifecycle', 4),
+      }),
+    );
+    history.insert('ledger-lifecycle', 4, { ...four, podId: 'ledger-lifecycle' });
+    expect(closureAttempt).toBe(3);
+    expect(four.taskReview?.reviewBatch?.closureVerification?.status).toBe('completed');
+    expect(four.taskReview?.issues).toEqual(['A']);
+    expect(four.taskReview?.status).toBe('fail');
+
+    // Persist the production-engine outputs through the real validation-history
+    // seam. Each stored attempt must keep its own immutable ledger snapshot.
+    const persisted = history.getForSession('ledger-lifecycle');
+    expect(persisted).toHaveLength(4);
+    const persistedStates = (index: number) =>
+      Object.fromEntries(
+        persisted[index]?.result.taskReview?.reviewBatch?.ledger?.map((entry) => [
+          entry.finding.id,
+          entry.state,
+        ]) ?? [],
+      );
+    expect(persistedStates(0)).toEqual(states(one));
+    expect(persistedStates(1)).toEqual(states(two));
+    expect(persistedStates(2)).toEqual(states(three));
+    expect(history.getLatestReviewBatchBefore('ledger-lifecycle', 5)?.id).toBe(
+      four.taskReview?.reviewBatch?.id,
+    );
+
+    // Exercise backward compatibility through the same production repository
+    // seam: an old persisted packet has accepted findings but predates ledger.
+    db.prepare(
+      `INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+       VALUES ('legacy-ledger-lifecycle', 'test-profile', 'legacy task', 'model', 'claude', 'main', 'user-1')`,
+    ).run();
+    const legacyBatch = {
+      id: 'legacy-no-ledger',
+      diffHash: 'legacy-diff',
+      reviewedHead: 'unavailable',
+      promptVersion: 'legacy-prompt',
+      schemaVersion: 'legacy-schema',
+      model: 'legacy-model',
+      axes: [],
+      candidates: [],
+      initialFindings: [],
+      accepted: [{ id: 'legacy-A', source: 'initial-review' as const, issue: 'legacy A' }],
+      rejected: [],
+      merged: [],
+      synthesis: 'model' as const,
+      durationMs: 1,
+    };
+    if (!one.taskReview) throw new Error('attempt one must produce task review history');
+    history.insert('legacy-ledger-lifecycle', 1, {
+      ...one,
+      podId: 'legacy-ledger-lifecycle',
+      taskReview: {
+        ...one.taskReview,
+        status: 'fail',
+        issues: ['legacy A'],
+        reviewBatch: legacyBatch,
+      },
+    });
+    const hydratedLegacy = history.getLatestReviewBatchBefore('legacy-ledger-lifecycle', 2);
+    expect(hydratedLegacy?.accepted).toEqual(legacyBatch.accepted);
+    expect(hydratedLegacy).not.toHaveProperty('ledger');
+    const legacySeeded = await engine.validate(
+      baseConfig({
+        ...common,
+        attempt: 2,
+        priorReviewBatch: hydratedLegacy,
+      }),
+    );
+    history.insert('legacy-ledger-lifecycle', 2, {
+      ...legacySeeded,
+      podId: 'legacy-ledger-lifecycle',
+    });
+    expect(legacySeeded.taskReview?.reviewBatch?.ledger).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: 'open',
+          finding: expect.objectContaining({ source: 'initial-review', issue: 'legacy A' }),
+        }),
+      ]),
+    );
+    expect(legacySeeded.taskReview?.issues).toContain('legacy A');
+    expect(legacySeeded.taskReview?.status).toBe('fail');
+    expect(
+      history.getForSession('legacy-ledger-lifecycle')[1]?.result.taskReview?.reviewBatch?.ledger,
+    ).toEqual(legacySeeded.taskReview?.reviewBatch?.ledger);
     await fs.rm(repoPath, { recursive: true, force: true });
   });
 
@@ -2629,6 +2828,41 @@ human_review: []
     });
     expect(result.taskReview?.tokenUsage?.costUsd).toBeGreaterThan(0);
     expect(runAgenticReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains structured overflow when Tier 3 falls back to Tier 2', async () => {
+    const worktreePath = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-overflow-fallback-'));
+    vi.mocked(runClaudeCli).mockResolvedValueOnce({
+      stdout: JSON.stringify({ status: 'uncertain', reasoning: 'tier 1', issues: [] }),
+    });
+    vi.mocked(runToolUseReview).mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        status: 'uncertain',
+        reasoning: 'overflow in tier 2',
+        issues: Array.from({ length: 4_097 }, (_, index) => `finding ${index}`),
+      }),
+    });
+    vi.mocked(runAgenticReview).mockResolvedValueOnce({ stdout: 'malformed' });
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        reviewerModel: 'claude-sonnet-4-6',
+        reviewDepth: 'deep',
+        validationSuite: 'deterministic',
+        worktreePath,
+        diff: `diff --git a/a.ts b/a.ts
+--- a/a.ts
++++ b/a.ts
+@@ -1 +1 @@
+-old
++new
+`,
+      }),
+    );
+    expect(result.taskReview?.firstGateOverflow).toEqual({
+      reportedCount: 4_097,
+      retainedFindingCount: 4_096,
+    });
+    expect(result.taskReview?.status).toBe('fail');
   });
 
   it('runs Max full-validation Review through the live container Claude reviewer', async () => {
