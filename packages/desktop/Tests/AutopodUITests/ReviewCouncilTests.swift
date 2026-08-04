@@ -18,7 +18,9 @@ import Testing
   #expect(council.merged.first?.sourceIds == ["a", "b"])
   #expect(council.repairDelta?.diffHash == "d")
   #expect(council.closureVerification?.decisions.first?.fixed == true)
-  #expect(council.tokenUsage?.cachedInputTokens == 2)
+  #expect(council.tokenUsage?.inputTokens == 12)
+  #expect(council.tokenUsage?.outputTokens == 4)
+  #expect(council.tokenUsage?.costUsd == 0.03)
 }
 
 @Test func reviewCouncilFallsBackToAcceptedFindingsWithoutLedger() throws {
@@ -27,6 +29,14 @@ import Testing
   let council = ReviewCouncil(batch)
   #expect(council.findings(filter: "open").map(\.id) == ["semantic"])
   #expect(council.infrastructureUnavailable)
+}
+
+@Test func reviewCouncilFallsBackToBatchTokenUsage() throws {
+  let usage = ReviewTokenUsageResponse(inputTokens: 7, outputTokens: 3, cachedInputTokens: 2, cacheCreationInputTokens: nil, costUsd: 0.01)
+  let batch = ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [], initialFindings: [], accepted: [], rejected: [], merged: [], synthesis: "model", durationMs: 1, infrastructureUnavailable: nil, tokenUsage: usage, ledger: nil, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)
+  let council = ReviewCouncil(batch)
+  #expect(council.tokenUsage?.inputTokens == 7)
+  #expect(council.tokenUsage?.cachedInputTokens == 2)
 }
 
 @Test func legacyReviewDecodesWithoutCouncil() throws {

@@ -22,9 +22,13 @@ public struct ReviewCouncil: Sendable {
   public let acceptedCount: Int
   public let repairDelta: ReviewRepairDeltaResponse?; public let closureVerification: ReviewClosureVerificationResponse?
 
-  public init(_ batch: ReviewBatchResponse, overflow taskOverflow: FirstGateOverflowResponse? = nil) {
+  public init(
+    _ batch: ReviewBatchResponse,
+    overflow taskOverflow: FirstGateOverflowResponse? = nil,
+    tokenUsage taskTokenUsage: ReviewTokenUsageResponse? = nil
+  ) {
     id = batch.id; diffHash = batch.diffHash; reviewedHead = batch.reviewedHead; promptVersion = batch.promptVersion; schemaVersion = batch.schemaVersion; model = batch.model
-    axes = batch.axes; synthesis = batch.synthesis; durationMs = batch.durationMs; tokenUsage = batch.tokenUsage; infrastructureUnavailable = batch.infrastructureUnavailable ?? false
+    axes = batch.axes; synthesis = batch.synthesis; durationMs = batch.durationMs; tokenUsage = taskTokenUsage ?? batch.tokenUsage; infrastructureUnavailable = batch.infrastructureUnavailable ?? false
     overflow = taskOverflow ?? batch.firstGateOverflow; initialFindings = batch.initialFindings; rejected = batch.rejected; merged = batch.merged; acceptedCount = batch.accepted.count; repairDelta = batch.repairDelta; closureVerification = batch.closureVerification
     let records = batch.ledger.map { $0.map { ($0.semanticId, $0.finding, $0.state, $0.currentSourceIds, $0.closureEvidence) } }
       ?? batch.accepted.map { (Self.candidateId($0), $0, "open", [Self.candidateId($0)], nil) }
@@ -70,7 +74,11 @@ public struct ReviewCouncil: Sendable {
 
 public func reviewCouncil(from review: TaskReviewResponse?) -> ReviewCouncil? {
   guard let review, let batch = review.reviewBatch else { return nil }
-  return ReviewCouncil(batch, overflow: review.firstGateOverflow)
+  return ReviewCouncil(
+    batch,
+    overflow: review.firstGateOverflow,
+    tokenUsage: review.tokenUsage
+  )
 }
 
 public enum ReviewPresentationMode: Sendable, Equatable { case legacy, council }
