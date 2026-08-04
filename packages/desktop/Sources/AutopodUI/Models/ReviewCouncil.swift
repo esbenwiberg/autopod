@@ -73,11 +73,9 @@ public struct ReviewCouncil: Sendable {
     }
   }
   public func canonicalDismissFinding(for semanticId: String, in available: [ValidationFindingResponse]) -> ValidationFindingResponse? {
-    guard overflow == nil else { return nil }
     return available.first { $0.id == semanticId }
   }
   public func canonicalDismissFinding(for finding: Finding, in available: [ValidationFindingResponse]) -> ValidationFindingResponse? {
-    guard overflow == nil else { return nil }
     if let exact = available.first(where: { $0.id == finding.id }) { return exact }
     guard !hasLedger else { return nil }
     let matches = available.filter { $0.description == finding.legacyIssue || $0.description == finding.claim }

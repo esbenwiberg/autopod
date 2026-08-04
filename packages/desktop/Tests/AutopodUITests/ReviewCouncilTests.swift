@@ -110,14 +110,14 @@ import Testing
   #expect(distinctBroadReviewIssues(["duplicate"], council: nil) == ["duplicate"])
 }
 
-@Test func overflowDisablesCanonicalDismissalAndTopLevelWins() throws {
+@Test func overflowKeepsRetainedFindingDismissalAndTopLevelWins() throws {
   let data = """
   {"status":"fail","reasoning":"x","issues":[],"model":"m","screenshots":[],"diff":"","firstGateOverflow":{"reportedCount":8,"retainedFindingCount":3},"reviewBatch":{"id":"p","diffHash":"d","reviewedHead":"h","promptVersion":"p","schemaVersion":"s","model":"m","axes":[],"candidates":[],"initialFindings":[],"accepted":[],"rejected":[],"merged":[],"synthesis":"model","durationMs":1}}
   """.data(using: .utf8)!
   let council = try #require(reviewCouncil(from: JSONDecoder().decode(TaskReviewResponse.self, from: data)))
   let finding = ValidationFindingResponse(id: "review:a", source: "task_review", description: "x", reasoning: nil)
   #expect(council.overflow?.reportedCount == 8)
-  #expect(council.canonicalDismissFinding(for: "review:a", in: [finding]) == nil)
+  #expect(council.canonicalDismissFinding(for: "review:a", in: [finding])?.id == "review:a")
 }
 
 @Test func historicalAttemptUsesItsOwnFrozenCouncilSnapshot() throws {
