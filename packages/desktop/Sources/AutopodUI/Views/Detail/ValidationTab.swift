@@ -1743,6 +1743,7 @@ public struct ValidationTab: View {
     let reqs: [RequirementCheckDetail]? = detail?.requirementsCheck ?? displayedChecks?.requirementsCheck
     let screenshots: [ScreenshotRef] = detail?.screenshots ?? displayedChecks?.taskReviewScreenshots ?? []
     let council = detail?.council ?? displayedChecks?.reviewCouncil
+    let broadReviewIssues = distinctBroadReviewIssues(issues, council: council)
     let issueTexts = issues.isEmpty
       ? displayedChecks?.reviewFindings?.map(\.description) ?? []
       : issues
@@ -1778,12 +1779,12 @@ public struct ValidationTab: View {
             )
           }
         }
-        if !issues.isEmpty || !(reasoning ?? "").isEmpty {
+        if !broadReviewIssues.isEmpty || !(reasoning ?? "").isEmpty {
           DisclosureGroup("Initial broad review") {
             if let reasoning, !reasoning.isEmpty {
               Text(reasoning).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
-            ForEach(Array(issues.enumerated()), id: \.offset) { _, issue in
+            ForEach(Array(broadReviewIssues.enumerated()), id: \.offset) { _, issue in
               Text(issue).font(.caption).textSelection(.enabled)
             }
           }

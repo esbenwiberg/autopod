@@ -73,3 +73,9 @@ public enum ReviewPresentationMode: Sendable, Equatable { case legacy, council }
 public func reviewPresentationMode(council: ReviewCouncil?) -> ReviewPresentationMode {
   council == nil ? .legacy : .council
 }
+
+public func distinctBroadReviewIssues(_ issues: [String], council: ReviewCouncil?) -> [String] {
+  guard let council else { return issues }
+  let canonicalClaims = Set(council.findings.map(\.claim))
+  return issues.filter { !canonicalClaims.contains($0) }
+}

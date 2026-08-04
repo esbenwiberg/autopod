@@ -71,6 +71,8 @@ import Testing
   ]
   #expect(council.canonicalDismissFinding(for: "review:z", in: available)?.id == "review:z")
   #expect(reviewPresentationMode(council: council) == .council)
+  #expect(distinctBroadReviewIssues(["duplicate", "broad context"], council: council) == ["broad context"])
+  #expect(distinctBroadReviewIssues(["duplicate"], council: nil) == ["duplicate"])
 }
 
 @Test func overflowDisablesCanonicalDismissalAndTopLevelWins() throws {
