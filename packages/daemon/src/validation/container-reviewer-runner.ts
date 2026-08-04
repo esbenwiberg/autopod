@@ -112,15 +112,7 @@ async function runClaudeContainerReview(
   const promptPath = `/tmp/autopod-claude-review-${suffix}.prompt`;
   const outputPath = `/tmp/autopod-claude-review-${suffix}.out`;
   const logPath = `/tmp/autopod-claude-review-${suffix}.log`;
-  const schemaPath = `/tmp/autopod-claude-review-${suffix}.schema.json`;
-
   await config.containerManager.writeFile(config.containerId, promptPath, config.prompt);
-  if (config.outputContract)
-    await config.containerManager.writeFile(
-      config.containerId,
-      schemaPath,
-      config.outputContract.jsonSchema,
-    );
 
   const modelArgs =
     config.model && config.model !== 'auto' ? ` --model ${shellQuote(config.model)}` : '';
@@ -128,7 +120,9 @@ async function runClaudeContainerReview(
     `sh ${shellQuote(SHIM_PATH)} claude -p`,
     modelArgs.trim(),
     '--output-format json',
-    ...(config.outputContract ? [`--json-schema ${shellQuote(schemaPath)}`] : []),
+    ...(config.outputContract
+      ? [`--json-schema ${shellQuote(config.outputContract.jsonSchema)}`]
+      : []),
     `< ${shellQuote(promptPath)}`,
     `> ${shellQuote(outputPath)} 2> ${shellQuote(logPath)}`,
   ]
@@ -203,7 +197,7 @@ async function runClaudeContainerReview(
     try {
       await config.containerManager.execInContainer(
         config.containerId,
-        ['rm', '-f', promptPath, outputPath, logPath, schemaPath],
+        ['rm', '-f', promptPath, outputPath, logPath],
         { timeout: 5_000 },
       );
     } catch {

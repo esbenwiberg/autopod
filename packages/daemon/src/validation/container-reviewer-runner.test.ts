@@ -176,7 +176,7 @@ describe('runContainerReviewer', () => {
       timeout: 60_000,
       outputContract: { name: 'review-axis-v1', jsonSchema: '{"type":"object"}' },
     });
-    expect(cm.writeFile).toHaveBeenCalledTimes(2);
+    expect(cm.writeFile).toHaveBeenCalledTimes(1);
     expect((cm.execStreaming as ReturnType<typeof vi.fn>).mock.calls[0]?.[1][2]).toContain(
       '--json-schema',
     );

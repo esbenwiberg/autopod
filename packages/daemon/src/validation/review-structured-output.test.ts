@@ -25,6 +25,7 @@ describe('parseAxisResponse', () => {
   it.each([
     { findings: [finding] },
     { result: JSON.stringify({ findings: [finding] }) },
+    { item: { text: JSON.stringify({ findings: [finding] }) } },
     '```json\n{"findings":[{"severity":"HIGH","path":"src/a.ts","line":4,"symbol":"guard","claim":"missing guard","evidence":"the route has no guard","remediation":"add authorization","confidence":0.9}]}\n```',
   ])('accepts supported plain, envelope, and fenced JSON', (value) => {
     expect(parse(value)).toMatchObject([{ axis: 'security_authority', id: '', ...finding }]);

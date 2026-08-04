@@ -90,6 +90,17 @@ function unwrapJson(input: string): string {
 function unwrapEnvelope(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
+  const item = record.item;
+  if (item && typeof item === 'object' && !Array.isArray(item)) {
+    const text = (item as Record<string, unknown>).text;
+    if (typeof text === 'string') {
+      try {
+        return JSON.parse(text);
+      } catch {
+        return value;
+      }
+    }
+  }
   for (const key of ['result', 'output', 'response']) {
     const wrapped = record[key];
     if (typeof wrapped === 'string') {

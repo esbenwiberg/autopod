@@ -65,45 +65,45 @@ export async function runCodexReview(
   const logPath = `/tmp/autopod-codex-review-${suffix}.log`;
   const schemaPath = `/tmp/autopod-codex-review-${suffix}.schema.json`;
 
-  await config.containerManager.writeFile(config.containerId, promptPath, config.prompt);
-  if (config.outputContract)
-    await config.containerManager.writeFile(
-      config.containerId,
-      schemaPath,
-      config.outputContract.jsonSchema,
-    );
-
-  const modelArgs =
-    config.model && config.model !== 'auto' ? ` --model ${shellQuote(config.model)}` : '';
-  const codexCommand = [
-    `sh ${shellQuote(SHIM_PATH)} codex exec`,
-    '--cd /workspace',
-    '--sandbox read-only',
-    '--skip-git-repo-check',
-    '--json',
-    '--output-last-message',
-    shellQuote(outputPath),
-    ...(config.outputContract ? [`--output-schema ${shellQuote(schemaPath)}`] : []),
-    modelArgs.trim(),
-    '-',
-    `< ${shellQuote(promptPath)}`,
-    `> ${shellQuote(logPath)} 2>&1`,
-  ]
-    .filter(Boolean)
-    .join(' ');
-  const command = [
-    `rm -f ${shellQuote(outputPath)} ${shellQuote(logPath)}`,
-    codexCommand,
-    'status=$?',
-    'if [ "$status" -ne 0 ]; then',
-    '  echo "codex review failed (exit $status)"',
-    `  tail -c 4000 ${shellQuote(logPath)} 2>/dev/null || true`,
-    '  exit "$status"',
-    'fi',
-    `cat ${shellQuote(outputPath)}`,
-  ].join('\n');
-
   try {
+    await config.containerManager.writeFile(config.containerId, promptPath, config.prompt);
+    if (config.outputContract)
+      await config.containerManager.writeFile(
+        config.containerId,
+        schemaPath,
+        config.outputContract.jsonSchema,
+      );
+
+    const modelArgs =
+      config.model && config.model !== 'auto' ? ` --model ${shellQuote(config.model)}` : '';
+    const codexCommand = [
+      `sh ${shellQuote(SHIM_PATH)} codex exec`,
+      '--cd /workspace',
+      '--sandbox read-only',
+      '--skip-git-repo-check',
+      '--json',
+      '--output-last-message',
+      shellQuote(outputPath),
+      ...(config.outputContract ? [`--output-schema ${shellQuote(schemaPath)}`] : []),
+      modelArgs.trim(),
+      '-',
+      `< ${shellQuote(promptPath)}`,
+      `> ${shellQuote(logPath)} 2>&1`,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const command = [
+      `rm -f ${shellQuote(outputPath)} ${shellQuote(logPath)}`,
+      codexCommand,
+      'status=$?',
+      'if [ "$status" -ne 0 ]; then',
+      '  echo "codex review failed (exit $status)"',
+      `  tail -c 4000 ${shellQuote(logPath)} 2>/dev/null || true`,
+      '  exit "$status"',
+      'fi',
+      `cat ${shellQuote(outputPath)}`,
+    ].join('\n');
+
     const options: ExecOptions = {
       cwd: '/workspace',
       ...(config.env ? { env: config.env } : {}),
