@@ -44,17 +44,28 @@ import Testing
   let review = try JSONDecoder().decode(TaskReviewResponse.self, from: data)
   let council = try #require(reviewCouncil(from: review))
 
-  let presentation = reviewPhasePresentation(status: .failed, council: council)
+  let checks = ValidationChecks(smoke: true, review: false, reviewCouncil: council)
+  let presentation = reviewPhasePresentation(progress: nil, checks: checks, council: council)
   #expect(presentation.status == .failed)
   #expect(presentation.councilUnavailableReason == "infrastructure unavailable")
   #expect(council.findings(filter: .open).map(\.id) == ["review:active"])
 }
 
 @Test func reviewPresentationPreservesSkippedAndPassedVerdicts() {
-  #expect(reviewPhasePresentation(status: .skipped, council: nil).status == .skipped)
+  let skipped = reviewPhasePresentation(
+    progress: nil,
+    checks: ValidationChecks(smoke: true, review: nil),
+    council: nil
+  )
+  #expect(skipped.status == .skipped)
 
   let batch = ReviewBatchResponse(id: "p", diffHash: "d", reviewedHead: "h", promptVersion: "p", schemaVersion: "s", model: "m", axes: [], candidates: [], initialFindings: [], accepted: [], rejected: [], merged: [], synthesis: "model", durationMs: 1, infrastructureUnavailable: true, tokenUsage: nil, ledger: nil, repairDelta: nil, closureVerification: nil, firstGateOverflow: nil)
-  let presentation = reviewPhasePresentation(status: .passed, council: ReviewCouncil(batch))
+  let council = ReviewCouncil(batch)
+  let presentation = reviewPhasePresentation(
+    progress: nil,
+    checks: ValidationChecks(smoke: true, review: true, reviewCouncil: council),
+    council: council
+  )
   #expect(presentation.status == .passed)
   #expect(presentation.councilUnavailableReason == "infrastructure unavailable")
 }

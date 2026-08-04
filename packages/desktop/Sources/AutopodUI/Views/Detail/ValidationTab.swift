@@ -37,10 +37,23 @@ public struct ReviewPhasePresentation: Sendable, Equatable {
 }
 
 public func reviewPhasePresentation(
-  status: PhaseStatus,
+  progress: ValidationProgress?,
+  checks: ValidationChecks?,
   council: ReviewCouncil?
 ) -> ReviewPhasePresentation {
-  ReviewPhasePresentation(
+  let status: PhaseStatus
+  if checks?.infrastructureFailure?.phase == ValidationPhase.review.rawValue {
+    status = .failed
+  } else if let progress {
+    status = progress.review.status
+  } else {
+    status = switch checks?.review {
+    case true: .passed
+    case false: .failed
+    case nil: .skipped
+    }
+  }
+  return ReviewPhasePresentation(
     status: status,
     councilUnavailableReason: council?.infrastructureUnavailable == true
       ? "infrastructure unavailable" : nil
@@ -445,7 +458,11 @@ public struct ValidationTab: View {
       }
       return switch c.factValidation { case true: .passed; case false: .failed; default: .skipped }
     case .review:
-      return switch c.review { case true: .passed; case false: .failed; default: .skipped }
+      return reviewPhasePresentation(
+        progress: progress,
+        checks: displayedChecks,
+        council: displayedReviewCouncil
+      ).status
     case .advisory:
       guard let advisory = c.advisoryQa else { return .notStarted }
       switch advisoryDisplayStatus(advisory.status) {
@@ -457,6 +474,14 @@ public struct ValidationTab: View {
   }
 
   private func phaseState(_ phase: ValidationPhase) -> ValidationPhaseState {
+    if phase == .review {
+      let presentation = reviewPhasePresentation(
+        progress: progress,
+        checks: displayedChecks,
+        council: displayedReviewCouncil
+      )
+      return ValidationPhaseState(status: presentation.status, duration: progress?.review.duration)
+    }
     progress?.state(for: phase) ?? ValidationPhaseState(status: phaseStatus(phase))
   }
 
@@ -479,7 +504,8 @@ public struct ValidationTab: View {
         return nil
       case .review:
         return reviewPhasePresentation(
-          status: phaseStatus(phase),
+          progress: progress,
+          checks: displayedChecks,
           council: displayedReviewCouncil
         ).councilUnavailableReason
       default:
@@ -503,7 +529,8 @@ public struct ValidationTab: View {
         return nil
       case .review:
         return reviewPhasePresentation(
-          status: phaseStatus(phase),
+          progress: progress,
+          checks: displayedChecks,
           council: displayedReviewCouncil
         ).councilUnavailableReason
       case .setup:
@@ -1806,7 +1833,6 @@ public struct ValidationTab: View {
 
   @ViewBuilder
   private var reviewDetail: some View {
-    let status = phaseStatus(.review)
     let detail: ReviewPhaseDetail? = progress?.reviewDetail
     let issues: [String] = detail?.issues ?? displayedChecks?.reviewIssues ?? []
     let reasoning: String? = detail?.reasoning ?? displayedChecks?.reviewReasoning
@@ -1815,7 +1841,11 @@ public struct ValidationTab: View {
     let reqs: [RequirementCheckDetail]? = detail?.requirementsCheck ?? displayedChecks?.requirementsCheck
     let screenshots: [ScreenshotRef] = detail?.screenshots ?? displayedChecks?.taskReviewScreenshots ?? []
     let council = displayedReviewCouncil
-    let presentation = reviewPhasePresentation(status: status, council: council)
+    let presentation = reviewPhasePresentation(
+      progress: progress,
+      checks: displayedChecks,
+      council: council
+    )
     let broadReviewIssues = distinctBroadReviewIssues(issues, council: council)
     let legacyPresentation = legacyReviewPresentation(
       council: council,

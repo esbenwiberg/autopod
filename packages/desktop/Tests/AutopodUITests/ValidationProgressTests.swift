@@ -87,7 +87,7 @@ import Testing
   progress.markCompleted(.review, result: ValidationPhaseResult(from: raw))
   #expect(progress.reviewDetail?.council?.id == "live-packet")
   #expect(progress.review.status == .failed)
-  #expect(reviewPhasePresentation(status: progress.review.status, council: progress.reviewDetail?.council).status == .failed)
+  #expect(reviewPhasePresentation(progress: progress, checks: nil, council: progress.reviewDetail?.council).status == .failed)
   #expect(progress.reviewDetail?.council?.axes.first?.error == "Network unavailable")
   #expect(validationShouldDisplayLiveProgress(podStatus: .complete, progress: progress, hasPersistedReviewCouncil: false))
   #expect(!validationShouldDisplayLiveProgress(podStatus: .complete, progress: progress, hasPersistedReviewCouncil: true))
