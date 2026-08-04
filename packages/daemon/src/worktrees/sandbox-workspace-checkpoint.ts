@@ -132,23 +132,70 @@ export async function checkpointSandboxWorkspace(args: {
       const expected = (
         await execFileAsync('git', ['rev-parse', `refs/heads/${branch}`], { cwd: bare })
       ).stdout.trim();
+      // A checkpoint is parented to the sandbox source HEAD.  Do not overwrite
+      // host work that advanced independently while the bundle was in flight.
+      if (expected !== sourceHead) {
+        return {
+          ...empty(sequence, 'feature branch moved since checkpoint capture', 'promotion'),
+          sourceHead,
+          sourceTree,
+          snapshotCommit,
+          snapshotTree,
+          transferVerified: true,
+          bundleVerified: true,
+          hostImported: true,
+          lineageVerified: true,
+          quarantineRef,
+          error: {
+            phase: 'promotion',
+            code: 'LINEAGE_CONFLICT',
+            retryable: false,
+            message: 'feature branch moved since checkpoint capture',
+          },
+        };
+      }
       await execFileAsync('git', ['update-ref', `refs/heads/${branch}`, snapshotCommit, expected], {
         cwd: bare,
       });
-      await execFileAsync('git', ['reset', '--hard', snapshotCommit], { cwd: worktreePath });
-      const finalHead = (
-        await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath })
-      ).stdout.trim();
-      const finalTree = (
-        await execFileAsync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: worktreePath })
-      ).stdout.trim();
-      const clean =
-        (
-          await execFileAsync('git', ['status', '--porcelain'], { cwd: worktreePath })
-        ).stdout.trim() === '';
-      if (finalHead !== snapshotCommit || finalTree !== snapshotTree || !clean)
+      try {
+        await execFileAsync('git', ['reset', '--hard', snapshotCommit], { cwd: worktreePath });
+        const finalHead = (
+          await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath })
+        ).stdout.trim();
+        const finalTree = (
+          await execFileAsync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: worktreePath })
+        ).stdout.trim();
+        const clean =
+          (
+            await execFileAsync('git', ['status', '--porcelain'], { cwd: worktreePath })
+          ).stdout.trim() === '';
+        if (finalHead !== snapshotCommit || finalTree !== snapshotTree || !clean) {
+          // Promotion is reversible until materialization proves the linked
+          // worktree matches. Guard the rollback so concurrent host work wins.
+          await execFileAsync(
+            'git',
+            ['update-ref', `refs/heads/${branch}`, sourceHead, snapshotCommit],
+            {
+              cwd: bare,
+            },
+          );
+          await execFileAsync('git', ['reset', '--hard', sourceHead], { cwd: worktreePath });
+          return {
+            ...empty(sequence, 'host materialization verification failed', 'materialize'),
+            sourceHead,
+            sourceTree,
+            snapshotCommit,
+            snapshotTree,
+            transferVerified: true,
+            bundleVerified: true,
+            hostImported: true,
+            lineageVerified: true,
+            promoted: false,
+            quarantineRef,
+          };
+        }
         return {
-          ...empty(sequence, 'host materialization verification failed', 'materialize'),
+          sequence,
           sourceHead,
           sourceTree,
           snapshotCommit,
@@ -158,22 +205,37 @@ export async function checkpointSandboxWorkspace(args: {
           hostImported: true,
           lineageVerified: true,
           promoted: true,
+          materialized: true,
           quarantineRef,
         };
-      return {
-        sequence,
-        sourceHead,
-        sourceTree,
-        snapshotCommit,
-        snapshotTree,
-        transferVerified: true,
-        bundleVerified: true,
-        hostImported: true,
-        lineageVerified: true,
-        promoted: true,
-        materialized: true,
-        quarantineRef,
-      };
+      } catch (err) {
+        // If reset itself fails, return the branch only if it is still ours.
+        await execFileAsync(
+          'git',
+          ['update-ref', `refs/heads/${branch}`, sourceHead, snapshotCommit],
+          {
+            cwd: bare,
+          },
+        ).catch(() => {});
+        return {
+          ...empty(sequence, err instanceof Error ? err.message : String(err), 'materialize'),
+          sourceHead,
+          sourceTree,
+          snapshotCommit,
+          snapshotTree,
+          transferVerified: true,
+          bundleVerified: true,
+          hostImported: true,
+          lineageVerified: true,
+          quarantineRef,
+          error: {
+            phase: 'materialize',
+            code: 'MATERIALIZATION_FAILED',
+            retryable: false,
+            message: err instanceof Error ? err.message : String(err),
+          },
+        };
+      }
     } finally {
       await rm(temp, { recursive: true, force: true });
     }
