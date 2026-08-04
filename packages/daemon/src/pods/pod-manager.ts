@@ -11985,14 +11985,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         let validationSyncOk = true;
         if (pod.containerId && pod.worktreePath) {
           try {
-            const cm = containerManagerFactory.get(pod.executionTarget);
-            await prepareWorkspaceForValidation(
-              pod.containerId,
-              pod.worktreePath,
-              cm,
-              podId,
-              pod.executionTarget,
-            );
+            if (pod.executionTarget === 'sandbox') {
+              const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
+              validationSyncOk =
+                checkpoint.promoted && checkpoint.materialized && checkpoint.lineageVerified;
+            } else {
+              const cm = containerManagerFactory.get(pod.executionTarget);
+              await prepareWorkspaceForValidation(
+                pod.containerId,
+                pod.worktreePath,
+                cm,
+                podId,
+                pod.executionTarget,
+              );
+            }
           } catch (err) {
             logger.warn({ err, podId }, 'Failed to sync workspace before validation');
             validationSyncOk =
@@ -12171,14 +12177,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           emitActivityStatus(podId, 'Syncing post-validation workspace…');
           const syncStartedAt = Date.now();
           try {
-            const cm = containerManagerFactory.get(pod.executionTarget);
-            await syncWorkspaceBack(
-              pod.containerId,
-              pod.worktreePath,
-              cm,
-              podId,
-              pod.executionTarget,
-            );
+            if (pod.executionTarget === 'sandbox') {
+              const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
+              validationSyncOk =
+                checkpoint.promoted && checkpoint.materialized && checkpoint.lineageVerified;
+            } else {
+              const cm = containerManagerFactory.get(pod.executionTarget);
+              await syncWorkspaceBack(
+                pod.containerId,
+                pod.worktreePath,
+                cm,
+                podId,
+                pod.executionTarget,
+              );
+            }
             emitActivityStatus(
               podId,
               `Workspace sync complete (${formatElapsedDuration(Date.now() - syncStartedAt)})`,
